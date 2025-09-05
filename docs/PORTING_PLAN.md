@@ -62,9 +62,9 @@ Acceptance criteria:
 - Dynamic records: Use `Selectable` and structural types for flexible outputs; offer typed case-class projections where feasible.
 - Core API:
   - `trait Module { def forward(...): Prediction; final def apply(...): Prediction = forward(...) }`
-  - `trait LM { def complete(prompt: Prompt, params: Params): F[Completion] }` (start with `F = scala.concurrent.Future` or `cats.effect.IO` — see Open Questions).
+  - `trait LM { def complete(prompt: Prompt, params: Params): Future[Completion] }`.
 - Prompt rendering: Text-first with JSON output blocks for deterministic parsing; later add adapters for richer chat/tool schemas.
-- Parsing: JSON decoding into structural records or typed case classes; surface parse errors as typed results.
+- Parsing: JSON decoding into structural records or typed case classes; on failure, complete the `Future` with `DspyError.ParseError` including raw text.
 - Settings/config: Central `Settings` (env vars, rate limits, model defaults) akin to Python’s `utils.settings`, but explicit in constructors where possible.
 - Errors: `DspyError` hierarchy (ConfigError, HttpError, ParseError, ProviderError) to avoid throwing generic exceptions across module boundaries.
 
@@ -72,10 +72,10 @@ Acceptance criteria:
 
 - Modules: `core` (primitives, signatures, utils), `predict`, `clients`, `adapters`, `evaluate`, `retrievers`, `teleprompt`, `streaming`, `examples`.
 - Root aggregates modules; publish `core`, `predict`, `clients` first.
-- Dependencies (tentative):
-  - HTTP: `sttp-client3` (or Java 11 `HttpClient` initially for zero deps).
-  - JSON: `circe` or `uPickle` (decision pending).
-  - Tests: `munit` (+ `munit-cats-effect` if using IO).
+- Dependencies:
+  - HTTP: `sttp-client3` (JDK `httpclient` backend).
+  - JSON: `uPickle`.
+  - Tests: `munit`.
 
 ## Testing Strategy
 
@@ -83,6 +83,7 @@ Acceptance criteria:
 - Golden tests: deterministic prompt→parse fixtures; avoid real network.
 - Parity tests: mirror selected upstream tutorial flows and assert output shape/keys.
 - Integration: optional OpenAI tests, gated by `OPENAI_API_KEY` and marked `it`.
+- Test framework: `munit` (no cats-effect); for async, use `Await.result` only in ITs or small helper utilities.
 
 ## Milestones & Deliverables
 
@@ -102,11 +103,59 @@ M4 – Teleprompt & Streaming (5–7 days)
 
 ## Open Questions / Decisions Needed
 
-- Effects: Start with `Future` (stdlib) or `cats-effect IO` for composability and resource safety?
-- JSON: `circe` vs `uPickle`? (Circe ecosystem vs smaller footprint.)
-- HTTP: `sttp` vs JDK `HttpClient` for MVP?
-- Package root: Keep `package dspy` for parity, or `package dspy4s.dspy`?
-- Config: Env-only or also support a `~/.dspy4s/config` file?
+- Package root: Keep `package dspy` for parity, or `package dspy4s.dspy`? (default: `dspy`).
+- Config: Env-only or also support a `~/.dspy4s/config` file? (default: env + optional config file).
+
+## Recommended Decisions (For Sign-Off)
+
+- Effects: Use stdlib `Future` for async, limited to LM/network boundaries; prefer sync APIs elsewhere. Accept an implicit `ExecutionContext` in clients/modules.
+- JSON: Use `uPickle` for a small, fast dependency and simple AST; revisit `circe` only if needed.
+- HTTP: Use `sttp-client3` with the JDK `httpclient` backend.
+- Package root: Publish as `dspy` (top-level) for parity; the repo name remains `dspy4s`.
+- Config: Support explicit params > env vars > system props; add optional `~/.dspy4s/config` (TOML/JSON) reader behind a tiny module.
+- Scala/JDK: Target Scala 3.7.2 and JDK 17+; CI matrix for 17 and 21.
+
+Rationale: These choices minimize friction for MVP while keeping a clean path to streaming, retries, and richer adapters without redesign.
+
+## Non-Goals (For Now)
+
+- Full parity of every upstream module; we will port only what’s needed to run core tutorials.
+- Multi-provider clients beyond OpenAI; vendor-specific adapters and retrievers are deferred.
+- Python interop, codegen-based macros for Signatures, or a JS/Scala.js target.
+- Distributed caching, persistence layers, or external stores.
+
+## Risks & Mitigations
+
+- Ambiguity in upstream behaviors: add golden tests against frozen fixtures; document divergences.
+- API churn during MVP: keep traits stable and hide impl details; start at version `0.x`.
+- Rate limits / flaky networks: centralize retries/backoff in `clients` with `sttp` request timeouts and simple retry policy (no cats).
+- Parsing fragility: prefer JSON blocks in prompts; maintain tolerant decoders and surface `ParseError` with raw text.
+
+## Conventions
+
+- Error model: sealed `DspyError` with typed cases; fail returned `Future` with `DspyError` at boundaries.
+- Async: Accept an implicit `ExecutionContext` in constructors; default to `global` only in examples/tests.
+- Naming: mirror Python class and file names where sensible; Scala package `dspy.*`.
+- Logging: minimal SLF4J facade; redact secrets; structured context for LM calls (model, tokens, latency).
+- Config precedence: constructor args > env > system props > config file.
+- Source style: add `scalafmt` with a pinned config; enable `-Xfatal-warnings` once code stabilizes.
+
+## Tooling & CI
+
+- GitHub Actions: build + test on JDK 17/21; cache Coursier; run fmt check.
+- Static checks: `scalafmt`, optional `scalafix` later; doc generation via `sbt doc`.
+- Test layout: `unit`, `golden`, and `it` (integration) tags; OpenAI tests gated by `OPENAI_API_KEY`.
+
+## Security & Privacy
+
+- Never log API keys or raw prompts/responses unless explicitly enabled; default to redacted logs.
+- Opt-in on-disk cache with TTL; default in-memory cache only, no persistence.
+- Respect env-only secrets; config file must support `chmod 600` style checks.
+
+## Publishing & Versioning
+
+- Versioning: `0.x` until APIs settle; follow SemVer post-1.0.
+- Artifacts: publish `core`, `predict`, `clients` first; others later.
 
 ## Workspace Notes
 
@@ -115,7 +164,25 @@ M4 – Teleprompt & Streaming (5–7 days)
 
 ## Next Steps
 
-1) Confirm decisions for Effects, JSON, HTTP, and package root naming.
+1) Confirm decisions for package root naming and config file.
 2) Scaffold the sbt multi-module layout and wire baseline dependencies.
 3) Implement MVP core and the first end-to-end example.
 
+## Task Breakdown (MVP)
+
+- Decide stack: package root + config file shape. (sign-off)
+- Create sbt modules: `core`, `predict`, `clients`, `examples` (aggregate root).
+- Add deps: `sttp-client3` (httpclient backend), `upickle`, `munit`.
+- Add `scalafmt` and CI workflow; enable fmt check in CI.
+- `core.primitives`: `Module`, `Example`, `Prediction`, `DspyError`.
+- `signatures`: `Field`, `Signature`, helpers for rendering/validation.
+- `utils`: `Settings` (env reading), logging façade, exceptions.
+- `clients.base`: `LM` trait (`complete`), request/response models, error mapping.
+- `clients.openai`: minimal chat completions path; key injection; timeouts and retries.
+- `clients.cache`: in-memory map with TTL and request-key hashing.
+- `predict`: `Predict` module: template → LM → JSON parse → `Prediction`.
+- Prompt rendering: text-first with fenced JSON block; parser tolerant to string/int/bool.
+- Tests: unit (signatures, render, parse, cache); golden fixtures; optional OpenAI integration test.
+- Example: small tutorial reproduction in `examples` and README snippet.
+
+Exit criteria: build green, example runs locally (with key), and golden tests pass without network.
