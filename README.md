@@ -51,3 +51,21 @@ You can also put config in `~/.dspy4s/config.json` (or set `DSPY4S_CONFIG` to a 
 ### Status
 
 This is an early MVP. See `docs/PORTING_PLAN.md` for scope, decisions, and tasks.
+
+### Predictors
+
+You can compose predictors for reliability and quality:
+
+```scala
+import dspy.predict.Predict
+import dspy.predict.predictors.{Retry, BestOfN}
+
+val sig = dspy.signatures.Signature.parse("question -> answer, confidence:int")
+val base = new Predict(sig, lm)
+
+// Retry the module on failures or unacceptable outputs
+val retry = new Retry(base, maxRetries = 2, delayMs = 100)
+
+// Run N modules and pick the one with highest `confidence`
+val best = new BestOfN(() => new Predict(sig, lm), n = 3, select = BestOfN.byConfidence())
+```
