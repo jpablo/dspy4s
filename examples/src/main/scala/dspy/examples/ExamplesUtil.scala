@@ -3,7 +3,7 @@ package dspy.examples
 import dspy.clients._
 import dspy.clients.openai.OpenAI
 import dspy.utils.Settings
-import sttp.client3.httpclient.future.HttpClientFutureBackend
+import sttp.client4.httpclient.HttpClientFutureBackend
 
 import scala.concurrent.Future
 

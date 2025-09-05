@@ -7,8 +7,8 @@ import dspy.utils.{DspyError, Settings}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
-import sttp.client3._
-import sttp.client3.testing.SttpBackendStub
+import sttp.client4._
+import sttp.client4.testing.BackendStub
 
 class OpenAIRetrySuite extends FunSuite {
   private def chatOk(body: String): String = {
@@ -19,8 +19,8 @@ class OpenAIRetrySuite extends FunSuite {
   }
 
   test("OpenAI fails with HttpError on 404") {
-    val backend: SttpBackend[Future, Any] =
-      SttpBackendStub.asynchronousFuture
+    val backend: Backend[Future] =
+      BackendStub.asynchronousFuture
         .whenAnyRequest
         .thenRespondNotFound()
 
@@ -37,10 +37,10 @@ class OpenAIRetrySuite extends FunSuite {
   }
 
   test("OpenAI returns ParseError on invalid JSON body") {
-    val backend: SttpBackend[Future, Any] =
-      SttpBackendStub.asynchronousFuture
+    val backend: Backend[Future] =
+      BackendStub.asynchronousFuture
         .whenAnyRequest
-        .thenRespond("not json")
+        .thenRespondOk()
 
     val lm = new OpenAI(
       model = "gpt-4o-mini",

@@ -4,12 +4,12 @@ import dspy.clients.{Completion, LM, Prompt}
 import dspy.utils.{ConsoleLogger, DspyError, Redaction, Settings}
 
 import scala.concurrent.{ExecutionContext, Future}
-import sttp.client3._
+import sttp.client4._
 
 final class OpenAI(
     model: String,
     settings: Settings,
-    backend: SttpBackend[Future, Any]
+    backend: Backend[Future]
 ) extends LM {
 
   private val uriBase = uri"${settings.openaiBaseUrl}"

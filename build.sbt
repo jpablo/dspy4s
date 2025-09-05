@@ -3,13 +3,13 @@ import Keys.*
 
 val scala3Version = "3.7.2"
 
-val sttpV     = "3.9.5"
-val upickleV  = "4.0.2"
-val munitV    = "1.0.0"
+val sttpV    = "4.0.9"
+val upickleV = "4.3.0"
+val munitV   = "1.1.1"
 
 lazy val commonSettings = Seq(
-  scalaVersion := scala3Version,
-  organization := "ai.dspy",
+  scalaVersion        := scala3Version,
+  organization        := "ai.dspy",
   ThisBuild / version := "0.1.0-SNAPSHOT",
   scalacOptions ++= Seq(
     "-deprecation",
@@ -22,7 +22,7 @@ lazy val root = project
   .aggregate(core, clients, adapters, predict, examples)
   .settings(commonSettings)
   .settings(
-    name := "dspy4s",
+    name           := "dspy4s",
     publish / skip := true
   )
 
@@ -32,7 +32,7 @@ lazy val core = project
   .settings(
     name := "dspy4s-core",
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %% "upickle" % upickleV,
+      "com.lihaoyi"   %% "upickle" % upickleV,
       "org.scalameta" %% "munit"   % munitV % Test
     )
   )
@@ -44,9 +44,9 @@ lazy val clients = project
   .settings(
     name := "dspy4s-clients",
     libraryDependencies ++= Seq(
-      "com.softwaremill.sttp.client3" %% "core"               % sttpV,
-      "com.lihaoyi" %% "upickle" % upickleV,
-      "org.scalameta" %% "munit"   % munitV % Test
+      "com.softwaremill.sttp.client4" %% "core"    % sttpV,
+      "com.lihaoyi"                   %% "upickle" % upickleV,
+      "org.scalameta"                 %% "munit"   % munitV % Test
     )
   )
 
@@ -57,7 +57,7 @@ lazy val adapters = project
   .settings(
     name := "dspy4s-adapters",
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %% "upickle" % upickleV,
+      "com.lihaoyi"   %% "upickle" % upickleV,
       "org.scalameta" %% "munit"   % munitV % Test
     )
   )
@@ -69,7 +69,7 @@ lazy val predict = project
   .settings(
     name := "dspy4s-predict",
     libraryDependencies ++= Seq(
-      "com.lihaoyi" %% "upickle" % upickleV,
+      "com.lihaoyi"   %% "upickle" % upickleV,
       "org.scalameta" %% "munit"   % munitV % Test
     )
   )
@@ -81,7 +81,7 @@ lazy val examples = project
   .settings(
     name := "dspy4s-examples",
     libraryDependencies ++= Seq(
-      "com.softwaremill.sttp.client3" %% "httpclient-backend" % sttpV
+      "com.softwaremill.sttp.client4" %% "core" % sttpV
     ),
     publish / skip := true
   )

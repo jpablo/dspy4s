@@ -73,7 +73,7 @@ Acceptance criteria:
 - Modules: `core` (primitives, signatures, utils), `predict`, `clients`, `adapters`, `evaluate`, `retrievers`, `teleprompt`, `streaming`, `examples`.
 - Root aggregates modules; publish `core`, `predict`, `clients` first.
 - Dependencies:
-  - HTTP: `sttp-client3` (JDK `httpclient` backend).
+  - HTTP: `sttp-client4` (JDK `httpclient` backend).
   - JSON: `uPickle`.
   - Tests: `munit`.
 
@@ -110,7 +110,7 @@ M4 – Teleprompt & Streaming (5–7 days)
 
 - Effects: Use stdlib `Future` for async, limited to LM/network boundaries; prefer sync APIs elsewhere. Accept an implicit `ExecutionContext` in clients/modules.
 - JSON: Use `uPickle` for a small, fast dependency and simple AST; revisit `circe` only if needed.
-- HTTP: Use `sttp-client3` with the JDK `httpclient` backend.
+- HTTP: Use `sttp-client4` with the JDK `httpclient` backend.
 - Package root: Publish as `dspy` (top-level) for parity; the repo name remains `dspy4s`.
 - Config: Support explicit params > env vars > system props; add optional `~/.dspy4s/config` (TOML/JSON) reader behind a tiny module.
 - Scala/JDK: Target Scala 3.7.2 and JDK 17+; CI matrix for 17 and 21.
@@ -172,7 +172,7 @@ Rationale: These choices minimize friction for MVP while keeping a clean path to
 
 - Decide stack: package root + config file shape. (sign-off)
 - Create sbt modules: `core`, `predict`, `clients`, `examples` (aggregate root).
-- Add deps: `sttp-client3` (httpclient backend), `upickle`, `munit`.
+- Add deps: `sttp-client4` (httpclient backend), `upickle`, `munit`.
 - Add `scalafmt` and CI workflow; enable fmt check in CI.
 - `core.primitives`: `Module`, `Example`, `Prediction`, `DspyError`.
 - `signatures`: `Field`, `Signature`, helpers for rendering/validation.
