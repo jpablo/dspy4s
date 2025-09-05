@@ -27,7 +27,7 @@ class SettingsLoaderSuite extends FunSuite {
     """.stripMargin
 
     withTempFile(json) { p =>
-      val s = Settings.load(p)
+      val s = Settings.loadWithEnv(Map.empty, p)
       assertEquals(s.openaiApiKey, Some("file-key"))
       assertEquals(s.openaiBaseUrl, "https://example.com/v1")
       assertEquals(s.requestTimeoutMillis, 1234)
