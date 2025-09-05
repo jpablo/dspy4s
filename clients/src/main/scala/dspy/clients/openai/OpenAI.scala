@@ -1,8 +1,7 @@
 package dspy.clients.openai
 
 import dspy.clients.{Completion, LM, Prompt}
-import dspy.utils.DspyError
-import dspy.utils.Settings
+import dspy.utils.{ConsoleLogger, DspyError, Redaction, Settings}
 
 import scala.concurrent.{ExecutionContext, Future}
 import sttp.client3._
@@ -14,6 +13,7 @@ final class OpenAI(
 ) extends LM {
 
   private val uriBase = uri"${settings.openaiBaseUrl}"
+  private val logger  = ConsoleLogger
 
   override def complete(prompt: Prompt, params: Map[String, String])(implicit
       ec: ExecutionContext
@@ -73,12 +73,30 @@ final class OpenAI(
 
     def after(ms: Long): Future[Unit] = Future { Thread.sleep(ms) }
 
-    def loop(attempt: Int): Future[Completion] =
-      sendOnce().recoverWith {
+    def loop(attempt: Int): Future[Completion] = {
+      val start = System.nanoTime()
+      if (settings.debug) {
+        val promptPreview =
+          if (settings.logPrompts)
+            Redaction.truncate(Redaction.redact(prompt.content, Seq(key)), 200)
+          else "<hidden>"
+        logger.debug(s"openai.request model=$model attempt=$attempt prompt=${promptPreview}")
+      }
+
+      sendOnce().map { c =>
+        if (settings.debug) {
+          val tookMs = (System.nanoTime() - start) / 1000000
+          val respPreview = if (settings.logResponses) Redaction.truncate(c.text, 200) else "<hidden>"
+          logger.debug(s"openai.response model=$model status=200 took_ms=$tookMs body=${respPreview}")
+        }
+        c
+      }.recoverWith {
         case e: DspyError.HttpError if retryable(e.status) && attempt < maxRetries =>
           val delay = baseBackoffMs * math.pow(2.0, attempt.toDouble).toLong
+          if (settings.debug) logger.warn(s"openai.retry status=${e.status} after=${delay}ms")
           after(delay).flatMap(_ => loop(attempt + 1))
       }
+    }
 
     loop(0)
   }
