@@ -69,3 +69,24 @@ val retry = new Retry(base, maxRetries = 2, delayMs = 100)
 // Run N modules and pick the one with highest `confidence`
 val best = new BestOfN(() => new Predict(sig, lm), n = 3, select = BestOfN.byConfidence())
 ```
+
+### Evaluation
+
+Evaluate a module over a small dataset with exact-match accuracy:
+
+```scala
+import dspy.evaluate._
+import dspy.signatures._
+import dspy.predict.Predict
+
+val sig = Signature.parse("question -> answer")
+val module = new Predict(sig, lm)
+
+val data = Seq(
+  EvalExample(Map("question" -> "Capital of France?"), Map("answer" -> ujson.Str("Paris"))),
+  EvalExample(Map("question" -> "2+2?"),                Map("answer" -> ujson.Str("4")))
+)
+
+val resF = Evaluator.run(module, data, Metrics.exactMatch(Seq("answer")))
+resF.onComplete(println)
+```
