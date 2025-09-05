@@ -23,6 +23,7 @@ class OpenAIRetrySuite extends FunSuite {
       SttpBackendStub.asynchronousFuture
         .whenAnyRequest
         .thenRespondServerError()
+        .whenAnyRequest
         .thenRespond(chatOk("{\"answer\": \"Paris\"}"))
 
     val lm = new OpenAI(
@@ -41,7 +42,7 @@ class OpenAIRetrySuite extends FunSuite {
     val backend: SttpBackend[Future, Any] =
       SttpBackendStub.asynchronousFuture
         .whenAnyRequest
-        .thenRespondWithCode(StatusCode.BadRequest, "bad request")
+        .thenRespondNotFound()
 
     val lm = new OpenAI(
       model = "gpt-4o-mini",
