@@ -12,4 +12,10 @@ class SignatureUtilsSuite extends FunSuite {
     val miss = Signature.missingInputKeys(sig, Set("a", "c"))
     assertEquals(miss, List("b"))
   }
+
+  test("parse signature DSL 'a, b -> c' and preserve order") {
+    val sig = Signature.parse("a, b -> c, d")
+    assertEquals(Signature.inputNames(sig), List("a", "b"))
+    assertEquals(Signature.outputNames(sig), List("c", "d"))
+  }
 }
