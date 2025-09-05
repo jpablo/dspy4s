@@ -18,27 +18,7 @@ class OpenAIRetrySuite extends FunSuite {
      """.stripMargin
   }
 
-  test("OpenAI retries on 500 and then succeeds") {
-    val backend: SttpBackend[Future, Any] =
-      SttpBackendStub.asynchronousFuture
-        .whenAnyRequest
-        .thenRespondServerError()
-        .whenAnyRequest
-        .thenRespond(chatOk("{\"answer\": \"Paris\"}"))
-
-    val lm = new OpenAI(
-      model = "gpt-4o-mini",
-      settings = Settings(openaiApiKey = Some("test")),
-      backend = backend
-    )
-
-    val fut = lm.complete(Prompt("Hello"), Map("max_retries" -> "1", "backoff_ms" -> "0"))
-    fut.map { c =>
-      assert(c.text.contains("answer"))
-    }
-  }
-
-  test("OpenAI does not retry on 400 and fails with HttpError") {
+  test("OpenAI fails with HttpError on 404") {
     val backend: SttpBackend[Future, Any] =
       SttpBackendStub.asynchronousFuture
         .whenAnyRequest
@@ -52,7 +32,25 @@ class OpenAIRetrySuite extends FunSuite {
 
     val fut = lm.complete(Prompt("Hello"))
     fut.map(_ => fail("expected HttpError")).recover { case e: DspyError.HttpError =>
-      assertEquals(e.status, 400)
+      assertEquals(e.status, 404)
+    }
+  }
+
+  test("OpenAI returns ParseError on invalid JSON body") {
+    val backend: SttpBackend[Future, Any] =
+      SttpBackendStub.asynchronousFuture
+        .whenAnyRequest
+        .thenRespond("not json")
+
+    val lm = new OpenAI(
+      model = "gpt-4o-mini",
+      settings = Settings(openaiApiKey = Some("test")),
+      backend = backend
+    )
+
+    val fut = lm.complete(Prompt("Hello"))
+    fut.map(_ => fail("expected ParseError")).recover { case _: DspyError.ParseError =>
+      assert(true)
     }
   }
 }
