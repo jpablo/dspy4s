@@ -31,6 +31,19 @@ val lm = new OpenAI(model = "gpt-4o-mini", settings = Settings.default, backend)
 
 Settings supports `DSPY_DEBUG=true` for request/response logging, with `DSPY_LOG_PROMPTS` / `DSPY_LOG_RESPONSES` to include bodies (redacted & truncated).
 
+You can also put config in `~/.dspy4s/config.json` (or set `DSPY4S_CONFIG` to a custom path). Example:
+
+```json
+{
+  "openai_api_key": "sk-...",
+  "openai_base_url": "https://api.openai.com/v1",
+  "request_timeout_ms": 60000,
+  "debug": false,
+  "log_prompts": false,
+  "log_responses": false
+}
+```
+
 ### Status
 
 This is an early MVP. See `docs/PORTING_PLAN.md` for scope, decisions, and tasks.
