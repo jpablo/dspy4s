@@ -21,7 +21,7 @@ final class OpenAIEmbeddings(
 
     val body = ujson.Obj(
       "model" -> model,
-      "input" -> ujson.Arr(texts.map(ujson.Str): _*)
+      "input" -> ujson.Arr(texts.map(ujson.Str.apply)*)
     )
 
     basicRequest
@@ -55,4 +55,3 @@ final class OpenAIEmbeddings(
       }
   }
 }
-
