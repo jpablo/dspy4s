@@ -15,6 +15,10 @@ A minimal, pragmatic Scala 3 port of the Python `dspy` library — starting with
 - Run tests: `sbt test`
 - Run example: `sbt examples/run`
 
+To run the second example (multi-output with confidence):
+
+- `sbt "examples/runMain dspy.examples.QAConfidence"`
+
 ### OpenAI Setup (optional)
 
 To use the OpenAI client, set `OPENAI_API_KEY` and create a backend in your app:
