@@ -15,7 +15,7 @@ object Main {
     )
 
     // Offline stub LM for example compilation without network
-    val stubLm  = new LM {
+    val stubLm = new LM {
       def complete(prompt: Prompt, params: Map[String, String])(implicit
           ec: scala.concurrent.ExecutionContext
       ) =
