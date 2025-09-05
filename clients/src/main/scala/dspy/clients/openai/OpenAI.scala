@@ -6,12 +6,11 @@ import dspy.utils.Settings
 
 import scala.concurrent.{ExecutionContext, Future}
 import sttp.client3._
-import sttp.client3.httpclient.future.HttpClientFutureBackend
 
 final class OpenAI(
     model: String,
-    settings: Settings = Settings.default,
-    backend: SttpBackend[Future, Any] = HttpClientFutureBackend()
+    settings: Settings,
+    backend: SttpBackend[Future, Any]
 ) extends LM {
 
   private val uriBase = uri"${settings.openaiBaseUrl}"

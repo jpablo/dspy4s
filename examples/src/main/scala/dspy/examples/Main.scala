@@ -2,8 +2,7 @@ package dspy.examples
 
 import dspy.signatures._
 import dspy.predict.Predict
-import dspy.clients.openai.OpenAI
-import dspy.utils.Settings
+import dspy.clients._
 
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -15,8 +14,12 @@ object Main {
       instructions = Some("Answer clearly and briefly. Return JSON only.")
     )
 
-    val lm = new OpenAI(model = "gpt-4o-mini", settings = Settings.default)
-    val predict = new Predict(sig, lm)
+    // Offline stub LM for example compilation without network
+    val stubLm = new LM {
+      def complete(prompt: Prompt, params: Map[String, String])(implicit ec: scala.concurrent.ExecutionContext) =
+        scala.concurrent.Future.successful(Completion("{\"answer\": \"Paris\"}", ujson.Obj()))
+    }
+    val predict = new Predict(sig, stubLm)
 
     val fut = predict(Map("question" -> "What is the capital of France?"))
     fut.onComplete { r =>

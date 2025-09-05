@@ -1,5 +1,5 @@
-import sbt._
-import Keys._
+import sbt.*
+import Keys.*
 
 val scala3Version = "3.7.2"
 
@@ -45,7 +45,6 @@ lazy val clients = project
     name := "dspy4s-clients",
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client3" %% "core"               % sttpV,
-      "com.softwaremill.sttp.client3" %% "httpclient-backend" % sttpV,
       "com.lihaoyi" %% "upickle" % upickleV,
       "org.scalameta" %% "munit"   % munitV % Test
     )
