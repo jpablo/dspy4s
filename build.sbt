@@ -80,5 +80,8 @@ lazy val examples = project
   .settings(commonSettings)
   .settings(
     name := "dspy4s-examples",
+    libraryDependencies ++= Seq(
+      "com.softwaremill.sttp.client3" %% "httpclient-backend" % sttpV
+    ),
     publish / skip := true
   )
