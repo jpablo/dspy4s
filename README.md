@@ -1,8 +1,36 @@
-## sbt project compiled with Scala 3
+## dspy4s (Scala 3)
 
-### Usage
+A minimal, pragmatic Scala 3 port of the Python `dspy` library — starting with primitives, signatures, a `Predict` module, and an OpenAI client.
 
-This is a normal sbt project. You can compile code with `sbt compile`, run it with `sbt run`, and `sbt console` will start a Scala 3 REPL.
+### Modules
 
-For more information on the sbt-dotty plugin, see the
-[scala3-example-project](https://github.com/scala/scala3-example-project/blob/main/README.md).
+- `core`: primitives (`Module`, `Example`, `Prediction`), `signatures`, `utils` (`DspyError`, `Settings`, logging).
+- `clients`: `LM` trait, `OpenAI` client (chat completions), in-memory `Cache`, `LMWithCache` wrapper.
+- `predict`: `Predict` flow (template → LM → parse JSON → `Prediction`).
+- `examples`: tiny demo wiring components together (stubbed `LM` by default).
+
+### Build & Test
+
+- Format check: `sbt scalafmtCheckAll`
+- Run tests: `sbt test`
+- Run example: `sbt examples/run`
+
+### OpenAI Setup (optional)
+
+To use the OpenAI client, set `OPENAI_API_KEY` and create a backend in your app:
+
+```scala
+import dspy.clients.openai.OpenAI
+import dspy.utils.Settings
+import sttp.client3.httpclient.future.HttpClientFutureBackend
+import scala.concurrent.ExecutionContext.Implicits.global
+
+val backend = HttpClientFutureBackend()
+val lm = new OpenAI(model = "gpt-4o-mini", settings = Settings.default, backend)
+```
+
+Settings supports `DSPY_DEBUG=true` for request/response logging, with `DSPY_LOG_PROMPTS` / `DSPY_LOG_RESPONSES` to include bodies (redacted & truncated).
+
+### Status
+
+This is an early MVP. See `docs/PORTING_PLAN.md` for scope, decisions, and tasks.
