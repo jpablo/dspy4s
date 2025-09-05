@@ -10,14 +10,14 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
 object Main {
   private def makeLm(settings: Settings): LM =
-    ExamplesUtil.openAiOrStub(settings, stubJson = "{\"answer\": \"Paris\"}")
+    ExamplesUtil.openAi(settings)
 
   def main(args: Array[String]): Unit = {
     val sig = Signature.parse("question -> answer")
     val lm  = makeLm(Settings.default)
     val predict = new Predict(sig, lm)
 
-    val fut = predict(Map("question" -> "What is the capital of France?"))
+    val fut = predict(Map("question" -> "What is the capital of Belize?"))
     fut.onComplete { r =>
       println(s"Prediction: $r")
     }

@@ -18,10 +18,7 @@ object QAConfidence {
       instructions = Some("Answer clearly and briefly. Also provide confidence 0-100 as an integer. Return JSON only.")
     )
 
-    val lm = ExamplesUtil.openAiOrStub(
-      Settings.default,
-      stubJson = "{\"answer\": \"Paris\", \"confidence\": 85}"
-    )
+    val lm = ExamplesUtil.openAi(Settings.default)
     val predict = new Predict(sig, lm)
 
     val fut = predict(Map("question" -> "What is the capital of France?"))
