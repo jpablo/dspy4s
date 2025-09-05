@@ -20,8 +20,8 @@ class PredictSuite extends FunSuite {
       inputs = List(Field("question", "q")),
       outputs = List(Field("answer", "a"))
     )
-    val lm = new StubLM("Here you go: {\"answer\": \"Paris\"}")
-    val p  = new Predict(sig, lm)
+    val lm  = new StubLM("Here you go: {\"answer\": \"Paris\"}")
+    val p   = new Predict(sig, lm)
     val fut = p.forward(Map("question" -> "What is the capital of France?"))
     fut.map { pred =>
       assertEquals(pred.getString("answer"), Some("Paris"))

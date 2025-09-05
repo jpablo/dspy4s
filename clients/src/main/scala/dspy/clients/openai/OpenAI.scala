@@ -26,10 +26,10 @@ final class OpenAI(
     val maxTokens   = params.get("max_tokens").flatMap(_.toIntOption)
 
     val body = ujson.Obj(
-      "model" -> model,
-      "messages" -> ujson.Arr(
+      "model"       -> model,
+      "messages"    -> ujson.Arr(
         ujson.Obj(
-          "role" -> "user",
+          "role"    -> "user",
           "content" -> prompt.content
         )
       ),
@@ -47,16 +47,18 @@ final class OpenAI(
       .send(backend)
       .flatMap { resp =>
         resp.body match {
-          case Left(err) =>
+          case Left(err)      =>
             Future.failed(DspyError.HttpError(resp.code.code, err))
           case Right(jsonStr) =>
             try {
-              val js = ujson.read(jsonStr)
+              val js   = ujson.read(jsonStr)
               val text = js("choices")(0)("message")("content").str
               Future.successful(Completion(text, js))
             } catch {
               case t: Throwable =>
-                Future.failed(DspyError.ParseError("Failed to parse OpenAI response", jsonStr, Some(t)))
+                Future.failed(
+                  DspyError.ParseError("Failed to parse OpenAI response", jsonStr, Some(t))
+                )
             }
         }
       }
