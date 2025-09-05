@@ -35,7 +35,7 @@ final class Predict(signature: Signature, lm: LM) extends Module {
     Future {
       // Try reading as raw JSON first; if it fails, try to extract a JSON object substring.
       def read(objStr: String) = ujson.read(objStr) match {
-        case ujson.Obj(kv*) => kv.toMap
+        case obj: ujson.Obj => obj.value.toMap
         case _               => throw DspyError.ParseError("Expected a JSON object", s)
       }
 
