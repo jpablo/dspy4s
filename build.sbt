@@ -19,7 +19,7 @@ lazy val commonSettings = Seq(
 
 lazy val root = project
   .in(file("."))
-  .aggregate(core, clients, predict, examples)
+  .aggregate(core, clients, adapters, predict, examples)
   .settings(commonSettings)
   .settings(
     name := "dspy4s",
@@ -50,9 +50,21 @@ lazy val clients = project
     )
   )
 
+lazy val adapters = project
+  .in(file("adapters"))
+  .dependsOn(core, clients)
+  .settings(commonSettings)
+  .settings(
+    name := "dspy4s-adapters",
+    libraryDependencies ++= Seq(
+      "com.lihaoyi" %% "upickle" % upickleV,
+      "org.scalameta" %% "munit"   % munitV % Test
+    )
+  )
+
 lazy val predict = project
   .in(file("predict"))
-  .dependsOn(core, clients)
+  .dependsOn(core, clients, adapters)
   .settings(commonSettings)
   .settings(
     name := "dspy4s-predict",
