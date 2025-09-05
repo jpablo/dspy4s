@@ -12,9 +12,25 @@ final class Predict(signature: Signature, lm: LM) extends Module {
   override def forward(
       inputs: Map[String, String]
   )(implicit ec: ExecutionContext): Future[Prediction] = {
+    val missing = Signature.missingInputKeys(signature, inputs.keySet)
+    if (missing.nonEmpty)
+      return Future.failed(
+        DspyError.ParseError(s"Missing input keys: ${missing.mkString(", ")}", inputs.toString)
+      )
+
     val rendered = renderPrompt(inputs)
     lm.complete(Prompt(rendered)).flatMap { completion =>
-      parseJson(completion.text).map(Prediction.apply)
+      parseJson(completion.text).flatMap { obj =>
+        val missingOut = Signature.missingOutputKeys(signature, obj.keySet)
+        if (missingOut.nonEmpty)
+          Future.failed(
+            DspyError.ParseError(
+              s"Missing output keys: ${missingOut.mkString(", ")}",
+              completion.text
+            )
+          )
+        else Future.successful(Prediction(obj))
+      }
     }
   }
 
@@ -27,7 +43,9 @@ final class Predict(signature: Signature, lm: LM) extends Module {
       val v = inputs.getOrElse(f.name, "")
       sb.append(s"- ${f.name}: $v\n")
     }
-    sb.append("\nRespond ONLY with a valid compact JSON object containing the following keys: ")
+    sb.append(
+      "\nRespond ONLY with a valid compact JSON object containing exactly the following keys: "
+    )
     sb.append(signature.outputs.map(_.name).mkString(", ")).append(".\n")
     sb.append("Example: {\"")
       .append(signature.outputs.headOption.map(_.name).getOrElse("field"))

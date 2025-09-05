@@ -4,6 +4,7 @@ import munit.FunSuite
 import dspy.signatures._
 import dspy.predict.Predict
 import dspy.clients._
+import dspy.utils.DspyError
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -25,6 +26,19 @@ class PredictSuite extends FunSuite {
     val fut = p.forward(Map("question" -> "What is the capital of France?"))
     fut.map { pred =>
       assertEquals(pred.getString("answer"), Some("Paris"))
+    }
+  }
+
+  test("Predict fails when required output keys are missing") {
+    val sig = Signature(
+      inputs = List(Field("question", "q")),
+      outputs = List(Field("answer", "a"))
+    )
+    val lm = new StubLM("{\"not_answer\": \"Paris\"}")
+    val p  = new Predict(sig, lm)
+    val fut = p.forward(Map("question" -> "What is the capital of France?"))
+    fut.map(_ => fail("expected ParseError for missing output keys")).recover { case e: DspyError.ParseError =>
+      assert(clue(e.getMessage).contains("Missing output keys"))
     }
   }
 }

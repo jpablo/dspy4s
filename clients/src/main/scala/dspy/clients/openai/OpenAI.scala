@@ -38,18 +38,21 @@ final class OpenAI(
 
     maxTokens.foreach(n => body.update("max_tokens", n))
 
-    basicRequest
-      .post(uriBase.addPath("chat", "completions"))
-      .header("Authorization", s"Bearer $key")
-      .contentType("application/json")
-      .readTimeout(scala.concurrent.duration.Duration(settings.requestTimeoutMillis, "millis"))
-      .body(body.render())
-      .send(backend)
-      .flatMap { resp =>
-        resp.body match {
-          case Left(err)      =>
-            Future.failed(DspyError.HttpError(resp.code.code, err))
-          case Right(jsonStr) =>
+    def sendOnce(): Future[Completion] =
+      basicRequest
+        .post(uriBase.addPath("chat", "completions"))
+        .header("Authorization", s"Bearer $key")
+        .contentType("application/json")
+        .readTimeout(scala.concurrent.duration.Duration(settings.requestTimeoutMillis, "millis"))
+        .body(body.render())
+        .response(asStringAlways)
+        .send(backend)
+        .flatMap { resp =>
+          val status  = resp.code.code
+          val jsonStr = resp.body
+          if (!resp.code.isSuccess)
+            Future.failed(DspyError.HttpError(status, jsonStr))
+          else
             try {
               val js   = ujson.read(jsonStr)
               val text = js("choices")(0)("message")("content").str
@@ -61,6 +64,22 @@ final class OpenAI(
                 )
             }
         }
+
+    def retryable(status: Int): Boolean =
+      status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504
+
+    val maxRetries    = params.get("max_retries").flatMap(_.toIntOption).getOrElse(2)
+    val baseBackoffMs = params.get("backoff_ms").flatMap(_.toLongOption).getOrElse(250L)
+
+    def after(ms: Long): Future[Unit] = Future { Thread.sleep(ms) }
+
+    def loop(attempt: Int): Future[Completion] =
+      sendOnce().recoverWith {
+        case e: DspyError.HttpError if retryable(e.status) && attempt < maxRetries =>
+          val delay = baseBackoffMs * math.pow(2.0, attempt.toDouble).toLong
+          after(delay).flatMap(_ => loop(attempt + 1))
       }
+
+    loop(0)
   }
 }
