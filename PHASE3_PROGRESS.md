@@ -62,7 +62,18 @@ Phase 3 focuses on LM runtime semantics (cache, retry, history, and usage tracki
   - deterministic backoff-delay assertions
   - retry classification by error code
 
+9. Provider-facing LM normalization and parsing layer
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/runtime/ProviderLanguageModel.scala`
+- Added request normalization helpers:
+  - `ProviderRequestNormalizer` (`chat`, `text`, `responses`)
+- Added response parsing helpers:
+  - `ProviderResponseParser` (choices/output blocks, tool calls, usage)
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/test/scala/dspy4s/lm/ProviderLanguageModelSuite.scala`
+  - chat request normalization coverage
+  - text prompt normalization coverage
+  - chat/responses parsing coverage
+  - empty-output parse error coverage
+
 ## Remaining for Phase 3
 
-- Add provider-facing LM implementation(s) and request/response normalization for chat/responses modes.
 - Expand usage/history parity to match DSPy tier-0 tests.
