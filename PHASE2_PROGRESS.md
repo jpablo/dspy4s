@@ -63,7 +63,16 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ChainOfThoughtSuite.scala`
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ParallelSuite.scala`
 
+10. Selection wrappers (`BestOfN` / `Refine`)
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/BestOfN.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/Refine.scala`
+- Added rollout-aware repeated execution (`rollout_id`, `temperature`) with reward-based best-candidate selection
+- Added fail-count behavior compatible with DSPy tests (default and custom fail thresholds)
+- Added best-attempt trace/history propagation back to outer runtime context
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/BestOfNSuite.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/RefineSuite.scala`
+
 ## Remaining for Phase 2
 
 - Add callback parity for tool-level events and nested module call IDs once tool/program layers are implemented.
-- Add richer wrappers beyond current subset (`BestOfN`, `Refine`) on top of the same runtime foundation.
+- Current wrapper subset is in place; next program additions should focus on `ReAct` and tool-calling parity.
