@@ -9,6 +9,10 @@ Phase 1 focuses on signatures and core primitives.
 - Added field name validation and prefix inference (`FieldSpec.validateName`, `FieldSpec.inferPrefix`)
 - Added field normalization defaults (`prefix`, `description`)
 - Added signature insert API (`Signature.insert`)
+- Added signature field update API (`Signature.withUpdatedField`)
+- Added Python-parity update aliases (`Signature.withUpdatedFields`) including typed token updates and multi-field patching
+- Added structural equality helper (`Signature.equalsByStructure`)
+- Added signature state serialization and restore (`dumpState`, `SignatureSpec.fromState`)
 - Added signature string rendering (`Signature.signatureString`)
 - Added validated signature constructor (`SignatureSpec.create`)
 
@@ -25,16 +29,23 @@ Phase 1 focuses on signatures and core primitives.
 - `Example` now supports key mutation helpers (`withValue`, `without`)
 - `Completions.at` now returns `Either[DspyError, PredictionData]` with bounds validation
 - `CompletionData` validates equal-length completion vectors
+- Added completion row/column helpers (`field`, `items`, `first`, `last`, `toPredictions`)
+- Added `CompletionData.fromRows` and `CompletionData.single`
 - `PredictionData` adds `score` extraction helper
+- Added generic prediction accessors (`value`, `asDouble`, `withValue`)
 - `PredictionData.fromCompletions` returns validated `Either`
+- Added `PredictionData.fromRows`
 
 5. Module graph traversal utilities
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/primitives/BaseModule.scala`
 - Added recursive graph walker for named parameters/submodules
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/primitives/BasicParameter.scala`
 
+6. Runtime context foundation (Phase 2 bootstrap)
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/runtime/RuntimeEnvironment.scala`
+- Added scoped context/settings management and callback dispatch entry points
+
 ## Remaining for Phase 1
 
-- Add test suite for parser and primitive semantics
-- Complete parity for signature mutation (`with_updated_fields` style typed updates)
-- Add richer prediction/completion convenience APIs aligned with DSPy behavior
+- No open Phase 1 blockers for the targeted subset.
+- Next focus: Phase 2 parity (`settings`, callbacks, and parallel context propagation tests).

@@ -32,7 +32,8 @@ lazy val core = (project in file("modules/core"))
   .settings(commonSettings)
   .settings(name := "dspy4s-core")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    Test / parallelExecution := false
   )
 
 lazy val lm = (project in file("modules/lm"))

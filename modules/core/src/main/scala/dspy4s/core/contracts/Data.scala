@@ -35,6 +35,11 @@ trait Completions:
   def fields: Map[String, Vector[Any]]
 
   def size: Int = fields.values.headOption.map(_.size).getOrElse(0)
+  def fieldNames: Vector[String] = fields.keys.toVector
+  def items: Vector[(String, Vector[Any])] = fields.toVector
+
+  def field(name: String): Either[DspyError, Vector[Any]] =
+    fields.get(name).toRight(NotFoundError("completion_field", s"Completion field '$name' does not exist"))
 
   def at(index: Int): Either[DspyError, PredictionData] =
     if index < 0 || index >= size then
@@ -43,16 +48,48 @@ trait Completions:
       val row = fields.map { case (key, values) => key -> values(index) }
       Right(PredictionData(values = row))
 
+  def first: Either[DspyError, PredictionData] =
+    if size == 0 then Left(ValidationError("Cannot access first completion from empty completions"))
+    else at(0)
+
+  def last: Either[DspyError, PredictionData] =
+    if size == 0 then Left(ValidationError("Cannot access last completion from empty completions"))
+    else at(size - 1)
+
+  def toPredictions: Either[DspyError, Vector[PredictionData]] =
+    (0 until size).toVector.foldLeft[Either[DspyError, Vector[PredictionData]]](Right(Vector.empty)) {
+      (acc, index) =>
+        for
+          soFar <- acc
+          prediction <- at(index)
+        yield soFar :+ prediction
+    }
+
 final case class CompletionData(fields: Map[String, Vector[Any]]) extends Completions:
   private val lengths = fields.values.map(_.size).toSet
   require(lengths.size <= 1, "All completion fields must have the same number of values")
 
-  def fieldNames: Vector[String] = fields.keys.toVector
+object CompletionData:
+  def fromRows(rows: Vector[Map[String, Any]]): Either[DspyError, CompletionData] =
+    if rows.isEmpty then Right(CompletionData(Map.empty))
+    else
+      val expectedKeys = rows.head.keySet
+      if rows.exists(_.keySet != expectedKeys) then
+        Left(ValidationError("All completion rows must include the same set of fields"))
+      else
+        val columns = expectedKeys.map { key => key -> rows.map(_(key)) }.toMap
+        Right(CompletionData(columns))
+
+  def single(values: Map[String, Any]): CompletionData =
+    CompletionData(values.view.mapValues(value => Vector(value)).toMap)
 
 trait Prediction extends Record:
   def completions: Option[Completions]
   def lmUsage: Option[Map[String, Long]]
   def withUsage(usage: Map[String, Long]): Prediction
+  def withValue(key: String, value: Any): Prediction
+  def value(key: String): Either[DspyError, Any]
+  def asDouble(key: String): Either[DspyError, Double]
 
 final case class PredictionData(
     values: Map[String, Any],
@@ -61,17 +98,28 @@ final case class PredictionData(
 ) extends Prediction:
   override def withUsage(usage: Map[String, Long]): PredictionData = copy(lmUsage = Some(usage))
 
+  override def withValue(key: String, value: Any): PredictionData = copy(values = values.updated(key, value))
+
+  override def value(key: String): Either[DspyError, Any] =
+    values.get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
+
+  override def asDouble(key: String): Either[DspyError, Double] =
+    value(key).flatMap {
+      case number: Int    => Right(number.toDouble)
+      case number: Long   => Right(number.toDouble)
+      case number: Float  => Right(number.toDouble)
+      case number: Double => Right(number)
+      case other          => Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
+    }
+
   def score: Either[DspyError, Double] =
-    values.get("score") match
-      case Some(number: Int)    => Right(number.toDouble)
-      case Some(number: Long)   => Right(number.toDouble)
-      case Some(number: Float)  => Right(number.toDouble)
-      case Some(number: Double) => Right(number)
-      case Some(other)          => Left(ValidationError(s"Prediction score is not numeric: $other"))
-      case None                 => Left(NotFoundError("score", "Prediction does not contain a score field"))
+    asDouble("score")
 
 object PredictionData:
   def empty: PredictionData = PredictionData(values = Map.empty)
 
   def fromCompletions(completions: Completions): Either[DspyError, PredictionData] =
     completions.at(0).map(_.copy(completions = Some(completions)))
+
+  def fromRows(rows: Vector[Map[String, Any]]): Either[DspyError, PredictionData] =
+    CompletionData.fromRows(rows).flatMap(fromCompletions)

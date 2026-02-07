@@ -34,6 +34,17 @@ final case class FieldSpec(
     metadata: Map[String, String] = Map.empty
 )
 
+final case class FieldUpdate(
+    typeRef: Option[TypeRef] = None,
+    typeToken: Option[String] = None,
+    description: Option[String] = None,
+    prefix: Option[String] = None,
+    defaultValue: Option[Any] = None,
+    metadata: Map[String, String] = Map.empty
+):
+  def resolvedTypeRef: Option[TypeRef] =
+    typeRef.orElse(typeToken.map(TypeRef.fromToken))
+
 object FieldSpec:
   private val identifierPattern: Regex = raw"[A-Za-z_][A-Za-z0-9_]*".r
 
@@ -107,10 +118,84 @@ trait Signature:
       }
     )
 
+  final def withUpdatedField(
+      fieldName: String,
+      typeRef: Option[TypeRef] = None,
+      description: Option[String] = None,
+      prefix: Option[String] = None,
+      defaultValue: Option[Any] = None,
+      metadata: Map[String, String] = Map.empty
+  ): Either[DspyError, Signature] =
+    fields.find(_.name == fieldName) match
+      case None => Left(NotFoundError("field", s"Field '$fieldName' does not exist in signature '$name'"))
+      case Some(existing) =>
+        val updated = existing.copy(
+          typeRef = typeRef.getOrElse(existing.typeRef),
+          description = description.orElse(existing.description),
+          prefix = prefix.orElse(existing.prefix),
+          defaultValue = defaultValue.orElse(existing.defaultValue),
+          metadata = existing.metadata ++ metadata
+        )
+        Right(withFields(fields.map { field => if field.name == fieldName then updated else field }))
+
+  final def withUpdatedFields(
+      fieldName: String,
+      typeRef: Option[TypeRef] = None,
+      typeToken: Option[String] = None,
+      description: Option[String] = None,
+      prefix: Option[String] = None,
+      defaultValue: Option[Any] = None,
+      metadata: Map[String, String] = Map.empty
+  ): Either[DspyError, Signature] =
+    withUpdatedField(
+      fieldName = fieldName,
+      typeRef = typeRef.orElse(typeToken.map(TypeRef.fromToken)),
+      description = description,
+      prefix = prefix,
+      defaultValue = defaultValue,
+      metadata = metadata
+    )
+
+  final def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, Signature] =
+    updates.foldLeft[Either[DspyError, Signature]](Right(this)) { (acc, entry) =>
+      val (fieldName, update) = entry
+      acc.flatMap(
+        _.withUpdatedFields(
+          fieldName = fieldName,
+          typeRef = update.typeRef,
+          typeToken = update.typeToken,
+          description = update.description,
+          prefix = update.prefix,
+          defaultValue = update.defaultValue,
+          metadata = update.metadata
+        )
+      )
+    }
+
   final def signatureString: String =
     val inputs = inputFields.map(_.name).mkString(", ")
     val outputs = outputFields.map(_.name).mkString(", ")
     s"$inputs -> $outputs"
+
+  final def equalsByStructure(other: Signature): Boolean =
+    instructions == other.instructions && fields == other.fields
+
+  final def dumpState: Map[String, Any] =
+    Map(
+      "name" -> name,
+      "instructions" -> instructions,
+      "fields" -> fields.map { field =>
+        Map(
+          "name" -> field.name,
+          "role" -> field.role.toString,
+          "typeRef" -> field.typeRef.repr,
+          "description" -> field.description,
+          "prefix" -> field.prefix,
+          "defaultValue" -> field.defaultValue,
+          "metadata" -> field.metadata
+        )
+      }
+    )
 
 final case class SignatureSpec(
     name: String,
@@ -139,6 +224,91 @@ object SignatureSpec:
     else
       val normalized = fields.map(FieldSpec.normalize)
       Right(SignatureSpec(name = name, fields = normalized, instructions = instructions))
+
+  def fromState(state: Map[String, Any]): Either[DspyError, SignatureSpec] =
+    def readName: Either[DspyError, String] =
+      state.get("name") match
+        case Some(value: String) if value.nonEmpty => Right(value)
+        case _                                      => Left(ValidationError("Signature state is missing non-empty 'name'"))
+
+    def readInstructions: Either[DspyError, Option[String]] =
+      state.get("instructions") match
+        case None                 => Right(None)
+        case Some(None)           => Right(None)
+        case Some(value: String)  => Right(Some(value))
+        case Some(value: Option[?]) =>
+          value match
+            case Some(text: String) => Right(Some(text))
+            case None               => Right(None)
+            case _                  => Left(ValidationError("Invalid 'instructions' value in signature state"))
+        case _ => Left(ValidationError("Invalid 'instructions' value in signature state"))
+
+    def parseRole(role: String): Either[DspyError, FieldRole] =
+      role.trim.toLowerCase match
+        case "input"  => Right(FieldRole.Input)
+        case "output" => Right(FieldRole.Output)
+        case _        => Left(ValidationError(s"Invalid field role '$role' in signature state"))
+
+    def readFields: Either[DspyError, Vector[FieldSpec]] =
+      state.get("fields") match
+        case Some(rawFields: Seq[?]) =>
+          rawFields.toVector.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, raw) =>
+            for
+              fields <- acc
+              fieldMap <- raw match
+                case value: collection.Map[?, ?] =>
+                  val mapped: Map[String, Any] = value.iterator.collect {
+                    case (k: String, v) => k -> v
+                  }.toMap
+                  Right(mapped)
+                case _ =>
+                  Left(ValidationError("Invalid field entry in signature state"))
+              name <- fieldMap.get("name") match
+                case Some(value: String) => Right(value)
+                case _                   => Left(ValidationError("Field state is missing 'name'"))
+              roleValue <- fieldMap.get("role") match
+                case Some(value: String) => parseRole(value)
+                case _                   => Left(ValidationError(s"Field '$name' is missing role"))
+              typeRef = fieldMap.get("typeRef") match
+                case Some(value: String) => TypeRef.fromToken(value)
+                case _                   => TypeRef.string
+              description = fieldMap.get("description") match
+                case Some(value: String) => Some(value)
+                case Some(Some(value: String)) => Some(value)
+                case _                   => None
+              prefix = fieldMap.get("prefix") match
+                case Some(value: String) => Some(value)
+                case Some(Some(value: String)) => Some(value)
+                case _                   => None
+              defaultValue = fieldMap.get("defaultValue") match
+                case Some(value: Option[?]) => value
+                case Some(value)            => Some(value)
+                case None                   => None
+              metadata = fieldMap.get("metadata") match
+                case Some(value: collection.Map[?, ?]) =>
+                  val parsed: Map[String, String] = value.iterator.collect {
+                    case (k: String, v: String) => k -> v
+                  }.toMap
+                  parsed
+                case _ => Map.empty[String, String]
+            yield fields :+ FieldSpec(
+              name = name,
+              role = roleValue,
+              typeRef = typeRef,
+              description = description,
+              prefix = prefix,
+              defaultValue = defaultValue,
+              metadata = metadata
+            )
+          }
+        case _ => Left(ValidationError("Signature state is missing 'fields'"))
+
+    for
+      name <- readName
+      instructions <- readInstructions
+      fields <- readFields
+      signature <- create(name = name, fields = fields, instructions = instructions)
+    yield signature
 
 trait SignatureParser:
   def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, Signature]
