@@ -1,6 +1,7 @@
 package dspy4s.lm
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -10,15 +11,23 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
+import dspy4s.lm.runtime.CompositeLmCache
+import dspy4s.lm.runtime.DiskLmCache
 import dspy4s.lm.runtime.InMemoryLmCache
+import dspy4s.lm.runtime.LmCacheConfig
+import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
+import dspy4s.lm.runtime.NoopLmCache
 import dspy4s.lm.runtime.RequestHash
 import dspy4s.lm.runtime.RetryPolicies
 import dspy4s.lm.runtime.UsageTracker
 import dspy4s.lm.runtime.UsageTracking
 import munit.FunSuite
 
+import java.nio.file.Files
+import java.nio.file.Path
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters.*
 
 class LmRuntimeSuite extends FunSuite:
   private final class StubLanguageModel(initial: Vector[Either[DspyError, LmResponse]]) extends LanguageModel:
@@ -49,9 +58,11 @@ class LmRuntimeSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
+    LmCacheRegistry.resetDefault()
 
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
+    LmCacheRegistry.resetDefault()
 
   test("request hash is stable for equivalent map orderings") {
     val requestA = baseRequest.copy(
@@ -111,6 +122,56 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(delegate.calls.size, 3)
   }
 
+  test("exponential backoff policy emits deterministic delays when jitter is disabled") {
+    val delegate = new StubLanguageModel(
+      Vector(
+        Left(RuntimeError("lm", "temporary-1")),
+        Left(RuntimeError("lm", "temporary-2")),
+        Right(baseResponse)
+      )
+    )
+    val delays = ArrayBuffer.empty[Long]
+    val retryPolicy = RetryPolicies.exponentialBackoff(
+      maxRetries = 2,
+      baseDelayMillis = 5L,
+      maxDelayMillis = 20L,
+      jitterFactor = 0.0
+    )
+    val managed = ManagedLanguageModel(
+      delegate = delegate,
+      retryPolicy = retryPolicy,
+      sleep = millis => delays += millis
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = managed.call(baseRequest)
+
+    assert(result.isRight)
+    assertEquals(delegate.calls.size, 3)
+    assertEquals(delays.toVector, Vector(5L, 10L))
+  }
+
+  test("retry code filtering prevents retries for non-matching errors") {
+    val delegate = new StubLanguageModel(
+      Vector(
+        Left(ConfigurationError("bad setup")),
+        Right(baseResponse)
+      )
+    )
+    val retryPolicy = RetryPolicies.maxRetriesOnCodes(
+      maxAttempts = 3,
+      retryableCodes = Set("runtime_error")
+    )
+    val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = retryPolicy)
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = managed.call(baseRequest)
+
+    assert(result.isLeft)
+    assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
+    assertEquals(delegate.calls.size, 1)
+  }
+
   test("usage tracking records only non-cached usage entries") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse)))
     val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(16)))
@@ -131,3 +192,61 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(totals.completionTokens, 5L)
     assertEquals(totals.details("cached_tokens"), 3L)
   }
+
+  test("disk cache persists values across cache instances") {
+    val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache")
+    try
+      val first = new DiskLmCache(tempDir, maxEntries = 8)
+      first.put(baseRequest, baseResponse)
+      assertEquals(first.size, 1)
+
+      val second = new DiskLmCache(tempDir, maxEntries = 8)
+      val cached = second.get(baseRequest)
+      assert(cached.isDefined)
+      assertEquals(cached.get.cacheHit, true)
+      assertEquals(cached.get.usage, None)
+    finally deleteRecursively(tempDir)
+  }
+
+  test("composite cache warms memory cache on disk hit") {
+    val tempDir = Files.createTempDirectory("dspy4s-lm-composite-cache")
+    try
+      val disk = new DiskLmCache(tempDir, maxEntries = 8)
+      val memory = new InMemoryLmCache(maxEntries = 8)
+      disk.put(baseRequest, baseResponse)
+
+      val composite = CompositeLmCache(memory = Some(memory), disk = Some(disk))
+      val first = composite.get(baseRequest)
+      val second = composite.get(baseRequest)
+
+      assert(first.isDefined)
+      assert(second.isDefined)
+      assertEquals(memory.size, 1)
+      assertEquals(second.get.cacheHit, true)
+    finally deleteRecursively(tempDir)
+  }
+
+  test("cache registry configure supports disabled and memory-only modes") {
+    val disabled = LmCacheRegistry.configure(
+      LmCacheConfig(enableDiskCache = false, enableMemoryCache = false)
+    )
+    assert(disabled eq NoopLmCache)
+    assertEquals(disabled.get(baseRequest), None)
+
+    val memoryOnly = LmCacheRegistry.configure(
+      LmCacheConfig(enableDiskCache = false, enableMemoryCache = true, memoryMaxEntries = 4)
+    )
+    memoryOnly.put(baseRequest, baseResponse)
+    val cached = memoryOnly.get(baseRequest)
+    assert(cached.isDefined)
+    assertEquals(cached.get.cacheHit, true)
+  }
+
+  private def deleteRecursively(path: Path): Unit =
+    if Files.exists(path) then
+      if Files.isDirectory(path) then
+        val children = Files.list(path)
+        try
+          children.iterator().asScala.foreach(child => deleteRecursively(child))
+        finally children.close()
+      Files.deleteIfExists(path)

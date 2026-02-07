@@ -66,6 +66,7 @@ trait LmCache:
 
 trait RetryPolicy:
   def shouldRetry(attempt: Int, error: DspyError): Boolean
+  def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long = 0L
 
 trait LanguageModel extends LanguageModelRef:
   def id: String

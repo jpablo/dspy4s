@@ -14,6 +14,7 @@ import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 
 import scala.collection.mutable
+import java.util.concurrent.ThreadLocalRandom
 
 object RetryPolicies:
   val never: RetryPolicy = new RetryPolicy:
@@ -24,6 +25,35 @@ object RetryPolicies:
     new RetryPolicy:
       override def shouldRetry(attempt: Int, error: DspyError): Boolean =
         attempt < maxRetries && retryOn(error)
+
+  def maxRetriesOnCodes(maxAttempts: Int, retryableCodes: Set[String]): RetryPolicy =
+    maxRetries(maxAttempts, error => retryableCodes.contains(error.code))
+
+  def exponentialBackoff(
+      maxRetries: Int,
+      baseDelayMillis: Long = 200L,
+      maxDelayMillis: Long = 4000L,
+      jitterFactor: Double = 0.0,
+      retryOn: DspyError => Boolean = _ => true
+  ): RetryPolicy =
+    require(maxRetries >= 0, "maxRetries must be non-negative")
+    require(baseDelayMillis >= 0L, "baseDelayMillis must be non-negative")
+    require(maxDelayMillis >= baseDelayMillis, "maxDelayMillis must be >= baseDelayMillis")
+    require(jitterFactor >= 0.0 && jitterFactor <= 1.0, "jitterFactor must be in [0.0, 1.0]")
+
+    new RetryPolicy:
+      override def shouldRetry(attempt: Int, error: DspyError): Boolean =
+        attempt < maxRetries && retryOn(error)
+
+      override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
+        val exponent = if attempt <= 0 then 0 else attempt
+        val scaled = baseDelayMillis * (1L << math.min(exponent, 20))
+        val bounded = math.min(scaled, maxDelayMillis)
+        if jitterFactor == 0.0 then bounded
+        else
+          val maxJitter = math.max((bounded * jitterFactor).toLong, 0L)
+          val jitter = if maxJitter == 0L then 0L else ThreadLocalRandom.current().nextLong(maxJitter + 1L)
+          bounded + jitter
 
 final class UsageTracker:
   private val data = mutable.Map.empty[String, Vector[LmUsage]]
@@ -77,7 +107,8 @@ object UsageTracking:
 final case class ManagedLanguageModel(
     delegate: LanguageModel,
     cache: Option[LmCache] = None,
-    retryPolicy: RetryPolicy = RetryPolicies.never
+    retryPolicy: RetryPolicy = RetryPolicies.never,
+    sleep: Long => Unit = ManagedLanguageModel.defaultSleep
 ) extends LanguageModel:
   override val id: String = delegate.id
   override val mode: LmMode = delegate.mode
@@ -114,6 +145,8 @@ final case class ManagedLanguageModel(
           result = ok
           continue = false
         case Left(error) if retryPolicy.shouldRetry(attempt, error) =>
+          val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
+          if delay > 0L then sleep(delay)
           attempt += 1
         case failed @ Left(_) =>
           result = failed
@@ -158,3 +191,7 @@ final case class ManagedLanguageModel(
       response.usage.foreach { usage =>
         UsageTracking.record(request.model, usage)
       }
+
+object ManagedLanguageModel:
+  private def defaultSleep(millis: Long): Unit =
+    Thread.sleep(millis)

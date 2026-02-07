@@ -40,9 +40,29 @@ Phase 3 focuses on LM runtime semantics (cache, retry, history, and usage tracki
 - Enabled `munit` for `lm` tests in `/Users/jpablo/proyectos/experimentos/dspy4s/build.sbt`
 - Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/LmApi.scala` to `contractsPhase = "phase-3"`
 
+7. Disk cache + cache configuration API
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/runtime/CacheRuntime.scala`
+- Added `DiskLmCache` with filesystem persistence and bounded entry eviction
+- Added `CompositeLmCache` for memory+disk layering
+- Added cache configuration/runtime APIs:
+  - `LmCacheConfig`
+  - `LmCaches.build(...)`
+  - `LmCacheRegistry` (`current`, `configure`, `resetDefault`)
+- Added memory-only/noop configuration behavior for disabled cache modes
+
+8. Retry policy expansion
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/contracts/LmContracts.scala`
+  - `RetryPolicy.delayBeforeNextAttemptMillis(...)`
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/runtime/ManagedLanguageModel.scala`
+  - delay-aware retry loop with injectable sleep function
+  - new policies:
+    - `RetryPolicies.maxRetriesOnCodes(...)`
+    - `RetryPolicies.exponentialBackoff(...)`
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/test/scala/dspy4s/lm/LmRuntimeSuite.scala`
+  - deterministic backoff-delay assertions
+  - retry classification by error code
+
 ## Remaining for Phase 3
 
-- Add disk cache implementation and cache configuration APIs.
 - Add provider-facing LM implementation(s) and request/response normalization for chat/responses modes.
-- Add richer retry strategies (backoff + error classification).
 - Expand usage/history parity to match DSPy tier-0 tests.
