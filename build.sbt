@@ -2,6 +2,8 @@ ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.1"
 
+lazy val munitVersion = "1.1.1"
+
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-deprecation",
@@ -29,6 +31,9 @@ lazy val root = (project in file("."))
 lazy val core = (project in file("modules/core"))
   .settings(commonSettings)
   .settings(name := "dspy4s-core")
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+  )
 
 lazy val lm = (project in file("modules/lm"))
   .dependsOn(core)
