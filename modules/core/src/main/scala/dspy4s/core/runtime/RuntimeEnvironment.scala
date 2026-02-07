@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicReference
 object RuntimeEnvironment:
   private val globalSettingsRef = new AtomicReference[Settings](SettingsData())
   private val configureOwnerThreadId = new AtomicLong(-1L)
+  private val configureOwnerAsyncTaskId = new AtomicReference[String | Null](null)
+  private val asyncTaskCounter = new AtomicLong(0L)
 
   private val contextRef = new ThreadLocal[RuntimeContext]:
     override def initialValue(): RuntimeContext = RuntimeContextData()
@@ -32,10 +34,24 @@ object RuntimeEnvironment:
     val caller = Thread.currentThread().threadId()
     val owner = configureOwnerThreadId.get()
     if owner == -1L then
-      if configureOwnerThreadId.compareAndSet(-1L, caller) then Right(())
+      if configureOwnerThreadId.compareAndSet(-1L, caller) then ensureConfigureAllowed()
       else ensureConfigureAllowed()
-    else if owner == caller then Right(())
-    else Left(ConfigurationError("Cannot call RuntimeEnvironment.configure from a non-owner thread"))
+    else if owner != caller then Left(ConfigurationError("Cannot call RuntimeEnvironment.configure from a non-owner thread"))
+    else
+      current.settings.get(SettingKeys.asyncTaskId) match
+        case None => Right(())
+        case Some(taskId) =>
+          val asyncOwner = configureOwnerAsyncTaskId.get()
+          if asyncOwner == null then
+            if configureOwnerAsyncTaskId.compareAndSet(null, taskId) then Right(())
+            else ensureConfigureAllowed()
+          else if asyncOwner == taskId then Right(())
+          else
+            Left(
+              ConfigurationError(
+                "RuntimeEnvironment.configure(...) can only be called from the same async task that called it first. Use RuntimeEnvironment.withSettings(...) in other async tasks."
+              )
+            )
 
   def current: RuntimeContext =
     val context = localContext
@@ -61,6 +77,13 @@ object RuntimeEnvironment:
 
   def withSetting[A, B](key: SettingKey[A], value: A)(thunk: => B): B =
     withSettings(SettingsData(Map(key.name -> value)))(thunk)
+
+  def withAsyncTask[A](taskId: String)(thunk: => A): A =
+    withSetting(SettingKeys.asyncTaskId, taskId)(thunk)
+
+  def withGeneratedAsyncTask[A](prefix: String = "async-task")(thunk: => A): A =
+    val taskId = s"$prefix-${asyncTaskCounter.incrementAndGet()}"
+    withAsyncTask(taskId)(thunk)
 
   def withContext[A](context: RuntimeContext)(thunk: => A): A =
     val previous = contextRef.get()
@@ -100,4 +123,6 @@ object RuntimeEnvironment:
   def resetForTests(): Unit =
     globalSettingsRef.set(SettingsData())
     configureOwnerThreadId.set(-1L)
+    configureOwnerAsyncTaskId.set(null)
+    asyncTaskCounter.set(0L)
     contextRef.remove()

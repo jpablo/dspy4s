@@ -20,7 +20,9 @@ object ContextPropagation:
         base.execute(new Runnable:
           override def run(): Unit =
             RuntimeEnvironment.withContext(captured) {
-              runnable.run()
+              RuntimeEnvironment.withGeneratedAsyncTask("future") {
+                runnable.run()
+              }
             }
         )
 

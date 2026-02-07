@@ -2,14 +2,17 @@ package dspy4s.core
 
 import dspy4s.core.contracts.SettingKey
 import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
 
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext
+import scala.concurrent.ExecutionContextExecutorService
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
+import java.util.concurrent.Executors
 
 class ContextPropagationSuite extends FunSuite:
   private val sampleKey = SettingKey[String]("sample")
@@ -41,4 +44,28 @@ class ContextPropagationSuite extends FunSuite:
     }
 
     assertEquals(observed, Some("scoped"))
+  }
+
+  test("context propagation assigns distinct async task ids across futures") {
+    val singleThread: ExecutionContextExecutorService = ExecutionContext.fromExecutorService(
+      Executors.newSingleThreadExecutor()
+    )
+
+    try
+      given ExecutionContext = singleThread
+
+      val first = Await.result(
+        ContextPropagation.future(RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "a"))),
+        3.seconds
+      )
+      val second = Await.result(
+        ContextPropagation.future(RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "b"))),
+        3.seconds
+      )
+
+      assertEquals(first, Right(()))
+      assert(second.isLeft)
+      assert(second.left.toOption.get.isInstanceOf[ConfigurationError])
+    finally
+      singleThread.shutdownNow()
   }

@@ -8,6 +8,7 @@ import dspy4s.core.contracts.SettingsData
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.runtime.ParallelExecutor
 import munit.FunSuite
+import java.util.concurrent.atomic.AtomicInteger
 
 class ParallelExecutorSuite extends FunSuite:
   private val sampleKey = SettingKey[String]("sample")
@@ -91,4 +92,22 @@ class ParallelExecutorSuite extends FunSuite:
       assert(result.isLeft)
       assertEquals(result.left.toOption.get.message, "Execution cancelled due to errors or interruption.")
     }
+  }
+
+  test("max errors stops scheduling additional work") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val started = AtomicInteger(0)
+    val executor = ParallelExecutor(numThreads = 2, maxErrors = 1)
+
+    val result = executor.execute(
+      task = (item: Int) =>
+        started.incrementAndGet()
+        if item == 0 then throw IllegalStateException("boom")
+        Thread.sleep(100)
+        item,
+      data = (0 until 20).toVector
+    )
+
+    assert(result.isLeft)
+    assert(started.get() <= 2)
   }

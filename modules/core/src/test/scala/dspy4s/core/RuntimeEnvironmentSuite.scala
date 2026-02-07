@@ -101,3 +101,28 @@ class RuntimeEnvironmentSuite extends FunSuite:
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
   }
+
+  test("configure is allowed repeatedly within the same async task id") {
+    val result = RuntimeEnvironment.withAsyncTask("task-a") {
+      val first = RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "v1"))
+      val second = RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "v2"))
+      (first, second, RuntimeEnvironment.currentSettings.get(sampleKey))
+    }
+
+    assertEquals(result._1, Right(()))
+    assertEquals(result._2, Right(()))
+    assertEquals(result._3, Some("v2"))
+  }
+
+  test("configure is rejected from different async task ids on the same thread") {
+    RuntimeEnvironment.withAsyncTask("task-a") {
+      assertEquals(RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "v1")), Right(()))
+    }
+
+    val second = RuntimeEnvironment.withAsyncTask("task-b") {
+      RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "v2"))
+    }
+
+    assert(second.isLeft)
+    assert(second.left.toOption.get.isInstanceOf[ConfigurationError])
+  }

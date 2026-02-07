@@ -25,6 +25,7 @@ object SettingKeys:
   val languageModel: SettingKey[LanguageModelRef] = SettingKey("lm")
   val adapter: SettingKey[AdapterRef] = SettingKey("adapter")
   val callbacks: SettingKey[Vector[CallbackHandler]] = SettingKey("callbacks")
+  val asyncTaskId: SettingKey[String] = SettingKey("async_task_id")
   val numThreads: SettingKey[Int] = SettingKey("num_threads")
   val maxErrors: SettingKey[Int] = SettingKey("max_errors")
   val asyncMaxWorkers: SettingKey[Int] = SettingKey("async_max_workers")
