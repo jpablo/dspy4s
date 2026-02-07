@@ -56,7 +56,14 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 - Added prediction completion/usage construction from parsed LM outputs
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/PredictSuite.scala`
 
+9. Additional program wrappers
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ChainOfThought.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/Parallel.scala`
+- Added `ParallelExecutor.executeEither` for structured module-level failure tracking
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ChainOfThoughtSuite.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ParallelSuite.scala`
+
 ## Remaining for Phase 2
 
 - Add callback parity for tool-level events and nested module call IDs once tool/program layers are implemented.
-- Add concrete program wrappers beyond `Predict` (`ChainOfThought`, `Parallel`, etc.) on top of the runtime foundation.
+- Add richer wrappers beyond current subset (`BestOfN`, `Refine`) on top of the same runtime foundation.

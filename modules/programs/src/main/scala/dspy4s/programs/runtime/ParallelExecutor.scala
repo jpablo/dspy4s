@@ -34,6 +34,30 @@ final class ParallelExecutor(
       task: A => B,
       data: Vector[A]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+    executeInternal(
+      task = (item: A) =>
+        try Right(task(item))
+        catch
+          case NonFatal(error) =>
+            Left(
+              RuntimeError(
+                component = "parallel_executor",
+                message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+              )
+            ),
+      data = data
+    )
+
+  def executeEither[A, B](
+      task: A => Either[DspyError, B],
+      data: Vector[A]
+  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+    executeInternal(task = task, data = data)
+
+  private def executeInternal[A, B](
+      task: A => Either[DspyError, B],
+      data: Vector[A]
+  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
     if data.isEmpty then
       return Right(ParallelExecutionResult(results = Vector.empty, failedIndices = Vector.empty, errors = Map.empty))
 
@@ -51,7 +75,7 @@ final class ParallelExecutor(
                 if cancelRequested.get() then index -> None
                 else
                   val value: Either[DspyError, B] =
-                    try Right(task(data(index)))
+                    try task(data(index))
                     catch
                       case NonFatal(error) =>
                         Left(
