@@ -75,7 +75,23 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/BestOfNSuite.scala`
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/RefineSuite.scala`
 
+11. ReAct and tool execution parity foundations
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/runtime/ToolExecutor.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ReAct.scala`
+- Added iterative tool-orchestration loop with bounded iterations and explicit exhaustion error semantics
+- Added tool lookup/invocation path with callback-dispatched tool start/end events
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ReActSuite.scala`
+
+12. Explicit call-stack inspection APIs
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/contracts/Runtime.scala` with `SettingKeys.callStack`
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/runtime/RuntimeEnvironment.scala` with:
+  - `activeCallStack`
+  - `activeCallDepth`
+  - stack-aware `withActiveCall` push/pop behavior
+- Added call-stack restoration coverage in `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/test/scala/dspy4s/core/RuntimeEnvironmentSuite.scala`
+- Added async call-stack propagation coverage in `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/test/scala/dspy4s/core/CallbackDispatcherSuite.scala`
+
 ## Remaining for Phase 2
 
-- Add callback parity for richer tool orchestration and explicit call-stack inspection APIs as tool/program layers expand.
-- Current wrapper subset is in place; next program additions should focus on `ReAct` and tool-calling parity.
+- No open blockers for the Phase 2 target subset.
+- Next focus should move to Phase 3 (`lm` cache/retry/history/usage parity).

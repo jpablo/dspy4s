@@ -89,13 +89,25 @@ object RuntimeEnvironment:
   def nextCallId(prefix: String = "call"): String =
     s"$prefix-${callbackCallCounter.incrementAndGet()}"
 
+  def activeCallStack: Vector[String] =
+    current.settings.get(SettingKeys.callStack).getOrElse(Vector.empty)
+
+  def activeCallDepth: Int =
+    activeCallStack.size
+
   def activeCallId: Option[String] =
-    current.settings.get(SettingKeys.activeCallId)
+    activeCallStack.lastOption.orElse(current.settings.get(SettingKeys.activeCallId))
 
   def withActiveCall[A](callId: String)(thunk: => A): A =
     val previous = localContext
     val previousSettings = previous.settings
-    val updatedSettings = SettingsData(previousSettings.entries.updated(SettingKeys.activeCallId.name, callId))
+    val previousCallStack = previousSettings.get(SettingKeys.callStack).getOrElse(Vector.empty)
+    val updatedCallStack = previousCallStack :+ callId
+    val updatedSettings = SettingsData(
+      previousSettings.entries
+        .updated(SettingKeys.activeCallId.name, callId)
+        .updated(SettingKeys.callStack.name, updatedCallStack)
+    )
     contextRef.set(previous.withSettings(updatedSettings))
     try thunk
     finally

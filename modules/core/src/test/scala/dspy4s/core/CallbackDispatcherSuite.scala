@@ -175,3 +175,33 @@ class CallbackDispatcherSuite extends FunSuite:
     assertEquals(start.parentCallId, None)
     assertEquals(end.parentCallId, None)
   }
+
+  test("active call stack is preserved across propagated future callbacks") {
+    val snapshots = ArrayBuffer.empty[Vector[String]]
+
+    given ExecutionContext = ExecutionContext.global
+
+    CallbackDispatcher.withModule("outer", Map("q" -> "x")) {
+      snapshots += RuntimeEnvironment.activeCallStack
+
+      Await.result(
+        ContextPropagation.future {
+          snapshots += RuntimeEnvironment.activeCallStack
+          CallbackDispatcher.withTool("search", Map("query" -> "scala")) {
+            snapshots += RuntimeEnvironment.activeCallStack
+            Right("ok")
+          }
+          snapshots += RuntimeEnvironment.activeCallStack
+          Right("done")
+        },
+        3.seconds
+      )
+    }
+
+    assertEquals(snapshots.size, 4)
+    assertEquals(snapshots(0).size, 1)
+    assertEquals(snapshots(1).size, 1)
+    assertEquals(snapshots(2).size, 2)
+    assertEquals(snapshots(3).size, 1)
+    assertEquals(RuntimeEnvironment.activeCallStack, Vector.empty)
+  }
