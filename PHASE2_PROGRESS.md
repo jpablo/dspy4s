@@ -17,6 +17,8 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/runtime/CallbackDispatcher.scala`
 - Added start/end wrappers for module, LM, and adapter execution paths
 - Added consistent end-event emission on success and thrown exceptions
+- Added tool callback wrappers (`withTool`) and tool start/end events
+- Added callback call IDs with parent call tracking for nested and async-propagated execution
 
 3. Context propagation helpers
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/runtime/ContextPropagation.scala`
@@ -28,6 +30,7 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/test/scala/dspy4s/core/CallbackDispatcherSuite.scala`
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/test/scala/dspy4s/core/ContextPropagationSuite.scala`
 - Added assertions for configure ownership, callback ordering, exception-path event emission, and future context propagation
+- Added callback call-id lineage tests (nested module calls, async propagation, and tool callbacks)
 
 5. Programs runtime integration
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/runtime/BasePredictProgram.scala`
@@ -74,5 +77,5 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 
 ## Remaining for Phase 2
 
-- Add callback parity for tool-level events and nested module call IDs once tool/program layers are implemented.
+- Add callback parity for richer tool orchestration and explicit call-stack inspection APIs as tool/program layers expand.
 - Current wrapper subset is in place; next program additions should focus on `ReAct` and tool-calling parity.

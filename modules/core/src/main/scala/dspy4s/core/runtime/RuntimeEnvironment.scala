@@ -21,6 +21,7 @@ object RuntimeEnvironment:
   private val configureOwnerThreadId = new AtomicLong(-1L)
   private val configureOwnerAsyncTaskId = new AtomicReference[String | Null](null)
   private val asyncTaskCounter = new AtomicLong(0L)
+  private val callbackCallCounter = new AtomicLong(0L)
 
   private val contextRef = new ThreadLocal[RuntimeContext]:
     override def initialValue(): RuntimeContext = RuntimeContextData()
@@ -85,6 +86,22 @@ object RuntimeEnvironment:
     val taskId = s"$prefix-${asyncTaskCounter.incrementAndGet()}"
     withAsyncTask(taskId)(thunk)
 
+  def nextCallId(prefix: String = "call"): String =
+    s"$prefix-${callbackCallCounter.incrementAndGet()}"
+
+  def activeCallId: Option[String] =
+    current.settings.get(SettingKeys.activeCallId)
+
+  def withActiveCall[A](callId: String)(thunk: => A): A =
+    val previous = localContext
+    val previousSettings = previous.settings
+    val updatedSettings = SettingsData(previousSettings.entries.updated(SettingKeys.activeCallId.name, callId))
+    contextRef.set(previous.withSettings(updatedSettings))
+    try thunk
+    finally
+      val after = localContext
+      contextRef.set(after.withSettings(previousSettings))
+
   def withContext[A](context: RuntimeContext)(thunk: => A): A =
     val previous = contextRef.get()
     contextRef.set(context)
@@ -125,4 +142,5 @@ object RuntimeEnvironment:
     configureOwnerThreadId.set(-1L)
     configureOwnerAsyncTaskId.set(null)
     asyncTaskCounter.set(0L)
+    callbackCallCounter.set(0L)
     contextRef.remove()
