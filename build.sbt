@@ -48,6 +48,9 @@ lazy val adapters = (project in file("modules/adapters"))
   .dependsOn(core, lm)
   .settings(commonSettings)
   .settings(name := "dspy4s-adapters")
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+  )
 
 lazy val programs = (project in file("modules/programs"))
   .dependsOn(core, lm, adapters)
