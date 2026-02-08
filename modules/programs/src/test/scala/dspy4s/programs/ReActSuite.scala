@@ -49,6 +49,31 @@ class ReActSuite extends FunSuite:
     override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
       Right(PredictionData(values = Map("tool_name" -> "search", "tool_args" -> Map("query" -> "q"))))
 
+  private final class NativeToolCallsProgram extends PredictProgram:
+    private val calls = AtomicInteger(0)
+    override val moduleName: String = "native-tool-calls"
+
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      val idx = calls.incrementAndGet()
+      if idx == 1 then
+        Right(
+          PredictionData(
+            values = Map(
+              "tool_calls" -> Vector(
+                Map("name" -> "search", "args" -> Map("query" -> input.inputs.getOrElse("question", "")))
+              )
+            )
+          )
+        )
+      else
+        Right(
+          PredictionData(
+            values = Map(
+              "answer" -> s"Final: ${input.inputs.getOrElse("tool_result", "")}"
+            )
+          )
+        )
+
   private final class SearchTool(counter: AtomicInteger) extends ToolFunction:
     override val name: String = "search"
     override def invoke(args: Map[String, Any])(using RuntimeContext): Either[DspyError, Any] =
@@ -115,4 +140,16 @@ class ReActSuite extends FunSuite:
     assertEquals(toolStart.parentCallId, Some(moduleStart.callId))
     assertEquals(toolEnd.parentCallId, Some(moduleStart.callId))
     assertEquals(toolStart.callId, toolEnd.callId)
+  }
+
+  test("react executes native tool_calls payloads") {
+    val counter = AtomicInteger(0)
+    val react = ReAct(module = NativeToolCallsProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = react.run(ProgramCall(inputs = Map("question" -> "What is the capital of Belgium?")))
+
+    assert(result.isRight)
+    assertEquals(result.toOption.get.values("answer"), "Final: Brussels")
+    assertEquals(counter.get(), 1)
   }

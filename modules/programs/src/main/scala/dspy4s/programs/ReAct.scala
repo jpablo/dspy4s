@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.lm.contracts.ToolCall
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
@@ -68,6 +69,12 @@ final case class ReAct(
       case None               => false
 
   private def extractToolRequest(prediction: Prediction): Either[DspyError, Option[ToolCallRequest]] =
+    extractNativeToolCall(prediction) match
+      case Right(Some(request)) => Right(Some(request))
+      case Left(error)          => Left(error)
+      case Right(None)          => extractLegacyToolRequest(prediction)
+
+  private def extractLegacyToolRequest(prediction: Prediction): Either[DspyError, Option[ToolCallRequest]] =
     prediction.values.get(toolNameField) match
       case None => Right(None)
       case Some(name: String) if name.trim.isEmpty =>
@@ -76,6 +83,38 @@ final case class ReAct(
         Right(Some(ToolCallRequest(name = name.trim, args = parseToolArgs(prediction.values.get(toolArgsField)))))
       case Some(other) =>
         Left(RuntimeError("react", s"Tool name must be a non-empty string, found: $other"))
+
+  private def extractNativeToolCall(prediction: Prediction): Either[DspyError, Option[ToolCallRequest]] =
+    prediction.values.get("tool_calls") match
+      case None => Right(None)
+      case Some(calls: Vector[?]) =>
+        parseToolCallsSequence(calls)
+      case Some(calls: Seq[?]) =>
+        parseToolCallsSequence(calls.toVector)
+      case Some(other) =>
+        Left(RuntimeError("react", s"tool_calls must be an array, found: $other"))
+
+  private def parseToolCallsSequence(calls: Vector[?]): Either[DspyError, Option[ToolCallRequest]] =
+    calls.headOption match
+      case None =>
+        Right(None)
+      case Some(call: ToolCall) =>
+        Right(Some(ToolCallRequest(call.name, call.args)))
+      case Some(call: collection.Map[?, ?]) =>
+        parseToolCallMap(call).map(Some(_))
+      case Some(other) =>
+        Left(RuntimeError("react", s"Unsupported tool_calls entry: $other"))
+
+  private def parseToolCallMap(raw: collection.Map[?, ?]): Either[DspyError, ToolCallRequest] =
+    val map = raw.iterator.collect { case (key: String, value) => key -> value }.toMap
+    map.get("name") match
+      case Some(name: String) if name.trim.nonEmpty =>
+        val args = map.get("args").orElse(map.get("arguments"))
+        Right(ToolCallRequest(name.trim, parseToolArgs(args)))
+      case Some(other) =>
+        Left(RuntimeError("react", s"Tool call name must be non-empty string, found: $other"))
+      case None =>
+        Left(RuntimeError("react", "Tool call payload is missing 'name'"))
 
   private def parseToolArgs(raw: Option[Any]): Map[String, Any] =
     raw match

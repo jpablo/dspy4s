@@ -21,6 +21,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 
@@ -66,6 +67,23 @@ class PredictSuite extends FunSuite:
             LmOutput(text = "Lyon", metadata = Map("score" -> 0.33))
           ),
           usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
+        )
+      )
+
+  private object DummyToolCallLanguageModel extends LanguageModel:
+    override val id: String = "dummy-lm-tools"
+    override val mode: LmMode = LmMode.Chat
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      Right(
+        LmResponse(
+          outputs = Vector(
+            LmOutput(
+              text = "Need tool",
+              metadata = Map("score" -> 0.5),
+              toolCalls = Vector(ToolCall(name = "search", args = Map("query" -> "capital of belgium")))
+            )
+          )
         )
       )
 
@@ -137,5 +155,27 @@ class PredictSuite extends FunSuite:
 
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
+    }
+  }
+
+  test("predict surfaces lm tool calls in prediction values") {
+    val signature = SignatureDsl.parse("question -> answer, score").toOption.get
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> DummyToolCallLanguageModel,
+          SettingKeys.adapter.name -> DummyAdapter
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = Predict(signature).run(ProgramCall(inputs = Map("question" -> "x")))
+
+      assert(result.isRight)
+      val toolCalls = result.toOption.get.values("tool_calls").asInstanceOf[Vector[Map[String, Any]]]
+      assertEquals(toolCalls.size, 1)
+      assertEquals(toolCalls.head("name"), "search")
+      assertEquals(toolCalls.head("args"), Map("query" -> "capital of belgium"))
     }
   }

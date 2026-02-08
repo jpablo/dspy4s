@@ -17,6 +17,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
+import dspy4s.lm.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.runtime.BasePredictProgram
@@ -46,7 +47,7 @@ final case class Predict(
         model.call(invocation.request.copy(messages = prompt.messages))
       }
       parsed <- parseOutputs(adapter, response.outputs)
-      prediction <- buildPrediction(parsed, response)
+      prediction <- buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))
     yield prediction
 
   private def buildInvocation(call: ProgramCall, model: LanguageModel): AdapterInvocation =
@@ -80,12 +81,14 @@ final case class Predict(
 
   private def buildPrediction(
       parsedOutputs: Vector[ParsedOutput],
-      response: LmResponse
+      response: LmResponse,
+      toolCalls: Vector[ToolCall]
   ): Either[DspyError, Prediction] =
     for
       completions <- CompletionData.fromRows(parsedOutputs.map(_.values))
       first <- PredictionData.fromCompletions(completions)
-      prediction = first.copy(lmUsage = response.usage.map(usageToMap))
+      withUsage = first.copy(lmUsage = response.usage.map(usageToMap))
+      prediction = withUsage.withValue("tool_calls", toToolCallPayload(toolCalls))
     yield prediction
 
   private def usageToMap(usage: LmUsage): Map[String, Long] =
@@ -94,3 +97,6 @@ final case class Predict(
       "prompt_tokens" -> usage.promptTokens,
       "completion_tokens" -> usage.completionTokens
     )
+
+  private def toToolCallPayload(toolCalls: Vector[ToolCall]): Vector[Map[String, Any]] =
+    toolCalls.map(call => Map("name" -> call.name, "args" -> call.args))
