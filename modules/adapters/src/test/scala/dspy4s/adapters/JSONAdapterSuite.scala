@@ -76,11 +76,22 @@ class JSONAdapterSuite extends FunSuite:
   }
 
   test("parse fails when json payload is malformed") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
     val parsed = JSONAdapter().parse(signature, LmOutput(text = "{not-json}"))
 
     assert(parsed.isLeft)
     assert(parsed.left.toOption.get.isInstanceOf[ParseError])
+  }
+
+  test("parse falls back to raw text for single-output signatures") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val parsed = JSONAdapter().parse(signature, LmOutput(text = "Brussels"))
+
+    assert(parsed.isRight)
+    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
+    assertEquals(parsed.toOption.get.metadata("fallback"), "text")
   }

@@ -73,11 +73,22 @@ class XMLAdapterSuite extends FunSuite:
   }
 
   test("parse fails when xml is malformed") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
     val parsed = XMLAdapter().parse(signature, LmOutput(text = "<outputs><answer>oops</outputs>"))
 
     assert(parsed.isLeft)
     assert(parsed.left.toOption.get.isInstanceOf[ParseError])
+  }
+
+  test("parse falls back to raw text for single-output signatures") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val parsed = XMLAdapter().parse(signature, LmOutput(text = "Brussels"))
+
+    assert(parsed.isRight)
+    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
+    assertEquals(parsed.toOption.get.metadata("fallback"), "text")
   }

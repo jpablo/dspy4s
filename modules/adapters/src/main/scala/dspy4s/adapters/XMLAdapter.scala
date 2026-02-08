@@ -19,7 +19,10 @@ import scala.util.Try
 import scala.xml.Elem
 import scala.xml.XML
 
-final case class XMLAdapter(name: String = "xml") extends Adapter:
+final case class XMLAdapter(
+    name: String = "xml",
+    allowTextFallbackForSingleOutput: Boolean = true
+) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val fieldTags = invocation.signature.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
     val xmlInstruction =
@@ -51,6 +54,23 @@ final case class XMLAdapter(name: String = "xml") extends Adapter:
     )
 
   override def parse(signature: Signature, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    parseStructured(signature, output).orElse {
+      if allowTextFallbackForSingleOutput && signature.outputFields.size == 1 then
+        val field = signature.outputFields.head
+        val trimmed = output.text.trim
+        if trimmed.nonEmpty then
+          Right(
+            ParsedOutput(
+              values = Map(field.name -> trimmed),
+              rawText = Some(output.text),
+              metadata = Map("adapter" -> name, "fallback" -> "text")
+            )
+          )
+        else Left(ParseError("adapter", "Cannot fallback from empty model output"))
+      else Left(ParseError("adapter", "XML parse failed and no fallback was applied"))
+    }
+
+  private def parseStructured(signature: Signature, output: LmOutput): Either[DspyError, ParsedOutput] =
     for
       xmlText <- extractXml(output.text)
       document <- parseXml(xmlText)

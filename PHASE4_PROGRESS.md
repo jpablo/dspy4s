@@ -61,7 +61,29 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Added adapters runtime XML dependency in `/Users/jpablo/proyectos/experimentos/dspy4s/build.sbt`:
   - `"org.scala-lang.modules" %% "scala-xml" % "2.3.0"`
 
+6. Tool schema + tool-call bridge
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/main/scala/dspy4s/adapters/contracts/ToolContracts.scala`
+- Added tool schema contracts:
+  - `ToolParameterSpec`
+  - `ToolSpec`
+  - `ToolCallData`
+- Added bridge utilities:
+  - `ToolSchemaBridge.toOpenAiTools(...)`
+  - `ToolSchemaBridge.fromOutput(...)`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/ToolSchemaBridgeSuite.scala`
+  - OpenAI function schema rendering coverage
+  - LM tool-call extraction coverage
+
+7. Malformed-output fallback/repair behavior
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/main/scala/dspy4s/adapters/JSONAdapter.scala`
+  - single-output text fallback when JSON parsing fails (`allowTextFallbackForSingleOutput`)
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/main/scala/dspy4s/adapters/XMLAdapter.scala`
+  - single-output text fallback when XML parsing fails (`allowTextFallbackForSingleOutput`)
+- Extended adapter suites with fallback coverage:
+  - `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/JSONAdapterSuite.scala`
+  - `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/XMLAdapterSuite.scala`
+
 ## Remaining for Phase 4
 
-- Add tool schema/tool-call adapter bridge (`Tool`, `ToolCalls`) for native function-calling parity.
-- Add fallback/repair behavior for malformed model outputs.
+- No open blockers for the Phase 4 target subset.
+- Next focus should move to Phase 5 program-surface expansion and tighter parity across predict/react parallel behaviors.
