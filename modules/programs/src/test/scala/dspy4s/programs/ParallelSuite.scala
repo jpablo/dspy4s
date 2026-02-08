@@ -124,3 +124,30 @@ class ParallelSuite extends FunSuite:
       assertEquals(values, Vector("scoped", "scoped", "scoped", "scoped"))
     }
   }
+
+  test("parallel preserves mixed answer and tool_calls outputs") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val program = StubProgram(
+      behavior = value =>
+        Right(
+          PredictionData(
+            values = Map(
+              "answer" -> s"answer-$value",
+              "tool_calls" -> Vector(
+                Map("name" -> "search", "args" -> Map("query" -> s"q-$value"))
+              )
+            )
+          )
+        )
+    )
+    val tasks = Vector(1, 2).map(value => program -> ProgramCall(inputs = Map("value" -> value)))
+
+    val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
+
+    assert(result.isRight)
+    val outputs = result.toOption.get.results.flatten
+    assertEquals(outputs.map(_.values("answer")), Vector("answer-1", "answer-2"))
+    val toolCalls = outputs.map(_.values("tool_calls").asInstanceOf[Vector[Map[String, Any]]])
+    assertEquals(toolCalls.map(_.head("name")), Vector("search", "search"))
+    assertEquals(toolCalls.map(_.head("args")), Vector(Map("query" -> "q-1"), Map("query" -> "q-2")))
+  }

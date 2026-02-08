@@ -113,3 +113,44 @@ class BestOfNSuite extends FunSuite:
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
   }
+
+  test("best of n preserves mixed answer and tool_calls for best candidate") {
+    val module = StubProgram(
+      Vector(
+        Right(
+          PredictionData(
+            values = Map(
+              "answer" -> "A",
+              "score" -> 0.2,
+              "tool_calls" -> Vector(Map("name" -> "search", "args" -> Map("query" -> "a")))
+            )
+          )
+        ),
+        Right(
+          PredictionData(
+            values = Map(
+              "answer" -> "B",
+              "score" -> 0.9,
+              "tool_calls" -> Vector(Map("name" -> "lookup", "args" -> Map("entity" -> "b")))
+            )
+          )
+        )
+      )
+    )
+    val bestOfN = BestOfN(
+      module = module,
+      n = 2,
+      rewardFn = (_, pred) => pred.asDouble("score").toOption.getOrElse(0.0),
+      threshold = 1.0
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = bestOfN.run(ProgramCall(inputs = Map("q" -> "x")))
+
+    assert(result.isRight)
+    val prediction = result.toOption.get
+    assertEquals(prediction.values("answer"), "B")
+    val toolCalls = prediction.values("tool_calls").asInstanceOf[Vector[Map[String, Any]]]
+    assertEquals(toolCalls.head("name"), "lookup")
+    assertEquals(RuntimeEnvironment.current.trace.head.outputs("tool_calls"), toolCalls)
+  }

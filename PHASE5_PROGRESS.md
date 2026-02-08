@@ -25,8 +25,31 @@ Phase 5 focuses on program-level parity and end-to-end runtime behavior.
 - Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ReActSuite.scala`
   - added coverage for native `tool_calls` execution flow in `ReAct`
 
+4. ReAct multi-tool-call sequencing and result stitching
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ReAct.scala`
+- `ReAct` now executes multiple native `tool_calls` entries in a single iteration, sequentially.
+- Added batched result stitching fields:
+  - `tool_results`: current iteration batch as `Vector[Map[String, Any]]` with `tool_name`, `tool_args`, `result`, `index`
+  - `tool_history`: cumulative history including all batch entries in order
+  - `tool_result`: last tool result (backward compatibility)
+- Existing behavior preserved:
+  - direct answer short-circuits tool execution
+  - legacy `tool_name` / `tool_args` path still supported
+
+5. Mixed completion/tool-call parity tests across wrappers
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ReActSuite.scala`
+  - added coverage for multi-call native `tool_calls` execution in one iteration
+  - added coverage that direct `answer` is prioritized over tool execution when both are present
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ParallelSuite.scala`
+  - added coverage that `Parallel` preserves mixed `answer` + `tool_calls` payloads
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/BestOfNSuite.scala`
+  - added coverage that `BestOfN` preserves mixed `answer` + `tool_calls` for the selected best candidate
+
+## Validation
+
+- Ran full test suite with `sbt test` on February 7, 2026.
+- Result: all tests passed.
+
 ## Remaining for Phase 5
 
-- Expand program parity around richer tool-call envelopes (multi-call sequencing and result stitching).
-- Add tighter parity cases for mixed completion/tool-call outputs across wrappers (`ReAct`, `Parallel`, `BestOfN`).
 - Add more DSPy-aligned trace/history assertions at the program boundary.
