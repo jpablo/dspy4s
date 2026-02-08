@@ -152,3 +152,21 @@ class RuntimeEnvironmentSuite extends FunSuite:
     assertEquals(RuntimeEnvironment.activeCallDepth, 0)
     assertEquals(RuntimeEnvironment.activeCallId, None)
   }
+
+  test("appendHistory honors max history size and disable history settings") {
+    RuntimeEnvironment.withSetting(dspy4s.core.contracts.SettingKeys.maxHistorySize, 2) {
+      RuntimeEnvironment.appendHistory(dspy4s.core.contracts.HistoryEntry("lm", Map("n" -> 1)))
+      RuntimeEnvironment.appendHistory(dspy4s.core.contracts.HistoryEntry("lm", Map("n" -> 2)))
+      RuntimeEnvironment.appendHistory(dspy4s.core.contracts.HistoryEntry("lm", Map("n" -> 3)))
+
+      val history = RuntimeEnvironment.current.history
+      assertEquals(history.size, 2)
+      assertEquals(history.head.payload("n"), 2)
+      assertEquals(history.last.payload("n"), 3)
+    }
+
+    RuntimeEnvironment.withSetting(dspy4s.core.contracts.SettingKeys.disableHistory, true) {
+      RuntimeEnvironment.appendHistory(dspy4s.core.contracts.HistoryEntry("lm", Map("n" -> 4)))
+      assertEquals(RuntimeEnvironment.current.history, Vector.empty)
+    }
+  }

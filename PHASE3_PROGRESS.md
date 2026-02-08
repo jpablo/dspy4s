@@ -74,6 +74,20 @@ Phase 3 focuses on LM runtime semantics (cache, retry, history, and usage tracki
   - chat/responses parsing coverage
   - empty-output parse error coverage
 
+10. Usage/history runtime parity expansion
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/contracts/Runtime.scala`
+  - added `SettingKeys.maxHistorySize`
+  - added `RuntimeContext.withHistory(...)`
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/runtime/RuntimeEnvironment.scala`
+  - `appendHistory` now honors:
+    - `disable_history`
+    - `max_history_size` truncation semantics
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/test/scala/dspy4s/core/RuntimeEnvironmentSuite.scala`
+  - added history truncation and disable-history coverage
+- Extended `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/test/scala/dspy4s/lm/LmRuntimeSuite.scala`
+  - added `track_usage=false` coverage for usage tracker suppression
+
 ## Remaining for Phase 3
 
-- Expand usage/history parity to match DSPy tier-0 tests.
+- No open blockers for the Phase 3 target subset.
+- Next focus should move to Phase 4 adapters parity (`ChatAdapter`, `JSONAdapter`, `XMLAdapter`, tool schema/tool calls).

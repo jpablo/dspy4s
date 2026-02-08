@@ -2,6 +2,7 @@ package dspy4s.lm
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ConfigurationError
+import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -191,6 +192,21 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(totals.promptTokens, 4L)
     assertEquals(totals.completionTokens, 5L)
     assertEquals(totals.details("cached_tokens"), 3L)
+  }
+
+  test("usage tracking respects track_usage setting") {
+    val delegate = new StubLanguageModel(Vector(Right(baseResponse)))
+    val managed = ManagedLanguageModel(delegate = delegate)
+    val tracker = new UsageTracker
+
+    given RuntimeContext = RuntimeEnvironment.current
+    UsageTracking.withTracker(tracker) {
+      RuntimeEnvironment.withSetting(SettingKeys.trackUsage, false) {
+        assert(managed.call(baseRequest).isRight)
+      }
+    }
+
+    assertEquals(tracker.usageData, Map.empty)
   }
 
   test("disk cache persists values across cache instances") {

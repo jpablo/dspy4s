@@ -139,7 +139,13 @@ object RuntimeEnvironment:
     contextRef.set(localContext.appendTrace(entry))
 
   def appendHistory(entry: HistoryEntry): Unit =
-    contextRef.set(localContext.appendHistory(entry))
+    val effectiveSettings = current.settings
+    val historyDisabled = effectiveSettings.get(SettingKeys.disableHistory).getOrElse(false)
+    val maxHistorySize = effectiveSettings.get(SettingKeys.maxHistorySize).getOrElse(10000)
+    if !historyDisabled && maxHistorySize > 0 then
+      val base = localContext
+      val nextHistory = (base.history :+ entry).takeRight(maxHistorySize)
+      contextRef.set(base.withHistory(nextHistory))
 
   def activeCallbacks: Vector[CallbackHandler] =
     current.settings.get(SettingKeys.callbacks).getOrElse(current.callbacks)

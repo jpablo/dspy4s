@@ -30,6 +30,7 @@ object SettingKeys:
   val callStack: SettingKey[Vector[String]] = SettingKey("call_stack")
   val numThreads: SettingKey[Int] = SettingKey("num_threads")
   val maxErrors: SettingKey[Int] = SettingKey("max_errors")
+  val maxHistorySize: SettingKey[Int] = SettingKey("max_history_size")
   val asyncMaxWorkers: SettingKey[Int] = SettingKey("async_max_workers")
   val disableHistory: SettingKey[Boolean] = SettingKey("disable_history")
   val trackUsage: SettingKey[Boolean] = SettingKey("track_usage")
@@ -51,6 +52,7 @@ trait RuntimeContext:
 
   def withSettings(updated: Settings): RuntimeContext
   def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext
+  def withHistory(updated: Vector[HistoryEntry]): RuntimeContext
   def appendTrace(entry: TraceEntry): RuntimeContext
   def appendHistory(entry: HistoryEntry): RuntimeContext
 
@@ -63,6 +65,8 @@ final case class RuntimeContextData(
   override def withSettings(updated: Settings): RuntimeContext = copy(settings = updated)
 
   override def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext = copy(callbacks = updated)
+
+  override def withHistory(updated: Vector[HistoryEntry]): RuntimeContext = copy(history = updated)
 
   override def appendTrace(entry: TraceEntry): RuntimeContext = copy(trace = trace :+ entry)
 
