@@ -51,7 +51,8 @@ lazy val adapters = (project in file("modules/adapters"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.0.2"
+      "com.lihaoyi" %% "ujson" % "4.0.2",
+      "org.scala-lang.modules" %% "scala-xml" % "2.3.0"
     )
   )
 

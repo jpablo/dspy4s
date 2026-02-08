@@ -45,8 +45,23 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Added adapters runtime JSON dependency in `/Users/jpablo/proyectos/experimentos/dspy4s/build.sbt`:
   - `"com.lihaoyi" %% "ujson" % "4.0.2"`
 
+5. XML adapter baseline
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/main/scala/dspy4s/adapters/XMLAdapter.scala`
+- Implemented XML-oriented formatting with explicit `<outputs>` schema instructions
+- Implemented parse path with:
+  - raw/fenced XML extraction
+  - XML document parsing and tag extraction
+  - typed field coercion
+  - malformed XML diagnostics
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/XMLAdapterSuite.scala`
+  - format instruction coverage
+  - typed parse coverage
+  - fenced XML parse coverage
+  - malformed output failure coverage
+- Added adapters runtime XML dependency in `/Users/jpablo/proyectos/experimentos/dspy4s/build.sbt`:
+  - `"org.scala-lang.modules" %% "scala-xml" % "2.3.0"`
+
 ## Remaining for Phase 4
 
-- Add `XMLAdapter` implementation with robust parse diagnostics.
 - Add tool schema/tool-call adapter bridge (`Tool`, `ToolCalls`) for native function-calling parity.
 - Add fallback/repair behavior for malformed model outputs.
