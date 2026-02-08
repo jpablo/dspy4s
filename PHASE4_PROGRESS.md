@@ -29,8 +29,24 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/main/scala/dspy4s/adapters/AdaptersApi.scala`
   - `contractsPhase = "phase-4"`
 
+4. JSON adapter baseline
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/main/scala/dspy4s/adapters/JSONAdapter.scala`
+- Implemented JSON-oriented formatting with explicit output-key contract
+- Implemented parse path with:
+  - raw/fenced JSON extraction
+  - object validation
+  - typed field coercion
+  - malformed JSON error diagnostics
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/JSONAdapterSuite.scala`
+  - format instruction coverage
+  - plain JSON parse coverage
+  - fenced JSON parse coverage
+  - malformed output failure coverage
+- Added adapters runtime JSON dependency in `/Users/jpablo/proyectos/experimentos/dspy4s/build.sbt`:
+  - `"com.lihaoyi" %% "ujson" % "4.0.2"`
+
 ## Remaining for Phase 4
 
-- Add `JSONAdapter` and `XMLAdapter` implementations with robust parse diagnostics.
+- Add `XMLAdapter` implementation with robust parse diagnostics.
 - Add tool schema/tool-call adapter bridge (`Tool`, `ToolCalls`) for native function-calling parity.
 - Add fallback/repair behavior for malformed model outputs.
