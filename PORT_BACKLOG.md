@@ -109,11 +109,23 @@ Acceptance tests:
 ## Phase 8: Streaming (`streaming`)
 Goal: minimal streaming parity.
 
-Implement:
-- `streamify`, status messages, stream listeners (Tier 1 subset).
+**Status**: v1 shipped (see `PHASE8_PROGRESS.md` and `STREAMING_POSTPONED.md`).
 
-Acceptance tests:
-- `tests/streaming/test_streaming.py` (Tier 1 subset)
+v1 covers:
+- `LmChunk` + `StreamingLanguageModel` trait
+- `StreamingQueue` with `ClosableIterator` consumer surface
+- `StatusMessageProvider` + `StatusStreamingCallback`
+- `StreamingLanguageModelWrapper` (pumps chunks during `call`)
+- `Streamify.streamify(program)(inputs) => Iterator[StreamEvent]`
+- Status/prediction/error events for both streaming and non-streaming LMs
+- 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
+
+v2 deferred (tracked in `STREAMING_POSTPONED.md`):
+- Per-field `StreamListener` with Chat/JSON/XML chunk state machines
+- Real LM provider streaming clients (OpenAI SSE, Anthropic, Ollama)
+- Structured concurrency (fs2 / ZIO streams)
+- `streaming_response` OpenAI-compatible SSE output
+- Async program streaming path
 
 ## Phase 9: Deferred/Advanced Tracks
 Goal: close major feature gaps after v1.

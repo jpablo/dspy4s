@@ -64,8 +64,10 @@ graph TD
 - Candidate generation/evaluation loops
 
 7. `streaming`
-- Stream listeners
-- Status messages and stream wrappers
+- Stream listeners (v1: raw token events)
+- Status messages and `StatusMessageProvider` customization
+- `Streamify.streamify(...)` producer-thread pipeline returning `ClosableIterator[StreamEvent]`
+- v2 backlog: per-field `StreamListener` chunk parsing, real provider clients, structured concurrency (see `STREAMING_POSTPONED.md`)
 
 ## Canonical Call Flow (`Predict`)
 1. Resolve effective settings (`lm`, `adapter`, callbacks, trace).
