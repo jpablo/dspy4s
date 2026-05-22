@@ -5,3 +5,6 @@
 project/target/
 target/
 modules/*/target/
+
+# Local secrets — loaded by sbt-dotenv plugin; never commit
+.env

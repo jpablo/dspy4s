@@ -74,6 +74,7 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(url, "https://api.example.com/v1/chat/completions")
     assertEquals(auth, "Bearer sk-test")
     assert(body.contains("\"model\":\"gpt-4o-mini\""))
+    assert(!body.contains("\"mode\""), s"payload should not include dspy4s-internal 'mode': $body")
   }
 
   test("invoke surfaces non-2xx status as runtime error with rate-limit component on 429") {

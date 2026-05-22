@@ -20,9 +20,14 @@ final case class OpenAiClient(
   private val streamOptionsIncludeUsage: Map[String, Any] =
     Map("stream_options" -> Map("include_usage" -> true))
 
+  private val providerInternalKeys: Set[String] = Set("mode")
+
+  private def outgoingPayload(payload: Map[String, Any]): Map[String, Any] =
+    JsonCodec.stripNone(payload).filterNot((k, _) => providerInternalKeys.contains(k))
+
   def invoke(payload: Map[String, Any]): Either[DspyError, Map[String, Any]] =
     val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
-    val body = JsonCodec.encodeString(JsonCodec.stripNone(payload))
+    val body = JsonCodec.encodeString(outgoingPayload(payload))
     transport.sendJson(url, defaultHeaders, body).flatMap { response =>
       if response.status < 200 || response.status >= 300 then
         Left(statusError(response.status, response.body))
@@ -33,7 +38,7 @@ final case class OpenAiClient(
   def stream(payload: Map[String, Any]): Either[DspyError, ClosableIterator[LmChunk]] =
     val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
     val withStreaming = payload + ("stream" -> true) ++ streamOptionsIncludeUsage
-    val body = JsonCodec.encodeString(JsonCodec.stripNone(withStreaming))
+    val body = JsonCodec.encodeString(outgoingPayload(withStreaming))
     transport.streamSse(url, defaultHeaders, body).flatMap { response =>
       if response.status < 200 || response.status >= 300 then
         val buffered = new StringBuilder
