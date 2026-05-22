@@ -41,16 +41,24 @@ Acceptance tests:
 ## Phase 3: LM + Cache (`lm`)
 Goal: stable LM execution semantics.
 
+**Status**: cache/retry/history parity shipped in Phase 3 baseline; OpenAI HTTP provider shipped as Phase 3 extension (see `PHASE3_PROGRESS.md`).
+
 Implement:
 - Base LM interface and request normalization.
 - Retry policy and cache keying.
 - History + usage tracking.
 - OpenAI-compatible chat and responses mode.
+- Real OpenAI HTTP provider with `StreamingLanguageModel` (SSE chat completions).
 
 Acceptance tests:
 - `tests/clients/test_cache.py`
 - `tests/clients/test_lm.py` (Tier 0 subset)
 - `tests/utils/test_usage_tracker.py`
+
+Remaining OpenAI provider gaps (deferred):
+- Anthropic / Ollama / LiteLLM providers.
+- Tool-call delta accumulation in streaming.
+- Live-API response-mode parity tests.
 
 ## Phase 4: Adapters (`adapters`)
 Goal: robust formatting/parsing.

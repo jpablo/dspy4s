@@ -1,8 +1,8 @@
 package dspy4s.streaming
 
-import java.util.concurrent.LinkedBlockingQueue
+import dspy4s.core.contracts.ClosableIterator
 
-trait ClosableIterator[+A] extends Iterator[A] with AutoCloseable
+import java.util.concurrent.LinkedBlockingQueue
 
 final class StreamingQueue[A](capacity: Int):
   private val queue = new LinkedBlockingQueue[Option[A]](capacity)

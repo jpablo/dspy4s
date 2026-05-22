@@ -1,6 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.core.contracts.CallbackHandler
+import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext

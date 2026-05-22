@@ -41,7 +41,10 @@ lazy val lm = (project in file("modules/lm"))
   .settings(commonSettings)
   .settings(name := "dspy4s-lm")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit" % munitVersion % Test,
+      "com.lihaoyi" %% "ujson" % "4.0.2"
+    )
   )
 
 lazy val adapters = (project in file("modules/adapters"))

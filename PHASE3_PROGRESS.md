@@ -91,3 +91,75 @@ Phase 3 focuses on LM runtime semantics (cache, retry, history, and usage tracki
 
 - No open blockers for the Phase 3 target subset.
 - Next focus should move to Phase 4 adapters parity (`ChatAdapter`, `JSONAdapter`, `XMLAdapter`, tool schema/tool calls).
+
+## Phase 3 Extension — OpenAI HTTP provider (real LM client)
+
+Added a real OpenAI chat-completions HTTP provider that implements both `LanguageModel` and `StreamingLanguageModel`.
+
+### Implemented in this step
+
+1. JSON codec
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/providers/JsonCodec.scala`
+- `Map[String, Any]` ⇄ ujson `Value` round-trip handling nested maps, vectors, primitives, `None` stripping
+- Parse error diagnostics for malformed JSON
+
+2. HTTP transport abstraction + JDK client
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/providers/HttpTransport.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/providers/JdkHttpTransport.scala`
+- `HttpTransport` trait with `sendJson` (string body) and `streamSse` (line iterator) contracts
+- `JdkHttpTransport` uses `java.net.http.HttpClient` (zero extra deps) with configurable timeout
+- SSE iterator wraps `HttpResponse.BodyHandlers.ofLines()` and is `ClosableIterator` so connection closes when drained/closed
+- HTTP/IO exception mapping to `RuntimeError(component = "openai_http|openai_timeout|...", message)`
+
+3. OpenAI client
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/providers/OpenAiClient.scala`
+- `invoke(payload: Map[String, Any]): Either[DspyError, Map[String, Any]]` for non-streaming
+- `stream(payload): Either[DspyError, ClosableIterator[LmChunk]]` for SSE streaming
+- Auto-injects `stream=true` + `stream_options.include_usage=true` for streaming calls
+- Status-aware error mapping: 401/403 → `openai_auth`, 404 → `openai_not_found`, 429 → `openai_rate_limit`, 5xx → `openai_server`
+- `OpenAiClient.fromEnv()` reads `OPENAI_API_KEY` (or custom env var) with structured error on miss
+
+4. OpenAI language model
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/main/scala/dspy4s/lm/providers/OpenAiLanguageModel.scala`
+- Extends `StreamingLanguageModel` — plugs directly into `Predict`, `ManagedLanguageModel`, and `Streamify.streamify`
+- Routes through `ProviderRequestNormalizer` + `ProviderResponseParser` (already phase-3) for consistent response shape
+- Supports `defaultOptions` (e.g. `temperature`), `model`, `mode`, and `client` injection
+- `OpenAiLanguageModel.fromEnv(model)` constructor for env-based wiring
+
+5. ClosableIterator relocation
+- Moved `ClosableIterator[A]` trait to `dspy4s.core.contracts` (general-purpose `Iterator` + `AutoCloseable`)
+- Removed cyclic dependency between `lm` and `streaming` modules
+- Both modules now import from core; streaming module still re-uses it for `StreamingQueue.asIterator`
+
+6. Build updates
+- Added `ujson % 4.0.2` to `lm` module (already used by `adapters`)
+
+7. Tests
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/test/scala/dspy4s/lm/providers/JsonCodecSuite.scala` (6 cases)
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/test/scala/dspy4s/lm/providers/OpenAiClientSuite.scala` (7 cases with scripted transport)
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/lm/src/test/scala/dspy4s/lm/providers/OpenAiLanguageModelSuite.scala` (4 end-to-end cases)
+- Coverage includes: auth header propagation, 429/500/401 error mapping with correct error components, SSE chunk parsing including `finish_reason` and usage, malformed-line skipping, defaultOptions override
+
+### Validation
+
+- Ran full test suite on 2026-05-22. All 142 tests pass (125 baseline + 17 OpenAI provider).
+
+### Usage
+
+```scala
+import dspy4s.lm.providers.OpenAiLanguageModel
+import dspy4s.core.contracts.SettingKeys
+import dspy4s.core.runtime.RuntimeEnvironment
+
+OpenAiLanguageModel.fromEnv("gpt-4o-mini").foreach { lm =>
+  RuntimeEnvironment.withSetting(SettingKeys.languageModel, lm) {
+    // program.run(...) or Streamify.streamify(program)(inputs)
+  }
+}
+```
+
+### Remaining gaps
+
+- Anthropic/Ollama/LiteLLM providers not yet (OpenAI-compatible APIs like Azure still work via `baseUrl` override)
+- Tool-call delta accumulation in streaming: streaming emits text deltas only (see STREAMING_POSTPONED.md)
+- Response mode endpoint not exercised end-to-end against a live API

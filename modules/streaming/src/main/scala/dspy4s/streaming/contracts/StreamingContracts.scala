@@ -1,11 +1,11 @@
 package dspy4s.streaming.contracts
 
+import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.streaming.ClosableIterator
 
 import java.time.Instant
 
