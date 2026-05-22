@@ -31,10 +31,16 @@ class OpenAiLiveSuite extends FunSuite:
   private val model: String =
     sys.env.getOrElse("OPENAI_LIVE_MODEL", sys.props.getOrElse("OPENAI_LIVE_MODEL", "gpt-4o-mini"))
 
+  private def hasOptIn: Boolean =
+    val env = sys.env.getOrElse("OPENAI_LIVE_ENABLED", "")
+    val prop = sys.props.getOrElse("OPENAI_LIVE_ENABLED", "")
+    (env.nonEmpty && env != "0" && env != "false") ||
+    (prop.nonEmpty && prop != "0" && prop != "false")
+
   private def requireLive(): Unit =
     assume(
-      apiKey.isDefined,
-      "OPENAI_API_KEY not set — skipping live OpenAI tests (copy .env.example → .env to enable)"
+      apiKey.isDefined && hasOptIn,
+      "Live OpenAI tests require OPENAI_API_KEY *and* OPENAI_LIVE_ENABLED=true (set both in .env)"
     )
 
   private def buildLm(): OpenAiLanguageModel =
