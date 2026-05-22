@@ -78,3 +78,6 @@ lazy val streaming = (project in file("modules/streaming"))
   .dependsOn(core, lm, adapters, programs)
   .settings(commonSettings)
   .settings(name := "dspy4s-streaming")
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+  )

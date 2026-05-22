@@ -4,6 +4,8 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.programs.contracts.ProgramCall
+import dspy4s.streaming.ClosableIterator
 
 import java.time.Instant
 
@@ -29,8 +31,7 @@ trait StreamListener:
   def onEvent(event: StreamEvent)(using RuntimeContext): Option[StreamEvent]
 
 trait Streamifier:
-  def stream(
-      program: Module[Map[String, Any], Prediction],
-      input: Map[String, Any],
+  def streamify(
+      program: Module[ProgramCall, Prediction],
       listeners: Vector[StreamListener] = Vector.empty
-  )(using RuntimeContext): LazyList[StreamEvent]
+  ): Map[String, Any] => ClosableIterator[StreamEvent]
