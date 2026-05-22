@@ -73,6 +73,12 @@ lazy val evaluation = (project in file("modules/eval"))
   .dependsOn(core, programs)
   .settings(commonSettings)
   .settings(name := "dspy4s-eval")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit" % munitVersion % Test,
+      "com.lihaoyi" %% "ujson" % "4.0.2"
+    )
+  )
 
 lazy val optimize = (project in file("modules/optimize"))
   .dependsOn(core, programs, evaluation)

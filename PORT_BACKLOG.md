@@ -93,13 +93,22 @@ Acceptance tests:
 ## Phase 6: Evaluation (`eval`)
 Goal: metric + threaded evaluation parity.
 
-Implement:
-- `Evaluate`, `EvaluationResult`, baseline metrics.
-- Save to json/csv and basic display hooks.
+**Status**: v1 shipped (see `PHASE6_PROGRESS.md`).
 
-Acceptance tests:
-- `tests/evaluate/test_evaluate.py`
-- `tests/evaluate/test_metrics.py`
+v1 covers:
+- Text normalization utility (`NormalizeText`, parity with Python)
+- Built-in metrics: `ExactMatch`, `ContainsMatch`, `F1Score`, `AnswerMatch`, `PassageMatch`, `FunctionMetric`
+- `Evaluate(devset, metric, numThreads, maxErrors, failureScore, ...)(program)` runner
+- Uses `ParallelExecutor` from programs (thread isolation, max-errors cancellation, timeout)
+- Percentage aggregate score (0–100) and `metricName` carried on `EvaluationResult`
+- `saveAsJson` / `saveAsCsv` with flat-row schema (example fields prefixed `example_`, collisions prefixed `pred_`)
+- 30 tests ported across NormalizeText, BuiltinMetrics, Evaluate, Persistence suites
+
+Deferred to Phase 6 v2:
+- `display_table` / pandas-style rendering
+- Straggler retry mechanism
+- LLM-judged auto-evaluation metrics (`SemanticF1`, `CompleteAndGrounded`)
+- `provideTraceback` and `callback_metadata` options
 
 ## Phase 7: First Optimizers (`optimize`)
 Goal: practical compile loops.

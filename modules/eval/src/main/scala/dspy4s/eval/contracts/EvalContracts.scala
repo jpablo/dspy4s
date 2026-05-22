@@ -16,10 +16,12 @@ trait Metric:
 final case class ExampleEvaluation(example: Example, prediction: Prediction, score: Double)
 
 final case class EvaluationResult(
-    aggregateScore: Double,
-    evaluations: Vector[ExampleEvaluation],
+    score: Double,
+    results: Vector[ExampleEvaluation],
+    metricName: String,
     metadata: Map[String, Any] = Map.empty
-)
+):
+  def aggregateScore: Double = score
 
 trait Evaluator:
   def evaluate(
