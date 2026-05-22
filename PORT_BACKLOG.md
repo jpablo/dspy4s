@@ -113,15 +113,21 @@ Deferred to Phase 6 v2:
 ## Phase 7: First Optimizers (`optimize`)
 Goal: practical compile loops.
 
-Implement:
-- `Teleprompter`, `LabeledFewShot`, `BootstrapFewShot`, `BootstrapFewShotWithRandomSearch`, `Ensemble`, `KNNFewShot`.
+**Status**: v1 shipped (see `PHASE7_PROGRESS.md`).
 
-Acceptance tests:
-- `tests/teleprompt/test_teleprompt.py`
-- `tests/teleprompt/test_bootstrap.py`
-- `tests/teleprompt/test_random_search.py`
-- `tests/teleprompt/test_ensemble.py`
-- `tests/teleprompt/test_knn_fewshot.py`
+v1 covers:
+- `PredictOps[P]` typeclass (rewrites demos/signature on `Predict` and `ChainOfThought`)
+- `LabeledFewShot(k, sample, seed)` baseline
+- `BootstrapFewShot(metric, maxBootstrappedDemos, maxLabeledDemos, maxRounds, maxErrors, seed)` teacher-driven trace collection
+- `BootstrapFewShotWithRandomSearch(...)` random candidate generation via seeds ±3, ±2, ±1, and ≥ 0; evaluation via `dspy4s.eval.Evaluate`; `stopAtScore` early exit
+- 13 tests (5 LabeledFewShot + 5 Bootstrap + 3 RandomSearch)
+- `ExampleData` extended with `augmented: Boolean` flag for bootstrap parity
+
+Deferred to Phase 7 v2:
+- `Ensemble` (per-input voting/majority)
+- `KNNFewShot` (k-NN retriever over `Embedder`)
+- Composite multi-predictor program support in bootstrap
+- LLM-judged metrics for bootstrap scoring
 
 ## Phase 8: Streaming (`streaming`)
 Goal: minimal streaming parity.

@@ -84,6 +84,9 @@ lazy val optimize = (project in file("modules/optimize"))
   .dependsOn(core, programs, evaluation)
   .settings(commonSettings)
   .settings(name := "dspy4s-optimize")
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+  )
 
 lazy val streaming = (project in file("modules/streaming"))
   .dependsOn(core, lm, adapters, programs)

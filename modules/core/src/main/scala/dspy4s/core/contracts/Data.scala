@@ -10,20 +10,28 @@ trait Record:
 
 trait Example extends Record:
   def inputKeys: Set[String]
+  def augmented: Boolean
   def withInputs(keys: Set[String]): Example
 
   def inputs: Map[String, Any] = values.filter((key, _) => inputKeys.contains(key))
   def labels: Map[String, Any] = values.removedAll(inputKeys)
   def withValue(key: String, value: Any): Example
   def without(keys: Set[String]): Example
+  def withAugmented(flag: Boolean): Example
 
-final case class ExampleData(values: Map[String, Any], inputKeys: Set[String] = Set.empty) extends Example:
+final case class ExampleData(
+    values: Map[String, Any],
+    inputKeys: Set[String] = Set.empty,
+    augmented: Boolean = false
+) extends Example:
   override def withInputs(keys: Set[String]): Example = copy(inputKeys = keys.intersect(values.keySet))
 
   override def withValue(key: String, value: Any): Example = copy(values = values.updated(key, value))
 
   override def without(keys: Set[String]): Example =
     copy(values = values.removedAll(keys), inputKeys = inputKeys -- keys)
+
+  override def withAugmented(flag: Boolean): Example = copy(augmented = flag)
 
   def withValueUnsafe(key: String, value: Any): ExampleData = copy(values = values.updated(key, value))
 
