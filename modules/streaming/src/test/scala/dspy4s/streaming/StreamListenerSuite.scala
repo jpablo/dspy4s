@@ -1,6 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.JSONAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
@@ -162,6 +163,35 @@ class StreamListenerSuite extends FunSuite:
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.fieldName).toSet, Set("reasoning", "answer"))
+    }
+  }
+
+  test("json-adapter listener routes streamed text per output field") {
+    val chunks = Vector(
+      LmChunk(text = """{"reasoning": "think","""),
+      LmChunk(text = """ "answer": "42"}""", finishReason = Some("stop"))
+    )
+    val lm = new ScriptedLm(chunks)
+    val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> JSONAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = Predict(signature = signature),
+        streamListeners = Vector(StreamListener("answer"))
+      )(Map("q" -> "x"))
+
+      val events = collectStream(stream)
+      val tokens = events.collect { case e: TokenEvent => e }
+      assertEquals(tokens.map(_.fieldName).toSet, Set("answer"))
+      assertEquals(tokens.map(_.chunk).mkString, "42")
     }
   }
 

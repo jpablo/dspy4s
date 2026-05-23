@@ -14,6 +14,24 @@ This document tracks streaming features deferred from the v1 implementation to l
 - `StatusEvent`, `PredictionEvent`, `ErrorEvent` emitted from the stream
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
+## Shipped in v1.3 — JSON adapter streaming state (Slice B)
+
+- `JsonStreamingState` parses a streamed top-level JSON object character by
+  character. Skips any preamble before the first `{` so fenced ```json blocks
+  work; decodes string-value escapes (`\n`, `\t`, `\"`, `\\`, `\/`, `\uXXXX`)
+  inline; emits non-string scalars and nested object/array values as their
+  raw JSON text (trimmed of surrounding whitespace at value end).
+- Robust to mid-token receive boundaries: half-buffered keys, partial
+  `\uXXXX` sequences, mid-value pauses, and unterminated strings all resume
+  cleanly on the next `receive(...)`. `finish()` emits any in-progress field
+  with `isLast = true`, including the truncated case.
+- `JSONAdapter.streamingState` wires it up.
+- Design note: this slice emits one chunk per field (at the value boundary
+  or via `finish()`), not character-by-character. Intra-value streaming
+  could be re-added later if a long-value use case demands it.
+- 13 new tests across `JsonStreamingStateSuite` (12) and one end-to-end JSON
+  listener test in `StreamListenerSuite`.
+
 ## Shipped in v1.2 — Per-field `StreamListener` (Chat adapter, Slice A)
 
 - `AdapterStreamingState` trait + `FieldChunk` data class added to
@@ -60,17 +78,14 @@ This document tracks streaming features deferred from the v1 implementation to l
 - 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
   `StreamingToolCallSuite`
 
-## Postponed — Per-field `StreamListener`: JSON / XML / multi-predictor (Slices B, C, D)
+## Postponed — Per-field `StreamListener`: XML / multi-predictor (Slices C, D)
 
-Slice A (ChatAdapter) shipped — see the v1.2 section above. Remaining:
+Slices A (ChatAdapter) and B (JSONAdapter) shipped — see the v1.2 and v1.3
+sections above. Remaining:
 
-- **JSONAdapter streaming state (Slice B)**: partial JSON parsing to detect
-  the next key in the stream as the field boundary. No `jiter` JVM artifact
-  off the shelf; the planned approach is a small incremental object parser
-  that tracks brace depth and string state, emitting per-key value fragments.
 - **XMLAdapter streaming state (Slice C)**: `<field_name>` / `</field_name>`
   boundary detection with the same buffer-and-flush discipline as
-  `ChatStreamingState`.
+  `ChatStreamingState` and `JsonStreamingState`.
 - **Multi-predictor routing + `allow_reuse` + `finalize` edge cases (Slice D)**:
   - Add `predict_id` to `LmOutput` / `LmResponse` so the streamify wrapper can
     route chunks to the correct listener when a program contains more than one

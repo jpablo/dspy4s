@@ -3,6 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterErrors
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
@@ -53,6 +54,9 @@ final case class JSONAdapter(
         )
       )
     )
+
+  override def streamingState(signature: Signature): Option[AdapterStreamingState] =
+    Some(new JsonStreamingState(signature.outputFields))
 
   override def parse(signature: Signature, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     parseStructured(signature, output).orElse {
