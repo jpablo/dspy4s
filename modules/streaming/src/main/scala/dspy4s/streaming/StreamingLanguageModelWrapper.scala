@@ -8,11 +8,14 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
+import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.StreamingLanguageModel
+import dspy4s.lm.runtime.ToolCallAssembler
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.TokenEvent
 
+import scala.collection.mutable
 import scala.util.control.NonFatal
 
 final class StreamingLanguageModelWrapper private (
@@ -27,15 +30,18 @@ final class StreamingLanguageModelWrapper private (
     val chunks = delegate.stream(request)
     val text = new StringBuilder
     var lastUsage: Option[LmUsage] = None
+    val toolDeltas = mutable.ArrayBuffer.empty[LmToolCallDelta]
     try
       chunks.foreach { chunk =>
         sink(chunk)
         text.append(chunk.text)
         chunk.usage.foreach(usage => lastUsage = Some(usage))
+        if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
       }
+      val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
       Right(
         LmResponse(
-          outputs = Vector(LmOutput(text = text.toString)),
+          outputs = Vector(LmOutput(text = text.toString, toolCalls = toolCalls)),
           usage = lastUsage
         )
       )

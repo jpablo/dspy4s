@@ -161,5 +161,5 @@ OpenAiLanguageModel.fromEnv("gpt-4o-mini").foreach { lm =>
 ### Remaining gaps
 
 - Anthropic/Ollama/LiteLLM providers not yet (OpenAI-compatible APIs like Azure still work via `baseUrl` override)
-- Tool-call delta accumulation in streaming: streaming emits text deltas only (see STREAMING_POSTPONED.md)
+- ~~Tool-call delta accumulation in streaming~~ — shipped: `LmChunk.toolCalls` carries `LmToolCallDelta`s; `ToolCallAssembler` merges per-index deltas and populates `LmOutput.toolCalls` on the synthesized streaming response. See `modules/lm/src/main/scala/dspy4s/lm/runtime/ToolCallAssembler.scala` and `StreamingToolCallSuite`.
 - Response mode endpoint not exercised end-to-end against a live API

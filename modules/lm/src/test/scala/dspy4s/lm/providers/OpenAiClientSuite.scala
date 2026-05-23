@@ -159,6 +159,38 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(error.component, "openai_server")
   }
 
+  test("stream parses tool_calls deltas into LmChunk.toolCalls") {
+    val toolCallLines = Vector(
+      """data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}""",
+      """data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"loc"}}]},"finish_reason":null}]}""",
+      """data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ation\":\"Paris\"}"}}]},"finish_reason":"tool_calls"}]}""",
+      "data: [DONE]",
+      ""
+    )
+    val transport = new ScriptedTransport(
+      streamingResponses = Vector(Right(HttpStreamResponse(
+        status = 200,
+        headers = Map.empty,
+        dataLines = new VectorClosableIterator(toolCallLines)
+      )))
+    )
+    val client = OpenAiClient(apiKey = "x", transport = transport)
+    val iter = client.stream(Map("model" -> "m")).toOption.get
+    val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
+    while iter.hasNext do chunks += iter.next()
+
+    assertEquals(chunks.size, 3)
+    val firstDelta = chunks(0).toolCalls.head
+    assertEquals(firstDelta.index, 0)
+    assertEquals(firstDelta.id, Some("call_1"))
+    assertEquals(firstDelta.name, Some("get_weather"))
+    assertEquals(firstDelta.argumentsFragment, Some(""))
+
+    assertEquals(chunks(1).toolCalls.head.argumentsFragment, Some("{\"loc"))
+    assertEquals(chunks(2).toolCalls.head.argumentsFragment, Some("ation\":\"Paris\"}"))
+    assertEquals(chunks(2).finishReason, Some("tool_calls"))
+  }
+
   test("stream ignores malformed SSE JSON lines without failing") {
     val transport = new ScriptedTransport(
       streamingResponses = Vector(Right(HttpStreamResponse(

@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.LmChunk
+import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.LmUsage
 
 final case class OpenAiClient(
@@ -96,17 +97,31 @@ final case class OpenAiClient(
           lines.close()
 
   private def chunkFromPayload(payload: Map[String, Any]): LmChunk =
-    val text = payload.get("choices").flatMap(asVector).flatMap(_.headOption).flatMap(asMap).flatMap { choice =>
-      choice.get("delta").flatMap(asMap).flatMap(_.get("content")).collect { case s: String => s }
-    }.getOrElse("")
+    val choice = payload.get("choices").flatMap(asVector).flatMap(_.headOption).flatMap(asMap)
+    val delta = choice.flatMap(_.get("delta")).flatMap(asMap)
 
-    val finishReason = payload.get("choices").flatMap(asVector).flatMap(_.headOption).flatMap(asMap).flatMap { choice =>
-      choice.get("finish_reason").collect { case s: String => s }
-    }
-
+    val text = delta.flatMap(_.get("content")).collect { case s: String => s }.getOrElse("")
+    val finishReason = choice.flatMap(_.get("finish_reason")).collect { case s: String => s }
     val usage = payload.get("usage").flatMap(asMap).map(parseUsage)
+    val toolCalls = delta
+      .flatMap(_.get("tool_calls"))
+      .flatMap(asVector)
+      .map(parseToolCallDeltas)
+      .getOrElse(Vector.empty)
 
-    LmChunk(text = text, finishReason = finishReason, usage = usage, raw = Some(payload))
+    LmChunk(text = text, finishReason = finishReason, usage = usage, toolCalls = toolCalls, raw = Some(payload))
+
+  private def parseToolCallDeltas(entries: Vector[Any]): Vector[LmToolCallDelta] =
+    entries.zipWithIndex.flatMap { case (raw, fallbackIdx) =>
+      asMap(raw).map { entry =>
+        val index = asLong(entry.get("index")).map(_.toInt).getOrElse(fallbackIdx)
+        val id = entry.get("id").collect { case s: String => s }
+        val function = entry.get("function").flatMap(asMap)
+        val name = function.flatMap(_.get("name")).collect { case s: String => s }
+        val arguments = function.flatMap(_.get("arguments")).collect { case s: String => s }
+        LmToolCallDelta(index = index, id = id, name = name, argumentsFragment = arguments)
+      }
+    }
 
   private def parseUsage(map: Map[String, Any]): LmUsage =
     val promptTokens = asLong(map.get("prompt_tokens")).getOrElse(0L)

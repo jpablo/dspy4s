@@ -57,7 +57,6 @@ Acceptance tests:
 
 Remaining OpenAI provider gaps (deferred):
 - Anthropic / Ollama / LiteLLM providers.
-- Tool-call delta accumulation in streaming.
 - Live-API response-mode parity tests.
 
 ## Phase 4: Adapters (`adapters`)

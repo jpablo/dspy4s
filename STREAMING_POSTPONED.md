@@ -14,6 +14,20 @@ This document tracks streaming features deferred from the v1 implementation to l
 - `StatusEvent`, `PredictionEvent`, `ErrorEvent` emitted from the stream
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
+## Shipped in v1.1 — Tool-call delta accumulation
+
+- `LmToolCallDelta(index, id, name, argumentsFragment)` added to `lm.contracts`
+- `LmChunk.toolCalls: Vector[LmToolCallDelta]` carries per-chunk fragments
+- `OpenAiClient.chunkFromPayload` parses `delta.tool_calls` from each SSE frame
+- `ToolCallAssembler.assemble(...)` merges fragments by index, JSON-decodes the
+  concatenated `arguments` string, and falls back to `Map("input" -> raw)` on
+  non-object arguments — matching `ProviderResponseParser.parseArgs`
+- `StreamingLanguageModelWrapper.call` accumulates deltas across the chunk
+  stream and populates `LmOutput.toolCalls` on the synthesized `LmResponse`,
+  so ReAct / native-tool flows behave identically over a streaming LM
+- 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
+  `StreamingToolCallSuite`
+
 ## Postponed — Per-field `StreamListener` with adapter-aware chunk parsing
 
 The Python `StreamListener` is a ~350-line stateful parser that reconstructs individual output fields from the LM token stream based on the adapter's framing:
