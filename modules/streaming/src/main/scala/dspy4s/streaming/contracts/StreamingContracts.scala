@@ -26,9 +26,20 @@ final case class PredictionEvent(prediction: Prediction, timestamp: Instant = In
 
 final case class ErrorEvent(error: DspyError, timestamp: Instant = Instant.now()) extends StreamEvent
 
-trait StreamListener:
-  def id: String
-  def onEvent(event: StreamEvent)(using RuntimeContext): Option[StreamEvent]
+/** Subscribes a stream consumer to a specific output field of a predictor.
+  *
+  *   - `signatureFieldName` selects which output field to receive
+  *     [[TokenEvent]]s for.
+  *   - `predictName` optionally narrows the subscription to a specific
+  *     predictor when a program contains more than one; `None` matches any
+  *     predictor.
+  */
+final case class StreamListener(
+    signatureFieldName: String,
+    predictName: Option[String] = None
+):
+  def matches(predict: String, field: String): Boolean =
+    field == signatureFieldName && predictName.forall(_ == predict)
 
 trait Streamifier:
   def streamify(

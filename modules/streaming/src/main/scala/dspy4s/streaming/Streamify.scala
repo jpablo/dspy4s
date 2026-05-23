@@ -1,15 +1,19 @@
 package dspy4s.streaming
 
+import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
+import dspy4s.core.contracts.Signature
 import dspy4s.core.contracts.SettingsData
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
+import dspy4s.programs.Predict
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
@@ -35,8 +39,23 @@ object Streamify:
       val callback = new StatusStreamingCallback(provider, queue)
 
       val currentLm = outerContext.settings.entries.get(SettingKeys.languageModel.name)
+      val (signature, predictName) = signatureFor(program)
+      val adapter = outerContext.settings.entries
+        .get(SettingKeys.adapter.name)
+        .collect { case a: Adapter => a }
+      val stateFactory: () => Option[AdapterStreamingState] =
+        (signature, adapter) match
+          case (Some(sig), Some(a)) => () => a.streamingState(sig)
+          case _                    => () => None
+
       val wrappedLm = currentLm.collect { case slm: StreamingLanguageModel =>
-        StreamingLanguageModelWrapper(slm, queue)
+        StreamingLanguageModelWrapper(
+          delegate = slm,
+          queue = queue,
+          predictName = predictName,
+          stateFactory = stateFactory,
+          listeners = streamListeners
+        )
       }
 
       val extraSettings: Map[String, Any] = wrappedLm match
@@ -77,3 +96,17 @@ object Streamify:
       producer.start()
 
       queue.asIterator
+
+  /** Best-effort extraction of the signature and predict name from a program.
+    *
+    * Slice A only handles the [[Predict]] case — single-predictor programs.
+    * Multi-predictor programs (e.g. `ChainOfThought`, `ReAct`) fall back to
+    * `(None, "")`, which disables the adapter state machine and reverts to
+    * raw-token emission. Routing through compound programs is Slice D work.
+    */
+  private def signatureFor(
+      program: Module[ProgramCall, Prediction]
+  ): (Option[Signature], String) =
+    program match
+      case predict: Predict => (Some(predict.signature), predict.moduleName)
+      case _                => (None, "")

@@ -14,6 +14,38 @@ This document tracks streaming features deferred from the v1 implementation to l
 - `StatusEvent`, `PredictionEvent`, `ErrorEvent` emitted from the stream
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
+## Shipped in v1.2 — Per-field `StreamListener` (Chat adapter, Slice A)
+
+- `AdapterStreamingState` trait + `FieldChunk` data class added to
+  `adapters.contracts`. Adapters implement `Adapter.streamingState(signature)`
+  to opt in.
+- `ChatStreamingState` implements line-based field detection for
+  `ChatAdapter`'s `prefix: value` framing. Buffers held-back partial lines so
+  a label that arrives across multiple tokens (e.g. `"ans"` then `"wer:"`)
+  is never leaked into the previous field's stream. `finish()` flushes
+  remaining buffer and marks the last chunk `isLast = true`.
+- `StreamListener` redefined from a placeholder trait to a configuration
+  case class with `signatureFieldName` and optional `predictName`.
+- `StreamingLanguageModelWrapper` builds a fresh state per `call()`,
+  drives it with each chunk's text, and emits one `TokenEvent` per
+  `FieldChunk`. When no state is supplied it preserves the previous
+  raw-token behavior.
+- `Streamify` resolves the active `Adapter` from settings and extracts
+  the signature from the program (only `Predict` for now; compound programs
+  fall back to raw-token emission until Slice D).
+- 14 tests across `ChatStreamingStateSuite` (9) and `StreamListenerSuite` (5).
+
+### Notes / behavioral deltas from Python parity
+
+- dspy4s `ChatAdapter` uses `prefix: value` line framing, not Python's
+  `[[ ## field ## ]]`. The state machine is correspondingly simpler. The
+  consequence: if the model emits text whose lines start with an unknown
+  label (e.g. `extra:`), the state machine treats it as continuation of
+  the most recently entered field, since it has no way to distinguish
+  "stray text" from "value with a colon in it".
+- Multi-predictor programs (`ChainOfThought`, `ReAct`) still fall through
+  to raw-token mode — Slice D will route per-predict.
+
 ## Shipped in v1.1 — Tool-call delta accumulation
 
 - `LmToolCallDelta(index, id, name, argumentsFragment)` added to `lm.contracts`
@@ -28,25 +60,25 @@ This document tracks streaming features deferred from the v1 implementation to l
 - 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
   `StreamingToolCallSuite`
 
-## Postponed — Per-field `StreamListener` with adapter-aware chunk parsing
+## Postponed — Per-field `StreamListener`: JSON / XML / multi-predictor (Slices B, C, D)
 
-The Python `StreamListener` is a ~350-line stateful parser that reconstructs individual output fields from the LM token stream based on the adapter's framing:
+Slice A (ChatAdapter) shipped — see the v1.2 section above. Remaining:
 
-- **ChatAdapter**: detects `[[ ## field_name ## ]]` start markers and `[[ ##` end markers, buffers up to 10 tokens to avoid emitting field-separator boilerplate
-- **JSONAdapter**: uses partial JSON parsing (`jiter`) to detect the next key in the stream as the field boundary
-- **XMLAdapter**: detects `<field_name>` / `</field_name>` boundaries
-- Handles missing completion markers (`[[ ## completed ## ]]`) by flushing buffers on finalization
-- `allow_reuse` semantics for streaming the same predictor multiple times in one program call
-- `finalize()` flush on prediction completion to avoid losing buffered tokens
-- Auto-resolution of listener-to-predictor mapping via `find_predictor_for_stream_listeners`
-
-### Scala design sketch for v2
-
-- `trait AdapterStreamingState` with three implementations (`ChatStreamingState`, `JsonStreamingState`, `XmlStreamingState`)
-- Each state exposes `receive(chunk: LmChunk): Option[TokenEvent]` and `finalize(): Option[TokenEvent]`
-- `StreamListener` owns a state, delegates adapter selection to settings
-- For `JSONAdapter` partial parsing: use `ujson` incremental or a small jiter-equivalent (no `jiter` JVM artifact available off the shelf — evaluate `simdjson` bindings or `ujson.Reader`)
-- Add `predict_id` to `LmOutput` / `LmResponse` so the streamify wrapper can route chunks to the correct listener
+- **JSONAdapter streaming state (Slice B)**: partial JSON parsing to detect
+  the next key in the stream as the field boundary. No `jiter` JVM artifact
+  off the shelf; the planned approach is a small incremental object parser
+  that tracks brace depth and string state, emitting per-key value fragments.
+- **XMLAdapter streaming state (Slice C)**: `<field_name>` / `</field_name>`
+  boundary detection with the same buffer-and-flush discipline as
+  `ChatStreamingState`.
+- **Multi-predictor routing + `allow_reuse` + `finalize` edge cases (Slice D)**:
+  - Add `predict_id` to `LmOutput` / `LmResponse` so the streamify wrapper can
+    route chunks to the correct listener when a program contains more than one
+    predictor (`ChainOfThought`, `ReAct`).
+  - Auto-resolution of listener-to-predictor mapping via signature traversal
+    (equivalent of Python's `find_predictor_for_stream_listeners`).
+  - `allow_reuse` semantics for streaming the same predictor multiple times in
+    one program call.
 
 ### Python parity tests to port
 
