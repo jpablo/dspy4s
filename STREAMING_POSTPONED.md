@@ -14,6 +14,21 @@ This document tracks streaming features deferred from the v1 implementation to l
 - `StatusEvent`, `PredictionEvent`, `ErrorEvent` emitted from the stream
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
+## Shipped in v1.4 — XML adapter streaming state (Slice C)
+
+- `XmlStreamingState` parses streamed XML output of the form
+  `<outputs><field1>v1</field1><field2>v2</field2></outputs>` character by
+  character. Skips any preamble before the first `<` (fenced ```xml blocks
+  work); walks through non-output tags (including the `<outputs>` wrapper)
+  without emission; tolerates open-tag attributes and whitespace before `>`.
+- Decodes named entities (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`)
+  and numeric character references (`&#NNN;`, `&#xHHHH;`) inline.
+- Robust to receive() boundaries that split a tag name, an entity, or
+  content. `finish()` flushes any in-progress field with `isLast = true`.
+- `XMLAdapter.streamingState` wires it up.
+- 13 new tests: `XmlStreamingStateSuite` (12) + end-to-end XML listener
+  test in `StreamListenerSuite`.
+
 ## Shipped in v1.3 — JSON adapter streaming state (Slice B)
 
 - `JsonStreamingState` parses a streamed top-level JSON object character by
@@ -78,14 +93,11 @@ This document tracks streaming features deferred from the v1 implementation to l
 - 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
   `StreamingToolCallSuite`
 
-## Postponed — Per-field `StreamListener`: XML / multi-predictor (Slices C, D)
+## Postponed — Per-field `StreamListener`: multi-predictor (Slice D)
 
-Slices A (ChatAdapter) and B (JSONAdapter) shipped — see the v1.2 and v1.3
-sections above. Remaining:
+Slices A (ChatAdapter), B (JSONAdapter), and C (XMLAdapter) shipped — see
+the v1.2 / v1.3 / v1.4 sections above. Remaining:
 
-- **XMLAdapter streaming state (Slice C)**: `<field_name>` / `</field_name>`
-  boundary detection with the same buffer-and-flush discipline as
-  `ChatStreamingState` and `JsonStreamingState`.
 - **Multi-predictor routing + `allow_reuse` + `finalize` edge cases (Slice D)**:
   - Add `predict_id` to `LmOutput` / `LmResponse` so the streamify wrapper can
     route chunks to the correct listener when a program contains more than one
