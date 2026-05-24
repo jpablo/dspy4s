@@ -4,6 +4,8 @@
 
 This is the single source of truth for **how dspy4s names and behaviors map to Python DSPy** and where they diverge. Anything that doesn't appear here should be a 1:1 port.
 
+For the lower-level **language-construct mapping** (async, error handling, dynamic kwargs, decorators, mocking, etc.) see [`PORT_LANGUAGE_NOTES.md`](PORT_LANGUAGE_NOTES.md). This doc is *what* changed; that doc is *how* it's done in Scala.
+
 > **Maintenance rule:** the commit that introduces a rename, consolidation, or deliberate behavioral delta updates this doc in the same commit. Streaming-specific deltas may continue to live in [STREAMING_POSTPONED.md](STREAMING_POSTPONED.md) (since they're tied to the streaming feature roadmap) but must also have a one-line pointer in §4 below.
 
 ---
