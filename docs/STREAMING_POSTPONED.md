@@ -123,28 +123,41 @@ for the small residual chunk-emission delta that remains
 - 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
   `StreamingToolCallSuite`
 
-## Postponed — opt-in `allowReuse=false` parity
+## Shipped in v1.6 — `allowReuse` opt-out and listener field-name validation
 
-Slices A–D shipped. The only piece of Python `StreamListener` parity that
-remains is the opt-out:
+- `StreamListener` gains `allowReuse: Boolean = true`. When set `false`,
+  the listener emits chunks for one complete field cycle (up to and
+  including `isLastChunk = true`) and then goes silent for the rest of
+  the `streamify` invocation. Matches Python's `allow_reuse = False`
+  default behaviour as an opt-in for users that want it.
+  Implementation: `StreamingLanguageModelWrapper.firedListeners` mutable
+  set tracks which listener indices have closed a field cycle.
+- `Streamify.streamify` now accepts a `warningSink: String => Unit`
+  (defaults to `System.err.println`) and walks the program tree
+  (`Predict` / `ChainOfThought` / `ReAct`) to warn at streamify-time
+  when a listener's `signatureFieldName` doesn't appear in any known
+  Predict signature, or when its `predictName` doesn't match any
+  Predict's name. dspy4s's equivalent of Python's
+  `find_predictor_for_stream_listeners`. Opaque user composites skip
+  validation silently.
+- 5 new tests in `StreamListenerSuite` covering both directions of
+  `allowReuse`, unknown-field warning, unknown-`predictName` warning,
+  and opaque-composite skip.
 
-- Add `allowReuse: Boolean = true` to `StreamListener`. When `false`,
-  the listener fires only on the **first** LM call within a Streamify
-  invocation and is silent on subsequent calls. Implementation: track a
-  mutable per-listener "has fired" flag inside
-  `StreamingLanguageModelWrapper` (since the wrapper persists across the
-  multiple `call()`s a compound program issues, while the adapter state
-  is rebuilt per call). Deferred until a concrete use case asks for it —
-  the default-on behavior matches what most consumers want.
+## Shipped in v1.7 — Concurrent-provider + blocking-tool parity tests
 
-Original Python design notes preserved below for reference:
-  - Add `predict_id` to `LmOutput` / `LmResponse` so the streamify wrapper can
-    route chunks to the correct listener when a program contains more than one
-    predictor (`ChainOfThought`, `ReAct`).
-  - Auto-resolution of listener-to-predictor mapping via signature traversal
-    (equivalent of Python's `find_predictor_for_stream_listeners`).
-  - `allow_reuse` semantics for streaming the same predictor multiple times in
-    one program call.
+- Ported Python's `test_concurrent_status_message_providers`: two
+  `streamify` invocations run on independent threads with distinct
+  `StatusMessageProvider`s and the assertion is that neither stream
+  sees the other provider's messages. Validates ThreadLocal isolation
+  + per-streamify queue independence already in v1.
+- Ported Python's `test_status_message_non_blocking`: a tool that
+  sleeps for 200 ms must still produce tool-start and tool-end status
+  events whose timestamps differ by ≥ 200 ms. Validates that status
+  callbacks emit to the queue from the producer thread without
+  blocking the consumer's ability to drain earlier events.
+- `StatusStreamingParitySuite` — 2 new tests, neither requires a live
+  LM (uses tool execution + scripted programs).
 
 ### Python parity tests to port
 
@@ -210,17 +223,6 @@ Python `streamify` can wrap async programs and route them through `acall`. dspy4
 - Propagating the `ExecutionContext` correctly through `ContextPropagation.wrapExecutionContext`
 
 Should land alongside the effect-system streaming work above.
-
-## Postponed — Concurrent/concurrent-safe status message providers
-
-Python test `test_concurrent_status_message_providers` verifies that two concurrent `streamify` invocations with different providers don't interfere. The dspy4s `RuntimeEnvironment` ThreadLocal model already gives per-thread isolation, but:
-
-- If both run on the same thread (via async task interleaving), the current `withCallbacks` mechanism handles it by nesting
-- A dedicated concurrency parity test should be added to `StreamifySuite`
-
-## Postponed — Blocking tool call status messages
-
-Python `test_status_message_non_blocking` verifies that status messages continue to be emitted even when a tool sleep-blocks. This works because the Python status callback dispatches via `sync_send_to_stream` which uses a thread pool when inside an event loop. The dspy4s producer thread will similarly emit while the tool runs — but no explicit test for this yet.
 
 ## Postponed — `apply_sync_streaming` / sync bridge
 

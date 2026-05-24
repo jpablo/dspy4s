@@ -436,11 +436,198 @@ class StreamListenerSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
         program = Predict(signature = signature),
-        streamListeners = Vector(StreamListener("answer", predictName = Some("other-predict")))
+        streamListeners = Vector(StreamListener("answer", predictName = Some("other-predict"))),
+        warningSink = _ => () // suppress the expected validation warning
       )(Map("q" -> "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
       assertEquals(tokens, Vector.empty[TokenEvent])
     }
+  }
+
+  test("allowReuse=false: listener fires for first LM call and is silent on subsequent ones") {
+    val perCallOutputs = Vector(
+      "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
+      "[[ ## answer ## ]]\nlondon\n[[ ## completed ## ]]"
+    )
+    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val multiCallLm = new StreamingLanguageModel:
+      override val id: String = "multi-scripted"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
+      override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
+
+    // Both Predicts share the same signature; they both output the "answer"
+    // field. Without allowReuse=false the listener would emit chunks from
+    // both LM calls; with allowReuse=false only the first call's chunks
+    // should appear.
+    val sig = SignatureDsl.parse("question -> answer").toOption.get
+    val composite = new PredictProgram:
+      override val moduleName: String = "my_program"
+      private val predict1 = Predict(signature = sig, name = Some("predict1"))
+      private val predict2 = Predict(signature = sig, name = Some("predict2"))
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+        for
+          _      <- predict1.run(input)
+          second <- predict2.run(input)
+        yield second
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> multiCallLm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = composite,
+        streamListeners = Vector(StreamListener("answer", allowReuse = false)),
+        warningSink = _ => ()
+      )(Map("question" -> "x"))
+
+      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      // Only the first LM call's chunks for "answer" should appear; the
+      // second LM call (predict2) also outputs to "answer" but the listener
+      // has already fired.
+      assertEquals(tokens.map(_.predictName).toSet, Set("predict1"))
+      assertEquals(tokens.map(_.chunk).mkString, "paris")
+    }
+  }
+
+  test("allowReuse=true (default): listener keeps firing across multiple LM calls") {
+    // Same composite + scripted LM as the test above, but the default-on
+    // allowReuse means BOTH calls' answer chunks should fire.
+    val perCallOutputs = Vector(
+      "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
+      "[[ ## answer ## ]]\nlondon\n[[ ## completed ## ]]"
+    )
+    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val multiCallLm = new StreamingLanguageModel:
+      override val id: String = "multi-scripted"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
+      override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
+
+    val sig = SignatureDsl.parse("question -> answer").toOption.get
+    val composite = new PredictProgram:
+      override val moduleName: String = "my_program"
+      private val p1 = Predict(signature = sig, name = Some("p1"))
+      private val p2 = Predict(signature = sig, name = Some("p2"))
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+        for
+          _ <- p1.run(input)
+          out <- p2.run(input)
+        yield out
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> multiCallLm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = composite,
+        streamListeners = Vector(StreamListener("answer"))
+      )(Map("question" -> "x"))
+
+      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      assertEquals(tokens.map(_.predictName).toSet, Set("p1", "p2"))
+    }
+  }
+
+  test("validation: listener for an unknown field emits a warning") {
+    val sig = SignatureDsl.parse("q -> answer").toOption.get
+    val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sink: String => Unit = warnings.append
+
+    val lm = new ScriptedLm(Vector(
+      LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
+    ))
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = Predict(signature = sig),
+        streamListeners = Vector(
+          StreamListener("nonexistent_field"),
+          StreamListener("answer") // valid; should not warn
+        ),
+        warningSink = sink
+      )(Map("q" -> "x"))
+      collectStream(stream)
+    }
+    assertEquals(warnings.size, 1, s"warnings: ${warnings.mkString("; ")}")
+    assert(warnings.head.contains("nonexistent_field"), warnings.head)
+    assert(warnings.head.contains("never fire"), warnings.head)
+  }
+
+  test("validation: listener with unknown predictName emits a warning") {
+    val sig = SignatureDsl.parse("q -> answer").toOption.get
+    val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sink: String => Unit = warnings.append
+
+    val lm = new ScriptedLm(Vector(
+      LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
+    ))
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = Predict(signature = sig),
+        streamListeners = Vector(StreamListener("answer", predictName = Some("nonexistent_predict"))),
+        warningSink = sink
+      )(Map("q" -> "x"))
+      collectStream(stream)
+    }
+    assertEquals(warnings.size, 1)
+    assert(warnings.head.contains("nonexistent_predict"), warnings.head)
+  }
+
+  test("validation: opaque user composite skips validation (no warnings)") {
+    val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sink: String => Unit = warnings.append
+
+    val opaqueProgram = new PredictProgram:
+      override val moduleName: String = "opaque"
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+        Right(dspy4s.core.contracts.PredictionData(values = Map("answer" -> "x")))
+
+    given RuntimeContext = RuntimeEnvironment.current
+    // We don't actually invoke the stream — validation runs eagerly when
+    // streamify is called, before any inputs flow.
+    Streamify.streamify(
+      program = opaqueProgram,
+      streamListeners = Vector(
+        StreamListener("anything_at_all"),
+        StreamListener("answer", predictName = Some("anyone"))
+      ),
+      warningSink = sink
+    )
+    assertEquals(warnings, scala.collection.mutable.ArrayBuffer.empty[String])
   }

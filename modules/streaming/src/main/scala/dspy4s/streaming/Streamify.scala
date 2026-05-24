@@ -7,9 +7,13 @@ import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Signature
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
+import dspy4s.programs.ChainOfThought
+import dspy4s.programs.Predict
+import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
@@ -37,8 +41,17 @@ object Streamify:
       statusMessageProvider: Option[StatusMessageProvider] = None,
       streamListeners: Vector[StreamListener] = Vector.empty,
       includeFinalPrediction: Boolean = true,
-      queueCapacity: Int = 64
+      queueCapacity: Int = 64,
+      warningSink: String => Unit = msg => System.err.println(s"[dspy4s.streamify] $msg")
   )(using outerContext: RuntimeContext): Map[String, Any] => ClosableIterator[StreamEvent] =
+    // Validate listener field names against the program structure as far as
+    // we can statically see it. This is dspy4s's equivalent of Python's
+    // `find_predictor_for_stream_listeners`: warn (don't fail) if a listener
+    // is subscribed to a field name that no Predict in the program emits.
+    // For composite programs whose internals we can't introspect (a user-
+    // defined `PredictProgram`), validation is silently skipped.
+    validateListeners(program, streamListeners, warningSink)
+
     inputs =>
       val queue = StreamingQueue[StreamEvent](queueCapacity)
       val captured = ContextPropagation.capture
@@ -98,3 +111,51 @@ object Streamify:
       producer.start()
 
       queue.asIterator
+
+  /** Walk the program tree, collect every Predict-derived signature we can
+    * statically see, and warn for each listener whose `signatureFieldName`
+    * does not appear in any of them. Composite programs that aren't one of
+    * the well-known shapes contribute nothing — for those, validation is
+    * skipped (matches Python's behavior of "look as far as you can"). */
+  private def validateListeners(
+      program: Module[?, ?],
+      listeners: Vector[StreamListener],
+      warningSink: String => Unit
+  ): Unit =
+    if listeners.isEmpty then return
+    val knownSignatures = collectKnownSignatures(program)
+    if knownSignatures.isEmpty then return // opaque program; skip
+    val knownFields: Set[String] = knownSignatures.flatMap(_._2.outputFields.map(_.name)).toSet
+    val knownPredictNames: Set[String] = knownSignatures.map(_._1).toSet
+    listeners.foreach { listener =>
+      if !knownFields.contains(listener.signatureFieldName) then
+        warningSink(
+          s"StreamListener(signatureFieldName=${listener.signatureFieldName}" +
+            listener.predictName.fold("")(n => s", predictName=$n") +
+            s") will never fire: no Predict in the program emits that output field. " +
+            s"Known output fields: ${knownFields.toSeq.sorted.mkString(", ")}."
+        )
+      else
+        listener.predictName.foreach { name =>
+          if !knownPredictNames.contains(name) then
+            warningSink(
+              s"StreamListener(signatureFieldName=${listener.signatureFieldName}, " +
+                s"predictName=$name) will never fire: no Predict in the program is named '$name'. " +
+                s"Known predict names: ${knownPredictNames.toSeq.sorted.mkString(", ")}."
+            )
+        }
+    }
+
+  /** Best-effort recursive collection of `(predictName, signature)` from
+    * the well-known program types. Unknown composite types contribute
+    * nothing. */
+  private def collectKnownSignatures(program: Module[?, ?]): Vector[(String, Signature)] =
+    program match
+      case p: Predict =>
+        Vector((p.moduleName, p.signature))
+      case cot: ChainOfThought =>
+        cot.signature.toOption.map(sig => (cot.moduleName, sig)).toVector
+      case react: ReAct =>
+        collectKnownSignatures(react.module)
+      case _ =>
+        Vector.empty

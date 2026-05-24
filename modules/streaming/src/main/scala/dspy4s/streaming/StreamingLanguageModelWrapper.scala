@@ -41,6 +41,12 @@ import scala.util.control.NonFatal
   *
   * Listener filtering: when `listeners` is non-empty, only field chunks whose
   * `(predictName, fieldName)` match at least one listener are emitted.
+  *
+  * `allowReuse = false` semantics: a non-reuse listener fires for the chunks
+  * of a single field cycle (up to and including the chunk that carries
+  * `isLastChunk = true`) and then goes silent for the remainder of the
+  * `streamify` invocation. The mutable set [[firedListeners]] holds the
+  * indices that have closed at least one field cycle.
   */
 final class StreamingLanguageModelWrapper private (
     delegate: StreamingLanguageModel,
@@ -48,6 +54,8 @@ final class StreamingLanguageModelWrapper private (
     adapter: Option[Adapter],
     listeners: Vector[StreamListener]
 ) extends StreamingLanguageModel:
+
+  private val firedListeners: mutable.Set[Int] = mutable.Set.empty
 
   override val id: String = delegate.id
   override val mode: LmMode = delegate.mode
@@ -122,18 +130,29 @@ final class StreamingLanguageModelWrapper private (
     }
 
   private def emitFieldChunk(ctx: CallContext, fc: FieldChunk, isFinalChunk: Boolean): Unit =
+    val isLast = fc.isLast || isFinalChunk
     if listenerAccepts(ctx.predictName, fc.fieldName) then
       queue.offer(
         TokenEvent(
           predictName = ctx.predictName,
           fieldName = fc.fieldName,
           chunk = fc.text,
-          isLastChunk = fc.isLast || isFinalChunk
+          isLastChunk = isLast
         )
       )
+      if isLast then markListenersFired(ctx.predictName, fc.fieldName)
 
   private def listenerAccepts(predictName: String, fieldName: String): Boolean =
-    listeners.isEmpty || listeners.exists(_.matches(predictName, fieldName))
+    if listeners.isEmpty then true
+    else
+      listeners.iterator.zipWithIndex.exists { case (l, i) =>
+        l.matches(predictName, fieldName) && (l.allowReuse || !firedListeners.contains(i))
+      }
+
+  private def markListenersFired(predictName: String, fieldName: String): Unit =
+    listeners.iterator.zipWithIndex.foreach { case (l, i) =>
+      if !l.allowReuse && l.matches(predictName, fieldName) then firedListeners += i
+    }
 
 object StreamingLanguageModelWrapper:
   def apply(
