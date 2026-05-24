@@ -142,6 +142,57 @@ class StreamingLiveSuite extends FunSuite:
   }
 
   /** Direct dspy4s port of Python DSPy's
+    * `tests/streaming/test_streaming.py::test_sync_streaming`.
+    *
+    * In Python, `streamify` returns an async iterator by default and this
+    * test pins `async_streaming=False` to exercise the sync opt-out. dspy4s's
+    * `Streamify` has no async variant — it returns a [[ClosableIterator]]
+    * driven by a producer thread, which is exactly the "sync streaming" mode
+    * Python is testing. The test therefore looks identical to the chat
+    * adapter parity test above; both are kept so the Python parity matrix
+    * stays 1:1 and so a future async variant has an obvious place to add
+    * its mirror test. */
+  test("live: sync_streaming parity (two Predicts, sync iteration)") {
+    requireLive()
+    val lm = buildLm()
+    val composite = buildComposite()
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = composite,
+        streamListeners = Vector(
+          StreamListener("answer"),
+          StreamListener("judgement")
+        ),
+        includeFinalPrediction = false
+      )(Map("question" -> "why did a chicken cross the kitchen?"))
+
+      // Sync iteration — same shape as Python's `for value in output` loop.
+      val tokens = ArrayBuffer.empty[TokenEvent]
+      while stream.hasNext do
+        stream.next() match
+          case t: TokenEvent => tokens += t
+          case _             => ()
+
+      assert(tokens.nonEmpty, "expected at least one TokenEvent from a live stream")
+      assertEquals(tokens.head.predictName, "predict1", s"first token: ${tokens.head}")
+      assertEquals(tokens.head.fieldName, "answer", s"first token: ${tokens.head}")
+      // Same Chat-framing delta as the chat parity test: use `last` rather
+      // than `[-2]`.
+      assertEquals(tokens.last.predictName, "predict2", s"last token: ${tokens.last}")
+      assertEquals(tokens.last.fieldName, "judgement", s"last token: ${tokens.last}")
+    }
+  }
+
+  /** Direct dspy4s port of Python DSPy's
     * `tests/streaming/test_streaming.py::test_stream_listener_json_adapter`.
     *
     * Same MyProgram, same listeners, but with [[JSONAdapter]] instead of
