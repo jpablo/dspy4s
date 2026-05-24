@@ -63,9 +63,9 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `parameter.py` | (folded into `core`) | `Parameter` trait lives in `dspy4s.core.contracts.Module`. |
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
 | `knn.py` | — | Deferred — depends on retrievers / embedders, neither of which is ported. |
-| `code_act.py` | — | Deferred — depends on a Python interpreter primitive. No clean Scala analog. |
-| `program_of_thought.py` | — | Deferred — same as `code_act`, generates Python code as the reasoning step. |
-| `rlm.py` | — | Deferred — the "Recursive Language Model" uses `CodeInterpreter` + `PythonInterpreter`. Same blocker as `code_act` / `program_of_thought`. |
+| `code_act.py` | `CodeAct.scala` | ✅ scaffolded. Iteration loop + fenced-code extraction + extractor wired up. Tools-inside-code (Scala↔Python RPC) is deferred — Python `CodeAct` lets users pass Python-callable Scala tools; that bridge needs the Deno+Pyodide infrastructure. v1 users either pre-load tools into their `CodeInterpreter` env, or use it without tools. |
+| `program_of_thought.py` | — | Deferred — generates Python code as the reasoning step. Now unblocked by `CodeInterpreter`; needs its own port session. |
+| `rlm.py` | — | Deferred — uses Deno+Pyodide JSON-RPC + tool-callback bridge; that infrastructure isn't built yet. The `CodeInterpreter` trait is the contract it'll plug into. |
 | `avatar/` | — | Deferred — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat. Separate session. |
 
 ---
@@ -81,6 +81,7 @@ dspy4s moves several Python `utils/*` modules next to the code that depends on t
 | `dspy/utils/parallelizer.py` | `modules/programs/src/main/scala/dspy4s/programs/runtime/ParallelExecutor.scala` | Lives with the programs that use it (`Parallel`, `BestOfN`, `Evaluate`). |
 | `dspy/utils/usage_tracker.py` | Inside `modules/lm/src/main/scala/dspy4s/lm/runtime/ManagedLanguageModel.scala` | Threaded as a per-call accumulator on the managed LM wrapper. |
 | `dspy/primitives/*` + `dspy/signatures/*` | `modules/core/src/main/scala/dspy4s/core/{contracts,signatures}/*` | Merged into one module; the `contracts` / `signatures` split inside `core` mirrors Python's two-package split for searchability without keeping it as a build-level boundary. |
+| `dspy/primitives/python_interpreter.py` + `dspy/primitives/code_interpreter.py` | `core/contracts/CodeInterpreter.scala` (trait) + `core/runtime/SubprocessPythonInterpreter.scala` (default impl) | dspy4s splits the Python `CodeInterpreter` protocol from its Deno+Pyodide-backed default impl. The default in dspy4s today is a plain `python3 -c "..."` subprocess (NOT sandboxed) — useful for trusted code and prototyping. The sandboxed Deno+Pyodide impl that matches Python DSPy 1:1 (`runner.js` + JSON-RPC + tool-callback bridge) is deferred to a focused future session. User code errors (`NameError`, `SyntaxError`) surface as `CodeResult` with non-zero `exitCode` and traceback in `stderr`; the `Either` Left path is reserved for interpreter-itself failures (process crash, timeout). |
 
 ---
 
