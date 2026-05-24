@@ -3,13 +3,36 @@
  *
  * Source:   docs/docs/learn/programming/signatures.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md
- * Status:   scaffold (8 python snippets — TODO translate)
+ * Status:   translated (8/8 python snippets)
+ *
+ * Notes on porting:
+ *   - In dspy4s, `dspy.Signature(...)` is built either from the inline DSL
+ *     (`SignatureDsl.parse("inputs -> outputs")`) or constructed explicitly
+ *     via `SignatureDsl.create(name, inputFields, outputFields, instructions)`.
+ *   - There is no metaclass-driven `class X(dspy.Signature)` form — class-based
+ *     signatures port to `SignatureDsl.create` with `FieldSpec` entries.
+ *   - Programs are invoked with `program.run(ProgramCall(inputs = Map(...)))`
+ *     and return `Either[DspyError, Prediction]`.
+ *   - The `// Python:` blocks below preserve the original snippets verbatim
+ *     for reference; the Scala translations follow.
  */
 package dspy4s.examples.learn.programming
 
+import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.FieldRole
+import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.TypeRef
+import dspy4s.core.signatures.SignatureDsl
+import dspy4s.programs.ChainOfThought
+import dspy4s.programs.Predict
+import dspy4s.programs.contracts.ProgramCall
+
 object Signatures {
 
-  // ── Snippet 1 (lines 37–46) ────────────────────
+  // ── Snippet 1 (lines 37–46) ─ inline signature + instructions ─────────
+  // Python:
   // | toxicity = dspy.Predict(
   // |     dspy.Signature(
   // |         "comment -> toxic: bool",
@@ -18,30 +41,72 @@ object Signatures {
   // | )
   // | comment = "you are beautiful."
   // | toxicity(comment=comment).toxic
-  // TODO translate snippet 1
+  val toxicitySignature: Signature =
+    SignatureDsl
+      .parse("comment -> toxic: bool")
+      .toOption
+      .get
+      .withInstructions(Some(
+        "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
+      ))
 
-  // ── Snippet 2 (lines 56–61) ────────────────────
+  val toxicity: Predict = Predict(toxicitySignature)
+
+  def callToxicity(comment: String)(using RuntimeContext): Either[DspyError, Any] =
+    toxicity.run(ProgramCall(inputs = Map("comment" -> comment))).flatMap(_.value("toxic"))
+
+  // ── Snippet 2 (lines 56–61) ─ Example A: Sentiment Classification ─────
+  // Python:
   // | sentence = "it's a charming and often affecting journey."  # example from the SST-2 dataset.
   // |
   // | classify = dspy.Predict('sentence -> sentiment: bool')  # we'll see an example with Literal[] later
   // | classify(sentence=sentence).sentiment
-  // TODO translate snippet 2
+  val sentimentSignature: Signature =
+    SignatureDsl.parse("sentence -> sentiment: bool").toOption.get
 
-  // ── Snippet 3 (lines 69–77) ────────────────────
+  val classifySentiment: Predict = Predict(sentimentSignature)
+
+  def callSentiment(sentence: String)(using RuntimeContext): Either[DspyError, Any] =
+    classifySentiment
+      .run(ProgramCall(inputs = Map("sentence" -> sentence)))
+      .flatMap(_.value("sentiment"))
+
+  // ── Snippet 3 (lines 69–77) ─ Example B: Summarization (ChainOfThought) ─
+  // Python:
   // | # Example from the XSum dataset.
-  // | document = """The 21-year-old made seven appearances for the Hammers and netted his only goal for them in a Europa League qualification round match against Andorran side FC Lustrains last season. Lee had two loan spells in League One last term, with Blackpool and then Colchester United. He scored twice for the U's but was unable to save them from relegation. The length of Lee's contract with the promoted Tykes has not been revealed. Find all the latest football transfers on our dedicated page."""
+  // | document = """The 21-year-old made seven appearances ..."""
   // |
   // | summarize = dspy.ChainOfThought('document -> summary')
   // | response = summarize(document=document)
   // |
   // | print(response.summary)
-  // TODO translate snippet 3
+  val summarizeSignature: Signature =
+    SignatureDsl.parse("document -> summary").toOption.get
 
-  // ── Snippet 4 (lines 87–89) ────────────────────
+  val summarize: ChainOfThought = ChainOfThought(summarizeSignature)
+
+  def callSummarize(document: String)(using RuntimeContext): Either[DspyError, Any] =
+    summarize.run(ProgramCall(inputs = Map("document" -> document))).flatMap(_.value("summary"))
+
+  // ── Snippet 4 (lines 87–89) ─ inspect the reasoning field ─────────────
+  // Python:
   // | print("Reasoning:", response.reasoning)
-  // TODO translate snippet 4
+  //
+  // ChainOfThought injects a `reasoning` output field (prefix "Reasoning:") at
+  // position 0 of the augmented signature, so the resulting Prediction exposes
+  // both `reasoning` and `summary`.
+  def callSummarizeWithReasoning(document: String)(using RuntimeContext): Either[DspyError, (Any, Any)] =
+    summarize
+      .run(ProgramCall(inputs = Map("document" -> document)))
+      .flatMap { p =>
+        for
+          reasoning <- p.value("reasoning")
+          summary <- p.value("summary")
+        yield (reasoning, summary)
+      }
 
-  // ── Snippet 5 (lines 107–120) ────────────────────
+  // ── Snippet 5 (lines 107–119) ─ Example C: class-based Classification ──
+  // Python:
   // | from typing import Literal
   // |
   // | class Emotion(dspy.Signature):
@@ -50,13 +115,34 @@ object Signatures {
   // |     sentence: str = dspy.InputField()
   // |     sentiment: Literal['sadness', 'joy', 'love', 'anger', 'fear', 'surprise'] = dspy.OutputField()
   // |
-  // | sentence = "i started feeling a little vulnerable when the giant spotlight started blinding me"  # from dair-ai/emotion
+  // | sentence = "i started feeling a little vulnerable when the giant spotlight started blinding me"
   // |
   // | classify = dspy.Predict(Emotion)
   // | classify(sentence=sentence)
-  // TODO translate snippet 5
+  //
+  // Python's `Literal[...]` carries through as a free-form TypeRef token; the
+  // adapter consumes the repr when formatting/parsing.
+  val emotionSignature: Signature =
+    SignatureDsl
+      .create(
+        name = "Emotion",
+        inputFields = Vector(FieldSpec(name = "sentence", role = FieldRole.Input)),
+        outputFields = Vector(
+          FieldSpec(
+            name = "sentiment",
+            role = FieldRole.Output,
+            typeRef = TypeRef("Literal['sadness', 'joy', 'love', 'anger', 'fear', 'surprise']")
+          )
+        ),
+        instructions = Some("Classify emotion.")
+      )
+      .toOption
+      .get
 
-  // ── Snippet 6 (lines 132–147) ────────────────────
+  val classifyEmotion: Predict = Predict(emotionSignature)
+
+  // ── Snippet 6 (lines 132–146) ─ Example D: faithfulness check ─────────
+  // Python:
   // | class CheckCitationFaithfulness(dspy.Signature):
   // |     """Verify that the text is based on the provided context."""
   // |
@@ -64,16 +150,36 @@ object Signatures {
   // |     text: str = dspy.InputField()
   // |     faithfulness: bool = dspy.OutputField()
   // |     evidence: dict[str, list[str]] = dspy.OutputField(desc="Supporting evidence for claims")
-  // |
-  // | context = "The 21-year-old made seven appearances for the Hammers and netted his only goal for them in a Europa League qualification round match against Andorran side FC Lustrains last season. Lee had two loan spells in League One last term, with Blackpool and then Colchester United. He scored twice for the U's but was unable to save them from relegation. The length of Lee's contract with the promoted Tykes has not been revealed. Find all the latest football transfers on our dedicated page."
-  // |
-  // | text = "Lee scored 3 goals for Colchester United."
-  // |
-  // | faithfulness = dspy.ChainOfThought(CheckCitationFaithfulness)
-  // | faithfulness(context=context, text=text)
-  // TODO translate snippet 6
+  val checkCitationFaithfulness: Signature =
+    SignatureDsl
+      .create(
+        name = "CheckCitationFaithfulness",
+        inputFields = Vector(
+          FieldSpec(
+            name = "context",
+            role = FieldRole.Input,
+            description = Some("facts here are assumed to be true")
+          ),
+          FieldSpec(name = "text", role = FieldRole.Input)
+        ),
+        outputFields = Vector(
+          FieldSpec(name = "faithfulness", role = FieldRole.Output, typeRef = TypeRef.bool),
+          FieldSpec(
+            name = "evidence",
+            role = FieldRole.Output,
+            typeRef = TypeRef("dict[str, list[str]]"),
+            description = Some("Supporting evidence for claims")
+          )
+        ),
+        instructions = Some("Verify that the text is based on the provided context.")
+      )
+      .toOption
+      .get
 
-  // ── Snippet 7 (lines 159–168) ────────────────────
+  val faithfulness: ChainOfThought = ChainOfThought(checkCitationFaithfulness)
+
+  // ── Snippet 7 (lines 159–167) ─ Example E: multi-modal image ──────────
+  // Python:
   // | class DogPictureSignature(dspy.Signature):
   // |     """Output the dog breed of the dog in the image."""
   // |     image_1: dspy.Image = dspy.InputField(desc="An image of a dog")
@@ -82,9 +188,39 @@ object Signatures {
   // | image_url = "https://picsum.photos/id/237/200/300"
   // | classify = dspy.Predict(DogPictureSignature)
   // | classify(image_1=dspy.Image.from_url(image_url))
-  // TODO translate snippet 7
+  //
+  // dspy4s does not yet ship a built-in `Image` value type (no equivalent of
+  // `dspy.Image.from_url(...)`). The field below carries the type as an opaque
+  // TypeRef token so the signature compiles; the adapter layer will need an
+  // Image type before this example can actually run.
+  val dogPictureSignature: Signature =
+    SignatureDsl
+      .create(
+        name = "DogPictureSignature",
+        inputFields = Vector(
+          FieldSpec(
+            name = "image_1",
+            role = FieldRole.Input,
+            typeRef = TypeRef("image"),
+            description = Some("An image of a dog")
+          )
+        ),
+        outputFields = Vector(
+          FieldSpec(
+            name = "answer",
+            role = FieldRole.Output,
+            description = Some("The dog breed of the dog in the image")
+          )
+        ),
+        instructions = Some("Output the dog breed of the dog in the image.")
+      )
+      .toOption
+      .get
 
-  // ── Snippet 8 (lines 190–205) ────────────────────
+  val classifyDog: Predict = Predict(dogPictureSignature)
+
+  // ── Snippet 8 (lines 190–204) ─ Working with Custom Types ─────────────
+  // Python:
   // | # Simple custom type
   // | class QueryResult(pydantic.BaseModel):
   // |     text: str
@@ -99,5 +235,15 @@ object Signatures {
   // |         score: float
   // |
   // | signature = dspy.Signature("query: MyContainer.Query -> score: MyContainer.Score")
-  // TODO translate snippet 8
+  //
+  // In dspy4s the type token is a free-form `TypeRef` consumed by the adapter
+  // (JSON / structured-output adapters). There is no pydantic-style schema
+  // derivation today, so the user-defined types appear as opaque labels —
+  // the meaning is supplied by the adapter that knows how to render/parse
+  // values of that shape.
+  val customTypeSignature: Signature =
+    SignatureDsl.parse("query: str -> result: QueryResult").toOption.get
+
+  val nestedCustomTypeSignature: Signature =
+    SignatureDsl.parse("query: MyContainer.Query -> score: MyContainer.Score").toOption.get
 }
