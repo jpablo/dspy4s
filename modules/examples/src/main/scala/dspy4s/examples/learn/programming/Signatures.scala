@@ -15,8 +15,10 @@
  *   - `Signature.apply` returns `Either[DspyError, Signature]` so parse errors
  *     stay strongly typed; bind via for-comprehension or `.toOption.get` at
  *     declarative call sites.
- *   - Programs are invoked with `program.run(ProgramCall(inputs = Map(...)))`
- *     and return `Either[DspyError, Prediction]`.
+ *   - Programs are invoked with the varargs sugar
+ *     `program.run("field" -> value, ...)` (or the explicit
+ *     `program.run(ProgramCall(...))` when `config`/`traceEnabled` need to
+ *     be customized) and return `Either[DspyError, Prediction]`.
  *   - The `// Python:` blocks below preserve the original snippets verbatim
  *     for reference; the Scala translations follow.
  */
@@ -31,7 +33,6 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict
-import dspy4s.programs.contracts.ProgramCall
 
 object Signatures {
 
@@ -54,7 +55,7 @@ object Signatures {
   val toxicity: Predict = Predict(toxicitySignature)
 
   def callToxicity(comment: String)(using RuntimeContext): Either[DspyError, Any] =
-    toxicity.run(ProgramCall(inputs = Map("comment" -> comment))).flatMap(_.value("toxic"))
+    toxicity.run("comment" -> comment).flatMap(_.value("toxic"))
 
   // ── Snippet 2 (lines 56–61) ─ Example A: Sentiment Classification ─────
   // Python:
@@ -68,9 +69,7 @@ object Signatures {
   val classifySentiment: Predict = Predict(sentimentSignature)
 
   def callSentiment(sentence: String)(using RuntimeContext): Either[DspyError, Any] =
-    classifySentiment
-      .run(ProgramCall(inputs = Map("sentence" -> sentence)))
-      .flatMap(_.value("sentiment"))
+    classifySentiment.run("sentence" -> sentence).flatMap(_.value("sentiment"))
 
   // ── Snippet 3 (lines 69–77) ─ Example B: Summarization (ChainOfThought) ─
   // Python:
@@ -87,7 +86,7 @@ object Signatures {
   val summarize: ChainOfThought = ChainOfThought(summarizeSignature)
 
   def callSummarize(document: String)(using RuntimeContext): Either[DspyError, Any] =
-    summarize.run(ProgramCall(inputs = Map("document" -> document))).flatMap(_.value("summary"))
+    summarize.run("document" -> document).flatMap(_.value("summary"))
 
   // ── Snippet 4 (lines 87–89) ─ inspect the reasoning field ─────────────
   // Python:
@@ -97,14 +96,12 @@ object Signatures {
   // position 0 of the augmented signature, so the resulting Prediction exposes
   // both `reasoning` and `summary`.
   def callSummarizeWithReasoning(document: String)(using RuntimeContext): Either[DspyError, (Any, Any)] =
-    summarize
-      .run(ProgramCall(inputs = Map("document" -> document)))
-      .flatMap { p =>
-        for
-          reasoning <- p.value("reasoning")
-          summary <- p.value("summary")
-        yield (reasoning, summary)
-      }
+    summarize.run("document" -> document).flatMap { p =>
+      for
+        reasoning <- p.value("reasoning")
+        summary <- p.value("summary")
+      yield (reasoning, summary)
+    }
 
   // ── Snippet 5 (lines 107–119) ─ Example C: class-based Classification ──
   // Python:

@@ -20,7 +20,16 @@ trait ProgramRuntime:
   def resolveModel(using RuntimeContext): Either[DspyError, LanguageModel]
   def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter]
 
-trait PredictProgram extends Module[ProgramCall, Prediction]
+trait PredictProgram extends Module[ProgramCall, Prediction]:
+  /** Convenience overload of `run` so call sites can write:
+    *
+    *   predict.run("comment" -> comment, "lang" -> "en")
+    *
+    * instead of `run(ProgramCall(inputs = Map(...)))`. The inherited
+    * `run(input: ProgramCall)` remains available when `config` or
+    * `traceEnabled` need to be customized. */
+  def run(inputs: (String, Any)*)(using RuntimeContext): Either[DspyError, Prediction] =
+    run(ProgramCall(inputs = inputs.toMap))
 
 trait ToolFunction:
   def name: String
