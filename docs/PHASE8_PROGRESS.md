@@ -54,7 +54,7 @@ Phase 8 focuses on streaming runtime parity.
 
 ## Remaining for Phase 8
 
-See `/Users/jpablo/proyectos/experimentos/dspy4s/STREAMING_POSTPONED.md` for the full deferred backlog:
+See `STREAMING_POSTPONED.md` for the full deferred backlog:
 - Per-field `StreamListener` with adapter-specific chunk state machines (Chat/JSON/XML)
 - Real LM provider streaming client (OpenAI SSE etc.)
 - Structured-concurrency streaming (fs2 / ZIO)
