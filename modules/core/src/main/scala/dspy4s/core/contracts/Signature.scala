@@ -180,6 +180,9 @@ trait Signature:
   final def equalsByStructure(other: Signature): Boolean =
     instructions == other.instructions && fields == other.fields
 
+  final def withInstructions(text: String): Signature =
+    if text.isEmpty then this else withInstructions(Some(text))
+
   final def dumpState: Map[String, Any] =
     Map(
       "name" -> name,
@@ -196,6 +199,18 @@ trait Signature:
         )
       }
     )
+
+/** Companion sugar so call sites can write:
+  *
+  *   Signature("comment -> toxic: bool", instructions = "...")
+  *
+  * instead of `SignatureDsl.parse(...).map(_.withInstructions(Some(...)))`.
+  * Returns `Either[DspyError, Signature]` so parse errors stay strongly typed. */
+object Signature:
+  def apply(dsl: String, instructions: String = ""): Either[DspyError, Signature] =
+    dspy4s.core.signatures.SignatureDsl
+      .parse(dsl)
+      .map(_.withInstructions(instructions))
 
 final case class SignatureSpec(
     name: String,

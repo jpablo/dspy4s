@@ -7,10 +7,14 @@
  *
  * Notes on porting:
  *   - In dspy4s, `dspy.Signature(...)` is built either from the inline DSL
- *     (`SignatureDsl.parse("inputs -> outputs")`) or constructed explicitly
- *     via `SignatureDsl.create(name, inputFields, outputFields, instructions)`.
+ *     via `Signature("inputs -> outputs", instructions = "...")` or
+ *     constructed explicitly via `SignatureDsl.create(name, inputFields,
+ *     outputFields, instructions)` for class-based signatures.
  *   - There is no metaclass-driven `class X(dspy.Signature)` form — class-based
  *     signatures port to `SignatureDsl.create` with `FieldSpec` entries.
+ *   - `Signature.apply` returns `Either[DspyError, Signature]` so parse errors
+ *     stay strongly typed; bind via for-comprehension or `.toOption.get` at
+ *     declarative call sites.
  *   - Programs are invoked with `program.run(ProgramCall(inputs = Map(...)))`
  *     and return `Either[DspyError, Prediction]`.
  *   - The `// Python:` blocks below preserve the original snippets verbatim
@@ -42,13 +46,10 @@ object Signatures {
   // | comment = "you are beautiful."
   // | toxicity(comment=comment).toxic
   val toxicitySignature: Signature =
-    SignatureDsl
-      .parse("comment -> toxic: bool")
-      .toOption
-      .get
-      .withInstructions(Some(
-        "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
-      ))
+    Signature(
+      "comment -> toxic: bool",
+      instructions = "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
+    ).toOption.get
 
   val toxicity: Predict = Predict(toxicitySignature)
 
@@ -62,7 +63,7 @@ object Signatures {
   // | classify = dspy.Predict('sentence -> sentiment: bool')  # we'll see an example with Literal[] later
   // | classify(sentence=sentence).sentiment
   val sentimentSignature: Signature =
-    SignatureDsl.parse("sentence -> sentiment: bool").toOption.get
+    Signature("sentence -> sentiment: bool").toOption.get
 
   val classifySentiment: Predict = Predict(sentimentSignature)
 
@@ -81,7 +82,7 @@ object Signatures {
   // |
   // | print(response.summary)
   val summarizeSignature: Signature =
-    SignatureDsl.parse("document -> summary").toOption.get
+    Signature("document -> summary").toOption.get
 
   val summarize: ChainOfThought = ChainOfThought(summarizeSignature)
 
@@ -242,8 +243,8 @@ object Signatures {
   // the meaning is supplied by the adapter that knows how to render/parse
   // values of that shape.
   val customTypeSignature: Signature =
-    SignatureDsl.parse("query: str -> result: QueryResult").toOption.get
+    Signature("query: str -> result: QueryResult").toOption.get
 
   val nestedCustomTypeSignature: Signature =
-    SignatureDsl.parse("query: MyContainer.Query -> score: MyContainer.Score").toOption.get
+    Signature("query: MyContainer.Query -> score: MyContainer.Score").toOption.get
 }
