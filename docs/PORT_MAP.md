@@ -17,7 +17,7 @@ dspy4s consolidates and renames Python's top-level packages. The rationale colum
 | Python `dspy/` | dspy4s `modules/` | Rationale |
 |---|---|---|
 | `clients` | `lm` | Self-describing: it's the LM module. "clients" is a generic Python idiom and conflicts with the conceptual sense of an HTTP/user client. |
-| `predict` | `programs` | The module holds composites (`ChainOfThought`, `ReAct`, `BestOfN`, `Refine`, `Parallel`), not just predict primitives. Also avoids the name collision with the `Predict` class itself. |
+| `predict` | `programs` | The module holds composites (`ChainOfThought`, `ReAct`, `BestOfN`, `Refine`, `Parallel`, `MultiChainComparison`) and the `Aggregation.majority` utility, not just predict primitives. Also avoids the name collision with the `Predict` class itself. |
 | `teleprompt` | `optimize` | `teleprompt` is jargon coined by DSPy; `optimize` is what the code actually does. |
 | `evaluate` | `evaluate` | 1:1. (Was briefly `eval` during scaffolding; renamed back in commit [`f5d9e12`](#) to align with Python.) |
 | `primitives` + `signatures` | `core` | Merged: the Python split is largely historical (signatures grew out of primitives). dspy4s collapses them into one home for shared ADTs. |
@@ -43,6 +43,30 @@ Only non-obvious renames are listed. A class with the same name in both projects
 | `dspy.streaming.StreamResponse` | `dspy4s.streaming.contracts.TokenEvent` | dspy4s's `StreamEvent` ADT splits Python's `StreamResponse` into typed `TokenEvent` / `StatusEvent` / `PredictionEvent` / `ErrorEvent` sealed cases. |
 | `dspy.streaming.StatusMessage` | `dspy4s.streaming.contracts.StatusEvent` | Same ADT split as above. |
 | `EvalApi` (early scaffolding) | `EvaluateApi` | Module rename follow-through ([`f5d9e12`](#)). |
+
+---
+
+## 2a. `programs/` per-file port status (vs Python `predict/`)
+
+Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
+
+| Python file | dspy4s | Notes |
+|---|---|---|
+| `predict.py` | `Predict.scala` | ✅ ported |
+| `chain_of_thought.py` | `ChainOfThought.scala` | ✅ ported |
+| `react.py` | `ReAct.scala` | ✅ ported |
+| `best_of_n.py` | `BestOfN.scala` | ✅ ported |
+| `refine.py` | `Refine.scala` | ✅ ported |
+| `parallel.py` | `Parallel.scala` | ✅ ported |
+| `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
+| `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported. Run via `runWithAttempts(call, attempts)` rather than Python's `__call__(attempts, **inputs)` shape — the explicit method takes the attempts off the kwargs path. |
+| `parameter.py` | (folded into `core`) | `Parameter` trait lives in `dspy4s.core.contracts.Module`. |
+| `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
+| `knn.py` | — | Deferred — depends on retrievers / embedders, neither of which is ported. |
+| `code_act.py` | — | Deferred — depends on a Python interpreter primitive. No clean Scala analog. |
+| `program_of_thought.py` | — | Deferred — same as `code_act`, generates Python code as the reasoning step. |
+| `rlm.py` | — | Deferred — the "Recursive Language Model" uses `CodeInterpreter` + `PythonInterpreter`. Same blocker as `code_act` / `program_of_thought`. |
+| `avatar/` | — | Deferred — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat. Separate session. |
 
 ---
 

@@ -103,10 +103,11 @@ trait Signature:
       Right(withFields(updatedFields))
 
   final def prepend(field: FieldSpec): Signature =
-    val (inputs, outputs) = fields.partition(_.role == field.role)
+    val sameRole = fields.filter(_.role == field.role)
+    val otherRole = fields.filterNot(_.role == field.role)
     field.role match
-      case FieldRole.Input  => withFields((field +: inputs) ++ outputs)
-      case FieldRole.Output => withFields(inputs ++ (field +: outputs))
+      case FieldRole.Input  => withFields((field +: sameRole) ++ otherRole)
+      case FieldRole.Output => withFields(otherRole ++ (field +: sameRole))
 
   final def delete(fieldName: String): Signature = withFields(fields.filterNot(_.name == fieldName))
 
