@@ -131,11 +131,11 @@ class StreamingLiveSuite extends FunSuite:
       assertEquals(tokens.head.fieldName, "answer", s"first token: ${tokens.head}")
 
       // Last chunk: from predict2, field "judgement".
-      // Behavioral delta from Python parity: the Python test checks tokens[-2]
-      // because its ChatAdapter `[[ ## completed ## ]]` marker sometimes adds a
-      // trailing flush chunk; dspy4s's ChatAdapter has no completion marker,
-      // so the field's final content IS the last token — checking `.last` is
-      // equivalent to Python's `[-2]` for our framing.
+      // Residual chunk-emission delta from Python: Python's stream listener
+      // emits a final synthetic chunk when it sees `[[ ## completed ## ]]`,
+      // so the Python test uses tokens[-2] to skip it. dspy4s closes the
+      // field on the marker without emitting a sentinel chunk, so tokens.last
+      // IS the field's final content. Framing parity itself is preserved.
       assertEquals(tokens.last.predictName, "predict2", s"last token: ${tokens.last}")
       assertEquals(tokens.last.fieldName, "judgement", s"last token: ${tokens.last}")
     }

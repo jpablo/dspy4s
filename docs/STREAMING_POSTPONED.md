@@ -84,32 +84,30 @@ This document tracks streaming features deferred from the v1 implementation to l
 - `AdapterStreamingState` trait + `FieldChunk` data class added to
   `adapters.contracts`. Adapters implement `Adapter.streamingState(signature)`
   to opt in.
-- `ChatStreamingState` implements line-based field detection for
-  `ChatAdapter`'s `prefix: value` framing. Buffers held-back partial lines so
-  a label that arrives across multiple tokens (e.g. `"ans"` then `"wer:"`)
-  is never leaked into the previous field's stream. `finish()` flushes
-  remaining buffer and marks the last chunk `isLast = true`.
+- `ChatStreamingState` detects `[[ ## field_name ## ]]` markers in the
+  streamed text and routes content between adjacent markers to per-field
+  chunks. Holds back the trailing window that could still grow into a
+  marker so partial markers across `receive()` boundaries are never leaked.
+  `finish()` flushes the active field and marks the last chunk
+  `isLast = true`. The `[[ ## completed ## ]]` sentinel closes the active
+  field without emitting a sentinel chunk.
 - `StreamListener` redefined from a placeholder trait to a configuration
   case class with `signatureFieldName` and optional `predictName`.
 - `StreamingLanguageModelWrapper` builds a fresh state per `call()`,
   drives it with each chunk's text, and emits one `TokenEvent` per
-  `FieldChunk`. When no state is supplied it preserves the previous
-  raw-token behavior.
-- `Streamify` resolves the active `Adapter` from settings and extracts
-  the signature from the program (only `Predict` for now; compound programs
-  fall back to raw-token emission until Slice D).
-- 14 tests across `ChatStreamingStateSuite` (9) and `StreamListenerSuite` (5).
+  `FieldChunk`. When no state is supplied it preserves raw-token behavior.
+- `Streamify` resolves the active `Adapter` from settings; per-LM-call
+  signature routing happens inside the wrapper via
+  `ActivePredictContext` (see v1.6).
 
-### Notes / behavioral deltas from Python parity
+### Framing parity update (was a delta in earlier drafts)
 
-- dspy4s `ChatAdapter` uses `prefix: value` line framing, not Python's
-  `[[ ## field ## ]]`. The state machine is correspondingly simpler. The
-  consequence: if the model emits text whose lines start with an unknown
-  label (e.g. `extra:`), the state machine treats it as continuation of
-  the most recently entered field, since it has no way to distinguish
-  "stray text" from "value with a colon in it".
-- Multi-predictor programs (`ChainOfThought`, `ReAct`) still fall through
-  to raw-token mode — Slice D will route per-predict.
+The original Slice A used `prefix: value` line framing and was documented
+as a deliberate behavioral delta. That delta was closed when we rewrote
+`ChatAdapter` + `ChatStreamingState` to use the full `[[ ## field ## ]]`
++ `[[ ## completed ## ]]` framing — see [`PORT_MAP.md`](PORT_MAP.md) §4
+for the small residual chunk-emission delta that remains
+(no sentinel chunk on `completed`).
 
 ## Shipped in v1.1 — Tool-call delta accumulation
 

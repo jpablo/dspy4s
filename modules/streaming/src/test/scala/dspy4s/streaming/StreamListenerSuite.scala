@@ -52,11 +52,11 @@ class StreamListenerSuite extends FunSuite:
 
   test("chat-adapter listener routes streamed text to the targeted field") {
     val chunks = Vector(
-      LmChunk(text = "reasoning: "),
+      LmChunk(text = "[[ ## reasoning ## ]]\n"),
       LmChunk(text = "think step "),
       LmChunk(text = "by step\n"),
-      LmChunk(text = "answer: 42"),
-      LmChunk(finishReason = Some("stop"))
+      LmChunk(text = "[[ ## answer ## ]]\n42\n"),
+      LmChunk(text = "[[ ## completed ## ]]", finishReason = Some("stop"))
     )
     val lm = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
@@ -87,8 +87,8 @@ class StreamListenerSuite extends FunSuite:
 
   test("multiple listeners each collect tokens for their declared field") {
     val chunks = Vector(
-      LmChunk(text = "reasoning: thinking"),
-      LmChunk(text = "\nanswer: ok", finishReason = Some("stop"))
+      LmChunk(text = "[[ ## reasoning ## ]]\nthinking"),
+      LmChunk(text = "\n[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     )
     val lm = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
@@ -120,7 +120,10 @@ class StreamListenerSuite extends FunSuite:
 
   test("listener subscribed to a single field filters out the others") {
     val chunks = Vector(
-      LmChunk(text = "reasoning: thinking\nanswer: ok", finishReason = Some("stop"))
+      LmChunk(
+        text = "[[ ## reasoning ## ]]\nthinking\n[[ ## answer ## ]]\nok\n[[ ## completed ## ]]",
+        finishReason = Some("stop")
+      )
     )
     val lm = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
@@ -148,7 +151,10 @@ class StreamListenerSuite extends FunSuite:
 
   test("when no listeners are provided, all field chunks are emitted") {
     val chunks = Vector(
-      LmChunk(text = "reasoning: r\nanswer: a", finishReason = Some("stop"))
+      LmChunk(
+        text = "[[ ## reasoning ## ]]\nr\n[[ ## answer ## ]]\na\n[[ ## completed ## ]]",
+        finishReason = Some("stop")
+      )
     )
     val lm = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
@@ -233,7 +239,10 @@ class StreamListenerSuite extends FunSuite:
 
   test("ChainOfThought: listener receives the augmented signature's fields") {
     val chunks = Vector(
-      LmChunk(text = "Reasoning: walked through it\nanswer: 42", finishReason = Some("stop"))
+      LmChunk(
+        text = "[[ ## reasoning ## ]]\nwalked through it\n[[ ## answer ## ]]\n42\n[[ ## completed ## ]]",
+        finishReason = Some("stop")
+      )
     )
     val lm = new ScriptedLm(chunks)
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
@@ -269,7 +278,10 @@ class StreamListenerSuite extends FunSuite:
 
   test("ChainOfThought: listener filtering by predictName works against the inner Predict's name") {
     val chunks = Vector(
-      LmChunk(text = "Reasoning: r\nanswer: a", finishReason = Some("stop"))
+      LmChunk(
+        text = "[[ ## reasoning ## ]]\nr\n[[ ## answer ## ]]\na\n[[ ## completed ## ]]",
+        finishReason = Some("stop")
+      )
     )
     val lm = new ScriptedLm(chunks)
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
@@ -299,10 +311,12 @@ class StreamListenerSuite extends FunSuite:
     // Single-iteration scenario: the model emits all three signature fields
     // with non-empty values, so ReAct's `hasAnswer` returns true after the
     // first call and we exercise the signature/predictName resolution path
-    // through the ReAct wrapper. Prefixes follow ChatAdapter's inferred
-    // Title-Case form (what the adapter prompts the model to produce).
+    // through the ReAct wrapper.
     val chunks = Vector(
-      LmChunk(text = "Answer: 42\nTool Name: noop\nTool Args: {}", finishReason = Some("stop"))
+      LmChunk(
+        text = "[[ ## answer ## ]]\n42\n[[ ## tool_name ## ]]\nnoop\n[[ ## tool_args ## ]]\n{}\n[[ ## completed ## ]]",
+        finishReason = Some("stop")
+      )
     )
     val lm = new ScriptedLm(chunks)
     val noopTool = new ToolFunction:
@@ -342,8 +356,8 @@ class StreamListenerSuite extends FunSuite:
     // Each LM call must use the active Predict's signature to parse fields,
     // and TokenEvents must carry that Predict's user-given name.
     val perCallOutputs = Vector(
-      "Answer: paris",
-      "Judgement: confident"
+      "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
+      "[[ ## judgement ## ]]\nconfident\n[[ ## completed ## ]]"
     )
     val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
     val multiCallLm = new StreamingLanguageModel:
@@ -405,7 +419,9 @@ class StreamListenerSuite extends FunSuite:
   }
 
   test("listener with non-matching predictName is filtered out") {
-    val chunks = Vector(LmChunk(text = "answer: 1", finishReason = Some("stop")))
+    val chunks = Vector(
+      LmChunk(text = "[[ ## answer ## ]]\n1\n[[ ## completed ## ]]", finishReason = Some("stop"))
+    )
     val lm = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> answer").toOption.get
 
