@@ -3,6 +3,9 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
+import dspy4s.programs.ChainOfThought
+import dspy4s.programs.ReAct
+import dspy4s.programs.contracts.ToolFunction
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
@@ -222,6 +225,109 @@ class StreamListenerSuite extends FunSuite:
       val tokens = events.collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.fieldName).toSet, Set("answer"))
       assertEquals(tokens.map(_.chunk).mkString, "42")
+    }
+  }
+
+  test("ChainOfThought: listener receives the augmented signature's fields") {
+    val chunks = Vector(
+      LmChunk(text = "Reasoning: walked through it\nanswer: 42", finishReason = Some("stop"))
+    )
+    val lm = new ScriptedLm(chunks)
+    val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val program = ChainOfThought(baseSignature = baseSignature)
+      val stream = Streamify.streamify(
+        program = program,
+        streamListeners = Vector(
+          StreamListener("reasoning"),
+          StreamListener("answer")
+        )
+      )(Map("q" -> "x"))
+
+      val events = collectStream(stream)
+      val tokens = events.collect { case e: TokenEvent => e }
+      val grouped = tokens.groupMapReduce(_.fieldName)(_.chunk)(_ + _)
+      assertEquals(grouped.get("reasoning"), Some("walked through it"))
+      assertEquals(grouped.get("answer"), Some("42"))
+      // predictName must be the outer program's name, not the inner Predict.
+      assertEquals(tokens.map(_.predictName).toSet, Set("chain_of_thought"))
+    }
+  }
+
+  test("ChainOfThought: listener filtering by predictName works against the outer module name") {
+    val chunks = Vector(
+      LmChunk(text = "Reasoning: r\nanswer: a", finishReason = Some("stop"))
+    )
+    val lm = new ScriptedLm(chunks)
+    val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = ChainOfThought(baseSignature = baseSignature),
+        streamListeners = Vector(
+          StreamListener("answer", predictName = Some("chain_of_thought"))
+        )
+      )(Map("q" -> "x"))
+
+      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      assertEquals(tokens.map(_.chunk).mkString, "a")
+    }
+  }
+
+  test("ReAct: routes streamed tokens through the inner predict's signature") {
+    // Single-iteration scenario: the model emits all three signature fields
+    // with non-empty values, so ReAct's `hasAnswer` returns true after the
+    // first call and we exercise the signature/predictName resolution path
+    // through the ReAct wrapper. Prefixes follow ChatAdapter's inferred
+    // Title-Case form (what the adapter prompts the model to produce).
+    val chunks = Vector(
+      LmChunk(text = "Answer: 42\nTool Name: noop\nTool Args: {}", finishReason = Some("stop"))
+    )
+    val lm = new ScriptedLm(chunks)
+    val noopTool = new ToolFunction:
+      override val name: String = "noop"
+      override def invoke(args: Map[String, Any])(using RuntimeContext) =
+        Right("ok")
+
+    val signature = SignatureDsl.parse("q -> answer, tool_name, tool_args").toOption.get
+    val innerPredict = Predict(signature = signature)
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> lm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val react = ReAct(module = innerPredict, tools = Vector(noopTool), maxIterations = 2)
+      val stream = Streamify.streamify(
+        program = react,
+        streamListeners = Vector(StreamListener("answer"))
+      )(Map("q" -> "x"))
+
+      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      assertEquals(tokens.map(_.chunk).mkString, "42")
+      // predictName comes from the outer ReAct wrapper, not the inner Predict.
+      assertEquals(tokens.map(_.predictName).toSet, Set("react"))
     }
   }
 

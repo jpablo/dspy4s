@@ -13,7 +13,9 @@ import dspy4s.core.contracts.SettingsData
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
+import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict
+import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
@@ -99,14 +101,24 @@ object Streamify:
 
   /** Best-effort extraction of the signature and predict name from a program.
     *
-    * Slice A only handles the [[Predict]] case — single-predictor programs.
-    * Multi-predictor programs (e.g. `ChainOfThought`, `ReAct`) fall back to
-    * `(None, "")`, which disables the adapter state machine and reverts to
-    * raw-token emission. Routing through compound programs is Slice D work.
+    * Pattern-matches the concrete program types dspy4s knows about today.
+    * Each of [[Predict]], [[ChainOfThought]], and [[ReAct]] wraps a single
+    * inner signature — they don't compose distinct predictors with different
+    * signatures (the way some Python DSPy programs do). When that becomes a
+    * thing, this resolver will need to grow into a per-LM-call routing
+    * mechanism.
+    *
+    * The returned `predictName` is the outermost program's `moduleName`, so
+    * listeners filter against the user-visible program (`"chain_of_thought"`,
+    * `"react"`, `"predict"`), not the inner Predict.
     */
   private def signatureFor(
       program: Module[ProgramCall, Prediction]
   ): (Option[Signature], String) =
     program match
-      case predict: Predict => (Some(predict.signature), predict.moduleName)
-      case _                => (None, "")
+      case predict: Predict       => (Some(predict.signature), predict.moduleName)
+      case cot: ChainOfThought    => (cot.signature.toOption, cot.moduleName)
+      case react: ReAct           =>
+        val (sig, _) = signatureFor(react.module)
+        (sig, react.moduleName)
+      case _                      => (None, "")

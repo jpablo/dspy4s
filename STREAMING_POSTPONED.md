@@ -14,6 +14,38 @@ This document tracks streaming features deferred from the v1 implementation to l
 - `StatusEvent`, `PredictionEvent`, `ErrorEvent` emitted from the stream
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
+## Shipped in v1.5 — Compound-program routing (Slice D)
+
+- `Streamify.signatureFor` now pattern-matches `ChainOfThought` and `ReAct`
+  in addition to `Predict`. The resolver returns the **outer** program's
+  `moduleName` as the listener `predictName`, so listeners filter against
+  the user-visible program (`"chain_of_thought"`, `"react"`, `"predict"`)
+  rather than the inner Predict's name.
+- `ChainOfThought` exposes its augmented signature (`reasoning` field
+  prepended to the base outputs) via `.signature.toOption`, so listeners
+  on the reasoning field receive its tokens.
+- `ReAct` recursively delegates to its inner `module`'s signature. Every
+  iteration's LM call builds a fresh adapter state, so listeners fire on
+  each iteration's matched chunks (equivalent to Python DSPy's
+  `allow_reuse=True`).
+- 3 new tests in `StreamListenerSuite`: ChainOfThought + listener,
+  ChainOfThought + predictName filter, ReAct routing through inner
+  Predict.
+
+### Notes / behavioral deltas from Python parity
+
+- dspy4s defaults to `allow_reuse = true` semantics (every iteration's
+  matched chunks fire). Python defaults to `allow_reuse = false` (only
+  the first invocation fires). An opt-in `allowReuse: Boolean = true`
+  field on `StreamListener` would close the gap; deferred until a
+  concrete use case appears.
+- Multi-predictor programs with *different* signatures per inner predict
+  aren't in dspy4s today (none of `Predict` / `ChainOfThought` / `ReAct`
+  compose distinct predictors with distinct signatures). When such a
+  program lands, `signatureFor` will need to switch to per-LM-call
+  signature routing — see the matching note that used to live in this
+  doc and is now resolved for the current program set.
+
 ## Shipped in v1.4 — XML adapter streaming state (Slice C)
 
 - `XmlStreamingState` parses streamed XML output of the form
@@ -93,12 +125,21 @@ This document tracks streaming features deferred from the v1 implementation to l
 - 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
   `StreamingToolCallSuite`
 
-## Postponed — Per-field `StreamListener`: multi-predictor (Slice D)
+## Postponed — opt-in `allowReuse=false` parity
 
-Slices A (ChatAdapter), B (JSONAdapter), and C (XMLAdapter) shipped — see
-the v1.2 / v1.3 / v1.4 sections above. Remaining:
+Slices A–D shipped. The only piece of Python `StreamListener` parity that
+remains is the opt-out:
 
-- **Multi-predictor routing + `allow_reuse` + `finalize` edge cases (Slice D)**:
+- Add `allowReuse: Boolean = true` to `StreamListener`. When `false`,
+  the listener fires only on the **first** LM call within a Streamify
+  invocation and is silent on subsequent calls. Implementation: track a
+  mutable per-listener "has fired" flag inside
+  `StreamingLanguageModelWrapper` (since the wrapper persists across the
+  multiple `call()`s a compound program issues, while the adapter state
+  is rebuilt per call). Deferred until a concrete use case asks for it —
+  the default-on behavior matches what most consumers want.
+
+Original Python design notes preserved below for reference:
   - Add `predict_id` to `LmOutput` / `LmResponse` so the streamify wrapper can
     route chunks to the correct listener when a program contains more than one
     predictor (`ChainOfThought`, `ReAct`).
