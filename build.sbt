@@ -43,7 +43,8 @@ lazy val lm = (project in file("modules/lm"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.0.2"
+      "com.lihaoyi" %% "ujson" % "4.0.2",
+      "io.github.cdimascio" % "dotenv-java" % "3.2.0" % Test
     ),
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"

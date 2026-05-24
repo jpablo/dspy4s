@@ -7,13 +7,16 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import io.github.cdimascio.dotenv.Dotenv
+import java.io.File
 import munit.FunSuite
 
 /**
  * Integration tests that hit the real OpenAI chat-completions endpoint.
  *
  * Run conditions:
- *   - Set OPENAI_API_KEY in the environment (or in `.env`, loaded by sbt-dotenv).
+ *   - Set OPENAI_API_KEY in the environment, in JVM system properties, or in a
+ *     `.env` file at the project root (resolved by walking up from the test cwd).
  *     If the variable is missing or empty these tests are marked "ignored" via
  *     MUnit's `assume(...)`, so `sbt test` still succeeds without credentials.
  *   - Optionally set OPENAI_BASE_URL to point at Azure OpenAI, OpenRouter,
@@ -24,18 +27,28 @@ import munit.FunSuite
  */
 class OpenAiLiveSuite extends FunSuite:
 
-  private val apiKey: Option[String] =
-    sys.env.get("OPENAI_API_KEY").orElse(sys.props.get("OPENAI_API_KEY")).filter(_.nonEmpty)
-  private val baseUrl: Option[String] =
-    sys.env.get("OPENAI_BASE_URL").orElse(sys.props.get("OPENAI_BASE_URL")).filter(_.nonEmpty)
-  private val model: String =
-    sys.env.getOrElse("OPENAI_LIVE_MODEL", sys.props.getOrElse("OPENAI_LIVE_MODEL", "gpt-4o-mini"))
+  private val dotenv: Dotenv =
+    val dir = Iterator
+      .iterate(new File(".").getAbsoluteFile)(_.getParentFile)
+      .takeWhile(_ != null)
+      .take(8)
+      .find(d => new File(d, ".env").isFile)
+      .map(_.getAbsolutePath)
+      .getOrElse(".")
+    Dotenv.configure().directory(dir).ignoreIfMissing().ignoreIfMalformed().load()
+
+  private def lookup(key: String): Option[String] =
+    sys.env.get(key)
+      .orElse(sys.props.get(key))
+      .orElse(Option(dotenv.get(key)))
+      .filter(_.nonEmpty)
+
+  private val apiKey: Option[String] = lookup("OPENAI_API_KEY")
+  private val baseUrl: Option[String] = lookup("OPENAI_BASE_URL")
+  private val model: String = lookup("OPENAI_LIVE_MODEL").getOrElse("gpt-4o-mini")
 
   private def hasOptIn: Boolean =
-    val env = sys.env.getOrElse("OPENAI_LIVE_ENABLED", "")
-    val prop = sys.props.getOrElse("OPENAI_LIVE_ENABLED", "")
-    (env.nonEmpty && env != "0" && env != "false") ||
-    (prop.nonEmpty && prop != "0" && prop != "false")
+    lookup("OPENAI_LIVE_ENABLED").exists(v => v != "0" && v != "false")
 
   private def requireLive(): Unit =
     assume(
