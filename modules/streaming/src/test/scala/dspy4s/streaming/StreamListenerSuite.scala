@@ -10,6 +10,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Prediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LmChunk
@@ -19,6 +20,8 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.Predict
+import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
@@ -258,12 +261,13 @@ class StreamListenerSuite extends FunSuite:
       val grouped = tokens.groupMapReduce(_.fieldName)(_.chunk)(_ + _)
       assertEquals(grouped.get("reasoning"), Some("walked through it"))
       assertEquals(grouped.get("answer"), Some("42"))
-      // predictName must be the outer program's name, not the inner Predict.
-      assertEquals(tokens.map(_.predictName).toSet, Set("chain_of_thought"))
+      // predictName is the innermost active Predict's name (matches Python
+      // DSPy parity). ChainOfThought delegates to a default-named inner Predict.
+      assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
     }
   }
 
-  test("ChainOfThought: listener filtering by predictName works against the outer module name") {
+  test("ChainOfThought: listener filtering by predictName works against the inner Predict's name") {
     val chunks = Vector(
       LmChunk(text = "Reasoning: r\nanswer: a", finishReason = Some("stop"))
     )
@@ -282,7 +286,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = ChainOfThought(baseSignature = baseSignature),
         streamListeners = Vector(
-          StreamListener("answer", predictName = Some("chain_of_thought"))
+          StreamListener("answer", predictName = Some("predict"))
         )
       )(Map("q" -> "x"))
 
@@ -326,8 +330,77 @@ class StreamListenerSuite extends FunSuite:
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.chunk).mkString, "42")
-      // predictName comes from the outer ReAct wrapper, not the inner Predict.
-      assertEquals(tokens.map(_.predictName).toSet, Set("react"))
+      // predictName is the innermost active Predict's name. ReAct's inner
+      // module is a default-named Predict, so tokens surface as "predict".
+      assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
+    }
+  }
+
+  test("multi-Predict composite: per-LM-call routing picks each Predict's own signature") {
+    // Mirrors Python's tests/streaming/test_streaming.py::test_stream_listener_chat_adapter:
+    // a user-defined Module composing two Predicts with different signatures.
+    // Each LM call must use the active Predict's signature to parse fields,
+    // and TokenEvents must carry that Predict's user-given name.
+    val perCallOutputs = Vector(
+      "Answer: paris",
+      "Judgement: confident"
+    )
+    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val multiCallLm = new StreamingLanguageModel:
+      override val id: String = "multi-scripted"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
+      override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
+
+    val sig1 = SignatureDsl.parse("question -> answer").toOption.get
+    val sig2 = SignatureDsl.parse("question, answer -> judgement").toOption.get
+
+    val composite = new PredictProgram:
+      override val moduleName: String = "my_program"
+      private val predict1 = Predict(signature = sig1, name = Some("predict1"))
+      private val predict2 = Predict(signature = sig2, name = Some("predict2"))
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+        for
+          answer    <- predict1.run(input)
+          judgement <- predict2.run(input.copy(
+                          inputs = input.inputs.updated("answer", answer.values("answer"))
+                        ))
+        yield judgement
+
+    RuntimeEnvironment.withSettings(
+      SettingsData(
+        Map(
+          SettingKeys.languageModel.name -> multiCallLm,
+          SettingKeys.adapter.name -> ChatAdapter()
+        )
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val stream = Streamify.streamify(
+        program = composite,
+        streamListeners = Vector(
+          StreamListener("answer"),
+          StreamListener("judgement")
+        )
+      )(Map("question" -> "what is the capital of france"))
+
+      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      // Token grouping per Predict.
+      val perPredict = tokens.groupMap(_.predictName)(t => t.fieldName -> t.chunk)
+      // Predict1 streamed the `answer` field.
+      assertEquals(
+        perPredict.get("predict1").map(_.toMap),
+        Some(Map("answer" -> "paris"))
+      )
+      // Predict2 streamed the `judgement` field — under its own different signature.
+      assertEquals(
+        perPredict.get("predict2").map(_.toMap),
+        Some(Map("judgement" -> "confident"))
+      )
     }
   }
 

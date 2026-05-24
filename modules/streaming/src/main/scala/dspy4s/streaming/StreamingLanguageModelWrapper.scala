@@ -1,10 +1,12 @@
 package dspy4s.streaming
 
+import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -25,23 +27,25 @@ import scala.util.control.NonFatal
   * into a [[StreamingQueue]] while still returning a fully assembled
   * [[LmResponse]] to non-streaming callers.
   *
-  * Two emission modes:
+  * Per-call signature routing: on each `call()` / `stream()` the wrapper reads
+  * the innermost [[ActivePredictContext]] entry. That entry carries the active
+  * predictor's name (used as `TokenEvent.predictName`) and signature (used to
+  * build a fresh [[AdapterStreamingState]] from the configured adapter). This
+  * lets a single Streamify wrap a program that internally invokes multiple
+  * `Predict`s with different signatures — each LM call routes to per-field
+  * chunks under the correct signature.
   *
-  *   - **Raw mode** (no adapter state supplied): every non-empty text chunk
-  *     becomes a [[TokenEvent]] with `fieldName = defaultFieldName`. Used when
-  *     listeners are not configured.
-  *   - **Field-aware mode** (state factory supplied): each `call()` builds a
-  *     fresh [[AdapterStreamingState]] that parses the streamed text into
-  *     per-field chunks. Emissions are filtered by `listeners` — when
-  *     listeners is empty, all field chunks are emitted; otherwise only those
-  *     matching a listener's `(predictName, fieldName)` are emitted.
+  * When there is no active predict context (e.g. the LM is called outside any
+  * `Predict.execute`, or no adapter is configured), the wrapper falls back to
+  * raw-token emission with an empty `fieldName`.
+  *
+  * Listener filtering: when `listeners` is non-empty, only field chunks whose
+  * `(predictName, fieldName)` match at least one listener are emitted.
   */
 final class StreamingLanguageModelWrapper private (
     delegate: StreamingLanguageModel,
     queue: StreamingQueue[StreamEvent],
-    predictName: String,
-    defaultFieldName: String,
-    stateFactory: () => Option[AdapterStreamingState],
+    adapter: Option[Adapter],
     listeners: Vector[StreamListener]
 ) extends StreamingLanguageModel:
 
@@ -49,19 +53,19 @@ final class StreamingLanguageModelWrapper private (
   override val mode: LmMode = delegate.mode
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    val chunks = delegate.stream(request)
+    val ctx = activeContext()
     val text = new StringBuilder
     var lastUsage: Option[LmUsage] = None
     val toolDeltas = mutable.ArrayBuffer.empty[LmToolCallDelta]
-    val state = stateFactory()
+    val chunks = delegate.stream(request)
     try
       chunks.foreach { chunk =>
-        emit(state, chunk)
+        emit(ctx, chunk)
         text.append(chunk.text)
         chunk.usage.foreach(usage => lastUsage = Some(usage))
         if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
       }
-      flush(state)
+      flush(ctx)
       val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
       Right(
         LmResponse(
@@ -74,61 +78,73 @@ final class StreamingLanguageModelWrapper private (
         Left(RuntimeError("streaming_lm", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
 
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
-    val state = stateFactory()
+    val ctx = activeContext()
     delegate.stream(request).map { chunk =>
-      emit(state, chunk)
+      emit(ctx, chunk)
       chunk
     }
 
-  private def emit(state: Option[AdapterStreamingState], chunk: LmChunk): Unit =
-    state match
+  /** Bundles per-LM-call state. Resolved once at the start of each `call()`
+    * / `stream()` so the same predict context governs every chunk in that
+    * invocation, even if nested context pushes happen meanwhile. */
+  private final case class CallContext(
+      predictName: String,
+      state: Option[AdapterStreamingState]
+  )
+
+  private def activeContext(): CallContext =
+    ActivePredictContext.current match
+      case Some(active) =>
+        val state = adapter.flatMap(_.streamingState(active.signature))
+        CallContext(active.name, state)
+      case None =>
+        CallContext(predictName = "", state = None)
+
+  private def emit(ctx: CallContext, chunk: LmChunk): Unit =
+    ctx.state match
       case Some(s) =>
         if chunk.text.nonEmpty then
-          s.receive(chunk.text).foreach(emitFieldChunk(_, isFinalChunk = chunk.isFinal))
+          s.receive(chunk.text).foreach(emitFieldChunk(ctx, _, isFinalChunk = chunk.isFinal))
       case None =>
-        if chunk.text.nonEmpty && listenerAccepts(defaultFieldName) then
+        if chunk.text.nonEmpty && listenerAccepts(ctx.predictName, "") then
           queue.offer(
             TokenEvent(
-              predictName = predictName,
-              fieldName = defaultFieldName,
+              predictName = ctx.predictName,
+              fieldName = "",
               chunk = chunk.text,
               isLastChunk = chunk.isFinal
             )
           )
 
-  private def flush(state: Option[AdapterStreamingState]): Unit =
-    state.foreach { s =>
-      s.finish().foreach(emitFieldChunk(_, isFinalChunk = true))
+  private def flush(ctx: CallContext): Unit =
+    ctx.state.foreach { s =>
+      s.finish().foreach(emitFieldChunk(ctx, _, isFinalChunk = true))
     }
 
-  private def emitFieldChunk(fc: FieldChunk, isFinalChunk: Boolean): Unit =
-    if listenerAccepts(fc.fieldName) then
+  private def emitFieldChunk(ctx: CallContext, fc: FieldChunk, isFinalChunk: Boolean): Unit =
+    if listenerAccepts(ctx.predictName, fc.fieldName) then
       queue.offer(
         TokenEvent(
-          predictName = predictName,
+          predictName = ctx.predictName,
           fieldName = fc.fieldName,
           chunk = fc.text,
           isLastChunk = fc.isLast || isFinalChunk
         )
       )
 
-  private def listenerAccepts(fieldName: String): Boolean =
+  private def listenerAccepts(predictName: String, fieldName: String): Boolean =
     listeners.isEmpty || listeners.exists(_.matches(predictName, fieldName))
 
 object StreamingLanguageModelWrapper:
   def apply(
       delegate: StreamingLanguageModel,
       queue: StreamingQueue[StreamEvent],
-      predictName: String = "",
-      fieldName: String = "",
-      stateFactory: () => Option[AdapterStreamingState] = () => None,
+      adapter: Option[Adapter] = None,
       listeners: Vector[StreamListener] = Vector.empty
   ): StreamingLanguageModelWrapper =
     new StreamingLanguageModelWrapper(
       delegate = delegate,
       queue = queue,
-      predictName = predictName,
-      defaultFieldName = fieldName,
-      stateFactory = stateFactory,
+      adapter = adapter,
       listeners = listeners
     )

@@ -11,6 +11,7 @@ import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.Signature
+import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
@@ -26,29 +27,32 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
 final case class Predict(
     signature: Signature,
     demos: Vector[Example] = Vector.empty,
+    name: Option[String] = None,
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
-) extends BasePredictProgram(moduleName = "predict"):
+) extends BasePredictProgram(moduleName = name.getOrElse("predict")):
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
-    for
-      model <- runtime.resolveModel
-      adapter <- runtime.resolveAdapter
-      invocation = buildInvocation(call, model)
-      prompt <- CallbackDispatcher.withAdapter(
-        adapterName = adapter.name,
-        inputs = Map("phase" -> "format", "signature" -> signature.name)
-      ) {
-        adapter.format(invocation)
-      }
-      response <- CallbackDispatcher.withLm(
-        modelId = model.id,
-        request = Map("model" -> model.id, "mode" -> model.mode.toString)
-      ) {
-        model.call(invocation.request.copy(messages = prompt.messages))
-      }
-      parsed <- parseOutputs(adapter, response.outputs)
-      prediction <- buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))
-    yield prediction
+    ActivePredictContext.withActive(moduleName, signature) {
+      for
+        model <- runtime.resolveModel
+        adapter <- runtime.resolveAdapter
+        invocation = buildInvocation(call, model)
+        prompt <- CallbackDispatcher.withAdapter(
+          adapterName = adapter.name,
+          inputs = Map("phase" -> "format", "signature" -> signature.name)
+        ) {
+          adapter.format(invocation)
+        }
+        response <- CallbackDispatcher.withLm(
+          modelId = model.id,
+          request = Map("model" -> model.id, "mode" -> model.mode.toString)
+        ) {
+          model.call(invocation.request.copy(messages = prompt.messages))
+        }
+        parsed <- parseOutputs(adapter, response.outputs)
+        prediction <- buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))
+      yield prediction
+    }
 
   private def buildInvocation(call: ProgramCall, model: LanguageModel): AdapterInvocation =
     val inputKeys = signature.inputFields.map(_.name).toSet
