@@ -11,16 +11,19 @@ forcing every typed access to a runtime cast. We propose a **layered
 architecture** that gives users compile-time typed predictions while
 keeping the existing runtime-flexible API intact:
 
-- **Engine layer** — one canonical, explicit typed carrier
-  (`TypedSignature[I, O]` + `TypedPredict` + `TypedPrediction`) built
-  on `Tuple` of `(name, type)` pairs, with match-type lookups for
-  `.value[K]`.
+- **Engine layer** — one canonical typed carrier (`Signature[I, O]` +
+  `TypedPredict` + `TypedPrediction`) that lifts field/type info into
+  the type system.
 - **Surface layers** — multiple ergonomic translators that all compile
   down to the engine: typed builder, named tuples, case-class
   derivation, and (later) an inline macro over the string DSL.
 
-Start by building the engine alone (Phase 1) under a new
-`dspy4s.typed` sub-package; layer surfaces on top once it's settled.
+**Foundation choice (§5):** rather than build the engine from scratch,
+adopt `zio-blocks-schema` (Apache-2.0, NamedTuple-aware `Schema.derived`
+macro, pure `Either`-returning codecs, no ZIO effect leakage). The
+0.0.x churn risk is accepted in exchange for not reimplementing
+primitives. A pure-Scala self-built fallback is documented in §5.3 in
+case adoption hits unexpected friction.
 
 ---
 
@@ -429,7 +432,15 @@ is the shape, not the literal implementation.) This is a small but
 non-trivial addition that the engine must include for the typing
 guarantee to be usable in practice.
 
-### 4.7 The existing untyped surface stays
+### 4.7 The engine sketch above is the *fallback* design
+
+Section 4.2's `TypedSignature[I, O]` + `FieldOf` + `TypedPrediction`
+sketch is preserved as a self-contained design we can fall back on if
+the foundation choice in §5 doesn't pan out. In the recommended path
+(§5.2), most of §4.2 is replaced by `zio-blocks-schema` primitives —
+the surface layout from §4.3 remains the same either way.
+
+### 4.8 The existing untyped surface stays
 
 `Signature.apply(dsl: String, instructions: String = "")` and
 `Predict(sig: Signature)` remain available unchanged. The typed layer
@@ -441,7 +452,148 @@ the macro footprint — but that decision can be deferred.
 
 ---
 
-## 5. Complementary: typed accessor ladder
+## 5. Foundation choice — zio-blocks-schema or self-built
+
+### 5.1 Background
+
+After §4 was drafted, we evaluated [zio-blocks](https://github.com/zio/zio-blocks)
+(currently `0.0.40`, Apache-2.0) as a possible foundation. The `schema`
+module specifically overlaps significantly with what §4 proposes to
+build:
+
+- **NamedTuple is already a first-class derivation target** via
+  `Schema.derived` (their macro handles `type SentimentIn = (sentence:
+  String)` and case classes uniformly).
+- **`Reflect.Record`** provides a runtime mirror with `Term`-level
+  field metadata.
+- **`Codec[Format, A]`** uses pure `Either[SchemaError, A]` decoding —
+  matches our `Either[DspyError, T]` discipline with no ZIO effect
+  leakage.
+- **`schema-toon` is an LLM-optimized text format** that already ships
+  — directly relevant to our ChatAdapter / JsonAdapter work.
+- **`ToStructural` macro** synthesizes refinement types from records
+  → Selectable-style dot-access without us writing it.
+- No transitive ZIO dependencies in `schema`/`chunk`/`maybe`/`scope`/
+  `context`. (`endpoint` and `mux` pull `zio.http` — avoid those.)
+
+The choice is whether to build the typed engine ourselves or adopt
+`zio-blocks-schema` as the underlying type-and-codec substrate.
+
+### 5.2 Option A — Adopt zio-blocks-schema *(recommended)*
+
+**Shape.** Replace `TypedSignature[I, O]` (§4.2) with a thin wrapper
+around two `Schema`s:
+
+```scala
+import zio.blocks.schema.Schema
+
+final case class Signature[I, O](
+  inputSchema:  Schema[I],
+  outputSchema: Schema[O],
+  instructions: Option[String] = None
+)
+
+object Signature:
+  // Surface 1 — named-tuple types (free: Schema.derived handles them)
+  def of[I, O](instructions: String = "")(
+    using inSch: Schema[I], outSch: Schema[O]
+  ): Signature[I, O] =
+    Signature(inSch, outSch, Option(instructions).filter(_.nonEmpty))
+
+  // Surface 2 — case classes: just `derives Schema` upstream
+  // Surface 3 — builder DSL: delegates to Reflect.Record construction
+  // Surface 4 — string DSL: macro emits Schema[NamedTuple[Names, Types]]
+```
+
+Each surface from §4.3 still applies, but the carrier becomes
+`Schema[I]` × `Schema[O]` instead of `(Tuple, Tuple)`. The match-type
+work over the carrier (§4.2's `FieldOf`) becomes mostly unnecessary —
+`NamedTuple` already provides typed dot-access via Selectable.
+
+**What we gain.**
+- Phases 1–3 of the rollout (§7) shrink dramatically. Case-class and
+  named-tuple surfaces are essentially free; we don't write any
+  Mirror-based derivation.
+- A pre-built `Codec` ecosystem (JSON, YAML, MessagePack, BSON, XML,
+  CSV, Thrift, **TOON**) for free. TOON especially is worth studying
+  for adapter prompt-format design.
+- `ToStructural` macro gives us Selectable-style dot-access without
+  writing it.
+- Some binary-compat care inherited (`mimaChecks` configured for
+  `schemaJVM`).
+
+**What we take on.**
+- Dependency on a 0.0.x library with weekly releases — breaking
+  changes expected; pinning and tracking required.
+- A new vocabulary (`Reflect`, `Term`, `Format`, `TypeId`, `Binding`)
+  visible at the engine layer.
+- Friction at the boundary: `Schema.decode` returns `Either[SchemaError,
+  A]`; we map `SchemaError → DspyError` at adapter boundaries.
+
+**Strategic note.** Project owner preference is to **lean into
+zio-blocks where it gives us pieces we need**. The 0.0.x churn risk
+is accepted in exchange for not reimplementing primitives. Mitigation
+is to keep `Signature` as a dspy4s-owned wrapper so churn is contained
+at one layer — adapters / programs see `Signature[I, O]`, never raw
+`Schema[A]`.
+
+### 5.3 Option B — Self-built engine *(fallback)*
+
+The §4.2 sketch in full: `opaque type TypedSignature[I <: Tuple, O <:
+Tuple] = SignatureSpec`, builder extensions, `FieldOf` match type,
+`TypedPredict`, `TypedPrediction`. Pure Scala 3.8.1 features, no
+external dependencies beyond what we already use.
+
+**What we gain.**
+- Zero external surface to track. Evolves at our cadence.
+- Vocabulary stays inside dspy4s — small, focused, documented in one
+  place.
+- Macro-derivation work is custom but small (each surface ~50–100
+  lines).
+
+**What we take on.**
+- Writing macros for case-class and string-DSL derivation ourselves.
+- Building codec / adapter infrastructure from scratch (no `Format`
+  registry to lean on).
+- Reinventing pieces zio-blocks-schema has already shipped, for
+  effectively the same use case.
+
+### 5.4 Comparison
+
+|  | Option A (adopt) | Option B (self-built) |
+|---|---|---|
+| Engine LOC | ~100 wrapper LOC | ~300 LOC engine + match-type work |
+| Macro work | None (use `Schema.derived`) | Case-class + string-DSL macros (~100 LOC each) |
+| Codec infrastructure | `Codec`/`Format` reusable; TOON ready | All adapter formats hand-written |
+| Stability risk | 0.0.x churn (accepted) | None external |
+| Vocabulary footprint | `Reflect`/`Term`/`Format`/`TypeId` at engine layer | All dspy4s names |
+| Lock-in | Moderate (wrapped, pervasive) | None |
+| Time to working prototype | ~1–2 sessions | ~3–5 sessions |
+
+### 5.5 Recommendation
+
+**Pursue Option A.** Concrete first steps:
+
+1. Add `dev.zio` `zio-blocks-schema` to the `core` module (or a new
+   `core-schema` module for cleanliness).
+2. Build `Signature[I, O]` as a thin wrapper around two `Schema`s.
+3. Adapt `Predict`/`ChainOfThought` to accept `Signature[I, O]` and
+   produce a typed `Prediction[O]`.
+4. Adapter integration: start with the existing `ChatAdapter`; map the
+   runtime `Reflect.Record` walk to current `FieldSpec` iteration.
+   Defer reuse of `Codec`/`Format` until the basics work.
+5. Study `schema-toon` for prompt-format inspiration (separate
+   exploration; not on the critical path).
+
+**Keep Option B documented as the fallback.** If Option A hits
+unexpected friction — surprising macro behavior, missing primitives,
+unworkable binary churn — the self-built engine remains a viable
+alternative. The two options share the same surface layout from §4.3,
+so the user-visible API stays similar either way.
+
+---
+
+## 6. Complementary: typed accessor ladder
 
 Independently of the typed engine, we can ship a small win **today** by
 mirroring the existing `asDouble` for every primitive value shape:
@@ -462,44 +614,56 @@ commitments.
 
 ---
 
-## 6. Phased rollout
+## 7. Phased rollout *(schema-first)*
+
+Assumes Option A (§5.2). If we fall back to Option B, the same phases
+apply but each is bigger because we own the engine.
 
 1. **Phase 0 (optional, immediate)** — Typed accessor ladder (Section
-   5). Pure win, independent.
+   6). Pure win, independent of the foundation choice.
 
-2. **Phase 1 — Engine.** `TypedSignature[I, O]`, `TypedPredict`,
-   `TypedPrediction`, match-type accessor, `Selectable` dot-access.
-   Lives in a new `dspy4s.typed` sub-package (or `dspy4s.core.typed`)
-   so the experimental work doesn't disturb the existing API. Builder
-   DSL as the only surface initially. Tests prove the type-level
-   mechanics in isolation.
+2. **Phase 1 — Adopt `zio-blocks-schema` + wrap as `Signature[I, O]`.**
+   Add the dependency, build the thin wrapper, write a small
+   compatibility shim from `Schema[A]`'s `Reflect.Record` to the
+   existing `FieldSpec` so current adapters keep working unchanged.
+   Tests prove `Signature.of[(sentence: String), (sentiment: Boolean)]`
+   round-trips field names and types correctly.
 
-3. **Phase 2 — Named-tuple surface.** Add `Signature.of[I, O]`.
-   Re-translate `Signatures.scala` Snippet 5 against it to evaluate
-   ergonomics on a real example. Decide whether to also re-translate
-   Snippets 1–4 against the typed layer or keep them on the untyped
-   string DSL as a baseline.
+3. **Phase 2 — Typed `Predict`/`Prediction`.** Add `TypedPredict[I,
+   O]` (consumes `Signature[I, O]`) and `TypedPrediction[O]` (returns
+   typed values via `NamedTuple` + Selectable). Re-translate
+   `Signatures.scala` Snippet 5 against it to validate ergonomics on
+   a real example. Existing `Predict(sig: Signature)` API stays
+   untouched.
 
-4. **Phase 3 — Case-class surface.** Add `derives Signature.Input` /
-   `Signature.Output` via Mirror. Good for downstream nominal-type
-   users.
+4. **Phase 3 — Case-class surface parity.** Verify `case class Foo
+   derives Schema` works end-to-end through `Signature.of[Foo,
+   Bar]`. Most or all of the work should already be done via
+   `Schema.derived` — this phase is mostly validation + tests.
 
-5. **Phase 4 (later, optional) — String DSL macro.** Inline
-   transparent macro that parses literal DSL constants at compile time
-   and emits a typed carrier. Most-aggressive surface, most maintenance
-   cost. Defer until Phases 1–3 have settled and the macro pays for
-   itself.
+5. **Phase 4 (optional) — String DSL → `Schema`.** Inline transparent
+   macro that parses literal DSL constants at compile time and emits
+   a `Schema[NamedTuple[Names, Types]]`. Defer until Phases 1–3
+   settle and the macro pays for itself.
 
-Phases 2–4 are purely additive. Each can be skipped if it doesn't pull
+6. **Phase 5 (optional, exploratory) — Adapter on `Codec`/`Format`.**
+   Study `schema-toon` and the JSON `Codec`. Decide whether to
+   refactor `ChatAdapter` / `JsonAdapter` to delegate prompt
+   format/parse to the `Codec` infrastructure. Big refactor, big
+   potential win. Out of scope until the above stabilize.
+
+Phases 2–5 are purely additive. Each can be skipped if it doesn't pull
 its weight in practice.
 
 ---
 
-## 7. Open questions for review
+## 8. Open questions for review
 
-1. **Sub-package name.** `dspy4s.typed`? `dspy4s.core.typed`? Something
-   else? Sub-package decision affects every import and is hard to
-   change later.
+1. **Module placement.** Does `Signature[I, O]` live in `core`, or do
+   we add a new `core-schema` module so the `zio-blocks-schema`
+   dependency is opt-in for downstream module authors? (Most modules
+   would still pull it transitively via `core`, so the split is
+   mostly about declared dependencies.)
 
 2. **`Either` at the typed boundary.** Should `TypedPrediction.value[K]`
    return `FieldOf[O, K]` directly (constructed from LM, "always
@@ -537,9 +701,20 @@ its weight in practice.
    users hit it, they're building something unusual and the standard
    compiler message is informative.
 
+9. **SchemaError → DspyError mapping.** `zio-blocks-schema` codecs
+   return `Either[SchemaError, A]`. Where do we translate? Per-call
+   at adapter boundaries, or once via an implicit conversion?
+   Recommendation: explicit per-call mapping for now; revisit if it
+   becomes boilerplate.
+
+10. **Tracking upstream churn.** With `zio-blocks-schema` at 0.0.x,
+    breaking changes are expected. Strategy: pin to a specific
+    version in `build.sbt`, add a `versionBump.md` entry to track
+    upgrades, run our test suite against each bump before merging.
+
 ---
 
-## 8. Non-goals (this document)
+## 9. Non-goals (this document)
 
 - A full inline macro for the string DSL. Sketched as Phase 4, design
   details deferred.
