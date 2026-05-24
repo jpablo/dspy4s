@@ -24,6 +24,11 @@ RUN install -d -m 0755 /etc/apt/keyrings \
  && apt-get update && apt-get install -y --no-install-recommends sbt \
  && rm -rf /var/lib/apt/lists/*
 
+# uv (Astral) installed system-wide so every user has it on PATH.
+# uv can self-manage Python versions, so no system Python is required.
+RUN curl -LsSf https://astral.sh/uv/install.sh | \
+      env UV_INSTALL_DIR=/usr/local/bin UV_UNMANAGED_INSTALL=1 sh
+
 # Dev user. UID/GID 1000 matches typical macOS Docker Desktop bind-mount mappings.
 ARG USERNAME=dev
 ARG UID=1000
