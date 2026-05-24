@@ -1,0 +1,31 @@
+services:
+  gateway-host:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dspy4s-gateway:latest
+    container_name: dspy4s-gateway
+    hostname: dspy4s-dev
+    restart: unless-stopped
+    ports:
+      # Host 2222 -> container 22. Bind to 0.0.0.0 so other LAN machines can reach it.
+      - "2222:22"
+    volumes:
+      # Project root mounted into the dev user's workspace.
+      - ../:/workspace
+      # SSH public keys (read-only); copied into ~/.ssh by entrypoint with correct perms.
+      - ${HOME}/.ssh/authorized_keys:/keys/authorized_keys:ro
+      # Persist caches / IDE backend across container rebuilds.
+      - gateway_home_cache:/home/dev/.cache
+      - gateway_sbt:/home/dev/.sbt
+      - gateway_ivy2:/home/dev/.ivy2
+      - gateway_coursier:/home/dev/.local/share/coursier
+      - gateway_ssh_host_keys:/etc/ssh/keys
+    working_dir: /workspace
+
+volumes:
+  gateway_home_cache:
+  gateway_sbt:
+  gateway_ivy2:
+  gateway_coursier:
+  gateway_ssh_host_keys:
