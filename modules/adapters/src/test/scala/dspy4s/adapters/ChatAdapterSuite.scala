@@ -44,8 +44,10 @@ class ChatAdapterSuite extends FunSuite:
       Vector(MessageRole.System, MessageRole.User, MessageRole.Assistant, MessageRole.User)
     )
     val system = messages.head.text.get
-    assert(system.contains("Your input fields are: question."), s"system: $system")
-    assert(system.contains("Your output fields are: answer."), s"system: $system")
+    assert(system.contains("Your input fields are:"), s"system: $system")
+    assert(system.contains("1. `question` (str)"), s"system: $system")
+    assert(system.contains("Your output fields are:"), s"system: $system")
+    assert(system.contains("1. `answer` (str)"), s"system: $system")
     assert(system.contains("[[ ## question ## ]]"), s"system: $system")
     assert(system.contains("[[ ## answer ## ]]"), s"system: $system")
     assert(system.contains("[[ ## completed ## ]]"), s"system: $system")
@@ -64,6 +66,84 @@ class ChatAdapterSuite extends FunSuite:
     assert(mainUser.contains("[[ ## question ## ]]\nCapital of Belgium?"), s"main user: $mainUser")
     assert(mainUser.contains("[[ ## answer ## ]]"), s"main user reminder: $mainUser")
     assert(mainUser.contains("[[ ## completed ## ]]"), s"main user reminder: $mainUser")
+  }
+
+  test("format emits type hints in the system prompt's structure example for non-string outputs") {
+    val signature = SignatureDsl.parse("question -> answer: int, score: float, flag: bool, payload: json").toOption.get
+    val invocation = AdapterInvocation(
+      signature = signature,
+      demos = Vector.empty,
+      inputs = ExampleData(values = Map("question" -> "?"), inputKeys = Set("question")),
+      request = LmRequest(model = "x", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+
+    // The structure example must annotate each non-string output with a
+    // `# note:` comment showing the typing constraint.
+    assert(system.contains("# note: the value you produce must be a single int value"), system)
+    assert(system.contains("# note: the value you produce must be a single float value"), system)
+    assert(system.contains("# note: the value you produce must be true or false"), system)
+    assert(system.contains("# note: the value you produce must be a valid JSON object"), system)
+    // String fields get no note.
+    val questionLine = system.linesIterator.find(_.contains("{question}")).getOrElse("")
+    assert(!questionLine.contains("# note:"), s"string input should not carry a type note: '$questionLine'")
+  }
+
+  test("format emits type hints in the final user reminder for non-string outputs") {
+    val signature = SignatureDsl.parse("q -> answer: int, summary").toOption.get
+    val invocation = AdapterInvocation(
+      signature = signature,
+      demos = Vector.empty,
+      inputs = ExampleData(values = Map("q" -> "?"), inputKeys = Set("q")),
+      request = LmRequest(model = "x", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val mainUser = ChatAdapter().format(invocation).toOption.get.messages.last.text.get
+
+    // Output reminder names each output marker; non-string fields get a
+    // parenthetical type hint, strings don't.
+    assert(
+      mainUser.contains("`[[ ## answer ## ]]` (must be formatted as a valid int)"),
+      s"main user reminder missing int hint: $mainUser"
+    )
+    // The `summary` field is str and should not carry a parenthetical.
+    assert(
+      mainUser.contains("`[[ ## summary ## ]]`,") || mainUser.contains("`[[ ## summary ## ]]`, and"),
+      s"main user reminder should reference summary without a type hint: $mainUser"
+    )
+  }
+
+  test("format emits FieldSpec.description when one is set, omits it when default") {
+    val signature = SignatureDsl.parse("q -> answer").toOption.get
+      .withFields(
+        Vector(
+          dspy4s.core.contracts.FieldSpec(
+            name = "q",
+            role = dspy4s.core.contracts.FieldRole.Input,
+            description = Some("The user's question to answer.")
+          ),
+          dspy4s.core.contracts.FieldSpec(
+            name = "answer",
+            role = dspy4s.core.contracts.FieldRole.Output
+            // description omitted — should fall back to the `${name}` placeholder
+            // inserted by FieldSpec.normalize and be suppressed by the renderer.
+          )
+        )
+      )
+    val invocation = AdapterInvocation(
+      signature = signature,
+      demos = Vector.empty,
+      inputs = ExampleData(values = Map("q" -> "?"), inputKeys = Set("q")),
+      request = LmRequest(model = "x", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+
+    // The custom description should appear.
+    assert(system.contains("The user's question to answer."), s"missing custom desc in: $system")
+    // The placeholder default `${answer}` should NOT appear (it should be elided).
+    assert(!system.contains("${answer}"), s"placeholder default leaked into system prompt: $system")
   }
 
   test("parse extracts marker-delimited fields and applies type coercion") {

@@ -119,13 +119,14 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     out.iterator.map { (k, v) => k -> v.toString.stripTrailing }.toMap
 
   private def buildSystemPrompt(signature: Signature): String =
-    val inputs = signature.inputFields.map(_.name).mkString(", ")
-    val outputs = signature.outputFields.map(_.name).mkString(", ")
+    val inputBlock = fieldDescriptionBlock(signature.inputFields, role = "input")
+    val outputBlock = fieldDescriptionBlock(signature.outputFields, role = "output")
     val structureExample = exampleStructure(signature)
     val instructions =
-      signature.instructions.getOrElse(s"Given the fields ${inputs}, produce the fields ${outputs}.")
-    s"""Your input fields are: $inputs.
-       |Your output fields are: $outputs.
+      signature.instructions.getOrElse(defaultInstructions(signature))
+    s"""$inputBlock
+       |
+       |$outputBlock
        |
        |All interactions will be structured in the following way, with the appropriate values filled in.
        |
@@ -133,21 +134,52 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
        |
        |In adhering to this structure, your objective is: $instructions""".stripMargin
 
+  /** Numbered field list mirroring Python's `get_field_description_string`.
+    * Each line:
+    *   `  N. `field_name` (type): description`
+    * with the description omitted when `FieldSpec.description` is the
+    * default `${field_name}` placeholder that signature normalisation
+    * inserts (see `FieldSpec.normalize`). */
+  private def fieldDescriptionBlock(fields: Vector[FieldSpec], role: String): String =
+    if fields.isEmpty then s"Your $role fields are: (none)."
+    else
+      val header = s"Your $role fields are:"
+      val lines = fields.zipWithIndex.map { case (field, idx) =>
+        val typeName = ChatAdapter.displayTypeName(field.typeRef)
+        val descPart = field.description match
+          case Some(desc) if desc != s"$${${field.name}}" && desc.nonEmpty =>
+            s": $desc"
+          case _ => ""
+        s"${idx + 1}. `${field.name}` ($typeName)$descPart"
+      }
+      (header +: lines).mkString("\n")
+
+  private def defaultInstructions(signature: Signature): String =
+    val inputs = signature.inputFields.map(_.name).mkString(", ")
+    val outputs = signature.outputFields.map(_.name).mkString(", ")
+    s"Given the fields $inputs, produce the fields $outputs."
+
   /** Renders an example showing the full marker framing — input markers,
-    * output markers, and the closing `[[ ## completed ## ]]`. The model
-    * sees this in the system prompt so it knows exactly what shape to
-    * produce. */
+    * output markers, and the closing `[[ ## completed ## ]]`. Output-field
+    * placeholders carry a `# note:` typing constraint when the field has
+    * a non-string type, reinforcing the type contract structurally. */
   private def exampleStructure(signature: Signature): String =
     val inputBlock = signature.inputFields.map { field =>
       s"[[ ## ${field.name} ## ]]\n{${field.name}}"
     }.mkString("\n\n")
     val outputBlock = signature.outputFields.map { field =>
-      s"[[ ## ${field.name} ## ]]\n{${field.name}}"
+      val note = ChatAdapter.structureHint(field.typeRef).fold("") { hint =>
+        s"        # note: the value you produce $hint"
+      }
+      s"[[ ## ${field.name} ## ]]\n{${field.name}}$note"
     }.mkString("\n\n")
     Vector(inputBlock, outputBlock, ChatAdapter.CompletedMarker).filter(_.nonEmpty).mkString("\n\n")
 
   private def outputRequirements(signature: Signature): String =
-    val outputs = signature.outputFields.map(f => s"`[[ ## ${f.name} ## ]]`").mkString(", then ")
+    val outputs = signature.outputFields.map { f =>
+      val hint = ChatAdapter.reminderHint(f.typeRef).fold("") { h => s" ($h)" }
+      s"`[[ ## ${f.name} ## ]]`$hint"
+    }.mkString(", then ")
     s"Respond with the corresponding output fields, starting with the field $outputs, and then ending with the marker for `${ChatAdapter.CompletedMarker}`."
 
   private def renderInputs(fields: Vector[FieldSpec], values: Map[String, Any]): String =
@@ -188,3 +220,33 @@ object ChatAdapter:
   /** Reserved field name that closes the structured output. */
   val CompletedFieldName: String = "completed"
   val CompletedMarker: String = s"[[ ## $CompletedFieldName ## ]]"
+
+  /** Canonical type name to surface in the system prompt's field
+    * description block. Maps dspy4s's internal `TypeRef.repr` to the
+    * names users will recognise (and that match Python DSPy). */
+  def displayTypeName(t: TypeRef): String = t match
+    case TypeRef.string => "str"
+    case TypeRef.int    => "int"
+    case TypeRef.double => "float"
+    case TypeRef.bool   => "bool"
+    case TypeRef.json   => "dict"
+    case other          => other.repr
+
+  /** Hint phrasing for the final-user-message reminder
+    * ("Respond with `[[ ## answer ## ]]` (must be …)"). Returns `None`
+    * for strings (no hint needed) and a "(must be formatted as a valid …)"
+    * string otherwise. */
+  def reminderHint(t: TypeRef): Option[String] = t match
+    case TypeRef.string => None
+    case _              => Some(s"must be formatted as a valid ${displayTypeName(t)}")
+
+  /** Hint phrasing for the structure-example `# note: ...` comments.
+    * More specific than the reminder hint: enumerates booleans and gives
+    * a brief "single X value" form for scalars. */
+  def structureHint(t: TypeRef): Option[String] = t match
+    case TypeRef.string => None
+    case TypeRef.int    => Some("must be a single int value")
+    case TypeRef.double => Some("must be a single float value")
+    case TypeRef.bool   => Some("must be true or false")
+    case TypeRef.json   => Some("must be a valid JSON object")
+    case other          => Some(s"must be a valid ${displayTypeName(other)}")
