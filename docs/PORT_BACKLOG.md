@@ -1,5 +1,9 @@
 # dspy4s Comprehensive Port Backlog
 
+See [`PORT_MAP.md`](PORT_MAP.md) for the dspy4s ⇄ Python DSPy name mapping
+and behavioral-delta ledger. The backlog below is *phase plan*; the map is
+*current state*.
+
 ## Upstream parity target
 
 - Upstream: [stanfordnlp/dspy](https://github.com/stanfordnlp/dspy)

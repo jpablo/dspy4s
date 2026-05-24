@@ -1,5 +1,8 @@
 # dspy4s Port Scope (Baseline: DSPy 3.1.3)
 
+See [`PORT_MAP.md`](PORT_MAP.md) for the full dspy4s ⇄ Python name mapping
+and the running ledger of deliberate behavioral deltas.
+
 ## Goal
 Deliver a Scala `3.8.1` implementation of DSPy with strong parity on the core authoring/runtime path used for building, running, and evaluating programs.
 
