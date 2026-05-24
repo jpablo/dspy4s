@@ -224,3 +224,14 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
     case '\\' => '\\'
     case '/'  => '/'
     case other => other
+
+object JsonStreamingState:
+  /** True iff `text`'s tail could be the start of a JSON value boundary
+    * (closing quote, comma, or right brace) that would terminate the
+    * currently-streaming field. Ported from Python
+    * `StreamListener._could_form_end_identifier` for `JSONAdapter`.
+    * Returns true when the buffer ends with `"`, `",`, `" `, or `"}`, or
+    * already contains `}` anywhere. */
+  def couldFormEndIdentifier(text: String): Boolean =
+    val endPrefixes = Seq("\"", "\",", "\" ", "\"}")
+    endPrefixes.exists(text.endsWith) || text.contains("}")

@@ -144,6 +144,59 @@ for the small residual chunk-emission delta that remains
   `allowReuse`, unknown-field warning, unknown-`predictName` warning,
   and opaque-composite skip.
 
+## Shipped in v1.8 — Mock-driven parity test ports (10 tests)
+
+Direct dspy4s ports of Python tests from
+`tests/streaming/test_streaming.py` that don't require live LMs,
+async program execution, Pydantic-equivalent typing, or per-token
+chunk emission:
+
+- `test_streaming_handles_space_correctly`
+- `test_stream_listener_missing_completion_marker_chat_adapter`
+- `test_stream_listener_empty_last_chunk_chat_adapter`
+- `test_stream_listener_empty_last_chunk_json_adapter`
+- `test_json_adapter_bracket_balance_detection`
+- `test_json_adapter_multiple_fields_detection`
+- `test_sync_status_streaming` (adapted: uses a tool-only program
+  since dspy4s has no published `DummyLM` yet)
+- `test_stream_listener_could_form_end_identifier_chat_adapter`
+- `test_stream_listener_could_form_end_identifier_json_adapter`
+- `test_stream_listener_could_form_end_identifier_xml_adapter`
+
+The three `could_form_end_identifier` tests required adding pure
+companion-object helpers to `ChatStreamingState`, `JsonStreamingState`,
+and `XmlStreamingState`. The helpers are not yet used by the state
+machines themselves — they exist as the foundation for a future
+per-token state-machine refactor.
+
+Test bug fix as part of this batch: `ChatStreamingState.stripFramingNewlines`
+previously stripped at most one boundary newline. It now strips all
+leading/trailing newlines from emitted content so that real LM output
+patterns like `value\n\n[[ ## ... ## ]]` round-trip without trailing
+`\n` artifacts.
+
+## Postponed — Per-token chunk-emission refactor
+
+Five Python tests assert per-token chunk shape and remain unported:
+
+- `test_stream_listener_returns_correct_chunk_chat_adapter`
+- `test_stream_listener_returns_correct_chunk_json_adapter`
+- `test_stream_listener_returns_correct_chunk_xml_adapter`
+- `test_stream_listener_returns_correct_chunk_chat_adapter_untokenized_stream`
+- `test_stream_listener_returns_correct_chunk_json_adapter_untokenized_stream`
+
+To port these we'd rewrite all three `*StreamingState`s around a
+queue-of-received-fragments + holdback discipline that emits each LM
+token as its own `FieldChunk`. The `couldFormEndIdentifier` helpers
+shipped in v1.8 are the per-adapter holdback predicates this refactor
+would consume.
+
+The work is bounded but substantial (~hundreds of lines across the
+three states + companions, plus rewriting the existing
+`*StreamingStateSuite` granularity expectations). Deferred until a
+consumer actually needs per-token UX (e.g. live chat-style typing
+animations).
+
 ## Shipped in v1.7 — Concurrent-provider + blocking-tool parity tests
 
 - Ported Python's `test_concurrent_status_message_providers`: two

@@ -160,3 +160,12 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends AdapterSt
       try Character.toString(Integer.parseInt(s.drop(1)))
       catch case NonFatal(_) => s"&$name;"
     case _ => s"&$name;"
+
+object XmlStreamingState:
+  /** True iff `text`'s tail could be the start of an XML closing tag that
+    * would terminate the currently-streaming field. Ported from Python
+    * `StreamListener._could_form_end_identifier` for `XMLAdapter`.
+    * Returns true when the buffer ends with `<` or `</`, or already
+    * contains `</` anywhere. */
+  def couldFormEndIdentifier(text: String): Boolean =
+    text.endsWith("<") || text.endsWith("</") || text.contains("</")

@@ -150,11 +150,32 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
     // consumed. If we're at start-of-text, return 0.
     if k < 0 then 0 else k + 1
 
-  /** Trim a single leading/trailing newline (left over from marker
-    * stripping) from emitted content. We only strip one because field
-    * values can legitimately contain blank lines. */
+  /** Trim leading/trailing newlines left over from marker framing.
+    *
+    * Markers reliably emit a `\n` *after* themselves and the LM typically
+    * adds `\n\n` *before* the next marker, so the framing artifacts can be
+    * multiple newlines on either side. Inner blank lines are preserved
+    * because we only strip from the boundaries. */
   private def stripFramingNewlines(s: String): String =
-    val left = if s.startsWith("\n") then s.drop(1) else s
-    if left.endsWith("\n") then left.dropRight(1) else left
+    var start = 0
+    while start < s.length && s.charAt(start) == '\n' do start += 1
+    var endExclusive = s.length
+    while endExclusive > start && s.charAt(endExclusive - 1) == '\n' do endExclusive -= 1
+    s.substring(start, endExclusive)
 
   private final case class MarkerHit(field: Option[String], markerStart: Int, markerEnd: Int)
+
+object ChatStreamingState:
+  /** True iff `text`'s tail or interior could still grow into a
+    * `[[ ## field_name ## ]]` (or `[[ ## completed ## ]]`) marker. Used by
+    * the per-token holdback heuristic — when this returns `false`, every
+    * pending token in the wrapper's queue is safe to flush.
+    *
+    * Ported from Python `StreamListener._could_form_end_identifier` for
+    * `ChatAdapter`. Returns true when the buffer ends with any of the
+    * marker-prefix snippets, or already contains `[[ ##` anywhere
+    * (a partial-marker tail can no longer be distinguished without further
+    * tokens). */
+  def couldFormEndIdentifier(text: String): Boolean =
+    val endPrefixes = Seq("[", "[[", "[[ ", "[[ #", "[[ ##")
+    endPrefixes.exists(text.endsWith) || text.contains("[[ ##")
