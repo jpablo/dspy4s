@@ -1,5 +1,21 @@
 # dspy4s Comprehensive Port Backlog
 
+## Upstream parity target
+
+- Upstream: [stanfordnlp/dspy](https://github.com/stanfordnlp/dspy)
+- Pinned version: **3.1.3** (released 2026-02-05)
+- Reference clone (local): `/Users/jpablo/GitHub/dspy`, branch `release-3.1.3`
+  at tag `3.1.3` (HEAD is one commit ahead, `ccae927` "Update versions" — a
+  routine post-release version bump in `pyproject.toml`/`uv.lock`, no source
+  changes).
+
+When upstream tags a new release, bump this section, refresh the clone
+(`git fetch && git checkout release-X.Y.Z`), and audit the changelog for
+features that affect contracts or behavior dspy4s already ports. Treat any
+behavioral delta we *intend* to keep as a documented "delta from Python
+parity" in the relevant `PHASE*_PROGRESS.md` / `STREAMING_POSTPONED.md` /
+test comment rather than letting it drift silently.
+
 ## Phase 0: Contracts and Scaffolding
 Goal: freeze boundaries before implementation.
 
