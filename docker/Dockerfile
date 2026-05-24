@@ -1,4 +1,5 @@
-# Linux dev host for JetBrains Gateway remote development.
+# Reusable Linux dev host for JetBrains Gateway remote development.
+# Project-agnostic: project sources are bind-mounted at runtime under /home/dev/.
 # Multi-arch (linux/amd64, linux/arm64) via Eclipse Temurin.
 FROM eclipse-temurin:21-jdk-jammy
 

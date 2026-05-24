@@ -13,12 +13,6 @@ for d in .cache .sbt .ivy2 .local .local/share .local/share/coursier; do
   fi
 done
 
-# Surface the bind-mounted project in the dev user's home so it's visible on `ls ~`.
-if [ -d /workspace ] && [ ! -e "${USER_HOME}/workspace" ]; then
-  ln -s /workspace "${USER_HOME}/workspace"
-  chown -h "${USERNAME}:${USERNAME}" "${USER_HOME}/workspace"
-fi
-
 # Install authorized_keys from the bind-mounted source with sshd-required perms.
 if [ -f /keys/authorized_keys ]; then
   install -d -m 700 -o "${USERNAME}" -g "${USERNAME}" "${USER_HOME}/.ssh"
