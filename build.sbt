@@ -94,5 +94,9 @@ lazy val streaming = (project in file("modules/streaming"))
   .settings(commonSettings)
   .settings(name := "dspy4s-streaming")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    // Fork so `.env`-backed envVars (loaded by DotEnvLoader) reach the test
+    // JVM — required by StreamingLiveSuite to read OPENAI_API_KEY.
+    Test / fork := true,
+    Test / javaOptions += "-Dfile.encoding=UTF-8"
   )
