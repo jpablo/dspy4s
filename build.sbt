@@ -18,7 +18,7 @@ lazy val root = (project in file("."))
     lm,
     adapters,
     programs,
-    evaluation,
+    evaluate,
     optimize,
     streaming
   )
@@ -70,10 +70,10 @@ lazy val programs = (project in file("modules/programs"))
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
   )
 
-lazy val evaluation = (project in file("modules/eval"))
+lazy val evaluate = (project in file("modules/evaluate"))
   .dependsOn(core, programs)
   .settings(commonSettings)
-  .settings(name := "dspy4s-eval")
+  .settings(name := "dspy4s-evaluate")
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
@@ -82,7 +82,7 @@ lazy val evaluation = (project in file("modules/eval"))
   )
 
 lazy val optimize = (project in file("modules/optimize"))
-  .dependsOn(core, programs, evaluation)
+  .dependsOn(core, programs, evaluate)
   .settings(commonSettings)
   .settings(name := "dspy4s-optimize")
   .settings(

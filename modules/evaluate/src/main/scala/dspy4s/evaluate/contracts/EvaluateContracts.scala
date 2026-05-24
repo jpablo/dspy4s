@@ -1,4 +1,4 @@
-package dspy4s.eval.contracts
+package dspy4s.evaluate.contracts
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example

@@ -36,7 +36,7 @@ Phase 6 focuses on the evaluation runtime (metrics, threaded evaluator, result p
 - `EvaluationResult` now carries `metricName` so persistence can name the score column
 
 5. Contract refresh
-- Updated `EvaluationResult` in `dspy4s.eval.contracts`:
+- Updated `EvaluationResult` in `dspy4s.evaluate.contracts`:
   - field `score` (percentage 0-100) replaces `aggregateScore`
   - field `results: Vector[ExampleEvaluation]` replaces `evaluations`
   - `metricName: String` carried alongside for persistence/display

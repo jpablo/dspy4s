@@ -7,7 +7,7 @@ graph TD
   lm[dspy4s-lm]
   adapters[dspy4s-adapters]
   programs[dspy4s-programs]
-  eval[dspy4s-eval]
+  evaluate[dspy4s-evaluate]
   optimize[dspy4s-optimize]
   streaming[dspy4s-streaming]
 
@@ -17,11 +17,11 @@ graph TD
   programs --> core
   programs --> lm
   programs --> adapters
-  eval --> core
-  eval --> programs
+  evaluate --> core
+  evaluate --> programs
   optimize --> core
   optimize --> programs
-  optimize --> eval
+  optimize --> evaluate
   streaming --> core
   streaming --> lm
   streaming --> adapters
@@ -55,7 +55,7 @@ graph TD
 - Parallel execution APIs
 - Trace propagation
 
-5. `eval`
+5. `evaluate`
 - Parallel evaluation runner
 - Score/result aggregation and persistence formats
 

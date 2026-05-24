@@ -1,9 +1,9 @@
-package dspy4s.eval
+package dspy4s.evaluate
 
 import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.PredictionData
-import dspy4s.eval.contracts.EvaluationResult
-import dspy4s.eval.contracts.ExampleEvaluation
+import dspy4s.evaluate.contracts.EvaluationResult
+import dspy4s.evaluate.contracts.ExampleEvaluation
 import munit.FunSuite
 
 import java.nio.file.Files
@@ -14,7 +14,7 @@ import scala.jdk.CollectionConverters.*
 class PersistenceSuite extends FunSuite:
 
   private def tmpPath(suffix: String) =
-    Files.createTempFile("dspy4s-eval-", suffix).toString
+    Files.createTempFile("dspy4s-evaluate-", suffix).toString
 
   private val sampleResult: EvaluationResult =
     EvaluationResult(

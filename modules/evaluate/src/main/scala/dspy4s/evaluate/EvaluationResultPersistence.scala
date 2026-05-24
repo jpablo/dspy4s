@@ -1,6 +1,6 @@
-package dspy4s.eval
+package dspy4s.evaluate
 
-import dspy4s.eval.contracts.EvaluationResult
+import dspy4s.evaluate.contracts.EvaluationResult
 
 import java.io.PrintWriter
 import java.nio.charset.StandardCharsets

@@ -4,7 +4,7 @@ import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.eval.metrics.ExactMatch
+import dspy4s.evaluate.metrics.ExactMatch
 import munit.FunSuite
 
 class BootstrapFewShotWithRandomSearchSuite extends FunSuite:

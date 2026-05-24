@@ -17,7 +17,7 @@ import scala.util.boundary.break
 import scala.util.control.NonFatal
 
 final case class BootstrapFewShotConfig(
-    metric: Option[dspy4s.eval.contracts.Metric] = None,
+    metric: Option[dspy4s.evaluate.contracts.Metric] = None,
     metricThreshold: Option[Double] = None,
     maxBootstrappedDemos: Int = 4,
     maxLabeledDemos: Int = 16,

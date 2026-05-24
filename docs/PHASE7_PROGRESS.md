@@ -42,7 +42,7 @@ Phase 7 focuses on the first optimizers.
   - seed −2: `LabeledFewShot(k = maxLabeledDemos)`
   - seed −1: unshuffled `BootstrapFewShot`
   - seed ≥ 0: shuffled-subset `BootstrapFewShot` with random subset size
-- Each candidate evaluated against `valset` (falls back to `trainset`) via `dspy4s.eval.Evaluate`
+- Each candidate evaluated against `valset` (falls back to `trainset`) via `dspy4s.evaluate.Evaluate`
 - Early exit when any candidate reaches `stopAtScore`
 - Returns `OptimizationReport` with `candidates` sorted by descending score and `bestProgram`
 

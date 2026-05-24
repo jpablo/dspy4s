@@ -5,8 +5,8 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.eval.Evaluate
-import dspy4s.eval.contracts.Metric
+import dspy4s.evaluate.Evaluate
+import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter

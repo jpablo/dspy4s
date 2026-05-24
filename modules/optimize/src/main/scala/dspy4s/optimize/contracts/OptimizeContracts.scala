@@ -3,7 +3,7 @@ package dspy4s.optimize.contracts
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.eval.contracts.EvaluationResult
+import dspy4s.evaluate.contracts.EvaluationResult
 
 final case class CandidateProgram[P](
     program: P,

@@ -1,4 +1,4 @@
-package dspy4s.eval.metrics
+package dspy4s.evaluate.metrics
 
 import munit.FunSuite
 

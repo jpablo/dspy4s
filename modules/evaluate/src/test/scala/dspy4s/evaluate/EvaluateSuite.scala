@@ -1,4 +1,4 @@
-package dspy4s.eval
+package dspy4s.evaluate
 
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ExampleData
@@ -6,10 +6,10 @@ import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.eval.contracts.ExampleEvaluation
-import dspy4s.eval.metrics.AnswerMatch
-import dspy4s.eval.metrics.ExactMatch
-import dspy4s.eval.metrics.FunctionMetric
+import dspy4s.evaluate.contracts.ExampleEvaluation
+import dspy4s.evaluate.metrics.AnswerMatch
+import dspy4s.evaluate.metrics.ExactMatch
+import dspy4s.evaluate.metrics.FunctionMetric
 import munit.FunSuite
 
 class EvaluateSuite extends FunSuite:

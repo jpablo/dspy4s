@@ -1,4 +1,4 @@
-package dspy4s.eval.metrics
+package dspy4s.evaluate.metrics
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
@@ -6,7 +6,7 @@ import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.ValidationError
-import dspy4s.eval.contracts.Metric
+import dspy4s.evaluate.contracts.Metric
 
 object MetricHelpers:
   def extractString(example: Example, prediction: Prediction, fieldName: String): Either[DspyError, (String, Vector[String])] =

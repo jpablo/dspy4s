@@ -1,4 +1,4 @@
-package dspy4s.eval
+package dspy4s.evaluate
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
@@ -7,10 +7,10 @@ import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.eval.contracts.EvaluationResult
-import dspy4s.eval.contracts.Evaluator
-import dspy4s.eval.contracts.ExampleEvaluation
-import dspy4s.eval.contracts.Metric
+import dspy4s.evaluate.contracts.EvaluationResult
+import dspy4s.evaluate.contracts.Evaluator
+import dspy4s.evaluate.contracts.ExampleEvaluation
+import dspy4s.evaluate.contracts.Metric
 import dspy4s.programs.runtime.ParallelExecutor
 
 import java.io.PrintWriter
@@ -100,8 +100,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
         )
       )
 
-      cfg.saveAsJson.foreach(path => dspy4s.eval.EvaluationResultPersistence.saveAsJson(result, path))
-      cfg.saveAsCsv.foreach(path => dspy4s.eval.EvaluationResultPersistence.saveAsCsv(result, path))
+      cfg.saveAsJson.foreach(path => dspy4s.evaluate.EvaluationResultPersistence.saveAsJson(result, path))
+      cfg.saveAsCsv.foreach(path => dspy4s.evaluate.EvaluationResultPersistence.saveAsCsv(result, path))
 
       if cfg.displayProgress then
         println(f"[Evaluate] score=${aggregate}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")

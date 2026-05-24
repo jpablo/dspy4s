@@ -27,7 +27,7 @@ This file captures the interface-first contract layer introduced before concrete
   - Program runtime resolution contract (`ProgramRuntime`)
   - Predict + tool contracts
 
-- `dspy4s.eval.contracts`
+- `dspy4s.evaluate.contracts`
   - Metric and evaluator contracts
   - Evaluation result model
 

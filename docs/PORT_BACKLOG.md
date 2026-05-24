@@ -105,7 +105,7 @@ Acceptance tests:
 - `tests/predict/test_best_of_n.py`
 - `tests/predict/test_refine.py`
 
-## Phase 6: Evaluation (`eval`)
+## Phase 6: Evaluation (`evaluate`)
 Goal: metric + threaded evaluation parity.
 
 **Status**: v1 shipped (see `PHASE6_PROGRESS.md`).
@@ -134,7 +134,7 @@ v1 covers:
 - `PredictOps[P]` typeclass (rewrites demos/signature on `Predict` and `ChainOfThought`)
 - `LabeledFewShot(k, sample, seed)` baseline
 - `BootstrapFewShot(metric, maxBootstrappedDemos, maxLabeledDemos, maxRounds, maxErrors, seed)` teacher-driven trace collection
-- `BootstrapFewShotWithRandomSearch(...)` random candidate generation via seeds ±3, ±2, ±1, and ≥ 0; evaluation via `dspy4s.eval.Evaluate`; `stopAtScore` early exit
+- `BootstrapFewShotWithRandomSearch(...)` random candidate generation via seeds ±3, ±2, ±1, and ≥ 0; evaluation via `dspy4s.evaluate.Evaluate`; `stopAtScore` early exit
 - 13 tests (5 LabeledFewShot + 5 Bootstrap + 3 RandomSearch)
 - `ExampleData` extended with `augmented: Boolean` flag for bootstrap parity
 

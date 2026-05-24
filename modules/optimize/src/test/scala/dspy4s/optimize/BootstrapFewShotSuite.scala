@@ -57,7 +57,7 @@ class BootstrapFewShotSuite extends FunSuite:
       ExampleData(Map("question" -> "q3", "answer" -> "expected"), inputKeys = Set("question"))
     )
 
-    val exactMatch = new dspy4s.eval.metrics.ExactMatch(answerField = "answer")
+    val exactMatch = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
     val student = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
