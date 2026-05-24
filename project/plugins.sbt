@@ -1,2 +1,1 @@
-// Project-level helpers. Secrets loading is performed by DotEnvLoader.scala
-// (no external plugins required).
+addSbtPlugin("nl.gn0s1s" % "sbt-dotenv" % "3.2.0")
