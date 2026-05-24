@@ -64,7 +64,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
 | `knn.py` | — | Deferred — depends on retrievers / embedders, neither of which is ported. |
 | `code_act.py` | `CodeAct.scala` | ✅ scaffolded. Iteration loop + fenced-code extraction + extractor wired up. Tools-inside-code (Scala↔Python RPC) is deferred — Python `CodeAct` lets users pass Python-callable Scala tools; that bridge needs the Deno+Pyodide infrastructure. v1 users either pre-load tools into their `CodeInterpreter` env, or use it without tools. |
-| `program_of_thought.py` | — | Deferred — generates Python code as the reasoning step. Now unblocked by `CodeInterpreter`; needs its own port session. |
+| `program_of_thought.py` | `ProgramOfThought.scala` | ✅ ported. Three `ChainOfThought` passes: `generate` → `regenerate` (on execution error, up to `maxIterations`) → `answer`. Caller-owned interpreter lifecycle. Behavioral delta: Python preloads a `SUBMIT(...)` function via Pyodide; dspy4s instructs the LM to **print** its JSON result instead, since the default subprocess interpreter doesn't have a SUBMIT mechanism. Functionally equivalent for the common case; explicit `SUBMIT` returns when Deno+Pyodide lands. |
 | `rlm.py` | — | Deferred — uses Deno+Pyodide JSON-RPC + tool-callback bridge; that infrastructure isn't built yet. The `CodeInterpreter` trait is the contract it'll plug into. |
 | `avatar/` | — | Deferred — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat. Separate session. |
 
