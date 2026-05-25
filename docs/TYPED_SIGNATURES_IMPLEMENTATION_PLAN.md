@@ -683,6 +683,63 @@ Acceptance criteria:
 - The resulting untyped signature is equivalent to a hand-written
   `Signature("sentence -> sentiment")` plus type metadata.
 
+### Outcomes (executed 2026-05-24)
+
+Implemented in three new files:
+
+- `modules/typed/src/main/scala/dspy4s/typed/Spec.scala` — `trait Spec`
+  marker plus opaque types `InputField[+A]` / `OutputField[+A]` (both
+  erase to `A` at runtime; the wrapping only exists so the macro can
+  classify by role).
+- `modules/typed/src/main/scala/dspy4s/typed/internal/SpecMacro.scala`
+  — quotes/splices macro that inspects abstract methods on the spec
+  trait, validates each returns `InputField[X]` or `OutputField[X]`,
+  summons `ValueDecoder[X]` evidence at the call site, and emits a
+  `TypedSignature[Map[String, Any], Map[String, Any]]` whose
+  `MapShape`s carry the derived `FieldSpec` vectors.
+- `Shape.MapShape` (added to `Shape.scala`) — `Shape[Map[String, Any]]`
+  used by the macro and available as a public utility for other
+  surfaces that produce `FieldSpec`s without a case class.
+
+Macro validates at compile time:
+  - methods that don't return `InputField[X]` / `OutputField[X]`
+  - methods with parameters
+  - empty spec traits
+  - missing `ValueDecoder[X]` for any wrapped type
+  - duplicate field names
+
+**Scope deviation from the plan's example** (documented inline):
+
+The plan's example showed `predict.run(sentence = "...")` with named
+arguments and `result.sentiment` with typed dot-access. Phase 5 MVP
+stops short of that — `I` and `O` are `Map[String, Any]`, so users
+call `predict.run(Map("sentence" -> "..."))` and access output via
+`tp.output("sentiment")`. Synthesizing case classes from a spec trait
+at compile time (to support typed dot-access end-to-end) is a
+significantly larger macro effort and is deferred to a follow-up.
+What Phase 5 *does* provide:
+
+- The trait is the declarative source of truth for the signature.
+- Field roles, names, types, enum metadata, and `FieldSpec.normalize`-d
+  prefixes/descriptions all flow from the trait.
+- The trait-derived `Signature` is structurally identical to the
+  builder-built or case-class-derived equivalent (asserted in
+  cross-surface-parity test).
+
+**Implementation lesson**: `tpe.memberType(m)` wraps parameterless
+defs in `NullaryMethodType`/`ByNameType`, so unwrapping with
+`MethodType.resType` alone produces unmatchable patterns. Read the
+declared return type directly from the `DefDef.returnTpt` instead —
+clean, no wrappers, no surprises.
+
+**Test results**: `Phase5SpecMacroSuite` adds 12 tests covering name
+ordering, role assignment, TypeRef derivation, enum metadata
+propagation, normalization, MapShape encode/decode, missing-field
+rejection, cross-surface parity, and four `compileErrors`-based
+negative tests (non-marker return type, parameterized method, missing
+decoder, empty spec trait). Typed module: 52 / 52 (was 40; +12). Full
+project: 368 / 368 (was 356; +12).
+
 ## Phase 6: Examples And Documentation
 
 Goal: make the feature discoverable without forcing users through the design

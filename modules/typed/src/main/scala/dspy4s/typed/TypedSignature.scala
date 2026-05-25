@@ -58,3 +58,14 @@ object TypedSignature:
   /** Programmatic builder for callers that don't want a case class per
     * signature. Returns a plain `Signature` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
+
+  /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
+    * compile time and materializes a `TypedSignature` whose untyped
+    * `Signature` reflects the trait's `InputField` / `OutputField` members.
+    *
+    * Phase 5 MVP: the typed `I` / `O` carry `Map[String, Any]` —
+    * `TypedPredict.run` accepts a raw `Map` of inputs and the
+    * `TypedPrediction.output` is also a `Map`. A follow-up may synthesize
+    * case classes from the spec for typed dot-access on results. */
+  inline def of[T <: Spec]: TypedSignature[Map[String, Any], Map[String, Any]] =
+    ${ internal.SpecMacro.ofImpl[T] }

@@ -22,6 +22,22 @@ trait Shape[A]:
 
 object Shape:
 
+  /** A `Shape[Map[String, Any]]` whose `fieldSpecs` are provided at
+    * construction. Encoding and decoding are identity; decode validates
+    * that every declared field is present in the raw map. Used by the
+    * trait-spec macro and any other surface that produces field metadata
+    * without an accompanying case class. */
+  final class MapShape(override val fieldSpecs: Vector[FieldSpec]) extends Shape[Map[String, Any]]:
+    def encode(value: Map[String, Any]): Map[String, Any] = value
+
+    def decode(raw: Map[String, Any]): Either[DspyError, Map[String, Any]] =
+      val missing = fieldSpecs.iterator.map(_.name).filterNot(raw.contains).toList
+      if missing.isEmpty then Right(raw)
+      else Left(NotFoundError(
+        resource = "prediction_field",
+        message  = s"Missing required fields: ${missing.mkString(", ")}"
+      ))
+
   /** Derives a `Shape[A]` from any case class whose fields all have a
     * `ValueDecoder` in scope. Compile error if any field lacks a decoder. */
   inline def derived[A <: Product](using m: Mirror.ProductOf[A]): Shape[A] =
