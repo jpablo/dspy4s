@@ -2,7 +2,6 @@ package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, FieldMetadata, TypeRef, ValidationError}
 import kyo.Schema
-import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.deriving.Mirror
 
 /** Field-level codec at the typed-layer boundary. Maps a Scala type to a
@@ -150,11 +149,7 @@ object FieldCodec extends LowPriorityFieldCodecs:
   /** Enables `derives FieldCodec` on Scala enums. Decodes case names from
     * strings or accepts already-typed enum values. */
   inline def derived[A <: scala.reflect.Enum](using m: Mirror.SumOf[A]): FieldCodec[A] =
-    new EnumDecoder[A](
-      caseNames   = summonEnumLabels[m.MirroredElemLabels],
-      cases       = summonEnumCases[A, m.MirroredElemTypes],
-      displayName = constValue[m.MirroredLabel & String]
-    )
+    new EnumDecoder[A](EnumInfo.derived[A])
 
   /** Extracted from `derived` so the inline def doesn't duplicate the
     * anonymous class at each call site. Package-private so inline expansion
@@ -165,54 +160,33 @@ object FieldCodec extends LowPriorityFieldCodecs:
     * is surfaced via `metadata(FieldMetadata.EnumCases)` so adapters can
     * render it into the prompt. */
   private[typed] final class EnumDecoder[A](
-      caseNames: List[String],
-      cases: List[A],
-      displayName: String
+      info: EnumInfo[A]
   ) extends FieldCodec[A]:
-
-    private val byName:  Map[String, A] = caseNames.zip(cases).toMap
-    private val byValue: Map[A, String] = cases.zip(caseNames).toMap
 
     val typeRef: TypeRef = TypeRef.string
 
     override val metadata: Map[String, String] = Map(
-      FieldMetadata.EnumCases -> caseNames.mkString(","),
-      FieldMetadata.EnumName  -> displayName
+      FieldMetadata.EnumCases -> info.caseNames.mkString(","),
+      FieldMetadata.EnumName  -> info.displayName
     )
 
     def decode(raw: Any): Either[DspyError, A] = raw match
-      case a if cases.contains(a) => Right(a.asInstanceOf[A])
+      case a if info.cases.contains(a) => Right(a.asInstanceOf[A])
       case s: String =>
-        byName.get(s) match
+        info.byName.get(s) match
           case Some(c) => Right(c)
           case None =>
             Left(ValidationError(
-              s"Cannot decode as $displayName: '$s' is not one of ${caseNames.mkString(", ")}"
+              s"Cannot decode as ${info.displayName}: '$s' is not one of ${info.caseNames.mkString(", ")}"
             ))
       case other =>
-        Left(ValidationError(s"Cannot decode as $displayName: $other"))
+        Left(ValidationError(s"Cannot decode as ${info.displayName}: $other"))
 
     /** Encode via the matched case name rather than `value.toString` so a
       * user-overridden `toString` can't drift away from the decode contract
       * or the prompt-rendered allowed set. */
     def encode(value: A): Any =
-      byValue.getOrElse(value, value.toString)
-
-  private inline def summonEnumLabels[T <: Tuple]: List[String] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   => constValue[h & String] :: summonEnumLabels[t]
-
-  /** Materializes each parameterless enum case by summoning its singleton
-    * mirror and reading the `fromProduct(EmptyTuple)` value. Compile-error
-    * if any case has parameters (the inline match leaves no fallback). */
-  private inline def summonEnumCases[A, T <: Tuple]: List[A] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   =>
-        val m  = summonInline[Mirror.ProductOf[h & A]]
-        val v  = m.fromProduct(EmptyTuple).asInstanceOf[A]
-        v :: summonEnumCases[A, t]
+      info.byValue.getOrElse(value, value.toString)
 
 trait LowPriorityFieldCodecs:
 

@@ -2,7 +2,6 @@ package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, TypeRef, ValidationError}
 import kyo.{Chunk, DecodeException, Result, Schema, Structure, UnknownVariantException}
-import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.deriving.Mirror
 
 private[typed] final class KyoSchemaFieldCodec[A](
@@ -24,18 +23,15 @@ private[typed] object KyoSchemaFieldCodec:
   inline def flatEnumSchema[A <: scala.reflect.Enum](using
       m: Mirror.SumOf[A]
   ): Schema[A] =
-    val caseNames = summonEnumLabels[m.MirroredElemLabels]
-    val cases = summonEnumCases[A, m.MirroredElemTypes]
-    val byName = caseNames.zip(cases).toMap
-    val byValue = cases.zip(caseNames).toMap
+    val info = EnumInfo.derived[A]
     Schema.init[A](
       writeFn = (value, writer) =>
-        writer.string(byValue.getOrElse(value, value.toString)),
+        writer.string(info.byValue.getOrElse(value, value.toString)),
       readFn = reader =>
         val raw = reader.string()
-        byName.getOrElse(
+        info.byName.getOrElse(
           raw,
-          throw UnknownVariantException(caseNames, raw)(using reader.frame)
+          throw UnknownVariantException(info.caseNames, raw)(using reader.frame)
         )
     )
 
@@ -271,16 +267,3 @@ private[typed] object KyoSchemaFieldCodec:
       case (Structure.Value.Bool(v), Structure.PrimitiveKind.Boolean)   => v
       case (Structure.Value.Null, Structure.PrimitiveKind.Unit)         => ()
       case (other, _)                                                   => fromStructure(other)
-
-  private inline def summonEnumLabels[T <: Tuple]: List[String] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   => constValue[h & String] :: summonEnumLabels[t]
-
-  private inline def summonEnumCases[A, T <: Tuple]: List[A] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t) =>
-        val m = summonInline[Mirror.ProductOf[h & A]]
-        val v = m.fromProduct(EmptyTuple).asInstanceOf[A]
-        v :: summonEnumCases[A, t]
