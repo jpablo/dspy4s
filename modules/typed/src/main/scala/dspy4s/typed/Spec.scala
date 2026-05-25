@@ -7,7 +7,7 @@ package dspy4s.typed
   *
   * Example:
   * {{{
-  *   trait Emotion extends TypedSignature.Spec:
+  *   trait Emotion extends Spec:
   *     def sentence:  InputField[String]
   *     def sentiment: OutputField[Sentiment]
   *

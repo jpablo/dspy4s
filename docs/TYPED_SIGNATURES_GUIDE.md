@@ -122,11 +122,15 @@ types, methods with parameters, missing `ValueDecoder[X]` for the
 inner type, duplicate field names, and empty spec traits.
 
 **Note on I/O typing**: the Phase 5 MVP returns
-`TypedSignature[Map[String, Any], Map[String, Any]]`. Typed dot-access
-on outputs (`result.sentiment`) requires synthesizing case classes
-from the trait at compile time and is deferred to a follow-up. Use
-this surface when the declarative spec matters most; use the
-case-class API when typed I/O ergonomics matter more.
+`TypedSignature[Map[String, Any], Map[String, Any]]`. Output values
+**are** decoded through the same `ValueDecoder` instances the
+case-class API uses — so `decoded("tone")` is `P5Tone.calm` (the
+typed enum value), not `"calm"` (the raw string). What's missing is
+**typed dot-access**: you still write `decoded("tone").asInstanceOf[P5Tone]`
+instead of `decoded.tone`. Synthesizing case classes from the trait
+at compile time (to enable dot-access on the result) is deferred to a
+follow-up. Use this surface when the declarative spec matters most;
+use the case-class API when typed I/O ergonomics matter more.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 

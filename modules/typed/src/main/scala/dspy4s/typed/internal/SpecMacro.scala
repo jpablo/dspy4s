@@ -30,19 +30,32 @@ private[typed] object SpecMacro:
     val inputFieldSym  = TypeRepr.of[InputField[Any]].typeSymbol
     val outputFieldSym = TypeRepr.of[OutputField[Any]].typeSymbol
 
-    // Abstract methods declared on the trait, in declaration order.
-    val methods = typeSym.declaredMethods.filter { m =>
-      val flags = m.flags
-      flags.is(Flags.Deferred) && !flags.is(Flags.Synthetic)
-    }
+    // Methods declared on the trait itself (excluding synthetic /
+    // compiler-generated ones). Inherited methods from Spec / Any are
+    // not in declaredMethods.
+    val allDeclared = typeSym.declaredMethods.filter(m => !m.flags.is(Flags.Synthetic))
+
+    // Reject concrete (non-abstract) methods on the spec trait. Spec
+    // traits must be purely declarative -- every member is a field
+    // declaration.
+    val concrete = allDeclared.filterNot(_.flags.is(Flags.Deferred))
+    if concrete.nonEmpty then
+      report.errorAndAbort(
+        s"Spec trait '$sigName' must declare only abstract field methods; " +
+        s"found concrete method(s): ${concrete.map(_.name).mkString(", ")}"
+      )
+
+    val methods = allDeclared  // all deferred by construction
 
     if methods.isEmpty then
       report.errorAndAbort(
         s"Spec trait '$sigName' must declare at least one InputField or OutputField method"
       )
 
-    // For each method: (name, isInput, innerType-Repr, FieldSpec-Expr)
-    val fieldData: List[(String, Boolean, TypeRepr, Expr[FieldSpec])] =
+    // For each method: (name, isInput, FieldSpec-Expr, ValueDecoder-Expr).
+    // The decoder expression is cast to ValueDecoder[Any] so we can carry
+    // a uniform list-of-decoders type into the macro output.
+    val fieldData: List[(String, Boolean, Expr[FieldSpec], Expr[ValueDecoder[Any]])] =
       methods.map { m =>
         val name = m.name
 
@@ -71,17 +84,18 @@ private[typed] object SpecMacro:
               s"Spec method '$sigName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
             )
 
-        // Summon a ValueDecoder[X] at the macro expansion site.
-        val decoderExpr = innerType.asType match
+        // Summon a ValueDecoder[X] at the macro expansion site, then cast
+        // to ValueDecoder[Any] so the runtime decoder map can carry
+        // heterogeneous types.
+        val decoderExpr: Expr[ValueDecoder[Any]] = innerType.asType match
           case '[t] =>
             Expr.summon[ValueDecoder[t]] match
-              case Some(d) => d
+              case Some(d) => '{ ${ d }.asInstanceOf[ValueDecoder[Any]] }
               case None =>
                 report.errorAndAbort(
                   s"No ValueDecoder[${innerType.show}] in scope for spec field '$sigName.$name'"
                 )
 
-        // Build: FieldSpec(name, role, decoder.typeRef, metadata = decoder.metadata)
         val nameExpr = Expr(name)
         val roleExpr =
           if isInput then '{ FieldRole.Input } else '{ FieldRole.Output }
@@ -94,7 +108,7 @@ private[typed] object SpecMacro:
           )
         }
 
-        (name, isInput, innerType, fieldSpecExpr)
+        (name, isInput, fieldSpecExpr, decoderExpr)
       }
 
     // Reject duplicate field names.
@@ -106,12 +120,22 @@ private[typed] object SpecMacro:
         s"Spec trait '$sigName' has duplicate field names: ${duplicates.mkString(", ")}"
       )
 
-    val inputFieldExprs:  List[Expr[FieldSpec]] = fieldData.collect { case (_, true,  _, e) => e }
-    val outputFieldExprs: List[Expr[FieldSpec]] = fieldData.collect { case (_, false, _, e) => e }
-    val sigNameExpr = Expr(sigName)
+    def buildDecoderMapExpr(items: List[(String, Boolean, Expr[FieldSpec], Expr[ValueDecoder[Any]])])
+        : Expr[Map[String, ValueDecoder[Any]]] =
+      val pairs: List[Expr[(String, ValueDecoder[Any])]] = items.map { case (n, _, _, dec) =>
+        val nameExpr = Expr(n)
+        '{ ${ nameExpr } -> ${ dec } }
+      }
+      '{ Map(${ Varargs(pairs) }*) }
+
+    val inputFieldExprs:  List[Expr[FieldSpec]] = fieldData.collect { case (_, true,  e, _) => e }
+    val outputFieldExprs: List[Expr[FieldSpec]] = fieldData.collect { case (_, false, e, _) => e }
+    val inputDecodersExpr  = buildDecoderMapExpr(fieldData.filter(_._2))
+    val outputDecodersExpr = buildDecoderMapExpr(fieldData.filterNot(_._2))
+    val sigNameExpr        = Expr(sigName)
 
     '{
-      val inFields: Vector[FieldSpec]  = Vector(${ Varargs(inputFieldExprs)  }*)
+      val inFields:  Vector[FieldSpec] = Vector(${ Varargs(inputFieldExprs)  }*)
       val outFields: Vector[FieldSpec] = Vector(${ Varargs(outputFieldExprs) }*)
       val sig = SignatureSpec
         .create(
@@ -127,7 +151,7 @@ private[typed] object SpecMacro:
       TypedSignature[Map[String, Any], Map[String, Any]](
         name        = ${ sigNameExpr },
         untyped     = sig,
-        inputShape  = new Shape.MapShape(inFields),
-        outputShape = new Shape.MapShape(outFields)
+        inputShape  = new Shape.MapShape(inFields,  ${ inputDecodersExpr }),
+        outputShape = new Shape.MapShape(outFields, ${ outputDecodersExpr })
       )
     }

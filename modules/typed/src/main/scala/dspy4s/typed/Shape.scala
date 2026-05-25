@@ -23,20 +23,58 @@ trait Shape[A]:
 object Shape:
 
   /** A `Shape[Map[String, Any]]` whose `fieldSpecs` are provided at
-    * construction. Encoding and decoding are identity; decode validates
-    * that every declared field is present in the raw map. Used by the
-    * trait-spec macro and any other surface that produces field metadata
-    * without an accompanying case class. */
-  final class MapShape(override val fieldSpecs: Vector[FieldSpec]) extends Shape[Map[String, Any]]:
-    def encode(value: Map[String, Any]): Map[String, Any] = value
+    * construction. Used by the trait-spec macro and any other surface
+    * that produces field metadata without an accompanying case class.
+    *
+    * When `decoders` is non-empty, every declared field is run through
+    * its `ValueDecoder` during `decode` (so a raw adapter value like the
+    * string `"joy"` becomes the typed enum value `Sentiment.joy`), and
+    * inputs are encoded through the same decoders on the way out (so a
+    * typed enum value becomes its case-name string for the adapter).
+    *
+    * Fields not present in `decoders` pass through unchanged — that
+    * preserves the original identity-shape behavior when callers don't
+    * supply per-field decoders. `decode` always validates that every
+    * field listed in `fieldSpecs` is present in the raw map. */
+  final class MapShape(
+      override val fieldSpecs: Vector[FieldSpec],
+      decoders: Map[String, ValueDecoder[Any]] = Map.empty
+  ) extends Shape[Map[String, Any]]:
+
+    def encode(value: Map[String, Any]): Map[String, Any] =
+      if decoders.isEmpty then value
+      else value.map { (k, v) =>
+        k -> decoders.get(k).fold(v: Any)(_.encode(v.asInstanceOf[Any]))
+      }
 
     def decode(raw: Map[String, Any]): Either[DspyError, Map[String, Any]] =
       val missing = fieldSpecs.iterator.map(_.name).filterNot(raw.contains).toList
-      if missing.isEmpty then Right(raw)
-      else Left(NotFoundError(
-        resource = "prediction_field",
-        message  = s"Missing required fields: ${missing.mkString(", ")}"
-      ))
+      if missing.nonEmpty then
+        Left(NotFoundError(
+          resource = "prediction_field",
+          message  = s"Missing required fields: ${missing.mkString(", ")}"
+        ))
+      else if decoders.isEmpty then
+        Right(raw)
+      else
+        // Decode each declared field through its decoder, short-circuit
+        // on the first failure.
+        val builder = Map.newBuilder[String, Any]
+        val it = fieldSpecs.iterator
+        while it.hasNext do
+          val fs = it.next()
+          val rawValue = raw(fs.name)
+          decoders.get(fs.name) match
+            case Some(dec) =>
+              dec.decode(rawValue) match
+                case Right(decoded) => builder += (fs.name -> decoded)
+                case Left(err) =>
+                  return Left(ValidationError(
+                    s"Field '${fs.name}': ${err.message}"
+                  ))
+            case None =>
+              builder += (fs.name -> rawValue)
+        Right(builder.result())
 
   /** Derives a `Shape[A]` from any case class whose fields all have a
     * `ValueDecoder` in scope. Compile error if any field lacks a decoder. */
