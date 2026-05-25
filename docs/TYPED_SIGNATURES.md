@@ -151,7 +151,7 @@ quick win that can ship in parallel.
 The class-based signature case (DSPy "class-based signatures" in
 `docs/docs/learn/programming/signatures.md`, Snippet 5) is where
 typing is easiest, because field names and types are already in source
-code with proper Scala types. We surveyed four shapes:
+code with proper Scala types. We surveyed five shapes:
 
 ### 3.1 Named tuple types
 
@@ -225,7 +225,38 @@ val emotionSig = TypedSignature.builder
   "just declare your data shape." Field names are stringly-typed at the
   call site, even though they're checked against the carrier.
 
-### 3.5 Comparison
+### 3.5 Trait/class-as-spec surface
+
+```scala
+trait Emotion extends TypedSignature.Spec:
+  def sentence: InputField[String]
+  def sentiment: OutputField["sadness" | "joy" | "love" | "anger" | "fear" | "surprise"]
+
+val emotionSig = TypedSignature.of[Emotion](
+  instructions = "Classify emotion."
+)
+```
+
+This is the closest Scala analogue to Python's class-based signatures:
+the declaration is a **spec**, not request/response data. Users never
+instantiate `Emotion`; they use it only to derive a `TypedSignature`.
+The macro reads abstract members, partitions them by `InputField` /
+`OutputField`, and lowers them to the same engine carrier as every
+other surface.
+
+- **Pros.** Best Python parity. One declaration. Avoids the placeholder
+  output problem because the trait is never constructed as data. Good
+  field-name source for IDE rename/refactor tools.
+- **Cons.** Requires a macro over trait/class members, not only
+  `Mirror.Product`. The marker wrappers (`InputField` / `OutputField`)
+  are extra vocabulary. A shorthand where unmarked members default to
+  outputs is possible later, but the explicit form should ship first.
+
+**Recommendation:** Make this the primary Python-like ergonomic
+surface after the foundation and typed `Predict` are working. Keep
+named tuples and case classes as data-oriented alternatives.
+
+### 3.6 Comparison
 
 | | Lines per signature | Mirror/macro work | Input/output construct asymmetry | Error message quality |
 |---|---:|:---:|:---:|:---:|
@@ -233,6 +264,7 @@ val emotionSig = TypedSignature.builder
 | 2. Case classes | 4–6 | small (`Mirror`-based derive) | clean | nominal (best) |
 | 3. Single case class + In/Out | 4 | medium (derive + role partition) | **bad** (placeholder outputs at construction) | nominal (good) |
 | 4. Typed builder | 5–7 | none | clean | carrier-tuple-typed (verbose) |
+| 5. Trait/class-as-spec | 5–7 | medium (member-inspection macro) | clean (spec-only) | nominal-ish (best Python parity) |
 
 ---
 
@@ -354,6 +386,7 @@ See §4.6 below for why this matters.
 | **Builder** (engine itself) | identity |
 | **Named tuples** (`TypedSignature.of[I, O]`) | inline def using `NamedTuple.Names[I]` + `NamedTuple.From[I]` to walk I/O at compile time, emit a sequence of `.input`/`.output` calls |
 | **Case classes** (`derives TypedSignature.Input/Output`) | Mirror-based: walk `m.MirroredElemLabels` + `m.MirroredElemTypes`, produce the carrier |
+| **Trait/class spec** (`trait Foo extends TypedSignature.Spec`) | macro: inspect abstract member methods, require `InputField[T]` / `OutputField[T]` markers, emit the carrier |
 | **String DSL** (`Signature("…")`) | macro: parse the literal at compile time, emit the carrier; for non-literals, fall back to the untyped `SignatureSpec` |
 
 Each translator is approximately 50–100 lines, isolated, and exercises
@@ -460,7 +493,7 @@ from §4.3 remains the same either way.
 `Predict(sig: Signature)` remain available unchanged. The typed layer
 is purely additive. Callers who don't need typing pay nothing.
 
-When the inline macro surface (Phase 4) ships, it can opt to *replace*
+When the inline macro surface (Phase 5) ships, it can opt to *replace*
 the existing `Signature.apply` if the user-facing improvement is worth
 the macro footprint — but that decision can be deferred.
 
@@ -833,18 +866,26 @@ Option B uses the self-built fallback engine from §4.2.
    Bar]`. Most or all of the work should already be done via
    `Schema.derived` — this phase is mostly validation + tests.
 
-5. **Phase 4 (optional) — String DSL → `Schema`.** Inline transparent
+5. **Phase 4 — Trait/class-as-spec surface.** Add
+   `TypedSignature.Spec`, `InputField[T]`, and `OutputField[T]`, plus
+   a macro that derives `TypedSignature.of[Spec]` from abstract
+   members. This is the Python-parity surface and should lower to the
+   same engine as named tuples, case classes, and builder signatures.
+   Start with explicit input/output markers; consider output-default
+   shorthand only after the explicit form is stable.
+
+6. **Phase 5 (optional) — String DSL → `Schema`.** Inline transparent
    macro that parses literal DSL constants at compile time and emits
-   a `Schema[NamedTuple[Names, Types]]`. Defer until Phases 1–3
+   a `Schema[NamedTuple[Names, Types]]`. Defer until Phases 1–4
    settle and the macro pays for itself.
 
-6. **Phase 5 (optional, exploratory) — Adapter on `Codec`/`Format`.**
+7. **Phase 6 (optional, exploratory) — Adapter on `Codec`/`Format`.**
    Study `schema-toon` and the JSON `Codec`. Decide whether to
    refactor `ChatAdapter` / `JsonAdapter` to delegate prompt
    format/parse to the `Codec` infrastructure. Big refactor, big
    potential win. Out of scope until the above stabilize.
 
-Phases 2–5 are purely additive. Each can be skipped if it doesn't pull
+Phases 2–6 are purely additive. Each can be skipped if it doesn't pull
 its weight in practice.
 
 ---
@@ -897,7 +938,7 @@ its weight in practice.
    basis; never automatic.
 
 6. **Untyped `Signature.apply` deprecation.** Should the string-DSL
-   `Signature.apply` eventually be replaced by the Phase 4 macro, or
+   `Signature.apply` eventually be replaced by the Phase 5 macro, or
    coexist forever as a runtime-DSL escape hatch? Recommendation:
    coexist; runtime DSL is a legitimate use case (config-driven
    signatures, REPL exploration).
@@ -943,7 +984,7 @@ its weight in practice.
 
 ## 9. Non-goals (this document)
 
-- A full inline macro for the string DSL. Sketched as Phase 4, design
+- A full inline macro for the string DSL. Sketched as Phase 5, design
   details deferred.
 - Refined / Iron predicate integration. Useful eventually for
   validated fields, but orthogonal.
