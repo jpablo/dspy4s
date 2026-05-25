@@ -100,9 +100,9 @@ object FieldSpec:
   *     adapters see.
   *   - `SignatureLayout.create(name, fields, instructions)` —
   *     validating + normalizing factory for programmatic construction.
-  *   - `SignatureLayout(dsl, instructions)` — string-DSL parser
-  *     (legacy escape hatch; prefer `dspy4s.typed.Signature.fromString`
-  *     from user code).
+  *   - `SignatureLayout.parse(dsl, instructions)` — string-DSL parser
+  *     escape hatch; prefer `dspy4s.typed.Signature.fromString` from
+  *     user code.
   *
   * The case-class `apply(name, fields, instructions)` form is also
   * available but skips normalization — only use it from internal code
@@ -251,17 +251,20 @@ final case class SignatureLayout(
 
 object SignatureLayout:
 
-  /** String-DSL parser kept on the companion as overloaded `apply` for
-    * source-compatibility with the pre-collapse `SignatureSchema(dsl, ...)`
-    * form. Prefer `dspy4s.typed.Signature.fromString` from user code; this
-    * factory is the internal entry point that the typed surface delegates
-    * to. */
-  def apply(dsl: String, instructions: String): Either[DspyError, SignatureLayout] =
+  /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a
+    * `SignatureLayout`. Prefer `dspy4s.typed.Signature.fromString` from
+    * user code; this is the lower-level entry point that the typed
+    * surface delegates to. */
+  def parse(
+      dsl: String,
+      instructions: String = ""
+  ): Either[DspyError, SignatureLayout] =
     dspy4s.core.signatures.SignatureDsl
       .parse(dsl)
-      .map(_.withInstructions(instructions))
-
-  def apply(dsl: String): Either[DspyError, SignatureLayout] = apply(dsl, "")
+      .map(layout =>
+        if instructions.isEmpty then layout
+        else layout.withInstructions(instructions)
+      )
 
   /** Validating + normalizing factory. Returns `Left` with a structured
     * `DspyError` when validation fails (empty name, no fields, duplicate

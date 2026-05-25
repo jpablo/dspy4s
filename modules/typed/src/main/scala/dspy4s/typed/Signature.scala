@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{FieldRole, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout}
 import kyo.Schema
 
 /** A signature with compile-time knowledge of its input (`I`) and output
@@ -78,6 +78,27 @@ object Signature:
   /** Programmatic builder for callers that don't want a case class per
     * signature. Returns a plain `SignatureLayout` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
+
+  /** Parse a DSPy-style string DSL (`"question -> answer"`) into a
+    * `Signature` whose input/output shapes are `Map[String, Any]`.
+    *
+    * This is the typed entry point for runtime-defined signatures: the
+    * resulting `Signature` flows through `Predict` and adapter pipelines
+    * exactly like a typed one, but inputs and outputs remain untyped
+    * `Map[String, Any]` because the DSL carries no static schema.
+    *
+    * For static type-safe inputs and outputs, prefer
+    * `Signature.fromType[F]`, `Signature.from(method)`, or
+    * `Signature.of[T <: Spec]`. */
+  def fromString(
+      dsl: String,
+      instructions: String = ""
+  ): Either[DspyError, Signature[Map[String, Any], Map[String, Any]]] =
+    SignatureLayout.parse(dsl, instructions).map { layout =>
+      val inShape  = Shape.MapShape(layout.inputFields)
+      val outShape = Shape.MapShape(layout.outputFields)
+      Signature(layout.name, layout, inShape, outShape)
+    }
 
   /** Function/method macro entry. Inspects a method reference at compile
     * time and materializes a `Signature` whose inputs come from the

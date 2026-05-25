@@ -186,3 +186,44 @@ class Phase3SurfacesSuite extends FunSuite:
       fromCases.fields.map(f => (f.name, f.role, f.typeRef.repr))
     )
   }
+
+  // ── String DSL surface ──────────────────────────────────────────────────
+
+  test("SignatureLayout.parse turns a DSPy-style string DSL into a layout") {
+    val parsed = SignatureLayout.parse("question -> answer")
+    parsed match
+      case Right(layout) =>
+        assertEquals(layout.inputFields.map(_.name),  Vector("question"))
+        assertEquals(layout.outputFields.map(_.name), Vector("answer"))
+        assertEquals(layout.instructions, None)
+      case Left(err) => fail(s"expected parse success, got: $err")
+  }
+
+  test("SignatureLayout.parse carries non-empty instructions") {
+    val parsed = SignatureLayout.parse(
+      "question -> answer",
+      instructions = "Answer the question concisely."
+    )
+    assertEquals(
+      parsed.toOption.flatMap(_.instructions),
+      Some("Answer the question concisely.")
+    )
+  }
+
+  test("Signature.fromString produces a typed wrapper backed by MapShape") {
+    val sig = Signature.fromString("question -> answer").toOption.get
+    assertEquals(sig.layout.inputFields.map(_.name),  Vector("question"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
+
+    // Map-shape encode is identity for the input record.
+    val encoded = sig.inputShape.encode(Map("question" -> "what is 2+2?"))
+    assertEquals(encoded, Map[String, Any]("question" -> "what is 2+2?"))
+
+    // Output decode succeeds for the declared field, fails when missing.
+    val decoded = sig.outputShape.decode(Map("answer" -> "4"))
+    assertEquals(decoded, Right(Map[String, Any]("answer" -> "4")))
+
+    sig.outputShape.decode(Map.empty) match
+      case Left(_: NotFoundError) => () // expected
+      case other                  => fail(s"expected NotFoundError, got: $other")
+  }
