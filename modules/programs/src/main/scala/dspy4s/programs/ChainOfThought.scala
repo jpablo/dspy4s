@@ -70,14 +70,35 @@ final case class ChainOfThought[I, O](
           for
             reasoning <- extractReasoning(raw.values)
             baseOut   <- signature.outputShape.decode(raw.values)
-          yield
-            // Named tuples erase to plain tuples at runtime, so we can
-            // cons the reasoning string onto the base tuple to materialize
-            // the augmented named tuple.
-            val baseTuple = baseOut.asInstanceOf[Tuple]
-            val augmented = (reasoning *: baseTuple).asInstanceOf[Out]
-            Prediction(augmented, raw)
+            augmented <- prependReasoning(reasoning, baseOut)
+          yield Prediction(augmented, raw)
         }
+
+  /** Cons `reasoning` onto the base output to materialize the augmented
+    * named tuple. Named tuples erase to plain tuples at runtime, so the
+    * cons is well-defined only when `baseOut` is a `Tuple` -- which holds
+    * for `Signature.of[Spec]` / `Signature.fromType[F]` outputs (backed
+    * by `TupleShape`) but not for case-class outputs from
+    * `Signature.derived[I, O <: Product]` (backed by `KyoProductShape`,
+    * which decodes into a non-tuple case class) or `Map[String, Any]`
+    * outputs from `Signature.fromString` (backed by `MapShape`).
+    *
+    * Surfaces the unsupported-shape case as a `ValidationError` instead
+    * of letting an `asInstanceOf` `ClassCastException` escape the
+    * `Either` boundary. The `WithReasoning[O]` match type already
+    * fails to reduce for these shapes, so anything that hits this
+    * branch is misuse of the public constructor. */
+  private def prependReasoning(reasoning: String, baseOut: O): Either[DspyError, Out] =
+    baseOut match
+      case tuple: Tuple =>
+        Right((reasoning *: tuple).asInstanceOf[Out])
+      case other =>
+        Left(ValidationError(
+          s"ChainOfThought requires a named-tuple output signature " +
+          s"(Signature.of[Spec] or Signature.fromType[F]); got " +
+          s"${other.getClass.getSimpleName} from '${signature.name}'. " +
+          s"Use DynamicChainOfThought for case-class or Map-shaped outputs."
+        ))
 
   private def extractReasoning(values: Map[String, Any]): Either[DspyError, String] =
     values.get("reasoning") match

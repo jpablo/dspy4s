@@ -23,6 +23,11 @@ trait TcotMultiOutputSpec extends Spec:
   def answer:   OutputField[String]
   def score:    OutputField[Double]
 
+// Case-class I/O fixtures for the negative-path test that exercises
+// the case-class-output rejection in typed ChainOfThought.
+case class TcotCaseInput(document: String)
+case class TcotCaseOutput(summary: String)
+
 class TypedChainOfThoughtSuite extends FunSuite:
 
   // ── Test doubles ────────────────────────────────────────────────────────
@@ -171,6 +176,30 @@ class TypedChainOfThoughtSuite extends FunSuite:
       result match
         case Left(_: ValidationError) => ()
         case other => fail(s"expected ValidationError, got: $other")
+    }
+  }
+
+  test("ChainOfThought rejects case-class-output signatures with a ValidationError") {
+    // Signature.derived produces a KyoProductShape that decodes into the
+    // case class -- not a Tuple -- so the augmented-tuple construction
+    // can't proceed. The boundary must surface a structured error, not
+    // a ClassCastException.
+    val sig = Signature.derived[TcotCaseInput, TcotCaseOutput]("CaseClassCot")
+    val adapter = new ScriptedAdapter(
+      reasoning  = "any reasoning",
+      baseValues = Map("summary" -> "any summary")
+    )
+    RuntimeEnvironment.withSettings(settings(adapter)) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = ChainOfThought(sig).run(TcotCaseInput("..."))
+      result match
+        case Left(err: ValidationError) =>
+          assert(
+            err.message.contains("named-tuple output"),
+            s"error message should mention named-tuple requirement: ${err.message}"
+          )
+        case other =>
+          fail(s"expected ValidationError, got: $other")
     }
   }
 
