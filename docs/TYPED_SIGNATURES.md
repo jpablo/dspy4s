@@ -18,12 +18,18 @@ keeping the existing runtime-flexible API intact:
   down to the engine: typed builder, named tuples, case-class
   derivation, and (later) an inline macro over the string DSL.
 
-**Foundation choice (§5):** rather than build the engine from scratch,
-adopt `zio-blocks-schema` (Apache-2.0, NamedTuple-aware `Schema.derived`
-macro, pure `Either`-returning codecs, no ZIO effect leakage). The
-0.0.x churn risk is accepted in exchange for not reimplementing
-primitives. A pure-Scala self-built fallback is documented in §5.3 in
-case adoption hits unexpected friction.
+**Foundation choice (§5):** three live options have been evaluated:
+- **Option A** — adopt `zio-blocks-schema` (`Schema[A]` + `Codec`/`Format`
+  + `schema-toon`; broad scope, 0.0.x).
+- **Option B** — self-built engine using only Scala 3.8.1 stdlib
+  features (documented as fallback).
+- **Option C** — adopt `kyo-data` `Record[F]` (intersection-typed
+  records; structurally cleaner; smaller scope — no bundled codec
+  system).
+
+Project owner prefers leaning into libraries where they give us pieces
+we need. Final selection (A vs. C, or an A+C hybrid) is pending
+external review.
 
 ---
 
@@ -436,9 +442,10 @@ guarantee to be usable in practice.
 
 Section 4.2's `TypedSignature[I, O]` + `FieldOf` + `TypedPrediction`
 sketch is preserved as a self-contained design we can fall back on if
-the foundation choice in §5 doesn't pan out. In the recommended path
-(§5.2), most of §4.2 is replaced by `zio-blocks-schema` primitives —
-the surface layout from §4.3 remains the same either way.
+neither library foundation in §5 pans out. In a library-adoption path
+(§5.2 zio-blocks-schema or §5.4 kyo-data Record), most of §4.2 is
+replaced by primitives from the chosen library — the surface layout
+from §4.3 remains the same either way.
 
 ### 4.8 The existing untyped surface stays
 
@@ -452,14 +459,27 @@ the macro footprint — but that decision can be deferred.
 
 ---
 
-## 5. Foundation choice — zio-blocks-schema or self-built
+## 5. Foundation choice — three options
 
 ### 5.1 Background
 
-After §4 was drafted, we evaluated [zio-blocks](https://github.com/zio/zio-blocks)
-(currently `0.0.40`, Apache-2.0) as a possible foundation. The `schema`
-module specifically overlaps significantly with what §4 proposes to
-build:
+Three live options for the typed engine have been evaluated:
+
+- **Option A** (§5.2): adopt [zio-blocks](https://github.com/zio/zio-blocks)
+  — broad `Schema` + `Codec`/`Format` ecosystem with NamedTuple-aware
+  derivation.
+- **Option B** (§5.3): self-built engine from §4.2 — pure Scala 3.8.1
+  with no external deps.
+- **Option C** (§5.4): adopt [kyo-data](https://github.com/getkyo/kyo)
+  `Record[F]` — intersection-typed structural records with a focused
+  scope, surfaced by [the kyo-sql preview gist](https://gist.github.com/fwbrasil/e5ea19cca971795ece95b6f7f1d1e14d).
+
+Each is described below; §5.5 compares; §5.6 records the current lean
+and defers the binding decision to external review.
+
+The original investigation (kept here for context) focused on
+zio-blocks. The `schema` module specifically overlaps significantly
+with what §4 proposes to build:
 
 - **NamedTuple is already a first-class derivation target** via
   `Schema.derived` (their macro handles `type SentimentIn = (sentence:
@@ -479,7 +499,7 @@ build:
 The choice is whether to build the typed engine ourselves or adopt
 `zio-blocks-schema` as the underlying type-and-codec substrate.
 
-### 5.2 Option A — Adopt zio-blocks-schema *(recommended)*
+### 5.2 Option A — Adopt zio-blocks-schema
 
 **Shape.** Replace `TypedSignature[I, O]` (§4.2) with a thin wrapper
 around two `Schema`s:
@@ -537,7 +557,7 @@ is to keep `Signature` as a dspy4s-owned wrapper so churn is contained
 at one layer — adapters / programs see `Signature[I, O]`, never raw
 `Schema[A]`.
 
-### 5.3 Option B — Self-built engine *(fallback)*
+### 5.3 Option B — Self-built engine
 
 The §4.2 sketch in full: `opaque type TypedSignature[I <: Tuple, O <:
 Tuple] = SignatureSpec`, builder extensions, `FieldOf` match type,
@@ -555,41 +575,180 @@ external dependencies beyond what we already use.
 - Writing macros for case-class and string-DSL derivation ourselves.
 - Building codec / adapter infrastructure from scratch (no `Format`
   registry to lean on).
-- Reinventing pieces zio-blocks-schema has already shipped, for
-  effectively the same use case.
+- Reinventing pieces both `zio-blocks-schema` and `kyo-data` have
+  already shipped, for effectively the same use case.
 
-### 5.4 Comparison
+**Patterns worth lifting even in this option.** Several techniques
+from the kyo-sql preview (§5.4 cites the source) would improve our
+self-built design materially:
 
-|  | Option A (adopt) | Option B (self-built) |
-|---|---|---|
-| Engine LOC | ~100 wrapper LOC | ~300 LOC engine + match-type work |
-| Macro work | None (use `Schema.derived`) | Case-class + string-DSL macros (~100 LOC each) |
-| Codec infrastructure | `Codec`/`Format` reusable; TOON ready | All adapter formats hand-written |
-| Stability risk | 0.0.x churn (accepted) | None external |
-| Vocabulary footprint | `Reflect`/`Term`/`Format`/`TypeId` at engine layer | All dspy4s names |
-| Lock-in | Moderate (wrapped, pervasive) | None |
-| Time to working prototype | ~1–2 sessions | ~3–5 sessions |
+- **`Name ~ Value` as a bidirectional operator** at type and value
+  level. Schema reads identically to construction:
+  `Record["k1" ~ V1 & "k2" ~ V2]` ↔ `("k1" ~ v1) & ("k2" ~ v2)`. This
+  replaces our `.input[T]("name")` builder with something tighter.
+- **`stage` / `stageNamed`** — a single inline-staged primitive that
+  walks a type's fields with a per-field polymorphic function. It is
+  the right abstraction for derive-from-NamedTuple, derive-from-case-class,
+  and build-decoder-from-output-type — all the same shape. Replaces a
+  collection of per-surface Mirror-derivation macros with one
+  primitive plus calls.
 
-### 5.5 Recommendation
+If we go Option B, we should adopt these patterns from the outset.
 
-**Pursue Option A.** Concrete first steps:
+### 5.4 Option C — Adopt kyo-data `Record[F]`
 
-1. Add `dev.zio` `zio-blocks-schema` to the `core` module (or a new
-   `core-schema` module for cleanliness).
-2. Build `Signature[I, O]` as a thin wrapper around two `Schema`s.
-3. Adapt `Predict`/`ChainOfThought` to accept `Signature[I, O]` and
-   produce a typed `Prediction[O]`.
-4. Adapter integration: start with the existing `ChatAdapter`; map the
-   runtime `Reflect.Record` walk to current `FieldSpec` iteration.
-   Defer reuse of `Codec`/`Format` until the basics work.
-5. Study `schema-toon` for prompt-format inspiration (separate
-   exploration; not on the critical path).
+**Source.** `getkyo/kyo`, module `kyo-data` (file
+`kyo-data/shared/src/main/scala/kyo/Record.scala`). Currently shipping
+under Apache-2.0. The pattern is showcased in the
+[kyo-sql preview gist](https://gist.github.com/fwbrasil/e5ea19cca971795ece95b6f7f1d1e14d)
+which motivated this option.
 
-**Keep Option B documented as the fallback.** If Option A hits
-unexpected friction — surprising macro behavior, missing primitives,
-unworkable binary churn — the self-built engine remains a viable
-alternative. The two options share the same surface layout from §4.3,
-so the user-visible API stays similar either way.
+**Shape.** `Record`'s type parameter is an intersection of `Name ~
+Value` pairs. Construction mirrors the schema:
+
+```scala
+import kyo.{Record, ~}
+
+val r: Record["name" ~ String & "age" ~ Int] =
+  ("name" ~ "Alice") & ("age" ~ 30)
+
+r.name   // String   (typed via Fields.Have evidence)
+r.age    // Int
+// r.email  // compile error: no Fields.Have evidence
+```
+
+Internally `Record[F]` is `final class Record[F](dict: Dict[String,
+Any]) extends Dynamic`. Field access goes through `selectDynamic[Name
+<: String & Singleton](using Fields.Have[F, Name]): h.Value`.
+Composition is `&[A](other: Record[A]): Record[F & A]` — intersection
+composition of schemas. Duplicate keys normalize to a union via `~`
+being contravariant in `Value` (`"f" ~ Int & "f" ~ String` ≡ `"f" ~
+(Int | String)`).
+
+**Polymorphic field iteration.** `Record.stageNamed[A]` walks a type's
+fields at compile time, runs a poly function per field, and rewrites
+each `Name ~ V` into `Name ~ G[V]`:
+
+```scala
+val cols = Record.stageNamed[User](
+  [n <: String, v] => (f: Field[n, v]) => Column[n, v](f.name)
+)
+// cols : Record[ "id" ~ Column["id", Long] & "name" ~ Column["name", String] ]
+```
+
+This *is* the abstraction we would otherwise hand-roll for
+derivation — but it is a published primitive, not a per-case macro.
+
+**Use in dspy4s.** Wrap as:
+
+```scala
+final case class Signature[I, O](
+  input:        Record[I],
+  output:       Record[O],
+  instructions: Option[String] = None
+)
+```
+
+`TypedPrediction[O]` becomes a `Record[O]` directly — typed dot-access
+already works. Surface translators reduce to one-liners:
+
+- Named-tuple types — `Record.fromNamedTuple[(sentence: String)]`
+- Case classes — `Record.fromProduct(...)` or `stageNamed` to build a
+  schema-derived Record
+- Builder DSL — `Record["k1" ~ V1 & "k2" ~ V2]` via `~` and `&`
+  (no separate `.input[T]` chain needed)
+- String DSL (later) — macro emits a `Record[Schema]` literal
+
+**What we gain.**
+- The structural carrier we want, already implemented.
+- `~` and `&` as bidirectional operators give the cleanest DSL
+  syntax. Schema in the type parameter reads identically to
+  construction. No separate builder vocabulary.
+- `stage` / `stageNamed` primitives replace per-surface Mirror-based
+  derivation code.
+- Constant-depth field access regardless of arity (no nested-tuple
+  destructuring like §4.4's option 1).
+- Subtyping is intersection-subtyping (wider Record subtypes narrower)
+  — the semantics we want for free.
+- Field-presence is enforced by `Fields.Have` typeclass evidence
+  instead of a recursive match type, so the "stuck match type" issue
+  from §4.6 doesn't apply.
+
+**What we take on.**
+- Dependency on `kyo-data`. Scope is narrower than zio-blocks-schema
+  (no codec system), so adapter format / parse logic stays on us
+  (which is roughly the status quo — `ChatAdapter`/`JsonAdapter`/
+  `XmlAdapter` already implement it).
+- New vocabulary at the engine layer: `Record`, `~`, `&`, `Fields`,
+  `stageNamed`, `Dict`. Smaller surface than zio-blocks but still
+  visible.
+- **Verify** that `kyo-data` does not transitively pull the full Kyo
+  effect runtime (`Abort`, `Async`, fibers). The Kyo project is
+  structured to keep `kyo-data` self-contained, but this must be
+  confirmed in `kyo-data`'s POM/build before committing. Same
+  zero-effect-leakage discipline we required of zio-blocks.
+- Smaller community + ecosystem than zio-blocks.
+
+**Possible hybrid: A + C.** Use `kyo-data` `Record[F]` for the typed
+prediction carrier (where the structural typing is the main win), and
+`zio-blocks-schema` for the runtime mirror + codec layer (where
+TOON / JSON / etc. are useful for adapter prompt-format work). Two
+libraries, each doing what it does best, both wrapped behind
+dspy4s-owned types. Higher dependency footprint; cleaner separation
+of concerns.
+
+### 5.5 Comparison
+
+|  | A (zio-blocks-schema) | B (self-built) | C (kyo-data Record) |
+|---|---|---|---|
+| Engine LOC | ~100 wrapper | ~300 engine + match-type work | ~50 wrapper |
+| Macro work | None (`Schema.derived`) | Case-class + string-DSL macros | None (`stageNamed`) |
+| Carrier shape | `Schema[A]` / `Reflect.Record` | Tuple of pairs in opaque type | Intersection of `Name ~ Value` |
+| Schema composition | wrapper-level | tuple concat ops | `&` (intersection types) |
+| Typed dot-access | NamedTuple + Selectable | Selectable + match types | Built-in `selectDynamic` + `Fields.Have` |
+| Field-not-found error | clean (Mirror) | needs `summonFrom` + `compiletime.error` mitigation | clean (typeclass evidence missing) |
+| Codec ecosystem | Bundled (JSON, YAML, BSON, TOON, ...) | Hand-built per format | Out of scope — write our own / keep current adapters |
+| Stability risk | 0.0.x (accepted) | None external | Lower than zio-blocks; verify version + transitive deps |
+| Vocabulary footprint | `Reflect` / `Term` / `Format` / `TypeId` | All dspy4s names | `Record` / `~` / `&` / `Fields` / `Dict` |
+| Lock-in | Moderate (wrapped) | None | Moderate (wrapped) |
+| Time to working prototype | ~1–2 sessions | ~3–5 sessions | ~1 session |
+
+### 5.6 Current lean — pending external review
+
+Project owner has stated a preference for **leaning into libraries
+that give us pieces we need**. That bias points away from Option B
+(self-built) for the foundation, but leaves Option A vs. Option C
+genuinely open. The key trade is **scope** vs **structural fit**:
+
+- **Option A** brings more — including a codec ecosystem (`schema-toon`,
+  JSON, YAML, etc.) that could simplify adapter work and a typed-mirror
+  story. Larger vocabulary footprint and a 0.0.x version pin.
+- **Option C** is structurally a better match for the typed-carrier
+  problem specifically (intersection types compose better than tuples
+  for structural records; `~` and `&` are the cleanest DSL syntax we
+  could ask for; `stageNamed` is the right primitive for derivation).
+  Smaller scope means no codec story — but our existing adapters
+  already cover that.
+- **A+C hybrid** uses each library for its strength: `Record` for
+  typed prediction access, `Schema` for codec/format work in adapters.
+  Two deps, but each wrapped.
+
+**Items to confirm before the binding decision:**
+
+1. `kyo-data` transitive dependencies — does it pull the full Kyo
+   runtime (`Abort`, `Async`, fibers)? Required reading: `kyo-data`'s
+   `build.sbt` settings and POM for the published artifact.
+2. `zio-blocks-schema` derivation behavior on our actual signature
+   shapes (especially DSPy patterns with `Literal[...]` enums, union
+   types, custom types).
+3. `kyo-data` `Record.fromNamedTuple` / `stageNamed` behavior on
+   identical shapes.
+4. Performance: macro-derived signature construction time. Could
+   matter if we end up with hundreds of `Signature` instances.
+
+**Until the binding decision is made**, Phase 1 of the rollout (§7)
+remains gated. Either of A or C unblocks the same Phase 2 work
+(typed `Predict` / `Prediction`).
 
 ---
 
@@ -622,12 +781,15 @@ apply but each is bigger because we own the engine.
 1. **Phase 0 (optional, immediate)** — Typed accessor ladder (Section
    6). Pure win, independent of the foundation choice.
 
-2. **Phase 1 — Adopt `zio-blocks-schema` + wrap as `Signature[I, O]`.**
-   Add the dependency, build the thin wrapper, write a small
-   compatibility shim from `Schema[A]`'s `Reflect.Record` to the
+2. **Phase 1 — Adopt the foundation chosen in §5.6 + wrap as
+   `Signature[I, O]`.** Add the dependency (zio-blocks-schema, kyo-data,
+   or both for an A+C hybrid), build the thin wrapper, write a small
+   compatibility shim from the chosen library's mirror type to the
    existing `FieldSpec` so current adapters keep working unchanged.
    Tests prove `Signature.of[(sentence: String), (sentiment: Boolean)]`
-   round-trips field names and types correctly.
+   round-trips field names and types correctly. If B is chosen,
+   substitute the self-built engine from §4.2 enriched with the
+   `Name ~ Value` and `stage`/`stageNamed` patterns from §5.3.
 
 3. **Phase 2 — Typed `Predict`/`Prediction`.** Add `TypedPredict[I,
    O]` (consumes `Signature[I, O]`) and `TypedPrediction[O]` (returns
@@ -711,6 +873,18 @@ its weight in practice.
     breaking changes are expected. Strategy: pin to a specific
     version in `build.sbt`, add a `versionBump.md` entry to track
     upgrades, run our test suite against each bump before merging.
+
+11. **Foundation: A vs. C vs. A+C.** The binding decision is held for
+    external review. Items to confirm beforehand are listed in §5.6.
+    The Phase 1 surface API (`Signature[I, O]`, `TypedPredict`,
+    `TypedPrediction`) is intended to be identical across foundations
+    so a late switch is recoverable, but the engine internals and
+    derivation macros differ.
+
+12. **kyo-data effect-runtime independence.** Before adopting Option
+    C or A+C, verify `kyo-data` does not transitively pull Kyo's
+    effect runtime (`Abort`, `Async`, fibers). Same zero-leakage
+    discipline we required of zio-blocks.
 
 ---
 
