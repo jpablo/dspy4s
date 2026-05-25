@@ -9,7 +9,7 @@ import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
   Message, MessageRole
 }
-import dspy4s.typed.{Spec, InputField, OutputField, TypedSignature}
+import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).
@@ -19,6 +19,11 @@ case class P4QAOutput(answer: String, score: Double)
 case class P4StrictOutput(answer: String, score: Int)  // forces decode failure: LM returns Double
 
 trait P4QASpec extends Spec:
+  def question: InputField[String]
+  def answer:   OutputField[String]
+  def score:    OutputField[Double]
+
+trait P4QAMissingInputSpec extends Spec:
   def question: InputField[String]
   def context:  InputField[String]
   def answer:   OutputField[String]
@@ -76,6 +81,21 @@ class TypedPredictSuite extends FunSuite:
       result match
         case Right(tp) =>
           assertEquals(tp.output, P4QAOutput("Paris", 0.95))
+        case Left(err) => fail(s"expected success, got: $err")
+    }
+  }
+
+  test("TypedPredict.run supports spec-derived named-tuple input and typed output dot-access") {
+    val sig = TypedSignature.of[P4QASpec]
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run((question = "Capital of France?"))
+      result match
+        case Right(tp) =>
+          val answer: String = tp.output.answer
+          val score:  Double = tp.output.score
+          assertEquals(answer, "Paris")
+          assertEquals(score, 0.95)
         case Left(err) => fail(s"expected success, got: $err")
     }
   }
@@ -183,7 +203,7 @@ class TypedPredictSuite extends FunSuite:
     // Spec-derived signatures use Map[String, Any] for inputs, so a caller
     // could silently omit a declared input. The defensive check in
     // TypedPredict.run catches this before any LM call is dispatched.
-    val sig = TypedSignature.of[P4QASpec]
+    val sig = TypedSignature.of[P4QAMissingInputSpec]
     var lmCalled = false
     val sentinelLm = new LanguageModel:
       val id   = "sentinel"

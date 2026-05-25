@@ -15,15 +15,15 @@ trait P5ToneSpec extends Spec:
   def text: InputField[String]
   def tone: OutputField[P5Tone]
 
+trait P5ToneInputSpec extends Spec:
+  def tone: InputField[P5Tone]
+  def label: OutputField[String]
+
 trait P5MultiSpec extends Spec:
   def question: InputField[String]
   def context:  InputField[String]
   def answer:   OutputField[String]
   def score:    OutputField[Double]
-
-trait P5EnumInputSpec extends Spec:
-  def tone:   InputField[P5Tone]
-  def answer: OutputField[String]
 
 /** Phase 5 trait-as-spec macro per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
 class Phase5SpecMacroSuite extends FunSuite:
@@ -72,15 +72,17 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(byName("score").prefix,    Some("Score:"))
   }
 
-  // ── MapShape / TypedSignature.of returns a usable TypedSignature ────────
+  // ── Named-tuple I/O / TypedSignature.of returns a usable TypedSignature ─
 
-  test("of[T] returns a TypedSignature[Map, Map] whose shapes pass through string fields") {
+  test("of[T] returns a TypedSignature with named-tuple input and output types") {
     val sig = TypedSignature.of[P5SentimentSpec]
-    val input  = Map[String, Any]("sentence" -> "hello there")
-    val output = Map[String, Any]("sentiment" -> "positive")
+    val input = (sentence = "hello there")
+    val encoded = sig.inputShape.encode(input)
+    val decoded = sig.outputShape.decode(Map("sentiment" -> "positive")).toOption.get
 
-    assertEquals(sig.inputShape.encode(input), input)
-    assertEquals(sig.outputShape.decode(output), Right(output))
+    assertEquals(encoded, Map[String, Any]("sentence" -> "hello there"))
+    val sentiment: String = decoded.sentiment
+    assertEquals(sentiment, "positive")
   }
 
   test("of[T] outputShape rejects raw maps missing required fields") {
@@ -96,15 +98,18 @@ class Phase5SpecMacroSuite extends FunSuite:
     val sig = TypedSignature.of[P5ToneSpec]
     val raw = Map[String, Any]("tone" -> "calm")
     val decoded = sig.outputShape.decode(raw).toOption.get
-    assertEquals(decoded("tone"), P5Tone.calm)  // typed enum value, not the raw string
+    val tone: P5Tone = decoded.tone
+    assertEquals(tone, P5Tone.calm)  // typed enum value, not the raw string
   }
 
   test("spec outputShape coerces numeric strings to the declared primitive type") {
     val sig = TypedSignature.of[P5MultiSpec]
     val raw = Map[String, Any]("answer" -> "Paris", "score" -> "0.5")
     val decoded = sig.outputShape.decode(raw).toOption.get
-    assertEquals(decoded("answer"), "Paris")
-    assertEquals(decoded("score"),  0.5)        // coerced from "0.5" to Double
+    val answer: String = decoded.answer
+    val score:  Double = decoded.score
+    assertEquals(answer, "Paris")
+    assertEquals(score,  0.5)        // coerced from "0.5" to Double
   }
 
   test("spec outputShape surfaces decoder failures as Left(DspyError)") {
@@ -115,10 +120,9 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec inputShape encodes typed enum values to their case-name strings") {
-    // P5EnumInputSpec.tone is an InputField[P5Tone], so inputShape's
-    // decoder map contains an entry for "tone" -> the P5Tone decoder.
-    val sig = TypedSignature.of[P5EnumInputSpec]
-    val encoded = sig.inputShape.encode(Map[String, Any]("tone" -> P5Tone.urgent))
+    val sig = TypedSignature.of[P5ToneInputSpec]
+    val input = (tone = P5Tone.urgent)
+    val encoded = sig.inputShape.encode(input)
     assertEquals(encoded("tone"), "urgent")
   }
 

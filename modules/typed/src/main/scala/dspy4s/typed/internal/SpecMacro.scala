@@ -9,9 +9,8 @@ private[typed] object SpecMacro:
   /** Implementation of `TypedSignature.of[T <: Spec]`. Inspects T's
     * abstract methods at compile time, validates each returns
     * `InputField[X]` or `OutputField[X]`, summons a `ValueDecoder[X]`,
-    * and emits a `TypedSignature[Map[String, Any], Map[String, Any]]`
-    * whose `inputShape` / `outputShape` are `MapShape`s carrying the
-    * derived `FieldSpec` vectors.
+    * and emits a `TypedSignature[I, O]` whose `I` and `O` are named
+    * tuples carrying the spec's input and output fields.
     *
     * Compile errors:
     *   - concrete (non-abstract) methods on the spec trait
@@ -19,8 +18,7 @@ private[typed] object SpecMacro:
     *   - methods with parameters
     *   - duplicate field names
     *   - missing `ValueDecoder[X]` for any wrapped type */
-  def ofImpl[T <: Spec : Type](using Quotes)
-      : Expr[TypedSignature[Map[String, Any], Map[String, Any]]] =
+  def ofImpl[T <: Spec : Type](using Quotes): Expr[Any] =
     import quotes.reflect.*
 
     val tpe        = TypeRepr.of[T]
@@ -52,10 +50,11 @@ private[typed] object SpecMacro:
         s"Spec trait '$sigName' must declare at least one InputField or OutputField method"
       )
 
-    // For each method: (name, isInput, FieldSpec-Expr, ValueDecoder-Expr).
+    // For each method: (name, isInput, inner type, FieldSpec-Expr,
+    // ValueDecoder-Expr).
     // The decoder expression is cast to ValueDecoder[Any] so we can carry
     // a uniform list-of-decoders type into the macro output.
-    val fieldData: List[(String, Boolean, Expr[FieldSpec], Expr[ValueDecoder[Any]])] =
+    val fieldData: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[ValueDecoder[Any]])] =
       methods.map { m =>
         val name = m.name
 
@@ -108,7 +107,7 @@ private[typed] object SpecMacro:
           )
         }
 
-        (name, isInput, fieldSpecExpr, decoderExpr)
+        (name, isInput, innerType, fieldSpecExpr, decoderExpr)
       }
 
     // Reject duplicate field names.
@@ -120,38 +119,58 @@ private[typed] object SpecMacro:
         s"Spec trait '$sigName' has duplicate field names: ${duplicates.mkString(", ")}"
       )
 
-    def buildDecoderMapExpr(items: List[(String, Boolean, Expr[FieldSpec], Expr[ValueDecoder[Any]])])
+    def buildDecoderMapExpr(items: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[ValueDecoder[Any]])])
         : Expr[Map[String, ValueDecoder[Any]]] =
-      val pairs: List[Expr[(String, ValueDecoder[Any])]] = items.map { case (n, _, _, dec) =>
+      val pairs: List[Expr[(String, ValueDecoder[Any])]] = items.map { case (n, _, _, _, dec) =>
         val nameExpr = Expr(n)
         '{ ${ nameExpr } -> ${ dec } }
       }
       '{ Map(${ Varargs(pairs) }*) }
 
-    val inputFieldExprs:  List[Expr[FieldSpec]] = fieldData.collect { case (_, true,  e, _) => e }
-    val outputFieldExprs: List[Expr[FieldSpec]] = fieldData.collect { case (_, false, e, _) => e }
+    def tupleType(parts: List[TypeRepr]): TypeRepr =
+      parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
+        TypeRepr.of[*:].appliedTo(List(head, tail))
+      }
+
+    def namedTupleType(items: List[(String, TypeRepr)]): TypeRepr =
+      val nameTypes = items.map { (name, _) => ConstantType(StringConstant(name)) }
+      val valueTypes = items.map(_._2)
+      val namesTuple = tupleType(nameTypes)
+      val valuesTuple = tupleType(valueTypes)
+      TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, valuesTuple))
+
+    val inputData  = fieldData.filter(_._2)
+    val outputData = fieldData.filterNot(_._2)
+
+    val inputFieldExprs:  List[Expr[FieldSpec]] = inputData.map(_._4)
+    val outputFieldExprs: List[Expr[FieldSpec]] = outputData.map(_._4)
     val inputDecodersExpr  = buildDecoderMapExpr(fieldData.filter(_._2))
     val outputDecodersExpr = buildDecoderMapExpr(fieldData.filterNot(_._2))
     val sigNameExpr        = Expr(sigName)
 
-    '{
-      val inFields:  Vector[FieldSpec] = Vector(${ Varargs(inputFieldExprs)  }*)
-      val outFields: Vector[FieldSpec] = Vector(${ Varargs(outputFieldExprs) }*)
-      val sig = SignatureSpec
-        .create(
-          name   = ${ sigNameExpr },
-          fields = inFields ++ outFields
-        )
-        .fold(
-          err => throw new IllegalStateException(
-            s"Internal error materializing spec trait '${${ sigNameExpr }}': ${err.message}"
-          ),
-          identity
-        )
-      TypedSignature[Map[String, Any], Map[String, Any]](
-        name        = ${ sigNameExpr },
-        untyped     = sig,
-        inputShape  = new Shape.MapShape(inFields,  ${ inputDecodersExpr }),
-        outputShape = new Shape.MapShape(outFields, ${ outputDecodersExpr })
-      )
-    }
+    val inputType  = namedTupleType(inputData.map { case (n, _, tpe, _, _) => n -> tpe })
+    val outputType = namedTupleType(outputData.map { case (n, _, tpe, _, _) => n -> tpe })
+
+    (inputType.asType, outputType.asType) match
+      case ('[i], '[o]) =>
+        '{
+          val inFields:  Vector[FieldSpec] = Vector(${ Varargs(inputFieldExprs)  }*)
+          val outFields: Vector[FieldSpec] = Vector(${ Varargs(outputFieldExprs) }*)
+          val sig = SignatureSpec
+            .create(
+              name   = ${ sigNameExpr },
+              fields = inFields ++ outFields
+            )
+            .fold(
+              err => throw new IllegalStateException(
+                s"Internal error materializing spec trait '${${ sigNameExpr }}': ${err.message}"
+              ),
+              identity
+            )
+          TypedSignature[i, o](
+            name        = ${ sigNameExpr },
+            untyped     = sig,
+            inputShape  = new Shape.TupleShape[i](inFields,  ${ inputDecodersExpr }),
+            outputShape = new Shape.TupleShape[o](outFields, ${ outputDecodersExpr })
+          )
+        }

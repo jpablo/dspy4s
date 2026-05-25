@@ -695,10 +695,12 @@ Implemented in three new files:
   — quotes/splices macro that inspects abstract methods on the spec
   trait, validates each returns `InputField[X]` or `OutputField[X]`,
   summons `ValueDecoder[X]` evidence at the call site, and emits a
-  `TypedSignature[Map[String, Any], Map[String, Any]]` whose
-  `MapShape`s carry the derived `FieldSpec` vectors.
-- `Shape.MapShape` (added to `Shape.scala`) — `Shape[Map[String, Any]]`
-  used by the macro and available as a public utility for other
+  `TypedSignature[I, O]` whose `I` and `O` are Scala named tuples
+  matching the input and output declarations.
+- `Shape.TupleShape` (added to `Shape.scala`) — tuple-backed shape used
+  by the macro. It encodes named-tuple inputs in declaration order and
+  decodes adapter output maps into named tuples with typed dot-access.
+- `Shape.MapShape` remains available as a public utility for other
   surfaces that produce `FieldSpec`s without a case class.
 
 Macro validates at compile time:
@@ -708,16 +710,24 @@ Macro validates at compile time:
   - missing `ValueDecoder[X]` for any wrapped type
   - duplicate field names
 
-**Scope deviation from the plan's example** (documented inline):
+**Named-tuple I/O design choice:**
 
-The plan's example showed `predict.run(sentence = "...")` with named
-arguments and `result.sentiment` with typed dot-access. Phase 5 MVP
-stops short of that — `I` and `O` are `Map[String, Any]`, so users
-call `predict.run(Map("sentence" -> "..."))` and access output via
-`tp.output("sentiment")`. Synthesizing case classes from a spec trait
-at compile time (to support typed dot-access end-to-end) is a
-significantly larger macro effort and is deferred to a follow-up.
-What Phase 5 *does* provide:
+The original plan's example showed `predict.run(sentence = "...")`
+and `result.sentiment`. Rather than synthesize unnameable local case
+classes, the macro now uses Scala named tuples:
+
+```scala
+val sig = TypedSignature.of[EmotionSpec]
+TypedPredict(sig).run((sentence = "...")).map(_.output.sentiment)
+```
+
+This gives the trait-spec surface the important case-class parity
+properties (typed input construction, typed output dot-access, and
+compile-time field-name checks) while keeping the runtime path simple.
+Users who need case-class-specific operations (`copy`, extractors,
+pattern matching) can still use `TypedSignature.derived[I, O]`.
+
+What Phase 5 provides:
 
 - The trait is the declarative source of truth for the signature.
 - Field roles, names, types, enum metadata, and `FieldSpec.normalize`-d
@@ -725,6 +735,8 @@ What Phase 5 *does* provide:
 - The trait-derived `Signature` is structurally identical to the
   builder-built or case-class-derived equivalent (asserted in
   cross-surface-parity test).
+- `TypedPredict(sig).run((field = value))` works for spec-derived
+  signatures and returns typed named-tuple outputs.
 
 **Implementation lesson**: `tpe.memberType(m)` wraps parameterless
 defs in `NullaryMethodType`/`ByNameType`, so unwrapping with
@@ -732,13 +744,13 @@ defs in `NullaryMethodType`/`ByNameType`, so unwrapping with
 declared return type directly from the `DefDef.returnTpt` instead —
 clean, no wrappers, no surprises.
 
-**Test results**: `Phase5SpecMacroSuite` adds 12 tests covering name
-ordering, role assignment, TypeRef derivation, enum metadata
-propagation, normalization, MapShape encode/decode, missing-field
-rejection, cross-surface parity, and four `compileErrors`-based
-negative tests (non-marker return type, parameterized method, missing
-decoder, empty spec trait). Typed module: 52 / 52 (was 40; +12). Full
-project: 368 / 368 (was 356; +12).
+**Test results**: `Phase5SpecMacroSuite` covers name ordering, role
+assignment, TypeRef derivation, enum metadata propagation,
+normalization, named-tuple input/output typing, decoder-aware output
+coercion, missing-field rejection, cross-surface parity, and
+`compileErrors`-based negative tests (non-marker return type,
+parameterized method, missing decoder, empty spec trait, concrete
+method).
 
 ## Phase 6: Examples And Documentation
 
@@ -779,7 +791,7 @@ Three example files under `modules/examples/src/main/scala/dspy4s/examples/typed
     builder; also shows that an enum reused from `CaseClassExample`
     flows its metadata through the builder for free.
   - `SpecExample.scala` — trait-as-spec for emotion + QA shapes.
-    Documents the Phase 5 MVP scope (I/O is `Map[String, Any]`) inline.
+    Shows named-tuple input construction and typed output dot-access.
 
 The `examples` module now depends on `typed` (added to `build.sbt`).
 All three files compile against the actual API and reference the

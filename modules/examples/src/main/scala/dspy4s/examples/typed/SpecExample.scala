@@ -9,11 +9,9 @@
  * `ValueDecoder[T]` for the wrapped type, and emits the runtime
  * `TypedSignature`.
  *
- * Phase 5 MVP: `I` / `O` are `Map[String, Any]`; typed dot-access on
- * outputs (`result.sentiment`) requires synthesizing case classes from
- * the trait and is deferred. Use this surface for declarative *signature
- * authoring*; use the case-class API when typed I/O matters more than
- * declarative shape.
+ * `TypedSignature.of[T]` exposes named-tuple input/output types, so callers
+ * get typed construction and typed dot-access while keeping the DSPy-style
+ * declaration as the source of truth.
  *
  * Status: example
  */
@@ -46,9 +44,8 @@ object SpecExample:
   val qa = TypedSignature.of[QASpec]
 
   /** Illustrative call: with an LM and adapter configured, run the
-    * spec-derived signature against the raw input map and read the output
-    * map. (Typed dot-access on outputs is the Phase 5 follow-up.) */
-  def callEmotion(sentence: String)(using RuntimeContext)
-      : Either[DspyError, Map[String, Any]] =
+    * spec-derived signature against a named-tuple input and read the
+    * typed named-tuple output with dot syntax. */
+  def callEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.TypedPredict
-    TypedPredict(emotion).run(Map("sentence" -> sentence)).map(_.output)
+    TypedPredict(emotion).run((sentence = sentence)).map(_.output.sentiment)

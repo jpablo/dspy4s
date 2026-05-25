@@ -11,10 +11,10 @@ import dspy4s.core.contracts.{DspyError, Prediction}
   * The raw `Prediction` remains available via `raw` so callers can still
   * reach completions, LM usage, and adapter metadata.
   *
-  * Phase 2 carries the typed output as the case class instance itself —
-  * `p.output.sentiment` gives typed dot-access through ordinary case-class
-  * field syntax. A later phase may wrap the typed output in a `kyo.Record`
-  * for users who want intersection-typed structural composition.
+  * Phase 2 carries the typed output as the decoded value itself: case-class
+  * signatures expose ordinary case-class fields, and trait-spec signatures
+  * expose named-tuple fields. In both cases `p.output.sentiment` is typed
+  * dot-access with no lazy parsing.
   */
 final case class TypedPrediction[O](
     output: O,

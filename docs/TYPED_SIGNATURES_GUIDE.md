@@ -9,24 +9,22 @@
 
 ```scala
 import dspy4s.programs.TypedPredict
-import dspy4s.typed.{TypedSignature, ValueDecoder}
+import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
 
-// 1. Describe your I/O as case classes.
-case class QAInput(question: String)
-case class QAOutput(answer: String, score: Double)
+// 1. Describe your I/O as a DSPy-style spec trait.
+trait QA extends Spec:
+  def question: InputField[String]
+  def answer:   OutputField[String]
+  def score:    OutputField[Double]
 
 // 2. Build the signature.
-val sig = TypedSignature.derived[QAInput, QAOutput](
-  name         = "QA",
-  instructions = "Answer the question concisely."
-)
+val sig = TypedSignature.of[QA]
 
 // 3. Run it. (RuntimeContext is summoned from RuntimeEnvironment as today.)
 given dspy4s.core.contracts.RuntimeContext =
   dspy4s.core.runtime.RuntimeEnvironment.current
 
-val result = TypedPredict(sig).run(QAInput("Capital of France?"))
-// result : Either[DspyError, TypedPrediction[QAOutput]]
+val result = TypedPredict(sig).run((question = "Capital of France?"))
 
 result.map(_.output.answer)   // typed: String
 result.map(_.output.score)    // typed: Double
@@ -60,23 +58,29 @@ Use when prototyping or when input/output types are all strings.
 Reach for one of the typed surfaces below the moment you want
 non-string outputs or enum-constrained values.
 
-### 2. Case classes — `TypedSignature.derived[I, O]`
+### 2. Trait-as-spec macro — `TypedSignature.of[T <: Spec]`
 
-The primary typed surface. Two case classes describe inputs and
-outputs; Mirror-based derivation produces the runtime metadata.
+The recommended typed surface and closest match for Python DSPy:
+a trait extending `Spec` declares abstract methods wrapped in
+`InputField[T]` / `OutputField[T]`.
 
 ```scala
-case class EmotionInput(sentence: String)
-case class EmotionOutput(sentiment: String)
+import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
 
-val sig = TypedSignature.derived[EmotionInput, EmotionOutput]("Emotion")
+trait EmotionSpec extends Spec:
+  def sentence:  InputField[String]
+  def sentiment: OutputField[Emotion]   // enum from elsewhere in scope
+
+val sig = TypedSignature.of[EmotionSpec]
 ```
 
-End-to-end typed I/O: `TypedPredict(sig).run(EmotionInput("..."))`
-returns `Either[DspyError, TypedPrediction[EmotionOutput]]`, and
-`tp.output.sentiment` is a typed `String` with no runtime cast.
+End-to-end typed I/O uses Scala named tuples: `TypedPredict(sig).run((sentence = "..."))`
+accepts a named-tuple input, and `tp.output.sentiment` is typed as
+`Emotion`. Compile-time validation catches methods not wrapped in the
+marker types, methods with parameters, missing `ValueDecoder[X]`,
+duplicate field names, concrete methods, and empty spec traits.
 
-See [`modules/examples/.../typed/CaseClassExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/CaseClassExample.scala).
+See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 
 ### 3. Programmatic builder — `TypedSignature.builder(name)`
 
@@ -101,38 +105,25 @@ name) flows through automatically.
 
 See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/BuilderExample.scala).
 
-### 4. Trait-as-spec macro — `TypedSignature.of[T <: Spec]`
+### 4. Case classes — `TypedSignature.derived[I, O]`
 
-The most "DSPy-like" surface — a trait extending `Spec` declares
-abstract methods wrapped in `InputField[T]` / `OutputField[T]`.
+Two case classes describe inputs and outputs; Mirror-based derivation
+produces the runtime metadata. This is useful when you already have
+domain case classes, want case-class `copy` / pattern matching, or
+prefer named product types over named tuples.
 
 ```scala
-import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+case class EmotionInput(sentence: String)
+case class EmotionOutput(sentiment: Emotion)
 
-trait EmotionSpec extends Spec:
-  def sentence:  InputField[String]
-  def sentiment: OutputField[Emotion]   // enum from elsewhere in scope
-
-val sig = TypedSignature.of[EmotionSpec]
-// sig : TypedSignature[Map[String, Any], Map[String, Any]]
+val sig = TypedSignature.derived[EmotionInput, EmotionOutput]("Emotion")
 ```
 
-Compile-time validation catches: methods not wrapped in the marker
-types, methods with parameters, missing `ValueDecoder[X]` for the
-inner type, duplicate field names, and empty spec traits.
+End-to-end typed I/O: `TypedPredict(sig).run(EmotionInput("..."))`
+returns `Either[DspyError, TypedPrediction[EmotionOutput]]`, and
+`tp.output.sentiment` is typed as `Emotion`.
 
-**Note on I/O typing**: the Phase 5 MVP returns
-`TypedSignature[Map[String, Any], Map[String, Any]]`. Output values
-**are** decoded through the same `ValueDecoder` instances the
-case-class API uses — so `decoded("tone")` is `P5Tone.calm` (the
-typed enum value), not `"calm"` (the raw string). What's missing is
-**typed dot-access**: you still write `decoded("tone").asInstanceOf[P5Tone]`
-instead of `decoded.tone`. Synthesizing case classes from the trait
-at compile time (to enable dot-access on the result) is deferred to a
-follow-up. Use this surface when the declarative spec matters most;
-use the case-class API when typed I/O ergonomics matter more.
-
-See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
+See [`modules/examples/.../typed/CaseClassExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/CaseClassExample.scala).
 
 ---
 
@@ -141,11 +132,11 @@ See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/mai
 | Surface | When to reach for it | Typed I/O on results? |
 |---|---|:---:|
 | String DSL | Prototyping, all-string fields | ❌ |
-| **Case classes** | **Most production code** | ✅ |
+| **Trait spec** | **Most production code; DSPy-style authoring** | ✅ |
+| Case classes | Existing domain models; case-class `copy` / pattern matching | ✅ |
 | Builder | Dynamic / config-driven shapes; tests | ❌ (runtime `Signature`) |
-| Trait spec | Declarative authoring; Python-DSPy parity | partial (Map I/O) |
 
-The case-class API is the **recommended default**. The others exist
+The trait-spec API is the **recommended default**. The others exist
 because each has a niche where it's a better fit.
 
 ---
@@ -218,9 +209,9 @@ The typed wrapper preserves the underlying prediction for callers
 that need completions, LM usage, or other adapter metadata:
 
 ```scala
-val tp = TypedPredict(sig).run(QAInput("...")).toOption.get
+val tp = TypedPredict(sig).run((question = "...")).toOption.get
 
-tp.output.answer        // typed access (case-class API)
+tp.output.answer        // typed access
 tp.raw.lmUsage          // Option[Map[String, Long]] — token counts
 tp.raw.completions      // Option[Completions] — multiple candidates
 tp.raw.value("answer")  // dynamic accessor on the raw Prediction
@@ -239,7 +230,7 @@ object. The typed layer just decodes its values into `tp.output`.
 
 ```scala
 TypedPredict(sig).run(
-  input        = QAInput("..."),
+  input        = (question = "..."),
   config       = Map("temperature" -> 0.7, "max_tokens" -> 50),
   traceEnabled = true   // false to suppress this call from the trace
 )
@@ -274,8 +265,10 @@ the typed value back, that's what `TypedPrediction.output` is for.
 
 These are documented gaps, surfaced so you can plan around them:
 
-- **Trait spec → typed dot-access on outputs**: deferred (the spec
-  surface returns `TypedSignature[Map, Map]`).
+- **Trait spec uses named tuples for I/O**: this gives typed dot-access
+  and compile-time field-name checks, but it is not a case class. If
+  you need case-class `copy`, extractors, or pattern matching, use
+  `TypedSignature.derived[I, O]`.
 - **Literal-union output types**: not yet a `ValueDecoder` instance;
   use a Scala enum.
 - **Decode-failure + trace divergence**: when the inner `Predict`

@@ -63,9 +63,9 @@ object TypedSignature:
     * compile time and materializes a `TypedSignature` whose untyped
     * `Signature` reflects the trait's `InputField` / `OutputField` members.
     *
-    * Phase 5 MVP: the typed `I` / `O` carry `Map[String, Any]` —
-    * `TypedPredict.run` accepts a raw `Map` of inputs and the
-    * `TypedPrediction.output` is also a `Map`. A follow-up may synthesize
-    * case classes from the spec for typed dot-access on results. */
-  inline def of[T <: Spec]: TypedSignature[Map[String, Any], Map[String, Any]] =
+    * The precise input and output types are named tuples. That lets users
+    * construct inputs with named-tuple syntax and read outputs with typed
+    * dot-access while the runtime still flows through the same `Shape` /
+    * `Predict` / adapter pipeline as case-class signatures. */
+  transparent inline def of[T <: Spec] =
     ${ internal.SpecMacro.ofImpl[T] }

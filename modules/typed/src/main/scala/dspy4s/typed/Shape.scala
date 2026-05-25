@@ -76,6 +76,50 @@ object Shape:
               builder += (fs.name -> rawValue)
         Right(builder.result())
 
+  /** A tuple-backed shape used by the trait-spec macro. The macro gives
+    * callers a named-tuple type, e.g. `(sentence: String)` for inputs and
+    * `(sentiment: Emotion)` for outputs. At runtime named tuples erase to
+    * ordinary tuples, so this shape pairs values with `fieldSpecs` by
+    * declaration order.
+    */
+  final class TupleShape[A](
+      override val fieldSpecs: Vector[FieldSpec],
+      decoders: Map[String, ValueDecoder[Any]]
+  ) extends Shape[A]:
+
+    def encode(value: A): Map[String, Any] =
+      val values = value.asInstanceOf[Product].productIterator.toVector
+      fieldSpecs.zip(values).map { (fs, raw) =>
+        val encoded = decoders.get(fs.name).fold(raw)(_.encode(raw.asInstanceOf[Any]))
+        fs.name -> encoded
+      }.toMap
+
+    def decode(raw: Map[String, Any]): Either[DspyError, A] =
+      val missing = fieldSpecs.iterator.map(_.name).filterNot(raw.contains).toList
+      if missing.nonEmpty then
+        Left(NotFoundError(
+          resource = "prediction_field",
+          message  = s"Missing required fields: ${missing.mkString(", ")}"
+        ))
+      else
+        val builder = Array.newBuilder[Any]
+        builder.sizeHint(fieldSpecs.size)
+        val it = fieldSpecs.iterator
+        while it.hasNext do
+          val fs = it.next()
+          val rawValue = raw(fs.name)
+          decoders.get(fs.name) match
+            case Some(dec) =>
+              dec.decode(rawValue) match
+                case Right(decoded) => builder += decoded
+                case Left(err) =>
+                  return Left(ValidationError(
+                    s"Field '${fs.name}': ${err.message}"
+                  ))
+            case None =>
+              builder += rawValue
+        Right(Tuple.fromArray(builder.result()).asInstanceOf[A])
+
   /** Derives a `Shape[A]` from any case class whose fields all have a
     * `ValueDecoder` in scope. Compile error if any field lacks a decoder. */
   inline def derived[A <: Product](using m: Mirror.ProductOf[A]): Shape[A] =
