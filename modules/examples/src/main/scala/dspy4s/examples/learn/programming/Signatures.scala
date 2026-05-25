@@ -20,15 +20,14 @@
  *
  *   TypedPredict(sig).run((field = "...")).map(_.output.field)
  *
- * `ChainOfThought` is still consumed in its untyped form (no
- * `TypedChainOfThought` yet), so CoT examples drop to `sig.untyped` for
- * the program-construction step while keeping the typed signature as the
- * declarative source.
+ * `ChainOfThought` has a typed counterpart `TypedChainOfThought` that
+ * augments the output named tuple with `reasoning: String` (the field CoT
+ * injects at the runtime layer). Snippets 3, 4, and 6 use it directly.
  */
 package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext, TypeRef}
-import dspy4s.programs.{ChainOfThought, TypedPredict}
+import dspy4s.programs.{TypedChainOfThought, TypedPredict}
 import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, TypedSignature}
 import kyo.Schema
 
@@ -137,31 +136,28 @@ object Signatures:
   // |
   // | print(response.summary)
   //
-  // CoT is still untyped in dspy4s (no `TypedChainOfThought` yet), so we
-  // derive the typed signature for metadata + IDE assistance and drop to
-  // `.untyped` for ChainOfThought construction.
+  // `TypedChainOfThought` augments the output named tuple by prepending
+  // `reasoning: String`, so `tp.output.reasoning` and `tp.output.summary`
+  // are both typed dot-accesses with no `.value(...)` indirection.
   val summarizeSig =
     TypedSignature.fromType[(document: String) => (summary: String)]("Summarize")
 
-  val summarize = ChainOfThought(summarizeSig.untyped)
+  val summarize = TypedChainOfThought(summarizeSig)
 
-  def callSummarize(document: String)(using RuntimeContext): Either[DspyError, Any] =
-    summarize.run("document" -> document).flatMap(_.value("summary"))
+  def callSummarize(document: String)(using RuntimeContext): Either[DspyError, String] =
+    summarize.run((document = document)).map(_.output.summary)
 
   // ── Snippet 4 (lines 87–89) ─ inspect the reasoning field ─────────────
   // Python:
   // | print("Reasoning:", response.reasoning)
   //
-  // ChainOfThought injects a `reasoning` output field (prefix "Reasoning:")
-  // at position 0 of the augmented signature, so the resulting Prediction
-  // exposes both `reasoning` and `summary` via dynamic `.value(...)`.
+  // CoT injects a `reasoning` field at position 0 of the augmented output.
+  // With TypedChainOfThought that field shows up as
+  // `tp.output.reasoning: String` — no dynamic lookup needed.
   def callSummarizeWithReasoning(document: String)(using RuntimeContext)
-      : Either[DspyError, (Any, Any)] =
-    summarize.run("document" -> document).flatMap { p =>
-      for
-        reasoning <- p.value("reasoning")
-        summary   <- p.value("summary")
-      yield (reasoning, summary)
+      : Either[DspyError, (String, String)] =
+    summarize.run((document = document)).map { tp =>
+      (tp.output.reasoning, tp.output.summary)
     }
 
   // ── Snippet 5 (lines 107–119) ─ Example C: class-based Classification ──
@@ -207,7 +203,7 @@ object Signatures:
       .of[CheckCitationFaithfulnessSpec]
       .withInstructions("Verify that the text is based on the provided context.")
 
-  val faithfulness = ChainOfThought(faithfulnessSig.untyped)
+  val faithfulness = TypedChainOfThought(faithfulnessSig)
 
   // ── Snippet 7 (lines 159–167) ─ Example E: multi-modal image ──────────
   // Python (class-based):
