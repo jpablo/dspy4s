@@ -39,6 +39,10 @@ trait P5StructuredSpec extends Spec:
   def question: InputField[String]
   def result:   OutputField[P5StructuredAnswer]
 
+trait P5CollectionSpec extends Spec:
+  def question: InputField[String]
+  def evidence: OutputField[Map[String, List[String]]]
+
 /** Phase 5 trait-as-spec macro per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
 class Phase5SpecMacroSuite extends FunSuite:
 
@@ -168,6 +172,27 @@ class Phase5SpecMacroSuite extends FunSuite:
         answer = "Paris",
         tone = P5Tone.calm,
         citations = List(P5Citation("Wikipedia", 0.9))
+      )
+    )
+  }
+
+  test("spec outputShape decodes collection fields through library FieldCodecs") {
+    val sig = TypedSignature.of[P5CollectionSpec]
+    val raw = Map[String, Any](
+      "evidence" -> Map(
+        "claim_1" -> List("Paris", "France"),
+        "claim_2" -> List("Berlin")
+      )
+    )
+
+    val decoded = sig.outputShape.decode(raw).toOption.get
+    val evidence: Map[String, List[String]] = decoded.evidence
+
+    assertEquals(
+      evidence,
+      Map(
+        "claim_1" -> List("Paris", "France"),
+        "claim_2" -> List("Berlin")
       )
     )
   }

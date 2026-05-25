@@ -190,6 +190,91 @@ object FieldCodec extends LowPriorityFieldCodecs:
 
 trait LowPriorityFieldCodecs:
 
+  /** Compositional codecs for standard container fields. These are kept
+    * explicit rather than making every `Schema[A]` a `FieldCodec[A]`, so
+    * arbitrary unsupported classes still fail with a clear "No
+    * FieldCodec" error while JSON-like collection shapes work out of the
+    * box.
+    */
+  given list[A](using item: FieldCodec[A]): FieldCodec[List[A]] with
+    val typeRef: TypeRef = TypeRef.json
+    def decode(raw: Any): Either[DspyError, List[A]] =
+      decodeIterable(raw, "List")(item).map(_.toList)
+    def encode(value: List[A]): Any =
+      value.map(item.encode)
+
+  given seq[A](using item: FieldCodec[A]): FieldCodec[Seq[A]] with
+    val typeRef: TypeRef = TypeRef.json
+    def decode(raw: Any): Either[DspyError, Seq[A]] =
+      decodeIterable(raw, "Seq")(item)
+    def encode(value: Seq[A]): Any =
+      value.map(item.encode)
+
+  given vector[A](using item: FieldCodec[A]): FieldCodec[Vector[A]] with
+    val typeRef: TypeRef = TypeRef.json
+    def decode(raw: Any): Either[DspyError, Vector[A]] =
+      decodeIterable(raw, "Vector")(item).map(_.toVector)
+    def encode(value: Vector[A]): Any =
+      value.map(item.encode)
+
+  given set[A](using item: FieldCodec[A]): FieldCodec[Set[A]] with
+    val typeRef: TypeRef = TypeRef.json
+    def decode(raw: Any): Either[DspyError, Set[A]] =
+      decodeIterable(raw, "Set")(item).map(_.toSet)
+    def encode(value: Set[A]): Any =
+      value.map(item.encode)
+
+  given map[K, V](using
+      key: FieldCodec[K],
+      itemValue: FieldCodec[V]
+  ): FieldCodec[Map[K, V]] with
+    val typeRef: TypeRef = TypeRef.json
+    def decode(raw: Any): Either[DspyError, Map[K, V]] =
+      raw match
+        case map: collection.Map[?, ?] =>
+          map.iterator.foldLeft(Right(Map.empty[K, V]): Either[DspyError, Map[K, V]]) {
+            case (Left(err), _) => Left(err)
+            case (Right(acc), (rawKey, rawValue)) =>
+              for
+                decodedKey <- key.decode(rawKey).left.map(err =>
+                  ValidationError(s"Cannot decode Map key '$rawKey': ${err.message}")
+                )
+                decodedValue <- itemValue.decode(rawValue).left.map(err =>
+                  ValidationError(s"Cannot decode Map value for key '$rawKey': ${err.message}")
+                )
+              yield acc.updated(decodedKey, decodedValue)
+          }
+        case other =>
+          Left(ValidationError(s"Cannot decode as Map: $other"))
+    def encode(value: Map[K, V]): Any =
+      value.map { (k, v) => key.encode(k) -> itemValue.encode(v) }
+
+  given option[A](using item: FieldCodec[A]): FieldCodec[Option[A]] with
+    val typeRef: TypeRef = TypeRef.json
+    def decode(raw: Any): Either[DspyError, Option[A]] =
+      raw match
+        case null => Right(None)
+        case value =>
+          item.decode(value).map(Some(_))
+    def encode(value: Option[A]): Any =
+      value.map(item.encode).orNull
+
+  private def decodeIterable[A](
+      raw: Any,
+      typeName: String
+  )(item: FieldCodec[A]): Either[DspyError, Seq[A]] =
+    raw match
+      case values: Iterable[?] =>
+        values.zipWithIndex.foldLeft(Right(Vector.empty[A]): Either[DspyError, Vector[A]]) {
+          case (Left(err), _) => Left(err)
+          case (Right(acc), (rawItem, index)) =>
+            item.decode(rawItem).left
+              .map(err => ValidationError(s"Cannot decode $typeName element $index: ${err.message}"))
+              .map(acc :+ _)
+        }
+      case other =>
+        Left(ValidationError(s"Cannot decode as $typeName: $other"))
+
   /** Fallback decoder for types that have a `kyo.Schema[A]` but no more
     * specific dspy4s `FieldCodec[A]`. Restricted to product types so an
     * arbitrary undecodable class still reports "No FieldCodec" instead of

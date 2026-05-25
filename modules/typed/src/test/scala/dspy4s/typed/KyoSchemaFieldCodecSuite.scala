@@ -99,6 +99,31 @@ class KyoSchemaFieldCodecSuite extends FunSuite:
     )
   }
 
+  test("schema-backed collection FieldCodecs handle nested maps and lists") {
+    val decoder = summon[FieldCodec[Map[String, List[String]]]]
+    val raw = Map[String, Any](
+      "claim_1" -> List("Paris", "France"),
+      "claim_2" -> List("Berlin")
+    )
+
+    val decoded = decoder.decode(raw)
+
+    assertEquals(
+      decoded,
+      Right(Map(
+        "claim_1" -> List("Paris", "France"),
+        "claim_2" -> List("Berlin")
+      ))
+    )
+    assertEquals(
+      decoded.map(decoder.encode),
+      Right(Map(
+        "claim_1" -> List("Paris", "France"),
+        "claim_2" -> List("Berlin")
+      ))
+    )
+  }
+
   test("case-class Shape decodes whole products through kyo-schema") {
     val shape = Shape.derived[KyoNestedContainer]
     val decoded = shape.decode(Map(

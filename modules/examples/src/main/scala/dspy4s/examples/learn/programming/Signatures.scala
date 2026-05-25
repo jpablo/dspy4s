@@ -25,14 +25,14 @@
  *
  * Structure note: each snippet is a self-contained block — heading
  * comment + python original + supporting types (when any) + example
- * object. Supporting types (enums, case classes, `given`s, spec traits)
+ * object. Supporting types (enums, case classes, spec traits)
  * must stay at the package level for kyo-schema / Mirror derivation and
  * for the trait-spec macro to see them, so the per-snippet block places
  * them immediately above the example object that uses them.
  */
 package dspy4s.examples.learn.programming
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext, TypeRef}
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.{TypedChainOfThought, TypedPredict}
 import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, TypedSignature}
 import kyo.Schema
@@ -159,12 +159,6 @@ object EmotionExample:
 //
 // Note: per-field descriptions (`desc=...`) are not yet first-class on the
 // trait-spec surface; only signature-level instructions are.
-
-/** `Map[String, List[String]]` is not `<: Product`, so it doesn't pick
-  * up the `schemaBackedProduct` low-priority fallback. Provide an
-  * explicit `FieldCodec` over kyo-schema's collection Schema. */
-given FieldCodec[Map[String, List[String]]] =
-  FieldCodec.fromSchema[Map[String, List[String]]](typeRef = TypeRef.json)
 
 trait CheckCitationFaithfulnessSpec extends Spec:
   def context:      InputField[String]

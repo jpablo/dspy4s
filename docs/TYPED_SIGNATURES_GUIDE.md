@@ -249,6 +249,7 @@ The `FieldCodec` typeclass covers the MVP type vocabulary:
 | `Double` | `Int` / `Long` / `Float` / `Double` | clean numeric strings like `"1.5"` |
 | `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
 | Scala enum (`FieldCodec.FlatEnum`) | already-typed enum value | flat case name like `"joy"` |
+| Standard containers, e.g. `List[A]`, `Seq[A]`, `Vector[A]`, `Set[A]`, `Map[K, V]`, `Option[A]` | adapter-like `Map` / `Seq` / primitive tree, when nested types have `FieldCodec`s | clear primitive strings inside nested values |
 | Product with `kyo.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
 
 Notably **not** auto-coerced:
