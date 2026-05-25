@@ -173,8 +173,13 @@ v2 deferred (tracked in `STREAMING_POSTPONED.md`):
 Goal: close major feature gaps after v1.
 
 Tracks:
-- Advanced optimizers (`GEPA`, `MIPROv2`, etc.)
-- Interpreter-based modules (`ProgramOfThought`, `CodeAct`, `RLM`)
+- Advanced optimizers (`GEPA`, `MIPROv2`, `SIMBA`, `GRPO`, `AvatarOptimizer`)
+- **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM`.
+  ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
+  with a plain `python3 -c "..."` subprocess interpreter; the sandboxed
+  Deno + Pyodide bridge + JSON-RPC + tool-callback path is what's deferred.
+  `RLM` itself depends on that bridge and is therefore also deferred.
+- Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)
 - Fine-tuning providers and local training stack
 - Broader multimodal/reliability suites
 

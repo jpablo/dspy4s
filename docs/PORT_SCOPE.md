@@ -15,44 +15,58 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 
 ## In Scope (v1)
 1. Core type system and signatures
-- String signature DSL (`"q -> a"`)
-- Programmatic/class-like signature construction
-- Input/Output field metadata (`desc`, `prefix`, constraints, defaults)
-- Signature mutation APIs (`append`, `prepend`, `insert`, `delete`, `with_instructions`, `with_updated_fields`)
+- String signature DSL (`"q -> a"`) via `Signature.fromString` / `SignatureLayout.parse`
+- Programmatic / class-like signature construction (`SignatureBuilder`, `SignatureLayout.create`)
+- **Typed signatures layer** (`dspy4s.typed.Signature[I, O]` with case-class
+  derivation, function-type macro, trait-spec macro, builder, and string
+  DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md))
+- Input/Output field metadata (`description`, `prefix`, constraints, defaults)
+- Signature mutation APIs (`append`, `prepend`, `insert`, `delete`,
+  `withInstructions`, `withUpdatedField*`) — now `private[dspy4s]` so
+  composite programs use them while user code stays on the typed surface
 
 2. Core primitives and runtime
-- `Example`, `Prediction`, `Completions`
-- `BaseModule`/`Module` behavior (including nested parameter traversal)
+- `Example`, `DynamicPrediction` (erased) / `Prediction[O]` (typed),
+  `CompletionData`
+- `Module[I, O]` trait (including nested parameter traversal)
 - Settings/context model (global + scoped overrides)
 - Trace, history, usage tracking, callback hooks
 
 3. LM and adapter path
-- `BaseLM` + `LM` abstraction
-- OpenAI-compatible chat + responses model path
+- `LanguageModel` (was Python's `BaseLM` + `LM`)
+- OpenAI-compatible chat + responses mode path
 - Caching (memory + disk), retries, rollout behavior, history updates
-- `ChatAdapter`, `JSONAdapter`, `XMLAdapter`, `TwoStepAdapter`
-- Tool-calling bridge (`Tool`, `ToolCalls`) for native function-calling path
+- `ChatAdapter`, `JSONAdapter`, `XMLAdapter` (TwoStepAdapter not yet ported)
+- Tool-calling bridge (`ToolFunction`, `ToolCallRequest` / `ToolCallResult`)
 
 4. Program modules
-- `Predict`, `ChainOfThought`, `ReAct`, `Parallel`
-- `BestOfN`, `Refine`
-- `Retrieve` abstraction and retrieval integration contract
+- `Predict[I, O]` (typed) and `DynamicPredict` (erased), backed by a
+  shared `PredictEngine`
+- `ChainOfThought` (typed) and `DynamicChainOfThought`
+- `ReAct`, `Parallel`, `BestOfN`, `Refine`, `Aggregation.majority`
+- `MultiChainComparison`, `ProgramOfThought`, `CodeAct` (scaffolded — see
+  PORT_MAP §2a for interpreter parity caveats)
 
 5. Evaluation
 - `Evaluate`, `EvaluationResult`
-- Core metrics in `evaluate/metrics.py`
+- Core metrics: `ExactMatch`, `ContainsMatch`, `F1Score`, `AnswerMatch`,
+  `PassageMatch`, `FunctionMetric`
 - Parallel evaluation executor semantics
 
 6. Optimizers (first wave)
-- `Teleprompter`
 - `LabeledFewShot`
 - `BootstrapFewShot`
 - `BootstrapFewShotWithRandomSearch`
-- `Ensemble` and `KNNFewShot`
+- `PredictOps[P]` typeclass — the dspy4s equivalent of Python's
+  `Teleprompter` parameter introspection (see PORT_LANGUAGE_NOTES)
 
 ## Explicitly Deferred (post-v1)
+- `Ensemble`, `KNNFewShot` (Phase 7 v2 — see PORT_BACKLOG)
 - `GEPA`, `MIPROv2`, `SIMBA`, `GRPO`, `AvatarOptimizer`, full optimizer surface
-- Full `RLM` and full `ProgramOfThought`/`CodeAct` interpreter stack parity
+- `Retrieve` abstraction and retrieval integration contract; embedders / `Embedder`
+- `RLM` and the sandboxed Deno + Pyodide interpreter behind
+  `ProgramOfThought` / `CodeAct` (the contract trait `CodeInterpreter`
+  exists; only a plain `python3 -c "..."` subprocess impl ships today)
 - Provider-specific fine-tuning implementations (`databricks`, local SFT stack)
 - Full multimodal reliability matrix and all generated reliability suites
 - Binary compatibility with Python `cloudpickle` artifacts

@@ -31,7 +31,7 @@ result.map(_.output.score)    // typed: Double
 result.map(_.raw.lmUsage)     // raw escape hatch (completions, usage, etc.)
 ```
 
-That's the whole loop. The rest of this guide explains the five
+That's the whole loop. The rest of this guide explains the six
 authoring surfaces, the supported types, and the few sharp edges to
 know about.
 
@@ -39,29 +39,15 @@ know about.
 
 ## Authoring surfaces
 
-The typed layer exposes **five ways** to define a signature. All five
-compile down to the same runtime `Signature` (and pass through the same
+The typed layer exposes **six ways** to define a signature. All six
+compile down to the same `Signature[I, O]` (and pass through the same
 adapter / LM / runtime path), so you can mix them freely in one
 project — pick whichever fits each call site.
 
-### 1. String DSL — `Signature("inputs -> outputs")`
+### 1. Trait-as-spec macro — `Signature.of[T <: Spec]`
 
-Pre-existing, untyped. Fastest to type out. No compile-time type
-checking on field values.
-
-```scala
-import dspy4s.core.contracts.Signature
-val sig = Signature("question -> answer").toOption.get
-```
-
-Use when prototyping or when input/output types are all strings.
-Reach for one of the typed surfaces below the moment you want
-non-string outputs or enum-constrained values.
-
-### 2. Trait-as-spec macro — `Signature.of[T <: Spec]`
-
-The recommended typed surface and closest match for Python DSPy:
-a trait extending `Spec` declares abstract methods wrapped in
+The recommended typed surface and closest match for Python DSPy: a
+trait extending `Spec` declares abstract methods wrapped in
 `InputField[T]` / `OutputField[T]`.
 
 ```scala
@@ -83,15 +69,16 @@ The runtime name defaults to the trait name. Pass
 `name = "Emotion"` or `instructions = "Classify emotion."` when you
 want to override either value at construction time.
 
-End-to-end typed I/O uses Scala named tuples: `Predict(sig).run((sentence = "..."))`
-accepts a named-tuple input, and `tp.output.sentiment` is typed as
-`Emotion`. Compile-time validation catches methods not wrapped in the
-marker types, methods with parameters, missing `FieldCodec[X]`,
-duplicate field names, concrete methods, and empty spec traits.
+End-to-end typed I/O uses Scala named tuples:
+`Predict(sig).run((sentence = "..."))` accepts a named-tuple input,
+and `tp.output.sentiment` is typed as `Emotion`. Compile-time
+validation catches methods not wrapped in the marker types, methods
+with parameters, missing `FieldCodec[X]`, duplicate field names,
+concrete methods, and empty spec traits.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 
-### 3. Function signatures — `Signature.fromType[F]`
+### 2. Function signatures — `Signature.fromType[F]`
 
 Concise Scala function types can declare typed signatures without a
 throwaway method body. Input fields come from the function parameter
@@ -152,30 +139,7 @@ DSPy-like surface or a dedicated named declaration.
 
 See [`modules/examples/.../typed/FunctionExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/FunctionExample.scala).
 
-### 4. Programmatic builder — `Signature.builder(name)`
-
-Fluent construction for callers that don't want a case class per
-signature (REPL exploration, dynamic shapes assembled from config,
-tests).
-
-```scala
-val sig: dspy4s.core.contracts.Signature =
-  Signature
-    .builder("Toxicity")
-    .input[String]("comment")
-    .output[Boolean]("toxic")
-    .output[Double]("confidence")
-    .instructions("Mark toxic comments...")
-    .build
-```
-
-Returns a plain runtime `Signature`. Per-field types come from the
-`FieldCodec[T]` typeclass, so enum metadata (allowed cases, display
-name) flows through automatically.
-
-See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/BuilderExample.scala).
-
-### 5. Case classes — `Signature.derived[I, O]`
+### 3. Case classes — `Signature.derived[I, O]`
 
 Two case classes describe inputs and outputs; `kyo.Schema`-backed
 derivation produces the runtime metadata and performs product
@@ -203,24 +167,83 @@ the custom type) to make derivation explicit.
 
 See [`modules/examples/.../typed/CaseClassExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/CaseClassExample.scala).
 
+### 4. Programmatic builder — `Signature.builder(name)`
+
+Fluent construction for callers that don't want a case class per
+signature (REPL exploration, dynamic shapes assembled from config,
+tests).
+
+```scala
+import dspy4s.core.contracts.SignatureLayout
+
+val layout: SignatureLayout =
+  Signature
+    .builder("Toxicity")
+    .input[String]("comment")
+    .output[Boolean]("toxic")
+    .output[Double]("confidence")
+    .instructions("Mark toxic comments...")
+    .build
+```
+
+Returns a plain `SignatureLayout` (the runtime, erased contract) — not
+a typed `Signature[I, O]`. Pass it to `DynamicPredict` when you need
+to run it. Per-field types come from the `FieldCodec[T]` typeclass,
+so enum metadata (allowed cases, display name) flows through
+automatically.
+
+See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/BuilderExample.scala).
+
+### 5. String DSL — `Signature.fromString("inputs -> outputs")`
+
+The DSPy-style string DSL, lifted into the typed wrapper. I/O types
+stay as `Map[String, Any]` because the DSL has no static schema, but
+the resulting signature still flows through `Predict[I, O]` and the
+typed `Prediction[O]` pipeline.
+
+```scala
+val sig = Signature.fromString("question -> answer").toOption.get
+
+Predict(sig).run(Map("question" -> "Capital of France?"))
+  .map(_.output("answer"))   // Any — no static type
+```
+
+Use when prototyping, when the signature shape is loaded from
+configuration, or when all fields are strings. Reach for one of the
+static-typed surfaces above the moment you want non-string outputs
+or enum-constrained values.
+
+Underneath, `SignatureLayout.parse(dsl, instructions = "")` is the
+lower-level entry point if you want the raw layout without the typed
+wrapper.
+
+### 6. Layout escape hatch — `SignatureLayout.create / parse`
+
+Rare. Direct construction of a `SignatureLayout` value, bypassing the
+typed surface entirely. You hand it to `DynamicPredict` and get back
+`DynamicPrediction` (a `Map[String, Any]`-shaped result). Use only
+when interoperating with code that already speaks the erased
+contract.
+
 ---
 
 ## Choosing a surface
 
 | Surface | When to reach for it | Typed I/O on results? |
 |---|---|:---:|
-| String DSL | Prototyping, all-string fields | ❌ |
 | **Trait spec** | **Most production code; DSPy-style authoring** | ✅ |
-| Method/function | Compact local signatures; scalar or named-tuple outputs | ✅ |
+| Method / function | Compact local signatures; scalar or named-tuple outputs | ✅ |
 | Case classes | Existing domain models; case-class `copy` / pattern matching | ✅ |
-| Builder | Dynamic / config-driven shapes; tests | ❌ (runtime `Signature`) |
+| Builder | Dynamic / config-driven shapes; tests | ❌ (returns `SignatureLayout`) |
+| String DSL (`fromString`) | Runtime-defined signatures; all-string fields | ❌ (`Map` I/O) |
+| `SignatureLayout` direct | Interop with the erased runtime | ❌ |
 
 The trait-spec API is the **recommended default**. The others exist
 because each has a niche where it's a better fit.
 
 ---
 
-## Signature Instructions
+## Signature instructions
 
 All typed signatures can carry DSPy-style signature-level instructions:
 
@@ -234,7 +257,7 @@ val sig =
 Constructor-time `instructions = ...` is the common-case path.
 `Signature.withInstructions(...)` is also available for composition:
 it preserves the typed input and output shapes while updating the
-underlying runtime `Signature` that adapters use for prompt formatting.
+underlying `SignatureLayout` that adapters use for prompt formatting.
 
 ---
 
@@ -335,7 +358,7 @@ reject lossy conversions such as `0.9` into `Int`; no silent truncation.
 
 ---
 
-## Accessing the raw `Prediction`
+## Accessing the raw `DynamicPrediction`
 
 The typed wrapper preserves the underlying prediction for callers
 that need completions, LM usage, or other adapter metadata:
@@ -346,18 +369,19 @@ val tp = Predict(sig).run((question = "...")).toOption.get
 tp.output.answer        // typed access
 tp.raw.lmUsage          // Option[Map[String, Long]] — token counts
 tp.raw.completions      // Option[Completions] — multiple candidates
-tp.raw.value("answer")  // dynamic accessor on the raw Prediction
+tp.raw.value("answer")  // dynamic accessor on the raw DynamicPrediction
 ```
 
-`tp.raw` is the *exact* `Prediction` returned by the underlying
-`Predict` — adapters, callbacks, trace, and history all see the same
-object. The typed layer just decodes its values into `tp.output`.
+`tp.raw` is the *exact* `DynamicPrediction` returned by the underlying
+`DynamicPredict` — adapters, callbacks, trace, and history all see
+the same object. The typed layer just decodes its values into
+`tp.output`.
 
 ---
 
 ## Per-call runtime knobs
 
-`Predict.run` exposes the same knobs as the untyped path through
+`Predict.run` exposes the same knobs as the dynamic path through
 `ProgramCall`:
 
 ```scala
@@ -371,25 +395,31 @@ Predict(sig).run(
 `config` flows into `ProgramCall.config` → `LmRequest.options`, so
 anything the underlying provider understands (sampling parameters,
 cache controls, response-format hints, …) works the same as it does
-via raw `Predict`.
+via `DynamicPredict`.
 
 ---
 
-## `Signature` vs `Signature`
+## `Signature[I, O]` vs `SignatureLayout`
 
-`Signature[I, O]` is a thin wrapper around a runtime `Signature`
-plus two `Shape` instances (one for input encoding, one for output
-decoding). The runtime stack — adapters, `Predict`, LM, callbacks,
-trace — only consumes the **untyped** `Signature` (`sig.untyped`), so
-the typed layer is purely additive:
+`Signature[I, O]` is a thin wrapper around a `SignatureLayout` plus
+two `Shape` instances (one for input encoding, one for output
+decoding). The runtime stack — adapters, `DynamicPredict`, LM,
+callbacks, trace — only consumes the **erased** `SignatureLayout`
+(`sig.layout`), so the typed layer is purely additive:
 
 - New typed code can opt in surface-by-surface.
-- Existing untyped code keeps working unchanged.
+- Existing dynamic code keeps working unchanged.
 - Adapter authors don't need to know the typed layer exists.
 
-When you need to drop into the untyped world (passing a signature to
-something that takes `Signature`), use `sig.untyped`. When you need
-the typed value back, that's what `Prediction.output` is for.
+When you need to drop into the erased world (passing a signature to
+something that takes `SignatureLayout`), use `sig.layout`. When you
+need the typed value back, that's what `Prediction.output` is for.
+
+Note that `SignatureLayout`'s field-mutation helpers (`append`,
+`prepend`, `insert`, `delete`, `withFields`, `withUpdatedField*`,
+`updateField`) are `private[dspy4s]` — only composite programs like
+`CodeAct` and `MultiChainComparison` use them. User code stays on
+the typed surface.
 
 ---
 
@@ -403,21 +433,22 @@ These are documented gaps, surfaced so you can plan around them:
   `Signature.derived[I, O]`.
 - **Literal-union output types**: not yet a `FieldCodec` instance;
   use a Scala enum.
-- **Decode-failure + trace divergence**: when the inner `Predict`
+- **Decode-failure + trace divergence**: when the inner `DynamicPredict`
   succeeds but the typed decode fails, the trace still records a
-  successful module call while `Predict.run` returns `Left`.
-  The discrepancy is benign (the underlying predict really did
-  succeed); consolidating the typed boundary's tracing is an open
-  design decision.
-- **Multi-completion typed decoding**: only the primary prediction
-  is decoded into `Prediction.output` today. The raw completions
-  are still on `tp.raw.completions` for manual decoding.
+  successful module call while `Predict.run` returns `Left`. The
+  discrepancy is benign (the underlying predict really did succeed);
+  consolidating the typed boundary's tracing is an open design
+  decision.
+- **Multi-completion typed decoding**: only the primary prediction is
+  decoded into `Prediction.output` today. The raw completions are
+  still on `tp.raw.completions` for manual decoding.
 
 ---
 
 ## Where to go from here
 
 - **Examples**: [`modules/examples/.../typed/`](../modules/examples/src/main/scala/dspy4s/examples/typed/)
+- **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Design doc**: [TYPED_SIGNATURES.md](TYPED_SIGNATURES.md)
 - **Implementation arc** (phase-by-phase outcomes, design deviations,
   open questions): [TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md](TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md)

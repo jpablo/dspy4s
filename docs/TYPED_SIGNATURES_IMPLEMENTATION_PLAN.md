@@ -1,5 +1,14 @@
 # Typed Signatures Implementation Plan
 
+> **Historical snapshot.** Captures the eight-phase implementation arc as
+> planned and executed. The work has shipped; subsequent refactors renamed
+> the original `Signature` trait to `SignatureLayout`, made `Signature` the
+> typed wrapper, dropped the `Typed*` prefix throughout, and narrowed the
+> mutation API. For the current shape see
+> [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) and
+> [ARCHITECTURE.md](ARCHITECTURE.md). Treat the plan below as a record of
+> the implementation thinking, not as the current API contract.
+
 ## Recommendation
 
 Implement typed signatures as an additive typed layer over the existing

@@ -1,11 +1,20 @@
 # Typed Signatures — Design Document
 
-> **Status:** Draft for review · 2026-05-24
+> **Status: design archive.** This document captures the original
+> design rationale (pre-implementation). The work has shipped, and the
+> nomenclature has since shifted — what this doc calls `Signature` is
+> now `SignatureLayout`, what it calls `Prediction` is `DynamicPrediction`,
+> and the typed surface is `Signature[I, O]` / `Prediction[O]` /
+> `Predict[I, O]`. For the current API see:
 >
-> **For users**: looking for "how do I use this"? See
-> [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md). This document
-> covers the rationale and design considerations; the guide covers
-> day-to-day usage.
+> - [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) — day-to-day usage
+> - [ARCHITECTURE.md](ARCHITECTURE.md) — how the typed/dynamic split fits the broader stack
+>
+> The body of this document is preserved as a record of the design
+> thinking; treat its code snippets as illustrative of intent, not as
+> the current API.
+>
+> **Original draft date:** 2026-05-24
 > **Scope:** dspy4s core + programs modules
 > **Targets:** Scala 3.8.1, minimal exposed dependency surface (Phase 1
 > may add one or two library dependencies per the foundation chosen in §5.6)
