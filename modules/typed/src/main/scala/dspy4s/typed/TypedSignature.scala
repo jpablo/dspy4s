@@ -74,6 +74,20 @@ object TypedSignature:
   transparent inline def from[F](inline fn: F) =
     ${ internal.FunctionMacro.fromImpl[F]('fn) }
 
+  /** Type-only function signature macro. This is the declaration-only
+    * companion to `from(method)`: no throwaway `???` method is needed.
+    *
+    * Input rules:
+    *   - named function parameters keep their names,
+    *     e.g. `(sentence: String) => Emotion`
+    *   - one anonymous input becomes `input`, e.g. `String => Emotion`
+    *   - multiple anonymous inputs become `input1`, `input2`, ...
+    *
+    * Output rules match `from(method)`.
+    */
+  transparent inline def fromType[F](inline name: String) =
+    ${ internal.FunctionMacro.fromTypeImpl[F]('name) }
+
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
     * compile time and materializes a `TypedSignature` whose untyped
     * `Signature` reflects the trait's `InputField` / `OutputField` members.

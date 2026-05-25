@@ -87,39 +87,52 @@ duplicate field names, concrete methods, and empty spec traits.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 
-### 3. Method/function macro — `TypedSignature.from(method)`
+### 3. Function signatures — `TypedSignature.fromType[F](name)`
 
-Concise Scala method signatures can also declare typed signatures.
-Input fields come from method parameters. Output fields come from the
-return type:
+Concise Scala function types can declare typed signatures without a
+throwaway method body. Input fields come from the function parameter
+types. Output fields come from the return type:
 
 - scalar return values become one output field named `result`
 - named-tuple return values keep their labels
 - case-class / product return values keep their product field names
 
-The method body is not called; the method is only a declaration surface.
+The nicest form uses named function parameters and named-tuple outputs:
 
 ```scala
-def classify(sentence: String): (sentiment: Emotion, confidence: Double) = ???
-
-val sig = TypedSignature.from(classify)
+val sig =
+  TypedSignature.fromType[
+    (sentence: String) => (sentiment: Emotion, confidence: Double)
+  ]("Classify")
 
 TypedPredict(sig).run((sentence = "..."))
   .map(_.output.sentiment)   // typed: Emotion
 ```
 
-For a single anonymous output:
+Anonymous inputs are supported too. A single anonymous input is named
+`input`; multiple anonymous inputs are named `input1`, `input2`, and so
+on. A single scalar output is named `result`:
 
 ```scala
-def classify(sentence: String): Emotion = ???
-
-val sig = TypedSignature.from(classify)
-// signature string: sentence -> result
+val sig = TypedSignature.fromType[String => Emotion]("Classify")
+// signature string: input -> result
 ```
 
-Use this when a Scala method signature is the clearest local
-description of the program boundary. Reach for trait specs when you
-want the most DSPy-like surface or a dedicated named declaration.
+If you already have an implementation method, `TypedSignature.from(method)`
+can inspect that method directly. The method is not called; only its
+parameter names, parameter types, and return type are used:
+
+```scala
+def classify(sentence: String): (sentiment: Emotion) =
+  runExistingClassifier(sentence)
+
+val sig = TypedSignature.from(classify)
+// signature string: sentence -> sentiment
+```
+
+Use this when a compact local function type is the clearest description
+of the program boundary. Reach for trait specs when you want the most
+DSPy-like surface or a dedicated named declaration.
 
 See [`modules/examples/.../typed/FunctionExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/FunctionExample.scala).
 

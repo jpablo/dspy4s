@@ -9,7 +9,7 @@ import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
   Message, MessageRole
 }
-import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+import dspy4s.typed.{InputField, OutputField, Shape, Spec, TypedSignature}
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).
@@ -220,7 +220,13 @@ class TypedPredictSuite extends FunSuite:
     // Spec-derived signatures use Map[String, Any] for inputs, so a caller
     // could silently omit a declared input. The defensive check in
     // TypedPredict.run catches this before any LM call is dispatched.
-    val sig = TypedSignature.of[P4QAMissingInputSpec]
+    val specSig = TypedSignature.of[P4QAMissingInputSpec]
+    val sig = TypedSignature(
+      name = specSig.name,
+      untyped = specSig.untyped,
+      inputShape = new Shape.MapShape(specSig.untyped.inputFields),
+      outputShape = specSig.outputShape
+    )
     var lmCalled = false
     val sentinelLm = new LanguageModel:
       val id   = "sentinel"

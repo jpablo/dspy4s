@@ -15,7 +15,7 @@ compile down to today's `Signature` model, and typed prediction values wrap
 today's `Prediction` so usage accounting, completions, adapter behavior, and
 runtime integration continue to work unchanged.
 
-The target user-facing API should support three construction styles in this
+The target user-facing API should support four construction styles in this
 order:
 
 1. A builder API for fast internal progress and straightforward tests.
@@ -44,16 +44,30 @@ is the ergonomic target; the MVP should use Scala enums for enum-like outputs if
 `kyo-schema` does not support literal unions cleanly.
 
 The method/function surface is an additional convenience rather than a
-replacement for trait specs:
+replacement for trait specs. Prefer `fromType` when the signature is only a
+declaration:
 
 ```scala
-def emotion(sentence: String): (sentiment: Emotion) = ???
+val sig =
+  TypedSignature.fromType[
+    (sentence: String) => (sentiment: Emotion)
+  ]("Emotion")
+```
+
+Use `from(method)` when an implementation method already exists:
+
+```scala
+def emotion(sentence: String): (sentiment: Emotion) =
+  runExistingClassifier(sentence)
+
 val sig = TypedSignature.from(emotion)
 ```
 
-Input fields come from method parameters. A named-tuple return keeps output
-field labels; a scalar return becomes a single `result` output; a case-class
-or product return keeps product field names.
+Input fields come from named function parameters or method parameters.
+For anonymous function types, a single input is named `input`; multiple
+anonymous inputs are named `input1`, `input2`, and so on. A named-tuple
+return keeps output field labels; a scalar return becomes a single
+`result` output; a case-class or product return keeps product field names.
 
 ## Module Strategy
 
@@ -801,7 +815,7 @@ Acceptance criteria:
 
 ### Outcomes (executed 2026-05-24)
 
-Three example files under `modules/examples/src/main/scala/dspy4s/examples/typed/`:
+Four example files under `modules/examples/src/main/scala/dspy4s/examples/typed/`:
 
   - `CaseClassExample.scala` — Emotion classifier with case-class I/O.
     Shows typed dot-access (`tp.output.sentiment`) and an offline
@@ -812,15 +826,18 @@ Three example files under `modules/examples/src/main/scala/dspy4s/examples/typed
     flows its metadata through the builder for free.
   - `SpecExample.scala` — trait-as-spec for emotion + QA shapes.
     Shows named-tuple input construction and typed output dot-access.
+  - `FunctionExample.scala` — function-type signatures via
+    `TypedSignature.fromType[F](name)`, including named-tuple output and the
+    `input -> result` convention for anonymous input / scalar output.
 
 The `examples` module now depends on `typed` (added to `build.sbt`).
-All three files compile against the actual API and reference the
+All four files compile against the actual API and reference the
 production types only.
 
 User-facing guide: [`docs/TYPED_SIGNATURES_GUIDE.md`](TYPED_SIGNATURES_GUIDE.md).
 Covers:
   - 5-line quick-start with the trait-spec API.
-  - All five authoring surfaces (string DSL, trait spec, method/function,
+  - All five authoring surfaces (string DSL, trait spec, function/method,
     builder, case classes) with one code block each and a "when to use" table.
   - Supported field types + coercion rules (what's accepted, what's
     deliberately not).
