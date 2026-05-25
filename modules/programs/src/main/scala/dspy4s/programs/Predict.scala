@@ -6,9 +6,9 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Signature}
 
 /** Typed counterpart to `DynamicPredict`. Wraps a `Signature[I, O]` and
-  * delegates execution to the underlying `DynamicPredict(signature.layout, ...)`,
-  * so all adapter/model/callback/cache/trace behavior is unchanged. The
-  * typed layer adds two boundaries:
+  * delegates execution to an internal `DynamicPredict`, so all
+  * adapter/model/callback/cache/trace behavior is unchanged. The typed
+  * layer adds two boundaries:
   *
   *   1. Inputs are encoded through `signature.inputShape` before reaching
   *      `ProgramCall`.
@@ -25,6 +25,12 @@ final case class Predict[I, O](
     name: Option[String] = None,
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
 ):
+
+  // Memoized rather than allocated per `run` -- a `Predict` is typically
+  // wired into a program once and called many times, and the inner
+  // `DynamicPredict` is a pure function of the case-class fields.
+  private lazy val inner: DynamicPredict =
+    DynamicPredict(signature.layout, demos, name, runtime)
 
   /** Encode `input`, dispatch through the existing `DynamicPredict` runtime, then
     * decode the resulting prediction into `Prediction[O]`.
@@ -61,7 +67,6 @@ final case class Predict[I, O](
         message  = s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
       ))
     else
-      val program = DynamicPredict(signature.layout, demos, name, runtime)
-      program
+      inner
         .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
         .flatMap(raw => Prediction.from(raw, signature.outputShape))
