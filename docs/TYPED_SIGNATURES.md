@@ -24,13 +24,13 @@ keeping the existing runtime-flexible API intact:
   + `schema-toon`; broad scope, 0.0.x).
 - **Option B** — self-built engine using only Scala 3.8.1 stdlib
   features (documented as fallback).
-- **Option C** — adopt `kyo-data` `Record[F]` (intersection-typed
-  records; structurally cleaner; smaller scope — no bundled codec
-  system).
+- **Option C** — adopt Kyo's typed stack: `kyo-data` `Record[F]` for
+  intersection-typed prediction access, and evaluate `kyo-schema` for
+  schema-backed decoding before writing custom codecs.
 
 Project owner prefers leaning into libraries where they give us pieces
-we need. Final selection (A vs. C, or an A+C hybrid) is pending
-external review.
+we need. Final selection is now biased toward Option C if `kyo-schema`
+is published and covers the MVP runtime decoding contract.
 
 ---
 
@@ -637,11 +637,15 @@ self-built design materially:
 
 If we go Option B, we should adopt these patterns from the outset.
 
-### 5.4 Option C — Adopt kyo-data `Record[F]`
+### 5.4 Option C — Adopt Kyo `Record[F]` + evaluate `kyo-schema`
 
-**Source.** `getkyo/kyo`, module `kyo-data` (file
-`kyo-data/shared/src/main/scala/kyo/Record.scala`). Currently shipping
-under Apache-2.0. The pattern is showcased in the
+**Source.** `getkyo/kyo`, modules `kyo-data` and `kyo-schema`.
+`kyo-data` provides `Record[F]` (file
+`kyo-data/shared/src/main/scala/kyo/Record.scala`). `kyo-schema`
+provides schema derivation, JSON/Protobuf serialization, validation,
+runtime `Structure` descriptions, and value decoding while depending
+only on `kyo-data` in the local checkout. Both are Apache-2.0. The
+`Record[F]` pattern is showcased in the
 [kyo-sql preview gist](https://gist.github.com/fwbrasil/e5ea19cca971795ece95b6f7f1d1e14d)
 which motivated this option.
 
@@ -709,6 +713,9 @@ already works via `Record.selectDynamic`. Surface translators:
 
 **What we gain.**
 - The structural carrier we want, already implemented.
+- A plausible schema/codec companion in `kyo-schema`, so the typed
+  layer can try schema-backed runtime decoding before writing its own
+  field codec stack.
 - `~` and `&` as bidirectional operators give the cleanest DSL
   syntax. Schema in the type parameter reads identically to
   construction. No separate builder vocabulary.
@@ -723,10 +730,12 @@ already works via `Record.selectDynamic`. Surface translators:
   from §4.6 doesn't apply.
 
 **What we take on.**
-- Dependency on `kyo-data`. Scope is narrower than zio-blocks-schema
-  (no codec system), so adapter format / parse logic stays on us
-  (which is roughly the status quo — `ChatAdapter`/`JsonAdapter`/
-  `XmlAdapter` already implement it).
+- Dependency on `kyo-data`; likely also `kyo-schema` if the Phase 0
+  spike confirms it is published and covers MVP decoding.
+- Adapter field extraction still stays on us (roughly the status quo:
+  `ChatAdapter`/`JsonAdapter`/`XmlAdapter` already extract named
+  fields). The goal is to avoid writing a general value codec system;
+  `kyo-schema` should handle runtime value decoding wherever possible.
 - New vocabulary at the engine layer: `Record`, `~`, `&`, `Fields`,
   `stage`, `Dict`. Smaller surface than zio-blocks but still visible.
 - **Locally verified** that `kyo-data` does not transitively pull the
@@ -736,17 +745,16 @@ already works via `Record.selectDynamic`. Surface translators:
   of zio-blocks.
 - Smaller community + ecosystem than zio-blocks.
 
-**Possible hybrid: A + C.** Use `kyo-data` `Record[F]` for the typed
-prediction carrier (where the structural typing is the main win), and
-`zio-blocks-schema` for the runtime mirror + codec layer (where
-TOON / JSON / etc. are useful for adapter prompt-format work). Two
-libraries, each doing what it does best, both wrapped behind
-dspy4s-owned types. Higher dependency footprint; cleaner separation
-of concerns.
+**Possible fallback hybrid: ZIO Blocks + Kyo.** Use `kyo-data`
+`Record[F]` for the typed prediction carrier, and `zio-blocks-schema`
+for the runtime mirror + codec layer only if `kyo-schema` cannot cover
+the MVP or future format requirements. This is a fallback, not the
+first choice, because Kyo can now plausibly cover both typed records
+and schema-backed decoding behind one family of dependencies.
 
 ### 5.5 Comparison
 
-|  | A (zio-blocks-schema) | B (self-built) | C (kyo-data Record) |
+|  | A (zio-blocks-schema) | B (self-built) | C (Kyo Record + schema) |
 |---|---|---|---|
 | Engine LOC | ~100 wrapper | ~300 engine + match-type work | ~50 wrapper |
 | Macro work | None (`Schema.derived`) | Case-class + string-DSL macros | Small (thin wrappers on `stage`/`fromProduct` for NamedTuple surface) |
@@ -754,7 +762,7 @@ of concerns.
 | Schema composition | wrapper-level | tuple concat ops | `&` (intersection types) |
 | Typed dot-access | NamedTuple + Selectable | Selectable + match types | Built-in `selectDynamic` + `Fields.Have` |
 | Field-not-found error | clean (Mirror) | needs `summonFrom` + `compiletime.error` mitigation | clean (typeclass evidence missing) |
-| Codec ecosystem | Bundled (JSON, YAML, BSON, TOON, ...) | Hand-built per format | Out of scope — write our own / keep current adapters |
+| Codec ecosystem | Bundled (JSON, YAML, BSON, TOON, ...) | Hand-built per format | `kyo-schema` JSON/Protobuf + runtime `Structure`; verify MVP fit |
 | Stability risk | 0.0.x (accepted) | None external | Lower than zio-blocks; verify version + transitive deps |
 | Vocabulary footprint | `Reflect` / `Term` / `Format` / `TypeId` | All dspy4s names | `Record` / `~` / `&` / `Fields` / `Dict` |
 | Lock-in | Moderate (wrapped) | None | Moderate (wrapped) |
@@ -783,25 +791,28 @@ genuinely open. The key trade is **scope** vs **structural fit**:
   primitive). Caveat: a few helpers shown in the kyo-sql preview
   (`stageNamed`, `fromNamedTuple`) are *not* in the published
   `kyo-data` source today — we'd ship thin wrappers in dspy4s or
-  contribute them upstream. Smaller scope than A means no codec
-  story, but our existing adapters already cover that.
-- **A+C hybrid** uses each library for its strength: `Record` for
-  typed prediction access, `Schema` for codec/format work in adapters.
-  Two deps, but each wrapped.
+  contribute them upstream. New information: `kyo-schema` may cover
+  the runtime schema/codec side too, so custom codecs should be a
+  fallback rather than the default implementation.
+- **ZIO Blocks + Kyo hybrid** remains available if Kyo's schema layer
+  cannot cover the decoding or format requirements, but it is no
+  longer the first path to try.
 
 **Items to confirm before the binding decision:**
 
-1. `kyo-data` published-artifact dependencies — the local checkout
-   does not pull the full Kyo runtime, but confirm the POM for the
-   exact version we pin.
-2. `zio-blocks-schema` derivation behavior on our actual signature
-   shapes (especially DSPy patterns with `Literal[...]` enums, union
-   types, custom types).
+1. `kyo-data` / `kyo-schema` published-artifact dependencies — the
+   local checkout does not pull the full Kyo runtime for these modules,
+   but confirm the POM for the exact version we pin.
+2. `kyo-schema` derivation and decoding behavior on our actual
+   signature shapes (case classes, Scala enums, primitive fields, named
+   tuples / structural records, and literal string unions if possible).
 3. `kyo-data` `Record.stage[A]` / `fromProduct[A]` behavior on
    identical shapes — plus prototyping the thin wrappers we'd need
    (`fromNamedTuple` equivalent) since they're not in the published
    source.
-4. Performance: macro-derived signature construction time. Could
+4. ZIO Blocks schema behavior as fallback if Kyo cannot cover the
+   decoding contract.
+5. Performance: macro-derived signature construction time. Could
    matter if we end up with hundreds of `Signature` instances.
 
 **Until the binding decision is made**, Phase 1 of the rollout (§7)
@@ -843,17 +854,21 @@ The Scala port needs the same contract:
 1. **The adapter extracts named fields** from the LM response. For
    example, a chat adapter extracts field sections and a JSON adapter
    extracts JSON object properties.
-2. **The typed layer decodes raw values** with a bounded
-   `TypeRefCodec[A]` / field-codec equivalent. This is where strings,
-   numbers, booleans, literal unions, and enums become Scala values.
+2. **The typed layer decodes raw values** with a bounded field decoder.
+   The first implementation should delegate to `kyo-schema` when
+   possible, falling back to hand-written decoders only for uncovered
+   MVP field types. This is where strings, numbers, booleans, literal
+   unions, and enums become Scala values.
 3. **`TypedPrediction[O]` is constructed only after successful decode.**
    Dot-access reads already-decoded values; it does not parse lazily and
    it does not return `Either`.
 
-This is distinct from arbitrary Pydantic-style schema derivation. The
-MVP parser only needs to cover the supported field types in the typed
-surface. Rich custom schemas, nested records, and JSON codecs can arrive
-later without changing this boundary.
+This is distinct from committing to arbitrary Pydantic-style schema
+derivation as a public feature. If `kyo-schema` covers case classes,
+enums, primitives, and possibly nested records cleanly, we should use it
+behind the DSPy4S boundary instead of recreating codecs. Rich custom
+schemas and domain-specific codecs can arrive later without changing
+this boundary.
 
 ---
 
@@ -861,15 +876,17 @@ later without changing this boundary.
 
 The phases are written against the public typed surface. The concrete
 carrier underneath is foundation-specific: Option A uses
-`Schema[I]`/`Schema[O]`, Option C uses `Record[I]`/`Record[O]`, and
-Option B uses the self-built fallback engine from §4.2.
+`Schema[I]`/`Schema[O]`, Option C uses `Record[I]`/`Record[O]` plus a
+`kyo-schema` decoding spike, and Option B uses the self-built fallback
+engine from §4.2.
 
 1. **Phase 0 (optional, immediate)** — Typed accessor ladder (Section
    6). Pure win, independent of the foundation choice.
 
 2. **Phase 1 — Adopt the foundation chosen in §5.6 + wrap as
-   `TypedSignature[I, O]`.** Add the dependency (zio-blocks-schema, kyo-data,
-   or both for an A+C hybrid), build the thin wrapper, write a small
+   `TypedSignature[I, O]`.** Add the dependency (`kyo-data` plus
+   `kyo-schema` if the spike succeeds; otherwise zio-blocks-schema or
+   the fallback engine), build the thin wrapper, write a small
    compatibility shim from the chosen library's mirror type to the
    existing `FieldSpec` so current adapters keep working unchanged.
    Tests prove `TypedSignature.of[(sentence: String), (sentiment: Boolean)]`
@@ -884,7 +901,7 @@ Option B uses the self-built fallback engine from §4.2.
    public ergonomic target is the same: typed dot-access and typed
    `.value[K]`. This phase also implements the runtime output parsing
    contract from §6.1: raw adapter outputs are decoded with the expected
-   field codecs before a `TypedPrediction[O]` is constructed.
+   schema/value decoders before a `TypedPrediction[O]` is constructed.
    Re-translate `Signatures.scala` Snippet 5 against it to validate
    ergonomics on a real example. Existing `Predict(sig: Signature)` API
    stays untouched.
@@ -908,7 +925,8 @@ Option B uses the self-built fallback engine from §4.2.
    settle and the macro pays for itself.
 
 7. **Phase 6 (optional, exploratory) — Adapter on `Codec`/`Format`.**
-   Study `schema-toon` and the JSON `Codec`. Decide whether to
+   Study `kyo-schema` codecs first, then `schema-toon` and the ZIO
+   Blocks JSON `Codec` only if Kyo is insufficient. Decide whether to
    refactor `ChatAdapter` / `JsonAdapter` to delegate prompt
    format/parse to the `Codec` infrastructure. Big refactor, big
    potential win. Out of scope until the above stabilize.
@@ -982,31 +1000,33 @@ its weight in practice.
    users hit it, they're building something unusual and the standard
    compiler message is informative.
 
-9. **SchemaError → DspyError mapping.** `zio-blocks-schema` codecs
-   return `Either[SchemaError, A]`. Where do we translate? Per-call
-   at adapter boundaries, or once via an implicit conversion?
-   Recommendation: explicit per-call mapping for now; revisit if it
-   becomes boilerplate.
+9. **Schema decode error → DspyError mapping.** `kyo-schema` and
+   `zio-blocks-schema` expose their own decode error shapes. Where do
+   we translate? Per-call at adapter boundaries, or once via an
+   implicit conversion? Recommendation: explicit per-call mapping for
+   now; revisit if it becomes boilerplate.
 
-10. **Tracking upstream churn.** With `zio-blocks-schema` at 0.0.x,
-    breaking changes are expected. Strategy: pin to a specific
-    version in `build.sbt`, add a `versionBump.md` entry to track
-    upgrades, run our test suite against each bump before merging.
+10. **Tracking upstream churn.** With `kyo-schema` newly discovered and
+    `zio-blocks-schema` at 0.0.x, breaking changes are possible.
+    Strategy: pin to a specific version in `build.sbt`, add a
+    `versionBump.md` entry to track upgrades, run our test suite
+    against each bump before merging.
 
-11. **Foundation: A vs. C vs. A+C.** The binding decision is held for
-    external review. Items to confirm beforehand are listed in §5.6.
+11. **Foundation: Kyo vs. ZIO Blocks fallback.** The binding decision is
+    now biased toward Kyo if `kyo-schema` covers the MVP. Items to
+    confirm beforehand are listed in §5.6.
     The Phase 1 surface API (`TypedSignature[I, O]`, `TypedPredict`,
     `TypedPrediction`) is intended to be identical across foundations
     so a late switch is recoverable, but the engine internals and
     derivation macros differ.
 
-12. **kyo-data effect-runtime independence — *locally verified*.**
-    Against checkout `e075492a` (`~/GitHub/kyo/build.sbt:395`):
-    `kyo-data` depends only on `kyo-stats-registry`, `pprint`
-    (compile), and `izumi-reflect` (Test). It does **not** depend on
-    `kyo-core`, the scheduler, or fibers. Re-check the published POM
-    of whatever version we pin before adopting, in case a release has
-    altered the transitive set.
+12. **Kyo data/schema effect-runtime independence — *locally verified*.**
+    Against the local checkout, `kyo-schema` depends on `kyo-data` and
+    does not depend on `kyo-core`, the scheduler, or fibers. A previous
+    check against `kyo-data` at checkout `e075492a` showed only
+    `kyo-stats-registry`, `pprint` (compile), and `izumi-reflect`
+    (Test). Re-check the published POM of whatever version we pin
+    before adopting, in case a release has altered the transitive set.
 
 ---
 
@@ -1016,10 +1036,11 @@ its weight in practice.
   details deferred.
 - Refined / Iron predicate integration. Useful eventually for
   validated fields, but orthogonal.
-- Schema derivation for arbitrary user types (pydantic-style). A bounded
-  parser/coercer for supported typed-signature fields is in scope (§6.1);
-  arbitrary custom schemas, nested records, and broad JSON codec support
-  are not.
+- Supporting every arbitrary Pydantic-style user type as a public
+  compatibility goal. A bounded parser/coercer for supported
+  typed-signature fields is in scope (§6.1), and `kyo-schema` may expand
+  that surface if the spike proves it clean. Arbitrary custom domain
+  codecs remain out of scope for the MVP.
 - Cross-module refactor. The typed engine is purely additive; existing
   modules continue to consume `Signature` (the trait) and `Prediction`
   unchanged.

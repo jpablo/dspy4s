@@ -5,8 +5,9 @@
 Implement typed signatures as an additive typed layer over the existing
 `Signature`, `Record`, `Prediction`, and `Predict` APIs. The first production
 version should use Kyo's `Record`/`Fields` machinery for structural field
-selection and compile-time field checking, while keeping DSPy4S-owned APIs at
-the user boundary.
+selection and compile-time field checking, and should evaluate `kyo-schema` as
+the preferred runtime schema/codec layer before introducing DSPy4S-owned codecs.
+DSPy4S-owned APIs remain at the user boundary.
 
 The implementation should not replace the current string DSL. Existing
 untyped signatures remain the stable interoperability layer. Typed signatures
@@ -37,7 +38,9 @@ val sentiment: "sadness" | "joy" | "love" = result.sentiment
 
 The exact marker names can change during implementation, but the syntax should
 preserve the main property: users describe signatures with ordinary Scala
-members and get statically checked output selection.
+members and get statically checked output selection. The literal-union example
+is the ergonomic target; the MVP should use Scala enums for enum-like outputs if
+`kyo-schema` does not support literal unions cleanly.
 
 ## Module Strategy
 
@@ -63,6 +66,9 @@ high-level execution module, while `core` remains the minimal contracts layer.
 Build changes:
 
 - Add a shared `kyoVersion` in `build.sbt`.
+- Add `kyo-data` for typed structural records.
+- Add `kyo-schema` only if the Phase 0 spike confirms it can cover the runtime
+  decoding contract for the MVP.
 - Add `lazy val typed = project.in(file("modules/typed")).dependsOn(core)`.
 - Add `typed` to the root aggregate.
 - Update `programs.dependsOn(...)` to include `typed`.
@@ -76,7 +82,8 @@ New files:
 - `modules/typed/src/main/scala/dspy4s/typed/TypedSignature.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/TypedPrediction.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/FieldMarkers.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/TypeRefCodec.scala`
+- `modules/typed/src/main/scala/dspy4s/typed/ValueDecoder.scala`
+- `modules/typed/src/main/scala/dspy4s/typed/KyoSchemaValueDecoder.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/Shape.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/internal/ShapeMacros.scala`
 - `modules/programs/src/main/scala/dspy4s/programs/TypedPredict.scala`
@@ -93,11 +100,13 @@ adding broad exports in the first slice.
 
 ## Phase 0: Dependency And Feasibility Spike
 
-Goal: prove that Kyo `Record`/`Fields` can support the needed runtime bridge.
+Goal: prove that Kyo can cover both halves of the typed runtime bridge:
+`kyo-data` for typed dot access and `kyo-schema` for schema-backed decoding.
 
 Tasks:
 
-- Add the `typed` module and Kyo dependency.
+- Add the `typed` module and Kyo dependencies behind the smallest possible
+  surface.
 - Create a tiny internal test that derives field names and field types from a
   Kyo-supported record shape.
 - Confirm how to construct a runtime `Record` value from decoded prediction
@@ -105,6 +114,16 @@ Tasks:
 - Confirm whether Kyo exposes enough API to wrap dynamic values safely, or
   whether DSPy4S needs a small internal representation that only exposes typed
   accessors through Kyo at the boundary.
+- Confirm whether `kyo-schema` is published at a version compatible with this
+  repository's Scala version.
+- Confirm whether `kyo-schema` can derive schemas for the planned MVP shapes:
+  case classes, simple Scala enums, primitives, and possibly named tuples or
+  structural records.
+- Confirm whether `kyo-schema` can decode from an untyped intermediate value
+  (`Structure.Value`) or whether we should normalize adapter fields to JSON and
+  call `Json.decode`.
+- Confirm whether `kyo-schema` supports literal string unions directly. If not,
+  make Scala enums the MVP enum-like output surface.
 
 Acceptance criteria:
 
@@ -113,12 +132,18 @@ Acceptance criteria:
   `sentence: String` and `sentiment: String`.
 - A test can access an existing field with dot syntax.
 - A compile-time test rejects an unknown field.
+- A test can decode `{"sentiment":"joy"}` into a typed output shape.
+- A test rejects `{"sentiment":"confused"}` for an enum-like output.
+- A test maps `kyo-schema` decode failures into `DspyError`.
 
 Risk gate:
 
 - If runtime `Record` construction is not practical with public Kyo APIs, keep
   Kyo for compile-time shape derivation and generate a DSPy4S `Selectable`
   wrapper for predictions. Do not switch to ZIO Blocks in the first version.
+- If `kyo-schema` is not published or cannot support the MVP decoding contract,
+  fall back to a small DSPy4S `ValueDecoder[A]` typeclass for primitives and
+  enums only. Do not build a broad custom codec ecosystem in the MVP.
 
 ## Phase 1: Prediction Primitive Accessors
 
@@ -186,14 +211,18 @@ val answer = p.answer
 - List fields in stable declaration order.
 - Convert field metadata to `FieldSpec`.
 - Encode typed inputs into `Map[String, Any]`.
-- Decode a raw `Prediction` into a typed output record.
+- Decode a raw `Prediction` into a typed output record through the selected
+  schema/value decoder.
 - Return structured DSPy4S errors for missing or invalid output fields.
 
-`TypeRefCodec[A]` responsibilities:
+`ValueDecoder[A]` responsibilities:
 
 - Map Scala types to existing `TypeRef` values.
 - Decode raw prediction values into Scala values.
 - Encode input values into untyped values.
+- Prefer delegating decoding to `kyo-schema` when a `Schema[A]` is available.
+- Provide small hand-written fallbacks only for field-level values that are not
+  naturally represented by the selected schema library.
 
 ### Output Parsing And Coercion Contract
 
@@ -208,26 +237,28 @@ DSPy4S should split that work into two explicit responsibilities:
   adapters remain responsible for turning an LM response into named raw output
   fields. The raw values may be strings, JSON values, numbers, booleans, or
   adapter-specific values.
-- **The typed layer decodes fields.** `TypeRefCodec[A]` is the bounded Scala
-  equivalent of DSPy's Pydantic-backed `parse_value`. It converts each raw
-  field into the expected Scala type or returns a structured `DspyError`.
+- **The typed layer decodes fields.** `ValueDecoder[A]` is the DSPy4S boundary
+  that converts each raw field into the expected Scala type or returns a
+  structured `DspyError`. Its first implementation should delegate to
+  `kyo-schema` rather than recreate a general codec system.
 
 `TypedPrediction[O]` must only be constructed after every required output field
 has been decoded successfully. Field access such as `prediction.sentiment`
 should not perform lazy parsing and should not return `Either`; all parse
 failures happen at the `TypedPredict.run` boundary.
 
-Initial coercion policy:
+Initial coercion policy, whether implemented directly or delegated through
+`kyo-schema`:
 
 - `String`: accept any scalar value by stringifying it; preserve strings as-is.
 - `Int`: accept integral numbers and unambiguous integral strings.
 - `Double`: accept numeric values and unambiguous numeric strings.
 - `Boolean`: accept boolean values and conservative string forms such as
   `true` and `false`.
-- string literal unions: decode as `String`, then require membership in the
-  declared literal set.
 - Scala enums: decode from their stable string representation, with the exact
   representation decided during implementation.
+- string literal unions: include only if the selected schema/decoder supports
+  them cleanly; otherwise defer and use Scala enums for MVP enum-like fields.
 
 Do not silently coerce ambiguous values. For example, `"yes"` should not become
 `true` unless the codec explicitly documents that policy.
@@ -246,18 +277,19 @@ First supported types:
 - `Int`
 - `Double`
 - `Boolean`
+- simple Scala enums
 
 Second supported types:
 
 - string literal unions such as `"sadness" | "joy" | "love"`
-- simple Scala enums, represented as string-valued outputs
+- collections and nested records if `kyo-schema` support proves direct enough
+  to expose safely
 
 Defer:
 
-- nested records
-- collections
 - arbitrary JSON values
-- custom schemas
+- custom domain codecs that are not expressible through the selected schema
+  library
 
 Tests:
 
@@ -267,8 +299,10 @@ Tests:
 - unsupported field types fail with a useful compile-time or construction error
 - missing outputs produce a typed DSPy4S error
 - invalid primitive conversions produce a typed DSPy4S error
-- literal union outputs reject values outside the declared set
+- enum-like outputs reject values outside the declared set
 - `TypedPrediction` is never constructed after a decode failure
+- `kyo-schema` decode errors, if used, are translated into stable `DspyError`
+  values
 
 Acceptance criteria:
 
@@ -382,7 +416,7 @@ Macro responsibilities:
 - Inspect abstract members on the spec trait.
 - Require each member to return `InputField[A]` or `OutputField[A]`.
 - Preserve declaration order.
-- Derive `TypeRefCodec[A]` for each field.
+- Derive or summon `ValueDecoder[A]` / `Schema[A]` evidence for each field.
 - Build `TypedSignature[inputRecord, outputRecord]`.
 - Emit readable compile errors for unsupported members.
 
@@ -460,16 +494,18 @@ Potential extensions:
   ```
 
 - richer `TypeRef` values for enums, arrays, objects, and literal unions
-- custom codecs for domain types
-- optional ZIO Blocks interop if schema derivation becomes a broader project
+- custom codecs for domain types not covered by `kyo-schema`
+- optional ZIO Blocks interop if `kyo-schema` cannot cover a future schema or
+  format requirement
 - typed examples for optimizers and evaluation
 - typed datasets and demos
 
 ## Suggested PR Slices
 
-1. Add `typed` module and Kyo feasibility tests.
+1. Add `typed` module and Kyo feasibility tests, including `kyo-schema`.
 2. Add primitive accessors to `Prediction`.
-3. Implement `TypedSignature`, `Shape`, `TypeRefCodec`, and builder API.
+3. Implement `TypedSignature`, `Shape`, schema-backed `ValueDecoder`, and
+   builder API.
 4. Implement `TypedPrediction` and typed output decoding.
 5. Implement `TypedPredict`.
 6. Add case class derivation.
@@ -504,12 +540,16 @@ Resolve these during Phase 0 and Phase 1:
 
 - Whether Kyo `Record` can be constructed directly from runtime prediction
   values with public APIs.
+- Whether `kyo-schema` is published and stable enough to be the MVP decoder
+  dependency.
+- Whether to decode typed outputs from `Structure.Value`, JSON object strings,
+  or a DSPy4S raw-value adapter into `kyo-schema`.
 - Whether `TypedPrediction` should expose Kyo `Record[O]` directly or hide it
   behind a DSPy4S wrapper.
 - Whether `programs` should depend on `typed`, or whether a later
   `typed-programs` module is worth the extra module complexity.
-- Whether literal string unions should be included in the MVP or land
-  immediately after primitive strings.
+- Whether literal string unions should be included in the MVP or deferred in
+  favor of Scala enums.
 - The final names for `InputField`, `OutputField`, and `TypedSignature.Spec`.
 
 The default answer for all open decisions should favor the smallest additive
