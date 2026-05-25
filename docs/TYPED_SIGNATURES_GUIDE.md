@@ -79,6 +79,10 @@ trait EmotionSpec extends Spec:
 val sig = TypedSignature.of[EmotionSpec]
 ```
 
+The runtime name defaults to the trait name. Pass
+`name = "Emotion"` or `instructions = "Classify emotion."` when you
+want to override either value at construction time.
+
 End-to-end typed I/O uses Scala named tuples: `TypedPredict(sig).run((sentence = "..."))`
 accepts a named-tuple input, and `tp.output.sentiment` is typed as
 `Emotion`. Compile-time validation catches methods not wrapped in the
@@ -87,7 +91,7 @@ duplicate field names, concrete methods, and empty spec traits.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 
-### 3. Function signatures — `TypedSignature.fromType[F](name)`
+### 3. Function signatures — `TypedSignature.fromType[F]`
 
 Concise Scala function types can declare typed signatures without a
 throwaway method body. Input fields come from the function parameter
@@ -103,7 +107,7 @@ The nicest form uses named function parameters and named-tuple outputs:
 val sig =
   TypedSignature.fromType[
     (sentence: String) => (sentiment: Emotion, confidence: Double)
-  ]("Classify")
+  ]
 
 TypedPredict(sig).run((sentence = "..."))
   .map(_.output.sentiment)   // typed: Emotion
@@ -114,8 +118,20 @@ Anonymous inputs are supported too. A single anonymous input is named
 on. A single scalar output is named `result`:
 
 ```scala
-val sig = TypedSignature.fromType[String => Emotion]("Classify")
+val sig = TypedSignature.fromType[String => Emotion]
 // signature string: input -> result
+```
+
+The runtime name defaults to `"Signature"` for DSPy-style anonymous
+declarations. Pass `name = "Classify"` when a stable name is useful for
+debugging or tracing. You can also pass signature-level instructions at
+construction time:
+
+```scala
+val sig =
+  TypedSignature.fromType[(comment: String) => (toxic: Boolean)](
+    instructions = "Mark toxic comments..."
+  )
 ```
 
 If you already have an implementation method, `TypedSignature.from(method)`
@@ -210,14 +226,15 @@ All typed signatures can carry DSPy-style signature-level instructions:
 
 ```scala
 val sig =
-  TypedSignature
-    .fromType[(comment: String) => (toxic: Boolean)]("Toxicity")
-    .withInstructions("Mark toxic comments...")
+  TypedSignature.fromType[(comment: String) => (toxic: Boolean)](
+    instructions = "Mark toxic comments..."
+  )
 ```
 
-`TypedSignature.withInstructions(...)` preserves the typed input and
-output shapes while updating the underlying runtime `Signature` that
-adapters use for prompt formatting.
+Constructor-time `instructions = ...` is the common-case path.
+`TypedSignature.withInstructions(...)` is also available for composition:
+it preserves the typed input and output shapes while updating the
+underlying runtime `Signature` that adapters use for prompt formatting.
 
 ---
 

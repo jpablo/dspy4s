@@ -51,6 +51,16 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment"))
   }
 
+  test("spec trait supports explicit name and construction-time instructions") {
+    val sig = TypedSignature.of[P5SentimentSpec](
+      name = "Sentiment",
+      instructions = "Classify the sentence sentiment."
+    )
+    assertEquals(sig.untyped.name, "Sentiment")
+    assertEquals(sig.name, "Sentiment")
+    assertEquals(sig.instructions, Some("Classify the sentence sentiment."))
+  }
+
   test("spec trait preserves declaration order for multiple inputs and outputs") {
     val sig = TypedSignature.of[P5MultiSpec]
     assertEquals(sig.untyped.inputFields.map(_.name),  Vector("question", "context"))

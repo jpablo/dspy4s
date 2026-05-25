@@ -91,8 +91,9 @@ object TypedSignature:
   transparent inline def from[F](inline fn: F) =
     ${ internal.FunctionMacro.fromImpl[F]('fn) }
 
-  /** Type-only function signature macro. This is the declaration-only
-    * companion to `from(method)`: no throwaway `???` method is needed.
+  /** Anonymous type-only function signature macro. This is the
+    * declaration-only companion to `from(method)`: no throwaway `???`
+    * method is needed.
     *
     * Input rules:
     *   - named function parameters keep their names,
@@ -102,8 +103,18 @@ object TypedSignature:
     *
     * Output rules match `from(method)`.
     */
-  transparent inline def fromType[F](inline name: String) =
-    ${ internal.FunctionMacro.fromTypeImpl[F]('name) }
+  transparent inline def fromType[F] =
+    ${ internal.FunctionMacro.fromTypeImpl[F]('{ "Signature" }, '{ "" }) }
+
+  /** Type-only function signature macro with optional runtime name and
+    * instructions. The name defaults to `"Signature"` for DSPy-style
+    * anonymous signatures.
+    */
+  transparent inline def fromType[F](
+      inline name: String = "Signature",
+      inline instructions: String = ""
+  ) =
+    ${ internal.FunctionMacro.fromTypeImpl[F]('name, 'instructions) }
 
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
     * compile time and materializes a `TypedSignature` whose untyped
@@ -114,4 +125,13 @@ object TypedSignature:
     * dot-access while the runtime still flows through the same `Shape` /
     * `Predict` / adapter pipeline as case-class signatures. */
   transparent inline def of[T <: Spec] =
-    ${ internal.SpecMacro.ofImpl[T] }
+    ${ internal.SpecMacro.ofImpl[T]('{ "" }, '{ "" }) }
+
+  /** Trait-as-spec macro entry with optional runtime name and instructions.
+    * The name defaults to the spec trait name when empty.
+    */
+  transparent inline def of[T <: Spec](
+      inline name: String = "",
+      inline instructions: String = ""
+  ) =
+    ${ internal.SpecMacro.ofImpl[T]('name, 'instructions) }

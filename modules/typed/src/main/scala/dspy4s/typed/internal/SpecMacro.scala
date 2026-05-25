@@ -18,12 +18,16 @@ private[typed] object SpecMacro:
     *   - methods with parameters
     *   - duplicate field names
     *   - missing `FieldCodec[X]` for any wrapped type */
-  def ofImpl[T <: Spec : Type](using Quotes): Expr[Any] =
+  def ofImpl[T <: Spec : Type](
+      name: Expr[String],
+      instructions: Expr[String]
+  )(using Quotes): Expr[Any] =
     import quotes.reflect.*
 
     val tpe        = TypeRepr.of[T]
     val typeSym    = tpe.typeSymbol
-    val sigName    = typeSym.name
+    val specName   = typeSym.name
+    val sigName    = name.value.filter(_.nonEmpty).getOrElse(specName)
 
     val inputFieldSym  = TypeRepr.of[InputField[Any]].typeSymbol
     val outputFieldSym = TypeRepr.of[OutputField[Any]].typeSymbol
@@ -39,7 +43,7 @@ private[typed] object SpecMacro:
     val concrete = allDeclared.filterNot(_.flags.is(Flags.Deferred))
     if concrete.nonEmpty then
       report.errorAndAbort(
-        s"Spec trait '$sigName' must declare only abstract field methods; " +
+        s"Spec trait '$specName' must declare only abstract field methods; " +
         s"found concrete method(s): ${concrete.map(_.name).mkString(", ")}"
       )
 
@@ -47,7 +51,7 @@ private[typed] object SpecMacro:
 
     if methods.isEmpty then
       report.errorAndAbort(
-        s"Spec trait '$sigName' must declare at least one InputField or OutputField method"
+        s"Spec trait '$specName' must declare at least one InputField or OutputField method"
       )
 
     // For each method: (name, isInput, inner type, FieldSpec-Expr,
@@ -62,7 +66,7 @@ private[typed] object SpecMacro:
         // parameterless field declarations.
         if m.paramSymss.exists(_.nonEmpty) then
           report.errorAndAbort(
-            s"Spec method '$sigName.$name' must be parameterless (got parameters: ${m.paramSymss})"
+            s"Spec method '$specName.$name' must be parameterless (got parameters: ${m.paramSymss})"
           )
 
         // Read the declared return type directly from the DefDef. This
@@ -72,7 +76,7 @@ private[typed] object SpecMacro:
           case dd: DefDef => dd.returnTpt.tpe
           case _ =>
             report.errorAndAbort(
-              s"Spec member '$sigName.$name' must be a `def` declaration"
+              s"Spec member '$specName.$name' must be a `def` declaration"
             )
 
         val (isInput, innerType) = returnType match
@@ -80,7 +84,7 @@ private[typed] object SpecMacro:
           case AppliedType(tc, List(arg)) if tc.typeSymbol == outputFieldSym => (false, arg)
           case other =>
             report.errorAndAbort(
-              s"Spec method '$sigName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
+              s"Spec method '$specName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
             )
 
         // Summon a FieldCodec[X] at the macro expansion site, then cast
@@ -92,7 +96,7 @@ private[typed] object SpecMacro:
               case Some(d) => '{ ${ d }.asInstanceOf[FieldCodec[Any]] }
               case None =>
                 report.errorAndAbort(
-                  s"No FieldCodec[${innerType.show}] in scope for spec field '$sigName.$name'"
+                  s"No FieldCodec[${innerType.show}] in scope for spec field '$specName.$name'"
                 )
 
         val nameExpr = Expr(name)
@@ -116,7 +120,7 @@ private[typed] object SpecMacro:
     }
     if duplicates.nonEmpty then
       report.errorAndAbort(
-        s"Spec trait '$sigName' has duplicate field names: ${duplicates.mkString(", ")}"
+        s"Spec trait '$specName' has duplicate field names: ${duplicates.mkString(", ")}"
       )
 
     def buildDecoderMapExpr(items: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[FieldCodec[Any]])])
@@ -146,7 +150,10 @@ private[typed] object SpecMacro:
     val outputFieldExprs: List[Expr[FieldSpec]] = outputData.map(_._4)
     val inputDecodersExpr  = buildDecoderMapExpr(fieldData.filter(_._2))
     val outputDecodersExpr = buildDecoderMapExpr(fieldData.filterNot(_._2))
-    val sigNameExpr        = Expr(sigName)
+    val sigNameExpr = '{
+      val explicitName = ${ name }
+      if explicitName.isEmpty then ${ Expr(specName) } else explicitName
+    }
 
     val inputType  = namedTupleType(inputData.map { case (n, _, tpe, _, _) => n -> tpe })
     val outputType = namedTupleType(outputData.map { case (n, _, tpe, _, _) => n -> tpe })
@@ -158,8 +165,9 @@ private[typed] object SpecMacro:
           val outFields: Vector[FieldSpec] = Vector(${ Varargs(outputFieldExprs) }*)
           val sig = SignatureSpec
             .create(
-              name   = ${ sigNameExpr },
-              fields = inFields ++ outFields
+              name         = ${ sigNameExpr },
+              fields       = inFields ++ outFields,
+              instructions = Option(${ instructions }).filter(_.nonEmpty)
             )
             .fold(
               err => throw new IllegalStateException(
@@ -175,4 +183,4 @@ private[typed] object SpecMacro:
           )
         }
       case _ =>
-        report.errorAndAbort(s"Internal error materializing spec trait '$sigName'")
+        report.errorAndAbort(s"Internal error materializing spec trait '$specName'")

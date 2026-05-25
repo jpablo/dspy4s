@@ -9,7 +9,7 @@
  *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`,
  *     `dspy.ChainOfThought("a -> b")`, or `dspy.Signature("a -> b")`)
  *     become Scala **function signatures** via
- *     `TypedSignature.fromType[(in: I) => (out: O)]("Name")`.
+ *     `TypedSignature.fromType[(in: I) => (out: O)]`.
  *   - Python **class-based** signatures (`class X(dspy.Signature): ...`)
  *     become Scala **spec traits** with `InputField[T]` / `OutputField[T]`
  *     members and `TypedSignature.of[T <: Spec]`.
@@ -52,11 +52,10 @@ import kyo.Schema
 
 object ToxicityExample:
   val signature =
-    TypedSignature
-      .fromType[(comment: String) => (toxic: Boolean)]("Toxicity")
-      .withInstructions(
+    TypedSignature.fromType[(comment: String) => (toxic: Boolean)](
+      instructions =
         "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
-      )
+    )
 
   val program = TypedPredict(signature)
 
@@ -74,7 +73,7 @@ object ToxicityExample:
 
 object SentimentExample:
   val signature =
-    TypedSignature.fromType[(sentence: String) => (sentiment: Boolean)]("ClassifySentiment")
+    TypedSignature.fromType[(sentence: String) => (sentiment: Boolean)]
 
   val program = TypedPredict(signature)
 
@@ -102,7 +101,7 @@ object SentimentExample:
 
 object SummarizeExample:
   val signature =
-    TypedSignature.fromType[(document: String) => (summary: String)]("Summarize")
+    TypedSignature.fromType[(document: String) => (summary: String)]
 
   val program = TypedChainOfThought(signature)
 
@@ -149,7 +148,7 @@ trait EmotionSpec extends Spec:
 
 object EmotionExample:
   val signature =
-    TypedSignature.of[EmotionSpec].withInstructions("Classify emotion.")
+    TypedSignature.of[EmotionSpec](instructions = "Classify emotion.")
 
   val program = TypedPredict(signature)
 
@@ -185,9 +184,9 @@ trait CheckCitationFaithfulnessSpec extends Spec:
 
 object FaithfulnessExample:
   val signature =
-    TypedSignature
-      .of[CheckCitationFaithfulnessSpec]
-      .withInstructions("Verify that the text is based on the provided context.")
+    TypedSignature.of[CheckCitationFaithfulnessSpec](
+      instructions = "Verify that the text is based on the provided context."
+    )
 
   val program = TypedChainOfThought(signature)
 
@@ -216,9 +215,9 @@ trait DogPictureSpec extends Spec:
 
 object DogPictureExample:
   val signature =
-    TypedSignature
-      .of[DogPictureSpec]
-      .withInstructions("Output the dog breed of the dog in the image.")
+    TypedSignature.of[DogPictureSpec](
+      instructions = "Output the dog breed of the dog in the image."
+    )
 
   val program = TypedPredict(signature)
 
@@ -256,9 +255,9 @@ object MyContainer:
 
 object CustomTypesExample:
   val signature =
-    TypedSignature.fromType[(query: String) => (result: QueryResult)]("CustomType")
+    TypedSignature.fromType[(query: String) => (result: QueryResult)]
 
   val nestedSignature =
     TypedSignature.fromType[
       (query: MyContainer.Query) => (score: MyContainer.Score)
-    ]("Nested")
+    ]

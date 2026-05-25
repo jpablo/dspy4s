@@ -51,7 +51,7 @@ declaration:
 val sig =
   TypedSignature.fromType[
     (sentence: String) => (sentiment: Emotion)
-  ]("Emotion")
+  ]
 ```
 
 Use `from(method)` when an implementation method already exists:
@@ -827,7 +827,7 @@ Four example files under `modules/examples/src/main/scala/dspy4s/examples/typed/
   - `SpecExample.scala` — trait-as-spec for emotion + QA shapes.
     Shows named-tuple input construction and typed output dot-access.
   - `FunctionExample.scala` — function-type signatures via
-    `TypedSignature.fromType[F](name)`, including named-tuple output and the
+    `TypedSignature.fromType[F]`, including named-tuple output and the
     `input -> result` convention for anonymous input / scalar output.
 
 The `examples` module now depends on `typed` (added to `build.sbt`).

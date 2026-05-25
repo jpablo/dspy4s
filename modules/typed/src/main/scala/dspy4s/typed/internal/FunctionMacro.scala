@@ -16,6 +16,7 @@ private[typed] object FunctionMacro:
 
   private def materialize[I : Type, O : Type](
       sigNameExpr: Expr[String],
+      instructionsExpr: Expr[String],
       errorName: String,
       inputFields: List[FieldData],
       outputFieldsExpr: Expr[Vector[FieldSpec]],
@@ -30,8 +31,9 @@ private[typed] object FunctionMacro:
       val outFields: Vector[FieldSpec] = ${ outputFieldsExpr }
       val sig = SignatureSpec
         .create(
-          name   = name,
-          fields = inFields ++ outFields
+          name         = name,
+          fields       = inFields ++ outFields,
+          instructions = Option(${ instructionsExpr }).filter(_.nonEmpty)
         )
         .fold(
           err => throw new IllegalStateException(
@@ -178,6 +180,7 @@ private[typed] object FunctionMacro:
     ): Expr[TypedSignature[I, O]] =
       materialize[I, O](
         sigNameExpr = Expr(sigName),
+        instructionsExpr = Expr(""),
         errorName = sigName,
         inputFields = inputFields,
         outputFieldsExpr = outputFieldsExpr,
@@ -288,10 +291,13 @@ private[typed] object FunctionMacro:
                   scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
 
-  /** Implementation of `TypedSignature.fromType[F](name)`. Inspects a
-    * function type rather than a method term.
+  /** Implementation of `TypedSignature.fromType[F]`. Inspects a function
+    * type rather than a method term.
     */
-  def fromTypeImpl[F : Type](name: Expr[String])(using Quotes): Expr[Any] =
+  def fromTypeImpl[F : Type](
+      name: Expr[String],
+      instructions: Expr[String]
+  )(using Quotes): Expr[Any] =
     import quotes.reflect.*
 
     def tupleType(parts: List[TypeRepr]): TypeRepr =
@@ -388,7 +394,11 @@ private[typed] object FunctionMacro:
     def inputName(index: Int, total: Int, explicit: Option[String]): String =
       explicit.getOrElse(if total == 1 then "input" else s"input${index + 1}")
 
-    val sigName = name.value.getOrElse("fromType")
+    val sigName = name.value.filter(_.nonEmpty).getOrElse("Signature")
+    val sigNameExpr = '{
+      val explicitName = ${ name }
+      if explicitName.isEmpty then "Signature" else explicitName
+    }
     val (rawInputs, returnType) = functionParts(TypeRepr.of[F])
 
     if rawInputs.isEmpty then
@@ -415,7 +425,8 @@ private[typed] object FunctionMacro:
         outputShapeExpr: Expr[Shape[O]]
     ): Expr[TypedSignature[I, O]] =
       materialize[I, O](
-        sigNameExpr = name,
+        sigNameExpr = sigNameExpr,
+        instructionsExpr = instructions,
         errorName = sigName,
         inputFields = inputData,
         outputFieldsExpr = outputFieldsExpr,
