@@ -31,7 +31,7 @@ the producer thread and status callbacks dispatch into the queue from
 whatever thread emits them.
 
 Open work: an effect-system surface (`fs2.Stream[IO, *]` / `ZStream`) and
-async `Streamify` are listed in [`STREAMING_POSTPONED.md`](STREAMING_POSTPONED.md).
+async `Streamify` are listed in [`../STREAMING_POSTPONED.md`](../STREAMING_POSTPONED.md).
 
 ---
 

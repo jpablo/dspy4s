@@ -9,8 +9,8 @@ For current state, see:
 
 - [../ARCHITECTURE.md](../ARCHITECTURE.md) — overall architecture
 - [../TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md) — user-facing API
-- [../PORT_MAP.md](../PORT_MAP.md) — per-symbol mapping ledger
-- [../PORT_BACKLOG.md](../PORT_BACKLOG.md) — phase plan + status
+- [../port/PORT_MAP.md](../port/PORT_MAP.md) — per-symbol mapping ledger
+- [../port/PORT_BACKLOG.md](../port/PORT_BACKLOG.md) — phase plan + status
 
 ## Contents
 

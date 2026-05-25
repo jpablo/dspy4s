@@ -10,7 +10,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 
 ## Parity Model
 - `Tier 0 (must-match)`: core signatures, module runtime semantics, adapters, LM behavior, tracing/settings/callbacks, evaluation, and first optimizers.
-- `Tier 1 (supported with explicit deltas)`: streaming (v1 minimal: raw token + status events; per-field `StreamListener` deferred — see `STREAMING_POSTPONED.md`), advanced adapters/types, additional retrieval helpers.
+- `Tier 1 (supported with explicit deltas)`: streaming (v1 minimal: raw token + status events; per-field `StreamListener` deferred — see `../STREAMING_POSTPONED.md`), advanced adapters/types, additional retrieval helpers.
 - `Tier 2 (deferred)`: heavy/experimental optimizers, full fine-tuning providers, Python-specific interpreter features.
 
 ## In Scope (v1)
@@ -19,7 +19,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 - Programmatic / class-like signature construction (`SignatureBuilder`, `SignatureLayout.create`)
 - **Typed signatures layer** (`dspy4s.typed.Signature[I, O]` with case-class
   derivation, function-type macro, trait-spec macro, builder, and string
-  DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md))
+  DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md))
 - Input/Output field metadata (`description`, `prefix`, constraints, defaults)
 - Signature mutation APIs (`append`, `prepend`, `insert`, `delete`,
   `withInstructions`, `withUpdatedField*`) — now `private[dspy4s]` so

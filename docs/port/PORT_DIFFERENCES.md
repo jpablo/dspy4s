@@ -72,7 +72,7 @@ inline macro inspects the abstract trait at compile time and emits
 a `Signature[I, O]` whose I/O types are named tuples. There is no
 runtime class introspection.
 
-See [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md).
+See [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md).
 
 ## 2. Typed I/O layer (Scala-native addition)
 
@@ -107,7 +107,7 @@ stack only knows about the erased side.
 This is "purely additive": existing dynamic code keeps working
 unchanged; adapter authors never see the typed layer; new code can
 opt into typed I/O surface-by-surface. See
-[TYPED_SIGNATURES.md](TYPED_SIGNATURES.md) for the design rationale.
+[TYPED_SIGNATURES.md](../TYPED_SIGNATURES.md) for the design rationale.
 
 ## 3. Module parameter discovery: `__dict__` walking → typeclass
 
@@ -177,7 +177,7 @@ Per-chunk granularity also differs: dspy4s emits one chunk per
 field at the value boundary (JSON), at the close-tag boundary
 (XML), or via a holdback window (Chat). Concatenated content
 matches Python; per-chunk shape doesn't. See
-[STREAMING_POSTPONED.md](STREAMING_POSTPONED.md) for the per-token
+[STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md) for the per-token
 refactor that would close the gap, and
 [PORT_MAP §4](PORT_MAP.md#4-behavioral-deltas) for the other
 documented streaming deltas (completion-chunk emission,
@@ -350,10 +350,10 @@ separately:
 - **`TwoStepAdapter`** — not yet ported.
 - **Multimodal reliability matrix** — out of scope for v1.
 - **Per-token streaming chunks** — see §5; tracked in
-  [STREAMING_POSTPONED.md](STREAMING_POSTPONED.md).
+  [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
 
 The non-architectural gaps live in [PORT_BACKLOG.md](PORT_BACKLOG.md);
-the streaming-specific ones in [STREAMING_POSTPONED.md](STREAMING_POSTPONED.md);
+the streaming-specific ones in [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md);
 the per-symbol deltas in [PORT_MAP.md](PORT_MAP.md).
 
 ## What this means in practice

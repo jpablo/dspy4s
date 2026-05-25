@@ -3,7 +3,7 @@
 > **Historical snapshot.** Frozen scope survey of the upstream Python codebase
 > at the start of porting. LOC numbers and inventory entries are not refreshed
 > as upstream evolves; for the current upstream pin see
-> [PORT_BACKLOG.md](PORT_BACKLOG.md#upstream-parity-target).
+> [PORT_BACKLOG.md](port/PORT_BACKLOG.md#upstream-parity-target).
 
 ## Baseline
 - Source root: `/Users/jpablo/GitHub/dspy`

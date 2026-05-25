@@ -17,7 +17,7 @@ When upstream tags a new release, bump this section, refresh the clone
 (`git fetch && git checkout release-X.Y.Z`), and audit the changelog for
 features that affect contracts or behavior dspy4s already ports. Treat any
 behavioral delta we *intend* to keep as a documented "delta from Python
-parity" in the relevant `PHASE*_PROGRESS.md` / `STREAMING_POSTPONED.md` /
+parity" in the relevant `PHASE*_PROGRESS.md` / `../STREAMING_POSTPONED.md` /
 test comment rather than letting it drift silently.
 
 ## Phase 0: Contracts and Scaffolding
@@ -61,7 +61,7 @@ Acceptance tests:
 ## Phase 3: LM + Cache (`lm`)
 Goal: stable LM execution semantics.
 
-**Status**: cache/retry/history parity shipped in Phase 3 baseline; OpenAI HTTP provider shipped as Phase 3 extension (see `progress/PHASE3_PROGRESS.md`).
+**Status**: cache/retry/history parity shipped in Phase 3 baseline; OpenAI HTTP provider shipped as Phase 3 extension (see `../progress/PHASE3_PROGRESS.md`).
 
 Implement:
 - Base LM interface and request normalization.
@@ -112,7 +112,7 @@ Acceptance tests:
 ## Phase 6: Evaluation (`evaluate`)
 Goal: metric + threaded evaluation parity.
 
-**Status**: v1 shipped (see `progress/PHASE6_PROGRESS.md`).
+**Status**: v1 shipped (see `../progress/PHASE6_PROGRESS.md`).
 
 v1 covers:
 - Text normalization utility (`NormalizeText`, parity with Python)
@@ -132,7 +132,7 @@ Deferred to Phase 6 v2:
 ## Phase 7: First Optimizers (`optimize`)
 Goal: practical compile loops.
 
-**Status**: v1 shipped (see `progress/PHASE7_PROGRESS.md`).
+**Status**: v1 shipped (see `../progress/PHASE7_PROGRESS.md`).
 
 v1 covers:
 - `PredictOps[P]` typeclass (rewrites demos/signature on `Predict` and `ChainOfThought`)
@@ -151,7 +151,7 @@ Deferred to Phase 7 v2:
 ## Phase 8: Streaming (`streaming`)
 Goal: minimal streaming parity.
 
-**Status**: v1 shipped (see `progress/PHASE8_PROGRESS.md` and `STREAMING_POSTPONED.md`).
+**Status**: v1 shipped (see `../progress/PHASE8_PROGRESS.md` and `../STREAMING_POSTPONED.md`).
 
 v1 covers:
 - `LmChunk` + `StreamingLanguageModel` trait
@@ -162,7 +162,7 @@ v1 covers:
 - Status/prediction/error events for both streaming and non-streaming LMs
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
-v2 deferred (tracked in `STREAMING_POSTPONED.md`):
+v2 deferred (tracked in `../STREAMING_POSTPONED.md`):
 - Per-field `StreamListener` with Chat/JSON/XML chunk state machines
 - Real LM provider streaming clients (OpenAI SSE, Anthropic, Ollama)
 - Structured concurrency (fs2 / ZIO streams)
