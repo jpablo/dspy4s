@@ -122,19 +122,28 @@ final case class SignatureLayout(
     "SignatureLayout fields must be valid identifiers"
   )
 
-  def withFields(updated: Vector[FieldSpec]): SignatureLayout = copy(fields = updated)
+  // ── Stable public accessors / settings ──────────────────────────────
+  def inputFields: Vector[FieldSpec]  = fields.filter(_.role == FieldRole.Input)
+  def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
 
   def withInstructions(text: Option[String]): SignatureLayout = copy(instructions = text)
 
   def withInstructions(text: String): SignatureLayout =
     if text.isEmpty then this else withInstructions(Some(text))
 
-  def inputFields: Vector[FieldSpec]  = fields.filter(_.role == FieldRole.Input)
-  def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
+  // ── Field-mutation helpers ──────────────────────────────────────────
+  // Narrowed to `private[dspy4s]`: composite programs (CodeAct,
+  // MultiChainComparison, ProgramOfThought, DynamicChainOfThought)
+  // augment a base layout by appending / prepending / inserting fields
+  // before handing it to a `DynamicPredict`. User code should use the
+  // typed `Signature` surface (`derived`, `fromType`, `of[Spec]`,
+  // `builder`, `fromString`) instead of mutating layouts directly.
 
-  def append(field: FieldSpec): SignatureLayout = withFields(fields :+ field)
+  private[dspy4s] def withFields(updated: Vector[FieldSpec]): SignatureLayout = copy(fields = updated)
 
-  def insert(index: Int, field: FieldSpec): Either[DspyError, SignatureLayout] =
+  private[dspy4s] def append(field: FieldSpec): SignatureLayout = withFields(fields :+ field)
+
+  private[dspy4s] def insert(index: Int, field: FieldSpec): Either[DspyError, SignatureLayout] =
     val (inputs, outputs) = (inputFields, outputFields)
     val target = if field.role == FieldRole.Input then inputs else outputs
     val normalizedIndex = if index < 0 then target.size + index + 1 else index
@@ -151,17 +160,17 @@ final case class SignatureLayout(
         else inputs ++ updatedTarget
       Right(withFields(updatedFields))
 
-  def prepend(field: FieldSpec): SignatureLayout =
+  private[dspy4s] def prepend(field: FieldSpec): SignatureLayout =
     val sameRole = fields.filter(_.role == field.role)
     val otherRole = fields.filterNot(_.role == field.role)
     field.role match
       case FieldRole.Input  => withFields((field +: sameRole) ++ otherRole)
       case FieldRole.Output => withFields(otherRole ++ (field +: sameRole))
 
-  def delete(fieldName: String): SignatureLayout =
+  private[dspy4s] def delete(fieldName: String): SignatureLayout =
     withFields(fields.filterNot(_.name == fieldName))
 
-  def updateField(fieldName: String, metadata: Map[String, String]): SignatureLayout =
+  private[dspy4s] def updateField(fieldName: String, metadata: Map[String, String]): SignatureLayout =
     withFields(
       fields.map { field =>
         if field.name == fieldName then field.copy(metadata = field.metadata ++ metadata)
@@ -169,7 +178,7 @@ final case class SignatureLayout(
       }
     )
 
-  def withUpdatedField(
+  private[dspy4s] def withUpdatedField(
       fieldName: String,
       typeRef: Option[TypeRef] = None,
       description: Option[String] = None,
@@ -190,7 +199,7 @@ final case class SignatureLayout(
         )
         Right(withFields(fields.map { field => if field.name == fieldName then updated else field }))
 
-  def withUpdatedFields(
+  private[dspy4s] def withUpdatedFields(
       fieldName: String,
       typeRef: Option[TypeRef] = None,
       typeToken: Option[String] = None,
@@ -208,7 +217,7 @@ final case class SignatureLayout(
       metadata = metadata
     )
 
-  def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureLayout] =
+  private[dspy4s] def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureLayout] =
     updates.foldLeft[Either[DspyError, SignatureLayout]](Right(this)) { (acc, entry) =>
       val (fieldName, update) = entry
       acc.flatMap(
