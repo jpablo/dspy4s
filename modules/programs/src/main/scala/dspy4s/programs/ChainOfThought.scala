@@ -9,7 +9,7 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Shape, Signature}
 import scala.NamedTuple
 
-/** Typed ChainOfThought, defined as a small signature transformation on top of
+/** ChainOfThought, defined as a small signature transformation on top of
   * [[Predict]]. Wraps a `Signature[I, O]` whose output is a named tuple
   * (typically produced by `Signature.of[T <: Spec]` or
   * `Signature.fromType[F]("...")`) and produces a `Prediction[Out]` whose

@@ -24,11 +24,11 @@ trait TcotMultiOutputSpec extends Spec:
   def score:    OutputField[Double]
 
 // Case-class I/O fixtures for the negative-path test that exercises
-// the case-class-output rejection in typed ChainOfThought.
+// the case-class-output rejection in ChainOfThought.
 case class TcotCaseInput(document: String)
 case class TcotCaseOutput(summary: String)
 
-class TypedChainOfThoughtSuite extends FunSuite:
+class ChainOfThoughtSuite extends FunSuite:
 
   // ── Test doubles ────────────────────────────────────────────────────────
 
