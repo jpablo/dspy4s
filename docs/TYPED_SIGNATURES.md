@@ -1,6 +1,11 @@
 # Typed Signatures — Design Document
 
 > **Status:** Draft for review · 2026-05-24
+>
+> **For users**: looking for "how do I use this"? See
+> [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md). This document
+> covers the rationale and design considerations; the guide covers
+> day-to-day usage.
 > **Scope:** dspy4s core + programs modules
 > **Targets:** Scala 3.8.1, minimal exposed dependency surface (Phase 1
 > may add one or two library dependencies per the foundation chosen in §5.6)

@@ -767,6 +767,41 @@ Acceptance criteria:
 - The design document continues to describe rationale, while the new guide
   describes usage.
 
+### Outcomes (executed 2026-05-24)
+
+Three example files under `modules/examples/src/main/scala/dspy4s/examples/typed/`:
+
+  - `CaseClassExample.scala` — Emotion classifier with case-class I/O.
+    Shows typed dot-access (`tp.output.sentiment`) and an offline
+    `TypedPrediction.from` demo for callers that want to exercise the
+    decode boundary without an LM.
+  - `BuilderExample.scala` — toxicity check with the programmatic
+    builder; also shows that an enum reused from `CaseClassExample`
+    flows its metadata through the builder for free.
+  - `SpecExample.scala` — trait-as-spec for emotion + QA shapes.
+    Documents the Phase 5 MVP scope (I/O is `Map[String, Any]`) inline.
+
+The `examples` module now depends on `typed` (added to `build.sbt`).
+All three files compile against the actual API and reference the
+production types only.
+
+User-facing guide: [`docs/TYPED_SIGNATURES_GUIDE.md`](TYPED_SIGNATURES_GUIDE.md).
+Covers:
+  - 5-line quick-start with the case-class API.
+  - All four authoring surfaces (string DSL, case classes, builder,
+    trait spec) with one code block each and a "when to use" table.
+  - Supported field types + coercion rules (what's accepted, what's
+    deliberately not).
+  - Enum support including the kyo-schema wire-format note.
+  - Accessing the raw `Prediction` for completions / lmUsage / debug.
+  - Per-call runtime knobs (`config`, `traceEnabled`).
+  - `TypedSignature` vs `Signature` relationship.
+  - Known limitations (deferred surfaces, decode-failure trace
+    divergence, multi-completion decoding).
+
+The design doc (`TYPED_SIGNATURES.md`) now opens with a pointer to the
+guide so users hit the right document first.
+
 ## Phase 7: Post-MVP Extensions
 
 Only start these after the trait syntax and `TypedPredict` are stable.
