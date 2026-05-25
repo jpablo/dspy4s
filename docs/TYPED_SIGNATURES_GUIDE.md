@@ -8,8 +8,8 @@
 ## Quick start
 
 ```scala
-import dspy4s.programs.TypedPredict
-import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+import dspy4s.programs.Predict
+import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 
 // 1. Describe your I/O as a DSPy-style spec trait.
 trait QA extends Spec:
@@ -18,13 +18,13 @@ trait QA extends Spec:
   def score:    OutputField[Double]
 
 // 2. Build the signature.
-val sig = TypedSignature.of[QA]
+val sig = Signature.of[QA]
 
 // 3. Run it. (RuntimeContext is summoned from RuntimeEnvironment as today.)
 given dspy4s.core.contracts.RuntimeContext =
   dspy4s.core.runtime.RuntimeEnvironment.current
 
-val result = TypedPredict(sig).run((question = "Capital of France?"))
+val result = Predict(sig).run((question = "Capital of France?"))
 
 result.map(_.output.answer)   // typed: String
 result.map(_.output.score)    // typed: Double
@@ -58,14 +58,14 @@ Use when prototyping or when input/output types are all strings.
 Reach for one of the typed surfaces below the moment you want
 non-string outputs or enum-constrained values.
 
-### 2. Trait-as-spec macro — `TypedSignature.of[T <: Spec]`
+### 2. Trait-as-spec macro — `Signature.of[T <: Spec]`
 
 The recommended typed surface and closest match for Python DSPy:
 a trait extending `Spec` declares abstract methods wrapped in
 `InputField[T]` / `OutputField[T]`.
 
 ```scala
-import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 
 enum Emotion:
   case sadness, joy, love
@@ -76,14 +76,14 @@ trait EmotionSpec extends Spec:
   def sentence:  InputField[String]
   def sentiment: OutputField[Emotion]
 
-val sig = TypedSignature.of[EmotionSpec]
+val sig = Signature.of[EmotionSpec]
 ```
 
 The runtime name defaults to the trait name. Pass
 `name = "Emotion"` or `instructions = "Classify emotion."` when you
 want to override either value at construction time.
 
-End-to-end typed I/O uses Scala named tuples: `TypedPredict(sig).run((sentence = "..."))`
+End-to-end typed I/O uses Scala named tuples: `Predict(sig).run((sentence = "..."))`
 accepts a named-tuple input, and `tp.output.sentiment` is typed as
 `Emotion`. Compile-time validation catches methods not wrapped in the
 marker types, methods with parameters, missing `FieldCodec[X]`,
@@ -91,7 +91,7 @@ duplicate field names, concrete methods, and empty spec traits.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 
-### 3. Function signatures — `TypedSignature.fromType[F]`
+### 3. Function signatures — `Signature.fromType[F]`
 
 Concise Scala function types can declare typed signatures without a
 throwaway method body. Input fields come from the function parameter
@@ -105,11 +105,11 @@ The nicest form uses named function parameters and named-tuple outputs:
 
 ```scala
 val sig =
-  TypedSignature.fromType[
+  Signature.fromType[
     (sentence: String) => (sentiment: Emotion, confidence: Double)
   ]
 
-TypedPredict(sig).run((sentence = "..."))
+Predict(sig).run((sentence = "..."))
   .map(_.output.sentiment)   // typed: Emotion
 ```
 
@@ -118,7 +118,7 @@ Anonymous inputs are supported too. A single anonymous input is named
 on. A single scalar output is named `result`:
 
 ```scala
-val sig = TypedSignature.fromType[String => Emotion]
+val sig = Signature.fromType[String => Emotion]
 // signature string: input -> result
 ```
 
@@ -129,12 +129,12 @@ construction time:
 
 ```scala
 val sig =
-  TypedSignature.fromType[(comment: String) => (toxic: Boolean)](
+  Signature.fromType[(comment: String) => (toxic: Boolean)](
     instructions = "Mark toxic comments..."
   )
 ```
 
-If you already have an implementation method, `TypedSignature.from(method)`
+If you already have an implementation method, `Signature.from(method)`
 can inspect that method directly. The method is not called; only its
 parameter names, parameter types, and return type are used:
 
@@ -142,7 +142,7 @@ parameter names, parameter types, and return type are used:
 def classify(sentence: String): (sentiment: Emotion) =
   runExistingClassifier(sentence)
 
-val sig = TypedSignature.from(classify)
+val sig = Signature.from(classify)
 // signature string: sentence -> sentiment
 ```
 
@@ -152,7 +152,7 @@ DSPy-like surface or a dedicated named declaration.
 
 See [`modules/examples/.../typed/FunctionExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/FunctionExample.scala).
 
-### 4. Programmatic builder — `TypedSignature.builder(name)`
+### 4. Programmatic builder — `Signature.builder(name)`
 
 Fluent construction for callers that don't want a case class per
 signature (REPL exploration, dynamic shapes assembled from config,
@@ -160,7 +160,7 @@ tests).
 
 ```scala
 val sig: dspy4s.core.contracts.Signature =
-  TypedSignature
+  Signature
     .builder("Toxicity")
     .input[String]("comment")
     .output[Boolean]("toxic")
@@ -175,7 +175,7 @@ name) flows through automatically.
 
 See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/BuilderExample.scala).
 
-### 5. Case classes — `TypedSignature.derived[I, O]`
+### 5. Case classes — `Signature.derived[I, O]`
 
 Two case classes describe inputs and outputs; `kyo.Schema`-backed
 derivation produces the runtime metadata and performs product
@@ -187,11 +187,11 @@ product types over named tuples.
 case class EmotionInput(sentence: String)
 case class EmotionOutput(sentiment: Emotion)
 
-val sig = TypedSignature.derived[EmotionInput, EmotionOutput]("Emotion")
+val sig = Signature.derived[EmotionInput, EmotionOutput]("Emotion")
 ```
 
-End-to-end typed I/O: `TypedPredict(sig).run(EmotionInput("..."))`
-returns `Either[DspyError, TypedPrediction[EmotionOutput]]`, and
+End-to-end typed I/O: `Predict(sig).run(EmotionInput("..."))`
+returns `Either[DspyError, Prediction[EmotionOutput]]`, and
 `tp.output.sentiment` is typed as `Emotion`.
 
 Requires `kyo.Schema[I]` and `kyo.Schema[O]` in scope. kyo-schema
@@ -226,13 +226,13 @@ All typed signatures can carry DSPy-style signature-level instructions:
 
 ```scala
 val sig =
-  TypedSignature.fromType[(comment: String) => (toxic: Boolean)](
+  Signature.fromType[(comment: String) => (toxic: Boolean)](
     instructions = "Mark toxic comments..."
   )
 ```
 
 Constructor-time `instructions = ...` is the common-case path.
-`TypedSignature.withInstructions(...)` is also available for composition:
+`Signature.withInstructions(...)` is also available for composition:
 it preserves the typed input and output shapes while updating the
 underlying runtime `Signature` that adapters use for prompt formatting.
 
@@ -341,7 +341,7 @@ The typed wrapper preserves the underlying prediction for callers
 that need completions, LM usage, or other adapter metadata:
 
 ```scala
-val tp = TypedPredict(sig).run((question = "...")).toOption.get
+val tp = Predict(sig).run((question = "...")).toOption.get
 
 tp.output.answer        // typed access
 tp.raw.lmUsage          // Option[Map[String, Long]] — token counts
@@ -357,11 +357,11 @@ object. The typed layer just decodes its values into `tp.output`.
 
 ## Per-call runtime knobs
 
-`TypedPredict.run` exposes the same knobs as the untyped path through
+`Predict.run` exposes the same knobs as the untyped path through
 `ProgramCall`:
 
 ```scala
-TypedPredict(sig).run(
+Predict(sig).run(
   input        = (question = "..."),
   config       = Map("temperature" -> 0.7, "max_tokens" -> 50),
   traceEnabled = true   // false to suppress this call from the trace
@@ -375,9 +375,9 @@ via raw `Predict`.
 
 ---
 
-## `TypedSignature` vs `Signature`
+## `Signature` vs `Signature`
 
-`TypedSignature[I, O]` is a thin wrapper around a runtime `Signature`
+`Signature[I, O]` is a thin wrapper around a runtime `Signature`
 plus two `Shape` instances (one for input encoding, one for output
 decoding). The runtime stack — adapters, `Predict`, LM, callbacks,
 trace — only consumes the **untyped** `Signature` (`sig.untyped`), so
@@ -389,7 +389,7 @@ the typed layer is purely additive:
 
 When you need to drop into the untyped world (passing a signature to
 something that takes `Signature`), use `sig.untyped`. When you need
-the typed value back, that's what `TypedPrediction.output` is for.
+the typed value back, that's what `Prediction.output` is for.
 
 ---
 
@@ -400,17 +400,17 @@ These are documented gaps, surfaced so you can plan around them:
 - **Trait spec uses named tuples for I/O**: this gives typed dot-access
   and compile-time field-name checks, but it is not a case class. If
   you need case-class `copy`, extractors, or pattern matching, use
-  `TypedSignature.derived[I, O]`.
+  `Signature.derived[I, O]`.
 - **Literal-union output types**: not yet a `FieldCodec` instance;
   use a Scala enum.
 - **Decode-failure + trace divergence**: when the inner `Predict`
   succeeds but the typed decode fails, the trace still records a
-  successful module call while `TypedPredict.run` returns `Left`.
+  successful module call while `Predict.run` returns `Left`.
   The discrepancy is benign (the underlying predict really did
   succeed); consolidating the typed boundary's tracing is an open
   design decision.
 - **Multi-completion typed decoding**: only the primary prediction
-  is decoded into `TypedPrediction.output` today. The raw completions
+  is decoded into `Prediction.output` today. The raw completions
   are still on `tp.raw.completions` for manual decoding.
 
 ---

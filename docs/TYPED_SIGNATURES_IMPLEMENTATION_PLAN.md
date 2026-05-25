@@ -26,12 +26,12 @@ order:
 The trait syntax is the desired end-user surface:
 
 ```scala
-trait Emotion extends TypedSignature.Spec:
+trait Emotion extends Signature.Spec:
   def sentence: InputField[String]
   def sentiment: OutputField["sadness" | "joy" | "love"]
 
-val sig = TypedSignature.of[Emotion]
-val predict = TypedPredict(sig)
+val sig = Signature.of[Emotion]
+val predict = Predict(sig)
 
 val result = predict.run(sentence = "I missed the train")
 val sentiment: "sadness" | "joy" | "love" = result.sentiment
@@ -49,7 +49,7 @@ declaration:
 
 ```scala
 val sig =
-  TypedSignature.fromType[
+  Signature.fromType[
     (sentence: String) => (sentiment: Emotion)
   ]
 ```
@@ -60,7 +60,7 @@ Use `from(method)` when an implementation method already exists:
 def emotion(sentence: String): (sentiment: Emotion) =
   runExistingClassifier(sentence)
 
-val sig = TypedSignature.from(emotion)
+val sig = Signature.from(emotion)
 ```
 
 Input fields come from named function parameters or method parameters.
@@ -86,7 +86,7 @@ programs
 ```
 
 This keeps `core` free of a Kyo dependency while allowing `programs` to expose
-`TypedPredict`. The tradeoff is that `programs` users will receive the typed
+`Predict`. The tradeoff is that `programs` users will receive the typed
 module transitively. That is acceptable because `programs` is already the
 high-level execution module, while `core` remains the minimal contracts layer.
 
@@ -106,14 +106,14 @@ Build changes:
 
 New files:
 
-- `modules/typed/src/main/scala/dspy4s/typed/TypedSignature.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/TypedPrediction.scala`
+- `modules/typed/src/main/scala/dspy4s/typed/Signature.scala`
+- `modules/typed/src/main/scala/dspy4s/typed/Prediction.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/FieldMarkers.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/FieldCodec.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/KyoSchemaFieldCodec.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/Shape.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/internal/ShapeMacros.scala`
-- `modules/programs/src/main/scala/dspy4s/programs/TypedPredict.scala`
+- `modules/programs/src/main/scala/dspy4s/programs/Predict.scala`
 
 Test files:
 
@@ -308,23 +308,23 @@ Goal: represent typed signatures independently of prediction execution.
 Core types in `modules/typed`:
 
 ```scala
-final case class TypedSignature[I, O](
+final case class Signature[I, O](
   name: String,
   untyped: Signature,
   inputShape: Shape[I],
   outputShape: Shape[O]
 )
 
-final case class TypedPrediction[O](
+final case class Prediction[O](
   typed: kyo.Record[O],
   raw: Prediction
 ) extends Selectable
 ```
 
-`TypedPrediction` should support direct field selection:
+`Prediction` should support direct field selection:
 
 ```scala
-val p: TypedPrediction[Output] = ???
+val p: Prediction[Output] = ???
 val answer = p.answer
 ```
 
@@ -364,10 +364,10 @@ DSPy4S should split that work into two explicit responsibilities:
   structured `DspyError`. Its first implementation should delegate to
   `kyo-schema` rather than recreate a general codec system.
 
-`TypedPrediction[O]` must only be constructed after every required output field
+`Prediction[O]` must only be constructed after every required output field
 has been decoded successfully. Field access such as `prediction.sentiment`
 should not perform lazy parsing and should not return `Either`; all parse
-failures happen at the `TypedPredict.run` boundary.
+failures happen at the `Predict.run` boundary.
 
 Initial coercion policy, whether implemented directly or delegated through
 `kyo-schema`:
@@ -422,14 +422,14 @@ Tests:
 - missing outputs produce a typed DSPy4S error
 - invalid primitive conversions produce a typed DSPy4S error
 - enum-like outputs reject values outside the declared set
-- `TypedPrediction` is never constructed after a decode failure
+- `Prediction` is never constructed after a decode failure
 - `kyo-schema` decode errors, if used, are translated into stable `DspyError`
   values
 
 Acceptance criteria:
 
-- `TypedSignature` can produce the same untyped `Signature` shape as the DSL.
-- `TypedPrediction` preserves the original raw `Prediction`.
+- `Signature` can produce the same untyped `Signature` shape as the DSL.
+- `Prediction` preserves the original raw `Prediction`.
 - `sbt typed/test` passes.
 
 ### Outcomes (executed 2026-05-24)
@@ -450,14 +450,14 @@ Implemented four files in `modules/typed/src/main/scala/dspy4s/typed/`:
   `Structure.decode`. Before decode, `Shape` normalizes LLM-friendly
   primitive strings (`"0.9"` for `Double`, `"true"` for `Boolean`) but still
   rejects lossy conversions such as decimal values into `Int`.
-- `TypedSignature.scala` — `final case class TypedSignature[I, O]` with
+- `Signature.scala` — `final case class Signature[I, O]` with
   `derived[I <: Product, O <: Product](name, instructions)` that wires
   two `Shape`s into an untyped `SignatureSpec` whose fields are
   `inputs ++ outputs` in declaration order.
-- `TypedPrediction.scala` — `final case class TypedPrediction[O]` holding
+- `Prediction.scala` — `final case class Prediction[O]` holding
   the decoded output case-class instance + the raw `Prediction`. The
-  `TypedPrediction.from(raw, shape)` constructor returns
-  `Either[DspyError, TypedPrediction[O]]` so the value is *only*
+  `Prediction.from(raw, shape)` constructor returns
+  `Either[DspyError, Prediction[O]]` so the value is *only*
   constructed after every required output field decodes successfully.
 
 **Test results**: `Phase2TypedCoreSuite` adds 15 tests, all passing. Full
@@ -465,7 +465,7 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
 
 **Intentional deviation from the plan's literal shape**:
 
-- `TypedPrediction[O]` does not carry a `typed: kyo.Record[O]` field as
+- `Prediction[O]` does not carry a `typed: kyo.Record[O]` field as
   the plan sketched. `Record`'s `dict` field is `private[kyo]`, so a
   general-purpose `selectDynamic` wrapper would need either reflection
   or upstream API changes. The case-class-direct approach
@@ -506,7 +506,7 @@ Builder API:
 
 ```scala
 val sig =
-  TypedSignature
+  Signature
     .builder("Emotion")
     .input[String]("sentence")
     .output[String]("sentiment")
@@ -519,7 +519,7 @@ Case class API:
 case class EmotionInput(sentence: String)
 case class EmotionOutput(sentiment: String)
 
-val sig = TypedSignature.derived[EmotionInput, EmotionOutput]("Emotion")
+val sig = Signature.derived[EmotionInput, EmotionOutput]("Emotion")
 ```
 
 Implementation notes:
@@ -553,15 +553,15 @@ Implemented one new file:
   is chainable anywhere; empty text → `None`. `.build` returns a plain
   runtime `Signature` (inputs then outputs in declaration order).
 
-- `TypedSignature.builder(name)` factory added on the companion for
+- `Signature.builder(name)` factory added on the companion for
   discoverability — same return type as `SignatureBuilder.apply`.
 
-**Design choice: builder returns `Signature`, not `TypedSignature[I, O]`.**
+**Design choice: builder returns `Signature`, not `Signature[I, O]`.**
 The builder is the **programmatic** path for callers that don't want a
 case class per signature (REPL, dynamic shapes from config, tests). For
 typed input encoding / output decoding, callers use
-`TypedSignature.derived[I, O]` (case classes) from Phase 2. A future
-phase may add a `TypedSignature.fromSignature[I, O](sig, Shape[I],
+`Signature.derived[I, O]` (case classes) from Phase 2. A future
+phase may add a `Signature.fromSignature[I, O](sig, Shape[I],
 Shape[O])` adapter if a use case emerges for upgrading a builder result
 to a typed surface; for now, the two surfaces are explicitly separate.
 
@@ -580,20 +580,20 @@ per-field name/role/typeRef.repr all match). This is the parity
 property that lets us treat the two surfaces as alternate front-doors
 to the same runtime substrate.
 
-## Phase 4: TypedPredict
+## Phase 4: Predict
 
 Goal: connect typed signatures to the existing prediction runtime.
 
 API:
 
 ```scala
-final case class TypedPredict[I, O](
-  signature: TypedSignature[I, O],
+final case class Predict[I, O](
+  signature: Signature[I, O],
   demos: Chunk[Record] = Chunk.empty,
   name: Option[String] = None,
   runtime: DspyRuntime = DspyRuntime.default
 ):
-  def run(input: I): Either[DspyError, TypedPrediction[O]]
+  def run(input: I): Either[DspyError, Prediction[O]]
 ```
 
 The implementation should:
@@ -606,8 +606,8 @@ The implementation should:
 
 Tests:
 
-- `TypedPredict` passes the expected untyped inputs to the existing path.
-- `TypedPredict` returns a typed prediction on valid output.
+- `Predict` passes the expected untyped inputs to the existing path.
+- `Predict` returns a typed prediction on valid output.
 - decode failures are returned as `Left(DspyError)`.
 - existing `PredictSuite` behavior is unchanged.
 
@@ -620,12 +620,12 @@ Acceptance criteria:
 
 Implemented one file + one build-graph edit:
 
-- `modules/programs/src/main/scala/dspy4s/programs/TypedPredict.scala` —
-  `final case class TypedPredict[I, O](signature, demos, name, runtime)`.
-  `run(input: I)(using RuntimeContext): Either[DspyError, TypedPrediction[O]]`
+- `modules/programs/src/main/scala/dspy4s/programs/Predict.scala` —
+  `final case class Predict[I, O](signature, demos, name, runtime)`.
+  `run(input: I)(using RuntimeContext): Either[DspyError, Prediction[O]]`
   encodes via `signature.inputShape`, dispatches through the existing
   `Predict(signature.untyped, demos, name, runtime).run(ProgramCall(...))`,
-  then decodes via `TypedPrediction.from(raw, signature.outputShape)`.
+  then decodes via `Prediction.from(raw, signature.outputShape)`.
 
 - `build.sbt` — `programs.dependsOn(core, lm, adapters, typed)` (was
   `core, lm, adapters`). The typed module already depends on core only,
@@ -660,11 +660,11 @@ Goal: add the Python-like signature authoring syntax.
 Target syntax:
 
 ```scala
-trait Emotion extends TypedSignature.Spec:
+trait Emotion extends Signature.Spec:
   def sentence: InputField[String]
   def sentiment: OutputField["sadness" | "joy" | "love"]
 
-val sig = TypedSignature.of[Emotion]
+val sig = Signature.of[Emotion]
 ```
 
 Marker types:
@@ -680,7 +680,7 @@ Macro responsibilities:
 - Require each member to return `InputField[A]` or `OutputField[A]`.
 - Preserve declaration order.
 - Derive or summon `FieldCodec[A]` / `Schema[A]` evidence for each field.
-- Build `TypedSignature[inputRecord, outputRecord]`.
+- Build `Signature[inputRecord, outputRecord]`.
 - Emit readable compile errors for unsupported members.
 
 Validation rules:
@@ -695,7 +695,7 @@ Validation rules:
 Possible metadata syntax:
 
 ```scala
-trait QA extends TypedSignature.Spec:
+trait QA extends Signature.Spec:
   @description("Question to answer")
   def question: InputField[String]
 
@@ -729,7 +729,7 @@ Implemented in three new files:
   — quotes/splices macro that inspects abstract methods on the spec
   trait, validates each returns `InputField[X]` or `OutputField[X]`,
   summons `FieldCodec[X]` evidence at the call site, and emits a
-  `TypedSignature[I, O]` whose `I` and `O` are Scala named tuples
+  `Signature[I, O]` whose `I` and `O` are Scala named tuples
   matching the input and output declarations.
 - `Shape.TupleShape` (added to `Shape.scala`) — tuple-backed shape used
   by the macro. It encodes named-tuple inputs in declaration order and
@@ -751,15 +751,15 @@ and `result.sentiment`. Rather than synthesize unnameable local case
 classes, the macro now uses Scala named tuples:
 
 ```scala
-val sig = TypedSignature.of[EmotionSpec]
-TypedPredict(sig).run((sentence = "...")).map(_.output.sentiment)
+val sig = Signature.of[EmotionSpec]
+Predict(sig).run((sentence = "...")).map(_.output.sentiment)
 ```
 
 This gives the trait-spec surface the important case-class parity
 properties (typed input construction, typed output dot-access, and
 compile-time field-name checks) while keeping the runtime path simple.
 Users who need case-class-specific operations (`copy`, extractors,
-pattern matching) can still use `TypedSignature.derived[I, O]`.
+pattern matching) can still use `Signature.derived[I, O]`.
 
 What Phase 5 provides:
 
@@ -769,7 +769,7 @@ What Phase 5 provides:
 - The trait-derived `Signature` is structurally identical to the
   builder-built or case-class-derived equivalent (asserted in
   cross-surface-parity test).
-- `TypedPredict(sig).run((field = value))` works for spec-derived
+- `Predict(sig).run((field = value))` works for spec-derived
   signatures and returns typed named-tuple outputs.
 
 **Implementation lesson**: `tpe.memberType(m)` wraps parameterless
@@ -803,7 +803,7 @@ Update docs:
 - Add a user-facing typed signatures guide.
 - Link from `docs/TYPED_SIGNATURES.md`.
 - Document supported field types and deferred types.
-- Document the relationship between `TypedSignature` and `Signature`.
+- Document the relationship between `Signature` and `Signature`.
 - Document how to access the raw `Prediction` when users need completions,
   usage, or debugging data.
 
@@ -819,7 +819,7 @@ Four example files under `modules/examples/src/main/scala/dspy4s/examples/typed/
 
   - `CaseClassExample.scala` — Emotion classifier with case-class I/O.
     Shows typed dot-access (`tp.output.sentiment`) and an offline
-    `TypedPrediction.from` demo for callers that want to exercise the
+    `Prediction.from` demo for callers that want to exercise the
     decode boundary without an LM.
   - `BuilderExample.scala` — toxicity check with the programmatic
     builder; also shows that an enum reused from `CaseClassExample`
@@ -827,7 +827,7 @@ Four example files under `modules/examples/src/main/scala/dspy4s/examples/typed/
   - `SpecExample.scala` — trait-as-spec for emotion + QA shapes.
     Shows named-tuple input construction and typed output dot-access.
   - `FunctionExample.scala` — function-type signatures via
-    `TypedSignature.fromType[F]`, including named-tuple output and the
+    `Signature.fromType[F]`, including named-tuple output and the
     `input -> result` convention for anonymous input / scalar output.
 
 The `examples` module now depends on `typed` (added to `build.sbt`).
@@ -844,7 +844,7 @@ Covers:
   - Enum support including the kyo-schema wire-format note.
   - Accessing the raw `Prediction` for completions / lmUsage / debug.
   - Per-call runtime knobs (`config`, `traceEnabled`).
-  - `TypedSignature` vs `Signature` relationship.
+  - `Signature` vs `Signature` relationship.
   - Known limitations (deferred surfaces, decode-failure trace
     divergence, multi-completion decoding).
 
@@ -853,7 +853,7 @@ guide so users hit the right document first.
 
 ## Phase 7: Post-MVP Extensions
 
-Only start these after the trait syntax and `TypedPredict` are stable.
+Only start these after the trait syntax and `Predict` are stable.
 
 Potential extensions:
 
@@ -874,10 +874,10 @@ Potential extensions:
 
 1. Add `typed` module and Kyo feasibility tests, including `kyo-schema`.
 2. Add primitive accessors to `Prediction`.
-3. Implement `TypedSignature`, `Shape`, schema-backed `FieldCodec`, and
+3. Implement `Signature`, `Shape`, schema-backed `FieldCodec`, and
    builder API.
-4. Implement `TypedPrediction` and typed output decoding.
-5. Implement `TypedPredict`.
+4. Implement `Prediction` and typed output decoding.
+5. Implement `Predict`.
 6. Add case class derivation.
 7. Add trait-as-spec macro and field markers.
 8. Add examples and user-facing docs.
@@ -914,13 +914,13 @@ Resolve these during Phase 0 and Phase 1:
   dependency.
 - Whether to decode typed outputs from `Structure.Value`, JSON object strings,
   or a DSPy4S raw-value adapter into `kyo-schema`.
-- Whether `TypedPrediction` should expose Kyo `Record[O]` directly or hide it
+- Whether `Prediction` should expose Kyo `Record[O]` directly or hide it
   behind a DSPy4S wrapper.
 - Whether `programs` should depend on `typed`, or whether a later
   `typed-programs` module is worth the extra module complexity.
 - Whether literal string unions should be included in the MVP or deferred in
   favor of Scala enums.
-- The final names for `InputField`, `OutputField`, and `TypedSignature.Spec`.
+- The final names for `InputField`, `OutputField`, and `Signature.Spec`.
 
 The default answer for all open decisions should favor the smallest additive
 API that can support the trait syntax and typed prediction field access.
