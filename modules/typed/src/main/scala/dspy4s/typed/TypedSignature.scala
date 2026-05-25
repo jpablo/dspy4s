@@ -41,3 +41,7 @@ object TypedSignature:
       instructions = Option(instructions).filter(_.nonEmpty)
     )
     TypedSignature(name, sig, inShape, outShape)
+
+  /** Programmatic builder for callers that don't want a case class per
+    * signature. Returns a plain `Signature` — see `SignatureBuilder`. */
+  def builder(name: String): SignatureBuilder = SignatureBuilder(name)

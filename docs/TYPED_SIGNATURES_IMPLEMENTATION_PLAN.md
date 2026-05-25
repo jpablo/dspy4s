@@ -508,6 +508,44 @@ Acceptance criteria:
 - Users can define typed signatures without macros beyond derivation support.
 - The implementation can be exercised end to end before trait syntax exists.
 
+### Outcomes (executed 2026-05-24)
+
+Implemented one new file:
+
+- `modules/typed/src/main/scala/dspy4s/typed/SignatureBuilder.scala` —
+  fluent, immutable builder. `.input[T](name)` / `.output[T](name)`
+  summon a `ValueDecoder[T]` to derive `TypeRef` + well-known metadata
+  (enum cases, etc.) for the resulting `FieldSpec`. `.instructions(text)`
+  is chainable anywhere; empty text → `None`. `.build` returns a plain
+  runtime `Signature` (inputs then outputs in declaration order).
+
+- `TypedSignature.builder(name)` factory added on the companion for
+  discoverability — same return type as `SignatureBuilder.apply`.
+
+**Design choice: builder returns `Signature`, not `TypedSignature[I, O]`.**
+The builder is the **programmatic** path for callers that don't want a
+case class per signature (REPL, dynamic shapes from config, tests). For
+typed input encoding / output decoding, callers use
+`TypedSignature.derived[I, O]` (case classes) from Phase 2. A future
+phase may add a `TypedSignature.fromSignature[I, O](sig, Shape[I],
+Shape[O])` adapter if a use case emerges for upgrading a builder result
+to a typed surface; for now, the two surfaces are explicitly separate.
+
+**Test results**: `Phase3SurfacesSuite` adds 9 tests (builder ordering,
+TypeRefs from `ValueDecoder`, enum metadata propagation, immutability,
+empty-instructions handling; case-class field-name / encode / decode
+end-to-end; cross-surface parity for equivalent shapes). Full project
+green at 345 / 345 (was 336; +9 from this suite).
+
+**Phase 3 falsifiable claim now exercised in tests**: for a shape like
+`P3CommentInput(comment: String, lang: String)` →
+`P3ClassifyOutput(toxic: Boolean, confidence: Double)`, the
+`SignatureBuilder` and the case-class-`derived` path emit
+**structurally identical Signatures** (name, signatureString, and
+per-field name/role/typeRef.repr all match). This is the parity
+property that lets us treat the two surfaces as alternate front-doors
+to the same runtime substrate.
+
 ## Phase 4: TypedPredict
 
 Goal: connect typed signatures to the existing prediction runtime.
