@@ -9,7 +9,7 @@ import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
   Message, MessageRole
 }
-import dspy4s.typed.TypedSignature
+import dspy4s.typed.{Spec, InputField, OutputField, TypedSignature}
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).
@@ -17,6 +17,12 @@ case class P4QAInput(question: String)
 case class P4QAOutput(answer: String, score: Double)
 
 case class P4StrictOutput(answer: String, score: Int)  // forces decode failure: LM returns Double
+
+trait P4QASpec extends Spec:
+  def question: InputField[String]
+  def context:  InputField[String]
+  def answer:   OutputField[String]
+  def score:    OutputField[Double]
 
 class TypedPredictSuite extends FunSuite:
 
@@ -168,6 +174,33 @@ class TypedPredictSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val _ = TypedPredict(sig).run(P4QAInput("Capital of France?"), traceEnabled = false)
       assertEquals(RuntimeEnvironment.current.trace.size, 0)
+    }
+  }
+
+  // ── Missing-required-input rejection ────────────────────────────────────
+
+  test("TypedPredict.run rejects spec-derived inputs missing a required field") {
+    // Spec-derived signatures use Map[String, Any] for inputs, so a caller
+    // could silently omit a declared input. The defensive check in
+    // TypedPredict.run catches this before any LM call is dispatched.
+    val sig = TypedSignature.of[P4QASpec]
+    var lmCalled = false
+    val sentinelLm = new LanguageModel:
+      val id   = "sentinel"
+      val mode = LmMode.Chat
+      def call(req: LmRequest)(using RuntimeContext) =
+        lmCalled = true
+        Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
+
+    RuntimeEnvironment.withSettings(SettingsData(Map(
+      SettingKeys.languageModel.name -> sentinelLm,
+      SettingKeys.adapter.name       -> EchoQuestionAdapter
+    ))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run(Map[String, Any]("question" -> "Capital of France?"))
+      // Missing 'context' input -> Left, LM never invoked.
+      assert(result.isLeft, s"expected missing-input failure, got: $result")
+      assert(!lmCalled, "expected LM not to be called when required inputs are missing")
     }
   }
 

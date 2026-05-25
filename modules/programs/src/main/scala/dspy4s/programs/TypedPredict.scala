@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, Example, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, Example, NotFoundError, RuntimeContext}
 import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{TypedPrediction, TypedSignature}
@@ -47,7 +47,21 @@ final case class TypedPredict[I, O](
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, TypedPrediction[O]] =
     val inputMap = signature.inputShape.encode(input)
-    val program  = Predict(signature.untyped, demos, name, runtime)
-    program
-      .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
-      .flatMap(raw => TypedPrediction.from(raw, signature.outputShape))
+    // Defensive: shape implementations that don't statically guarantee
+    // full coverage of declared input fields (notably the Map-based
+    // shape used by trait specs) could let a caller silently omit a
+    // required input. Validate before spending an LM call. Case-class
+    // derivations always produce a complete map, so the check never
+    // fires for them; cost is one Set.diff per call.
+    val requiredInputs = signature.untyped.inputFields.iterator.map(_.name).toSet
+    val missing        = requiredInputs.diff(inputMap.keySet)
+    if missing.nonEmpty then
+      Left(NotFoundError(
+        resource = "program_input",
+        message  = s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
+      ))
+    else
+      val program = Predict(signature.untyped, demos, name, runtime)
+      program
+        .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
+        .flatMap(raw => TypedPrediction.from(raw, signature.outputShape))

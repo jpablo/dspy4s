@@ -21,6 +21,10 @@ trait P5MultiSpec extends Spec:
   def answer:   OutputField[String]
   def score:    OutputField[Double]
 
+trait P5EnumInputSpec extends Spec:
+  def tone:   InputField[P5Tone]
+  def answer: OutputField[String]
+
 /** Phase 5 trait-as-spec macro per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
 class Phase5SpecMacroSuite extends FunSuite:
 
@@ -111,13 +115,10 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec inputShape encodes typed enum values to their case-name strings") {
-    val sig = TypedSignature.of[P5ToneSpec]
-    val input = Map[String, Any]("text" -> "hello", "tone" -> P5Tone.urgent)
-    // text is an input (P5ToneSpec.text: InputField[String]), tone is an
-    // output. encode is applied to inputs; the test uses the outputShape's
-    // encode for clarity since that's where the decoder is most useful
-    // (going back over the wire).
-    val encoded = sig.outputShape.encode(Map("tone" -> P5Tone.urgent))
+    // P5EnumInputSpec.tone is an InputField[P5Tone], so inputShape's
+    // decoder map contains an entry for "tone" -> the P5Tone decoder.
+    val sig = TypedSignature.of[P5EnumInputSpec]
+    val encoded = sig.inputShape.encode(Map[String, Any]("tone" -> P5Tone.urgent))
     assertEquals(encoded("tone"), "urgent")
   }
 
