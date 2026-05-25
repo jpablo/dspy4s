@@ -1,14 +1,12 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{FieldMetadata, TypeRef}
-import kyo.Schema
 import munit.FunSuite
 
-enum P7Emotion derives ValueDecoder:
+enum P7Emotion:
   case sadness, joy, love
 
-object P7Emotion:
-  given Schema[P7Emotion] = ValueDecoder.flatEnumSchema[P7Emotion]
+object P7Emotion extends ValueDecoder.FlatEnum[P7Emotion]
 
 case class P7Score(sentiment: P7Emotion, confidence: Double)
 

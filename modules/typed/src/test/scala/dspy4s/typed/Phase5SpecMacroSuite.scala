@@ -1,11 +1,21 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{FieldMetadata, FieldRole, TypeRef}
+import kyo.Schema
 import munit.FunSuite
 
 // Top-level fixtures: spec traits + supporting enum.
-enum P5Tone derives ValueDecoder:
+enum P5Tone:
   case calm, urgent, frustrated
+
+object P5Tone extends ValueDecoder.FlatEnum[P5Tone]
+
+case class P5Citation(title: String, score: Double) derives Schema
+case class P5StructuredAnswer(
+    answer: String,
+    tone: P5Tone,
+    citations: List[P5Citation]
+) derives Schema
 
 trait P5SentimentSpec extends Spec:
   def sentence:  InputField[String]
@@ -24,6 +34,10 @@ trait P5MultiSpec extends Spec:
   def context:  InputField[String]
   def answer:   OutputField[String]
   def score:    OutputField[Double]
+
+trait P5StructuredSpec extends Spec:
+  def question: InputField[String]
+  def result:   OutputField[P5StructuredAnswer]
 
 /** Phase 5 trait-as-spec macro per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
 class Phase5SpecMacroSuite extends FunSuite:
@@ -124,6 +138,28 @@ class Phase5SpecMacroSuite extends FunSuite:
     val input = (tone = P5Tone.urgent)
     val encoded = sig.inputShape.encode(input)
     assertEquals(encoded("tone"), "urgent")
+  }
+
+  test("spec outputShape decodes nested product fields through kyo-schema") {
+    val sig = TypedSignature.of[P5StructuredSpec]
+    val raw = Map[String, Any](
+      "result" -> Map(
+        "answer" -> "Paris",
+        "tone" -> "calm",
+        "citations" -> List(Map("title" -> "Wikipedia", "score" -> "0.9"))
+      )
+    )
+
+    val decoded = sig.outputShape.decode(raw).toOption.get
+    val result: P5StructuredAnswer = decoded.result
+    assertEquals(
+      result,
+      P5StructuredAnswer(
+        answer = "Paris",
+        tone = P5Tone.calm,
+        citations = List(P5Citation("Wikipedia", 0.9))
+      )
+    )
   }
 
   // ── Cross-surface parity ────────────────────────────────────────────────

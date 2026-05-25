@@ -4,7 +4,6 @@ import dspy4s.core.contracts.{
   FieldMetadata, FieldRole, NotFoundError, PredictionData, Signature,
   SignatureSpec, TypeRef
 }
-import kyo.Schema
 import munit.FunSuite
 
 // Top-level fixtures (Phase 0 finding: Mirror derivation needs top-level types,
@@ -12,11 +11,10 @@ import munit.FunSuite
 case class P3CommentInput(comment: String, lang: String)
 case class P3ClassifyOutput(toxic: Boolean, confidence: Double)
 
-enum P3Tone derives ValueDecoder:
+enum P3Tone:
   case neutral, positive, negative
 
-object P3Tone:
-  given Schema[P3Tone] = ValueDecoder.flatEnumSchema[P3Tone]
+object P3Tone extends ValueDecoder.FlatEnum[P3Tone]
 
 case class P3ToneOutput(tone: P3Tone) derives Shape
 

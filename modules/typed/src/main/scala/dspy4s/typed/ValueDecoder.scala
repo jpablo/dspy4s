@@ -92,13 +92,13 @@ object ValueDecoder extends LowPriorityValueDecoders:
     *
     * Primitive and enum decoders above remain preferred because they encode
     * dspy4s's LLM-friendly coercion policy (e.g. `"0.5"` -> `Double`) and
-    * enum metadata. Schema-backed decoding is intentionally stricter for
-    * primitive leaves. */
-  def fromSchema[A](
+    * enum metadata. Schema-backed decoding uses the same conservative
+    * primitive normalization as product `Shape`s. */
+  inline def fromSchema[A](
       typeRef: TypeRef = TypeRef.json,
       metadata: Map[String, String] = Map.empty
   )(using schema: Schema[A]): ValueDecoder[A] =
-    KyoSchemaValueDecoder[A](schema, typeRef, metadata)
+    KyoSchemaValueDecoder[A](schema, schema.structure, typeRef, metadata)
 
   /** Flat-string schema for parameterless Scala enums. Kyo's default enum
     * schema is a discriminated object (`{"joy":{}}`); DSPy-style LM outputs
@@ -110,14 +110,33 @@ object ValueDecoder extends LowPriorityValueDecoders:
     * enum Emotion:
     *   case joy, sadness
     *
-    * object Emotion:
-    *   given Schema[Emotion] = ValueDecoder.flatEnumSchema[Emotion]
+    * object Emotion extends ValueDecoder.FlatEnum[Emotion]
     * }}}
     */
   inline def flatEnumSchema[A <: scala.reflect.Enum](using
       m: Mirror.SumOf[A]
   ): Schema[A] =
     KyoSchemaValueDecoder.flatEnumSchema[A]
+
+  /** One-line companion helper for DSPy-style flat enum fields.
+    *
+    * {{{
+    * enum Emotion:
+    *   case joy, sadness
+    *
+    * object Emotion extends ValueDecoder.FlatEnum[Emotion]
+    * }}}
+    *
+    * The companion then provides both `ValueDecoder[Emotion]` for field
+    * metadata / tuple-shaped signatures and `Schema[Emotion]` for
+    * schema-backed products.
+    */
+  trait FlatEnum[A <: scala.reflect.Enum]:
+    inline given valueDecoder(using Mirror.SumOf[A]): ValueDecoder[A] =
+      ValueDecoder.derived[A]
+
+    inline given schema(using Mirror.SumOf[A]): Schema[A] =
+      ValueDecoder.flatEnumSchema[A]
 
   // ── Scala enum derivation ────────────────────────────────────────────────
   //
@@ -203,7 +222,7 @@ trait LowPriorityValueDecoders:
     * triggering kyo-schema's generic derivation error. Kept low-priority so
     * primitive and enum decoders above continue to define the default
     * flat-field behavior. */
-  given schemaBackedProduct[A <: Product](using
+  inline given schemaBackedProduct[A <: Product](using
       m: Mirror.ProductOf[A],
       schema: Schema[A]
   ): ValueDecoder[A] =

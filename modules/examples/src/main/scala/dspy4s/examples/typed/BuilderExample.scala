@@ -4,7 +4,8 @@
  * The builder is the right choice when a case class per signature is
  * overkill (REPL exploration, dynamic shapes assembled from config,
  * tests). It produces a runtime `Signature` directly; users who want
- * typed `Predict.run` should use the case-class API instead.
+ * typed `Predict.run` should use the trait-spec, method, or case-class
+ * APIs instead.
  *
  * Each `.input[T]` / `.output[T]` call summons a `ValueDecoder[T]` so the
  * resulting `FieldSpec` carries the right `TypeRef` and any well-known

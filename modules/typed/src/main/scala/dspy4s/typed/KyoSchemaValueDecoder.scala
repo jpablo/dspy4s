@@ -7,12 +7,13 @@ import scala.deriving.Mirror
 
 private[typed] final class KyoSchemaValueDecoder[A](
     schema: Schema[A],
+    structure: Structure.Type,
     override val typeRef: TypeRef,
     override val metadata: Map[String, String]
 ) extends ValueDecoder[A]:
 
   def decode(raw: Any): Either[DspyError, A] =
-    val value = KyoSchemaValueDecoder.toStructure(raw)
+    val value = KyoSchemaValueDecoder.toStructure(raw, structure)
     KyoSchemaValueDecoder.toEither(Structure.decode[A](value)(using schema, summon))
 
   def encode(value: A): Any =

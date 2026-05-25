@@ -19,6 +19,7 @@ package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+import kyo.Schema
 
 trait EmotionSpec extends Spec:
   def sentence:  InputField[String]
@@ -29,6 +30,13 @@ trait QASpec extends Spec:
   def context:  InputField[String]
   def answer:   OutputField[String]
   def score:    OutputField[Double]
+
+case class Source(title: String, score: Double) derives Schema
+case class CitedAnswer(answer: String, sources: List[Source]) derives Schema
+
+trait CitedQASpec extends Spec:
+  def question: InputField[String]
+  def result:   OutputField[CitedAnswer]
 
 object SpecExample:
 
@@ -42,6 +50,10 @@ object SpecExample:
   /** A multi-field QA spec. Field order, names, types, normalized prefixes,
     * and enum metadata all flow from the trait declarations. */
   val qa = TypedSignature.of[QASpec]
+
+  /** A structured-output spec. Nested products, lists, and primitive
+    * coercions are decoded through kyo-schema. */
+  val citedQa = TypedSignature.of[CitedQASpec]
 
   /** Illustrative call: with an LM and adapter configured, run the
     * spec-derived signature against a named-tuple input and read the

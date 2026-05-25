@@ -423,12 +423,12 @@ Acceptance criteria:
 Implemented four files in `modules/typed/src/main/scala/dspy4s/typed/`:
 
 - `ValueDecoder.scala` — field-level codec typeclass with built-in givens for
-  `String` / `Int` / `Double` / `Boolean`, and a `derived` inline def that
-  enables `derives ValueDecoder` on Scala enums (`Mirror.SumOf[A]` →
-  case-name → enum-value table). Decodes from `Any` (already-typed
-  adapter values), not from JSON bytes. It also exposes
+  `String` / `Int` / `Double` / `Boolean`, plus enum support based on
+  `Mirror.SumOf[A]` → case-name → enum-value tables. Decodes from `Any`
+  (already-typed adapter values), not from JSON bytes. It also exposes
   `ValueDecoder.fromSchema[A](using Schema[A])` for structured field values
-  and `ValueDecoder.flatEnumSchema[A]` for flat-string enum schemas.
+  and `ValueDecoder.FlatEnum[A]` for enum companions that need both
+  `ValueDecoder[A]` and flat-string `Schema[A]`.
 - `Shape.scala` — `Shape[A <: Product]` derivation via `kyo.Schema[A]` and
   `Structure.Type`. It derives `Vector[FieldSpec]` from Kyo's structural
   fields, stamps the requested role at derivation time, encodes products
@@ -463,10 +463,13 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
   instead of reconstructing products field-by-field with hand-summoned
   `ValueDecoder`s. `ValueDecoder` remains the DSPy field boundary for
   builder, trait-spec, named-tuple, scalar, and custom-field cases, and also
-  provides a kyo-schema bridge for structured product fields.
+  provides a kyo-schema bridge for structured product fields. That bridge now
+  uses the same guided `Structure.Type` normalization path as product
+  `Shape`s, so nested product fields in trait specs get conservative
+  primitive coercion too.
 - Kyo's default enum schema remains discriminated (`{"case":{}}`), but
-  `ValueDecoder.flatEnumSchema[A]` provides an LLM-friendly flat string
-  schema for enum fields inside schema-backed products.
+  `ValueDecoder.FlatEnum[A]` provides an LLM-friendly flat string schema and
+  a matching field decoder from a single companion-object line.
 
 **Lessons from implementation**:
 
@@ -816,9 +819,9 @@ production types only.
 
 User-facing guide: [`docs/TYPED_SIGNATURES_GUIDE.md`](TYPED_SIGNATURES_GUIDE.md).
 Covers:
-  - 5-line quick-start with the case-class API.
-  - All four authoring surfaces (string DSL, case classes, builder,
-    trait spec) with one code block each and a "when to use" table.
+  - 5-line quick-start with the trait-spec API.
+  - All five authoring surfaces (string DSL, trait spec, method/function,
+    builder, case classes) with one code block each and a "when to use" table.
   - Supported field types + coercion rules (what's accepted, what's
     deliberately not).
   - Enum support including the kyo-schema wire-format note.

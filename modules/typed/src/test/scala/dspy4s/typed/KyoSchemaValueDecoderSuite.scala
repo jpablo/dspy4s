@@ -6,8 +6,7 @@ import munit.FunSuite
 enum KyoFlatEmotion:
   case sadness, joy, love
 
-object KyoFlatEmotion:
-  given Schema[KyoFlatEmotion] = ValueDecoder.flatEnumSchema[KyoFlatEmotion]
+object KyoFlatEmotion extends ValueDecoder.FlatEnum[KyoFlatEmotion]
 
 case class KyoFlatOutput(sentiment: KyoFlatEmotion) derives Schema
 
@@ -82,7 +81,7 @@ class KyoSchemaValueDecoderSuite extends FunSuite:
     )
   }
 
-  test("schema-backed ValueDecoder is stricter than primitive ValueDecoder coercion") {
+  test("schema-backed ValueDecoder normalizes nested primitive strings") {
     val decoder = summon[ValueDecoder[KyoNestedOutput]]
     val raw = Map[String, Any](
       "answer" -> "Paris",
@@ -90,7 +89,14 @@ class KyoSchemaValueDecoderSuite extends FunSuite:
       "citations" -> List(Map("title" -> "Wikipedia", "score" -> "0.9"))
     )
 
-    assert(decoder.decode(raw).isLeft)
+    assertEquals(
+      decoder.decode(raw),
+      Right(KyoNestedOutput(
+        answer = "Paris",
+        sentiment = KyoFlatEmotion.joy,
+        citations = List(KyoCitation("Wikipedia", 0.9))
+      ))
+    )
   }
 
   test("case-class Shape decodes whole products through kyo-schema") {

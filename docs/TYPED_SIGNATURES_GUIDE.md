@@ -67,9 +67,14 @@ a trait extending `Spec` declares abstract methods wrapped in
 ```scala
 import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
 
+enum Emotion:
+  case sadness, joy, love
+
+object Emotion extends dspy4s.typed.ValueDecoder.FlatEnum[Emotion]
+
 trait EmotionSpec extends Spec:
   def sentence:  InputField[String]
-  def sentiment: OutputField[Emotion]   // enum from elsewhere in scope
+  def sentiment: OutputField[Emotion]
 
 val sig = TypedSignature.of[EmotionSpec]
 ```
@@ -189,8 +194,8 @@ The `ValueDecoder` typeclass covers the MVP type vocabulary:
 | `Int` | `Int`; `Long` in `Int` range | clean integer strings like `"42"` |
 | `Double` | `Int` / `Long` / `Float` / `Double` | clean numeric strings like `"1.5"` |
 | `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
-| Scala enum (`derives ValueDecoder`) | already-typed enum value | flat case name like `"joy"` |
-| Product with `kyo.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | field-level schema decoder is strict; product `Shape` decoding applies the primitive coercions above |
+| Scala enum (`ValueDecoder.FlatEnum`) | already-typed enum value | flat case name like `"joy"` |
+| Product with `kyo.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
 
 Notably **not** auto-coerced:
 
@@ -199,14 +204,13 @@ Notably **not** auto-coerced:
 
 Supported for structured fields:
 
-- Case-class signatures and method/function signatures with product
-  outputs are decoded as whole products through `kyo-schema`.
-- Product values with a `kyo.Schema[A]` in scope can also be used as
-  structured fields; nested lists, maps, options, and other
-  `kyo-schema`-supported members are supported there.
-- Use `ValueDecoder.flatEnumSchema[A]` when a nested enum should use flat
-  case-name strings instead of kyo-schema's default discriminated object
-  encoding.
+- Trait specs, method signatures, and case-class signatures can all use
+  product fields with a `kyo.Schema[A]` in scope.
+- Nested lists, maps, options, and other `kyo-schema`-supported members are
+  supported inside those product fields.
+- Use `ValueDecoder.FlatEnum[A]` for enum companions when the enum appears in
+  a schema-backed product. It supplies both the field decoder and the flat
+  Kyo schema.
 
 Deferred to a later phase:
 
@@ -221,11 +225,14 @@ and import it into scope.
 
 ## Enum support and the wire-format note
 
-Scala enums get a `ValueDecoder` via `derives`:
+For DSPy-style flat enum fields, define the enum normally and make its
+companion extend `ValueDecoder.FlatEnum`:
 
 ```scala
-enum Sentiment derives ValueDecoder:
+enum Sentiment:
   case sadness, joy, love, anger, fear, surprise
+
+object Sentiment extends ValueDecoder.FlatEnum[Sentiment]
 ```
 
 The decoder accepts either an already-typed `Sentiment` value or a
@@ -243,24 +250,33 @@ fieldSpec.metadata.get(FieldMetadata.EnumName)
 Adapters that don't understand these well-known keys (defined in
 `dspy4s.core.contracts.FieldMetadata`) ignore them harmlessly.
 
+This one-line companion also provides `kyo.Schema[Sentiment]`, so the
+same enum works inside nested schema-backed products:
+
+```scala
+case class Citation(title: String, score: Double) derives kyo.Schema
+case class Classification(sentiment: Sentiment, citations: List[Citation]) derives kyo.Schema
+
+trait Classify extends Spec:
+  def sentence: InputField[String]
+  def result:   OutputField[Classification]
+```
+
 **Wire-format finding from Phase 0**: `kyo-schema`'s default enum
 derivation encodes Scala enums as `{"caseName":{}}` (discriminated
-object), not as flat strings. The direct `ValueDecoder` enum derivation
-above accepts flat strings. For schema-backed products, use a flat enum
-schema when you want the same LLM-friendly wire form:
+object), not as flat strings. `ValueDecoder.FlatEnum` overrides that
+with the LLM-friendly flat string form.
 
 ```scala
 enum Mood:
   case happy, sad
 
-object Mood:
-  given kyo.Schema[Mood] = ValueDecoder.flatEnumSchema[Mood]
+object Mood extends ValueDecoder.FlatEnum[Mood]
 ```
 
-For case-class and method-product signatures, `Shape` normalizes clear
-primitive strings before handing the record to `kyo-schema`, so
-`"0.9"` can decode as `Double`. It still rejects lossy conversions such
-as `0.9` into `Int`; no silent truncation.
+Schema-backed products normalize clear primitive strings before handing
+the record to `kyo-schema`, so `"0.9"` can decode as `Double`. They still
+reject lossy conversions such as `0.9` into `Int`; no silent truncation.
 
 ---
 
