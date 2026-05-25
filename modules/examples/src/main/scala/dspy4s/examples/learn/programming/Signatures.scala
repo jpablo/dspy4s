@@ -17,9 +17,9 @@
  * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named
  * tuples, so call sites get typed dot-access:
  *
- *   TypedPredict(sig).run((field = "...")).map(_.output.field)
+ *   Predict(sig).run((field = "...")).map(_.output.field)
  *
- * `DynamicChainOfThought` has a typed counterpart `TypedChainOfThought` that
+ * `DynamicChainOfThought` has a typed counterpart `ChainOfThought` that
  * augments the output named tuple with `reasoning: String` (the field CoT
  * injects at the runtime layer). Snippets 3, 4, and 6 use it directly.
  *
@@ -33,7 +33,7 @@
 package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
-import dspy4s.programs.{TypedChainOfThought, TypedPredict}
+import dspy4s.programs.{ChainOfThought, Predict}
 import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, Signature}
 import kyo.Schema
 
@@ -57,7 +57,7 @@ object ToxicityExample:
         "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
     )
 
-  val toxicity = TypedPredict(signature)
+  val toxicity = Predict(signature)
 
   def call(comment: String)(using RuntimeContext): Either[DspyError, Boolean] =
     toxicity.run((comment = comment)).map(_.output.toxic)
@@ -72,7 +72,7 @@ object ToxicityExample:
 // | classify(sentence=sentence).sentiment
 
 object SentimentExample:
-  val classify = TypedPredict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
+  val classify = Predict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
     classify.run((sentence = sentence)).map(_.output.sentiment)
@@ -92,12 +92,12 @@ object SentimentExample:
 // Python (snippet 4, inspect the reasoning):
 // | print("Reasoning:", response.reasoning)
 //
-// `TypedChainOfThought` augments the output named tuple by prepending
+// `ChainOfThought` augments the output named tuple by prepending
 // `reasoning: String`, so `tp.output.reasoning` and `tp.output.summary`
 // are both typed dot-accesses with no `.value(...)` indirection.
 
 object SummarizeExample:
-  val program = TypedChainOfThought(Signature.fromType[(document: String) => (summary: String)])
+  val program = ChainOfThought(Signature.fromType[(document: String) => (summary: String)])
 
   /** Snippet 3: just the summary. */
   def call(document: String)(using RuntimeContext): Either[DspyError, String] =
@@ -140,7 +140,7 @@ trait EmotionSpec extends Spec:
   def sentiment: OutputField[Emotion]
 
 object EmotionExample:
-  val classify = TypedPredict(Signature.of[EmotionSpec](instructions = "Classify emotion."))
+  val classify = Predict(Signature.of[EmotionSpec](instructions = "Classify emotion."))
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     classify.run((sentence = sentence)).map(_.output.sentiment)
@@ -172,7 +172,7 @@ object FaithfulnessExample:
       instructions = "Verify that the text is based on the provided context."
     )
 
-  val program = TypedChainOfThought(signature)
+  val program = ChainOfThought(signature)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 7 (lines 159–167) — Example E: multi-modal image
@@ -203,7 +203,7 @@ object DogPictureExample:
       instructions = "Output the dog breed of the dog in the image."
     )
 
-  val program = TypedPredict(signature)
+  val program = Predict(signature)
 
   def call(imageUrl: String)(using RuntimeContext): Either[DspyError, String] =
     program.run((image_1 = Image(imageUrl))).map(_.output.answer)

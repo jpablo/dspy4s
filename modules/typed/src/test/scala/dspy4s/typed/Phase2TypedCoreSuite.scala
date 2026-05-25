@@ -172,23 +172,23 @@ class Phase2TypedCoreSuite extends FunSuite:
     }
   }
 
-  // ── TypedPrediction: never constructed after a decode failure ───────────
+  // ── Prediction: never constructed after a decode failure ───────────
 
-  test("TypedPrediction is never constructed when decode fails") {
+  test("Prediction is never constructed when decode fails") {
     val shape = Shape.derived[P2ScoredSentiment]
     val raw   = PredictionData(values = Map("sentiment" -> "joy"))  // missing 'confidence'
-    val result = TypedPrediction.from(raw, shape)
+    val result = Prediction.from(raw, shape)
     assert(result.isLeft, s"expected failure but got: $result")
   }
 
-  test("TypedPrediction.from succeeds when all required outputs decode") {
+  test("Prediction.from succeeds when all required outputs decode") {
     val shape = Shape.derived[P2ScoredSentiment]
     val raw   = PredictionData(values = Map("sentiment" -> "joy", "confidence" -> 0.92))
-    val result = TypedPrediction.from(raw, shape)
+    val result = Prediction.from(raw, shape)
     result match
       case Right(tp) =>
         assertEquals(tp.output, P2ScoredSentiment("joy", 0.92))
-        assert(tp.raw eq raw, "TypedPrediction must preserve the original raw DynamicPrediction")
+        assert(tp.raw eq raw, "Prediction must preserve the original raw DynamicPrediction")
       case Left(err) => fail(s"expected success but got: $err")
   }
 
@@ -198,11 +198,11 @@ class Phase2TypedCoreSuite extends FunSuite:
     val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
     val input = P2SentenceInput("i started feeling vulnerable")
 
-    // Encode input → Map (what TypedPredict will hand to ProgramCall)
+    // Encode input → Map (what Predict will hand to ProgramCall)
     val inputMap = sig.inputShape.encode(input)
     assertEquals(inputMap, Map[String, Any]("sentence" -> "i started feeling vulnerable"))
 
-    // Decode output ← Map (what TypedPredict will receive from DynamicPrediction)
+    // Decode output ← Map (what Predict will receive from DynamicPrediction)
     val outputMap = Map[String, Any]("sentiment" -> "joy", "confidence" -> 0.85)
     val output    = sig.outputShape.decode(outputMap)
     assertEquals(output, Right(P2ScoredSentiment("joy", 0.85)))

@@ -112,7 +112,7 @@ final case class PredictionData(
   override def withValue(key: String, value: Any): PredictionData = copy(values = values.updated(key, value))
 
   override def value(key: String): Either[DspyError, Any] =
-    values.get(key).toRight(NotFoundError("prediction_field", s"DynamicPrediction field '$key' does not exist"))
+    values.get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
 
   override def asString(key: String): Either[DspyError, String] =
     value(key).flatMap {
@@ -120,7 +120,7 @@ final case class PredictionData(
       case b: Boolean                                      => Right(b.toString)
       case n @ (_: Int | _: Long | _: Float | _: Double)   => Right(n.toString)
       case other =>
-        Left(ValidationError(s"DynamicPrediction field '$key' cannot be converted to String: $other"))
+        Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
     }
 
   override def asInt(key: String): Either[DspyError, Int] =
@@ -129,10 +129,10 @@ final case class PredictionData(
       case n: Long if n >= Int.MinValue && n <= Int.MaxValue => Right(n.toInt)
       case s: String =>
         s.trim.toIntOption.toRight(
-          ValidationError(s"DynamicPrediction field '$key' is not a valid Int: $s")
+          ValidationError(s"Prediction field '$key' is not a valid Int: $s")
         )
       case other =>
-        Left(ValidationError(s"DynamicPrediction field '$key' is not an integer: $other"))
+        Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
     }
 
   override def asDouble(key: String): Either[DspyError, Double] =
@@ -143,9 +143,9 @@ final case class PredictionData(
       case number: Double => Right(number)
       case s: String =>
         s.trim.toDoubleOption.toRight(
-          ValidationError(s"DynamicPrediction field '$key' is not a valid Double: $s")
+          ValidationError(s"Prediction field '$key' is not a valid Double: $s")
         )
-      case other          => Left(ValidationError(s"DynamicPrediction field '$key' is not numeric: $other"))
+      case other          => Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
     }
 
   override def asBoolean(key: String): Either[DspyError, Boolean] =
@@ -156,8 +156,8 @@ final case class PredictionData(
           case "true"  => Right(true)
           case "false" => Right(false)
           case _       =>
-            Left(ValidationError(s"DynamicPrediction field '$key' is not a valid Boolean: $s"))
-      case other => Left(ValidationError(s"DynamicPrediction field '$key' is not a boolean: $other"))
+            Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
+      case other => Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))
     }
 
   def score: Either[DspyError, Double] =

@@ -36,7 +36,7 @@ object FunctionExample:
     Signature.fromType[String => Emotion]
 
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    import dspy4s.programs.TypedPredict
-    TypedPredict(emotion)
+    import dspy4s.programs.Predict
+    Predict(emotion)
       .run((sentence = sentence))
       .map(_.output.sentiment)

@@ -16,12 +16,12 @@ import dspy4s.core.contracts.{DspyError, DynamicPrediction}
   * expose named-tuple fields. In both cases `p.output.sentiment` is typed
   * dot-access with no lazy parsing.
   */
-final case class TypedPrediction[O](
+final case class Prediction[O](
     output: O,
     raw: DynamicPrediction
 )
 
-object TypedPrediction:
+object Prediction:
 
   /** Decodes a raw `DynamicPrediction` against an output `Shape`, lifting decode
     * errors into the `Either` channel.
@@ -30,5 +30,5 @@ object TypedPrediction:
     * surface that `DynamicPrediction` extends). Multi-completion decoding — picking
     * a specific completion index or producing one typed prediction per
     * completion — is deferred to a later phase. */
-  def from[O](raw: DynamicPrediction, outputShape: Shape[O]): Either[DspyError, TypedPrediction[O]] =
-    outputShape.decode(raw.values).map(o => TypedPrediction(o, raw))
+  def from[O](raw: DynamicPrediction, outputShape: Shape[O]): Either[DspyError, Prediction[O]] =
+    outputShape.decode(raw.values).map(o => Prediction(o, raw))

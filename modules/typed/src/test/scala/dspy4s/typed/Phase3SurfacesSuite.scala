@@ -109,13 +109,13 @@ class Phase3SurfacesSuite extends FunSuite:
     assertEquals(encoded, Map[String, Any]("comment" -> "hello there", "lang" -> "en"))
   }
 
-  test("decoded TypedPrediction exposes case-class fields directly") {
+  test("decoded Prediction exposes case-class fields directly") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val raw = PredictionData(values = Map(
       "toxic"      -> false,
       "confidence" -> 0.91
     ))
-    val result = TypedPrediction.from(raw, sig.outputShape)
+    val result = Prediction.from(raw, sig.outputShape)
     result match
       case Right(tp) =>
         // Direct case-class field access — typed, no Either at the field level.

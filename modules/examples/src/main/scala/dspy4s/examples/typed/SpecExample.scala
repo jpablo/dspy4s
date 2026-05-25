@@ -59,5 +59,5 @@ object SpecExample:
     * spec-derived signature against a named-tuple input and read the
     * typed named-tuple output with dot syntax. */
   def callEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    import dspy4s.programs.TypedPredict
-    TypedPredict(emotion).run((sentence = sentence)).map(_.output.sentiment)
+    import dspy4s.programs.Predict
+    Predict(emotion).run((sentence = sentence)).map(_.output.sentiment)

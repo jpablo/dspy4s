@@ -10,7 +10,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, PredictionData, RuntimeContext}
-import dspy4s.typed.{TypedPrediction, Signature, FieldCodec}
+import dspy4s.typed.{Prediction, Signature, FieldCodec}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
 // enum's Schema must come from outside any enclosing class.
@@ -27,9 +27,9 @@ case class EmotionOutput(sentiment: Emotion)
  * Build a `Signature` from two case classes — one for inputs, one for
  * outputs. The resulting signature is fully typed at the program boundary:
  *
- *   - encode: `TypedPredict.run(EmotionInput("..."))` accepts a typed value;
+ *   - encode: `Predict.run(EmotionInput("..."))` accepts a typed value;
  *     the typed shape encodes it into the `ProgramCall.inputs` map.
- *   - decode: `TypedPrediction.output` is a typed `EmotionOutput`, so
+ *   - decode: `Prediction.output` is a typed `EmotionOutput`, so
  *     `tp.output.sentiment` has type `Emotion` with no runtime cast.
  *   - metadata: enum-typed fields surface their allowed cases through
  *     `FieldSpec.metadata` (under `FieldMetadata.EnumCases`) so adapters
@@ -44,17 +44,17 @@ object CaseClassExample:
     )
 
   /** Illustrative call site. With an LM and adapter configured in
-    * `RuntimeContext`, `TypedPredict(signature).run(...)` returns
-    * `Either[DspyError, TypedPrediction[EmotionOutput]]`. */
+    * `RuntimeContext`, `Predict(signature).run(...)` returns
+    * `Either[DspyError, Prediction[EmotionOutput]]`. */
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    import dspy4s.programs.TypedPredict
-    TypedPredict(signature)
+    import dspy4s.programs.Predict
+    Predict(signature)
       .run(EmotionInput(sentence))
       .map(_.output.sentiment)
 
-  /** Offline demonstration: build a `TypedPrediction` from a raw prediction
+  /** Offline demonstration: build a `Prediction` from a raw prediction
     * map without invoking an LM. Useful for tests and for showing the
     * decode boundary. */
-  def fromRawValues(rawSentiment: String): Either[DspyError, TypedPrediction[EmotionOutput]] =
+  def fromRawValues(rawSentiment: String): Either[DspyError, Prediction[EmotionOutput]] =
     val raw = PredictionData(values = Map("sentiment" -> rawSentiment))
-    TypedPrediction.from(raw, signature.outputShape)
+    Prediction.from(raw, signature.outputShape)

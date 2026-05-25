@@ -22,7 +22,7 @@ object MetricHelpers:
     val predictionValue = prediction.get(fieldName) match
       case Some(text: String) => Right(text)
       case Some(other) => Right(other.toString)
-      case None => Left(NotFoundError(fieldName, s"DynamicPrediction is missing field '$fieldName'"))
+      case None => Left(NotFoundError(fieldName, s"Prediction is missing field '$fieldName'"))
 
     for
       examples <- exampleValue
@@ -99,7 +99,7 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
       case Some(other) =>
         Right(Vector(other.toString))
       case None =>
-        Left(NotFoundError(contextField, s"DynamicPrediction is missing field '$contextField'"))
+        Left(NotFoundError(contextField, s"Prediction is missing field '$contextField'"))
 
     val answers = example.get(answerField) match
       case Some(texts: Iterable[?]) =>

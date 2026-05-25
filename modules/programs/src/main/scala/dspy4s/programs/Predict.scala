@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.{DspyError, Example, NotFoundError, RuntimeContext}
 import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.{TypedPrediction, Signature}
+import dspy4s.typed.{Prediction, Signature}
 
 /** Typed counterpart to `DynamicPredict`. Wraps a `Signature[I, O]` and
   * delegates execution to the underlying `DynamicPredict(signature.untyped, ...)`,
@@ -13,13 +13,13 @@ import dspy4s.typed.{TypedPrediction, Signature}
   *   1. Inputs are encoded through `signature.inputShape` before reaching
   *      `ProgramCall`.
   *   2. Outputs are decoded through `signature.outputShape` into a typed
-  *      `TypedPrediction[O]`; decode failures surface as `Left(DspyError)`
+  *      `Prediction[O]`; decode failures surface as `Left(DspyError)`
   *      at this `run` boundary, never via lazy field access.
   *
   * The raw `DynamicPrediction` (including completions and LM usage) is preserved
-  * on `TypedPrediction.raw` for callers that need it.
+  * on `Prediction.raw` for callers that need it.
   */
-final case class TypedPredict[I, O](
+final case class Predict[I, O](
     signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     name: Option[String] = None,
@@ -27,7 +27,7 @@ final case class TypedPredict[I, O](
 ):
 
   /** Encode `input`, dispatch through the existing `DynamicPredict` runtime, then
-    * decode the resulting prediction into `TypedPrediction[O]`.
+    * decode the resulting prediction into `Prediction[O]`.
     *
     * `config` is forwarded into `ProgramCall.config`, which `DynamicPredict`
     * surfaces as `LmRequest.options` (per-call LM options, cache /
@@ -45,7 +45,7 @@ final case class TypedPredict[I, O](
       input: I,
       config: Map[String, Any] = Map.empty,
       traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, TypedPrediction[O]] =
+  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputMap = signature.inputShape.encode(input)
     // Defensive: shape implementations that don't statically guarantee
     // full coverage of declared input fields (notably the Map-based
@@ -64,4 +64,4 @@ final case class TypedPredict[I, O](
       val program = DynamicPredict(signature.untyped, demos, name, runtime)
       program
         .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
-        .flatMap(raw => TypedPrediction.from(raw, signature.outputShape))
+        .flatMap(raw => Prediction.from(raw, signature.outputShape))
