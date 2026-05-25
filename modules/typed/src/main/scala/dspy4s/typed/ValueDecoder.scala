@@ -1,6 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, FieldMetadata, TypeRef, ValidationError}
+import kyo.Schema
 import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.deriving.Mirror
 
@@ -15,9 +16,9 @@ import scala.deriving.Mirror
   * extracting raw field values from the LM response. For enums, the
   * built-in `EnumDecoder` accepts either an already-typed enum value (e.g.
   * when an adapter has pre-resolved the case) or a flat string carrying
-  * the case name. Other shapes (such as kyo-schema's discriminated
-  * `{"case":{}}` wrapper) must be normalized at the adapter layer before
-  * reaching the decoder. */
+  * the case name. For structured product values, the low-priority
+  * schema-backed decoder delegates to `kyo-schema` through
+  * `Structure.Value`. */
 trait ValueDecoder[A]:
   def typeRef: TypeRef
   def decode(raw: Any): Either[DspyError, A]
@@ -29,7 +30,7 @@ trait ValueDecoder[A]:
     * writers share one contract. Defaults to empty. */
   def metadata: Map[String, String] = Map.empty
 
-object ValueDecoder:
+object ValueDecoder extends LowPriorityValueDecoders:
 
   // ── Primitive instances ──────────────────────────────────────────────────
 
@@ -81,6 +82,42 @@ object ValueDecoder:
             Left(ValidationError(s"Cannot decode as Boolean: '$s'"))
       case other => Left(ValidationError(s"Cannot decode as Boolean: $other"))
     def encode(value: Boolean): Any = value
+
+  // ── kyo-schema interop ──────────────────────────────────────────────────
+
+  /** Builds a field decoder from a `kyo.Schema[A]`. This is the bridge for
+    * structured/nested values: adapter-produced `Map` / `Seq` / primitive
+    * values are normalized to `kyo.Structure.Value` and decoded through the
+    * schema.
+    *
+    * Primitive and enum decoders above remain preferred because they encode
+    * dspy4s's LLM-friendly coercion policy (e.g. `"0.5"` -> `Double`) and
+    * enum metadata. Schema-backed decoding is intentionally stricter for
+    * primitive leaves. */
+  def fromSchema[A](
+      typeRef: TypeRef = TypeRef.json,
+      metadata: Map[String, String] = Map.empty
+  )(using schema: Schema[A]): ValueDecoder[A] =
+    KyoSchemaValueDecoder[A](schema, typeRef, metadata)
+
+  /** Flat-string schema for parameterless Scala enums. Kyo's default enum
+    * schema is a discriminated object (`{"joy":{}}`); DSPy-style LM outputs
+    * generally use plain case-name strings (`"joy"`). Use this given when
+    * a domain type wants `derives Schema`-style structured decoding while
+    * preserving flat enum wire values:
+    *
+    * {{{
+    * enum Emotion:
+    *   case joy, sadness
+    *
+    * object Emotion:
+    *   given Schema[Emotion] = ValueDecoder.flatEnumSchema[Emotion]
+    * }}}
+    */
+  inline def flatEnumSchema[A <: scala.reflect.Enum](using
+      m: Mirror.SumOf[A]
+  ): Schema[A] =
+    KyoSchemaValueDecoder.flatEnumSchema[A]
 
   // ── Scala enum derivation ────────────────────────────────────────────────
   //
@@ -157,3 +194,17 @@ object ValueDecoder:
         val m  = summonInline[Mirror.ProductOf[h & A]]
         val v  = m.fromProduct(EmptyTuple).asInstanceOf[A]
         v :: summonEnumCases[A, t]
+
+trait LowPriorityValueDecoders:
+
+  /** Fallback decoder for types that have a `kyo.Schema[A]` but no more
+    * specific dspy4s `ValueDecoder[A]`. Restricted to product types so an
+    * arbitrary undecodable class still reports "No ValueDecoder" instead of
+    * triggering kyo-schema's generic derivation error. Kept low-priority so
+    * primitive and enum decoders above continue to define the default
+    * flat-field behavior. */
+  given schemaBackedProduct[A <: Product](using
+      m: Mirror.ProductOf[A],
+      schema: Schema[A]
+  ): ValueDecoder[A] =
+    ValueDecoder.fromSchema[A]()(using schema)

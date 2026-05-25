@@ -426,13 +426,16 @@ Implemented four files in `modules/typed/src/main/scala/dspy4s/typed/`:
   `String` / `Int` / `Double` / `Boolean`, and a `derived` inline def that
   enables `derives ValueDecoder` on Scala enums (`Mirror.SumOf[A]` →
   case-name → enum-value table). Decodes from `Any` (already-typed
-  adapter values), not from JSON bytes — this sidesteps the Phase 0
-  enum wire-format finding entirely.
-- `Shape.scala` — `Shape[A <: Product]` derivation via
-  `Mirror.ProductOf[A]` + inline `summonLabels` / `summonDecoders`.
-  Produces `Vector[FieldSpec]`, `encode(A) → Map[String, Any]`, and
-  `decode(Map[String, Any]) → Either[DspyError, A]`. Role is stamped at
-  derivation time via `derivedWithRole(role)`.
+  adapter values), not from JSON bytes. It also exposes
+  `ValueDecoder.fromSchema[A](using Schema[A])` for structured field values
+  and `ValueDecoder.flatEnumSchema[A]` for flat-string enum schemas.
+- `Shape.scala` — `Shape[A <: Product]` derivation via `kyo.Schema[A]` and
+  `Structure.Type`. It derives `Vector[FieldSpec]` from Kyo's structural
+  fields, stamps the requested role at derivation time, encodes products
+  through `Structure.encode`, and decodes raw records through
+  `Structure.decode`. Before decode, `Shape` normalizes LLM-friendly
+  primitive strings (`"0.9"` for `Double`, `"true"` for `Boolean`) but still
+  rejects lossy conversions such as decimal values into `Int`.
 - `TypedSignature.scala` — `final case class TypedSignature[I, O]` with
   `derived[I <: Product, O <: Product](name, instructions)` that wires
   two `Shape`s into an untyped `SignatureSpec` whose fields are
@@ -456,13 +459,14 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
   ordinary case-class syntax, with no kyo Record involvement at the
   user surface. A `.toRecord` extension can be added later if users
   want intersection-typed structural composition.
-- `ValueDecoder` is hand-written; no `kyo-schema` Schema delegation in
-  Phase 2. The MVP coercion policy is fully covered by hand-written
-  primitive instances + enum-via-Mirror derivation, and decoding
-  happens from `Any` (typed adapter values), not from JSON bytes — so
-  kyo-schema's `Schema[A]` would be the wrong tool here. A
-  `ValueDecoder.fromSchema[A](using Schema[A])` adapter could land
-  later for users who already have a Schema in scope.
+- `Shape` now uses kyo-schema for whole-product case-class encode/decode
+  instead of reconstructing products field-by-field with hand-summoned
+  `ValueDecoder`s. `ValueDecoder` remains the DSPy field boundary for
+  builder, trait-spec, named-tuple, scalar, and custom-field cases, and also
+  provides a kyo-schema bridge for structured product fields.
+- Kyo's default enum schema remains discriminated (`{"case":{}}`), but
+  `ValueDecoder.flatEnumSchema[A]` provides an LLM-friendly flat string
+  schema for enum fields inside schema-backed products.
 
 **Lessons from implementation**:
 
@@ -614,8 +618,8 @@ Implemented one file + one build-graph edit:
 
 - The plan sketch shows `demos: Chunk[Record]` and `runtime: DspyRuntime`.
   Used `Vector[Example]` and `ProgramRuntime` instead to match the existing
-  `Predict` case-class signature exactly, keeping kyo types Test-scoped and
-  avoiding a parallel runtime-contract that would diverge from the rest of
+  `Predict` case-class signature exactly, avoiding a parallel runtime-contract
+  that would diverge from the rest of
   `programs`. Typed demos (`Vector[(I, O)]` or similar) are a Phase 7
   consideration.
 - The plan's API sketches `run(input: I)` without an explicit context.

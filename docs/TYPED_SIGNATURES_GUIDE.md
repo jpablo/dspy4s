@@ -143,10 +143,11 @@ See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/
 
 ### 5. Case classes — `TypedSignature.derived[I, O]`
 
-Two case classes describe inputs and outputs; Mirror-based derivation
-produces the runtime metadata. This is useful when you already have
-domain case classes, want case-class `copy` / pattern matching, or
-prefer named product types over named tuples.
+Two case classes describe inputs and outputs; `kyo.Schema`-backed
+derivation produces the runtime metadata and performs product
+encoding/decoding. This is useful when you already have domain case
+classes, want case-class `copy` / pattern matching, or prefer named
+product types over named tuples.
 
 ```scala
 case class EmotionInput(sentence: String)
@@ -189,17 +190,28 @@ The `ValueDecoder` typeclass covers the MVP type vocabulary:
 | `Double` | `Int` / `Long` / `Float` / `Double` | clean numeric strings like `"1.5"` |
 | `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
 | Scala enum (`derives ValueDecoder`) | already-typed enum value | flat case name like `"joy"` |
+| Product with `kyo.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | field-level schema decoder is strict; product `Shape` decoding applies the primitive coercions above |
 
 Notably **not** auto-coerced:
 
 - `"yes"` / `"1"` / numerics → `Boolean` (rejected; no implicit coercion)
 - `Double` → `Int` (rejected; no silent truncation)
 
+Supported for structured fields:
+
+- Case-class signatures and method/function signatures with product
+  outputs are decoded as whole products through `kyo-schema`.
+- Product values with a `kyo.Schema[A]` in scope can also be used as
+  structured fields; nested lists, maps, options, and other
+  `kyo-schema`-supported members are supported there.
+- Use `ValueDecoder.flatEnumSchema[A]` when a nested enum should use flat
+  case-name strings instead of kyo-schema's default discriminated object
+  encoding.
+
 Deferred to a later phase:
 
 - Literal-union types (`"sadness" | "joy" | "love"`) — use Scala enums
   for now
-- Arbitrary JSON values, collections of records, nested records
 - Custom domain codecs beyond what `ValueDecoder` covers
 
 To support a custom type, write a `ValueDecoder[YourType]` instance
@@ -231,12 +243,24 @@ fieldSpec.metadata.get(FieldMetadata.EnumName)
 Adapters that don't understand these well-known keys (defined in
 `dspy4s.core.contracts.FieldMetadata`) ignore them harmlessly.
 
-**Wire-format finding from Phase 0** (only relevant if you ever route
-enum outputs through `kyo-schema`'s JSON layer): `kyo-schema` encodes
-Scala enums as `{"caseName":{}}` (discriminated object), not as flat
-strings. The dspy4s typed layer doesn't go through kyo-schema's JSON
-encoding — it accepts flat strings directly — so this isn't a problem
-in normal use.
+**Wire-format finding from Phase 0**: `kyo-schema`'s default enum
+derivation encodes Scala enums as `{"caseName":{}}` (discriminated
+object), not as flat strings. The direct `ValueDecoder` enum derivation
+above accepts flat strings. For schema-backed products, use a flat enum
+schema when you want the same LLM-friendly wire form:
+
+```scala
+enum Mood:
+  case happy, sad
+
+object Mood:
+  given kyo.Schema[Mood] = ValueDecoder.flatEnumSchema[Mood]
+```
+
+For case-class and method-product signatures, `Shape` normalizes clear
+primitive strings before handing the record to `kyo-schema`, so
+`"0.9"` can decode as `Double`. It still rejects lossy conversions such
+as `0.9` into `Int`; no silent truncation.
 
 ---
 

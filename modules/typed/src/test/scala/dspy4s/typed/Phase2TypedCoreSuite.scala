@@ -3,6 +3,7 @@ package dspy4s.typed
 import dspy4s.core.contracts.{
   DspyError, FieldRole, NotFoundError, PredictionData, ValidationError
 }
+import kyo.Schema
 import munit.FunSuite
 
 // Top-level: Schema/Mirror derivation does not work for path-dependent types
@@ -12,6 +13,9 @@ case class P2ScoredSentiment(sentiment: String, confidence: Double)
 
 enum P2Sentiment derives ValueDecoder:
   case sadness, joy, love, anger, fear, surprise
+
+object P2Sentiment:
+  given Schema[P2Sentiment] = ValueDecoder.flatEnumSchema[P2Sentiment]
 
 case class P2EnumOutput(sentiment: P2Sentiment) derives Shape
 

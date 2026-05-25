@@ -1,6 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{FieldRole, Signature, SignatureSpec}
+import kyo.Schema
 
 /** A signature with compile-time knowledge of its input (`I`) and output
   * (`O`) shapes. Wraps an untyped `Signature` for compatibility with the
@@ -36,7 +37,9 @@ object TypedSignature:
       instructions: String = ""
   )(using
       mi: scala.deriving.Mirror.ProductOf[I],
-      mo: scala.deriving.Mirror.ProductOf[O]
+      mo: scala.deriving.Mirror.ProductOf[O],
+      inputSchema: Schema[I],
+      outputSchema: Schema[O]
   ): TypedSignature[I, O] =
     val inShape  = Shape.derivedWithRole[I](FieldRole.Input)
     val outShape = Shape.derivedWithRole[O](FieldRole.Output)

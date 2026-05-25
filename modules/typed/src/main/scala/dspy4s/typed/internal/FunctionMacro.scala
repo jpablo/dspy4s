@@ -2,6 +2,7 @@ package dspy4s.typed.internal
 
 import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureSpec}
 import dspy4s.typed.{Shape, TypedSignature, ValueDecoder}
+import kyo.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
 
@@ -246,22 +247,26 @@ private[typed] object FunctionMacro:
             case '[o] =>
               Expr.summon[Mirror.ProductOf[o]] match
                 case Some(mirror) =>
-                  inputType.asType match
-                    case '[i] =>
-                      signatureExpr[i, o](
-                        sigName = sigName,
-                        inputFields = inputData,
-                        outputFieldsExpr = '{
-                          Shape
-                            .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror })
-                            .fieldSpecs
-                        },
-                        inputShapeExpr = '{ new Shape.TupleShape[i](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
-                        outputShapeExpr = '{
-                          Shape
-                            .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror })
-                        }
-                      )
+                  Expr.summon[Schema[o]] match
+                    case Some(schema) =>
+                      inputType.asType match
+                        case '[i] =>
+                          signatureExpr[i, o](
+                            sigName = sigName,
+                            inputFields = inputData,
+                            outputFieldsExpr = '{
+                              Shape
+                                .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror }, ${ schema })
+                                .fieldSpecs
+                            },
+                            inputShapeExpr = '{ new Shape.TupleShape[i](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
+                            outputShapeExpr = '{
+                              Shape
+                                .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror }, ${ schema })
+                            }
+                          )
+                    case None =>
+                      report.errorAndAbort(s"No kyo.Schema for product output type '${returnType.show}'")
                 case None =>
                   scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)

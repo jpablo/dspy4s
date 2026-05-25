@@ -5,6 +5,11 @@ ThisBuild / scalaVersion := "3.8.1"
 lazy val munitVersion = "1.1.1"
 lazy val kyoVersion   = "1.0.0-RC2"
 
+lazy val kyoSchemaDeps = Seq(
+  "io.getkyo" %% "kyo-data"   % kyoVersion,
+  "io.getkyo" %% "kyo-schema" % kyoVersion
+)
+
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-deprecation",
@@ -39,21 +44,17 @@ lazy val core = (project in file("modules/core"))
     Test / parallelExecution := false
   )
 
-// Typed signatures layer. kyo-data / kyo-schema are currently Test-scope
-// because production sources don't import them yet -- the Phase 0
-// feasibility suite uses them to probe the wire contract. When a later
-// phase actually wires kyo APIs into the production path (e.g. wrapping
-// TypedPrediction in a kyo.Record), promote these to compile scope.
+// Typed signatures layer. kyo-schema is used in production as the structured
+// codec backend behind dspy4s's ValueDecoder boundary. kyo-data is explicit
+// because kyo-schema's Structure.Value tree and test Record probes use its
+// collection/data primitives.
 lazy val typed = (project in file("modules/typed"))
   .dependsOn(core)
   .settings(commonSettings)
   .settings(name := "dspy4s-typed")
   .settings(
-    libraryDependencies ++= Seq(
-      "io.getkyo"     %% "kyo-data"   % kyoVersion   % Test,
-      "io.getkyo"     %% "kyo-schema" % kyoVersion   % Test,
-      "org.scalameta" %% "munit"      % munitVersion % Test
-    )
+    libraryDependencies ++= kyoSchemaDeps :+
+      ("org.scalameta" %% "munit" % munitVersion % Test)
   )
 
 lazy val lm = (project in file("modules/lm"))
@@ -87,7 +88,8 @@ lazy val programs = (project in file("modules/programs"))
   .settings(commonSettings)
   .settings(name := "dspy4s-modules")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies ++= kyoSchemaDeps :+
+      ("org.scalameta" %% "munit" % munitVersion % Test)
   )
 
 lazy val evaluate = (project in file("modules/evaluate"))
@@ -130,5 +132,6 @@ lazy val examples = (project in file("modules/examples"))
   .settings(commonSettings)
   .settings(name := "dspy4s-examples")
   .settings(
-    publish / skip := true
+    publish / skip := true,
+    libraryDependencies ++= kyoSchemaDeps
   )

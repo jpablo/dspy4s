@@ -1,9 +1,10 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, FieldRole, FieldSpec, NotFoundError, ValidationError
+  DspyError, FieldMetadata, FieldRole, FieldSpec, NotFoundError, TypeRef,
+  ValidationError
 }
-import scala.compiletime.{constValue, erasedValue, summonInline}
+import kyo.{Chunk, Schema, Structure}
 import scala.deriving.Mirror
 
 /** A schema-aware view of a user type `A`, used as the input or output of a
@@ -120,9 +121,13 @@ object Shape:
               builder += rawValue
         Right(Tuple.fromArray(builder.result()).asInstanceOf[A])
 
-  /** Derives a `Shape[A]` from any case class whose fields all have a
-    * `ValueDecoder` in scope. Compile error if any field lacks a decoder. */
-  inline def derived[A <: Product](using m: Mirror.ProductOf[A]): Shape[A] =
+  /** Derives a `Shape[A]` from any case class with a `kyo.Schema[A]` in
+    * scope. kyo-schema owns product encode/decode; dspy4s derives the
+    * DSPy-facing field metadata from the same structural description. */
+  inline def derived[A <: Product](using
+      m: Mirror.ProductOf[A],
+      schema: Schema[A]
+  ): Shape[A] =
     derivedWithRole[A](FieldRole.Output)
 
   /** Derives a `Shape[A]` and stamps every field with the given role. Use
@@ -130,76 +135,94 @@ object Shape:
     * output case classes. `derived` defaults to `Output`; `TypedSignature`
     * builders that need inputs invoke this explicitly. */
   inline def derivedWithRole[A <: Product](role: FieldRole)(using
-      m: Mirror.ProductOf[A]
+      m: Mirror.ProductOf[A],
+      schema: Schema[A]
   ): Shape[A] =
     derivedProductWithRole[A](role)
 
   private[typed] inline def derivedProductWithRole[A](role: FieldRole)(using
-      m: Mirror.ProductOf[A]
-  ): Shape[A] =
-    val names    = summonLabels[m.MirroredElemLabels]
-    val decoders = summonDecoders[m.MirroredElemTypes]
-    new MirrorShape[A](m, names, decoders, role)
-
-  // ── Internal: Mirror-backed Shape implementation ─────────────────────────
-
-  private[typed] final class MirrorShape[A](
       m: Mirror.ProductOf[A],
-      names: List[String],
-      decoders: List[ValueDecoder[Any]],
+      schema: Schema[A]
+  ): Shape[A] =
+    new KyoProductShape[A](schema, schema.structure, role)
+
+  // ── Internal: kyo-schema-backed Shape implementation ─────────────────────
+
+  private[typed] final class KyoProductShape[A](
+      schema: Schema[A],
+      structure: Structure.Type,
       role: FieldRole
   ) extends Shape[A]:
 
+    private val fields: Chunk[Structure.Field] =
+      structure match
+        case Structure.Type.Product(_, _, _, fields) => fields
+        case other =>
+          throw new IllegalArgumentException(
+            s"Shape derivation requires a product type, got ${other.name}"
+          )
+
     val fieldSpecs: Vector[FieldSpec] =
-      names.lazyZip(decoders).map { (name, dec) =>
-        FieldSpec(
-          name     = name,
-          role     = role,
-          typeRef  = dec.typeRef,
-          metadata = dec.metadata
-        )
-      }.toVector
+      fields.map(field => fieldSpec(field, role)).toVector
 
     def encode(value: A): Map[String, Any] =
-      val iter = value.asInstanceOf[Product].productIterator
-      names
-        .lazyZip(decoders)
-        .map { (name, dec) => name -> dec.encode(iter.next()) }
-        .toMap
+      KyoSchemaValueDecoder.fromStructure(
+        Structure.encode[A](value)(using schema, summon),
+        structure
+      ) match
+        case map: Map[?, ?] =>
+          map.asInstanceOf[Map[String, Any]]
+        case other =>
+          throw new IllegalStateException(
+            s"Expected schema encode of ${structure.name} to produce a record, got: $other"
+          )
 
     def decode(raw: Map[String, Any]): Either[DspyError, A] =
-      // Decode each field, short-circuit on first failure.
-      val builder = Array.newBuilder[Any]
-      builder.sizeHint(names.size)
-      val it = names.lazyZip(decoders).iterator
+      val builder = Vector.newBuilder[(String, Structure.Value)]
+      val it = fields.iterator
       while it.hasNext do
-        val (name, dec) = it.next()
-        raw.get(name) match
+        val field = it.next()
+        raw.get(field.name) match
           case None =>
             return Left(NotFoundError(
               resource = "prediction_field",
-              message  = s"Required field '$name' is missing from the raw prediction"
+              message  = s"Required field '${field.name}' is missing from the raw prediction"
             ))
           case Some(value) =>
-            dec.decode(value) match
-              case Right(decoded) => builder += decoded
-              case Left(err) =>
-                return Left(ValidationError(
-                  s"Field '$name': ${err.message}"
-                ))
-      val tuple = Tuple.fromArray(builder.result()).asInstanceOf[m.MirroredElemTypes]
-      Right(m.fromProduct(tuple))
+            builder += field.name -> KyoSchemaValueDecoder.toStructure(value, field.fieldType)
+      val record = Structure.Value.Record(Chunk.from(builder.result()))
+      KyoSchemaValueDecoder.toEither(Structure.decode[A](record)(using schema, summon))
 
-  // ── Compile-time summon helpers ──────────────────────────────────────────
+  private def fieldSpec(field: Structure.Field, role: FieldRole): FieldSpec =
+    val (typeRef, metadata) = metadataFor(field.fieldType)
+    FieldSpec(
+      name     = field.name,
+      role     = role,
+      typeRef  = typeRef,
+      metadata = metadata
+    )
 
-  private inline def summonLabels[T <: Tuple]: List[String] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   => constValue[h & String] :: summonLabels[t]
-
-  private inline def summonDecoders[T <: Tuple]: List[ValueDecoder[Any]] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t) =>
-        summonInline[ValueDecoder[h]].asInstanceOf[ValueDecoder[Any]]
-          :: summonDecoders[t]
+  private def metadataFor(tpe: Structure.Type): (TypeRef, Map[String, String]) =
+    tpe match
+      case Structure.Type.Primitive(kind, _) =>
+        kind match
+          case Structure.PrimitiveKind.String | Structure.PrimitiveKind.Char =>
+            TypeRef.string -> Map.empty
+          case Structure.PrimitiveKind.Boolean =>
+            TypeRef.bool -> Map.empty
+          case Structure.PrimitiveKind.Int | Structure.PrimitiveKind.Long |
+              Structure.PrimitiveKind.Short | Structure.PrimitiveKind.Byte |
+              Structure.PrimitiveKind.BigInt =>
+            TypeRef.int -> Map.empty
+          case Structure.PrimitiveKind.Float | Structure.PrimitiveKind.Double |
+              Structure.PrimitiveKind.BigDecimal =>
+            TypeRef.double -> Map.empty
+          case Structure.PrimitiveKind.Unit =>
+            TypeRef.json -> Map.empty
+      case Structure.Type.Sum(name, _, _, _, enumValues) if enumValues.nonEmpty =>
+        TypeRef.string -> Map(
+          FieldMetadata.EnumCases -> enumValues.mkString(","),
+          FieldMetadata.EnumName  -> name
+        )
+      case _ =>
+        TypeRef.json -> Map.empty
