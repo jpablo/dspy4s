@@ -405,6 +405,65 @@ Acceptance criteria:
 - `TypedPrediction` preserves the original raw `Prediction`.
 - `sbt typed/test` passes.
 
+### Outcomes (executed 2026-05-24)
+
+Implemented four files in `modules/typed/src/main/scala/dspy4s/typed/`:
+
+- `ValueDecoder.scala` — field-level codec typeclass with built-in givens for
+  `String` / `Int` / `Double` / `Boolean`, and a `derived` inline def that
+  enables `derives ValueDecoder` on Scala enums (`Mirror.SumOf[A]` →
+  case-name → enum-value table). Decodes from `Any` (already-typed
+  adapter values), not from JSON bytes — this sidesteps the Phase 0
+  enum wire-format finding entirely.
+- `Shape.scala` — `Shape[A <: Product]` derivation via
+  `Mirror.ProductOf[A]` + inline `summonLabels` / `summonDecoders`.
+  Produces `Vector[FieldSpec]`, `encode(A) → Map[String, Any]`, and
+  `decode(Map[String, Any]) → Either[DspyError, A]`. Role is stamped at
+  derivation time via `derivedWithRole(role)`.
+- `TypedSignature.scala` — `final case class TypedSignature[I, O]` with
+  `derived[I <: Product, O <: Product](name, instructions)` that wires
+  two `Shape`s into an untyped `SignatureSpec` whose fields are
+  `inputs ++ outputs` in declaration order.
+- `TypedPrediction.scala` — `final case class TypedPrediction[O]` holding
+  the decoded output case-class instance + the raw `Prediction`. The
+  `TypedPrediction.from(raw, shape)` constructor returns
+  `Either[DspyError, TypedPrediction[O]]` so the value is *only*
+  constructed after every required output field decodes successfully.
+
+**Test results**: `Phase2TypedCoreSuite` adds 15 tests, all passing. Full
+project remains green at 333 / 333 (was 318; +15 from this suite).
+
+**Intentional deviation from the plan's literal shape**:
+
+- `TypedPrediction[O]` does not carry a `typed: kyo.Record[O]` field as
+  the plan sketched. `Record`'s `dict` field is `private[kyo]`, so a
+  general-purpose `selectDynamic` wrapper would need either reflection
+  or upstream API changes. The case-class-direct approach
+  (`p.output.sentiment`) gives users the same typed dot-access through
+  ordinary case-class syntax, with no kyo Record involvement at the
+  user surface. A `.toRecord` extension can be added later if users
+  want intersection-typed structural composition.
+- `ValueDecoder` is hand-written; no `kyo-schema` Schema delegation in
+  Phase 2. The MVP coercion policy is fully covered by hand-written
+  primitive instances + enum-via-Mirror derivation, and decoding
+  happens from `Any` (typed adapter values), not from JSON bytes — so
+  kyo-schema's `Schema[A]` would be the wrong tool here. A
+  `ValueDecoder.fromSchema[A](using Schema[A])` adapter could land
+  later for users who already have a Schema in scope.
+
+**Lessons from implementation**:
+
+- Inline def + anonymous class issues warning `-W E197` ("New anonymous
+  class definition will be duplicated at each inline site"). Extract
+  to a named `private[typed]` class to silence; the class still needs
+  to be visible from inline-expansion call sites.
+- Case-class / enum fixtures must be top-level (Phase 0 finding) AND
+  must not collide with other top-level fixtures in the same package
+  (e.g. `Phase0FeasibilitySuite`'s `EmotionOutput` clashed with our
+  Phase 2 `EmotionOutput`). Convention: prefix per-phase fixtures
+  (`P2SentenceInput`, `P2ScoredSentiment`, etc.) until we move to a
+  per-suite namespace.
+
 ## Phase 3: Builder And Case Class Surfaces
 
 Goal: provide a working typed API before implementing the trait macro.
