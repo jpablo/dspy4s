@@ -5,39 +5,94 @@
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md
  * Status:   translated (8/8 python snippets)
  *
- * Notes on porting:
- *   - In dspy4s, `dspy.Signature(...)` is built either from the inline DSL
- *     via `Signature("inputs -> outputs", instructions = "...")` or
- *     constructed explicitly via `SignatureDsl.create(name, inputFields,
- *     outputFields, instructions)` for class-based signatures.
- *   - There is no metaclass-driven `class X(dspy.Signature)` form — class-based
- *     signatures port to `SignatureDsl.create` with `FieldSpec` entries.
- *   - `Signature.apply` returns `Either[DspyError, Signature]` so parse errors
- *     stay strongly typed; bind via for-comprehension or `.toOption.get` at
- *     declarative call sites.
- *   - Programs are invoked with the varargs sugar
- *     `program.run("field" -> value, ...)` (or the explicit
- *     `program.run(ProgramCall(...))` when `config`/`traceEnabled` need to
- *     be customized) and return `Either[DspyError, Prediction]`.
- *   - The `// Python:` blocks below preserve the original snippets verbatim
- *     for reference; the Scala translations follow.
+ * Translation rule:
+ *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`,
+ *     `dspy.ChainOfThought("a -> b")`, or `dspy.Signature("a -> b")`)
+ *     become Scala **function signatures** via
+ *     `TypedSignature.fromType[(in: I) => (out: O)]("Name")`.
+ *   - Python **class-based** signatures (`class X(dspy.Signature): ...`)
+ *     become Scala **spec traits** with `InputField[T]` / `OutputField[T]`
+ *     members and `TypedSignature.of[T <: Spec]`.
+ *
+ * Both surfaces produce a `TypedSignature[I, O]` where `I` / `O` are named
+ * tuples (or case classes in the case-class derivation surface — not used
+ * here), so call sites get typed dot-access:
+ *
+ *   TypedPredict(sig).run((field = "...")).map(_.output.field)
+ *
+ * `ChainOfThought` is still consumed in its untyped form (no
+ * `TypedChainOfThought` yet), so CoT examples drop to `sig.untyped` for
+ * the program-construction step while keeping the typed signature as the
+ * declarative source.
  */
 package dspy4s.examples.learn.programming
 
-import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.FieldRole
-import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.Signature
-import dspy4s.core.contracts.TypeRef
-import dspy4s.core.signatures.SignatureDsl
-import dspy4s.programs.ChainOfThought
-import dspy4s.programs.Predict
+import dspy4s.core.contracts.{DspyError, RuntimeContext, TypeRef}
+import dspy4s.programs.{ChainOfThought, TypedPredict}
+import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, TypedSignature}
+import kyo.Schema
 
-object Signatures {
+// ── Top-level types referenced by the translations below ─────────────────
+// Top-level so Schema / Mirror derivation and the trait-spec macro see them.
 
-  // ── Snippet 1 (lines 37–46) ─ inline signature + instructions ─────────
-  // Python:
+/** Python's `Literal['sadness', 'joy', ...]` (snippet 5) becomes a Scala
+  * enum. `FieldCodec.FlatEnum` gives the companion both a `FieldCodec`
+  * (for top-level OutputField use) and a flat-string `Schema` (for
+  * nested-product use). */
+enum Emotion:
+  case sadness, joy, love, anger, fear, surprise
+
+object Emotion extends FieldCodec.FlatEnum[Emotion]
+
+/** Placeholder for `dspy.Image` (snippet 7). dspy4s does not yet ship a
+  * built-in `Image` value type with adapter support; this local case class
+  * keeps the spec trait compilable. Replace with a real Image type when
+  * one lands. */
+case class Image(url: String) derives Schema
+
+/** Custom output type (snippet 8). */
+case class QueryResult(text: String, score: Double) derives Schema
+
+/** Nested-namespace custom types (snippet 8, second half). */
+object MyContainer:
+  case class Query(text: String) derives Schema
+  case class Score(score: Double) derives Schema
+
+/** `Map[String, List[String]]` (snippet 6) is not `<: Product`, so it
+  * doesn't pick up the `schemaBackedProduct` low-priority fallback. We
+  * provide an explicit `FieldCodec` over kyo-schema's collection Schema. */
+given FieldCodec[Map[String, List[String]]] =
+  FieldCodec.fromSchema[Map[String, List[String]]](typeRef = TypeRef.json)
+
+// ── Class-based spec traits (snippets 5, 6, 7) ───────────────────────────
+
+/** Snippet 5: `class Emotion(dspy.Signature)` → spec trait. */
+trait EmotionSpec extends Spec:
+  def sentence:  InputField[String]
+  def sentiment: OutputField[Emotion]
+
+/** Snippet 6: `class CheckCitationFaithfulness(dspy.Signature)` → spec trait. */
+trait CheckCitationFaithfulnessSpec extends Spec:
+  def context:      InputField[String]
+  def text:         InputField[String]
+  def faithfulness: OutputField[Boolean]
+  def evidence:     OutputField[Map[String, List[String]]]
+
+/** Snippet 7: `class DogPictureSignature(dspy.Signature)` → spec trait. */
+trait DogPictureSpec extends Spec:
+  def image_1: InputField[Image]
+  def answer:  OutputField[String]
+
+object Signatures:
+
+  /** Small helper: `TypedSignature.fromType` doesn't take an `instructions`
+    * parameter, so attach them by re-wrapping the untyped signature. */
+  extension [I, O](sig: TypedSignature[I, O])
+    def withInstructions(text: String): TypedSignature[I, O] =
+      sig.copy(untyped = sig.untyped.withInstructions(text))
+
+  // ── Snippet 1 (lines 37–46) ─ string DSL with instructions ────────────
+  // Python (string-based):
   // | toxicity = dspy.Predict(
   // |     dspy.Signature(
   // |         "comment -> toxic: bool",
@@ -46,44 +101,49 @@ object Signatures {
   // | )
   // | comment = "you are beautiful."
   // | toxicity(comment=comment).toxic
-  val toxicitySignature: Signature =
-    Signature(
-      "comment -> toxic: bool",
-      instructions = "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
-    ).toOption.get
+  val toxicitySig =
+    TypedSignature
+      .fromType[(comment: String) => (toxic: Boolean)]("Toxicity")
+      .withInstructions(
+        "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
+      )
 
-  val toxicity: Predict = Predict(toxicitySignature)
+  val toxicity = TypedPredict(toxicitySig)
 
-  def callToxicity(comment: String)(using RuntimeContext): Either[DspyError, Any] =
-    toxicity.run("comment" -> comment).flatMap(_.value("toxic"))
+  def callToxicity(comment: String)(using RuntimeContext): Either[DspyError, Boolean] =
+    toxicity.run((comment = comment)).map(_.output.toxic)
 
   // ── Snippet 2 (lines 56–61) ─ Example A: Sentiment Classification ─────
-  // Python:
+  // Python (string-based):
   // | sentence = "it's a charming and often affecting journey."  # example from the SST-2 dataset.
   // |
   // | classify = dspy.Predict('sentence -> sentiment: bool')  # we'll see an example with Literal[] later
   // | classify(sentence=sentence).sentiment
-  val sentimentSignature: Signature =
-    Signature("sentence -> sentiment: bool").toOption.get
+  val sentimentSig =
+    TypedSignature.fromType[(sentence: String) => (sentiment: Boolean)]("ClassifySentiment")
 
-  val classifySentiment: Predict = Predict(sentimentSignature)
+  val classifySentiment = TypedPredict(sentimentSig)
 
-  def callSentiment(sentence: String)(using RuntimeContext): Either[DspyError, Any] =
-    classifySentiment.run("sentence" -> sentence).flatMap(_.value("sentiment"))
+  def callSentiment(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
+    classifySentiment.run((sentence = sentence)).map(_.output.sentiment)
 
   // ── Snippet 3 (lines 69–77) ─ Example B: Summarization (ChainOfThought) ─
-  // Python:
+  // Python (string-based):
   // | # Example from the XSum dataset.
-  // | document = """The 21-year-old made seven appearances ..."""
+  // | document = """..."""
   // |
   // | summarize = dspy.ChainOfThought('document -> summary')
   // | response = summarize(document=document)
   // |
   // | print(response.summary)
-  val summarizeSignature: Signature =
-    Signature("document -> summary").toOption.get
+  //
+  // CoT is still untyped in dspy4s (no `TypedChainOfThought` yet), so we
+  // derive the typed signature for metadata + IDE assistance and drop to
+  // `.untyped` for ChainOfThought construction.
+  val summarizeSig =
+    TypedSignature.fromType[(document: String) => (summary: String)]("Summarize")
 
-  val summarize: ChainOfThought = ChainOfThought(summarizeSignature)
+  val summarize = ChainOfThought(summarizeSig.untyped)
 
   def callSummarize(document: String)(using RuntimeContext): Either[DspyError, Any] =
     summarize.run("document" -> document).flatMap(_.value("summary"))
@@ -92,19 +152,20 @@ object Signatures {
   // Python:
   // | print("Reasoning:", response.reasoning)
   //
-  // ChainOfThought injects a `reasoning` output field (prefix "Reasoning:") at
-  // position 0 of the augmented signature, so the resulting Prediction exposes
-  // both `reasoning` and `summary`.
-  def callSummarizeWithReasoning(document: String)(using RuntimeContext): Either[DspyError, (Any, Any)] =
+  // ChainOfThought injects a `reasoning` output field (prefix "Reasoning:")
+  // at position 0 of the augmented signature, so the resulting Prediction
+  // exposes both `reasoning` and `summary` via dynamic `.value(...)`.
+  def callSummarizeWithReasoning(document: String)(using RuntimeContext)
+      : Either[DspyError, (Any, Any)] =
     summarize.run("document" -> document).flatMap { p =>
       for
         reasoning <- p.value("reasoning")
-        summary <- p.value("summary")
+        summary   <- p.value("summary")
       yield (reasoning, summary)
     }
 
   // ── Snippet 5 (lines 107–119) ─ Example C: class-based Classification ──
-  // Python:
+  // Python (class-based):
   // | from typing import Literal
   // |
   // | class Emotion(dspy.Signature):
@@ -118,29 +179,19 @@ object Signatures {
   // | classify = dspy.Predict(Emotion)
   // | classify(sentence=sentence)
   //
-  // Python's `Literal[...]` carries through as a free-form TypeRef token; the
-  // adapter consumes the repr when formatting/parsing.
-  val emotionSignature: Signature =
-    SignatureDsl
-      .create(
-        name = "Emotion",
-        inputFields = Vector(FieldSpec(name = "sentence", role = FieldRole.Input)),
-        outputFields = Vector(
-          FieldSpec(
-            name = "sentiment",
-            role = FieldRole.Output,
-            typeRef = TypeRef("Literal['sadness', 'joy', 'love', 'anger', 'fear', 'surprise']")
-          )
-        ),
-        instructions = Some("Classify emotion.")
-      )
-      .toOption
-      .get
+  // Python's `Literal[...]` becomes the top-level `Emotion` enum. The trait
+  // spec carries the same role + type metadata; the docstring becomes
+  // instructions via `.withInstructions`.
+  val emotionSig =
+    TypedSignature.of[EmotionSpec].withInstructions("Classify emotion.")
 
-  val classifyEmotion: Predict = Predict(emotionSignature)
+  val classifyEmotion = TypedPredict(emotionSig)
+
+  def callClassifyEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
+    classifyEmotion.run((sentence = sentence)).map(_.output.sentiment)
 
   // ── Snippet 6 (lines 132–146) ─ Example D: faithfulness check ─────────
-  // Python:
+  // Python (class-based):
   // | class CheckCitationFaithfulness(dspy.Signature):
   // |     """Verify that the text is based on the provided context."""
   // |
@@ -148,36 +199,18 @@ object Signatures {
   // |     text: str = dspy.InputField()
   // |     faithfulness: bool = dspy.OutputField()
   // |     evidence: dict[str, list[str]] = dspy.OutputField(desc="Supporting evidence for claims")
-  val checkCitationFaithfulness: Signature =
-    SignatureDsl
-      .create(
-        name = "CheckCitationFaithfulness",
-        inputFields = Vector(
-          FieldSpec(
-            name = "context",
-            role = FieldRole.Input,
-            description = Some("facts here are assumed to be true")
-          ),
-          FieldSpec(name = "text", role = FieldRole.Input)
-        ),
-        outputFields = Vector(
-          FieldSpec(name = "faithfulness", role = FieldRole.Output, typeRef = TypeRef.bool),
-          FieldSpec(
-            name = "evidence",
-            role = FieldRole.Output,
-            typeRef = TypeRef("dict[str, list[str]]"),
-            description = Some("Supporting evidence for claims")
-          )
-        ),
-        instructions = Some("Verify that the text is based on the provided context.")
-      )
-      .toOption
-      .get
+  //
+  // Note: per-field descriptions (`desc=...`) are not yet first-class on
+  // the trait-spec surface; metadata flows through `FieldCodec.metadata`.
+  val faithfulnessSig =
+    TypedSignature
+      .of[CheckCitationFaithfulnessSpec]
+      .withInstructions("Verify that the text is based on the provided context.")
 
-  val faithfulness: ChainOfThought = ChainOfThought(checkCitationFaithfulness)
+  val faithfulness = ChainOfThought(faithfulnessSig.untyped)
 
   // ── Snippet 7 (lines 159–167) ─ Example E: multi-modal image ──────────
-  // Python:
+  // Python (class-based):
   // | class DogPictureSignature(dspy.Signature):
   // |     """Output the dog breed of the dog in the image."""
   // |     image_1: dspy.Image = dspy.InputField(desc="An image of a dog")
@@ -187,38 +220,21 @@ object Signatures {
   // | classify = dspy.Predict(DogPictureSignature)
   // | classify(image_1=dspy.Image.from_url(image_url))
   //
-  // dspy4s does not yet ship a built-in `Image` value type (no equivalent of
-  // `dspy.Image.from_url(...)`). The field below carries the type as an opaque
-  // TypeRef token so the signature compiles; the adapter layer will need an
-  // Image type before this example can actually run.
-  val dogPictureSignature: Signature =
-    SignatureDsl
-      .create(
-        name = "DogPictureSignature",
-        inputFields = Vector(
-          FieldSpec(
-            name = "image_1",
-            role = FieldRole.Input,
-            typeRef = TypeRef("image"),
-            description = Some("An image of a dog")
-          )
-        ),
-        outputFields = Vector(
-          FieldSpec(
-            name = "answer",
-            role = FieldRole.Output,
-            description = Some("The dog breed of the dog in the image")
-          )
-        ),
-        instructions = Some("Output the dog breed of the dog in the image.")
-      )
-      .toOption
-      .get
+  // Placeholder `Image` type defined above. Until dspy4s ships a real
+  // image value type with adapter support, callers construct
+  // `Image("https://...")` directly.
+  val dogPictureSig =
+    TypedSignature
+      .of[DogPictureSpec]
+      .withInstructions("Output the dog breed of the dog in the image.")
 
-  val classifyDog: Predict = Predict(dogPictureSignature)
+  val classifyDog = TypedPredict(dogPictureSig)
+
+  def callClassifyDog(imageUrl: String)(using RuntimeContext): Either[DspyError, String] =
+    classifyDog.run((image_1 = Image(imageUrl))).map(_.output.answer)
 
   // ── Snippet 8 (lines 190–204) ─ Working with Custom Types ─────────────
-  // Python:
+  // Python (string-based with custom types):
   // | # Simple custom type
   // | class QueryResult(pydantic.BaseModel):
   // |     text: str
@@ -234,14 +250,14 @@ object Signatures {
   // |
   // | signature = dspy.Signature("query: MyContainer.Query -> score: MyContainer.Score")
   //
-  // In dspy4s the type token is a free-form `TypeRef` consumed by the adapter
-  // (JSON / structured-output adapters). There is no pydantic-style schema
-  // derivation today, so the user-defined types appear as opaque labels —
-  // the meaning is supplied by the adapter that knows how to render/parse
-  // values of that shape.
-  val customTypeSignature: Signature =
-    Signature("query: str -> result: QueryResult").toOption.get
+  // Pydantic models port to Scala case classes with `derives Schema`.
+  // Their `FieldCodec` comes from the `schemaBackedProduct` fallback,
+  // which fires automatically for any `<: Product` type with a `Schema`
+  // in scope.
+  val customTypeSig =
+    TypedSignature.fromType[(query: String) => (result: QueryResult)]("CustomType")
 
-  val nestedCustomTypeSignature: Signature =
-    Signature("query: MyContainer.Query -> score: MyContainer.Score").toOption.get
-}
+  val nestedCustomTypeSig =
+    TypedSignature.fromType[
+      (query: MyContainer.Query) => (score: MyContainer.Score)
+    ]("Nested")
