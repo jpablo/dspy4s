@@ -126,6 +126,45 @@ class Phase3SurfacesSuite extends FunSuite:
 
   // ── Cross-surface parity ────────────────────────────────────────────────
 
+  test("builder fields are normalized (inferred prefix + description)") {
+    // SignatureSpec.create routes through FieldSpec.normalize, so each
+    // FieldSpec gets a prefix derived from its name and a description
+    // template. Adapters depend on these for prompt rendering.
+    val sig = TypedSignature
+      .builder("Bag")
+      .input[String]("userName")  // camelCase exercises prefix inference
+      .output[Int]("scoreValue")
+      .build
+
+    val byName = sig.fields.map(f => f.name -> f).toMap
+    assertEquals(byName("userName").prefix,      Some("User Name:"))
+    assertEquals(byName("userName").description, Some("${userName}"))
+    assertEquals(byName("scoreValue").prefix,    Some("Score Value:"))
+    assertEquals(byName("scoreValue").description, Some("${scoreValue}"))
+  }
+
+  test("case-class derived fields are normalized identically to the builder path") {
+    val sig = TypedSignature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val byName = sig.untyped.fields.map(f => f.name -> f).toMap
+    // P3CommentInput.comment / lang and P3ClassifyOutput.toxic / confidence
+    // are all lowercase, so the inferred prefix is just the capitalized form.
+    assertEquals(byName("comment").prefix,    Some("Comment:"))
+    assertEquals(byName("toxic").prefix,      Some("Toxic:"))
+    assertEquals(byName("confidence").prefix, Some("Confidence:"))
+  }
+
+  test("builder rejects invalid field names by throwing IllegalArgumentException") {
+    // SignatureSpec.create validates identifiers. The builder routes the
+    // failure into a thrown exception (programmer error at construction).
+    intercept[IllegalArgumentException] {
+      TypedSignature
+        .builder("Bad")
+        .input[String]("field-with-dash")
+        .output[String]("ok")
+        .build
+    }
+  }
+
   test("builder and case-class derivation produce equivalent Signatures for the same shape") {
     val fromBuilder = TypedSignature
       .builder("Classify")

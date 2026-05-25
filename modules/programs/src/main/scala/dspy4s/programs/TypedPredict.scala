@@ -27,10 +27,27 @@ final case class TypedPredict[I, O](
 ):
 
   /** Encode `input`, dispatch through the existing `Predict` runtime, then
-    * decode the resulting prediction into `TypedPrediction[O]`. */
-  def run(input: I)(using RuntimeContext): Either[DspyError, TypedPrediction[O]] =
+    * decode the resulting prediction into `TypedPrediction[O]`.
+    *
+    * `config` is forwarded into `ProgramCall.config`, which `Predict`
+    * surfaces as `LmRequest.options` (per-call LM options, cache /
+    * rollout controls, anything the underlying provider understands).
+    * `traceEnabled` controls whether the inner `Predict` writes a trace
+    * entry for this call.
+    *
+    * **Known limitation (Phase 4):** when the inner `Predict` succeeds
+    * but the typed decode fails, callbacks / trace / history still
+    * record the inner predict as a successful module call. The
+    * `Left(DspyError)` returned here does not retroactively un-record
+    * those events. Wrapping the typed boundary in its own
+    * callback/trace scope is a design decision deferred to Phase 5+. */
+  def run(
+      input: I,
+      config: Map[String, Any] = Map.empty,
+      traceEnabled: Boolean = true
+  )(using RuntimeContext): Either[DspyError, TypedPrediction[O]] =
     val inputMap = signature.inputShape.encode(input)
     val program  = Predict(signature.untyped, demos, name, runtime)
     program
-      .run(ProgramCall(inputs = inputMap))
+      .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
       .flatMap(raw => TypedPrediction.from(raw, signature.outputShape))

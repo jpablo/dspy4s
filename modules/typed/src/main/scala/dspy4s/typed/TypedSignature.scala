@@ -24,7 +24,13 @@ object TypedSignature:
   /** Derives a `TypedSignature[I, O]` from two case classes. The resulting
     * untyped signature has all input fields followed by all output fields
     * (matching the `inputFields ++ outputFields` ordering used everywhere
-    * else in dspy4s). */
+    * else in dspy4s).
+    *
+    * Routed through `SignatureSpec.create` so fields are normalized
+    * (inferred prefix + description) and standard validations apply.
+    * Case-class field names are always valid Scala identifiers, so the
+    * `.fold(throw _, identity)` is a defensive measure -- it should
+    * never fire for a well-formed case class. */
   inline def derived[I <: Product, O <: Product](
       name: String,
       instructions: String = ""
@@ -35,11 +41,18 @@ object TypedSignature:
     val inShape  = Shape.derivedWithRole[I](FieldRole.Input)
     val outShape = Shape.derivedWithRole[O](FieldRole.Output)
     val fields   = inShape.fieldSpecs ++ outShape.fieldSpecs
-    val sig = SignatureSpec(
-      name = name,
-      fields = fields,
-      instructions = Option(instructions).filter(_.nonEmpty)
-    )
+    val sig = SignatureSpec
+      .create(
+        name = name,
+        fields = fields,
+        instructions = Option(instructions).filter(_.nonEmpty)
+      )
+      .fold(
+        err => throw new IllegalStateException(
+          s"Internal error: case-class-derived signature '$name' failed validation: ${err.message}"
+        ),
+        identity
+      )
     TypedSignature(name, sig, inShape, outShape)
 
   /** Programmatic builder for callers that don't want a case class per

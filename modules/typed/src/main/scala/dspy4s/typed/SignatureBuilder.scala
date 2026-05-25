@@ -44,13 +44,24 @@ final class SignatureBuilder private[typed] (
 
   /** Finalize the builder into a runtime `Signature`. The resulting fields
     * are all inputs followed by all outputs, matching the ordering used by
-    * the rest of dspy4s. */
+    * the rest of dspy4s.
+    *
+    * Routed through `SignatureSpec.create` so the resulting fields are
+    * normalized (inferred prefix + description) and standard validations
+    * apply (non-empty fields, unique names, valid identifiers). Invalid
+    * input from the builder surfaces as `IllegalArgumentException` —
+    * this is a programmer-error path, not user-input handling. */
   def build: Signature =
-    SignatureSpec(
-      name         = sigName,
-      fields       = inputs ++ outputs,
-      instructions = instructionsText
-    )
+    SignatureSpec
+      .create(
+        name         = sigName,
+        fields       = inputs ++ outputs,
+        instructions = instructionsText
+      )
+      .fold(
+        err => throw new IllegalArgumentException(s"Invalid signature '$sigName': ${err.message}"),
+        identity
+      )
 
   private def fieldSpec(name: String, role: FieldRole, dec: ValueDecoder[?]): FieldSpec =
     FieldSpec(

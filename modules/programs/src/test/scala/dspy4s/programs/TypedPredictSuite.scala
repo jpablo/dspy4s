@@ -132,6 +132,66 @@ class TypedPredictSuite extends FunSuite:
     }
   }
 
+  // ── Per-call runtime knobs (config + traceEnabled) ──────────────────────
+
+  test("TypedPredict.run forwards `config` into ProgramCall.config (then LmRequest.options)") {
+    val capturedRequests = scala.collection.mutable.ArrayBuffer.empty[LmRequest]
+    val capturingLm = new LanguageModel:
+      val id   = "capturing-lm"
+      val mode = LmMode.Chat
+      def call(req: LmRequest)(using RuntimeContext) =
+        capturedRequests += req
+        Right(LmResponse(
+          outputs = Vector(LmOutput(text = "Paris", metadata = Map("score" -> 0.5))),
+          usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        ))
+
+    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    RuntimeEnvironment.withSettings(SettingsData(Map(
+      SettingKeys.languageModel.name -> capturingLm,
+      SettingKeys.adapter.name       -> EchoQuestionAdapter
+    ))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val _ = TypedPredict(sig).run(
+        P4QAInput("hi"),
+        config = Map("temperature" -> 0.7, "max_tokens" -> 50)
+      )
+    }
+    assertEquals(capturedRequests.size, 1)
+    assertEquals(capturedRequests.head.options.get("temperature"), Some(0.7))
+    assertEquals(capturedRequests.head.options.get("max_tokens"),  Some(50))
+  }
+
+  test("TypedPredict.run with traceEnabled=false suppresses the trace entry") {
+    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val _ = TypedPredict(sig).run(P4QAInput("Capital of France?"), traceEnabled = false)
+      assertEquals(RuntimeEnvironment.current.trace.size, 0)
+    }
+  }
+
+  // ── Decode-failure / trace divergence (Phase 4 known limitation) ────────
+
+  test("decode failures: inner Predict still records trace + history (known limitation)") {
+    // Characterizes current behavior so a future "wrap typed boundary in its
+    // own scope" change is intentional. Today: TypedPredict.run returns
+    // Left(decode failure), but the inner Predict already emitted its
+    // module-end event and appended to trace/history. Asserted so a future
+    // Phase 5+ change that consolidates the typed boundary's tracing has
+    // to update this test deliberately.
+    val sig = TypedSignature.derived[P4QAInput, P4StrictOutput]("QA-strict")
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run(P4QAInput("Capital of France?"))
+      assert(result.isLeft, s"expected decode failure but got: $result")
+      // Inner Predict succeeded -> trace/history entries are present despite
+      // the typed boundary reporting failure.
+      assertEquals(RuntimeEnvironment.current.trace.size, 1)
+      assertEquals(RuntimeEnvironment.current.history.size, 1)
+    }
+  }
+
   // ── No regression in the underlying Predict path ────────────────────────
 
   test("the inner Predict path still works directly (no PredictSuite regression)") {
