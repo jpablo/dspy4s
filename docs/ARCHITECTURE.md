@@ -47,7 +47,7 @@ graph TD
 
 1. **`core`** — pure contracts, no dependencies.
    - `SignatureLayout` and `FieldSpec` (erased runtime contract for adapters)
-   - `Example`, `DynamicPrediction`, `CompletionData`, `PredictionData`
+   - `Example`, `DynamicPrediction`, `Completions`
    - `Module[I, O]` trait, `RuntimeContext`, `Settings`
    - Error ADT (`DspyError`, `ValidationError`, `ParseError`, …)
    - Callbacks + thread-local context machinery
@@ -263,7 +263,7 @@ For comparison with the upstream Python DSPy architecture:
   factories (`parse`, `create`, `fromState`). Mutation helpers are
   `private[dspy4s]`.
 - `core/contracts/Data.scala` — `Example`, `DynamicPrediction`,
-  `CompletionData`, `PredictionData`.
+  `Completions`.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `typed/Signature.scala` — typed wrapper + six factory entry points.
 - `typed/Shape.scala` — three shape implementations + kyo-schema

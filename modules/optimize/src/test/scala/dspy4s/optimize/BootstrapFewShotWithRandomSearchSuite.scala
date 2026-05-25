@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.core.contracts.ExampleData
+import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -28,7 +28,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
 
   test("BootstrapFewShotWithRandomSearch generates multiple candidates and reports the best") {
     val trainset = (1 to 6).map(i =>
-      ExampleData(Map("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
+      Example(Map("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
     ).toVector
 
     val metric = new ExactMatch(answerField = "answer")
@@ -56,7 +56,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
 
   test("BootstrapFewShotWithRandomSearch stops early when stopAtScore is reached") {
     val trainset = (1 to 4).map(i =>
-      ExampleData(Map("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
+      Example(Map("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
     ).toVector
 
     val metric = new ExactMatch(answerField = "answer")

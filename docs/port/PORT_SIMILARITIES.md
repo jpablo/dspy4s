@@ -67,7 +67,7 @@ analogues:
 | `Signature` (class) | `SignatureLayout` (erased) + `Signature[I, O]` (typed wrapper) |
 | `dspy.Example` | `dspy4s.core.contracts.Example` |
 | `dspy.Prediction` | `DynamicPrediction` (erased) + `Prediction[O]` (typed) |
-| `dspy.Completions` | `CompletionData` |
+| `dspy.Completions` | `Completions` |
 | `dspy.LM` / `BaseLM` | `LanguageModel` |
 | `dspy.Adapter` | `Adapter` |
 | `dspy.Tool` | `ToolFunction` |

@@ -5,7 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SignatureLayout
@@ -75,15 +75,15 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = base, m = 3)
 
     val completions = Vector(
-      PredictionData(values = Map(
+      DynamicPrediction(values = Map(
         "rationale" -> "I recall that during clear days, the sky often appears this color.",
         "answer" -> "blue"
       )),
-      PredictionData(values = Map(
+      DynamicPrediction(values = Map(
         "rationale" -> "Based on common knowledge, I believe the sky is typically seen as this color.",
         "answer" -> "green"
       )),
-      PredictionData(values = Map(
+      DynamicPrediction(values = Map(
         "rationale" -> "From images and depictions in media, the sky is frequently represented with this hue.",
         "answer" -> "blue"
       ))
@@ -117,7 +117,7 @@ class MultiChainComparisonSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val call = ProgramCall(inputs = Map("question" -> "?"))
-      val result = mcc.runWithAttempts(call, Vector(PredictionData(values = Map.empty)))
+      val result = mcc.runWithAttempts(call, Vector(DynamicPrediction(values = Map.empty)))
       assert(result.isLeft)
       assert(result.left.toOption.get.message.contains("doesn't match the configured m"), result.left.toOption.get.message)
     }

@@ -4,7 +4,7 @@ import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.ValidationError
 
 /** Aggregation utilities for collapsing multiple candidate completions into a
@@ -75,7 +75,7 @@ object Aggregation:
           val winner = counted.iterator.collectFirst {
             case (row, Some(k)) if k == majorityKey => row
           }.getOrElse(rows.head)
-          PredictionData.fromRows(Vector(winner))
+          DynamicPrediction.fromRows(Vector(winner))
       }
 
   /** Run majority over the [[Completions]] embedded in a [[DynamicPrediction]],

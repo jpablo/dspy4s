@@ -617,7 +617,7 @@ class StreamListenerSuite extends FunSuite:
     val opaqueProgram = new PredictProgram:
       override val moduleName: String = "opaque"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-        Right(dspy4s.core.contracts.PredictionData(values = Map("answer" -> "x")))
+        Right(dspy4s.core.contracts.DynamicPrediction(values = Map("answer" -> "x")))
 
     given RuntimeContext = RuntimeEnvironment.current
     // We don't actually invoke the stream — validation runs eagerly when

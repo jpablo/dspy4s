@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, FieldRole, NotFoundError, PredictionData, ValidationError
+  DspyError, FieldRole, NotFoundError, DynamicPrediction, ValidationError
 }
 import munit.FunSuite
 
@@ -176,14 +176,14 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("Prediction is never constructed when decode fails") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = PredictionData(values = Map("sentiment" -> "joy"))  // missing 'confidence'
+    val raw   = DynamicPrediction(values = Map("sentiment" -> "joy"))  // missing 'confidence'
     val result = Prediction.from(raw, shape)
     assert(result.isLeft, s"expected failure but got: $result")
   }
 
   test("Prediction.from succeeds when all required outputs decode") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = PredictionData(values = Map("sentiment" -> "joy", "confidence" -> 0.92))
+    val raw   = DynamicPrediction(values = Map("sentiment" -> "joy", "confidence" -> 0.92))
     val result = Prediction.from(raw, shape)
     result match
       case Right(tp) =>

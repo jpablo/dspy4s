@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.core.contracts.ExampleData
+import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -25,12 +25,12 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector(
-        ExampleData(
+        Example(
           values = Map("question" -> "Capital of France?", "answer" -> "Paris"),
           inputKeys = Set("question")
         )
       ),
-      inputs = ExampleData(values = Map("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
+      inputs = Example(values = Map("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
     )
 
@@ -73,7 +73,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = ExampleData(values = Map("question" -> "?"), inputKeys = Set("question")),
+      inputs = Example(values = Map("question" -> "?"), inputKeys = Set("question")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -95,7 +95,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = ExampleData(values = Map("q" -> "?"), inputKeys = Set("q")),
+      inputs = Example(values = Map("q" -> "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -134,7 +134,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = ExampleData(values = Map("q" -> "?"), inputKeys = Set("q")),
+      inputs = Example(values = Map("q" -> "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current

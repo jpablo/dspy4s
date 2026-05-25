@@ -1,9 +1,7 @@
 package dspy4s.evaluate
 
 import dspy4s.core.contracts.Example
-import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.ExampleEvaluation
@@ -20,15 +18,15 @@ class EvaluateSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
 
-  private def ex(values: (String, Any)*): ExampleData = ExampleData(values.toMap)
-  private def pred(values: (String, Any)*): PredictionData = PredictionData(values.toMap)
+  private def ex(values: (String, Any)*): Example = Example(values.toMap)
+  private def pred(values: (String, Any)*): DynamicPrediction = DynamicPrediction(values.toMap)
 
   private def scriptedPredict(mappings: Map[String, DynamicPrediction]): Example => Either[dspy4s.core.contracts.DspyError, DynamicPrediction] =
     (ex: Example) =>
       val key = ex.get("question").map(_.toString).getOrElse("")
       mappings.get(key) match
         case Some(p) => Right(p)
-        case None    => Right(PredictionData(Map("answer" -> "unknown")))
+        case None    => Right(DynamicPrediction(Map("answer" -> "unknown")))
 
   test("Evaluate runs a program over a dev set and aggregates metric scores as percentage") {
     val dataset = Vector(
@@ -54,7 +52,7 @@ class EvaluateSuite extends FunSuite:
   test("Evaluate with empty devset returns score 0") {
     val evaluator = Evaluate(devset = Vector.empty, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current
-    val result = evaluator()((_: Example) => Right(PredictionData.empty))
+    val result = evaluator()((_: Example) => Right(DynamicPrediction.empty))
     assert(result.isRight)
     assertEquals(result.toOption.get.score, 0.0)
   }
@@ -79,7 +77,7 @@ class EvaluateSuite extends FunSuite:
     val program: Example => Either[dspy4s.core.contracts.DspyError, DynamicPrediction] = ex =>
       val q = ex.get("question").map(_.toString).getOrElse("")
       Thread.sleep(5)
-      Right(PredictionData(Map("answer" -> s"a${q.stripPrefix("q")}")))
+      Right(DynamicPrediction(Map("answer" -> s"a${q.stripPrefix("q")}")))
 
     val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), numThreads = Some(4))
     given RuntimeContext = RuntimeEnvironment.current
@@ -115,7 +113,7 @@ class EvaluateSuite extends FunSuite:
     )
     val evaluator = Evaluate(devset = dataset, metric = metric)
     given RuntimeContext = RuntimeEnvironment.current
-    val result = evaluator()((ex: Example) => Right(PredictionData(ex.values)))
+    val result = evaluator()((ex: Example) => Right(DynamicPrediction(ex.values)))
     assert(result.isRight)
     val eval = result.toOption.get
     assertEquals(eval.metricName, "lengthy")

@@ -5,7 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
@@ -145,7 +145,7 @@ final case class CodeAct(
         extractor.run(call.copy(inputs = extractInputs)).map { extracted =>
           // Attach the trajectory to the extracted prediction's values so
           // callers can inspect it after the fact.
-          PredictionData(
+          DynamicPrediction(
             values = extracted.values.updated("trajectory", trajectory.render),
             completions = extracted.completions,
             lmUsage = extracted.lmUsage

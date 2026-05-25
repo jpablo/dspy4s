@@ -1,7 +1,7 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.CompletionData
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.Completions
+import dspy4s.core.contracts.DynamicPrediction
 import munit.FunSuite
 
 /** Direct dspy4s port of Python DSPy's `tests/predict/test_aggregation.py`.
@@ -14,13 +14,13 @@ class AggregationSuite extends FunSuite:
       Map[String, Any]("answer" -> "2"),
       Map[String, Any]("answer" -> "3")
     )
-    val prediction = PredictionData.fromRows(rows).toOption.get
+    val prediction = DynamicPrediction.fromRows(rows).toOption.get
     val result = Aggregation.majorityOf(prediction).toOption.get
     assertEquals(result.values("answer"), "2")
   }
 
   test("majority with Completions picks the most common answer") {
-    val completions = CompletionData.fromRows(Vector(
+    val completions = Completions.fromRows(Vector(
       Map[String, Any]("answer" -> "2"),
       Map[String, Any]("answer" -> "2"),
       Map[String, Any]("answer" -> "3")

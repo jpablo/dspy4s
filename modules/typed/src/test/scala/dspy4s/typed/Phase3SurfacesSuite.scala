@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  FieldMetadata, FieldRole, NotFoundError, PredictionData, SignatureLayout, TypeRef
+  FieldMetadata, FieldRole, NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
 }
 import munit.FunSuite
 
@@ -110,7 +110,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   test("decoded Prediction exposes case-class fields directly") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
-    val raw = PredictionData(values = Map(
+    val raw = DynamicPrediction(values = Map(
       "toxic"      -> false,
       "confidence" -> 0.91
     ))

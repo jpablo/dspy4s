@@ -3,12 +3,10 @@ package dspy4s.programs.runtime
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.ParsedOutput
-import dspy4s.core.contracts.CompletionData
+import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.Example
-import dspy4s.core.contracts.ExampleData
-import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ActivePredictContext
@@ -67,7 +65,7 @@ private[dspy4s] final case class PredictEngine(
     AdapterInvocation(
       layout = layout,
       demos = demos,
-      inputs = ExampleData(values = call.inputs, inputKeys = inputKeys),
+      inputs = Example(values = call.inputs, inputKeys = inputKeys),
       request = LmRequest(
         model = model.id,
         mode = model.mode,
@@ -97,8 +95,8 @@ private[dspy4s] final case class PredictEngine(
       toolCalls: Vector[ToolCall]
   ): Either[DspyError, DynamicPrediction] =
     for
-      completions <- CompletionData.fromRows(parsedOutputs.map(_.values))
-      first <- PredictionData.fromCompletions(completions)
+      completions <- Completions.fromRows(parsedOutputs.map(_.values))
+      first <- DynamicPrediction.fromCompletions(completions)
       withUsage = first.copy(lmUsage = response.usage.map(usageToMap))
       prediction = withUsage.withValue("tool_calls", toToolCallPayload(toolCalls))
     yield prediction

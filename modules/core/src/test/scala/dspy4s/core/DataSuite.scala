@@ -1,14 +1,14 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.CompletionData
-import dspy4s.core.contracts.ExampleData
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.Completions
+import dspy4s.core.contracts.Example
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.ValidationError
 import munit.FunSuite
 
 class DataSuite extends FunSuite:
   test("example inputs and labels split by input keys") {
-    val example = ExampleData("question" -> "What is 1+1?", "answer" -> "2").withInputs(Set("question"))
+    val example = Example("question" -> "What is 1+1?", "answer" -> "2").withInputs(Set("question"))
 
     assertEquals(example.inputs, Map("question" -> "What is 1+1?"))
     assertEquals(example.labels, Map("answer" -> "2"))
@@ -16,7 +16,7 @@ class DataSuite extends FunSuite:
 
   test("completion rows must have equal lengths") {
     intercept[IllegalArgumentException] {
-      CompletionData(
+      Completions(
         fields = Map(
           "answer" -> Vector("a", "b"),
           "score" -> Vector(0.5)
@@ -26,7 +26,7 @@ class DataSuite extends FunSuite:
   }
 
   test("completion at out of bounds returns validation error") {
-    val completions = CompletionData(fields = Map("answer" -> Vector("a")))
+    val completions = Completions(fields = Map("answer" -> Vector("a")))
     val result = completions.at(2)
 
     assert(result.isLeft)
@@ -34,13 +34,13 @@ class DataSuite extends FunSuite:
   }
 
   test("prediction from completions and score extraction") {
-    val completions = CompletionData(
+    val completions = Completions(
       fields = Map(
         "answer" -> Vector("hello"),
         "score" -> Vector(0.9)
       )
     )
-    val prediction = PredictionData.fromCompletions(completions)
+    val prediction = DynamicPrediction.fromCompletions(completions)
 
     assert(prediction.isRight)
     val built = prediction.toOption.get
@@ -53,7 +53,7 @@ class DataSuite extends FunSuite:
       Map("answer" -> "a", "score" -> 0.1),
       Map("answer" -> "b", "score" -> 0.2)
     )
-    val completions = CompletionData.fromRows(rows)
+    val completions = Completions.fromRows(rows)
 
     assert(completions.isRight)
     val predictions = completions.toOption.get.toPredictions
@@ -69,14 +69,14 @@ class DataSuite extends FunSuite:
       Map("answer" -> "a", "score" -> 0.1),
       Map("answer" -> "b")
     )
-    val completions = CompletionData.fromRows(rows)
+    val completions = Completions.fromRows(rows)
 
     assert(completions.isLeft)
     assert(completions.left.toOption.get.isInstanceOf[ValidationError])
   }
 
   test("prediction asDouble and withValue") {
-    val prediction = PredictionData.empty
+    val prediction = DynamicPrediction.empty
       .withValue("score", 3)
       .withValue("label", "ok")
 
@@ -88,12 +88,12 @@ class DataSuite extends FunSuite:
   // ── Primitive accessor ladder (asString/asInt/asDouble/asBoolean) ────────
 
   test("asString returns native strings unchanged") {
-    val p = PredictionData.empty.withValue("s", "hello")
+    val p = DynamicPrediction.empty.withValue("s", "hello")
     assertEquals(p.asString("s"), Right("hello"))
   }
 
   test("asString stringifies primitive numerics and booleans") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("i", 7)
       .withValue("d", 1.5)
       .withValue("b", true)
@@ -103,16 +103,16 @@ class DataSuite extends FunSuite:
   }
 
   test("asString rejects non-scalar values") {
-    val p = PredictionData.empty.withValue("m", Map("a" -> 1))
+    val p = DynamicPrediction.empty.withValue("m", Map("a" -> 1))
     assert(p.asString("m").isLeft)
   }
 
   test("asString fails for missing key") {
-    assert(PredictionData.empty.asString("missing").isLeft)
+    assert(DynamicPrediction.empty.asString("missing").isLeft)
   }
 
   test("asInt accepts Int and Long that fits, rejects out-of-range Long") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("i", 42)
       .withValue("l", 42L)
       .withValue("huge", Long.MaxValue)
@@ -122,7 +122,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asInt parses integer strings, rejects non-integer strings") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("clean", "42")
       .withValue("padded", "  7  ")
       .withValue("garbage", "abc")
@@ -134,7 +134,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asInt rejects Double and Boolean to avoid silent truncation") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("d", 1.5)
       .withValue("b", true)
     assert(p.asInt("d").isLeft)
@@ -142,7 +142,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asDouble parses numeric strings as Phase-1 addition") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("clean", "1.5")
       .withValue("int-shaped", "42")
       .withValue("garbage", "abc")
@@ -152,7 +152,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asBoolean accepts true/false and conservative string forms") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("native-t", true)
       .withValue("native-f", false)
       .withValue("str-t", "true")
@@ -166,7 +166,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asBoolean rejects ambiguous strings and other types") {
-    val p = PredictionData.empty
+    val p = DynamicPrediction.empty
       .withValue("yes", "yes")
       .withValue("one", "1")
       .withValue("number", 1)
@@ -176,7 +176,7 @@ class DataSuite extends FunSuite:
   }
 
   test("completion single exposes first and last prediction") {
-    val completions = CompletionData.single(Map("answer" -> "hello", "score" -> 0.42))
+    val completions = Completions.single(Map("answer" -> "hello", "score" -> 0.42))
 
     assertEquals(completions.size, 1)
     assertEquals(completions.first.map(_.values("answer")), Right("hello"))
@@ -184,7 +184,7 @@ class DataSuite extends FunSuite:
   }
 
   test("completion empty first and last fail with validation error") {
-    val completions = CompletionData(Map.empty)
+    val completions = Completions(Map.empty)
 
     assert(completions.first.isLeft)
     assert(completions.last.isLeft)
@@ -193,7 +193,7 @@ class DataSuite extends FunSuite:
   }
 
   test("prediction from empty rows fails") {
-    val prediction = PredictionData.fromRows(Vector.empty)
+    val prediction = DynamicPrediction.fromRows(Vector.empty)
 
     assert(prediction.isLeft)
     assert(prediction.left.toOption.get.isInstanceOf[ValidationError])

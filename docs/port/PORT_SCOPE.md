@@ -27,7 +27,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 
 2. Core primitives and runtime
 - `Example`, `DynamicPrediction` (erased) / `Prediction[O]` (typed),
-  `CompletionData`
+  `Completions`
 - `Module[I, O]` trait (including nested parameter traversal)
 - Settings/context model (global + scoped overrides)
 - Trace, history, usage tracking, callback hooks

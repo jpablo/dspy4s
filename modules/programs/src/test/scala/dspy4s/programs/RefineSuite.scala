@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -34,9 +34,9 @@ class RefineSuite extends FunSuite:
   test("refine returns best prediction among attempts") {
     val module = StubProgram(
       Vector(
-        Right(PredictionData(values = Map("answer" -> "Brussels", "score" -> 0.4))),
-        Right(PredictionData(values = Map("answer" -> "City of Brussels", "score" -> 0.2))),
-        Right(PredictionData(values = Map("answer" -> "Brussels", "score" -> 0.9)))
+        Right(DynamicPrediction(values = Map("answer" -> "Brussels", "score" -> 0.4))),
+        Right(DynamicPrediction(values = Map("answer" -> "City of Brussels", "score" -> 0.2))),
+        Right(DynamicPrediction(values = Map("answer" -> "Brussels", "score" -> 0.9)))
       )
     )
     val refine = Refine(
@@ -81,7 +81,7 @@ class RefineSuite extends FunSuite:
       Vector(
         Left(RuntimeError("stub", "f1")),
         Left(RuntimeError("stub", "f2")),
-        Right(PredictionData(values = Map("answer" -> "ok", "score" -> 1.0)))
+        Right(DynamicPrediction(values = Map("answer" -> "ok", "score" -> 1.0)))
       )
     )
     val refine = Refine(

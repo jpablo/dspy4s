@@ -140,7 +140,7 @@ v1 covers:
 - `BootstrapFewShot(metric, maxBootstrappedDemos, maxLabeledDemos, maxRounds, maxErrors, seed)` teacher-driven trace collection
 - `BootstrapFewShotWithRandomSearch(...)` random candidate generation via seeds ±3, ±2, ±1, and ≥ 0; evaluation via `dspy4s.evaluate.Evaluate`; `stopAtScore` early exit
 - 13 tests (5 LabeledFewShot + 5 Bootstrap + 3 RandomSearch)
-- `ExampleData` extended with `augmented: Boolean` flag for bootstrap parity
+- `Example` extended with `augmented: Boolean` flag for bootstrap parity
 
 Deferred to Phase 7 v2:
 - `Ensemble` (per-input voting/majority)

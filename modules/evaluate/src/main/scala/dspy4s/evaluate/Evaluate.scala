@@ -3,7 +3,6 @@ package dspy4s.evaluate
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SettingKeys
@@ -84,7 +83,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
           case Some((prediction, score)) =>
             ExampleEvaluation(dataset(idx), prediction, score)
           case None =>
-            ExampleEvaluation(dataset(idx), PredictionData.empty, cfg.failureScore)
+            ExampleEvaluation(dataset(idx), DynamicPrediction.empty, cfg.failureScore)
       }.toVector
 
       val totalScore = evaluations.map(_.score).sum

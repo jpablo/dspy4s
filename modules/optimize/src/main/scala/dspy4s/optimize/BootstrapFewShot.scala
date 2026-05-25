@@ -2,7 +2,6 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -93,7 +92,7 @@ final class BootstrapFewShot[P <: Module[ProgramCall, DynamicPrediction]: Predic
 
                   if metricOk then
                     val demoValues = example.inputs ++ prediction.values
-                    val demo = ExampleData(values = demoValues, inputKeys = example.inputKeys, augmented = true)
+                    val demo = Example(values = demoValues, inputKeys = example.inputKeys, augmented = true)
                     bootstrapped += demo
                     success = true
             catch

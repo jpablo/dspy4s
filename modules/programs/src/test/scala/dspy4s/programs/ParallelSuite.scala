@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SettingKey
@@ -33,7 +33,7 @@ class ParallelSuite extends FunSuite:
 
   test("parallel executes programs and preserves task ordering") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(behavior = value => Right(PredictionData(values = Map("output" -> value * 2))))
+    val program = StubProgram(behavior = value => Right(DynamicPrediction(values = Map("output" -> value * 2))))
     val tasks = (1 to 5).toVector.map { value =>
       program -> ProgramCall(inputs = Map("value" -> value))
     }
@@ -50,7 +50,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 3 then Left(ValidationError("boom"))
-        else Right(PredictionData(values = Map("output" -> value)))
+        else Right(DynamicPrediction(values = Map("output" -> value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
       program -> ProgramCall(inputs = Map("value" -> value))
@@ -70,7 +70,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value % 2 == 0 then Left(ValidationError("fail"))
-        else Right(PredictionData(values = Map("output" -> value)))
+        else Right(DynamicPrediction(values = Map("output" -> value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
       program -> ProgramCall(inputs = Map("value" -> value))
@@ -86,7 +86,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 2 then Left(ValidationError("boom"))
-        else Right(PredictionData(values = Map("output" -> value)))
+        else Right(DynamicPrediction(values = Map("output" -> value)))
     )
     val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = Map("value" -> value)))
 
@@ -109,7 +109,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = _ =>
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map("sample" -> RuntimeEnvironment.currentSettings.get(sampleKey).getOrElse("missing"))
           )
         )
@@ -130,7 +130,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "answer" -> s"answer-$value",
               "tool_calls" -> Vector(

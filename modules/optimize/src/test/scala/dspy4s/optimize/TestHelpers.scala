@@ -2,9 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.PredictProgram
@@ -22,7 +20,7 @@ final case class ScriptedPredictProgram(
       case Some(err) => throw err
       case None =>
         val q = input.inputs.getOrElse("question", "").toString
-        Right(PredictionData(Map("answer" -> answers.getOrElse(q, "unknown"))))
+        Right(DynamicPrediction(Map("answer" -> answers.getOrElse(q, "unknown"))))
 
 final case class DemoAwarePredictProgram(
     layout: SignatureLayout,
@@ -36,7 +34,7 @@ final case class DemoAwarePredictProgram(
     val answer = answers.get(q)
       .orElse(demos.find(_.values.get("question").contains(q)).flatMap(_.values.get("answer")).map(_.toString))
       .getOrElse("unknown")
-    Right(PredictionData(Map("answer" -> answer)))
+    Right(DynamicPrediction(Map("answer" -> answer)))
 
 object DemoAwarePredictProgram:
   given demoAwareOps: PredictOps[DemoAwarePredictProgram] with

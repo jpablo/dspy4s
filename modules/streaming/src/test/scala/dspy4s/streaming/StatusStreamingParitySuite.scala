@@ -2,7 +2,7 @@ package dspy4s.streaming
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
@@ -45,7 +45,7 @@ class StatusStreamingParitySuite extends FunSuite:
       override val moduleName: String = "tool_caller"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(name = tool.name, args = toolArgs), Vector(tool)).map { _ =>
-          PredictionData(values = Map("answer" -> "ok"))
+          DynamicPrediction(values = Map("answer" -> "ok"))
         }
 
   test("concurrent status-message providers don't bleed messages across streamify invocations") {

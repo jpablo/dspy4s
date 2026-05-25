@@ -1,7 +1,7 @@
 package dspy4s.evaluate
 
-import dspy4s.core.contracts.ExampleData
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.Example
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.ExampleEvaluation
 import munit.FunSuite
@@ -21,18 +21,18 @@ class PersistenceSuite extends FunSuite:
       score = 66.67,
       results = Vector(
         ExampleEvaluation(
-          ExampleData(Map("question" -> "cap of France?", "answer" -> "Paris")),
-          PredictionData(Map("answer" -> "Paris")),
+          Example(Map("question" -> "cap of France?", "answer" -> "Paris")),
+          DynamicPrediction(Map("answer" -> "Paris")),
           score = 1.0
         ),
         ExampleEvaluation(
-          ExampleData(Map("question" -> "cap of Italy?", "answer" -> "Rome")),
-          PredictionData(Map("answer" -> "Naples")),
+          Example(Map("question" -> "cap of Italy?", "answer" -> "Rome")),
+          DynamicPrediction(Map("answer" -> "Naples")),
           score = 0.0
         ),
         ExampleEvaluation(
-          ExampleData(Map("question" -> "cap of Spain?", "answer" -> "Madrid")),
-          PredictionData(Map("answer" -> "Madrid")),
+          Example(Map("question" -> "cap of Spain?", "answer" -> "Madrid")),
+          DynamicPrediction(Map("answer" -> "Madrid")),
           score = 1.0
         )
       ),
@@ -79,8 +79,8 @@ class PersistenceSuite extends FunSuite:
       score = 50.0,
       results = Vector(
         ExampleEvaluation(
-          ExampleData(Map("answer" -> "Paris")),
-          PredictionData(Map("answer" -> "Lyon")),
+          Example(Map("answer" -> "Paris")),
+          DynamicPrediction(Map("answer" -> "Lyon")),
           score = 0.0
         )
       ),
@@ -100,8 +100,8 @@ class PersistenceSuite extends FunSuite:
     val withNumbers = sampleResult.copy(
       results = Vector(
         ExampleEvaluation(
-          ExampleData(Map("answer" -> "Paris", "score" -> 0.8)),
-          PredictionData(Map("answer" -> "Paris", "confidence" -> 0.95)),
+          Example(Map("answer" -> "Paris", "score" -> 0.8)),
+          DynamicPrediction(Map("answer" -> "Paris", "confidence" -> 0.95)),
           score = 1.0
         )
       )

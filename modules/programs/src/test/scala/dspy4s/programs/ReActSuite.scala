@@ -5,7 +5,7 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ToolEndEvent
@@ -28,7 +28,7 @@ class ReActSuite extends FunSuite:
       val idx = calls.incrementAndGet()
       if idx == 1 then
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "tool_name" -> "search",
               "tool_args" -> Map("query" -> input.inputs.getOrElse("question", ""))
@@ -37,7 +37,7 @@ class ReActSuite extends FunSuite:
         )
       else
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "answer" -> s"Final: ${input.inputs.getOrElse("tool_result", "")}"
             )
@@ -47,7 +47,7 @@ class ReActSuite extends FunSuite:
   private final class LoopingProgram extends PredictProgram:
     override val moduleName: String = "loop"
     override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(PredictionData(values = Map("tool_name" -> "search", "tool_args" -> Map("query" -> "q"))))
+      Right(DynamicPrediction(values = Map("tool_name" -> "search", "tool_args" -> Map("query" -> "q"))))
 
   private final class NativeToolCallsProgram extends PredictProgram:
     private val calls = AtomicInteger(0)
@@ -57,7 +57,7 @@ class ReActSuite extends FunSuite:
       val idx = calls.incrementAndGet()
       if idx == 1 then
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "tool_calls" -> Vector(
                 Map("name" -> "search", "args" -> Map("query" -> input.inputs.getOrElse("question", "")))
@@ -67,7 +67,7 @@ class ReActSuite extends FunSuite:
         )
       else
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "answer" -> s"Final: ${input.inputs.getOrElse("tool_result", "")}"
             )
@@ -82,7 +82,7 @@ class ReActSuite extends FunSuite:
       val idx = calls.incrementAndGet()
       if idx == 1 then
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "tool_calls" -> Vector(
                 Map("name" -> "search", "args" -> Map("query" -> input.inputs.getOrElse("question", ""))),
@@ -97,7 +97,7 @@ class ReActSuite extends FunSuite:
           case entries: Seq[?]    => entries.toVector
         }.getOrElse(Vector.empty)
         Right(
-          PredictionData(
+          DynamicPrediction(
             values = Map(
               "answer" -> s"Tools executed: ${batch.size}"
             )
@@ -109,7 +109,7 @@ class ReActSuite extends FunSuite:
 
     override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       Right(
-        PredictionData(
+        DynamicPrediction(
           values = Map(
             "answer" -> "Final without tools",
             "tool_calls" -> Vector(

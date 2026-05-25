@@ -7,7 +7,7 @@ import dspy4s.adapters.JsonStreamingState
 import dspy4s.adapters.XmlStreamingState
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
@@ -299,7 +299,7 @@ class StreamingPortedSuite extends FunSuite:
       override val moduleName: String = "my_program"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, Map.empty), Vector(tool)).map { _ =>
-          PredictionData(values = Map("answer" -> "blue"))
+          DynamicPrediction(values = Map("answer" -> "blue"))
         }
 
     given RuntimeContext = RuntimeEnvironment.current

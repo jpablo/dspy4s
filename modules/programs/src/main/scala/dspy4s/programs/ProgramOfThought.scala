@@ -5,7 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout

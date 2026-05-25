@@ -11,7 +11,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleEndEvent
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.PredictionData
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeContextData
 import dspy4s.core.contracts.SettingKeys
@@ -59,7 +59,7 @@ class ProgramRuntimeSuite extends FunSuite:
 
   private final class EchoProgram extends BasePredictProgram("echo"):
     override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(PredictionData(values = call.inputs.updated("answer", "ok")))
+      Right(DynamicPrediction(values = call.inputs.updated("answer", "ok")))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
