@@ -3,10 +3,26 @@ package dspy4s.core.contracts
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
-trait Parameter:
-  def name: String
-  def reset(): Parameter
-
+/** The universal callable contract for everything in dspy4s -- predicts, composite programs, optimizers' wrapped
+  * candidates, anything you can invoke with an input and get back an `Either[DspyError, Out]`.
+  *
+  * Variance is the standard "function" variance: contravariant in `In` (a `Module[Any, X]` can satisfy a position
+  * expecting `Module[ProgramCall, X]`), covariant in `Out` (a `Module[I, PredictionData]` satisfies
+  * `Module[I, DynamicPrediction]`). This makes program composition compose naturally with subtyping.
+  *
+  *   - [[moduleName]] is the public identity. Used by callbacks, trace entries, and stream-listener routing -- so
+  *     end users can recognize a program by its module name in logs and traces. By convention: snake_case
+  *     (`"predict"`, `"chain_of_thought"`, `"react"`).
+  *   - [[run]] is the synchronous entry. The required `using RuntimeContext` carries the active settings (LM,
+  *     adapter, callbacks, cache), so the caller never threads them by hand.
+  *   - [[arun]] is the async entry. The default wraps `run` in a `Future.successful` -- adequate for tests and
+  *     simple cases. [[dspy4s.programs.runtime.BasePredictProgram]] overrides it with
+  *     [[dspy4s.core.runtime.ContextPropagation.future]] so the callback / trace / `ActivePredictContext` thread-
+  *     locals propagate across the thread boundary correctly.
+  *
+  * Notable extensions: [[dspy4s.programs.contracts.PredictProgram]] (the predict-shaped subtype every
+  * `DynamicPredict` / composite program ultimately extends).
+  */
 trait Module[-In, +Out]:
   def moduleName: String
 
@@ -14,11 +30,3 @@ trait Module[-In, +Out]:
 
   def arun(input: In)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Out]] =
     Future.successful(run(input))
-
-trait StatefulModule[-In, +Out] extends Module[In, Out]:
-  def dumpState: Map[String, Any]
-  def loadState(state: Map[String, Any]): Either[DspyError, StatefulModule[In, Out]]
-
-trait ModuleGraph:
-  def namedParameters: Vector[(String, Parameter)]
-  def namedSubModules: Vector[(String, Module[?, ?])]

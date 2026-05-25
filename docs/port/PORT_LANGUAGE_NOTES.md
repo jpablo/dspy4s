@@ -155,7 +155,7 @@ context-manager sense — the equivalent is a function that takes a thunk.
 | Python | dspy4s | Where |
 |---|---|---|
 | `predict_name` derived from `self.predict1` field name via `__getattribute__` walking | `Predict(signature, name = Some("predict1"))` — explicit. Defaults to `"predict"`. | `programs/Predict.scala`, [`PORT_MAP.md` §4](PORT_MAP.md#4-behavioral-deltas) |
-| Iterate `__dict__` to collect submodules for `named_parameters()` | `ModuleGraph` trait declares `namedSubModules: Vector[(String, Module[?, ?])]` and `namedParameters: Vector[(String, Parameter)]` — implementations return them by hand. | `core/contracts/Module.scala` |
+| Iterate `__dict__` to collect submodules for `named_parameters()` | Not ported. Optimizers use the `PredictOps[P]` typeclass to read each program's `demos` / `layout` directly, bypassing the generic walk entirely. An earlier `ModuleGraph` / `BaseModule` port shipped in Phase 1 and was removed once `PredictOps` proved sufficient. | `optimize/PredictOps.scala` |
 
 **Why:** Scala has reflection but it's runtime, slow, and a footgun. The
 explicit-naming style requires more keystrokes from users (`name = Some(...)`)

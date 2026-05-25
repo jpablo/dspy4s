@@ -38,7 +38,7 @@ Implement:
 - Field metadata and defaults.
 - Signature mutation operations.
 - `Example`, `Prediction`, `Completions`.
-- Module tree traversal (`named_parameters`, `named_sub_modules`) equivalent behavior.
+- Module tree traversal (`named_parameters`, `named_sub_modules`) equivalent behavior. (Shipped in Phase 1, removed in May 2026: the typeclass-based `PredictOps[P]` introduced in Phase 7 superseded it and the `Parameter` / `ModuleGraph` walk had no remaining consumer.)
 
 Acceptance tests (ported):
 - `tests/signatures/test_signature.py`
