@@ -9,7 +9,7 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
@@ -54,10 +54,10 @@ final case class XMLAdapter(
       )
     )
 
-  override def streamingState(signature: SignatureSchema): Option[AdapterStreamingState] =
+  override def streamingState(signature: SignatureLayout): Option[AdapterStreamingState] =
     Some(new XmlStreamingState(signature.outputFields))
 
-  override def parse(signature: SignatureSchema, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+  override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     parseStructured(signature, output).orElse {
       if allowTextFallbackForSingleOutput && signature.outputFields.size == 1 then
         val field = signature.outputFields.head
@@ -74,7 +74,7 @@ final case class XMLAdapter(
       else Left(ParseError("adapter", "XML parse failed and no fallback was applied"))
     }
 
-  private def parseStructured(signature: SignatureSchema, output: LmOutput): Either[DspyError, ParsedOutput] =
+  private def parseStructured(signature: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
     for
       xmlText <- extractXml(output.text)
       document <- parseXml(xmlText)
@@ -87,7 +87,7 @@ final case class XMLAdapter(
       }
     yield ParsedOutput(values = values, rawText = Some(output.text), metadata = Map("adapter" -> name))
 
-  private def buildOutputXml(signature: SignatureSchema, values: Map[String, Any]): String =
+  private def buildOutputXml(signature: SignatureLayout, values: Map[String, Any]): String =
     val body = signature.outputFields.flatMap { field =>
       values.get(field.name).map(value => s"<${field.name}>${escapeXml(value.toString)}</${field.name}>")
     }.mkString

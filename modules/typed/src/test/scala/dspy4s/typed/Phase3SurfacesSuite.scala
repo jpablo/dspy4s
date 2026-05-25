@@ -1,8 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  FieldMetadata, FieldRole, NotFoundError, PredictionData, SignatureSchema,
-  SignatureSpec, TypeRef
+  FieldMetadata, FieldRole, NotFoundError, PredictionData, SignatureLayout, TypeRef
 }
 import munit.FunSuite
 
@@ -26,7 +25,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   // ── Builder API ─────────────────────────────────────────────────────────
 
-  test("builder emits a SignatureSchema with input then output fields in declaration order") {
+  test("builder emits a SignatureLayout with input then output fields in declaration order") {
     val sig = Signature
       .builder("Classify")
       .input[String]("comment")
@@ -129,7 +128,7 @@ class Phase3SurfacesSuite extends FunSuite:
   // ── Cross-surface parity ────────────────────────────────────────────────
 
   test("builder fields are normalized (inferred prefix + description)") {
-    // SignatureSpec.create routes through FieldSpec.normalize, so each
+    // SignatureLayout.create routes through FieldSpec.normalize, so each
     // FieldSpec gets a prefix derived from its name and a description
     // template. Adapters depend on these for prompt rendering.
     val sig = Signature
@@ -156,7 +155,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder rejects invalid field names by throwing IllegalArgumentException") {
-    // SignatureSpec.create validates identifiers. The builder routes the
+    // SignatureLayout.create validates identifiers. The builder routes the
     // failure into a thrown exception (programmer error at construction).
     intercept[IllegalArgumentException] {
       Signature

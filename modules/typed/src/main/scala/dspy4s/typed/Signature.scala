@@ -1,10 +1,10 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{FieldRole, SignatureSchema, SignatureSpec}
+import dspy4s.core.contracts.{FieldRole, SignatureLayout}
 import kyo.Schema
 
 /** A signature with compile-time knowledge of its input (`I`) and output
-  * (`O`) shapes. Wraps an untyped `SignatureSchema` for compatibility with the
+  * (`O`) shapes. Wraps an untyped `SignatureLayout` for compatibility with the
   * existing `DynamicPredict` / adapter / runtime stack — adapters still see the
   * runtime `fields` vector and consume it as today; the typed layer
   * additionally carries `Shape[I]` / `Shape[O]` for input encoding and
@@ -15,19 +15,19 @@ import kyo.Schema
   */
 final case class Signature[I, O](
     name: String,
-    untyped: SignatureSchema,
+    untyped: SignatureLayout,
     inputShape: Shape[I],
     outputShape: Shape[O]
 ):
 
-  /** SignatureSchema-level instructions carried into adapter prompt formatting.
-    * This mirrors the underlying untyped `SignatureSchema` API while preserving
+  /** SignatureLayout-level instructions carried into adapter prompt formatting.
+    * This mirrors the underlying untyped `SignatureLayout` API while preserving
     * the typed input/output shapes.
     */
   def instructions: Option[String] = untyped.instructions
 
   /** Replace signature-level instructions. Empty strings keep the current
-    * untyped `SignatureSchema.withInstructions` behavior and leave the signature
+    * untyped `SignatureLayout.withInstructions` behavior and leave the signature
     * unchanged.
     */
   def withInstructions(text: String): Signature[I, O] =
@@ -44,7 +44,7 @@ object Signature:
     * (matching the `inputFields ++ outputFields` ordering used everywhere
     * else in dspy4s).
     *
-    * Routed through `SignatureSpec.create` so fields are normalized
+    * Routed through `SignatureLayout.create` so fields are normalized
     * (inferred prefix + description) and standard validations apply.
     * Case-class field names are always valid Scala identifiers, so the
     * `.fold(throw _, identity)` is a defensive measure -- it should
@@ -61,7 +61,7 @@ object Signature:
     val inShape  = Shape.derivedWithRole[I](FieldRole.Input)
     val outShape = Shape.derivedWithRole[O](FieldRole.Output)
     val fields   = inShape.fieldSpecs ++ outShape.fieldSpecs
-    val sig = SignatureSpec
+    val sig = SignatureLayout
       .create(
         name = name,
         fields = fields,
@@ -76,7 +76,7 @@ object Signature:
     Signature(name, sig, inShape, outShape)
 
   /** Programmatic builder for callers that don't want a case class per
-    * signature. Returns a plain `SignatureSchema` — see `SignatureBuilder`. */
+    * signature. Returns a plain `SignatureLayout` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
   /** Function/method macro entry. Inspects a method reference at compile
@@ -118,7 +118,7 @@ object Signature:
 
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
     * compile time and materializes a `Signature` whose untyped
-    * `SignatureSchema` reflects the trait's `InputField` / `OutputField` members.
+    * `SignatureLayout` reflects the trait's `InputField` / `OutputField` members.
     *
     * The precise input and output types are named tuples. That lets users
     * construct inputs with named-tuple syntax and read outputs with typed

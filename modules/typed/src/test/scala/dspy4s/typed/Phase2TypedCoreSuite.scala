@@ -45,7 +45,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(outputs, Vector("sentiment", "confidence"))
   }
 
-  test("Signature.untyped emits the same shape as a hand-written SignatureSpec") {
+  test("Signature.untyped emits the same shape as a hand-written SignatureLayout") {
     val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](
       name = "Emotion",
       instructions = "Classify emotion."

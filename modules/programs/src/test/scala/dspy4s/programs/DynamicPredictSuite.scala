@@ -43,7 +43,7 @@ class PredictSuite extends FunSuite:
         )
       )
 
-    override def parse(signature: dspy4s.core.contracts.SignatureSchema, output: LmOutput)(using
+    override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(

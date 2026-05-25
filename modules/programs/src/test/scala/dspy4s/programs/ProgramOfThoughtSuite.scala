@@ -10,7 +10,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.SettingsData
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
@@ -64,7 +64,7 @@ class ProgramOfThoughtSuite extends FunSuite:
     override val name: String = "scripted-pot-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(signature: SignatureSchema, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
       val names = signature.outputFields.map(_.name)
       if names.contains("generated_code") then
         Right(ParsedOutput(values = Map("generated_code" -> output.text) ++

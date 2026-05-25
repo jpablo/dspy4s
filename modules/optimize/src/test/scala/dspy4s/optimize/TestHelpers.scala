@@ -6,13 +6,13 @@ import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 
 final case class ScriptedPredictProgram(
     answers: Map[String, String],
-    signature: SignatureSchema,
+    signature: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     failsWith: Option[RuntimeException] = None
 ) extends PredictProgram:
@@ -25,7 +25,7 @@ final case class ScriptedPredictProgram(
         Right(PredictionData(Map("answer" -> answers.getOrElse(q, "unknown"))))
 
 final case class DemoAwarePredictProgram(
-    signature: SignatureSchema,
+    signature: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     answers: Map[String, String] = Map.empty
 ) extends PredictProgram:
@@ -41,7 +41,7 @@ final case class DemoAwarePredictProgram(
 object DemoAwarePredictProgram:
   given demoAwareOps: PredictOps[DemoAwarePredictProgram] with
     def name(program: DemoAwarePredictProgram): String = program.moduleName
-    def signature(program: DemoAwarePredictProgram): SignatureSchema = program.signature
+    def signature(program: DemoAwarePredictProgram): SignatureLayout = program.signature
     def demos(program: DemoAwarePredictProgram): Vector[Example] = program.demos
     def withDemos(program: DemoAwarePredictProgram, demos: Vector[Example]): DemoAwarePredictProgram =
       program.copy(demos = demos)
@@ -49,7 +49,7 @@ object DemoAwarePredictProgram:
 object ScriptedPredictProgram:
   given scriptedOps: PredictOps[ScriptedPredictProgram] with
     def name(program: ScriptedPredictProgram): String = program.moduleName
-    def signature(program: ScriptedPredictProgram): SignatureSchema = program.signature
+    def signature(program: ScriptedPredictProgram): SignatureLayout = program.signature
     def demos(program: ScriptedPredictProgram): Vector[Example] = program.demos
     def withDemos(program: ScriptedPredictProgram, demos: Vector[Example]): ScriptedPredictProgram =
       program.copy(demos = demos)

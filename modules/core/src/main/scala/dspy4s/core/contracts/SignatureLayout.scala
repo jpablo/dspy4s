@@ -88,20 +88,53 @@ object FieldSpec:
       description = field.description.orElse(Some(s"$${${field.name}}"))
     )
 
-trait SignatureSchema:
-  def name: String
-  def fields: Vector[FieldSpec]
-  def instructions: Option[String]
+/** The compiled runtime layout of a typed Signature: a name, optional
+  * instructions, and an ordered list of `FieldSpec`s. Adapters, programs,
+  * and the rest of the runtime stack consume this directly; the typed
+  * `Signature[I, O]` is the user-facing wrapper around it.
+  *
+  * Construction paths:
+  *   - The typed surface (`dspy4s.typed.Signature.of[T]`,
+  *     `Signature.fromType[F]`, `Signature.derived[I, O]`) — the
+  *     primary path; the resulting `Signature.layout` is the value
+  *     adapters see.
+  *   - `SignatureLayout.create(name, fields, instructions)` —
+  *     validating + normalizing factory for programmatic construction.
+  *   - `SignatureLayout(dsl, instructions)` — string-DSL parser
+  *     (legacy escape hatch; prefer `dspy4s.typed.Signature.fromString`
+  *     from user code).
+  *
+  * The case-class `apply(name, fields, instructions)` form is also
+  * available but skips normalization — only use it from internal code
+  * that builds the field list deliberately. */
+final case class SignatureLayout(
+    name: String,
+    fields: Vector[FieldSpec],
+    instructions: Option[String] = None
+):
+  require(name.nonEmpty, "SignatureLayout name cannot be empty")
+  require(
+    fields.map(_.name).distinct.size == fields.size,
+    "SignatureLayout fields must have unique names"
+  )
+  require(
+    fields.forall(f => FieldSpec.validateName(f.name)),
+    "SignatureLayout fields must be valid identifiers"
+  )
 
-  def withFields(updated: Vector[FieldSpec]): SignatureSchema
-  def withInstructions(text: Option[String]): SignatureSchema
+  def withFields(updated: Vector[FieldSpec]): SignatureLayout = copy(fields = updated)
 
-  final def inputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Input)
-  final def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
+  def withInstructions(text: Option[String]): SignatureLayout = copy(instructions = text)
 
-  final def append(field: FieldSpec): SignatureSchema = withFields(fields :+ field)
+  def withInstructions(text: String): SignatureLayout =
+    if text.isEmpty then this else withInstructions(Some(text))
 
-  final def insert(index: Int, field: FieldSpec): Either[DspyError, SignatureSchema] =
+  def inputFields: Vector[FieldSpec]  = fields.filter(_.role == FieldRole.Input)
+  def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
+
+  def append(field: FieldSpec): SignatureLayout = withFields(fields :+ field)
+
+  def insert(index: Int, field: FieldSpec): Either[DspyError, SignatureLayout] =
     val (inputs, outputs) = (inputFields, outputFields)
     val target = if field.role == FieldRole.Input then inputs else outputs
     val normalizedIndex = if index < 0 then target.size + index + 1 else index
@@ -118,16 +151,17 @@ trait SignatureSchema:
         else inputs ++ updatedTarget
       Right(withFields(updatedFields))
 
-  final def prepend(field: FieldSpec): SignatureSchema =
+  def prepend(field: FieldSpec): SignatureLayout =
     val sameRole = fields.filter(_.role == field.role)
     val otherRole = fields.filterNot(_.role == field.role)
     field.role match
       case FieldRole.Input  => withFields((field +: sameRole) ++ otherRole)
       case FieldRole.Output => withFields(otherRole ++ (field +: sameRole))
 
-  final def delete(fieldName: String): SignatureSchema = withFields(fields.filterNot(_.name == fieldName))
+  def delete(fieldName: String): SignatureLayout =
+    withFields(fields.filterNot(_.name == fieldName))
 
-  final def updateField(fieldName: String, metadata: Map[String, String]): SignatureSchema =
+  def updateField(fieldName: String, metadata: Map[String, String]): SignatureLayout =
     withFields(
       fields.map { field =>
         if field.name == fieldName then field.copy(metadata = field.metadata ++ metadata)
@@ -135,16 +169,17 @@ trait SignatureSchema:
       }
     )
 
-  final def withUpdatedField(
+  def withUpdatedField(
       fieldName: String,
       typeRef: Option[TypeRef] = None,
       description: Option[String] = None,
       prefix: Option[String] = None,
       defaultValue: Option[Any] = None,
       metadata: Map[String, String] = Map.empty
-  ): Either[DspyError, SignatureSchema] =
+  ): Either[DspyError, SignatureLayout] =
     fields.find(_.name == fieldName) match
-      case None => Left(NotFoundError("field", s"Field '$fieldName' does not exist in signature '$name'"))
+      case None =>
+        Left(NotFoundError("field", s"Field '$fieldName' does not exist in signature '$name'"))
       case Some(existing) =>
         val updated = existing.copy(
           typeRef = typeRef.getOrElse(existing.typeRef),
@@ -155,7 +190,7 @@ trait SignatureSchema:
         )
         Right(withFields(fields.map { field => if field.name == fieldName then updated else field }))
 
-  final def withUpdatedFields(
+  def withUpdatedFields(
       fieldName: String,
       typeRef: Option[TypeRef] = None,
       typeToken: Option[String] = None,
@@ -163,7 +198,7 @@ trait SignatureSchema:
       prefix: Option[String] = None,
       defaultValue: Option[Any] = None,
       metadata: Map[String, String] = Map.empty
-  ): Either[DspyError, SignatureSchema] =
+  ): Either[DspyError, SignatureLayout] =
     withUpdatedField(
       fieldName = fieldName,
       typeRef = typeRef.orElse(typeToken.map(TypeRef.fromToken)),
@@ -173,8 +208,8 @@ trait SignatureSchema:
       metadata = metadata
     )
 
-  final def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureSchema] =
-    updates.foldLeft[Either[DspyError, SignatureSchema]](Right(this)) { (acc, entry) =>
+  def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureLayout] =
+    updates.foldLeft[Either[DspyError, SignatureLayout]](Right(this)) { (acc, entry) =>
       val (fieldName, update) = entry
       acc.flatMap(
         _.withUpdatedFields(
@@ -189,18 +224,15 @@ trait SignatureSchema:
       )
     }
 
-  final def signatureString: String =
+  def signatureString: String =
     val inputs = inputFields.map(_.name).mkString(", ")
     val outputs = outputFields.map(_.name).mkString(", ")
     s"$inputs -> $outputs"
 
-  final def equalsByStructure(other: SignatureSchema): Boolean =
+  def equalsByStructure(other: SignatureLayout): Boolean =
     instructions == other.instructions && fields == other.fields
 
-  final def withInstructions(text: String): SignatureSchema =
-    if text.isEmpty then this else withInstructions(Some(text))
-
-  final def dumpState: Map[String, Any] =
+  def dumpState: Map[String, Any] =
     Map(
       "name" -> name,
       "instructions" -> instructions,
@@ -217,51 +249,47 @@ trait SignatureSchema:
       }
     )
 
-/** Companion sugar so call sites can write:
-  *
-  *   SignatureSchema("comment -> toxic: bool", instructions = "...")
-  *
-  * instead of `SignatureDsl.parse(...).map(_.withInstructions(Some(...)))`.
-  * Returns `Either[DspyError, SignatureSchema]` so parse errors stay strongly typed. */
-object SignatureSchema:
-  def apply(dsl: String, instructions: String = ""): Either[DspyError, SignatureSchema] =
+object SignatureLayout:
+
+  /** String-DSL parser kept on the companion as overloaded `apply` for
+    * source-compatibility with the pre-collapse `SignatureSchema(dsl, ...)`
+    * form. Prefer `dspy4s.typed.Signature.fromString` from user code; this
+    * factory is the internal entry point that the typed surface delegates
+    * to. */
+  def apply(dsl: String, instructions: String): Either[DspyError, SignatureLayout] =
     dspy4s.core.signatures.SignatureDsl
       .parse(dsl)
       .map(_.withInstructions(instructions))
 
-final case class SignatureSpec(
-    name: String,
-    fields: Vector[FieldSpec],
-    instructions: Option[String] = None
-) extends SignatureSchema:
-  require(name.nonEmpty, "SignatureSchema name cannot be empty")
-  require(fields.map(_.name).distinct.size == fields.size, "SignatureSchema fields must have unique names")
-  require(fields.forall(f => FieldSpec.validateName(f.name)), "SignatureSchema fields must be valid identifiers")
+  def apply(dsl: String): Either[DspyError, SignatureLayout] = apply(dsl, "")
 
-  override def withFields(updated: Vector[FieldSpec]): SignatureSchema = copy(fields = updated)
-  override def withInstructions(text: Option[String]): SignatureSchema = copy(instructions = text)
-
-object SignatureSpec:
+  /** Validating + normalizing factory. Returns `Left` with a structured
+    * `DspyError` when validation fails (empty name, no fields, duplicate
+    * names, invalid identifiers); on success, applies `FieldSpec.normalize`
+    * to each field so adapters see consistent prefixes / descriptions. */
   def create(
       name: String,
       fields: Vector[FieldSpec],
       instructions: Option[String] = None
-  ): Either[DspyError, SignatureSpec] =
-    if name.trim.isEmpty then Left(ValidationError("SignatureSchema name cannot be empty"))
-    else if fields.isEmpty then Left(ValidationError("SignatureSchema must have at least one field"))
+  ): Either[DspyError, SignatureLayout] =
+    if name.trim.isEmpty then Left(ValidationError("SignatureLayout name cannot be empty"))
+    else if fields.isEmpty then Left(ValidationError("SignatureLayout must have at least one field"))
     else if fields.map(_.name).distinct.size != fields.size then
-      Left(ValidationError("SignatureSchema fields must have unique names"))
+      Left(ValidationError("SignatureLayout fields must have unique names"))
     else if fields.exists(f => !FieldSpec.validateName(f.name)) then
-      Left(ValidationError("SignatureSchema fields must be valid identifiers"))
+      Left(ValidationError("SignatureLayout fields must be valid identifiers"))
     else
       val normalized = fields.map(FieldSpec.normalize)
-      Right(SignatureSpec(name = name, fields = normalized, instructions = instructions))
+      Right(SignatureLayout(name = name, fields = normalized, instructions = instructions))
 
-  def fromState(state: Map[String, Any]): Either[DspyError, SignatureSpec] =
+  /** Re-hydrate a layout from the `Map[String, Any]` produced by
+    * `dumpState`. Used by persistence / state-snapshot paths. */
+  def fromState(state: Map[String, Any]): Either[DspyError, SignatureLayout] =
     def readName: Either[DspyError, String] =
       state.get("name") match
         case Some(value: String) if value.nonEmpty => Right(value)
-        case _                                      => Left(ValidationError("SignatureSchema state is missing non-empty 'name'"))
+        case _ =>
+          Left(ValidationError("SignatureLayout state is missing non-empty 'name'"))
 
     def readInstructions: Either[DspyError, Option[String]] =
       state.get("instructions") match
@@ -333,7 +361,7 @@ object SignatureSpec:
               metadata = metadata
             )
           }
-        case _ => Left(ValidationError("SignatureSchema state is missing 'fields'"))
+        case _ => Left(ValidationError("SignatureLayout state is missing 'fields'"))
 
     for
       name <- readName
@@ -343,4 +371,4 @@ object SignatureSpec:
     yield signature
 
 trait SignatureParser:
-  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureSchema]
+  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout]

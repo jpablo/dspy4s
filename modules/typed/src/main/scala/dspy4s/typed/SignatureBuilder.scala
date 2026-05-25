@@ -1,10 +1,10 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  FieldRole, FieldSpec, SignatureSchema, SignatureSpec
+  FieldRole, FieldSpec, SignatureLayout
 }
 
-/** Fluent, type-driven builder for runtime `SignatureSchema` values.
+/** Fluent, type-driven builder for runtime `SignatureLayout` values.
   *
   * The case-class derivation in `Signature.derived[I, O]` is the
   * primary typed-I/O surface; this builder is the complementary
@@ -18,7 +18,7 @@ import dspy4s.core.contracts.{
   * support that case-class derivation gets in Phase 2 are available here
   * without writing a case class.
   *
-  * Returns a plain `SignatureSchema` from `.build`; callers needing typed
+  * Returns a plain `SignatureLayout` from `.build`; callers needing typed
   * `DynamicPredict.run` should use `Signature.derived[I, O]` instead.
   */
 final class SignatureBuilder private[typed] (
@@ -29,12 +29,12 @@ final class SignatureBuilder private[typed] (
 ):
 
   /** Append an input field typed `T`. Order of `.input` calls becomes the
-    * input-field order in the resulting `SignatureSchema`. */
+    * input-field order in the resulting `SignatureLayout`. */
   def input[T](name: String)(using dec: FieldCodec[T]): SignatureBuilder =
     copy(inputs = inputs :+ fieldSpec(name, FieldRole.Input, dec))
 
   /** Append an output field typed `T`. Order of `.output` calls becomes the
-    * output-field order in the resulting `SignatureSchema`. */
+    * output-field order in the resulting `SignatureLayout`. */
   def output[T](name: String)(using dec: FieldCodec[T]): SignatureBuilder =
     copy(outputs = outputs :+ fieldSpec(name, FieldRole.Output, dec))
 
@@ -42,17 +42,17 @@ final class SignatureBuilder private[typed] (
   def instructions(text: String): SignatureBuilder =
     copy(instructionsText = Option(text).filter(_.nonEmpty))
 
-  /** Finalize the builder into a runtime `SignatureSchema`. The resulting fields
+  /** Finalize the builder into a runtime `SignatureLayout`. The resulting fields
     * are all inputs followed by all outputs, matching the ordering used by
     * the rest of dspy4s.
     *
-    * Routed through `SignatureSpec.create` so the resulting fields are
+    * Routed through `SignatureLayout.create` so the resulting fields are
     * normalized (inferred prefix + description) and standard validations
     * apply (non-empty fields, unique names, valid identifiers). Invalid
     * input from the builder surfaces as `IllegalArgumentException` —
     * this is a programmer-error path, not user-input handling. */
-  def build: SignatureSchema =
-    SignatureSpec
+  def build: SignatureLayout =
+    SignatureLayout
       .create(
         name         = sigName,
         fields       = inputs ++ outputs,

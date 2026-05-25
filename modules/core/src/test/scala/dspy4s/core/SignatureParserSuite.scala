@@ -3,7 +3,7 @@ package dspy4s.core
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.FieldUpdate
-import dspy4s.core.contracts.SignatureSpec
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.signatures.DefaultSignatureParser
@@ -114,7 +114,7 @@ class SignatureParserSuite extends FunSuite:
   test("signature dumpState and fromState roundtrip") {
     val signature = SignatureDsl.parse("question: str -> answer: string").toOption.get
     val state = signature.dumpState
-    val rebuilt = SignatureSpec.fromState(state)
+    val rebuilt = SignatureLayout.fromState(state)
 
     assert(rebuilt.isRight)
     assert(signature.equalsByStructure(rebuilt.toOption.get))
@@ -134,7 +134,7 @@ class SignatureParserSuite extends FunSuite:
       )
     )
 
-    val rebuilt = SignatureSpec.fromState(state)
+    val rebuilt = SignatureLayout.fromState(state)
     assert(rebuilt.isLeft)
     assert(rebuilt.left.toOption.get.isInstanceOf[ValidationError])
   }

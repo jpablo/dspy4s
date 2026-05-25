@@ -3,16 +3,16 @@ package dspy4s.core.signatures
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.SignatureParser
-import dspy4s.core.contracts.SignatureSpec
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 
 final class DefaultSignatureParser extends SignatureParser:
-  override def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureSchema] =
+  override def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
     val trimmed = signatureDsl.trim
-    if trimmed.isEmpty then Left(ValidationError("SignatureSchema DSL cannot be empty"))
+    if trimmed.isEmpty then Left(ValidationError("SignatureLayout DSL cannot be empty"))
     else
       val arrowCount = "->".r.findAllIn(trimmed).length
       if arrowCount != 1 then
@@ -22,7 +22,7 @@ final class DefaultSignatureParser extends SignatureParser:
         for
           inputs <- parseSegment(inputSegment, FieldRole.Input)
           outputs <- parseSegment(outputSegment, FieldRole.Output)
-          signature <- SignatureSpec.create(name = name, fields = inputs ++ outputs)
+          signature <- SignatureLayout.create(name = name, fields = inputs ++ outputs)
         yield signature
 
   private def parseSegment(segment: String, role: FieldRole): Either[DspyError, Vector[FieldSpec]] =

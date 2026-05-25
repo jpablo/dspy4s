@@ -28,7 +28,7 @@ class ChainOfThoughtSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("q")))))
 
-    override def parse(signature: dspy4s.core.contracts.SignatureSchema, output: LmOutput)(using
+    override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(

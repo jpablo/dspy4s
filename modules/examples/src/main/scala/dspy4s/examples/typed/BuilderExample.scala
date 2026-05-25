@@ -3,7 +3,7 @@
  *
  * The builder is the right choice when a case class per signature is
  * overkill (REPL exploration, dynamic shapes assembled from config,
- * tests). It produces a runtime `SignatureSchema` directly; users who want
+ * tests). It produces a runtime `SignatureLayout` directly; users who want
  * typed `DynamicPredict.run` should use the trait-spec, method, or case-class
  * APIs instead.
  *
@@ -15,13 +15,13 @@
  */
 package dspy4s.examples.typed
 
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.typed.Signature
 
 object BuilderExample:
 
   /** A simple toxicity check signature, built fluently. */
-  val toxicity: SignatureSchema =
+  val toxicity: SignatureLayout =
     Signature
       .builder("Toxicity")
       .input[String]("comment")
@@ -37,7 +37,7 @@ object BuilderExample:
     * `Emotion`) gives the builder enum metadata for free — adapters can
     * read `FieldSpec.metadata(FieldMetadata.EnumCases)` to render the
     * allowed values into the prompt. */
-  val classifyEmotion: SignatureSchema =
+  val classifyEmotion: SignatureLayout =
     Signature
       .builder("Emotion")
       .input[String]("sentence")

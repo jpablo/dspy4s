@@ -1,6 +1,6 @@
 package dspy4s.typed.internal
 
-import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureSpec}
+import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureLayout}
 import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig, FieldCodec}
 import scala.quoted.*
 
@@ -163,7 +163,7 @@ private[typed] object SpecMacro:
         '{
           val inFields:  Vector[FieldSpec] = Vector(${ Varargs(inputFieldExprs)  }*)
           val outFields: Vector[FieldSpec] = Vector(${ Varargs(outputFieldExprs) }*)
-          val sig = SignatureSpec
+          val sig = SignatureLayout
             .create(
               name         = ${ sigNameExpr },
               fields       = inFields ++ outFields,

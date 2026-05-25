@@ -48,7 +48,7 @@ object Tools {
   // | import dspy
   // |
   // | class ToolSignature(dspy.Signature):
-  // |     """SignatureSchema for manual tool handling."""
+  // |     """SignatureLayout for manual tool handling."""
   // |     question: str = dspy.InputField()
   // |     tools: list[dspy.Tool] = dspy.InputField()
   // |     outputs: dspy.ToolCalls = dspy.OutputField()

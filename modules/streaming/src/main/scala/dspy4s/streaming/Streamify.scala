@@ -7,7 +7,7 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
@@ -149,7 +149,7 @@ object Streamify:
   /** Best-effort recursive collection of `(predictName, signature)` from
     * the well-known program types. Unknown composite types contribute
     * nothing. */
-  private def collectKnownSignatures(program: Module[?, ?]): Vector[(String, SignatureSchema)] =
+  private def collectKnownSignatures(program: Module[?, ?]): Vector[(String, SignatureLayout)] =
     program match
       case p: DynamicPredict =>
         Vector((p.moduleName, p.signature))

@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  DspyError, RuntimeContext, SettingKeys, SettingsData, SignatureSchema
+  DspyError, RuntimeContext, SettingKeys, SettingsData, SignatureLayout
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{
@@ -45,7 +45,7 @@ class TypedPredictSuite extends FunSuite:
         Message(role = MessageRole.User, text = Some(q))
       )))
 
-    override def parse(signature: SignatureSchema, output: LmOutput)(using RuntimeContext)
+    override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = Map(
         "answer" -> output.text,
@@ -132,7 +132,7 @@ class TypedPredictSuite extends FunSuite:
         Right(FormattedPrompt(messages = Vector(
           Message(role = MessageRole.User, text = Some("hi"))
         )))
-      override def parse(signature: SignatureSchema, output: LmOutput)(using RuntimeContext) =
+      override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values = Map(
           "answer" -> "x",
           "score"  -> 0.5

@@ -10,7 +10,7 @@ import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureSchema
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.lm.contracts.LanguageModel
@@ -25,7 +25,7 @@ import dspy4s.programs.runtime.BasePredictProgram
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
 final case class DynamicPredict(
-    signature: SignatureSchema,
+    signature: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     name: Option[String] = None,
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
