@@ -11,12 +11,12 @@ import dspy4s.core.contracts.SignatureSchema
 final case class ActivePredict(name: String, signature: SignatureSchema)
 
 /** Thread-local stack of [[ActivePredict]] entries, pushed for the duration of
-  * a `Predict.execute` body and read by downstream components (notably
+  * a `DynamicPredict.execute` body and read by downstream components (notably
   * `StreamingLanguageModelWrapper`) that need to know which predictor's
   * signature applies to the LM call they are observing.
   *
-  * Stack semantics handle nested calls (e.g. a `Predict` invoked from inside
-  * another `Predict.run` via a custom composite module): the most recent push
+  * Stack semantics handle nested calls (e.g. a `DynamicPredict` invoked from inside
+  * another `DynamicPredict.run` via a custom composite module): the most recent push
   * always wins via `current`.
   *
   * Context is propagated across thread boundaries by

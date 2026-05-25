@@ -12,7 +12,7 @@ import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.ChainOfThought
-import dspy4s.programs.Predict
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
@@ -32,7 +32,7 @@ object Streamify:
     * [[StreamingLanguageModel]]: it consults [[dspy4s.core.runtime.ActivePredictContext]]
     * at the start of each `call()` to pick the active predictor's signature
     * and name, then builds a fresh adapter state machine for that signature.
-    * As a result, programs that internally invoke multiple `Predict`s with
+    * As a result, programs that internally invoke multiple `DynamicPredict`s with
     * different signatures stream per-field tokens correctly under each
     * predictor's own framing.
     */
@@ -47,7 +47,7 @@ object Streamify:
     // Validate listener field names against the program structure as far as
     // we can statically see it. This is dspy4s's equivalent of Python's
     // `find_predictor_for_stream_listeners`: warn (don't fail) if a listener
-    // is subscribed to a field name that no Predict in the program emits.
+    // is subscribed to a field name that no DynamicPredict in the program emits.
     // For composite programs whose internals we can't introspect (a user-
     // defined `PredictProgram`), validation is silently skipped.
     validateListeners(program, streamListeners, warningSink)
@@ -112,7 +112,7 @@ object Streamify:
 
       queue.asIterator
 
-  /** Walk the program tree, collect every Predict-derived signature we can
+  /** Walk the program tree, collect every DynamicPredict-derived signature we can
     * statically see, and warn for each listener whose `signatureFieldName`
     * does not appear in any of them. Composite programs that aren't one of
     * the well-known shapes contribute nothing — for those, validation is
@@ -132,7 +132,7 @@ object Streamify:
         warningSink(
           s"StreamListener(signatureFieldName=${listener.signatureFieldName}" +
             listener.predictName.fold("")(n => s", predictName=$n") +
-            s") will never fire: no Predict in the program emits that output field. " +
+            s") will never fire: no DynamicPredict in the program emits that output field. " +
             s"Known output fields: ${knownFields.toSeq.sorted.mkString(", ")}."
         )
       else
@@ -140,7 +140,7 @@ object Streamify:
           if !knownPredictNames.contains(name) then
             warningSink(
               s"StreamListener(signatureFieldName=${listener.signatureFieldName}, " +
-                s"predictName=$name) will never fire: no Predict in the program is named '$name'. " +
+                s"predictName=$name) will never fire: no DynamicPredict in the program is named '$name'. " +
                 s"Known predict names: ${knownPredictNames.toSeq.sorted.mkString(", ")}."
             )
         }
@@ -151,7 +151,7 @@ object Streamify:
     * nothing. */
   private def collectKnownSignatures(program: Module[?, ?]): Vector[(String, SignatureSchema)] =
     program match
-      case p: Predict =>
+      case p: DynamicPredict =>
         Vector((p.moduleName, p.signature))
       case cot: ChainOfThought =>
         cot.signature.toOption.map(sig => (cot.moduleName, sig)).toVector

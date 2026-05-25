@@ -40,5 +40,5 @@ final case class ChainOfThought(
   override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     for
       augmented <- signature
-      prediction <- Predict(signature = augmented, demos = demos, runtime = runtime).run(input)
+      prediction <- DynamicPredict(signature = augmented, demos = demos, runtime = runtime).run(input)
     yield prediction

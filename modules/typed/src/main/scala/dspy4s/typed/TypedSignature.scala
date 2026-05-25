@@ -5,7 +5,7 @@ import kyo.Schema
 
 /** A signature with compile-time knowledge of its input (`I`) and output
   * (`O`) shapes. Wraps an untyped `SignatureSchema` for compatibility with the
-  * existing `Predict` / adapter / runtime stack — adapters still see the
+  * existing `DynamicPredict` / adapter / runtime stack — adapters still see the
   * runtime `fields` vector and consume it as today; the typed layer
   * additionally carries `Shape[I]` / `Shape[O]` for input encoding and
   * output decoding.
@@ -123,7 +123,7 @@ object TypedSignature:
     * The precise input and output types are named tuples. That lets users
     * construct inputs with named-tuple syntax and read outputs with typed
     * dot-access while the runtime still flows through the same `Shape` /
-    * `Predict` / adapter pipeline as case-class signatures. */
+    * `DynamicPredict` / adapter pipeline as case-class signatures. */
   transparent inline def of[T <: Spec] =
     ${ internal.SpecMacro.ofImpl[T]('{ "" }, '{ "" }) }
 

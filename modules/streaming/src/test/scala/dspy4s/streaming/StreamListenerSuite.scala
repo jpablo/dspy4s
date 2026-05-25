@@ -19,7 +19,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.programs.Predict
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.StreamEvent
@@ -71,7 +71,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener(signatureFieldName = "answer"))
       )(Map("question" -> "x"))
 
@@ -103,7 +103,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(
           StreamListener("reasoning"),
           StreamListener("answer")
@@ -138,7 +138,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("q" -> "x"))
 
@@ -169,7 +169,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector.empty
       )(Map("q" -> "x"))
 
@@ -197,7 +197,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("q" -> "x"))
 
@@ -226,7 +226,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("q" -> "x"))
 
@@ -270,13 +270,13 @@ class StreamListenerSuite extends FunSuite:
       val grouped = tokens.groupMapReduce(_.fieldName)(_.chunk)(_ + _)
       assertEquals(grouped.get("reasoning"), Some("walked through it"))
       assertEquals(grouped.get("answer"), Some("42"))
-      // predictName is the innermost active Predict's name (matches Python
-      // DSPy parity). ChainOfThought delegates to a default-named inner Predict.
+      // predictName is the innermost active DynamicPredict's name (matches Python
+      // DSPy parity). ChainOfThought delegates to a default-named inner DynamicPredict.
       assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
     }
   }
 
-  test("ChainOfThought: listener filtering by predictName works against the inner Predict's name") {
+  test("ChainOfThought: listener filtering by predictName works against the inner DynamicPredict's name") {
     val chunks = Vector(
       LmChunk(
         text = "[[ ## reasoning ## ]]\nr\n[[ ## answer ## ]]\na\n[[ ## completed ## ]]",
@@ -325,7 +325,7 @@ class StreamListenerSuite extends FunSuite:
         Right("ok")
 
     val signature = SignatureDsl.parse("q -> answer, tool_name, tool_args").toOption.get
-    val innerPredict = Predict(signature = signature)
+    val innerPredict = DynamicPredict(signature = signature)
 
     RuntimeEnvironment.withSettings(
       SettingsData(
@@ -344,17 +344,17 @@ class StreamListenerSuite extends FunSuite:
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.chunk).mkString, "42")
-      // predictName is the innermost active Predict's name. ReAct's inner
-      // module is a default-named Predict, so tokens surface as "predict".
+      // predictName is the innermost active DynamicPredict's name. ReAct's inner
+      // module is a default-named DynamicPredict, so tokens surface as "predict".
       assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
     }
   }
 
-  test("multi-Predict composite: per-LM-call routing picks each Predict's own signature") {
+  test("multi-DynamicPredict composite: per-LM-call routing picks each DynamicPredict's own signature") {
     // Mirrors Python's tests/streaming/test_streaming.py::test_stream_listener_chat_adapter:
     // a user-defined Module composing two Predicts with different signatures.
-    // Each LM call must use the active Predict's signature to parse fields,
-    // and TokenEvents must carry that Predict's user-given name.
+    // Each LM call must use the active DynamicPredict's signature to parse fields,
+    // and TokenEvents must carry that DynamicPredict's user-given name.
     val perCallOutputs = Vector(
       "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
       "[[ ## judgement ## ]]\nconfident\n[[ ## completed ## ]]"
@@ -375,8 +375,8 @@ class StreamListenerSuite extends FunSuite:
 
     val composite = new PredictProgram:
       override val moduleName: String = "my_program"
-      private val predict1 = Predict(signature = sig1, name = Some("predict1"))
-      private val predict2 = Predict(signature = sig2, name = Some("predict2"))
+      private val predict1 = DynamicPredict(signature = sig1, name = Some("predict1"))
+      private val predict2 = DynamicPredict(signature = sig2, name = Some("predict2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.run(input)
@@ -403,7 +403,7 @@ class StreamListenerSuite extends FunSuite:
       )(Map("question" -> "what is the capital of france"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
-      // Token grouping per Predict.
+      // Token grouping per DynamicPredict.
       val perPredict = tokens.groupMap(_.predictName)(t => t.fieldName -> t.chunk)
       // Predict1 streamed the `answer` field.
       assertEquals(
@@ -435,7 +435,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("answer", predictName = Some("other-predict"))),
         warningSink = _ => () // suppress the expected validation warning
       )(Map("q" -> "x"))
@@ -469,8 +469,8 @@ class StreamListenerSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new PredictProgram:
       override val moduleName: String = "my_program"
-      private val predict1 = Predict(signature = sig, name = Some("predict1"))
-      private val predict2 = Predict(signature = sig, name = Some("predict2"))
+      private val predict1 = DynamicPredict(signature = sig, name = Some("predict1"))
+      private val predict2 = DynamicPredict(signature = sig, name = Some("predict2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _      <- predict1.run(input)
@@ -522,8 +522,8 @@ class StreamListenerSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new PredictProgram:
       override val moduleName: String = "my_program"
-      private val p1 = Predict(signature = sig, name = Some("p1"))
-      private val p2 = Predict(signature = sig, name = Some("p2"))
+      private val p1 = DynamicPredict(signature = sig, name = Some("p1"))
+      private val p2 = DynamicPredict(signature = sig, name = Some("p2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _ <- p1.run(input)
@@ -567,7 +567,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = sig),
+        program = DynamicPredict(signature = sig),
         streamListeners = Vector(
           StreamListener("nonexistent_field"),
           StreamListener("answer") // valid; should not warn
@@ -599,7 +599,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = sig),
+        program = DynamicPredict(signature = sig),
         streamListeners = Vector(StreamListener("answer", predictName = Some("nonexistent_predict"))),
         warningSink = sink
       )(Map("q" -> "x"))

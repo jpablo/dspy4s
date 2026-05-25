@@ -19,7 +19,7 @@ import dspy4s.core.contracts.{
   * without writing a case class.
   *
   * Returns a plain `SignatureSchema` from `.build`; callers needing typed
-  * `Predict.run` should use `TypedSignature.derived[I, O]` instead.
+  * `DynamicPredict.run` should use `TypedSignature.derived[I, O]` instead.
   */
 final class SignatureBuilder private[typed] (
     private val sigName: String,

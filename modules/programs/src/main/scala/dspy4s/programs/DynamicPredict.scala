@@ -24,7 +24,7 @@ import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.runtime.BasePredictProgram
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
-final case class Predict(
+final case class DynamicPredict(
     signature: SignatureSchema,
     demos: Vector[Example] = Vector.empty,
     name: Option[String] = None,

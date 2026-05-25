@@ -122,7 +122,7 @@ final case class CodeAct(
       description = Some("History of generated code and observations.")
     ))
 
-  /** System-prompt instructions handed to the codeact Predict. Mirrors
+  /** System-prompt instructions handed to the codeact DynamicPredict. Mirrors
     * Python's `_build_instructions` shape verbatim. */
   private def buildInstructions: String =
     val inputs = baseSignature.inputFields.map(f => s"`${f.name}`").mkString(", ")
@@ -136,7 +136,7 @@ final case class CodeAct(
        |You have access to the Python Standard Library.""".stripMargin
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val codeActPredict = Predict(signature = codeActSignature, name = Some(codeActProgramName))
+    val codeActPredict = DynamicPredict(signature = codeActSignature, name = Some(codeActProgramName))
     val extractor = ChainOfThought(baseSignature = extractorSignature)
 
     runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>
@@ -157,7 +157,7 @@ final case class CodeAct(
     * recursion since maxIterations bounds depth. */
   private def runIterations(
       call: ProgramCall,
-      codeActPredict: Predict,
+      codeActPredict: DynamicPredict,
       trajectory: Vector[CodeAct.TrajectoryEntry],
       iteration: Int
   )(using RuntimeContext): Either[DspyError, Vector[CodeAct.TrajectoryEntry]] =

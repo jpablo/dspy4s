@@ -20,7 +20,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.programs.Predict
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
@@ -71,7 +71,7 @@ class StreamifySuite extends FunSuite:
     )
     val lm = new ScriptedStreamingLm(chunks)
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val program = Predict(signature = signature)
+    val program = DynamicPredict(signature = signature)
 
     RuntimeEnvironment.withSettings(
       SettingsData(
@@ -112,7 +112,7 @@ class StreamifySuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         statusMessageProvider = Some(new StatusMessageProvider:
           override def lmStart(modelId: String, inputs: Map[String, Any]): Option[String] =
             Some(s"Calling $modelId...")
@@ -152,7 +152,7 @@ class StreamifySuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         statusMessageProvider = Some(provider)
       )(Map("question" -> "x"))
 
@@ -199,7 +199,7 @@ class StreamifySuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val streamFn = Streamify.streamify(Predict(signature = signature))
+      val streamFn = Streamify.streamify(DynamicPredict(signature = signature))
 
       val first = ArrayBuffer.empty[StreamEvent]
       val iter1 = streamFn(Map("q" -> "1"))

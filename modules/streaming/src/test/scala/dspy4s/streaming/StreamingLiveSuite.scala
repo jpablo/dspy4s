@@ -11,7 +11,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.providers.OpenAiClient
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.programs.Predict
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.StreamEvent
@@ -78,8 +78,8 @@ class StreamingLiveSuite extends FunSuite:
     val sig2 = SignatureDsl.parse("question, answer -> judgement").toOption.get
     new PredictProgram:
       override val moduleName: String = "my_program"
-      private val predict1 = Predict(signature = sig1, name = Some("predict1"))
-      private val predict2 = Predict(signature = sig2, name = Some("predict2"))
+      private val predict1 = DynamicPredict(signature = sig1, name = Some("predict1"))
+      private val predict2 = DynamicPredict(signature = sig2, name = Some("predict2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.run(input)
@@ -91,7 +91,7 @@ class StreamingLiveSuite extends FunSuite:
   /** Direct dspy4s port of Python DSPy's
     * `tests/streaming/test_streaming.py::test_stream_listener_chat_adapter`.
     *
-    * Composes two `Predict`s with different signatures:
+    * Composes two `DynamicPredict`s with different signatures:
     *   - predict1: `question -> answer`
     *   - predict2: `question, answer -> judgement`
     *

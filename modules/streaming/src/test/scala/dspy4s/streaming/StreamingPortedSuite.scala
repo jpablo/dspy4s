@@ -19,7 +19,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.programs.Predict
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
@@ -81,7 +81,7 @@ class StreamingPortedSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("question" -> "What is the capital of France?"))
 
@@ -124,7 +124,7 @@ class StreamingPortedSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("question" -> "Test question"))
 
@@ -160,7 +160,7 @@ class StreamingPortedSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("reasoning"), StreamListener("answer"))
       )(Map("question" -> "Why did the chicken cross the kitchen?"))
 
@@ -196,7 +196,7 @@ class StreamingPortedSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("reasoning"), StreamListener("answer"))
       )(Map("question" -> "Why did the chicken cross the kitchen?"))
 
@@ -234,7 +234,7 @@ class StreamingPortedSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("response"))
       )(Map("question" -> "Generate complex JSON"))
 
@@ -268,7 +268,7 @@ class StreamingPortedSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = Predict(signature = signature),
+        program = DynamicPredict(signature = signature),
         streamListeners = Vector(StreamListener("first"), StreamListener("second"))
       )(Map("question" -> "Generate two responses"))
 

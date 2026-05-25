@@ -5,8 +5,8 @@ import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{TypedPrediction, TypedSignature}
 
-/** Typed counterpart to `Predict`. Wraps a `TypedSignature[I, O]` and
-  * delegates execution to the underlying `Predict(signature.untyped, ...)`,
+/** Typed counterpart to `DynamicPredict`. Wraps a `TypedSignature[I, O]` and
+  * delegates execution to the underlying `DynamicPredict(signature.untyped, ...)`,
   * so all adapter/model/callback/cache/trace behavior is unchanged. The
   * typed layer adds two boundaries:
   *
@@ -26,16 +26,16 @@ final case class TypedPredict[I, O](
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
 ):
 
-  /** Encode `input`, dispatch through the existing `Predict` runtime, then
+  /** Encode `input`, dispatch through the existing `DynamicPredict` runtime, then
     * decode the resulting prediction into `TypedPrediction[O]`.
     *
-    * `config` is forwarded into `ProgramCall.config`, which `Predict`
+    * `config` is forwarded into `ProgramCall.config`, which `DynamicPredict`
     * surfaces as `LmRequest.options` (per-call LM options, cache /
     * rollout controls, anything the underlying provider understands).
-    * `traceEnabled` controls whether the inner `Predict` writes a trace
+    * `traceEnabled` controls whether the inner `DynamicPredict` writes a trace
     * entry for this call.
     *
-    * **Known limitation (Phase 4):** when the inner `Predict` succeeds
+    * **Known limitation (Phase 4):** when the inner `DynamicPredict` succeeds
     * but the typed decode fails, callbacks / trace / history still
     * record the inner predict as a successful module call. The
     * `Left(DspyError)` returned here does not retroactively un-record
@@ -61,7 +61,7 @@ final case class TypedPredict[I, O](
         message  = s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
       ))
     else
-      val program = Predict(signature.untyped, demos, name, runtime)
+      val program = DynamicPredict(signature.untyped, demos, name, runtime)
       program
         .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
         .flatMap(raw => TypedPrediction.from(raw, signature.outputShape))

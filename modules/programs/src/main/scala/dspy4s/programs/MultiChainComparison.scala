@@ -20,7 +20,7 @@ import dspy4s.programs.contracts.ProgramCall
   *   4. Render each candidate completion as
   *      `«I'm trying to <rationale>. I'm not sure but my prediction is <answer>»`
   *      and feed them as the new attempt inputs.
-  *   5. Run the augmented `Predict` to obtain the corrected reasoning and
+  *   5. Run the augmented `DynamicPredict` to obtain the corrected reasoning and
   *      final answer.
   *
   * @param baseSignature the original task signature
@@ -93,7 +93,7 @@ final case class MultiChainComparison(
       val augmentedInputs = input.inputs ++ attemptLines.zipWithIndex.map { case (line, idx) =>
         s"reasoning_attempt_${idx + 1}" -> line
       }.toMap
-      Predict(signature = augmentedSignature)
+      DynamicPredict(signature = augmentedSignature)
         .run(input.copy(inputs = augmentedInputs))
 
   /** Renders a single attempt as Python does:
