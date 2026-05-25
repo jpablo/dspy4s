@@ -3,7 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.Module
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
@@ -37,7 +37,7 @@ object Streamify:
     * predictor's own framing.
     */
   def streamify(
-      program: Module[ProgramCall, Prediction],
+      program: Module[ProgramCall, DynamicPrediction],
       statusMessageProvider: Option[StatusMessageProvider] = None,
       streamListeners: Vector[StreamListener] = Vector.empty,
       includeFinalPrediction: Boolean = true,

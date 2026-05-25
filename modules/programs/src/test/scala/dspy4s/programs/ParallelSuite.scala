@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -19,9 +19,9 @@ class ParallelSuite extends FunSuite:
 
   private final case class StubProgram(
       override val moduleName: String = "stub",
-      behavior: Int => Either[DspyError, Prediction]
+      behavior: Int => Either[DspyError, DynamicPrediction]
   ) extends PredictProgram:
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val value = input.inputs("value").asInstanceOf[Int]
       behavior(value)
 

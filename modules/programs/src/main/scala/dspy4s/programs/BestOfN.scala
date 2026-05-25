@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.HistoryEntry
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeContextData
 import dspy4s.core.contracts.RuntimeError
@@ -16,7 +16,7 @@ import scala.util.control.NonFatal
 final case class BestOfN(
     module: PredictProgram,
     n: Int,
-    rewardFn: (Map[String, Any], Prediction) => Double,
+    rewardFn: (Map[String, Any], DynamicPrediction) => Double,
     threshold: Double,
     failCount: Option[Int] = None
 ) extends PredictProgram:
@@ -24,12 +24,12 @@ final case class BestOfN(
 
   override val moduleName: String = "best_of_n"
 
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val baseContext = RuntimeEnvironment.current
     val rolloutStart = readRolloutId(input.config)
     var remainingFailures = failCount.getOrElse(n)
     var bestReward = Double.NegativeInfinity
-    var bestPrediction: Option[Prediction] = None
+    var bestPrediction: Option[DynamicPrediction] = None
     var bestTrace = Vector.empty[TraceEntry]
     var bestHistory = Vector.empty[HistoryEntry]
     var lastError: Option[DspyError] = None
@@ -88,7 +88,7 @@ final case class BestOfN(
 
   private def evaluateReward(
       inputs: Map[String, Any],
-      prediction: Prediction
+      prediction: DynamicPrediction
   ): Either[DspyError, Double] =
     try Right(rewardFn(inputs, prediction))
     catch

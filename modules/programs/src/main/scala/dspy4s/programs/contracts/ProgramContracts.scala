@@ -3,7 +3,7 @@ package dspy4s.programs.contracts
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Module
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
 
@@ -20,7 +20,7 @@ trait ProgramRuntime:
   def resolveModel(using RuntimeContext): Either[DspyError, LanguageModel]
   def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter]
 
-trait PredictProgram extends Module[ProgramCall, Prediction]:
+trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
   /** Convenience overload of `run` so call sites can write:
     *
     *   predict.run("comment" -> comment, "lang" -> "en")
@@ -28,7 +28,7 @@ trait PredictProgram extends Module[ProgramCall, Prediction]:
     * instead of `run(ProgramCall(inputs = Map(...)))`. The inherited
     * `run(input: ProgramCall)` remains available when `config` or
     * `traceEnabled` need to be customized. */
-  def run(inputs: (String, Any)*)(using RuntimeContext): Either[DspyError, Prediction] =
+  def run(inputs: (String, Any)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     run(ProgramCall(inputs = inputs.toMap))
 
 trait ToolFunction:

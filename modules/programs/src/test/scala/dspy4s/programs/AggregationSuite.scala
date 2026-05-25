@@ -8,7 +8,7 @@ import munit.FunSuite
   * Each test mirrors a Python `test_majority_*` case. */
 class AggregationSuite extends FunSuite:
 
-  test("majority with Prediction picks the most common answer") {
+  test("majority with DynamicPrediction picks the most common answer") {
     val rows = Vector(
       Map[String, Any]("answer" -> "2"),
       Map[String, Any]("answer" -> "2"),

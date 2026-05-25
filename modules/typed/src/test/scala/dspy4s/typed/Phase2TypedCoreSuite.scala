@@ -188,7 +188,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     result match
       case Right(tp) =>
         assertEquals(tp.output, P2ScoredSentiment("joy", 0.92))
-        assert(tp.raw eq raw, "TypedPrediction must preserve the original raw Prediction")
+        assert(tp.raw eq raw, "TypedPrediction must preserve the original raw DynamicPrediction")
       case Left(err) => fail(s"expected success but got: $err")
   }
 
@@ -202,7 +202,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     val inputMap = sig.inputShape.encode(input)
     assertEquals(inputMap, Map[String, Any]("sentence" -> "i started feeling vulnerable"))
 
-    // Decode output ← Map (what TypedPredict will receive from Prediction)
+    // Decode output ← Map (what TypedPredict will receive from DynamicPrediction)
     val outputMap = Map[String, Any]("sentiment" -> "joy", "confidence" -> 0.85)
     val output    = sig.outputShape.decode(outputMap)
     assertEquals(output, Right(P2ScoredSentiment("joy", 0.85)))

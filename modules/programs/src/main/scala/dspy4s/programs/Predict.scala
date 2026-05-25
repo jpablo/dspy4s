@@ -7,7 +7,7 @@ import dspy4s.core.contracts.CompletionData
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ExampleData
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureSchema
@@ -31,7 +31,7 @@ final case class Predict(
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
 ) extends BasePredictProgram(moduleName = name.getOrElse("predict")):
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     ActivePredictContext.withActive(moduleName, signature) {
       for
         model <- runtime.resolveModel
@@ -87,7 +87,7 @@ final case class Predict(
       parsedOutputs: Vector[ParsedOutput],
       response: LmResponse,
       toolCalls: Vector[ToolCall]
-  ): Either[DspyError, Prediction] =
+  ): Either[DspyError, DynamicPrediction] =
     for
       completions <- CompletionData.fromRows(parsedOutputs.map(_.values))
       first <- PredictionData.fromCompletions(completions)

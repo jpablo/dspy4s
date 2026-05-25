@@ -4,7 +4,7 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -135,7 +135,7 @@ final case class CodeAct(
        |When all information for producing the outputs ($outputs) are available to be extracted, mark `finished=true` besides the final Python code.
        |You have access to the Python Standard Library.""".stripMargin
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val codeActPredict = Predict(signature = codeActSignature, name = Some(codeActProgramName))
     val extractor = ChainOfThought(baseSignature = extractorSignature)
 

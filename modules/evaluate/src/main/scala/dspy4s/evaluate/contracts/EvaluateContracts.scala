@@ -2,18 +2,18 @@ package dspy4s.evaluate.contracts
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
 
 object Evaluator:
-  type PredictFn = Example => Either[DspyError, Prediction]
+  type PredictFn = Example => Either[DspyError, DynamicPrediction]
 
 trait Metric:
   def name: String
-  def score(example: Example, prediction: Prediction, trace: Vector[TraceEntry] = Vector.empty): Either[DspyError, Double]
+  def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry] = Vector.empty): Either[DspyError, Double]
 
-final case class ExampleEvaluation(example: Example, prediction: Prediction, score: Double)
+final case class ExampleEvaluation(example: Example, prediction: DynamicPrediction, score: Double)
 
 final case class EvaluationResult(
     score: Double,

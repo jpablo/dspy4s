@@ -3,7 +3,7 @@ package dspy4s.streaming.contracts
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Module
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.ProgramCall
 
@@ -22,7 +22,7 @@ final case class TokenEvent(
 
 final case class StatusEvent(message: String, timestamp: Instant = Instant.now()) extends StreamEvent
 
-final case class PredictionEvent(prediction: Prediction, timestamp: Instant = Instant.now()) extends StreamEvent
+final case class PredictionEvent(prediction: DynamicPrediction, timestamp: Instant = Instant.now()) extends StreamEvent
 
 final case class ErrorEvent(error: DspyError, timestamp: Instant = Instant.now()) extends StreamEvent
 
@@ -49,6 +49,6 @@ final case class StreamListener(
 
 trait Streamifier:
   def streamify(
-      program: Module[ProgramCall, Prediction],
+      program: Module[ProgramCall, DynamicPrediction],
       listeners: Vector[StreamListener] = Vector.empty
   ): Map[String, Any] => ClosableIterator[StreamEvent]

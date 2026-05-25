@@ -3,7 +3,7 @@ package dspy4s.optimize
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.Module
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
@@ -29,7 +29,7 @@ final case class RandomSearchConfig(
     seed: Long = 0L
 )
 
-final class BootstrapFewShotWithRandomSearch[P <: Module[ProgramCall, Prediction]: PredictOps](
+final class BootstrapFewShotWithRandomSearch[P <: Module[ProgramCall, DynamicPrediction]: PredictOps](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 
@@ -178,20 +178,20 @@ final class BootstrapFewShotWithRandomSearch[P <: Module[ProgramCall, Prediction
           )
     }
 
-private final case class LabeledSampleProgram[P <: Module[ProgramCall, Prediction]] private (
+private final case class LabeledSampleProgram[P <: Module[ProgramCall, DynamicPrediction]] private (
     wrapped: P,
     ops: PredictOps[P],
     currentDemos: Vector[Example]
-) extends Module[ProgramCall, Prediction]:
+) extends Module[ProgramCall, DynamicPrediction]:
   override val moduleName: String = ops.name(wrapped)
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     ops.withDemos(wrapped, currentDemos).run(input)
 
 private object LabeledSampleProgram:
-  def apply[P <: Module[ProgramCall, Prediction]](wrapped: P, ops: PredictOps[P]): LabeledSampleProgram[P] =
+  def apply[P <: Module[ProgramCall, DynamicPrediction]](wrapped: P, ops: PredictOps[P]): LabeledSampleProgram[P] =
     new LabeledSampleProgram(wrapped, ops, ops.demos(wrapped))
 
-  given labeledOps[P <: Module[ProgramCall, Prediction]]: PredictOps[LabeledSampleProgram[P]] with
+  given labeledOps[P <: Module[ProgramCall, DynamicPrediction]]: PredictOps[LabeledSampleProgram[P]] with
     def name(program: LabeledSampleProgram[P]): String = program.ops.name(program.wrapped)
     def signature(program: LabeledSampleProgram[P]): dspy4s.core.contracts.SignatureSchema =
       program.ops.signature(program.wrapped)

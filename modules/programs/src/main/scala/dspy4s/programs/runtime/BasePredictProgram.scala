@@ -4,7 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.HistoryEntry
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.TraceEntry
@@ -51,12 +51,12 @@ abstract class BasePredictProgram(
 ) extends PredictProgram
     with SettingsProgramRuntime:
 
-  protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction]
+  protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction]
 
-  protected def tracePayload(prediction: Prediction): Map[String, Any] =
+  protected def tracePayload(prediction: DynamicPrediction): Map[String, Any] =
     prediction.values
 
-  override final def run(input: ProgramCall)(using runtime: RuntimeContext): Either[DspyError, Prediction] =
+  override final def run(input: ProgramCall)(using runtime: RuntimeContext): Either[DspyError, DynamicPrediction] =
     CallbackDispatcher.withModule(moduleName, input.inputs) {
       val result = execute(input)
       if input.traceEnabled then
@@ -73,5 +73,5 @@ abstract class BasePredictProgram(
       result
     }
 
-  override def arun(input: ProgramCall)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Prediction]] =
+  override def arun(input: ProgramCall)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, DynamicPrediction]] =
     ContextPropagation.future(run(input))

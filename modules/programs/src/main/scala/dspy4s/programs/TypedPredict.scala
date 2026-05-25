@@ -16,7 +16,7 @@ import dspy4s.typed.{TypedPrediction, TypedSignature}
   *      `TypedPrediction[O]`; decode failures surface as `Left(DspyError)`
   *      at this `run` boundary, never via lazy field access.
   *
-  * The raw `Prediction` (including completions and LM usage) is preserved
+  * The raw `DynamicPrediction` (including completions and LM usage) is preserved
   * on `TypedPrediction.raw` for callers that need it.
   */
 final case class TypedPredict[I, O](

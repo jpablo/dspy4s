@@ -5,7 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
@@ -173,7 +173,7 @@ class StreamifySuite extends FunSuite:
   test("streamify emits error event when program fails") {
     val failing = new PredictProgram:
       override val moduleName: String = "failing"
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
     given RuntimeContext = RuntimeEnvironment.current

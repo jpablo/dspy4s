@@ -3,7 +3,7 @@ package dspy4s.optimize
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ExampleData
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureSchema
@@ -17,7 +17,7 @@ final case class ScriptedPredictProgram(
     failsWith: Option[RuntimeException] = None
 ) extends PredictProgram:
   override val moduleName: String = "scripted"
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     failsWith match
       case Some(err) => throw err
       case None =>
@@ -30,7 +30,7 @@ final case class DemoAwarePredictProgram(
     answers: Map[String, String] = Map.empty
 ) extends PredictProgram:
   override val moduleName: String = "demo_aware"
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val q = input.inputs.getOrElse("question", "").toString
     // Use answers map first; then demos; else "unknown"
     val answer = answers.get(q)

@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureSchema
 import dspy4s.programs.contracts.PredictProgram
@@ -70,7 +70,7 @@ final case class MultiChainComparison(
       )
     )
 
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val attempts = input.config.get("attempts") match
       case Some(seq: Seq[?]) => seq.toVector
       case _                 => Vector.empty
@@ -82,7 +82,7 @@ final case class MultiChainComparison(
   def runWithAttempts(
       input: ProgramCall,
       attempts: Vector[Any]
-  )(using RuntimeContext): Either[DspyError, Prediction] =
+  )(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     if attempts.size != m then
       Left(dspy4s.core.contracts.ValidationError(
         s"Number of attempts (${attempts.size}) doesn't match the configured m ($m). " +
@@ -98,10 +98,10 @@ final case class MultiChainComparison(
 
   /** Renders a single attempt as Python does:
     * `«I'm trying to {rationale}. I'm not sure but my prediction is {answer}»`.
-    * Accepts either a `Prediction` or a `Map[String, Any]` row. */
+    * Accepts either a `DynamicPrediction` or a `Map[String, Any]` row. */
   private def formatAttempt(attempt: Any): String =
     val rowOpt: Option[Map[String, Any]] = attempt match
-      case p: Prediction          => Some(p.values)
+      case p: DynamicPrediction          => Some(p.values)
       case row: Map[String, Any] @unchecked
           if row.keys.forall(_.isInstanceOf[String]) => Some(row)
       case _                      => None

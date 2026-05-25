@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.ToolCall
@@ -25,10 +25,10 @@ final case class ReAct(
 ) extends BasePredictProgram(moduleName = "react"):
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     var currentInputs = call.inputs
     var toolHistory = Vector.empty[Map[String, Any]]
-    var lastPrediction: Option[Prediction] = None
+    var lastPrediction: Option[DynamicPrediction] = None
     var iteration = 0
 
     while iteration < maxIterations do
@@ -81,19 +81,19 @@ final case class ReAct(
 
     Left(RuntimeError("react", s"Reached max iterations ($maxIterations) without producing an answer"))
 
-  private def hasAnswer(prediction: Prediction): Boolean =
+  private def hasAnswer(prediction: DynamicPrediction): Boolean =
     prediction.values.get(answerField) match
       case Some(text: String) => text.trim.nonEmpty
       case Some(_)            => true
       case None               => false
 
-  private def extractToolRequests(prediction: Prediction): Either[DspyError, Vector[ToolCallRequest]] =
+  private def extractToolRequests(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
     extractNativeToolCalls(prediction) match
       case Right(requests) if requests.nonEmpty => Right(requests)
       case Left(error)          => Left(error)
       case Right(_)             => extractLegacyToolRequest(prediction).map(_.toVector)
 
-  private def extractLegacyToolRequest(prediction: Prediction): Either[DspyError, Option[ToolCallRequest]] =
+  private def extractLegacyToolRequest(prediction: DynamicPrediction): Either[DspyError, Option[ToolCallRequest]] =
     prediction.values.get(toolNameField) match
       case None => Right(None)
       case Some(name: String) if name.trim.isEmpty =>
@@ -103,7 +103,7 @@ final case class ReAct(
       case Some(other) =>
         Left(RuntimeError("react", s"Tool name must be a non-empty string, found: $other"))
 
-  private def extractNativeToolCalls(prediction: Prediction): Either[DspyError, Vector[ToolCallRequest]] =
+  private def extractNativeToolCalls(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
     prediction.values.get("tool_calls") match
       case None => Right(Vector.empty)
       case Some(calls: Vector[?]) =>

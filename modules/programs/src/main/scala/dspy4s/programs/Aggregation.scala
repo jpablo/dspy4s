@@ -3,12 +3,12 @@ package dspy4s.programs
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.NotFoundError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.ValidationError
 
 /** Aggregation utilities for collapsing multiple candidate completions into a
-  * single [[Prediction]]. Port of Python DSPy's `dspy.predict.aggregation`.
+  * single [[DynamicPrediction]]. Port of Python DSPy's `dspy.predict.aggregation`.
   *
   * The primary entry point is [[majority]], which picks the most-common value
   * for a given output field across a set of candidate completions. Ties are
@@ -33,7 +33,7 @@ object Aggregation:
     case other        => Option(other.toString.trim).filter(_.nonEmpty)
   }
 
-  /** Returns a [[Prediction]] whose chosen completion's value for the given
+  /** Returns a [[DynamicPrediction]] whose chosen completion's value for the given
     * field is the majority across `rows`. Ties are broken by first occurrence.
     *
     *   - `field = None` picks the **last** key in the first row (matches
@@ -46,7 +46,7 @@ object Aggregation:
       rows: Vector[Map[String, Any]],
       field: Option[String] = None,
       normalize: Any => Option[String] = defaultNormalize
-  ): Either[DspyError, Prediction] =
+  ): Either[DspyError, DynamicPrediction] =
     if rows.isEmpty then Left(ValidationError("Cannot compute majority over an empty set of completions"))
     else
       val resolvedField = field.getOrElse(rows.head.keys.toVector.last)
@@ -78,16 +78,16 @@ object Aggregation:
           PredictionData.fromRows(Vector(winner))
       }
 
-  /** Run majority over the [[Completions]] embedded in a [[Prediction]],
+  /** Run majority over the [[Completions]] embedded in a [[DynamicPrediction]],
     * falling back to a single-row vote when the prediction has no
     * completions attached. Convenience overload — defaults live only on
     * the row-based primary [[majority]] above (Scala 3 forbids defaults on
     * multiple overloads of the same name). */
   def majorityOf(
-      prediction: Prediction,
+      prediction: DynamicPrediction,
       field: Option[String] = None,
       normalize: Any => Option[String] = defaultNormalize
-  ): Either[DspyError, Prediction] =
+  ): Either[DspyError, DynamicPrediction] =
     prediction.completions match
       case Some(completions) => majorityOf(completions, field, normalize)
       case None              => majority(Vector(prediction.values), field, normalize)
@@ -97,7 +97,7 @@ object Aggregation:
       completions: Completions,
       field: Option[String],
       normalize: Any => Option[String]
-  ): Either[DspyError, Prediction] =
+  ): Either[DspyError, DynamicPrediction] =
     if completions.size == 0 then
       Left(ValidationError("Cannot compute majority over an empty Completions"))
     else

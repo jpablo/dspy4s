@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.TypeRef
@@ -37,7 +37,7 @@ final case class ChainOfThought(
 
   override val moduleName: String = "chain_of_thought"
 
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     for
       augmented <- signature
       prediction <- Predict(signature = augmented, demos = demos, runtime = runtime).run(input)

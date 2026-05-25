@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.programs.contracts.PredictProgram
@@ -27,13 +27,13 @@ final case class Parallel(
 
   def run(
       tasks: Vector[(PredictProgram, ProgramCall)]
-  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[Prediction]] =
-    resolvedExecutor.executeEither[(PredictProgram, ProgramCall), Prediction](
+  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[DynamicPrediction]] =
+    resolvedExecutor.executeEither[(PredictProgram, ProgramCall), DynamicPrediction](
       task = (pair: (PredictProgram, ProgramCall)) => pair._1.run(pair._2),
       data = tasks
     )
 
   def apply(
       tasks: Vector[(PredictProgram, ProgramCall)]
-  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[Prediction]] =
+  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[DynamicPrediction]] =
     run(tasks)

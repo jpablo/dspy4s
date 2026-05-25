@@ -4,7 +4,7 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.NotFoundError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -24,7 +24,7 @@ class ReActSuite extends FunSuite:
     private val calls = AtomicInteger(0)
     override val moduleName: String = "scripted"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val idx = calls.incrementAndGet()
       if idx == 1 then
         Right(
@@ -46,14 +46,14 @@ class ReActSuite extends FunSuite:
 
   private final class LoopingProgram extends PredictProgram:
     override val moduleName: String = "loop"
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       Right(PredictionData(values = Map("tool_name" -> "search", "tool_args" -> Map("query" -> "q"))))
 
   private final class NativeToolCallsProgram extends PredictProgram:
     private val calls = AtomicInteger(0)
     override val moduleName: String = "native-tool-calls"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val idx = calls.incrementAndGet()
       if idx == 1 then
         Right(
@@ -78,7 +78,7 @@ class ReActSuite extends FunSuite:
     private val calls = AtomicInteger(0)
     override val moduleName: String = "multi-tool-calls"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val idx = calls.incrementAndGet()
       if idx == 1 then
         Right(
@@ -107,7 +107,7 @@ class ReActSuite extends FunSuite:
   private final class AnswerAndToolCallsProgram extends PredictProgram:
     override val moduleName: String = "answer-and-tool-calls"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       Right(
         PredictionData(
           values = Map(

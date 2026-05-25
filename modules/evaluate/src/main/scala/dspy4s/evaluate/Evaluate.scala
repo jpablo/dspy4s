@@ -2,7 +2,7 @@ package dspy4s.evaluate
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -42,7 +42,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       failureScore: Option[Double] = None,
       saveAsCsv: Option[String] = None,
       saveAsJson: Option[String] = None
-  )(program: Example => Either[DspyError, Prediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
+  )(program: Example => Either[DspyError, DynamicPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val mergedConfig = EvaluateConfig(
       devset = devset.getOrElse(config.devset),
       metric = metric.getOrElse(config.metric),
@@ -59,7 +59,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     applyInternal(program, mergedConfig)
 
   private def applyInternal(
-      fn: Example => Either[DspyError, Prediction],
+      fn: Example => Either[DspyError, DynamicPrediction],
       cfg: EvaluateConfig
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val dataset = cfg.devset
@@ -72,7 +72,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
     val executor = buildExecutor(cfg)
 
-    executor.executeEither[Example, (Prediction, Double)](
+    executor.executeEither[Example, (DynamicPrediction, Double)](
       task = (ex: Example) =>
         fn(ex).flatMap { prediction =>
           metric.score(ex, prediction).map(score => (prediction, score))
@@ -110,7 +110,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     }
 
   override def evaluate(
-      predict: Example => Either[DspyError, Prediction],
+      predict: Example => Either[DspyError, DynamicPrediction],
       dataset: Vector[Example],
       metric: Metric
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =

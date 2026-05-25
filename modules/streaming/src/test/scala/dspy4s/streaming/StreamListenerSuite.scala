@@ -10,7 +10,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LmChunk
@@ -377,7 +377,7 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = Predict(signature = sig1, name = Some("predict1"))
       private val predict2 = Predict(signature = sig2, name = Some("predict2"))
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.run(input)
           judgement <- predict2.run(input.copy(
@@ -471,7 +471,7 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = Predict(signature = sig, name = Some("predict1"))
       private val predict2 = Predict(signature = sig, name = Some("predict2"))
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _      <- predict1.run(input)
           second <- predict2.run(input)
@@ -524,7 +524,7 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val p1 = Predict(signature = sig, name = Some("p1"))
       private val p2 = Predict(signature = sig, name = Some("p2"))
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _ <- p1.run(input)
           out <- p2.run(input)
@@ -615,7 +615,7 @@ class StreamListenerSuite extends FunSuite:
 
     val opaqueProgram = new PredictProgram:
       override val moduleName: String = "opaque"
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         Right(dspy4s.core.contracts.PredictionData(values = Map("answer" -> "x")))
 
     given RuntimeContext = RuntimeEnvironment.current

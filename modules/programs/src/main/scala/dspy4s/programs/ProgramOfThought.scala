@@ -4,7 +4,7 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -139,7 +139,7 @@ final case class ProgramOfThought(
         s"Given the final Python code and its printed output, produce the final $outputs."
       }))
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val generator = ChainOfThought(baseSignature = generateSignature, runtime = SignatureProgramRuntime)
     val regenerator = ChainOfThought(baseSignature = regenerateSignature, runtime = SignatureProgramRuntime)
     val answerer = ChainOfThought(baseSignature = answerSignature, runtime = SignatureProgramRuntime)

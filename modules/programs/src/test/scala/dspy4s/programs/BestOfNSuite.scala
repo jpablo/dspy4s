@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -16,14 +16,14 @@ import scala.collection.mutable.ArrayBuffer
 
 class BestOfNSuite extends FunSuite:
   private final class StubProgram(
-      results: Vector[Either[DspyError, Prediction]]
+      results: Vector[Either[DspyError, DynamicPrediction]]
   ) extends PredictProgram:
     private val counter = AtomicInteger(0)
     val rolloutIds: ArrayBuffer[Int] = ArrayBuffer.empty
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "stub"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       calls.incrementAndGet()
       val rollout = input.config.get("rollout_id").collect { case v: Int => v }.getOrElse(-1)
       rolloutIds += rollout

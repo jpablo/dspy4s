@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ExampleData
 import dspy4s.core.contracts.Module
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.optimize.contracts.CandidateProgram
@@ -30,7 +30,7 @@ final case class BootstrapFewShotConfig(
   require(maxRounds >= 1, "maxRounds must be at least 1")
   require(maxErrors > 0, "maxErrors must be > 0")
 
-final class BootstrapFewShot[P <: Module[ProgramCall, Prediction]: PredictOps](
+final class BootstrapFewShot[P <: Module[ProgramCall, DynamicPrediction]: PredictOps](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -72,7 +72,7 @@ final class BootstrapFewShot[P <: Module[ProgramCall, Prediction]: PredictOps](
           var success = false
           while round < config.maxRounds && !success do
             try
-              val runOutcome: Either[DspyError, Prediction] =
+              val runOutcome: Either[DspyError, DynamicPrediction] =
                 dspy4s.core.runtime.RuntimeEnvironment.withGeneratedAsyncTask(s"bootstrap-round-$round") {
                   given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
                   teacherProgram.run(ProgramCall(inputs = example.inputs))

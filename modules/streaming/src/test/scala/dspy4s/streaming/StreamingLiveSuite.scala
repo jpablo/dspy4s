@@ -3,7 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Prediction
+import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SettingsData
@@ -80,7 +80,7 @@ class StreamingLiveSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = Predict(signature = sig1, name = Some("predict1"))
       private val predict2 = Predict(signature = sig2, name = Some("predict2"))
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, Prediction] =
+      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.run(input)
           judgement <- predict2.run(input.copy(
