@@ -18,6 +18,3 @@ final case class ParseError(component: String, message: String, raw: Option[Stri
 
 final case class RuntimeError(component: String, message: String) extends DspyError:
   val code: String = "runtime_error"
-
-final case class UnsupportedError(feature: String, message: String) extends DspyError:
-  val code: String = "unsupported"

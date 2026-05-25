@@ -7,9 +7,6 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
 
-import scala.concurrent.ExecutionContext
-import scala.concurrent.Future
-
 final case class ProgramCall(
     inputs: Map[String, Any],
     config: Map[String, Any] = Map.empty,
@@ -37,6 +34,3 @@ trait ToolFunction:
 
 final case class ToolCallRequest(name: String, args: Map[String, Any])
 final case class ToolCallResult(name: String, result: Either[DspyError, Any])
-
-trait AsyncToolFunction extends ToolFunction:
-  def invokeAsync(args: Map[String, Any])(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Any]]
