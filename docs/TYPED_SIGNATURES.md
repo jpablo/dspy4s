@@ -830,6 +830,31 @@ continues to use `.value` until the typed engine or a codec-backed
 adapter path can represent JSON without adding `ujson` to `core`.
 ~30 lines, no design commitments.
 
+### 6.1 Runtime output parsing contract
+
+Typed prediction access is only sound if output values are decoded before
+the typed prediction is created. Python DSPy does this by keeping each
+field's annotation on the signature, extracting raw fields in the
+adapter, and then coercing each value with a parser such as Pydantic's
+`TypeAdapter`.
+
+The Scala port needs the same contract:
+
+1. **The adapter extracts named fields** from the LM response. For
+   example, a chat adapter extracts field sections and a JSON adapter
+   extracts JSON object properties.
+2. **The typed layer decodes raw values** with a bounded
+   `TypeRefCodec[A]` / field-codec equivalent. This is where strings,
+   numbers, booleans, literal unions, and enums become Scala values.
+3. **`TypedPrediction[O]` is constructed only after successful decode.**
+   Dot-access reads already-decoded values; it does not parse lazily and
+   it does not return `Either`.
+
+This is distinct from arbitrary Pydantic-style schema derivation. The
+MVP parser only needs to cover the supported field types in the typed
+surface. Rich custom schemas, nested records, and JSON codecs can arrive
+later without changing this boundary.
+
 ---
 
 ## 7. Phased rollout *(foundation-neutral)*
@@ -857,9 +882,12 @@ Option B uses the self-built fallback engine from §4.2.
    The underlying prediction carrier is foundation-specific
    (`NamedTuple`/Selectable for A or B, `Record[O]` for C), but the
    public ergonomic target is the same: typed dot-access and typed
-   `.value[K]`. Re-translate `Signatures.scala` Snippet 5 against it
-   to validate ergonomics on a real example. Existing
-   `Predict(sig: Signature)` API stays untouched.
+   `.value[K]`. This phase also implements the runtime output parsing
+   contract from §6.1: raw adapter outputs are decoded with the expected
+   field codecs before a `TypedPrediction[O]` is constructed.
+   Re-translate `Signatures.scala` Snippet 5 against it to validate
+   ergonomics on a real example. Existing `Predict(sig: Signature)` API
+   stays untouched.
 
 4. **Phase 3 — Case-class surface parity.** Verify `case class Foo
    derives Schema` works end-to-end through `TypedSignature.of[Foo,
@@ -988,9 +1016,10 @@ its weight in practice.
   details deferred.
 - Refined / Iron predicate integration. Useful eventually for
   validated fields, but orthogonal.
-- Schema derivation for arbitrary user types (pydantic-style). The
-  engine relies on adapters to format/parse field values; that contract
-  is out of scope here.
+- Schema derivation for arbitrary user types (pydantic-style). A bounded
+  parser/coercer for supported typed-signature fields is in scope (§6.1);
+  arbitrary custom schemas, nested records, and broad JSON codec support
+  are not.
 - Cross-module refactor. The typed engine is purely additive; existing
   modules continue to consume `Signature` (the trait) and `Prediction`
   unchanged.
