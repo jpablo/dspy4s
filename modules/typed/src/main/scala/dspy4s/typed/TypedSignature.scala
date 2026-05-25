@@ -59,6 +59,18 @@ object TypedSignature:
     * signature. Returns a plain `Signature` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
+  /** Function/method macro entry. Inspects a method reference at compile
+    * time and materializes a `TypedSignature` whose inputs come from the
+    * method parameters and whose outputs come from the method return type.
+    *
+    * Output rules:
+    *   - named tuple returns keep their names, e.g. `(sentiment: Emotion)`
+    *   - case-class / product returns keep their product field names
+    *   - scalar returns become a single output field named `result`
+    */
+  transparent inline def from[F](inline fn: F) =
+    ${ internal.FunctionMacro.fromImpl[F]('fn) }
+
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
     * compile time and materializes a `TypedSignature` whose untyped
     * `Signature` reflects the trait's `InputField` / `OutputField` members.

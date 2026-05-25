@@ -132,13 +132,18 @@ object Shape:
   inline def derivedWithRole[A <: Product](role: FieldRole)(using
       m: Mirror.ProductOf[A]
   ): Shape[A] =
+    derivedProductWithRole[A](role)
+
+  private[typed] inline def derivedProductWithRole[A](role: FieldRole)(using
+      m: Mirror.ProductOf[A]
+  ): Shape[A] =
     val names    = summonLabels[m.MirroredElemLabels]
     val decoders = summonDecoders[m.MirroredElemTypes]
     new MirrorShape[A](m, names, decoders, role)
 
   // ── Internal: Mirror-backed Shape implementation ─────────────────────────
 
-  private[typed] final class MirrorShape[A <: Product](
+  private[typed] final class MirrorShape[A](
       m: Mirror.ProductOf[A],
       names: List[String],
       decoders: List[ValueDecoder[Any]],
@@ -156,7 +161,7 @@ object Shape:
       }.toVector
 
     def encode(value: A): Map[String, Any] =
-      val iter = value.productIterator
+      val iter = value.asInstanceOf[Product].productIterator
       names
         .lazyZip(decoders)
         .map { (name, dec) => name -> dec.encode(iter.next()) }

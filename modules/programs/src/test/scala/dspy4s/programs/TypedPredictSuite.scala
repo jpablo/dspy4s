@@ -29,6 +29,8 @@ trait P4QAMissingInputSpec extends Spec:
   def answer:   OutputField[String]
   def score:    OutputField[Double]
 
+def p4QaMethod(question: String): (answer: String, score: Double) = ???
+
 class TypedPredictSuite extends FunSuite:
 
   // ── Test doubles ────────────────────────────────────────────────────────
@@ -87,6 +89,21 @@ class TypedPredictSuite extends FunSuite:
 
   test("TypedPredict.run supports spec-derived named-tuple input and typed output dot-access") {
     val sig = TypedSignature.of[P4QASpec]
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run((question = "Capital of France?"))
+      result match
+        case Right(tp) =>
+          val answer: String = tp.output.answer
+          val score:  Double = tp.output.score
+          assertEquals(answer, "Paris")
+          assertEquals(score, 0.95)
+        case Left(err) => fail(s"expected success, got: $err")
+    }
+  }
+
+  test("TypedPredict.run supports method-derived named-tuple input and output") {
+    val sig = TypedSignature.from(p4QaMethod)
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = TypedPredict(sig).run((question = "Capital of France?"))

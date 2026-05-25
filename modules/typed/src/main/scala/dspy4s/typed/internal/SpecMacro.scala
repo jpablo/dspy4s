@@ -174,3 +174,5 @@ private[typed] object SpecMacro:
             outputShape = new Shape.TupleShape[o](outFields, ${ outputDecodersExpr })
           )
         }
+      case _ =>
+        report.errorAndAbort(s"Internal error materializing spec trait '$sigName'")

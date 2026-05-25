@@ -21,6 +21,7 @@ order:
 1. A builder API for fast internal progress and straightforward tests.
 2. Case class / named-field syntax for ordinary Scala users.
 3. A trait-as-spec syntax that mirrors DSPy's Python class style.
+4. A method/function syntax for compact local declarations.
 
 The trait syntax is the desired end-user surface:
 
@@ -41,6 +42,18 @@ preserve the main property: users describe signatures with ordinary Scala
 members and get statically checked output selection. The literal-union example
 is the ergonomic target; the MVP should use Scala enums for enum-like outputs if
 `kyo-schema` does not support literal unions cleanly.
+
+The method/function surface is an additional convenience rather than a
+replacement for trait specs:
+
+```scala
+def emotion(sentence: String): (sentiment: Emotion) = ???
+val sig = TypedSignature.from(emotion)
+```
+
+Input fields come from method parameters. A named-tuple return keeps output
+field labels; a scalar return becomes a single `result` output; a case-class
+or product return keeps product field names.
 
 ## Module Strategy
 

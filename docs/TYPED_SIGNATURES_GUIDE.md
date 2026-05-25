@@ -31,7 +31,7 @@ result.map(_.output.score)    // typed: Double
 result.map(_.raw.lmUsage)     // raw escape hatch (completions, usage, etc.)
 ```
 
-That's the whole loop. The rest of this guide explains the four
+That's the whole loop. The rest of this guide explains the five
 authoring surfaces, the supported types, and the few sharp edges to
 know about.
 
@@ -39,7 +39,7 @@ know about.
 
 ## Authoring surfaces
 
-The typed layer exposes **four ways** to define a signature. All four
+The typed layer exposes **five ways** to define a signature. All five
 compile down to the same runtime `Signature` (and pass through the same
 adapter / LM / runtime path), so you can mix them freely in one
 project — pick whichever fits each call site.
@@ -82,7 +82,43 @@ duplicate field names, concrete methods, and empty spec traits.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
 
-### 3. Programmatic builder — `TypedSignature.builder(name)`
+### 3. Method/function macro — `TypedSignature.from(method)`
+
+Concise Scala method signatures can also declare typed signatures.
+Input fields come from method parameters. Output fields come from the
+return type:
+
+- scalar return values become one output field named `result`
+- named-tuple return values keep their labels
+- case-class / product return values keep their product field names
+
+The method body is not called; the method is only a declaration surface.
+
+```scala
+def classify(sentence: String): (sentiment: Emotion, confidence: Double) = ???
+
+val sig = TypedSignature.from(classify)
+
+TypedPredict(sig).run((sentence = "..."))
+  .map(_.output.sentiment)   // typed: Emotion
+```
+
+For a single anonymous output:
+
+```scala
+def classify(sentence: String): Emotion = ???
+
+val sig = TypedSignature.from(classify)
+// signature string: sentence -> result
+```
+
+Use this when a Scala method signature is the clearest local
+description of the program boundary. Reach for trait specs when you
+want the most DSPy-like surface or a dedicated named declaration.
+
+See [`modules/examples/.../typed/FunctionExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/FunctionExample.scala).
+
+### 4. Programmatic builder — `TypedSignature.builder(name)`
 
 Fluent construction for callers that don't want a case class per
 signature (REPL exploration, dynamic shapes assembled from config,
@@ -105,7 +141,7 @@ name) flows through automatically.
 
 See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/BuilderExample.scala).
 
-### 4. Case classes — `TypedSignature.derived[I, O]`
+### 5. Case classes — `TypedSignature.derived[I, O]`
 
 Two case classes describe inputs and outputs; Mirror-based derivation
 produces the runtime metadata. This is useful when you already have
@@ -133,6 +169,7 @@ See [`modules/examples/.../typed/CaseClassExample.scala`](../modules/examples/sr
 |---|---|:---:|
 | String DSL | Prototyping, all-string fields | ❌ |
 | **Trait spec** | **Most production code; DSPy-style authoring** | ✅ |
+| Method/function | Compact local signatures; scalar or named-tuple outputs | ✅ |
 | Case classes | Existing domain models; case-class `copy` / pattern matching | ✅ |
 | Builder | Dynamic / config-driven shapes; tests | ❌ (runtime `Signature`) |
 
