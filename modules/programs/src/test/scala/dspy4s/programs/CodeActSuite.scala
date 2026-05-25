@@ -10,7 +10,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.core.signatures.SignatureDsl
@@ -95,7 +95,7 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> lm,
         SettingKeys.adapter.name -> ScriptedAdapter
       ))
@@ -130,7 +130,7 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> lm,
         SettingKeys.adapter.name -> ScriptedAdapter
       ))
@@ -155,7 +155,7 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 2)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> lm,
         SettingKeys.adapter.name -> ScriptedAdapter
       ))
@@ -178,7 +178,7 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 1)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> lm,
         SettingKeys.adapter.name -> ScriptedAdapter
       ))
@@ -202,7 +202,7 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 1)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> lm,
         SettingKeys.adapter.name -> ScriptedAdapter
       ))

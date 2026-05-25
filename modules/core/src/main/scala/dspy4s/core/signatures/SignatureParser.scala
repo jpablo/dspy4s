@@ -4,13 +4,11 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.SignatureParser
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 
-final class DefaultSignatureParser extends SignatureParser:
-  override def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
+final class SignatureParser:
+  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
     val trimmed = signatureDsl.trim
     if trimmed.isEmpty then Left(ValidationError("SignatureLayout DSL cannot be empty"))
     else

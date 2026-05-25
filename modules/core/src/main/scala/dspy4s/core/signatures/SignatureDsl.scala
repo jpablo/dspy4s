@@ -6,7 +6,7 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.SignatureLayout
 
 object SignatureDsl:
-  private val parser = DefaultSignatureParser()
+  private val parser = SignatureParser()
 
   def parse(dsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
     parser.parse(dsl, name)

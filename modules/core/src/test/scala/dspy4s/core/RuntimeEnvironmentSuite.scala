@@ -4,9 +4,8 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeContextData
 import dspy4s.core.contracts.SettingKey
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
@@ -24,8 +23,8 @@ class RuntimeEnvironmentSuite extends FunSuite:
 
   test("withContext restores previous context after scope") {
     val base = RuntimeEnvironment.current
-    val scopedSettings = SettingsData(Map("sample" -> "scoped"))
-    val scopedContext = RuntimeContextData(settings = scopedSettings)
+    val scopedSettings = Settings(Map("sample" -> "scoped"))
+    val scopedContext = RuntimeContext(settings = scopedSettings)
 
     RuntimeEnvironment.withContext(scopedContext) {
       assertEquals(RuntimeEnvironment.current.settings.get(sampleKey), Some("scoped"))
@@ -51,7 +50,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         received += event
 
-    val context = RuntimeContextData(callbacks = Vector(callback))
+    val context = RuntimeContext(callbacks = Vector(callback))
 
     RuntimeEnvironment.withContext(context) {
       RuntimeEnvironment.emit(ModuleStartEvent("predict", Map("q" -> "hi")))

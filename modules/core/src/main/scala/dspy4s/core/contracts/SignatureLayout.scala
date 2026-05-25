@@ -381,6 +381,3 @@ object SignatureLayout:
       fields <- readFields
       signature <- create(name = name, fields = fields, instructions = instructions)
     yield signature
-
-trait SignatureParser:
-  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout]

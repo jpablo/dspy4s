@@ -5,11 +5,9 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeContextData
 import dspy4s.core.contracts.SettingKey
 import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.Settings
-import dspy4s.core.contracts.SettingsData
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.HistoryEntry
 
@@ -17,19 +15,19 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 object RuntimeEnvironment:
-  private val globalSettingsRef = new AtomicReference[Settings](SettingsData())
+  private val globalSettingsRef = new AtomicReference[Settings](Settings())
   private val configureOwnerThreadId = new AtomicLong(-1L)
   private val configureOwnerAsyncTaskId = new AtomicReference[String | Null](null)
   private val asyncTaskCounter = new AtomicLong(0L)
   private val callbackCallCounter = new AtomicLong(0L)
 
   private val contextRef = new ThreadLocal[RuntimeContext]:
-    override def initialValue(): RuntimeContext = RuntimeContextData()
+    override def initialValue(): RuntimeContext = RuntimeContext()
 
   private def localContext: RuntimeContext = contextRef.get()
 
   private def mergedSettings(local: Settings): Settings =
-    SettingsData(globalSettingsRef.get().entries ++ local.entries)
+    Settings(globalSettingsRef.get().entries ++ local.entries)
 
   private def ensureConfigureAllowed(): Either[DspyError, Unit] =
     val caller = Thread.currentThread().threadId()
@@ -67,17 +65,17 @@ object RuntimeEnvironment:
     }
 
   def configureEntries(entries: Map[String, Any]): Either[DspyError, Unit] =
-    configure(SettingsData(entries))
+    configure(Settings(entries))
 
   def configure(updates: (SettingKey[?], Any)*): Either[DspyError, Unit] =
     val merged = updates.foldLeft(globalSettingsRef.get().entries) { (acc, entry) =>
       val (key, value) = entry
       acc.updated(key.name, value)
     }
-    configure(SettingsData(merged))
+    configure(Settings(merged))
 
   def withSetting[A, B](key: SettingKey[A], value: A)(thunk: => B): B =
-    withSettings(SettingsData(Map(key.name -> value)))(thunk)
+    withSettings(Settings(Map(key.name -> value)))(thunk)
 
   def withAsyncTask[A](taskId: String)(thunk: => A): A =
     withSetting(SettingKeys.asyncTaskId, taskId)(thunk)
@@ -103,7 +101,7 @@ object RuntimeEnvironment:
     val previousSettings = previous.settings
     val previousCallStack = previousSettings.get(SettingKeys.callStack).getOrElse(Vector.empty)
     val updatedCallStack = previousCallStack :+ callId
-    val updatedSettings = SettingsData(
+    val updatedSettings = Settings(
       previousSettings.entries
         .updated(SettingKeys.activeCallId.name, callId)
         .updated(SettingKeys.callStack.name, updatedCallStack)
@@ -125,13 +123,13 @@ object RuntimeEnvironment:
 
   def withSettings[A](settings: Settings)(thunk: => A): A =
     scoped { context =>
-      val merged = SettingsData(context.settings.entries ++ settings.entries)
+      val merged = Settings(context.settings.entries ++ settings.entries)
       context.withSettings(merged)
     }(thunk)
 
   def withCallbacks[A](callbacks: Vector[CallbackHandler])(thunk: => A): A =
     scoped { context =>
-      val settings = SettingsData(context.settings.entries.updated(SettingKeys.callbacks.name, callbacks))
+      val settings = Settings(context.settings.entries.updated(SettingKeys.callbacks.name, callbacks))
       context.withSettings(settings).withCallbacks(callbacks)
     }(thunk)
 
@@ -156,7 +154,7 @@ object RuntimeEnvironment:
     activeCallbacks.foreach(_.onEvent(event))
 
   def resetForTests(): Unit =
-    globalSettingsRef.set(SettingsData())
+    globalSettingsRef.set(Settings())
     configureOwnerThreadId.set(-1L)
     configureOwnerAsyncTaskId.set(null)
     asyncTaskCounter.set(0L)

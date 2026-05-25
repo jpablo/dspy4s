@@ -10,7 +10,7 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LmChunk
@@ -74,7 +74,7 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> new ScriptedLm(chunks),
         SettingKeys.adapter.name -> ChatAdapter()
       ))
@@ -117,7 +117,7 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> new ScriptedLm(chunks),
         SettingKeys.adapter.name -> ChatAdapter()
       ))
@@ -153,7 +153,7 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> new ScriptedLm(chunks),
         SettingKeys.adapter.name -> ChatAdapter()
       ))
@@ -189,7 +189,7 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> new ScriptedLm(chunks),
         SettingKeys.adapter.name -> JSONAdapter()
       ))
@@ -227,7 +227,7 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> response: json").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> new ScriptedLm(chunks),
         SettingKeys.adapter.name -> JSONAdapter()
       ))
@@ -261,7 +261,7 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> first: json, second: json").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(Map(
+      Settings(Map(
         SettingKeys.languageModel.name -> new ScriptedLm(chunks),
         SettingKeys.adapter.name -> JSONAdapter()
       ))

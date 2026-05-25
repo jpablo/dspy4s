@@ -6,7 +6,7 @@ import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -80,7 +80,7 @@ object Streamify:
         new Runnable:
           override def run(): Unit =
             ContextPropagation.inContext(captured) {
-              RuntimeEnvironment.withSettings(SettingsData(extraSettings)) {
+              RuntimeEnvironment.withSettings(Settings(extraSettings)) {
                 val existingCallbacks = RuntimeEnvironment.current.settings
                   .get(SettingKeys.callbacks)
                   .getOrElse(Vector.empty)

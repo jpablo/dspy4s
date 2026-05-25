@@ -10,7 +10,7 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -101,7 +101,7 @@ class PredictSuite extends FunSuite:
         events += event
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> DummyLanguageModel,
           SettingKeys.adapter.name -> DummyAdapter
@@ -144,7 +144,7 @@ class PredictSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> DummyLanguageModel
         )
@@ -162,7 +162,7 @@ class PredictSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer, score").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> DummyToolCallLanguageModel,
           SettingKeys.adapter.name -> DummyAdapter

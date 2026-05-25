@@ -6,7 +6,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.providers.OpenAiClient
@@ -106,7 +106,7 @@ class StreamingLiveSuite extends FunSuite:
     val composite = buildComposite()
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -158,7 +158,7 @@ class StreamingLiveSuite extends FunSuite:
     val composite = buildComposite()
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -205,7 +205,7 @@ class StreamingLiveSuite extends FunSuite:
     val composite = buildComposite()
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> JSONAdapter()

@@ -4,7 +4,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SettingKey
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.runtime.ParallelExecutor
 import munit.FunSuite
@@ -20,7 +20,7 @@ class ParallelExecutorSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("worker threads inherit captured runtime context") {
-    RuntimeEnvironment.withSettings(SettingsData(Map(sampleKey.name -> "scoped"))) {
+    RuntimeEnvironment.withSettings(Settings(Map(sampleKey.name -> "scoped"))) {
       given RuntimeContext = RuntimeEnvironment.current
       val executor = ParallelExecutor(numThreads = 3, maxErrors = 3)
 
@@ -72,7 +72,7 @@ class ParallelExecutorSuite extends FunSuite:
 
   test("fromSettings uses runtime numThreads and maxErrors values") {
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.numThreads.name -> 2,
           SettingKeys.maxErrors.name -> 1

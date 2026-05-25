@@ -10,7 +10,7 @@ import dspy4s.programs.contracts.ToolFunction
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -63,7 +63,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -95,7 +95,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -130,7 +130,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -161,7 +161,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -189,7 +189,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> JSONAdapter()
@@ -218,7 +218,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> XMLAdapter()
@@ -249,7 +249,7 @@ class StreamListenerSuite extends FunSuite:
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -287,7 +287,7 @@ class StreamListenerSuite extends FunSuite:
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -329,7 +329,7 @@ class StreamListenerSuite extends FunSuite:
     val innerPredict = DynamicPredict(layout = signature)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -387,7 +387,7 @@ class StreamListenerSuite extends FunSuite:
         yield judgement
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> multiCallLm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -427,7 +427,7 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -479,7 +479,7 @@ class StreamListenerSuite extends FunSuite:
         yield second
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> multiCallLm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -532,7 +532,7 @@ class StreamListenerSuite extends FunSuite:
         yield out
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> multiCallLm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -559,7 +559,7 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     ))
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()
@@ -591,7 +591,7 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     ))
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> ChatAdapter()

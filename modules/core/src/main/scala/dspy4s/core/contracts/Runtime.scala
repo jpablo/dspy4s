@@ -7,19 +7,11 @@ trait AdapterRef
 
 final case class SettingKey[A](name: String)
 
-trait Settings:
-  def entries: Map[String, Any]
-  def get[A](key: SettingKey[A]): Option[A]
-  def updated[A](key: SettingKey[A], value: A): Settings
-  def remove(key: SettingKey[?]): Settings
+final case class Settings(entries: Map[String, Any] = Map.empty):
+  def get[A](key: SettingKey[A]): Option[A] = entries.get(key.name).map(_.asInstanceOf[A])
 
-final case class SettingsData(entries: Map[String, Any] = Map.empty) extends Settings:
-  override def get[A](key: SettingKey[A]): Option[A] = entries.get(key.name).map(_.asInstanceOf[A])
-
-  override def updated[A](key: SettingKey[A], value: A): Settings =
+  def updated[A](key: SettingKey[A], value: A): Settings =
     copy(entries = entries.updated(key.name, value))
-
-  override def remove(key: SettingKey[?]): Settings = copy(entries = entries.removed(key.name))
 
 object SettingKeys:
   val languageModel: SettingKey[LanguageModelRef] = SettingKey("lm")
@@ -44,30 +36,14 @@ final case class TraceEntry(
 
 final case class HistoryEntry(component: String, payload: Map[String, Any], timestamp: Instant = Instant.now())
 
-trait RuntimeContext:
-  def settings: Settings
-  def trace: Vector[TraceEntry]
-  def history: Vector[HistoryEntry]
-  def callbacks: Vector[CallbackHandler]
-
-  def withSettings(updated: Settings): RuntimeContext
-  def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext
-  def withHistory(updated: Vector[HistoryEntry]): RuntimeContext
-  def appendTrace(entry: TraceEntry): RuntimeContext
-  def appendHistory(entry: HistoryEntry): RuntimeContext
-
-final case class RuntimeContextData(
-    settings: Settings = SettingsData(),
+final case class RuntimeContext(
+    settings: Settings = Settings(),
     trace: Vector[TraceEntry] = Vector.empty,
     history: Vector[HistoryEntry] = Vector.empty,
     callbacks: Vector[CallbackHandler] = Vector.empty
-) extends RuntimeContext:
-  override def withSettings(updated: Settings): RuntimeContext = copy(settings = updated)
-
-  override def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext = copy(callbacks = updated)
-
-  override def withHistory(updated: Vector[HistoryEntry]): RuntimeContext = copy(history = updated)
-
-  override def appendTrace(entry: TraceEntry): RuntimeContext = copy(trace = trace :+ entry)
-
-  override def appendHistory(entry: HistoryEntry): RuntimeContext = copy(history = history :+ entry)
+):
+  def withSettings(updated: Settings): RuntimeContext = copy(settings = updated)
+  def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext = copy(callbacks = updated)
+  def withHistory(updated: Vector[HistoryEntry]): RuntimeContext = copy(history = updated)
+  def appendTrace(entry: TraceEntry): RuntimeContext = copy(trace = trace :+ entry)
+  def appendHistory(entry: HistoryEntry): RuntimeContext = copy(history = history :+ entry)

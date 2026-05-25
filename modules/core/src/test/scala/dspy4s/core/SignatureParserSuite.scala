@@ -6,13 +6,13 @@ import dspy4s.core.contracts.FieldUpdate
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
-import dspy4s.core.signatures.DefaultSignatureParser
+import dspy4s.core.signatures.SignatureParser
 import dspy4s.core.signatures.SignatureDsl
 import munit.FunSuite
 
 class SignatureParserSuite extends FunSuite:
   test("parse simple untyped signature") {
-    val parser = new DefaultSignatureParser()
+    val parser = new SignatureParser()
     val parsed = parser.parse("question -> answer")
 
     assert(parsed.isRight)
@@ -22,7 +22,7 @@ class SignatureParserSuite extends FunSuite:
   }
 
   test("parse typed signature") {
-    val parser = new DefaultSignatureParser()
+    val parser = new SignatureParser()
     val parsed = parser.parse("question: str, top_k: int -> answer: string, score: double")
 
     assert(parsed.isRight)
@@ -35,7 +35,7 @@ class SignatureParserSuite extends FunSuite:
   }
 
   test("invalid signature with multiple arrows fails") {
-    val parser = new DefaultSignatureParser()
+    val parser = new SignatureParser()
     val parsed = parser.parse("a -> b -> c")
 
     assert(parsed.isLeft)

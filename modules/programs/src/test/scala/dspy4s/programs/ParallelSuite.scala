@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SettingKey
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
@@ -91,7 +91,7 @@ class ParallelSuite extends FunSuite:
     val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = Map("value" -> value)))
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.numThreads.name -> 2,
           SettingKeys.maxErrors.name -> 1
@@ -116,7 +116,7 @@ class ParallelSuite extends FunSuite:
     )
     val tasks = Vector.fill(4)(program -> ProgramCall(inputs = Map("value" -> 1)))
 
-    RuntimeEnvironment.withSettings(SettingsData(Map(sampleKey.name -> "scoped"))) {
+    RuntimeEnvironment.withSettings(Settings(Map(sampleKey.name -> "scoped"))) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
       assert(result.isRight)

@@ -4,7 +4,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeContextData
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -43,7 +42,7 @@ final case class BestOfN(
           .updated("temperature", 1.0d)
       )
 
-      val isolated = RuntimeContextData(
+      val isolated = RuntimeContext(
         settings = baseContext.settings,
         callbacks = baseContext.callbacks
       )

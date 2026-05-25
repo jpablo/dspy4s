@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  DspyError, RuntimeContext, SettingKeys, SettingsData, SignatureLayout
+  DspyError, RuntimeContext, SettingKeys, Settings, SignatureLayout
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{
@@ -65,7 +65,7 @@ class TypedPredictSuite extends FunSuite:
         usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
       ))
 
-  private val defaultSettings: SettingsData = SettingsData(Map(
+  private val defaultSettings: Settings = Settings(Map(
     SettingKeys.languageModel.name -> FixedLm,
     SettingKeys.adapter.name       -> EchoQuestionAdapter
   ))
@@ -139,7 +139,7 @@ class TypedPredictSuite extends FunSuite:
         )))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
-    RuntimeEnvironment.withSettings(SettingsData(Map(
+    RuntimeEnvironment.withSettings(Settings(Map(
       SettingKeys.languageModel.name -> FixedLm,
       SettingKeys.adapter.name       -> capturingAdapter
     ))) {
@@ -190,7 +190,7 @@ class TypedPredictSuite extends FunSuite:
         ))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
-    RuntimeEnvironment.withSettings(SettingsData(Map(
+    RuntimeEnvironment.withSettings(Settings(Map(
       SettingKeys.languageModel.name -> capturingLm,
       SettingKeys.adapter.name       -> EchoQuestionAdapter
     ))) {
@@ -235,7 +235,7 @@ class TypedPredictSuite extends FunSuite:
         lmCalled = true
         Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
 
-    RuntimeEnvironment.withSettings(SettingsData(Map(
+    RuntimeEnvironment.withSettings(Settings(Map(
       SettingKeys.languageModel.name -> sentinelLm,
       SettingKeys.adapter.name       -> EchoQuestionAdapter
     ))) {

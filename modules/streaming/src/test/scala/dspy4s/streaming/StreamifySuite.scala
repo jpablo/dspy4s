@@ -8,7 +8,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.SettingsData
+import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -74,7 +74,7 @@ class StreamifySuite extends FunSuite:
     val program = DynamicPredict(layout = signature)
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> PassthroughAdapter
@@ -103,7 +103,7 @@ class StreamifySuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> PassthroughAdapter
@@ -143,7 +143,7 @@ class StreamifySuite extends FunSuite:
         Some("starting")
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> nonStreaming,
           SettingKeys.adapter.name -> PassthroughAdapter
@@ -191,7 +191,7 @@ class StreamifySuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> a").toOption.get
 
     RuntimeEnvironment.withSettings(
-      SettingsData(
+      Settings(
         Map(
           SettingKeys.languageModel.name -> lm,
           SettingKeys.adapter.name -> PassthroughAdapter

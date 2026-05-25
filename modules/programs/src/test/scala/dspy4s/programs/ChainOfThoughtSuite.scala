@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  DspyError, NotFoundError, RuntimeContext, SettingKeys, SettingsData, SignatureLayout,
+  DspyError, NotFoundError, RuntimeContext, SettingKeys, Settings, SignatureLayout,
   ValidationError
 }
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -75,7 +75,7 @@ class ChainOfThoughtSuite extends FunSuite:
         usage   = Some(LmUsage(totalTokens = 10, promptTokens = 4, completionTokens = 6))
       ))
 
-  private def settings(adapter: Adapter): SettingsData = SettingsData(Map(
+  private def settings(adapter: Adapter): Settings = Settings(Map(
     SettingKeys.languageModel.name -> FixedLm,
     SettingKeys.adapter.name       -> adapter
   ))
