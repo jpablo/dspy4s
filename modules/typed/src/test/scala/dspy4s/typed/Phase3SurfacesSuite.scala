@@ -14,7 +14,7 @@ case class P3ClassifyOutput(toxic: Boolean, confidence: Double)
 enum P3Tone:
   case neutral, positive, negative
 
-object P3Tone extends ValueDecoder.FlatEnum[P3Tone]
+object P3Tone extends FieldCodec.FlatEnum[P3Tone]
 
 case class P3ToneOutput(tone: P3Tone) derives Shape
 
@@ -43,7 +43,7 @@ class Phase3SurfacesSuite extends FunSuite:
     assertEquals(sig.signatureString, "comment, lang -> toxic, confidence")
   }
 
-  test("builder field TypeRefs come from the ValueDecoder typeclass") {
+  test("builder field TypeRefs come from the FieldCodec typeclass") {
     val sig = TypedSignature
       .builder("Bag")
       .input[String]("a")

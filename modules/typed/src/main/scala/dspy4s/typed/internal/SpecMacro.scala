@@ -1,14 +1,14 @@
 package dspy4s.typed.internal
 
 import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureSpec}
-import dspy4s.typed.{InputField, OutputField, Shape, Spec, TypedSignature, ValueDecoder}
+import dspy4s.typed.{InputField, OutputField, Shape, Spec, TypedSignature, FieldCodec}
 import scala.quoted.*
 
 private[typed] object SpecMacro:
 
   /** Implementation of `TypedSignature.of[T <: Spec]`. Inspects T's
     * abstract methods at compile time, validates each returns
-    * `InputField[X]` or `OutputField[X]`, summons a `ValueDecoder[X]`,
+    * `InputField[X]` or `OutputField[X]`, summons a `FieldCodec[X]`,
     * and emits a `TypedSignature[I, O]` whose `I` and `O` are named
     * tuples carrying the spec's input and output fields.
     *
@@ -17,7 +17,7 @@ private[typed] object SpecMacro:
     *   - methods that don't return `InputField[X]` or `OutputField[X]`
     *   - methods with parameters
     *   - duplicate field names
-    *   - missing `ValueDecoder[X]` for any wrapped type */
+    *   - missing `FieldCodec[X]` for any wrapped type */
   def ofImpl[T <: Spec : Type](using Quotes): Expr[Any] =
     import quotes.reflect.*
 
@@ -51,10 +51,10 @@ private[typed] object SpecMacro:
       )
 
     // For each method: (name, isInput, inner type, FieldSpec-Expr,
-    // ValueDecoder-Expr).
-    // The decoder expression is cast to ValueDecoder[Any] so we can carry
+    // FieldCodec-Expr).
+    // The decoder expression is cast to FieldCodec[Any] so we can carry
     // a uniform list-of-decoders type into the macro output.
-    val fieldData: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[ValueDecoder[Any]])] =
+    val fieldData: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[FieldCodec[Any]])] =
       methods.map { m =>
         val name = m.name
 
@@ -83,16 +83,16 @@ private[typed] object SpecMacro:
               s"Spec method '$sigName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
             )
 
-        // Summon a ValueDecoder[X] at the macro expansion site, then cast
-        // to ValueDecoder[Any] so the runtime decoder map can carry
+        // Summon a FieldCodec[X] at the macro expansion site, then cast
+        // to FieldCodec[Any] so the runtime decoder map can carry
         // heterogeneous types.
-        val decoderExpr: Expr[ValueDecoder[Any]] = innerType.asType match
+        val decoderExpr: Expr[FieldCodec[Any]] = innerType.asType match
           case '[t] =>
-            Expr.summon[ValueDecoder[t]] match
-              case Some(d) => '{ ${ d }.asInstanceOf[ValueDecoder[Any]] }
+            Expr.summon[FieldCodec[t]] match
+              case Some(d) => '{ ${ d }.asInstanceOf[FieldCodec[Any]] }
               case None =>
                 report.errorAndAbort(
-                  s"No ValueDecoder[${innerType.show}] in scope for spec field '$sigName.$name'"
+                  s"No FieldCodec[${innerType.show}] in scope for spec field '$sigName.$name'"
                 )
 
         val nameExpr = Expr(name)
@@ -119,9 +119,9 @@ private[typed] object SpecMacro:
         s"Spec trait '$sigName' has duplicate field names: ${duplicates.mkString(", ")}"
       )
 
-    def buildDecoderMapExpr(items: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[ValueDecoder[Any]])])
-        : Expr[Map[String, ValueDecoder[Any]]] =
-      val pairs: List[Expr[(String, ValueDecoder[Any])]] = items.map { case (n, _, _, _, dec) =>
+    def buildDecoderMapExpr(items: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[FieldCodec[Any]])])
+        : Expr[Map[String, FieldCodec[Any]]] =
+      val pairs: List[Expr[(String, FieldCodec[Any])]] = items.map { case (n, _, _, _, dec) =>
         val nameExpr = Expr(n)
         '{ ${ nameExpr } -> ${ dec } }
       }

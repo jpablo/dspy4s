@@ -12,7 +12,7 @@ import dspy4s.core.contracts.{
   * case class per signature (REPL exploration, dynamic shapes assembled
   * from config, tests).
   *
-  * Each `.input[T]` / `.output[T]` call summons a `ValueDecoder[T]` to
+  * Each `.input[T]` / `.output[T]` call summons a `FieldCodec[T]` to
   * derive the `TypeRef` and any well-known metadata (e.g. enum allowed
   * cases) for the resulting `FieldSpec`. The same primitives + Scala enum
   * support that case-class derivation gets in Phase 2 are available here
@@ -30,12 +30,12 @@ final class SignatureBuilder private[typed] (
 
   /** Append an input field typed `T`. Order of `.input` calls becomes the
     * input-field order in the resulting `Signature`. */
-  def input[T](name: String)(using dec: ValueDecoder[T]): SignatureBuilder =
+  def input[T](name: String)(using dec: FieldCodec[T]): SignatureBuilder =
     copy(inputs = inputs :+ fieldSpec(name, FieldRole.Input, dec))
 
   /** Append an output field typed `T`. Order of `.output` calls becomes the
     * output-field order in the resulting `Signature`. */
-  def output[T](name: String)(using dec: ValueDecoder[T]): SignatureBuilder =
+  def output[T](name: String)(using dec: FieldCodec[T]): SignatureBuilder =
     copy(outputs = outputs :+ fieldSpec(name, FieldRole.Output, dec))
 
   /** Replace the signature-level instructions. Empty strings become `None`. */
@@ -63,7 +63,7 @@ final class SignatureBuilder private[typed] (
         identity
       )
 
-  private def fieldSpec(name: String, role: FieldRole, dec: ValueDecoder[?]): FieldSpec =
+  private def fieldSpec(name: String, role: FieldRole, dec: FieldCodec[?]): FieldSpec =
     FieldSpec(
       name     = name,
       role     = role,

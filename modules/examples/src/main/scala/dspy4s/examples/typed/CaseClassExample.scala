@@ -10,7 +10,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, PredictionData, RuntimeContext}
-import dspy4s.typed.{TypedPrediction, TypedSignature, ValueDecoder}
+import dspy4s.typed.{TypedPrediction, TypedSignature, FieldCodec}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
 // enum's Schema must come from outside any enclosing class.
@@ -19,7 +19,7 @@ case class EmotionInput(sentence: String)
 enum Emotion:
   case sadness, joy, love, anger, fear, surprise
 
-object Emotion extends ValueDecoder.FlatEnum[Emotion]
+object Emotion extends FieldCodec.FlatEnum[Emotion]
 
 case class EmotionOutput(sentiment: Emotion)
 

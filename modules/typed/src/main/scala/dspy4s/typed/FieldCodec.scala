@@ -19,7 +19,7 @@ import scala.deriving.Mirror
   * the case name. For structured product values, the low-priority
   * schema-backed decoder delegates to `kyo-schema` through
   * `Structure.Value`. */
-trait ValueDecoder[A]:
+trait FieldCodec[A]:
   def typeRef: TypeRef
   def decode(raw: Any): Either[DspyError, A]
   def encode(value: A): Any
@@ -30,11 +30,11 @@ trait ValueDecoder[A]:
     * writers share one contract. Defaults to empty. */
   def metadata: Map[String, String] = Map.empty
 
-object ValueDecoder extends LowPriorityValueDecoders:
+object FieldCodec extends LowPriorityFieldCodecs:
 
   // ── Primitive instances ──────────────────────────────────────────────────
 
-  given ValueDecoder[String] with
+  given FieldCodec[String] with
     val typeRef: TypeRef = TypeRef.string
     def decode(raw: Any): Either[DspyError, String] = raw match
       case s: String                                       => Right(s)
@@ -44,7 +44,7 @@ object ValueDecoder extends LowPriorityValueDecoders:
         Left(ValidationError(s"Cannot decode as String: $other"))
     def encode(value: String): Any = value
 
-  given ValueDecoder[Int] with
+  given FieldCodec[Int] with
     val typeRef: TypeRef = TypeRef.int
     def decode(raw: Any): Either[DspyError, Int] = raw match
       case n: Int                                            => Right(n)
@@ -56,7 +56,7 @@ object ValueDecoder extends LowPriorityValueDecoders:
       case other => Left(ValidationError(s"Cannot decode as Int: $other"))
     def encode(value: Int): Any = value
 
-  given ValueDecoder[Double] with
+  given FieldCodec[Double] with
     val typeRef: TypeRef = TypeRef.double
     def decode(raw: Any): Either[DspyError, Double] = raw match
       case n: Double => Right(n)
@@ -70,7 +70,7 @@ object ValueDecoder extends LowPriorityValueDecoders:
       case other => Left(ValidationError(s"Cannot decode as Double: $other"))
     def encode(value: Double): Any = value
 
-  given ValueDecoder[Boolean] with
+  given FieldCodec[Boolean] with
     val typeRef: TypeRef = TypeRef.bool
     def decode(raw: Any): Either[DspyError, Boolean] = raw match
       case b: Boolean => Right(b)
@@ -97,8 +97,8 @@ object ValueDecoder extends LowPriorityValueDecoders:
   inline def fromSchema[A](
       typeRef: TypeRef = TypeRef.json,
       metadata: Map[String, String] = Map.empty
-  )(using schema: Schema[A]): ValueDecoder[A] =
-    KyoSchemaValueDecoder[A](schema, schema.structure, typeRef, metadata)
+  )(using schema: Schema[A]): FieldCodec[A] =
+    KyoSchemaFieldCodec[A](schema, schema.structure, typeRef, metadata)
 
   /** Flat-string schema for parameterless Scala enums. Kyo's default enum
     * schema is a discriminated object (`{"joy":{}}`); DSPy-style LM outputs
@@ -110,13 +110,13 @@ object ValueDecoder extends LowPriorityValueDecoders:
     * enum Emotion:
     *   case joy, sadness
     *
-    * object Emotion extends ValueDecoder.FlatEnum[Emotion]
+    * object Emotion extends FieldCodec.FlatEnum[Emotion]
     * }}}
     */
   inline def flatEnumSchema[A <: scala.reflect.Enum](using
       m: Mirror.SumOf[A]
   ): Schema[A] =
-    KyoSchemaValueDecoder.flatEnumSchema[A]
+    KyoSchemaFieldCodec.flatEnumSchema[A]
 
   /** One-line companion helper for DSPy-style flat enum fields.
     *
@@ -124,19 +124,19 @@ object ValueDecoder extends LowPriorityValueDecoders:
     * enum Emotion:
     *   case joy, sadness
     *
-    * object Emotion extends ValueDecoder.FlatEnum[Emotion]
+    * object Emotion extends FieldCodec.FlatEnum[Emotion]
     * }}}
     *
-    * The companion then provides both `ValueDecoder[Emotion]` for field
+    * The companion then provides both `FieldCodec[Emotion]` for field
     * metadata / tuple-shaped signatures and `Schema[Emotion]` for
     * schema-backed products.
     */
   trait FlatEnum[A <: scala.reflect.Enum]:
-    inline given valueDecoder(using Mirror.SumOf[A]): ValueDecoder[A] =
-      ValueDecoder.derived[A]
+    inline given fieldCodec(using Mirror.SumOf[A]): FieldCodec[A] =
+      FieldCodec.derived[A]
 
     inline given schema(using Mirror.SumOf[A]): Schema[A] =
-      ValueDecoder.flatEnumSchema[A]
+      FieldCodec.flatEnumSchema[A]
 
   // ── Scala enum derivation ────────────────────────────────────────────────
   //
@@ -147,9 +147,9 @@ object ValueDecoder extends LowPriorityValueDecoders:
   // transform before handoff, or callers can pass the typed enum value
   // directly.
 
-  /** Enables `derives ValueDecoder` on Scala enums. Decodes case names from
+  /** Enables `derives FieldCodec` on Scala enums. Decodes case names from
     * strings or accepts already-typed enum values. */
-  inline def derived[A <: scala.reflect.Enum](using m: Mirror.SumOf[A]): ValueDecoder[A] =
+  inline def derived[A <: scala.reflect.Enum](using m: Mirror.SumOf[A]): FieldCodec[A] =
     new EnumDecoder[A](
       caseNames   = summonEnumLabels[m.MirroredElemLabels],
       cases       = summonEnumCases[A, m.MirroredElemTypes],
@@ -158,7 +158,7 @@ object ValueDecoder extends LowPriorityValueDecoders:
 
   /** Extracted from `derived` so the inline def doesn't duplicate the
     * anonymous class at each call site. Package-private so inline expansion
-    * sites outside `ValueDecoder` (but inside `dspy4s.typed`) can reach it.
+    * sites outside `FieldCodec` (but inside `dspy4s.typed`) can reach it.
     *
     * The wire form for enum fields is a plain `String` — `typeRef =
     * TypeRef.string` reflects that honestly. The allowed-case constraint
@@ -168,7 +168,7 @@ object ValueDecoder extends LowPriorityValueDecoders:
       caseNames: List[String],
       cases: List[A],
       displayName: String
-  ) extends ValueDecoder[A]:
+  ) extends FieldCodec[A]:
 
     private val byName:  Map[String, A] = caseNames.zip(cases).toMap
     private val byValue: Map[A, String] = cases.zip(caseNames).toMap
@@ -214,16 +214,16 @@ object ValueDecoder extends LowPriorityValueDecoders:
         val v  = m.fromProduct(EmptyTuple).asInstanceOf[A]
         v :: summonEnumCases[A, t]
 
-trait LowPriorityValueDecoders:
+trait LowPriorityFieldCodecs:
 
   /** Fallback decoder for types that have a `kyo.Schema[A]` but no more
-    * specific dspy4s `ValueDecoder[A]`. Restricted to product types so an
-    * arbitrary undecodable class still reports "No ValueDecoder" instead of
+    * specific dspy4s `FieldCodec[A]`. Restricted to product types so an
+    * arbitrary undecodable class still reports "No FieldCodec" instead of
     * triggering kyo-schema's generic derivation error. Kept low-priority so
     * primitive and enum decoders above continue to define the default
     * flat-field behavior. */
   inline given schemaBackedProduct[A <: Product](using
       m: Mirror.ProductOf[A],
       schema: Schema[A]
-  ): ValueDecoder[A] =
-    ValueDecoder.fromSchema[A]()(using schema)
+  ): FieldCodec[A] =
+    FieldCodec.fromSchema[A]()(using schema)

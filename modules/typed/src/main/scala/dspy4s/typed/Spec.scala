@@ -16,7 +16,7 @@ package dspy4s.typed
   *
   * The macro behind `TypedSignature.of` validates the trait at compile
   * time: every member must return `InputField[A]` or `OutputField[A]`,
-  * the field name must be unique, and a `ValueDecoder[A]` must be in
+  * the field name must be unique, and a `FieldCodec[A]` must be in
   * scope. */
 trait Spec
 

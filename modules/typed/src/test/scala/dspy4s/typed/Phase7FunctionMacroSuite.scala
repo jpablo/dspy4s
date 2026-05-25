@@ -6,7 +6,7 @@ import munit.FunSuite
 enum P7Emotion:
   case sadness, joy, love
 
-object P7Emotion extends ValueDecoder.FlatEnum[P7Emotion]
+object P7Emotion extends FieldCodec.FlatEnum[P7Emotion]
 
 case class P7Score(sentiment: P7Emotion, confidence: Double)
 
@@ -92,14 +92,14 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(field.metadata.get(FieldMetadata.EnumName), Some("P7Emotion"))
   }
 
-  test("compile error: missing input ValueDecoder") {
+  test("compile error: missing input FieldCodec") {
     val errors = compileErrors("""
       class NotDecodable
       def badInput(value: NotDecodable): String = ""
       val sig = dspy4s.typed.TypedSignature.from(badInput)
     """)
-    assert(errors.contains("No ValueDecoder"),
-      s"expected helpful error about missing ValueDecoder, got:\n$errors")
+    assert(errors.contains("No FieldCodec"),
+      s"expected helpful error about missing FieldCodec, got:\n$errors")
   }
 
   test("compile error: Unit output") {

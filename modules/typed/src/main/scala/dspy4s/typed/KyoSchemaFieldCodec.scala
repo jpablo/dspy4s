@@ -5,21 +5,21 @@ import kyo.{Chunk, DecodeException, Result, Schema, Structure, UnknownVariantExc
 import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.deriving.Mirror
 
-private[typed] final class KyoSchemaValueDecoder[A](
+private[typed] final class KyoSchemaFieldCodec[A](
     schema: Schema[A],
     structure: Structure.Type,
     override val typeRef: TypeRef,
     override val metadata: Map[String, String]
-) extends ValueDecoder[A]:
+) extends FieldCodec[A]:
 
   def decode(raw: Any): Either[DspyError, A] =
-    val value = KyoSchemaValueDecoder.toStructure(raw, structure)
-    KyoSchemaValueDecoder.toEither(Structure.decode[A](value)(using schema, summon))
+    val value = KyoSchemaFieldCodec.toStructure(raw, structure)
+    KyoSchemaFieldCodec.toEither(Structure.decode[A](value)(using schema, summon))
 
   def encode(value: A): Any =
-    KyoSchemaValueDecoder.fromStructure(Structure.encode[A](value)(using schema, summon))
+    KyoSchemaFieldCodec.fromStructure(Structure.encode[A](value)(using schema, summon))
 
-private[typed] object KyoSchemaValueDecoder:
+private[typed] object KyoSchemaFieldCodec:
 
   inline def flatEnumSchema[A <: scala.reflect.Enum](using
       m: Mirror.SumOf[A]

@@ -1,7 +1,7 @@
 package dspy4s.typed.internal
 
 import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureSpec}
-import dspy4s.typed.{Shape, TypedSignature, ValueDecoder}
+import dspy4s.typed.{Shape, TypedSignature, FieldCodec}
 import kyo.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
@@ -19,7 +19,7 @@ private[typed] object FunctionMacro:
         name: String,
         tpe: TypeRepr,
         fieldSpec: Expr[FieldSpec],
-        decoder: Expr[ValueDecoder[Any]]
+        decoder: Expr[FieldCodec[Any]]
     )
 
     def unwrap(term: Term): Term = term match
@@ -103,14 +103,14 @@ private[typed] object FunctionMacro:
           Some(nameParts.zip(valueParts))
         case _ => None
 
-    def decoderExpr(owner: String, fieldName: String, fieldTpe: TypeRepr): Expr[ValueDecoder[Any]] =
+    def decoderExpr(owner: String, fieldName: String, fieldTpe: TypeRepr): Expr[FieldCodec[Any]] =
       fieldTpe.asType match
         case '[t] =>
-          Expr.summon[ValueDecoder[t]] match
-            case Some(d) => '{ ${ d }.asInstanceOf[ValueDecoder[Any]] }
+          Expr.summon[FieldCodec[t]] match
+            case Some(d) => '{ ${ d }.asInstanceOf[FieldCodec[Any]] }
             case None =>
               report.errorAndAbort(
-                s"No ValueDecoder[${fieldTpe.show}] in scope for field '$owner.$fieldName'"
+                s"No FieldCodec[${fieldTpe.show}] in scope for field '$owner.$fieldName'"
               )
 
     def fieldData(owner: String, role: FieldRole, items: List[(String, TypeRepr)]): List[FieldData] =
@@ -130,7 +130,7 @@ private[typed] object FunctionMacro:
         FieldData(name, tpe, fieldSpecExpr, dec)
       }
 
-    def decoderMapExpr(items: List[FieldData]): Expr[Map[String, ValueDecoder[Any]]] =
+    def decoderMapExpr(items: List[FieldData]): Expr[Map[String, FieldCodec[Any]]] =
       val pairs = items.map { item =>
         val nameExpr = Expr(item.name)
         '{ ${ nameExpr } -> ${ item.decoder } }

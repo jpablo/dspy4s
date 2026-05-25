@@ -45,7 +45,7 @@ lazy val core = (project in file("modules/core"))
   )
 
 // Typed signatures layer. kyo-schema is used in production as the structured
-// codec backend behind dspy4s's ValueDecoder boundary. kyo-data is explicit
+// codec backend behind dspy4s's FieldCodec boundary. kyo-data is explicit
 // because kyo-schema's Structure.Value tree and test Record probes use its
 // collection/data primitives.
 lazy val typed = (project in file("modules/typed"))

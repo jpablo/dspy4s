@@ -28,7 +28,7 @@ object Shape:
     * that produces field metadata without an accompanying case class.
     *
     * When `decoders` is non-empty, every declared field is run through
-    * its `ValueDecoder` during `decode` (so a raw adapter value like the
+    * its `FieldCodec` during `decode` (so a raw adapter value like the
     * string `"joy"` becomes the typed enum value `Sentiment.joy`), and
     * inputs are encoded through the same decoders on the way out (so a
     * typed enum value becomes its case-name string for the adapter).
@@ -39,7 +39,7 @@ object Shape:
     * field listed in `fieldSpecs` is present in the raw map. */
   final class MapShape(
       override val fieldSpecs: Vector[FieldSpec],
-      decoders: Map[String, ValueDecoder[Any]] = Map.empty
+      decoders: Map[String, FieldCodec[Any]] = Map.empty
   ) extends Shape[Map[String, Any]]:
 
     def encode(value: Map[String, Any]): Map[String, Any] =
@@ -85,7 +85,7 @@ object Shape:
     */
   final class TupleShape[A](
       override val fieldSpecs: Vector[FieldSpec],
-      decoders: Map[String, ValueDecoder[Any]]
+      decoders: Map[String, FieldCodec[Any]]
   ) extends Shape[A]:
 
     def encode(value: A): Map[String, Any] =
@@ -166,7 +166,7 @@ object Shape:
       fields.map(field => fieldSpec(field, role)).toVector
 
     def encode(value: A): Map[String, Any] =
-      KyoSchemaValueDecoder.fromStructure(
+      KyoSchemaFieldCodec.fromStructure(
         Structure.encode[A](value)(using schema, summon),
         structure
       ) match
@@ -189,9 +189,9 @@ object Shape:
               message  = s"Required field '${field.name}' is missing from the raw prediction"
             ))
           case Some(value) =>
-            builder += field.name -> KyoSchemaValueDecoder.toStructure(value, field.fieldType)
+            builder += field.name -> KyoSchemaFieldCodec.toStructure(value, field.fieldType)
       val record = Structure.Value.Record(Chunk.from(builder.result()))
-      KyoSchemaValueDecoder.toEither(Structure.decode[A](record)(using schema, summon))
+      KyoSchemaFieldCodec.toEither(Structure.decode[A](record)(using schema, summon))
 
   private def fieldSpec(field: Structure.Field, role: FieldRole): FieldSpec =
     val (typeRef, metadata) = metadataFor(field.fieldType)

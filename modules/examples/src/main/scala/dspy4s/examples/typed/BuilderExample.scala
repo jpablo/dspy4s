@@ -7,7 +7,7 @@
  * typed `Predict.run` should use the trait-spec, method, or case-class
  * APIs instead.
  *
- * Each `.input[T]` / `.output[T]` call summons a `ValueDecoder[T]` so the
+ * Each `.input[T]` / `.output[T]` call summons a `FieldCodec[T]` so the
  * resulting `FieldSpec` carries the right `TypeRef` and any well-known
  * metadata (enum allowed cases, display name, etc.).
  *
@@ -33,7 +33,7 @@ object BuilderExample:
       )
       .build
 
-  /** Reusing an enum that has a `ValueDecoder` (see CaseClassExample's
+  /** Reusing an enum that has a `FieldCodec` (see CaseClassExample's
     * `Emotion`) gives the builder enum metadata for free — adapters can
     * read `FieldSpec.metadata(FieldMetadata.EnumCases)` to render the
     * allowed values into the prompt. */

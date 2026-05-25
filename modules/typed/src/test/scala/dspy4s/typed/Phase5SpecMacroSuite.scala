@@ -8,7 +8,7 @@ import munit.FunSuite
 enum P5Tone:
   case calm, urgent, frustrated
 
-object P5Tone extends ValueDecoder.FlatEnum[P5Tone]
+object P5Tone extends FieldCodec.FlatEnum[P5Tone]
 
 case class P5Citation(title: String, score: Double) derives Schema
 case class P5StructuredAnswer(
@@ -58,7 +58,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(sig.untyped.signatureString, "question, context -> answer, score")
   }
 
-  test("spec trait field TypeRefs come from the ValueDecoder typeclass") {
+  test("spec trait field TypeRefs come from the FieldCodec typeclass") {
     val sig = TypedSignature.of[P5MultiSpec]
     val byName = sig.untyped.fields.map(f => f.name -> f.typeRef.repr).toMap
     assertEquals(byName("question"), "string")
@@ -108,7 +108,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   // ── Decoder-aware MapShape: spec output types are honored at decode ─────
 
-  test("spec outputShape decodes enum case names through the field's ValueDecoder") {
+  test("spec outputShape decodes enum case names through the field's FieldCodec") {
     val sig = TypedSignature.of[P5ToneSpec]
     val raw = Map[String, Any]("tone" -> "calm")
     val decoded = sig.outputShape.decode(raw).toOption.get
@@ -204,15 +204,15 @@ class Phase5SpecMacroSuite extends FunSuite:
       s"expected helpful error about parameters, got:\n$errors")
   }
 
-  test("compile error: missing ValueDecoder for inner type") {
+  test("compile error: missing FieldCodec for inner type") {
     val errors = compileErrors("""
       class NotDecodable
       trait BadSpec extends dspy4s.typed.Spec:
         def field: dspy4s.typed.OutputField[NotDecodable]
       val sig = dspy4s.typed.TypedSignature.of[BadSpec]
     """)
-    assert(errors.contains("No ValueDecoder"),
-      s"expected helpful error about missing ValueDecoder, got:\n$errors")
+    assert(errors.contains("No FieldCodec"),
+      s"expected helpful error about missing FieldCodec, got:\n$errors")
   }
 
   test("compile error: empty spec trait") {

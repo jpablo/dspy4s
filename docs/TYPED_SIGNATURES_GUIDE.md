@@ -70,7 +70,7 @@ import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
 enum Emotion:
   case sadness, joy, love
 
-object Emotion extends dspy4s.typed.ValueDecoder.FlatEnum[Emotion]
+object Emotion extends dspy4s.typed.FieldCodec.FlatEnum[Emotion]
 
 trait EmotionSpec extends Spec:
   def sentence:  InputField[String]
@@ -82,7 +82,7 @@ val sig = TypedSignature.of[EmotionSpec]
 End-to-end typed I/O uses Scala named tuples: `TypedPredict(sig).run((sentence = "..."))`
 accepts a named-tuple input, and `tp.output.sentiment` is typed as
 `Emotion`. Compile-time validation catches methods not wrapped in the
-marker types, methods with parameters, missing `ValueDecoder[X]`,
+marker types, methods with parameters, missing `FieldCodec[X]`,
 duplicate field names, concrete methods, and empty spec traits.
 
 See [`modules/examples/.../typed/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/SpecExample.scala).
@@ -141,7 +141,7 @@ val sig: dspy4s.core.contracts.Signature =
 ```
 
 Returns a plain runtime `Signature`. Per-field types come from the
-`ValueDecoder[T]` typeclass, so enum metadata (allowed cases, display
+`FieldCodec[T]` typeclass, so enum metadata (allowed cases, display
 name) flows through automatically.
 
 See [`modules/examples/.../typed/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/BuilderExample.scala).
@@ -186,7 +186,7 @@ because each has a niche where it's a better fit.
 
 ## Supported field types
 
-The `ValueDecoder` typeclass covers the MVP type vocabulary:
+The `FieldCodec` typeclass covers the MVP type vocabulary:
 
 | Type | Pass-through accepts | String coercion accepts |
 |---|---|---|
@@ -194,7 +194,7 @@ The `ValueDecoder` typeclass covers the MVP type vocabulary:
 | `Int` | `Int`; `Long` in `Int` range | clean integer strings like `"42"` |
 | `Double` | `Int` / `Long` / `Float` / `Double` | clean numeric strings like `"1.5"` |
 | `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
-| Scala enum (`ValueDecoder.FlatEnum`) | already-typed enum value | flat case name like `"joy"` |
+| Scala enum (`FieldCodec.FlatEnum`) | already-typed enum value | flat case name like `"joy"` |
 | Product with `kyo.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
 
 Notably **not** auto-coerced:
@@ -208,7 +208,7 @@ Supported for structured fields:
   product fields with a `kyo.Schema[A]` in scope.
 - Nested lists, maps, options, and other `kyo-schema`-supported members are
   supported inside those product fields.
-- Use `ValueDecoder.FlatEnum[A]` for enum companions when the enum appears in
+- Use `FieldCodec.FlatEnum[A]` for enum companions when the enum appears in
   a schema-backed product. It supplies both the field decoder and the flat
   Kyo schema.
 
@@ -216,9 +216,9 @@ Deferred to a later phase:
 
 - Literal-union types (`"sadness" | "joy" | "love"`) — use Scala enums
   for now
-- Custom domain codecs beyond what `ValueDecoder` covers
+- Custom domain codecs beyond what `FieldCodec` covers
 
-To support a custom type, write a `ValueDecoder[YourType]` instance
+To support a custom type, write a `FieldCodec[YourType]` instance
 and import it into scope.
 
 ---
@@ -226,13 +226,13 @@ and import it into scope.
 ## Enum support and the wire-format note
 
 For DSPy-style flat enum fields, define the enum normally and make its
-companion extend `ValueDecoder.FlatEnum`:
+companion extend `FieldCodec.FlatEnum`:
 
 ```scala
 enum Sentiment:
   case sadness, joy, love, anger, fear, surprise
 
-object Sentiment extends ValueDecoder.FlatEnum[Sentiment]
+object Sentiment extends FieldCodec.FlatEnum[Sentiment]
 ```
 
 The decoder accepts either an already-typed `Sentiment` value or a
@@ -264,14 +264,14 @@ trait Classify extends Spec:
 
 **Wire-format finding from Phase 0**: `kyo-schema`'s default enum
 derivation encodes Scala enums as `{"caseName":{}}` (discriminated
-object), not as flat strings. `ValueDecoder.FlatEnum` overrides that
+object), not as flat strings. `FieldCodec.FlatEnum` overrides that
 with the LLM-friendly flat string form.
 
 ```scala
 enum Mood:
   case happy, sad
 
-object Mood extends ValueDecoder.FlatEnum[Mood]
+object Mood extends FieldCodec.FlatEnum[Mood]
 ```
 
 Schema-backed products normalize clear primitive strings before handing
@@ -346,7 +346,7 @@ These are documented gaps, surfaced so you can plan around them:
   and compile-time field-name checks, but it is not a case class. If
   you need case-class `copy`, extractors, or pattern matching, use
   `TypedSignature.derived[I, O]`.
-- **Literal-union output types**: not yet a `ValueDecoder` instance;
+- **Literal-union output types**: not yet a `FieldCodec` instance;
   use a Scala enum.
 - **Decode-failure + trace divergence**: when the inner `Predict`
   succeeds but the typed decode fails, the trace still records a

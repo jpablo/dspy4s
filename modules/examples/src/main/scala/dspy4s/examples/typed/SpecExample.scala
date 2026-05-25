@@ -6,7 +6,7 @@
  * input/output fields as abstract method members tagged with
  * `InputField[T]` / `OutputField[T]`. The macro `TypedSignature.of[T]`
  * walks the trait at compile time, validates each member, summons a
- * `ValueDecoder[T]` for the wrapped type, and emits the runtime
+ * `FieldCodec[T]` for the wrapped type, and emits the runtime
  * `TypedSignature`.
  *
  * `TypedSignature.of[T]` exposes named-tuple input/output types, so callers

@@ -6,7 +6,7 @@ import munit.FunSuite
 enum KyoFlatEmotion:
   case sadness, joy, love
 
-object KyoFlatEmotion extends ValueDecoder.FlatEnum[KyoFlatEmotion]
+object KyoFlatEmotion extends FieldCodec.FlatEnum[KyoFlatEmotion]
 
 case class KyoFlatOutput(sentiment: KyoFlatEmotion) derives Schema
 
@@ -20,7 +20,7 @@ case class KyoNestedOutput(
 
 case class KyoNestedContainer(result: KyoNestedOutput)
 
-class KyoSchemaValueDecoderSuite extends FunSuite:
+class KyoSchemaFieldCodecSuite extends FunSuite:
 
   test("flat enum kyo-schema helper encodes case names as strings") {
     val json = Json.encode(KyoFlatOutput(KyoFlatEmotion.joy))
@@ -41,8 +41,8 @@ class KyoSchemaValueDecoderSuite extends FunSuite:
     assert(result.isFailure, s"expected decode failure, got: $result")
   }
 
-  test("schema-backed ValueDecoder decodes adapter-like nested maps") {
-    val decoder = summon[ValueDecoder[KyoNestedOutput]]
+  test("schema-backed FieldCodec decodes adapter-like nested maps") {
+    val decoder = summon[FieldCodec[KyoNestedOutput]]
     val raw = Map[String, Any](
       "answer" -> "Paris",
       "sentiment" -> "joy",
@@ -63,8 +63,8 @@ class KyoSchemaValueDecoderSuite extends FunSuite:
     )
   }
 
-  test("schema-backed ValueDecoder encodes nested values to adapter-like maps") {
-    val decoder = summon[ValueDecoder[KyoNestedOutput]]
+  test("schema-backed FieldCodec encodes nested values to adapter-like maps") {
+    val decoder = summon[FieldCodec[KyoNestedOutput]]
     val encoded = decoder.encode(KyoNestedOutput(
       answer = "Paris",
       sentiment = KyoFlatEmotion.love,
@@ -81,8 +81,8 @@ class KyoSchemaValueDecoderSuite extends FunSuite:
     )
   }
 
-  test("schema-backed ValueDecoder normalizes nested primitive strings") {
-    val decoder = summon[ValueDecoder[KyoNestedOutput]]
+  test("schema-backed FieldCodec normalizes nested primitive strings") {
+    val decoder = summon[FieldCodec[KyoNestedOutput]]
     val raw = Map[String, Any](
       "answer" -> "Paris",
       "sentiment" -> "joy",
@@ -140,7 +140,7 @@ class KyoSchemaValueDecoderSuite extends FunSuite:
   }
 
   test("schema-backed decoder accepts Structure.Value directly") {
-    val decoder = summon[ValueDecoder[KyoNestedOutput]]
+    val decoder = summon[FieldCodec[KyoNestedOutput]]
     val value = Structure.encode(KyoNestedOutput(
       answer = "Paris",
       sentiment = KyoFlatEmotion.sadness,

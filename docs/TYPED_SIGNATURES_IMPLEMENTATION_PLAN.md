@@ -95,8 +95,8 @@ New files:
 - `modules/typed/src/main/scala/dspy4s/typed/TypedSignature.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/TypedPrediction.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/FieldMarkers.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/ValueDecoder.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/KyoSchemaValueDecoder.scala`
+- `modules/typed/src/main/scala/dspy4s/typed/FieldCodec.scala`
+- `modules/typed/src/main/scala/dspy4s/typed/KyoSchemaFieldCodec.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/Shape.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/internal/ShapeMacros.scala`
 - `modules/programs/src/main/scala/dspy4s/programs/TypedPredict.scala`
@@ -155,7 +155,7 @@ Risk gate:
   Kyo for compile-time shape derivation and generate a DSPy4S `Selectable`
   wrapper for predictions. Do not switch to ZIO Blocks in the first version.
 - If `kyo-schema` is not published or cannot support the MVP decoding contract,
-  fall back to a small DSPy4S `ValueDecoder[A]` typeclass for primitives and
+  fall back to a small DSPy4S `FieldCodec[A]` typeclass for primitives and
   enums only. Do not build a broad custom codec ecosystem in the MVP.
 
 ### Outcomes (executed 2026-05-24)
@@ -320,10 +320,10 @@ val answer = p.answer
 - Convert field metadata to `FieldSpec`.
 - Encode typed inputs into `Map[String, Any]`.
 - Decode a raw `Prediction` into a typed output record through the selected
-  schema/value decoder.
+  schema/field codec.
 - Return structured DSPy4S errors for missing or invalid output fields.
 
-`ValueDecoder[A]` responsibilities:
+`FieldCodec[A]` responsibilities:
 
 - Map Scala types to existing `TypeRef` values.
 - Decode raw prediction values into Scala values.
@@ -345,7 +345,7 @@ DSPy4S should split that work into two explicit responsibilities:
   adapters remain responsible for turning an LM response into named raw output
   fields. The raw values may be strings, JSON values, numbers, booleans, or
   adapter-specific values.
-- **The typed layer decodes fields.** `ValueDecoder[A]` is the DSPy4S boundary
+- **The typed layer decodes fields.** `FieldCodec[A]` is the DSPy4S boundary
   that converts each raw field into the expected Scala type or returns a
   structured `DspyError`. Its first implementation should delegate to
   `kyo-schema` rather than recreate a general codec system.
@@ -422,13 +422,13 @@ Acceptance criteria:
 
 Implemented four files in `modules/typed/src/main/scala/dspy4s/typed/`:
 
-- `ValueDecoder.scala` — field-level codec typeclass with built-in givens for
+- `FieldCodec.scala` — field-level codec typeclass with built-in givens for
   `String` / `Int` / `Double` / `Boolean`, plus enum support based on
   `Mirror.SumOf[A]` → case-name → enum-value tables. Decodes from `Any`
   (already-typed adapter values), not from JSON bytes. It also exposes
-  `ValueDecoder.fromSchema[A](using Schema[A])` for structured field values
-  and `ValueDecoder.FlatEnum[A]` for enum companions that need both
-  `ValueDecoder[A]` and flat-string `Schema[A]`.
+  `FieldCodec.fromSchema[A](using Schema[A])` for structured field values
+  and `FieldCodec.FlatEnum[A]` for enum companions that need both
+  `FieldCodec[A]` and flat-string `Schema[A]`.
 - `Shape.scala` — `Shape[A <: Product]` derivation via `kyo.Schema[A]` and
   `Structure.Type`. It derives `Vector[FieldSpec]` from Kyo's structural
   fields, stamps the requested role at derivation time, encodes products
@@ -461,14 +461,14 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
   want intersection-typed structural composition.
 - `Shape` now uses kyo-schema for whole-product case-class encode/decode
   instead of reconstructing products field-by-field with hand-summoned
-  `ValueDecoder`s. `ValueDecoder` remains the DSPy field boundary for
+  `FieldCodec`s. `FieldCodec` remains the DSPy field boundary for
   builder, trait-spec, named-tuple, scalar, and custom-field cases, and also
   provides a kyo-schema bridge for structured product fields. That bridge now
   uses the same guided `Structure.Type` normalization path as product
   `Shape`s, so nested product fields in trait specs get conservative
   primitive coercion too.
 - Kyo's default enum schema remains discriminated (`{"case":{}}`), but
-  `ValueDecoder.FlatEnum[A]` provides an LLM-friendly flat string schema and
+  `FieldCodec.FlatEnum[A]` provides an LLM-friendly flat string schema and
   a matching field decoder from a single companion-object line.
 
 **Lessons from implementation**:
@@ -534,7 +534,7 @@ Implemented one new file:
 
 - `modules/typed/src/main/scala/dspy4s/typed/SignatureBuilder.scala` —
   fluent, immutable builder. `.input[T](name)` / `.output[T](name)`
-  summon a `ValueDecoder[T]` to derive `TypeRef` + well-known metadata
+  summon a `FieldCodec[T]` to derive `TypeRef` + well-known metadata
   (enum cases, etc.) for the resulting `FieldSpec`. `.instructions(text)`
   is chainable anywhere; empty text → `None`. `.build` returns a plain
   runtime `Signature` (inputs then outputs in declaration order).
@@ -552,7 +552,7 @@ Shape[O])` adapter if a use case emerges for upgrading a builder result
 to a typed surface; for now, the two surfaces are explicitly separate.
 
 **Test results**: `Phase3SurfacesSuite` adds 9 tests (builder ordering,
-TypeRefs from `ValueDecoder`, enum metadata propagation, immutability,
+TypeRefs from `FieldCodec`, enum metadata propagation, immutability,
 empty-instructions handling; case-class field-name / encode / decode
 end-to-end; cross-surface parity for equivalent shapes). Full project
 green at 345 / 345 (was 336; +9 from this suite).
@@ -665,7 +665,7 @@ Macro responsibilities:
 - Inspect abstract members on the spec trait.
 - Require each member to return `InputField[A]` or `OutputField[A]`.
 - Preserve declaration order.
-- Derive or summon `ValueDecoder[A]` / `Schema[A]` evidence for each field.
+- Derive or summon `FieldCodec[A]` / `Schema[A]` evidence for each field.
 - Build `TypedSignature[inputRecord, outputRecord]`.
 - Emit readable compile errors for unsupported members.
 
@@ -714,7 +714,7 @@ Implemented in three new files:
 - `modules/typed/src/main/scala/dspy4s/typed/internal/SpecMacro.scala`
   — quotes/splices macro that inspects abstract methods on the spec
   trait, validates each returns `InputField[X]` or `OutputField[X]`,
-  summons `ValueDecoder[X]` evidence at the call site, and emits a
+  summons `FieldCodec[X]` evidence at the call site, and emits a
   `TypedSignature[I, O]` whose `I` and `O` are Scala named tuples
   matching the input and output declarations.
 - `Shape.TupleShape` (added to `Shape.scala`) — tuple-backed shape used
@@ -727,7 +727,7 @@ Macro validates at compile time:
   - methods that don't return `InputField[X]` / `OutputField[X]`
   - methods with parameters
   - empty spec traits
-  - missing `ValueDecoder[X]` for any wrapped type
+  - missing `FieldCodec[X]` for any wrapped type
   - duplicate field names
 
 **Named-tuple I/O design choice:**
@@ -857,7 +857,7 @@ Potential extensions:
 
 1. Add `typed` module and Kyo feasibility tests, including `kyo-schema`.
 2. Add primitive accessors to `Prediction`.
-3. Implement `TypedSignature`, `Shape`, schema-backed `ValueDecoder`, and
+3. Implement `TypedSignature`, `Shape`, schema-backed `FieldCodec`, and
    builder API.
 4. Implement `TypedPrediction` and typed output decoding.
 5. Implement `TypedPredict`.

@@ -906,7 +906,7 @@ engine from §4.2.
    public ergonomic target is the same: typed dot-access and typed
    `.value[K]`. This phase also implements the runtime output parsing
    contract from §6.1: raw adapter outputs are decoded with the expected
-   schema/value decoders before a `TypedPrediction[O]` is constructed.
+   schemas/field codecs before a `TypedPrediction[O]` is constructed.
    Re-translate `Signatures.scala` Snippet 5 against it to validate
    ergonomics on a real example. Existing `Predict(sig: Signature)` API
    stays untouched.

@@ -13,7 +13,7 @@ case class P2ScoredSentiment(sentiment: String, confidence: Double)
 enum P2Sentiment:
   case sadness, joy, love, anger, fear, surprise
 
-object P2Sentiment extends ValueDecoder.FlatEnum[P2Sentiment]
+object P2Sentiment extends FieldCodec.FlatEnum[P2Sentiment]
 
 case class P2EnumOutput(sentiment: P2Sentiment) derives Shape
 
@@ -103,14 +103,14 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   // ── Enum decoding ────────────────────────────────────────────────────────
 
-  test("ValueDecoder enum derivation accepts case names as strings") {
-    val dec = summon[ValueDecoder[P2Sentiment]]
+  test("FieldCodec enum derivation accepts case names as strings") {
+    val dec = summon[FieldCodec[P2Sentiment]]
     assertEquals(dec.decode("joy"),       Right(P2Sentiment.joy))
     assertEquals(dec.decode("sadness"),   Right(P2Sentiment.sadness))
   }
 
-  test("ValueDecoder enum derivation accepts already-typed enum values") {
-    val dec = summon[ValueDecoder[P2Sentiment]]
+  test("FieldCodec enum derivation accepts already-typed enum values") {
+    val dec = summon[FieldCodec[P2Sentiment]]
     assertEquals(dec.decode(P2Sentiment.fear), Right(P2Sentiment.fear))
   }
 
@@ -140,7 +140,7 @@ class Phase2TypedCoreSuite extends FunSuite:
   }
 
   test("enum encoder uses case name (not toString) so overrides can't drift") {
-    val dec = summon[ValueDecoder[P2Sentiment]]
+    val dec = summon[FieldCodec[P2Sentiment]]
     assertEquals(dec.encode(P2Sentiment.joy), "joy")
     assertEquals(dec.encode(P2Sentiment.sadness), "sadness")
     // Encoded value must round-trip through decode.
