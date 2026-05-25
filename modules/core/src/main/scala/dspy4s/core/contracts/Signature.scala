@@ -34,6 +34,22 @@ final case class FieldSpec(
     metadata: Map[String, String] = Map.empty
 )
 
+/** Well-known string keys that may appear in `FieldSpec.metadata`. Defined
+  * here in `core` so any producer (the typed layer, custom builders, future
+  * derivation macros) and any consumer (adapters in `lm`, prompt formatters
+  * in `adapters`, etc.) can share one contract without depending on each
+  * other. Adapters that understand a key may surface it to the LM; adapters
+  * that don't ignore it harmlessly. */
+object FieldMetadata:
+  /** Comma-separated allowed case names for a field backed by a closed set
+    * (typically a Scala enum). Example: `"sadness,joy,love"`. */
+  val EnumCases: String = "enum.cases"
+
+  /** The original Scala display name of an enum-typed field (e.g.
+    * `"Sentiment"`). Useful for adapter prompt rendering when the lowercased
+    * `TypeRef` is less informative than the source type name. */
+  val EnumName: String = "enum.name"
+
 final case class FieldUpdate(
     typeRef: Option[TypeRef] = None,
     typeToken: Option[String] = None,

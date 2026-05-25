@@ -128,10 +128,21 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(fs.name, "sentiment")
     assertEquals(fs.typeRef, dspy4s.core.contracts.TypeRef.string)
     assertEquals(
-      fs.metadata.get(ValueDecoder.Meta.EnumCases),
+      fs.metadata.get(dspy4s.core.contracts.FieldMetadata.EnumCases),
       Some("sadness,joy,love,anger,fear,surprise")
     )
-    assertEquals(fs.metadata.get(ValueDecoder.Meta.EnumName), Some("P2Sentiment"))
+    assertEquals(
+      fs.metadata.get(dspy4s.core.contracts.FieldMetadata.EnumName),
+      Some("P2Sentiment")
+    )
+  }
+
+  test("enum encoder uses case name (not toString) so overrides can't drift") {
+    val dec = summon[ValueDecoder[P2Sentiment]]
+    assertEquals(dec.encode(P2Sentiment.joy), "joy")
+    assertEquals(dec.encode(P2Sentiment.sadness), "sadness")
+    // Encoded value must round-trip through decode.
+    assertEquals(dec.decode(dec.encode(P2Sentiment.love)), Right(P2Sentiment.love))
   }
 
   test("primitive fields carry empty metadata (no enum constraints)") {

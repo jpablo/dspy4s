@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, FieldMetadata, TypeRef, ValidationError}
 import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.deriving.Mirror
 
@@ -12,35 +12,24 @@ import scala.deriving.Mirror
   * through `ProgramCall`.
   *
   * Decodes from `Any`, not from JSON bytes — adapters are responsible for
-  * extracting raw field values. This deliberately sidesteps the kyo-schema
-  * enum wire-format mismatch surfaced in Phase 0 (flat string `"joy"` vs.
-  * discriminated `{"joy":{}}`); the typed layer accepts both shapes
-  * depending on which the adapter produces.
-  */
+  * extracting raw field values from the LM response. For enums, the
+  * built-in `EnumDecoder` accepts either an already-typed enum value (e.g.
+  * when an adapter has pre-resolved the case) or a flat string carrying
+  * the case name. Other shapes (such as kyo-schema's discriminated
+  * `{"case":{}}` wrapper) must be normalized at the adapter layer before
+  * reaching the decoder. */
 trait ValueDecoder[A]:
   def typeRef: TypeRef
   def decode(raw: Any): Either[DspyError, A]
   def encode(value: A): Any
 
   /** Optional per-field metadata surfaced into `FieldSpec.metadata` at
-    * `Shape` derivation time. Adapters can read well-known keys to enrich
-    * prompts (e.g. listing allowed enum case names). Defaults to empty. */
+    * `Shape` derivation time. Well-known keys live in
+    * `dspy4s.core.contracts.FieldMetadata` so adapter readers and decoder
+    * writers share one contract. Defaults to empty. */
   def metadata: Map[String, String] = Map.empty
 
 object ValueDecoder:
-
-  /** Well-known `metadata` keys produced by built-in decoders. Adapters
-    * that understand these may surface them to the LM (e.g. by rendering
-    * the allowed enum cases in a prompt). */
-  object Meta:
-    /** Comma-separated case names for fields backed by a Scala enum.
-      * Example: `"sadness,joy,love,anger,fear,surprise"`. */
-    val EnumCases: String = "enum.cases"
-
-    /** The original Scala display name of an enum type (e.g. `"Sentiment"`).
-      * Useful for adapter prompt rendering when the type label is more
-      * informative than the lowercased `TypeRef`. */
-    val EnumName: String = "enum.name"
 
   // ── Primitive instances ──────────────────────────────────────────────────
 
@@ -117,20 +106,22 @@ object ValueDecoder:
     *
     * The wire form for enum fields is a plain `String` — `typeRef =
     * TypeRef.string` reflects that honestly. The allowed-case constraint
-    * is surfaced via `metadata(Meta.EnumCases)` so adapters can render it
-    * into the prompt. */
+    * is surfaced via `metadata(FieldMetadata.EnumCases)` so adapters can
+    * render it into the prompt. */
   private[typed] final class EnumDecoder[A](
       caseNames: List[String],
       cases: List[A],
       displayName: String
   ) extends ValueDecoder[A]:
 
-    private val byName: Map[String, A] = caseNames.zip(cases).toMap
-    val typeRef: TypeRef               = TypeRef.string
+    private val byName:  Map[String, A] = caseNames.zip(cases).toMap
+    private val byValue: Map[A, String] = cases.zip(caseNames).toMap
+
+    val typeRef: TypeRef = TypeRef.string
 
     override val metadata: Map[String, String] = Map(
-      Meta.EnumCases -> caseNames.mkString(","),
-      Meta.EnumName  -> displayName
+      FieldMetadata.EnumCases -> caseNames.mkString(","),
+      FieldMetadata.EnumName  -> displayName
     )
 
     def decode(raw: Any): Either[DspyError, A] = raw match
@@ -145,7 +136,11 @@ object ValueDecoder:
       case other =>
         Left(ValidationError(s"Cannot decode as $displayName: $other"))
 
-    def encode(value: A): Any = value.toString
+    /** Encode via the matched case name rather than `value.toString` so a
+      * user-overridden `toString` can't drift away from the decode contract
+      * or the prompt-rendered allowed set. */
+    def encode(value: A): Any =
+      byValue.getOrElse(value, value.toString)
 
   private inline def summonEnumLabels[T <: Tuple]: List[String] =
     inline erasedValue[T] match
