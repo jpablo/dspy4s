@@ -42,7 +42,7 @@ object SpecExample:
 
   /** Spec-derived signature for the emotion-classification task. The
     * resulting `untyped` SignatureLayout is structurally identical to the one
-    * produced by `CaseClassExample.signature.untyped` and to one built
+    * produced by `CaseClassExample.signature.layout` and to one built
     * via `Signature.builder("Emotion").input[String]("sentence")...`.
     * Cross-surface parity is proven by the typed module's test suite. */
   val emotion = Signature.of[EmotionSpec]

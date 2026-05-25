@@ -39,22 +39,22 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("Signature.derived assigns input and output roles correctly") {
     val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
-    val inputs  = sig.untyped.inputFields.map(_.name)
-    val outputs = sig.untyped.outputFields.map(_.name)
+    val inputs  = sig.layout.inputFields.map(_.name)
+    val outputs = sig.layout.outputFields.map(_.name)
     assertEquals(inputs, Vector("sentence"))
     assertEquals(outputs, Vector("sentiment", "confidence"))
   }
 
-  test("Signature.untyped emits the same shape as a hand-written SignatureLayout") {
+  test("Signature.layout emits the same shape as a hand-written SignatureLayout") {
     val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](
       name = "Emotion",
       instructions = "Classify emotion."
     )
-    assertEquals(sig.untyped.name, "Emotion")
-    assertEquals(sig.untyped.instructions, Some("Classify emotion."))
-    assertEquals(sig.untyped.signatureString, "sentence -> sentiment, confidence")
+    assertEquals(sig.layout.name, "Emotion")
+    assertEquals(sig.layout.instructions, Some("Classify emotion."))
+    assertEquals(sig.layout.signatureString, "sentence -> sentiment, confidence")
     assertEquals(
-      sig.untyped.fields.map(f => (f.name, f.role, f.typeRef.repr)),
+      sig.layout.fields.map(f => (f.name, f.role, f.typeRef.repr)),
       Vector(
         ("sentence",   FieldRole.Input,  "string"),
         ("sentiment",  FieldRole.Output, "string"),
@@ -68,7 +68,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     val instructed = sig.withInstructions("Classify emotion.")
 
     assertEquals(instructed.instructions, Some("Classify emotion."))
-    assertEquals(instructed.untyped.instructions, Some("Classify emotion."))
+    assertEquals(instructed.layout.instructions, Some("Classify emotion."))
     assertEquals(
       instructed.inputShape.encode(P2SentenceInput("hello")),
       Map[String, Any]("sentence" -> "hello")

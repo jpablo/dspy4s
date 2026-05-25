@@ -31,10 +31,10 @@ class Phase7FunctionMacroSuite extends FunSuite:
   test("method signature derives inputs from parameters and scalar output as result") {
     val sig = Signature.from(p7ScalarEmotion)
 
-    assertEquals(sig.untyped.name, "p7ScalarEmotion")
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("sentence"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("result"))
-    assertEquals(sig.untyped.signatureString, "sentence -> result")
+    assertEquals(sig.layout.name, "p7ScalarEmotion")
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("sentence"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("result"))
+    assertEquals(sig.layout.signatureString, "sentence -> result")
 
     val encoded = sig.inputShape.encode((sentence = "I missed the train"))
     assertEquals(encoded, Map[String, Any]("sentence" -> "I missed the train"))
@@ -46,7 +46,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
 
   test("method signature keeps named tuple output field names") {
     val sig = Signature.from(p7NamedEmotion)
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment"))
 
     val decoded = sig.outputShape.decode(Map("sentiment" -> "sadness")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
@@ -55,8 +55,8 @@ class Phase7FunctionMacroSuite extends FunSuite:
 
   test("method signature supports multiple inputs and multiple named tuple outputs") {
     val sig = Signature.from(p7ScoredEmotion)
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("sentence", "hint"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment", "confidence"))
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("sentence", "hint"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
 
     val encoded = sig.inputShape.encode((sentence = "hi", hint = "warm"))
     assertEquals(encoded, Map[String, Any]("sentence" -> "hi", "hint" -> "warm"))
@@ -70,7 +70,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
 
   test("method signature supports case class output products") {
     val sig = Signature.from(p7CaseClassEmotion)
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment", "confidence"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
 
     val decoded = sig.outputShape.decode(Map("sentiment" -> "joy", "confidence" -> 0.8))
     assertEquals(decoded, Right(P7Score(P7Emotion.joy, 0.8)))
@@ -78,7 +78,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
 
   test("method signature supports unnamed tuple output products") {
     val sig = Signature.from(p7TupleEmotion)
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("_1", "_2"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("_1", "_2"))
 
     val decoded = sig.outputShape.decode(Map("_1" -> "joy", "_2" -> "0.8"))
     assertEquals(decoded, Right((P7Emotion.joy, 0.8)))
@@ -86,7 +86,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
 
   test("method signature propagates enum metadata") {
     val sig = Signature.from(p7NamedEmotion)
-    val field = sig.untyped.outputFields.head
+    val field = sig.layout.outputFields.head
     assertEquals(field.typeRef, TypeRef.string)
     assertEquals(field.metadata.get(FieldMetadata.EnumCases), Some("sadness,joy,love"))
     assertEquals(field.metadata.get(FieldMetadata.EnumName), Some("P7Emotion"))
@@ -95,10 +95,10 @@ class Phase7FunctionMacroSuite extends FunSuite:
   test("type-only function signature supports anonymous input and scalar output") {
     val sig = Signature.fromType[String => P7Emotion]
 
-    assertEquals(sig.untyped.name, "Signature")
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("input"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("result"))
-    assertEquals(sig.untyped.signatureString, "input -> result")
+    assertEquals(sig.layout.name, "Signature")
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("input"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("result"))
+    assertEquals(sig.layout.signatureString, "input -> result")
 
     val encoded = sig.inputShape.encode((input = "I missed the train"))
     assertEquals(encoded, Map[String, Any]("input" -> "I missed the train"))
@@ -117,11 +117,11 @@ class Phase7FunctionMacroSuite extends FunSuite:
         instructions = "Classify emotion with confidence."
       )
 
-    assertEquals(sig.untyped.name, "ScoredEmotion")
+    assertEquals(sig.layout.name, "ScoredEmotion")
     assertEquals(sig.instructions, Some("Classify emotion with confidence."))
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("sentence", "hint"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment", "confidence"))
-    assertEquals(sig.untyped.signatureString, "sentence, hint -> sentiment, confidence")
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("sentence", "hint"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
+    assertEquals(sig.layout.signatureString, "sentence, hint -> sentiment, confidence")
 
     val encoded = sig.inputShape.encode((sentence = "hi", hint = "warm"))
     assertEquals(encoded, Map[String, Any]("sentence" -> "hi", "hint" -> "warm"))
@@ -136,9 +136,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
   test("type-only function signature names multiple anonymous inputs by position") {
     val sig = Signature.fromType[(String, String) => P7Emotion]("Emotion")
 
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("input1", "input2"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("result"))
-    assertEquals(sig.untyped.signatureString, "input1, input2 -> result")
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("input1", "input2"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("result"))
+    assertEquals(sig.layout.signatureString, "input1, input2 -> result")
 
     val encoded = sig.inputShape.encode((input1 = "hi", input2 = "warm"))
     assertEquals(encoded, Map[String, Any]("input1" -> "hi", "input2" -> "warm"))
@@ -146,8 +146,8 @@ class Phase7FunctionMacroSuite extends FunSuite:
 
   test("type-only function signature supports case class output products") {
     val sig = Signature.fromType[(sentence: String) => P7Score]("ScoredEmotion")
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("sentence"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment", "confidence"))
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("sentence"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
 
     val decoded = sig.outputShape.decode(Map("sentiment" -> "joy", "confidence" -> 0.8))
     assertEquals(decoded, Right(P7Score(P7Emotion.joy, 0.8)))

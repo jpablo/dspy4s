@@ -50,9 +50,9 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec trait derives a SignatureLayout with correct field names + roles") {
     val sig = Signature.of[P5SentimentSpec]
-    assertEquals(sig.untyped.name, "P5SentimentSpec")
-    assertEquals(sig.untyped.inputFields.map(_.name),  Vector("sentence"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment"))
+    assertEquals(sig.layout.name, "P5SentimentSpec")
+    assertEquals(sig.layout.inputFields.map(_.name),  Vector("sentence"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment"))
   }
 
   test("spec trait supports explicit name and construction-time instructions") {
@@ -60,21 +60,21 @@ class Phase5SpecMacroSuite extends FunSuite:
       name = "Sentiment",
       instructions = "Classify the sentence sentiment."
     )
-    assertEquals(sig.untyped.name, "Sentiment")
+    assertEquals(sig.layout.name, "Sentiment")
     assertEquals(sig.name, "Sentiment")
     assertEquals(sig.instructions, Some("Classify the sentence sentiment."))
   }
 
   test("spec trait preserves declaration order for multiple inputs and outputs") {
     val sig = Signature.of[P5MultiSpec]
-    assertEquals(sig.untyped.inputFields.map(_.name),  Vector("question", "context"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("answer", "score"))
-    assertEquals(sig.untyped.signatureString, "question, context -> answer, score")
+    assertEquals(sig.layout.inputFields.map(_.name),  Vector("question", "context"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("answer", "score"))
+    assertEquals(sig.layout.signatureString, "question, context -> answer, score")
   }
 
   test("spec trait field TypeRefs come from the FieldCodec typeclass") {
     val sig = Signature.of[P5MultiSpec]
-    val byName = sig.untyped.fields.map(f => f.name -> f.typeRef.repr).toMap
+    val byName = sig.layout.fields.map(f => f.name -> f.typeRef.repr).toMap
     assertEquals(byName("question"), "string")
     assertEquals(byName("context"),  "string")
     assertEquals(byName("answer"),   "string")
@@ -83,7 +83,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec trait propagates enum metadata to FieldSpec.metadata") {
     val sig = Signature.of[P5ToneSpec]
-    val toneField = sig.untyped.outputFields.find(_.name == "tone").get
+    val toneField = sig.layout.outputFields.find(_.name == "tone").get
     assertEquals(toneField.typeRef, TypeRef.string)
     assertEquals(
       toneField.metadata.get(FieldMetadata.EnumCases),
@@ -94,7 +94,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec trait fields are normalized (inferred prefix + description)") {
     val sig = Signature.of[P5MultiSpec]
-    val byName = sig.untyped.fields.map(f => f.name -> f).toMap
+    val byName = sig.layout.fields.map(f => f.name -> f).toMap
     assertEquals(byName("question").prefix, Some("Question:"))
     assertEquals(byName("answer").prefix,   Some("Answer:"))
     assertEquals(byName("score").prefix,    Some("Score:"))
@@ -200,7 +200,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   // ── Cross-surface parity ────────────────────────────────────────────────
 
   test("spec-derived signature matches builder-built signature for the same shape") {
-    val fromSpec = Signature.of[P5MultiSpec].untyped
+    val fromSpec = Signature.of[P5MultiSpec].layout
     val fromBuilder = Signature
       .builder("P5MultiSpec")
       .input[String]("question")

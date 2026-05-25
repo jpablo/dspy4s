@@ -15,7 +15,7 @@ import kyo.Schema
   */
 final case class Signature[I, O](
     name: String,
-    untyped: SignatureLayout,
+    layout: SignatureLayout,
     inputShape: Shape[I],
     outputShape: Shape[O]
 ):
@@ -24,18 +24,18 @@ final case class Signature[I, O](
     * This mirrors the underlying untyped `SignatureLayout` API while preserving
     * the typed input/output shapes.
     */
-  def instructions: Option[String] = untyped.instructions
+  def instructions: Option[String] = layout.instructions
 
   /** Replace signature-level instructions. Empty strings keep the current
     * untyped `SignatureLayout.withInstructions` behavior and leave the signature
     * unchanged.
     */
   def withInstructions(text: String): Signature[I, O] =
-    copy(untyped = untyped.withInstructions(text))
+    copy(layout = layout.withInstructions(text))
 
   /** Replace or clear signature-level instructions. */
   def withInstructions(text: Option[String]): Signature[I, O] =
-    copy(untyped = untyped.withInstructions(text))
+    copy(layout = layout.withInstructions(text))
 
 object Signature:
 

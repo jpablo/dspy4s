@@ -223,8 +223,8 @@ class TypedPredictSuite extends FunSuite:
     val specSig = Signature.of[P4QAMissingInputSpec]
     val sig = Signature(
       name = specSig.name,
-      untyped = specSig.untyped,
-      inputShape = new Shape.MapShape(specSig.untyped.inputFields),
+      layout = specSig.layout,
+      inputShape = new Shape.MapShape(specSig.layout.inputFields),
       outputShape = specSig.outputShape
     )
     var lmCalled = false

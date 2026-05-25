@@ -50,7 +50,7 @@ final case class ChainOfThought[I, O](
     val inputMap = signature.inputShape.encode(input)
 
     // Same defensive missing-input check as Predict.run.
-    val requiredInputs = signature.untyped.inputFields.iterator.map(_.name).toSet
+    val requiredInputs = signature.layout.inputFields.iterator.map(_.name).toSet
     val missing        = requiredInputs.diff(inputMap.keySet)
     if missing.nonEmpty then
       Left(NotFoundError(
@@ -60,7 +60,7 @@ final case class ChainOfThought[I, O](
       ))
     else
       val program = DynamicChainOfThought(
-        baseSignature = signature.untyped,
+        baseSignature = signature.layout,
         demos         = demos,
         runtime       = runtime
       )

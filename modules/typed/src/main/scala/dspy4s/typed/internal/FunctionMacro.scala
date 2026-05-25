@@ -43,7 +43,7 @@ private[typed] object FunctionMacro:
         )
       TypedSig[I, O](
         name        = name,
-        untyped     = sig,
+        layout = sig,
         inputShape  = ${ inputShapeExpr },
         outputShape = ${ outputShapeExpr }
       )

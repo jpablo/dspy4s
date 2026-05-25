@@ -177,7 +177,7 @@ private[typed] object SpecMacro:
             )
           TypedSig[i, o](
             name        = ${ sigNameExpr },
-            untyped     = sig,
+            layout = sig,
             inputShape  = new Shape.TupleShape[i](inFields,  ${ inputDecodersExpr }),
             outputShape = new Shape.TupleShape[o](outFields, ${ outputDecodersExpr })
           )

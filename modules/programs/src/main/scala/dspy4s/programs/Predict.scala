@@ -6,7 +6,7 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Signature}
 
 /** Typed counterpart to `DynamicPredict`. Wraps a `Signature[I, O]` and
-  * delegates execution to the underlying `DynamicPredict(signature.untyped, ...)`,
+  * delegates execution to the underlying `DynamicPredict(signature.layout, ...)`,
   * so all adapter/model/callback/cache/trace behavior is unchanged. The
   * typed layer adds two boundaries:
   *
@@ -53,7 +53,7 @@ final case class Predict[I, O](
     // required input. Validate before spending an LM call. Case-class
     // derivations always produce a complete map, so the check never
     // fires for them; cost is one Set.diff per call.
-    val requiredInputs = signature.untyped.inputFields.iterator.map(_.name).toSet
+    val requiredInputs = signature.layout.inputFields.iterator.map(_.name).toSet
     val missing        = requiredInputs.diff(inputMap.keySet)
     if missing.nonEmpty then
       Left(NotFoundError(
@@ -61,7 +61,7 @@ final case class Predict[I, O](
         message  = s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
       ))
     else
-      val program = DynamicPredict(signature.untyped, demos, name, runtime)
+      val program = DynamicPredict(signature.layout, demos, name, runtime)
       program
         .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
         .flatMap(raw => Prediction.from(raw, signature.outputShape))

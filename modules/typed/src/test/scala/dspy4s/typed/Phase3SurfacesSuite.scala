@@ -97,8 +97,8 @@ class Phase3SurfacesSuite extends FunSuite:
 
   test("case-class derived signature has expected field names and roles") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
-    assertEquals(sig.untyped.inputFields.map(_.name), Vector("comment", "lang"))
-    assertEquals(sig.untyped.outputFields.map(_.name), Vector("toxic", "confidence"))
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("comment", "lang"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("toxic", "confidence"))
   }
 
   test("case-class encode produces a Map keyed by case-class field names") {
@@ -146,7 +146,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   test("case-class derived fields are normalized identically to the builder path") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
-    val byName = sig.untyped.fields.map(f => f.name -> f).toMap
+    val byName = sig.layout.fields.map(f => f.name -> f).toMap
     // P3CommentInput.comment / lang and P3ClassifyOutput.toxic / confidence
     // are all lowercase, so the inferred prefix is just the capitalized form.
     assertEquals(byName("comment").prefix,    Some("Comment:"))
@@ -177,7 +177,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
     val fromCases = Signature
       .derived[P3CommentInput, P3ClassifyOutput]("Classify")
-      .untyped
+      .layout
 
     assertEquals(fromBuilder.name, fromCases.name)
     assertEquals(fromBuilder.signatureString, fromCases.signatureString)
