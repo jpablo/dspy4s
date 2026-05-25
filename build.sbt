@@ -3,6 +3,7 @@ ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.1"
 
 lazy val munitVersion = "1.1.1"
+lazy val kyoVersion   = "1.0.0-RC2"
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -15,6 +16,7 @@ lazy val commonSettings = Seq(
 lazy val root = (project in file("."))
   .aggregate(
     core,
+    typed,
     lm,
     adapters,
     programs,
@@ -35,6 +37,21 @@ lazy val core = (project in file("modules/core"))
   .settings(
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
     Test / parallelExecution := false
+  )
+
+// Typed signatures layer. Adds kyo-data and kyo-schema as the typed
+// carrier + schema-backed decoding substrate per the TYPED_SIGNATURES
+// implementation plan (Phase 0 feasibility spike).
+lazy val typed = (project in file("modules/typed"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-typed")
+  .settings(
+    libraryDependencies ++= Seq(
+      "io.getkyo"     %% "kyo-data"   % kyoVersion,
+      "io.getkyo"     %% "kyo-schema" % kyoVersion,
+      "org.scalameta" %% "munit"      % munitVersion % Test
+    )
   )
 
 lazy val lm = (project in file("modules/lm"))

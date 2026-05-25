@@ -145,6 +145,68 @@ Risk gate:
   fall back to a small DSPy4S `ValueDecoder[A]` typeclass for primitives and
   enums only. Do not build a broad custom codec ecosystem in the MVP.
 
+### Outcomes (executed 2026-05-24)
+
+Phase 0 was completed against `io.getkyo:kyo-data_3:1.0.0-RC2` and
+`io.getkyo:kyo-schema_3:1.0.0-RC2` — both published on Maven Central two weeks
+before this run. Tests live in
+`modules/typed/src/test/scala/dspy4s/typed/Phase0FeasibilitySuite.scala`
+(9 tests, all passing). All Phase 0 acceptance criteria met.
+
+**Resolved confirmations (per the Tasks list above):**
+
+- `kyo-schema` is published as `kyo-schema_3` at `1.0.0-RC2`, compatible with
+  this repo's Scala 3.8.1 (kyo itself is built on 3.8.3 — same minor family,
+  TASTy-compatible).
+- `kyo-data` `Record` is constructible at runtime via the `~` extension on
+  `String` and `&` composition; field access via `selectDynamic` with
+  compile-time `Fields.Have` evidence works as documented.
+- `kyo-schema` `Json.decode[A]` returns `Result[DecodeException, A]`; folding
+  into `Either[DspyError, ParseError]` is a clean ~10-line mapping.
+- Case classes derive `Schema` via `derives Schema`; primitives (`String`,
+  `Int`, `Boolean`) decode correctly from natural JSON.
+
+**Surprises worth surfacing for Phase 2 design:**
+
+1. **kyo-schema encodes Scala enums as `{"caseName":{}}` (discriminated
+   object), not as flat strings.** A Scala enum
+   `Mood.happy` encodes to `{"happy":{}}`; embedded in a case class
+   `Result(mood: Mood)` it becomes `{"mood":{"happy":{}}}`. Confirmed by the
+   `EncodingProbe.scala` test. LLM outputs that produce flat strings
+   (`"sentiment":"joy"`) **will not** decode against an enum-typed field
+   without intervening transformation. This is the discriminated `oneOf`
+   pattern documented in kyo-schema's `Json` scaladoc.
+
+2. **Path-dependent types break Schema derivation.** Declaring an enum or
+   case class *inside* a test class produces `ClassCastException` at decode
+   time. All shapes must be top-level (or in a top-level object). Worth
+   capturing in dspy4s docs for users.
+
+**Implications for Phase 2 (Output Parsing And Coercion Contract):**
+
+- The "decode from already typed values first" coercion policy needs to
+  account for the enum wire format. Options to evaluate during Phase 2:
+  (a) require adapters to wrap flat-string enum outputs before handoff to
+  the typed layer; (b) provide a `Schema[A]` override that uses flat-string
+  encoding for enums; (c) use an `inline given Schema[Emotion]` per-enum
+  case that maps strings → cases. Option (b) is the most LLM-friendly and
+  worth a spike during Phase 2 design.
+- Literal string unions (e.g. `"sadness" | "joy" | "love"`) were *not* tested
+  in Phase 0 — they're a known kyo-schema gap and the plan already directs us
+  to use Scala enums for MVP. Re-evaluate in Phase 7 (Post-MVP Extensions).
+
+**Files added:**
+
+- `modules/typed/` — new sbt module aggregating under root.
+- `build.sbt` — `kyoVersion = "1.0.0-RC2"` shared val; `typed` project added.
+- `modules/typed/src/test/scala/dspy4s/typed/Phase0FeasibilitySuite.scala`
+  (9 acceptance-criteria tests).
+- `modules/typed/src/test/scala/dspy4s/typed/EncodingProbe.scala` (kept as a
+  record of how the enum wire format was discovered; useful for future
+  diagnostic work, low maintenance cost).
+
+No production code added in Phase 0 — purely a test-only spike.
+
 ## Phase 1: Prediction Primitive Accessors
 
 Goal: improve the untyped foundation before adding the typed layer.
