@@ -178,6 +178,13 @@ End-to-end typed I/O: `TypedPredict(sig).run(EmotionInput("..."))`
 returns `Either[DspyError, TypedPrediction[EmotionOutput]]`, and
 `tp.output.sentiment` is typed as `Emotion`.
 
+Requires `kyo.Schema[I]` and `kyo.Schema[O]` in scope. kyo-schema
+**auto-derives** `Schema[Product]` as long as every field's type
+already has a `Schema` (primitives and `FieldCodec.FlatEnum`-companion
+enums do). If your case class contains a custom type without a
+`Schema`, add `derives kyo.Schema` on the case class itself (or on
+the custom type) to make derivation explicit.
+
 See [`modules/examples/.../typed/CaseClassExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/CaseClassExample.scala).
 
 ---
@@ -365,7 +372,7 @@ These are documented gaps, surfaced so you can plan around them:
   succeeds but the typed decode fails, the trace still records a
   successful module call while `TypedPredict.run` returns `Left`.
   The discrepancy is benign (the underlying predict really did
-  succeed); consolidating the typed boundary's tracing is a Phase 5+
+  succeed); consolidating the typed boundary's tracing is an open
   design decision.
 - **Multi-completion typed decoding**: only the primary prediction
   is decoded into `TypedPrediction.output` today. The raw completions
