@@ -95,7 +95,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
   test("type-only function signature supports anonymous input and scalar output") {
     val sig = TypedSignature.fromType[String => P7Emotion]
 
-    assertEquals(sig.untyped.name, "Signature")
+    assertEquals(sig.untyped.name, "SignatureSchema")
     assertEquals(sig.untyped.inputFields.map(_.name), Vector("input"))
     assertEquals(sig.untyped.outputFields.map(_.name), Vector("result"))
     assertEquals(sig.untyped.signatureString, "input -> result")

@@ -3,16 +3,16 @@ package dspy4s.core.signatures
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.SignatureParser
 import dspy4s.core.contracts.SignatureSpec
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 
 final class DefaultSignatureParser extends SignatureParser:
-  override def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, Signature] =
+  override def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureSchema] =
     val trimmed = signatureDsl.trim
-    if trimmed.isEmpty then Left(ValidationError("Signature DSL cannot be empty"))
+    if trimmed.isEmpty then Left(ValidationError("SignatureSchema DSL cannot be empty"))
     else
       val arrowCount = "->".r.findAllIn(trimmed).length
       if arrowCount != 1 then

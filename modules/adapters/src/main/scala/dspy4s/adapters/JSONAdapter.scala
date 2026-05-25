@@ -9,7 +9,7 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
@@ -55,10 +55,10 @@ final case class JSONAdapter(
       )
     )
 
-  override def streamingState(signature: Signature): Option[AdapterStreamingState] =
+  override def streamingState(signature: SignatureSchema): Option[AdapterStreamingState] =
     Some(new JsonStreamingState(signature.outputFields))
 
-  override def parse(signature: Signature, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+  override def parse(signature: SignatureSchema, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     parseStructured(signature, output).orElse {
       if allowTextFallbackForSingleOutput && signature.outputFields.size == 1 then
         val field = signature.outputFields.head
@@ -75,7 +75,7 @@ final case class JSONAdapter(
       else Left(ParseError("adapter", "JSON parse failed and no fallback was applied"))
     }
 
-  private def parseStructured(signature: Signature, output: LmOutput): Either[DspyError, ParsedOutput] =
+  private def parseStructured(signature: SignatureSchema, output: LmOutput): Either[DspyError, ParsedOutput] =
     for
       jsonText <- extractJson(output.text)
       root <- parseJsonObject(jsonText)

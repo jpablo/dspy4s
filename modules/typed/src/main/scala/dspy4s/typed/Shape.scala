@@ -9,7 +9,7 @@ import scala.deriving.Mirror
 
 /** A schema-aware view of a user type `A`, used as the input or output of a
   * `TypedSignature`. Lists fields in declaration order, converts each to a
-  * `FieldSpec` for the untyped `Signature`, encodes typed values into the
+  * `FieldSpec` for the untyped `SignatureSchema`, encodes typed values into the
   * `Map[String, Any]` carried through `ProgramCall`, and decodes a raw
   * `Map[String, Any]` produced by an adapter back into the typed `A`.
   *

@@ -394,10 +394,10 @@ private[typed] object FunctionMacro:
     def inputName(index: Int, total: Int, explicit: Option[String]): String =
       explicit.getOrElse(if total == 1 then "input" else s"input${index + 1}")
 
-    val sigName = name.value.filter(_.nonEmpty).getOrElse("Signature")
+    val sigName = name.value.filter(_.nonEmpty).getOrElse("SignatureSchema")
     val sigNameExpr = '{
       val explicitName = ${ name }
-      if explicitName.isEmpty then "Signature" else explicitName
+      if explicitName.isEmpty then "SignatureSchema" else explicitName
     }
     val (rawInputs, returnType) = functionParts(TypeRepr.of[F])
 

@@ -9,7 +9,7 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
@@ -55,10 +55,10 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
 
     Right(FormattedPrompt(messages = Vector(systemMessage) ++ demoMessages ++ Vector(inputMessage)))
 
-  override def streamingState(signature: Signature): Option[AdapterStreamingState] =
+  override def streamingState(signature: SignatureSchema): Option[AdapterStreamingState] =
     Some(new ChatStreamingState(signature.outputFields))
 
-  override def parse(signature: Signature, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+  override def parse(signature: SignatureSchema, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     val outputNames = signature.outputFields.map(_.name).toSet
     val sections = extractSections(output.text, outputNames)
 
@@ -118,7 +118,7 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     }
     out.iterator.map { (k, v) => k -> v.toString.stripTrailing }.toMap
 
-  private def buildSystemPrompt(signature: Signature): String =
+  private def buildSystemPrompt(signature: SignatureSchema): String =
     val inputBlock = fieldDescriptionBlock(signature.inputFields, role = "input")
     val outputBlock = fieldDescriptionBlock(signature.outputFields, role = "output")
     val structureExample = exampleStructure(signature)
@@ -154,7 +154,7 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
       }
       (header +: lines).mkString("\n")
 
-  private def defaultInstructions(signature: Signature): String =
+  private def defaultInstructions(signature: SignatureSchema): String =
     val inputs = signature.inputFields.map(_.name).mkString(", ")
     val outputs = signature.outputFields.map(_.name).mkString(", ")
     s"Given the fields $inputs, produce the fields $outputs."
@@ -163,7 +163,7 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     * output markers, and the closing `[[ ## completed ## ]]`. Output-field
     * placeholders carry a `# note:` typing constraint when the field has
     * a non-string type, reinforcing the type contract structurally. */
-  private def exampleStructure(signature: Signature): String =
+  private def exampleStructure(signature: SignatureSchema): String =
     val inputBlock = signature.inputFields.map { field =>
       s"[[ ## ${field.name} ## ]]\n{${field.name}}"
     }.mkString("\n\n")
@@ -175,7 +175,7 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     }.mkString("\n\n")
     Vector(inputBlock, outputBlock, ChatAdapter.CompletedMarker).filter(_.nonEmpty).mkString("\n\n")
 
-  private def outputRequirements(signature: Signature): String =
+  private def outputRequirements(signature: SignatureSchema): String =
     val outputs = signature.outputFields.map { f =>
       val hint = ChatAdapter.reminderHint(f.typeRef).fold("") { h => s" ($h)" }
       s"`[[ ## ${f.name} ## ]]`$hint"

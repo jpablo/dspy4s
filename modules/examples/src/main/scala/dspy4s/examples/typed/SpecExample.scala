@@ -41,7 +41,7 @@ trait CitedQASpec extends Spec:
 object SpecExample:
 
   /** Spec-derived signature for the emotion-classification task. The
-    * resulting `untyped` Signature is structurally identical to the one
+    * resulting `untyped` SignatureSchema is structurally identical to the one
     * produced by `CaseClassExample.signature.untyped` and to one built
     * via `TypedSignature.builder("Emotion").input[String]("sentence")...`.
     * Cross-surface parity is proven by the typed module's test suite. */

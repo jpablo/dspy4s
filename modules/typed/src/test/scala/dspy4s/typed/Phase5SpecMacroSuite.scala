@@ -46,9 +46,9 @@ trait P5CollectionSpec extends Spec:
 /** Phase 5 trait-as-spec macro per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
 class Phase5SpecMacroSuite extends FunSuite:
 
-  // ── Spec → Signature derivation ─────────────────────────────────────────
+  // ── Spec → SignatureSchema derivation ─────────────────────────────────────────
 
-  test("spec trait derives a Signature with correct field names + roles") {
+  test("spec trait derives a SignatureSchema with correct field names + roles") {
     val sig = TypedSignature.of[P5SentimentSpec]
     assertEquals(sig.untyped.name, "P5SentimentSpec")
     assertEquals(sig.untyped.inputFields.map(_.name),  Vector("sentence"))

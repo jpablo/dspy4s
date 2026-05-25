@@ -8,7 +8,7 @@ import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.TypeRef
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -47,7 +47,7 @@ import scala.util.matching.Regex
   * reused across multiple `run(...)` invocations.
   */
 final case class ProgramOfThought(
-    baseSignature: Signature,
+    baseSignature: SignatureSchema,
     interpreter: CodeInterpreter,
     maxIterations: Int = 3
 ) extends BasePredictProgram(moduleName = "program_of_thought"):
@@ -92,7 +92,7 @@ final case class ProgramOfThought(
     prefix = Some("Code Output:")
   )
 
-  private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): Signature =
+  private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): SignatureSchema =
     val withInputs = extraInputs.foldLeft(baseSignature)(_.append(_))
     // The generate / regenerate signatures discard the user's outputs —
     // generated_code is the only output of those steps.
@@ -100,9 +100,9 @@ final case class ProgramOfThought(
       withInputs.withFields(withInputs.fields.filterNot(_.role == FieldRole.Output))
     extraOutputs.foldLeft(withoutUserOutputs)(_.append(_))
 
-  /** Signature for the initial code-generation step. Inputs from the user's
+  /** SignatureSchema for the initial code-generation step. Inputs from the user's
     * signature; outputs a `generated_code` string. */
-  val generateSignature: Signature =
+  val generateSignature: SignatureSchema =
     buildSig(
       extraInputs = Vector.empty,
       extraOutputs = Vector(generatedCodeField)
@@ -115,9 +115,9 @@ final case class ProgramOfThought(
          |The downstream step parses this output and produces the final structured response.""".stripMargin
     }))
 
-  /** Signature for the retry step when execution failed. Adds
+  /** SignatureSchema for the retry step when execution failed. Adds
     * `previous_code` and `error` as inputs. */
-  val regenerateSignature: Signature =
+  val regenerateSignature: SignatureSchema =
     buildSig(
       extraInputs = Vector(previousCodeField, errorField),
       extraOutputs = Vector(generatedCodeField)
@@ -127,10 +127,10 @@ final case class ProgramOfThought(
         |The corrected code must still print its result as a JSON object.""".stripMargin
     ))
 
-  /** Signature for the final answer-extraction step. Has the user's
+  /** SignatureSchema for the final answer-extraction step. Has the user's
     * original outputs plus `final_generated_code` + `code_output` as
     * inputs. */
-  val answerSignature: Signature =
+  val answerSignature: SignatureSchema =
     baseSignature
       .append(finalGeneratedCodeField)
       .append(codeOutputField)

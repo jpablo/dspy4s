@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  FieldMetadata, FieldRole, NotFoundError, PredictionData, Signature,
+  FieldMetadata, FieldRole, NotFoundError, PredictionData, SignatureSchema,
   SignatureSpec, TypeRef
 }
 import munit.FunSuite
@@ -26,7 +26,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   // ── Builder API ─────────────────────────────────────────────────────────
 
-  test("builder emits a Signature with input then output fields in declaration order") {
+  test("builder emits a SignatureSchema with input then output fields in declaration order") {
     val sig = TypedSignature
       .builder("Classify")
       .input[String]("comment")

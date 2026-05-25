@@ -5,7 +5,7 @@ import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 
@@ -30,7 +30,7 @@ import dspy4s.programs.contracts.ProgramCall
   *                    default of 0.7
   */
 final case class MultiChainComparison(
-    baseSignature: Signature,
+    baseSignature: SignatureSchema,
     m: Int = 3,
     temperature: Double = 0.7,
     rationaleFieldName: String = "rationale",
@@ -50,7 +50,7 @@ final case class MultiChainComparison(
   /** The augmented signature: `baseSignature` plus `m` attempt-input fields
     * appended, plus a `rationale` output field prepended (matches Python
     * field ordering). */
-  val augmentedSignature: Signature =
+  val augmentedSignature: SignatureSchema =
     val withAttempts = (1 to m).foldLeft(baseSignature) { (sig, idx) =>
       sig.append(
         FieldSpec(

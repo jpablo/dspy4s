@@ -6,7 +6,7 @@ import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.TypeRef
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -14,7 +14,7 @@ import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
 final case class ChainOfThought(
-    baseSignature: Signature,
+    baseSignature: SignatureSchema,
     demos: Vector[Example] = Vector.empty,
     reasoningFieldName: String = "reasoning",
     reasoningType: TypeRef = TypeRef.string,
@@ -31,7 +31,7 @@ final case class ChainOfThought(
     prefix = reasoningPrefix
   )
 
-  val signature: Either[DspyError, Signature] =
+  val signature: Either[DspyError, SignatureSchema] =
     if baseSignature.outputFields.exists(_.name == reasoningFieldName) then Right(baseSignature)
     else baseSignature.insert(index = 0, field = reasoningField)
 

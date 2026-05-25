@@ -193,7 +193,7 @@ private object LabeledSampleProgram:
 
   given labeledOps[P <: Module[ProgramCall, Prediction]]: PredictOps[LabeledSampleProgram[P]] with
     def name(program: LabeledSampleProgram[P]): String = program.ops.name(program.wrapped)
-    def signature(program: LabeledSampleProgram[P]): dspy4s.core.contracts.Signature =
+    def signature(program: LabeledSampleProgram[P]): dspy4s.core.contracts.SignatureSchema =
       program.ops.signature(program.wrapped)
     def demos(program: LabeledSampleProgram[P]): Vector[Example] =
       program.currentDemos

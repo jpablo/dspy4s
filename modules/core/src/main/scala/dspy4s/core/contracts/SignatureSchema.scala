@@ -88,20 +88,20 @@ object FieldSpec:
       description = field.description.orElse(Some(s"$${${field.name}}"))
     )
 
-trait Signature:
+trait SignatureSchema:
   def name: String
   def fields: Vector[FieldSpec]
   def instructions: Option[String]
 
-  def withFields(updated: Vector[FieldSpec]): Signature
-  def withInstructions(text: Option[String]): Signature
+  def withFields(updated: Vector[FieldSpec]): SignatureSchema
+  def withInstructions(text: Option[String]): SignatureSchema
 
   final def inputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Input)
   final def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
 
-  final def append(field: FieldSpec): Signature = withFields(fields :+ field)
+  final def append(field: FieldSpec): SignatureSchema = withFields(fields :+ field)
 
-  final def insert(index: Int, field: FieldSpec): Either[DspyError, Signature] =
+  final def insert(index: Int, field: FieldSpec): Either[DspyError, SignatureSchema] =
     val (inputs, outputs) = (inputFields, outputFields)
     val target = if field.role == FieldRole.Input then inputs else outputs
     val normalizedIndex = if index < 0 then target.size + index + 1 else index
@@ -118,16 +118,16 @@ trait Signature:
         else inputs ++ updatedTarget
       Right(withFields(updatedFields))
 
-  final def prepend(field: FieldSpec): Signature =
+  final def prepend(field: FieldSpec): SignatureSchema =
     val sameRole = fields.filter(_.role == field.role)
     val otherRole = fields.filterNot(_.role == field.role)
     field.role match
       case FieldRole.Input  => withFields((field +: sameRole) ++ otherRole)
       case FieldRole.Output => withFields(otherRole ++ (field +: sameRole))
 
-  final def delete(fieldName: String): Signature = withFields(fields.filterNot(_.name == fieldName))
+  final def delete(fieldName: String): SignatureSchema = withFields(fields.filterNot(_.name == fieldName))
 
-  final def updateField(fieldName: String, metadata: Map[String, String]): Signature =
+  final def updateField(fieldName: String, metadata: Map[String, String]): SignatureSchema =
     withFields(
       fields.map { field =>
         if field.name == fieldName then field.copy(metadata = field.metadata ++ metadata)
@@ -142,7 +142,7 @@ trait Signature:
       prefix: Option[String] = None,
       defaultValue: Option[Any] = None,
       metadata: Map[String, String] = Map.empty
-  ): Either[DspyError, Signature] =
+  ): Either[DspyError, SignatureSchema] =
     fields.find(_.name == fieldName) match
       case None => Left(NotFoundError("field", s"Field '$fieldName' does not exist in signature '$name'"))
       case Some(existing) =>
@@ -163,7 +163,7 @@ trait Signature:
       prefix: Option[String] = None,
       defaultValue: Option[Any] = None,
       metadata: Map[String, String] = Map.empty
-  ): Either[DspyError, Signature] =
+  ): Either[DspyError, SignatureSchema] =
     withUpdatedField(
       fieldName = fieldName,
       typeRef = typeRef.orElse(typeToken.map(TypeRef.fromToken)),
@@ -173,8 +173,8 @@ trait Signature:
       metadata = metadata
     )
 
-  final def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, Signature] =
-    updates.foldLeft[Either[DspyError, Signature]](Right(this)) { (acc, entry) =>
+  final def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureSchema] =
+    updates.foldLeft[Either[DspyError, SignatureSchema]](Right(this)) { (acc, entry) =>
       val (fieldName, update) = entry
       acc.flatMap(
         _.withUpdatedFields(
@@ -194,10 +194,10 @@ trait Signature:
     val outputs = outputFields.map(_.name).mkString(", ")
     s"$inputs -> $outputs"
 
-  final def equalsByStructure(other: Signature): Boolean =
+  final def equalsByStructure(other: SignatureSchema): Boolean =
     instructions == other.instructions && fields == other.fields
 
-  final def withInstructions(text: String): Signature =
+  final def withInstructions(text: String): SignatureSchema =
     if text.isEmpty then this else withInstructions(Some(text))
 
   final def dumpState: Map[String, Any] =
@@ -219,12 +219,12 @@ trait Signature:
 
 /** Companion sugar so call sites can write:
   *
-  *   Signature("comment -> toxic: bool", instructions = "...")
+  *   SignatureSchema("comment -> toxic: bool", instructions = "...")
   *
   * instead of `SignatureDsl.parse(...).map(_.withInstructions(Some(...)))`.
-  * Returns `Either[DspyError, Signature]` so parse errors stay strongly typed. */
-object Signature:
-  def apply(dsl: String, instructions: String = ""): Either[DspyError, Signature] =
+  * Returns `Either[DspyError, SignatureSchema]` so parse errors stay strongly typed. */
+object SignatureSchema:
+  def apply(dsl: String, instructions: String = ""): Either[DspyError, SignatureSchema] =
     dspy4s.core.signatures.SignatureDsl
       .parse(dsl)
       .map(_.withInstructions(instructions))
@@ -233,13 +233,13 @@ final case class SignatureSpec(
     name: String,
     fields: Vector[FieldSpec],
     instructions: Option[String] = None
-) extends Signature:
-  require(name.nonEmpty, "Signature name cannot be empty")
-  require(fields.map(_.name).distinct.size == fields.size, "Signature fields must have unique names")
-  require(fields.forall(f => FieldSpec.validateName(f.name)), "Signature fields must be valid identifiers")
+) extends SignatureSchema:
+  require(name.nonEmpty, "SignatureSchema name cannot be empty")
+  require(fields.map(_.name).distinct.size == fields.size, "SignatureSchema fields must have unique names")
+  require(fields.forall(f => FieldSpec.validateName(f.name)), "SignatureSchema fields must be valid identifiers")
 
-  override def withFields(updated: Vector[FieldSpec]): Signature = copy(fields = updated)
-  override def withInstructions(text: Option[String]): Signature = copy(instructions = text)
+  override def withFields(updated: Vector[FieldSpec]): SignatureSchema = copy(fields = updated)
+  override def withInstructions(text: Option[String]): SignatureSchema = copy(instructions = text)
 
 object SignatureSpec:
   def create(
@@ -247,12 +247,12 @@ object SignatureSpec:
       fields: Vector[FieldSpec],
       instructions: Option[String] = None
   ): Either[DspyError, SignatureSpec] =
-    if name.trim.isEmpty then Left(ValidationError("Signature name cannot be empty"))
-    else if fields.isEmpty then Left(ValidationError("Signature must have at least one field"))
+    if name.trim.isEmpty then Left(ValidationError("SignatureSchema name cannot be empty"))
+    else if fields.isEmpty then Left(ValidationError("SignatureSchema must have at least one field"))
     else if fields.map(_.name).distinct.size != fields.size then
-      Left(ValidationError("Signature fields must have unique names"))
+      Left(ValidationError("SignatureSchema fields must have unique names"))
     else if fields.exists(f => !FieldSpec.validateName(f.name)) then
-      Left(ValidationError("Signature fields must be valid identifiers"))
+      Left(ValidationError("SignatureSchema fields must be valid identifiers"))
     else
       val normalized = fields.map(FieldSpec.normalize)
       Right(SignatureSpec(name = name, fields = normalized, instructions = instructions))
@@ -261,7 +261,7 @@ object SignatureSpec:
     def readName: Either[DspyError, String] =
       state.get("name") match
         case Some(value: String) if value.nonEmpty => Right(value)
-        case _                                      => Left(ValidationError("Signature state is missing non-empty 'name'"))
+        case _                                      => Left(ValidationError("SignatureSchema state is missing non-empty 'name'"))
 
     def readInstructions: Either[DspyError, Option[String]] =
       state.get("instructions") match
@@ -333,7 +333,7 @@ object SignatureSpec:
               metadata = metadata
             )
           }
-        case _ => Left(ValidationError("Signature state is missing 'fields'"))
+        case _ => Left(ValidationError("SignatureSchema state is missing 'fields'"))
 
     for
       name <- readName
@@ -343,4 +343,4 @@ object SignatureSpec:
     yield signature
 
 trait SignatureParser:
-  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, Signature]
+  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureSchema]

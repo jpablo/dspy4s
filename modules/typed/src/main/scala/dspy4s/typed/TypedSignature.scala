@@ -1,10 +1,10 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{FieldRole, Signature, SignatureSpec}
+import dspy4s.core.contracts.{FieldRole, SignatureSchema, SignatureSpec}
 import kyo.Schema
 
 /** A signature with compile-time knowledge of its input (`I`) and output
-  * (`O`) shapes. Wraps an untyped `Signature` for compatibility with the
+  * (`O`) shapes. Wraps an untyped `SignatureSchema` for compatibility with the
   * existing `Predict` / adapter / runtime stack — adapters still see the
   * runtime `fields` vector and consume it as today; the typed layer
   * additionally carries `Shape[I]` / `Shape[O]` for input encoding and
@@ -15,19 +15,19 @@ import kyo.Schema
   */
 final case class TypedSignature[I, O](
     name: String,
-    untyped: Signature,
+    untyped: SignatureSchema,
     inputShape: Shape[I],
     outputShape: Shape[O]
 ):
 
-  /** Signature-level instructions carried into adapter prompt formatting.
-    * This mirrors the underlying untyped `Signature` API while preserving
+  /** SignatureSchema-level instructions carried into adapter prompt formatting.
+    * This mirrors the underlying untyped `SignatureSchema` API while preserving
     * the typed input/output shapes.
     */
   def instructions: Option[String] = untyped.instructions
 
   /** Replace signature-level instructions. Empty strings keep the current
-    * untyped `Signature.withInstructions` behavior and leave the signature
+    * untyped `SignatureSchema.withInstructions` behavior and leave the signature
     * unchanged.
     */
   def withInstructions(text: String): TypedSignature[I, O] =
@@ -76,7 +76,7 @@ object TypedSignature:
     TypedSignature(name, sig, inShape, outShape)
 
   /** Programmatic builder for callers that don't want a case class per
-    * signature. Returns a plain `Signature` — see `SignatureBuilder`. */
+    * signature. Returns a plain `SignatureSchema` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
   /** Function/method macro entry. Inspects a method reference at compile
@@ -104,21 +104,21 @@ object TypedSignature:
     * Output rules match `from(method)`.
     */
   transparent inline def fromType[F] =
-    ${ internal.FunctionMacro.fromTypeImpl[F]('{ "Signature" }, '{ "" }) }
+    ${ internal.FunctionMacro.fromTypeImpl[F]('{ "SignatureSchema" }, '{ "" }) }
 
   /** Type-only function signature macro with optional runtime name and
-    * instructions. The name defaults to `"Signature"` for DSPy-style
+    * instructions. The name defaults to `"SignatureSchema"` for DSPy-style
     * anonymous signatures.
     */
   transparent inline def fromType[F](
-      inline name: String = "Signature",
+      inline name: String = "SignatureSchema",
       inline instructions: String = ""
   ) =
     ${ internal.FunctionMacro.fromTypeImpl[F]('name, 'instructions) }
 
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
     * compile time and materializes a `TypedSignature` whose untyped
-    * `Signature` reflects the trait's `InputField` / `OutputField` members.
+    * `SignatureSchema` reflects the trait's `InputField` / `OutputField` members.
     *
     * The precise input and output types are named tuples. That lets users
     * construct inputs with named-tuple syntax and read outputs with typed

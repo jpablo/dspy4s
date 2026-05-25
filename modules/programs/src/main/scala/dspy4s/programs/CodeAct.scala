@@ -8,7 +8,7 @@ import dspy4s.core.contracts.Prediction
 import dspy4s.core.contracts.PredictionData
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.contracts.TypeRef
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -52,7 +52,7 @@ import scala.util.matching.Regex
   * reused across multiple `run(...)` invocations. The caller owns lifecycle.
   */
 final case class CodeAct(
-    baseSignature: Signature,
+    baseSignature: SignatureSchema,
     interpreter: CodeInterpreter,
     maxIterations: Int = 5,
     codeActProgramName: String = "codeact",
@@ -60,10 +60,10 @@ final case class CodeAct(
 ) extends BasePredictProgram(moduleName = "code_act"):
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
-  /** Signature for the per-iteration code generator. Mirrors Python:
+  /** SignatureSchema for the per-iteration code generator. Mirrors Python:
     *   inputs:  baseSignature.inputs ∪ {trajectory}
     *   outputs: {generated_code, finished} */
-  val codeActSignature: Signature =
+  val codeActSignature: SignatureSchema =
     baseSignature
       .append(FieldSpec(
         name = "trajectory",
@@ -111,10 +111,10 @@ final case class CodeAct(
       )
       .withInstructions(Some(buildInstructions))
 
-  /** Signature for the final extractor. Mirrors Python:
+  /** SignatureSchema for the final extractor. Mirrors Python:
     *   inputs:  baseSignature.inputs ∪ {trajectory}
     *   outputs: baseSignature.outputs */
-  val extractorSignature: Signature =
+  val extractorSignature: SignatureSchema =
     baseSignature.append(FieldSpec(
       name = "trajectory",
       role = FieldRole.Input,

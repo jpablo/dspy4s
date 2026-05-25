@@ -1,6 +1,6 @@
 package dspy4s.core.runtime
 
-import dspy4s.core.contracts.Signature
+import dspy4s.core.contracts.SignatureSchema
 
 /** Identity of the predictor currently running an LM call.
   *
@@ -8,7 +8,7 @@ import dspy4s.core.contracts.Signature
   * [[dspy4s.streaming.contracts.StreamListener]]s with the correct
   * signature-derived field labels.
   */
-final case class ActivePredict(name: String, signature: Signature)
+final case class ActivePredict(name: String, signature: SignatureSchema)
 
 /** Thread-local stack of [[ActivePredict]] entries, pushed for the duration of
   * a `Predict.execute` body and read by downstream components (notably
@@ -38,7 +38,7 @@ object ActivePredictContext:
     try thunk
     finally tl.set(previous)
 
-  def withActive[A](name: String, signature: Signature)(thunk: => A): A =
+  def withActive[A](name: String, signature: SignatureSchema)(thunk: => A): A =
     withActive(ActivePredict(name, signature))(thunk)
 
   /** Replace the entire stack; used by [[ContextPropagation]] when copying

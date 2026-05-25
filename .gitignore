@@ -8,3 +8,8 @@ modules/*/target/
 
 # Local secrets — loaded by sbt-dotenv plugin; never commit
 .env
+
+# Editor / IDE / agent state — never commit
+.idea/
+.claude/
+.agents/
