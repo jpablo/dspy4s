@@ -1,0 +1,147 @@
+package dspy4s.programs
+
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
+import dspy4s.core.contracts.{
+  DspyError, RuntimeContext, SettingKeys, SettingsData, Signature
+}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.{
+  LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
+  Message, MessageRole
+}
+import dspy4s.typed.TypedSignature
+import munit.FunSuite
+
+// Top-level fixtures (Mirror derivation requires top-level types).
+case class P4QAInput(question: String)
+case class P4QAOutput(answer: String, score: Double)
+
+case class P4StrictOutput(answer: String, score: Int)  // forces decode failure: LM returns Double
+
+class TypedPredictSuite extends FunSuite:
+
+  // ── Test doubles ────────────────────────────────────────────────────────
+
+  private object EchoQuestionAdapter extends Adapter:
+    override val name: String = "echo-question"
+
+    override def format(invocation: AdapterInvocation)(using RuntimeContext)
+        : Either[DspyError, FormattedPrompt] =
+      val q = invocation.inputs.values.get("question").map(_.toString).getOrElse("")
+      Right(FormattedPrompt(messages = Vector(
+        Message(role = MessageRole.User, text = Some(q))
+      )))
+
+    override def parse(signature: Signature, output: LmOutput)(using RuntimeContext)
+        : Either[DspyError, ParsedOutput] =
+      Right(ParsedOutput(values = Map(
+        "answer" -> output.text,
+        "score"  -> output.metadata.getOrElse("score", 0.0)
+      )))
+
+  private object FixedLm extends LanguageModel:
+    override val id: String   = "fixed-lm"
+    override val mode: LmMode = LmMode.Chat
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      Right(LmResponse(
+        outputs = Vector(
+          LmOutput(text = "Paris",  metadata = Map("score" -> 0.95)),
+          LmOutput(text = "London", metadata = Map("score" -> 0.33))
+        ),
+        usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
+      ))
+
+  private val defaultSettings: SettingsData = SettingsData(Map(
+    SettingKeys.languageModel.name -> FixedLm,
+    SettingKeys.adapter.name       -> EchoQuestionAdapter
+  ))
+
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+
+  // ── Happy path ──────────────────────────────────────────────────────────
+
+  test("TypedPredict.run returns a TypedPrediction with the decoded output case class") {
+    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run(P4QAInput("Capital of France?"))
+      result match
+        case Right(tp) =>
+          assertEquals(tp.output, P4QAOutput("Paris", 0.95))
+        case Left(err) => fail(s"expected success, got: $err")
+    }
+  }
+
+  // ── Input encoding reaches the adapter unchanged ────────────────────────
+
+  test("TypedPredict encodes inputs through the typed shape before reaching the adapter") {
+    // The EchoQuestionAdapter echoes invocation.inputs.values("question")
+    // back through the LM request -- if encoding ever dropped or renamed
+    // the field, the assertion below would still pass (the LM is fixed),
+    // so we instrument with a capturing adapter.
+    val capturedInputs = scala.collection.mutable.ArrayBuffer.empty[Map[String, Any]]
+    val capturingAdapter = new Adapter:
+      override val name = "capturing"
+      override def format(invocation: AdapterInvocation)(using RuntimeContext) =
+        capturedInputs += invocation.inputs.values
+        Right(FormattedPrompt(messages = Vector(
+          Message(role = MessageRole.User, text = Some("hi"))
+        )))
+      override def parse(signature: Signature, output: LmOutput)(using RuntimeContext) =
+        Right(ParsedOutput(values = Map(
+          "answer" -> "x",
+          "score"  -> 0.5
+        )))
+
+    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    RuntimeEnvironment.withSettings(SettingsData(Map(
+      SettingKeys.languageModel.name -> FixedLm,
+      SettingKeys.adapter.name       -> capturingAdapter
+    ))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val _ = TypedPredict(sig).run(P4QAInput("Capital of France?"))
+    }
+
+    assertEquals(capturedInputs.size, 1)
+    assertEquals(capturedInputs.head, Map[String, Any]("question" -> "Capital of France?"))
+  }
+
+  // ── Raw prediction is preserved ─────────────────────────────────────────
+
+  test("TypedPredict preserves completions and lmUsage on the raw prediction") {
+    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run(P4QAInput("Capital of France?")).toOption.get
+      assertEquals(result.raw.completions.map(_.size), Some(2))
+      assertEquals(result.raw.lmUsage.flatMap(_.get("total_tokens")), Some(12L))
+    }
+  }
+
+  // ── Decode-failure path ─────────────────────────────────────────────────
+
+  test("TypedPredict surfaces output decode failures as Left(DspyError)") {
+    val sig = TypedSignature.derived[P4QAInput, P4StrictOutput]("QA-strict")
+    // LM returns a Double for `score`; P4StrictOutput expects Int.
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = TypedPredict(sig).run(P4QAInput("Capital of France?"))
+      assert(result.isLeft, s"expected decode failure but got: $result")
+    }
+  }
+
+  // ── No regression in the underlying Predict path ────────────────────────
+
+  test("the inner Predict path still works directly (no PredictSuite regression)") {
+    import dspy4s.core.signatures.SignatureDsl
+    import dspy4s.programs.contracts.ProgramCall
+    val sig = SignatureDsl.parse("question -> answer, score").toOption.get
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = Predict(sig).run(ProgramCall(inputs = Map("question" -> "x")))
+      assert(result.isRight)
+      assertEquals(result.toOption.get.values("answer"), "Paris")
+    }
+  }

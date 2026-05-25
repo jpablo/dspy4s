@@ -83,7 +83,7 @@ lazy val adapters = (project in file("modules/adapters"))
   )
 
 lazy val programs = (project in file("modules/programs"))
-  .dependsOn(core, lm, adapters)
+  .dependsOn(core, lm, adapters, typed)
   .settings(commonSettings)
   .settings(name := "dspy4s-modules")
   .settings(

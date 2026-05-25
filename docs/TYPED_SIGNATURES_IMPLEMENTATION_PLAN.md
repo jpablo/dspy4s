@@ -582,6 +582,43 @@ Acceptance criteria:
 - `sbt programs/test typed/test core/test` passes.
 - No adapter changes are required.
 
+### Outcomes (executed 2026-05-24)
+
+Implemented one file + one build-graph edit:
+
+- `modules/programs/src/main/scala/dspy4s/programs/TypedPredict.scala` —
+  `final case class TypedPredict[I, O](signature, demos, name, runtime)`.
+  `run(input: I)(using RuntimeContext): Either[DspyError, TypedPrediction[O]]`
+  encodes via `signature.inputShape`, dispatches through the existing
+  `Predict(signature.untyped, demos, name, runtime).run(ProgramCall(...))`,
+  then decodes via `TypedPrediction.from(raw, signature.outputShape)`.
+
+- `build.sbt` — `programs.dependsOn(core, lm, adapters, typed)` (was
+  `core, lm, adapters`). The typed module already depends on core only,
+  so the new edge stays acyclic.
+
+**Plan deviations** (called out for the next reviewer):
+
+- The plan sketch shows `demos: Chunk[Record]` and `runtime: DspyRuntime`.
+  Used `Vector[Example]` and `ProgramRuntime` instead to match the existing
+  `Predict` case-class signature exactly, keeping kyo types Test-scoped and
+  avoiding a parallel runtime-contract that would diverge from the rest of
+  `programs`. Typed demos (`Vector[(I, O)]` or similar) are a Phase 7
+  consideration.
+- The plan's API sketches `run(input: I)` without an explicit context.
+  Added `(using RuntimeContext)` because the underlying `Predict.run`
+  requires it for settings / callbacks / trace.
+
+**Test results**: `TypedPredictSuite` adds 5 tests covering happy path,
+input-encoding-reaches-adapter (with a capturing test double),
+completions/usage preserved on `raw`, decode failures surfaced as
+`Left`, and a regression check that the inner `Predict` path still
+works directly. Programs module: 59 / 59 (was 54; +5). Full project:
+350 / 350 (was 345; +5).
+
+**No adapter changes were required**, per the acceptance criterion.
+The typed layer composes purely above the existing runtime.
+
 ## Phase 5: Trait-As-Spec Syntax
 
 Goal: add the Python-like signature authoring syntax.
