@@ -97,7 +97,10 @@ trait Prediction extends Record:
   def withUsage(usage: Map[String, Long]): Prediction
   def withValue(key: String, value: Any): Prediction
   def value(key: String): Either[DspyError, Any]
+  def asString(key: String): Either[DspyError, String]
+  def asInt(key: String): Either[DspyError, Int]
   def asDouble(key: String): Either[DspyError, Double]
+  def asBoolean(key: String): Either[DspyError, Boolean]
 
 final case class PredictionData(
     values: Map[String, Any],
@@ -111,13 +114,50 @@ final case class PredictionData(
   override def value(key: String): Either[DspyError, Any] =
     values.get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
 
+  override def asString(key: String): Either[DspyError, String] =
+    value(key).flatMap {
+      case s: String                                       => Right(s)
+      case b: Boolean                                      => Right(b.toString)
+      case n @ (_: Int | _: Long | _: Float | _: Double)   => Right(n.toString)
+      case other =>
+        Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
+    }
+
+  override def asInt(key: String): Either[DspyError, Int] =
+    value(key).flatMap {
+      case n: Int                                          => Right(n)
+      case n: Long if n >= Int.MinValue && n <= Int.MaxValue => Right(n.toInt)
+      case s: String =>
+        s.trim.toIntOption.toRight(
+          ValidationError(s"Prediction field '$key' is not a valid Int: $s")
+        )
+      case other =>
+        Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
+    }
+
   override def asDouble(key: String): Either[DspyError, Double] =
     value(key).flatMap {
       case number: Int    => Right(number.toDouble)
       case number: Long   => Right(number.toDouble)
       case number: Float  => Right(number.toDouble)
       case number: Double => Right(number)
+      case s: String =>
+        s.trim.toDoubleOption.toRight(
+          ValidationError(s"Prediction field '$key' is not a valid Double: $s")
+        )
       case other          => Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
+    }
+
+  override def asBoolean(key: String): Either[DspyError, Boolean] =
+    value(key).flatMap {
+      case b: Boolean => Right(b)
+      case s: String  =>
+        s.trim.toLowerCase match
+          case "true"  => Right(true)
+          case "false" => Right(false)
+          case _       =>
+            Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
+      case other => Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))
     }
 
   def score: Either[DspyError, Double] =

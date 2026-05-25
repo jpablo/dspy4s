@@ -241,6 +241,39 @@ Acceptance criteria:
 
 - `sbt core/test` passes.
 
+### Outcomes (executed 2026-05-24)
+
+Implemented in `modules/core/src/main/scala/dspy4s/core/contracts/Data.scala`;
+tests appended to `DataSuite.scala` (DataSuite is now 20 tests, all passing;
+project-wide `sbt test` remains at 318 / 318).
+
+**Intentional deviation from the plan's literal signatures.** The plan
+sketched `Option[T]` returns; the implementation uses
+`Either[DspyError, T]` for consistency with the existing
+`asDouble: Either[DspyError, Double]` and the codebase-wide
+`Either[DspyError, _]` discipline. `None` would have been less informative
+than `Left(ValidationError(...))` with a message about why the conversion
+failed. No call sites needed updating beyond the new abstract methods on
+`Prediction` — the only implementor is `PredictionData`.
+
+**Additional change beyond the plan**: `asDouble` was extended to accept
+clean numeric strings (`"1.5"`, `"42"`) in addition to numeric primitives.
+This is purely additive — every prior call site continues to return the
+same value. Mirrors the new `asInt` and `asBoolean` string-parsing.
+
+**Coercion policy applied** (Phase-1 conservative; Phase 2 will formalize):
+
+- `asString` — String pass-through; primitive numerics + Boolean stringify
+  via `.toString`; Map / Seq / other reject with `ValidationError`.
+- `asInt` — Int pass-through; Long accepted only when within Int range;
+  string parsed via `.toIntOption`; Double rejected (no silent truncation);
+  Boolean rejected.
+- `asDouble` — existing behavior preserved; clean numeric strings now
+  accepted.
+- `asBoolean` — Boolean pass-through; `"true"`/`"false"` (case-insensitive,
+  trimmed) accepted; `"yes"`/`"1"`/numerics rejected (no implicit
+  coercion).
+
 ## Phase 2: Typed Core Model
 
 Goal: represent typed signatures independently of prediction execution.
