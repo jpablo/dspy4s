@@ -10,7 +10,7 @@ import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
   Message, MessageRole
 }
-import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 import munit.FunSuite
 
 // Top-level spec traits (Mirror derivation requires top-level types).
@@ -81,7 +81,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test("TypedChainOfThought.run returns a typed prediction with reasoning prepended") {
-    val sig = TypedSignature.of[TcotSummarizeSpec]
+    val sig = Signature.of[TcotSummarizeSpec]
     val adapter = new ScriptedAdapter(
       reasoning  = "The text is about football transfers; condense the key facts.",
       baseValues = Map("summary" -> "Lee signed a new contract with Barnsley.")
@@ -101,7 +101,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
   }
 
   test("TypedChainOfThought preserves declaration order and types for multi-output signatures") {
-    val sig = TypedSignature.of[TcotMultiOutputSpec]
+    val sig = Signature.of[TcotMultiOutputSpec]
     val adapter = new ScriptedAdapter(
       reasoning  = "Paris is the capital because of historical and political factors.",
       baseValues = Map("answer" -> "Paris", "score" -> 0.95)
@@ -121,7 +121,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
   // ── Raw prediction is preserved ─────────────────────────────────────────
 
   test("TypedChainOfThought preserves the raw DynamicPrediction (including lmUsage)") {
-    val sig = TypedSignature.of[TcotSummarizeSpec]
+    val sig = Signature.of[TcotSummarizeSpec]
     val adapter = new ScriptedAdapter(
       reasoning  = "short reasoning",
       baseValues = Map("summary" -> "short summary")
@@ -138,7 +138,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
   // ── Failure modes ───────────────────────────────────────────────────────
 
   test("TypedChainOfThought surfaces missing reasoning as a structured DspyError") {
-    val sig = TypedSignature.of[TcotSummarizeSpec]
+    val sig = Signature.of[TcotSummarizeSpec]
     val adapter = new NoReasoningAdapter(Map("summary" -> "summary without reasoning"))
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -151,7 +151,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
   }
 
   test("TypedChainOfThought surfaces non-string reasoning as a ValidationError") {
-    val sig = TypedSignature.of[TcotSummarizeSpec]
+    val sig = Signature.of[TcotSummarizeSpec]
     // Adapter emits reasoning as an Int -- decoding should reject it.
     val brokenAdapter = new Adapter:
       val name = "broken"

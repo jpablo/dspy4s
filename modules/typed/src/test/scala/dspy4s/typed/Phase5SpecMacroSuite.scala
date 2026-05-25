@@ -49,14 +49,14 @@ class Phase5SpecMacroSuite extends FunSuite:
   // ── Spec → SignatureSchema derivation ─────────────────────────────────────────
 
   test("spec trait derives a SignatureSchema with correct field names + roles") {
-    val sig = TypedSignature.of[P5SentimentSpec]
+    val sig = Signature.of[P5SentimentSpec]
     assertEquals(sig.untyped.name, "P5SentimentSpec")
     assertEquals(sig.untyped.inputFields.map(_.name),  Vector("sentence"))
     assertEquals(sig.untyped.outputFields.map(_.name), Vector("sentiment"))
   }
 
   test("spec trait supports explicit name and construction-time instructions") {
-    val sig = TypedSignature.of[P5SentimentSpec](
+    val sig = Signature.of[P5SentimentSpec](
       name = "Sentiment",
       instructions = "Classify the sentence sentiment."
     )
@@ -66,14 +66,14 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec trait preserves declaration order for multiple inputs and outputs") {
-    val sig = TypedSignature.of[P5MultiSpec]
+    val sig = Signature.of[P5MultiSpec]
     assertEquals(sig.untyped.inputFields.map(_.name),  Vector("question", "context"))
     assertEquals(sig.untyped.outputFields.map(_.name), Vector("answer", "score"))
     assertEquals(sig.untyped.signatureString, "question, context -> answer, score")
   }
 
   test("spec trait field TypeRefs come from the FieldCodec typeclass") {
-    val sig = TypedSignature.of[P5MultiSpec]
+    val sig = Signature.of[P5MultiSpec]
     val byName = sig.untyped.fields.map(f => f.name -> f.typeRef.repr).toMap
     assertEquals(byName("question"), "string")
     assertEquals(byName("context"),  "string")
@@ -82,7 +82,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec trait propagates enum metadata to FieldSpec.metadata") {
-    val sig = TypedSignature.of[P5ToneSpec]
+    val sig = Signature.of[P5ToneSpec]
     val toneField = sig.untyped.outputFields.find(_.name == "tone").get
     assertEquals(toneField.typeRef, TypeRef.string)
     assertEquals(
@@ -93,17 +93,17 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec trait fields are normalized (inferred prefix + description)") {
-    val sig = TypedSignature.of[P5MultiSpec]
+    val sig = Signature.of[P5MultiSpec]
     val byName = sig.untyped.fields.map(f => f.name -> f).toMap
     assertEquals(byName("question").prefix, Some("Question:"))
     assertEquals(byName("answer").prefix,   Some("Answer:"))
     assertEquals(byName("score").prefix,    Some("Score:"))
   }
 
-  // ── Named-tuple I/O / TypedSignature.of returns a usable TypedSignature ─
+  // ── Named-tuple I/O / Signature.of returns a usable Signature ─
 
-  test("of[T] returns a TypedSignature with named-tuple input and output types") {
-    val sig = TypedSignature.of[P5SentimentSpec]
+  test("of[T] returns a Signature with named-tuple input and output types") {
+    val sig = Signature.of[P5SentimentSpec]
     val input = (sentence = "hello there")
     val encoded = sig.inputShape.encode(input)
     val decoded = sig.outputShape.decode(Map("sentiment" -> "positive")).toOption.get
@@ -114,7 +114,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("of[T] outputShape rejects raw maps missing required fields") {
-    val sig = TypedSignature.of[P5MultiSpec]
+    val sig = Signature.of[P5MultiSpec]
     val incomplete = Map[String, Any]("answer" -> "Paris")  // missing 'score'
     val result = sig.outputShape.decode(incomplete)
     assert(result.isLeft, s"expected decode failure for missing field, got: $result")
@@ -123,7 +123,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   // ── Decoder-aware MapShape: spec output types are honored at decode ─────
 
   test("spec outputShape decodes enum case names through the field's FieldCodec") {
-    val sig = TypedSignature.of[P5ToneSpec]
+    val sig = Signature.of[P5ToneSpec]
     val raw = Map[String, Any]("tone" -> "calm")
     val decoded = sig.outputShape.decode(raw).toOption.get
     val tone: P5Tone = decoded.tone
@@ -131,7 +131,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec outputShape coerces numeric strings to the declared primitive type") {
-    val sig = TypedSignature.of[P5MultiSpec]
+    val sig = Signature.of[P5MultiSpec]
     val raw = Map[String, Any]("answer" -> "Paris", "score" -> "0.5")
     val decoded = sig.outputShape.decode(raw).toOption.get
     val answer: String = decoded.answer
@@ -141,21 +141,21 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec outputShape surfaces decoder failures as Left(DspyError)") {
-    val sig = TypedSignature.of[P5ToneSpec]
+    val sig = Signature.of[P5ToneSpec]
     val raw = Map[String, Any]("tone" -> "confused")  // not a valid P5Tone case
     val result = sig.outputShape.decode(raw)
     assert(result.isLeft, s"expected decode failure for invalid enum value, got: $result")
   }
 
   test("spec inputShape encodes typed enum values to their case-name strings") {
-    val sig = TypedSignature.of[P5ToneInputSpec]
+    val sig = Signature.of[P5ToneInputSpec]
     val input = (tone = P5Tone.urgent)
     val encoded = sig.inputShape.encode(input)
     assertEquals(encoded("tone"), "urgent")
   }
 
   test("spec outputShape decodes nested product fields through kyo-schema") {
-    val sig = TypedSignature.of[P5StructuredSpec]
+    val sig = Signature.of[P5StructuredSpec]
     val raw = Map[String, Any](
       "result" -> Map(
         "answer" -> "Paris",
@@ -177,7 +177,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   }
 
   test("spec outputShape decodes collection fields through library FieldCodecs") {
-    val sig = TypedSignature.of[P5CollectionSpec]
+    val sig = Signature.of[P5CollectionSpec]
     val raw = Map[String, Any](
       "evidence" -> Map(
         "claim_1" -> List("Paris", "France"),
@@ -200,8 +200,8 @@ class Phase5SpecMacroSuite extends FunSuite:
   // ── Cross-surface parity ────────────────────────────────────────────────
 
   test("spec-derived signature matches builder-built signature for the same shape") {
-    val fromSpec = TypedSignature.of[P5MultiSpec].untyped
-    val fromBuilder = TypedSignature
+    val fromSpec = Signature.of[P5MultiSpec].untyped
+    val fromBuilder = Signature
       .builder("P5MultiSpec")
       .input[String]("question")
       .input[String]("context")
@@ -223,7 +223,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     val errors = compileErrors("""
       trait BadSpec extends dspy4s.typed.Spec:
         def sentence: String   // wrong: not wrapped in InputField/OutputField
-      val sig = dspy4s.typed.TypedSignature.of[BadSpec]
+      val sig = dspy4s.typed.Signature.of[BadSpec]
     """)
     assert(errors.contains("must return InputField"),
       s"expected helpful error about marker types, got:\n$errors")
@@ -233,7 +233,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     val errors = compileErrors("""
       trait BadSpec extends dspy4s.typed.Spec:
         def f(x: Int): dspy4s.typed.InputField[String]
-      val sig = dspy4s.typed.TypedSignature.of[BadSpec]
+      val sig = dspy4s.typed.Signature.of[BadSpec]
     """)
     assert(errors.contains("must be parameterless"),
       s"expected helpful error about parameters, got:\n$errors")
@@ -244,7 +244,7 @@ class Phase5SpecMacroSuite extends FunSuite:
       class NotDecodable
       trait BadSpec extends dspy4s.typed.Spec:
         def field: dspy4s.typed.OutputField[NotDecodable]
-      val sig = dspy4s.typed.TypedSignature.of[BadSpec]
+      val sig = dspy4s.typed.Signature.of[BadSpec]
     """)
     assert(errors.contains("No FieldCodec"),
       s"expected helpful error about missing FieldCodec, got:\n$errors")
@@ -253,7 +253,7 @@ class Phase5SpecMacroSuite extends FunSuite:
   test("compile error: empty spec trait") {
     val errors = compileErrors("""
       trait EmptySpec extends dspy4s.typed.Spec
-      val sig = dspy4s.typed.TypedSignature.of[EmptySpec]
+      val sig = dspy4s.typed.Signature.of[EmptySpec]
     """)
     assert(errors.contains("at least one"),
       s"expected helpful error about empty spec, got:\n$errors")
@@ -264,7 +264,7 @@ class Phase5SpecMacroSuite extends FunSuite:
       trait BadSpec extends dspy4s.typed.Spec:
         def question: dspy4s.typed.InputField[String]
         def helper(): String = "oops"   // concrete -- not allowed
-      val sig = dspy4s.typed.TypedSignature.of[BadSpec]
+      val sig = dspy4s.typed.Signature.of[BadSpec]
     """)
     assert(errors.contains("concrete method"),
       s"expected helpful error about concrete methods, got:\n$errors")

@@ -8,7 +8,7 @@ import kyo.{Chunk, Schema, Structure}
 import scala.deriving.Mirror
 
 /** A schema-aware view of a user type `A`, used as the input or output of a
-  * `TypedSignature`. Lists fields in declaration order, converts each to a
+  * `Signature`. Lists fields in declaration order, converts each to a
   * `FieldSpec` for the untyped `SignatureSchema`, encodes typed values into the
   * `Map[String, Any]` carried through `ProgramCall`, and decodes a raw
   * `Map[String, Any]` produced by an adapter back into the typed `A`.
@@ -132,7 +132,7 @@ object Shape:
 
   /** Derives a `Shape[A]` and stamps every field with the given role. Use
     * `FieldRole.Input` for input case classes, `FieldRole.Output` for
-    * output case classes. `derived` defaults to `Output`; `TypedSignature`
+    * output case classes. `derived` defaults to `Output`; `Signature`
     * builders that need inputs invoke this explicitly. */
   inline def derivedWithRole[A <: Product](role: FieldRole)(using
       m: Mirror.ProductOf[A],

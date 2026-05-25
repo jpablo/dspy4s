@@ -10,7 +10,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, PredictionData, RuntimeContext}
-import dspy4s.typed.{TypedPrediction, TypedSignature, FieldCodec}
+import dspy4s.typed.{TypedPrediction, Signature, FieldCodec}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
 // enum's Schema must come from outside any enclosing class.
@@ -24,7 +24,7 @@ object Emotion extends FieldCodec.FlatEnum[Emotion]
 case class EmotionOutput(sentiment: Emotion)
 
 /**
- * Build a `TypedSignature` from two case classes — one for inputs, one for
+ * Build a `Signature` from two case classes — one for inputs, one for
  * outputs. The resulting signature is fully typed at the program boundary:
  *
  *   - encode: `TypedPredict.run(EmotionInput("..."))` accepts a typed value;
@@ -37,8 +37,8 @@ case class EmotionOutput(sentiment: Emotion)
  */
 object CaseClassExample:
 
-  val signature: TypedSignature[EmotionInput, EmotionOutput] =
-    TypedSignature.derived[EmotionInput, EmotionOutput](
+  val signature: Signature[EmotionInput, EmotionOutput] =
+    Signature.derived[EmotionInput, EmotionOutput](
       name         = "Emotion",
       instructions = "Classify emotion in the given sentence."
     )

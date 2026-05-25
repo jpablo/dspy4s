@@ -4,12 +4,12 @@
  * The trait-spec surface is the closest port of DSPy's Python
  * `class Foo(dspy.Signature)` style. A trait extending `Spec` declares
  * input/output fields as abstract method members tagged with
- * `InputField[T]` / `OutputField[T]`. The macro `TypedSignature.of[T]`
+ * `InputField[T]` / `OutputField[T]`. The macro `Signature.of[T]`
  * walks the trait at compile time, validates each member, summons a
  * `FieldCodec[T]` for the wrapped type, and emits the runtime
- * `TypedSignature`.
+ * `Signature`.
  *
- * `TypedSignature.of[T]` exposes named-tuple input/output types, so callers
+ * `Signature.of[T]` exposes named-tuple input/output types, so callers
  * get typed construction and typed dot-access while keeping the DSPy-style
  * declaration as the source of truth.
  *
@@ -18,7 +18,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
-import dspy4s.typed.{InputField, OutputField, Spec, TypedSignature}
+import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 import kyo.Schema
 
 trait EmotionSpec extends Spec:
@@ -43,17 +43,17 @@ object SpecExample:
   /** Spec-derived signature for the emotion-classification task. The
     * resulting `untyped` SignatureSchema is structurally identical to the one
     * produced by `CaseClassExample.signature.untyped` and to one built
-    * via `TypedSignature.builder("Emotion").input[String]("sentence")...`.
+    * via `Signature.builder("Emotion").input[String]("sentence")...`.
     * Cross-surface parity is proven by the typed module's test suite. */
-  val emotion = TypedSignature.of[EmotionSpec]
+  val emotion = Signature.of[EmotionSpec]
 
   /** A multi-field QA spec. Field order, names, types, normalized prefixes,
     * and enum metadata all flow from the trait declarations. */
-  val qa = TypedSignature.of[QASpec]
+  val qa = Signature.of[QASpec]
 
   /** A structured-output spec. Nested products, lists, and primitive
     * coercions are decoded through kyo-schema. */
-  val citedQa = TypedSignature.of[CitedQASpec]
+  val citedQa = Signature.of[CitedQASpec]
 
   /** Illustrative call: with an LM and adapter configured, run the
     * spec-derived signature against a named-tuple input and read the

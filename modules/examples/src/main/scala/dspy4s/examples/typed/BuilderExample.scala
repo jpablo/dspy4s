@@ -16,13 +16,13 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.SignatureSchema
-import dspy4s.typed.TypedSignature
+import dspy4s.typed.Signature
 
 object BuilderExample:
 
   /** A simple toxicity check signature, built fluently. */
   val toxicity: SignatureSchema =
-    TypedSignature
+    Signature
       .builder("Toxicity")
       .input[String]("comment")
       .output[Boolean]("toxic")
@@ -38,7 +38,7 @@ object BuilderExample:
     * read `FieldSpec.metadata(FieldMetadata.EnumCases)` to render the
     * allowed values into the prompt. */
   val classifyEmotion: SignatureSchema =
-    TypedSignature
+    Signature
       .builder("Emotion")
       .input[String]("sentence")
       .output[Emotion]("sentiment")

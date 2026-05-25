@@ -5,12 +5,12 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.{TypedPrediction, TypedSignature}
+import dspy4s.typed.{TypedPrediction, Signature}
 import scala.NamedTuple
 
-/** Typed counterpart to `DynamicChainOfThought`. Wraps a `TypedSignature[I, O]`
+/** Typed counterpart to `DynamicChainOfThought`. Wraps a `Signature[I, O]`
   * whose output is a named tuple (typically produced by
-  * `TypedSignature.of[T <: Spec]` or `TypedSignature.fromType[F]("...")`)
+  * `Signature.of[T <: Spec]` or `Signature.fromType[F]("...")`)
   * and produces a `TypedPrediction[Out]` whose output named tuple has
   * `reasoning: String` prepended to O's fields.
   *
@@ -21,7 +21,7 @@ import scala.NamedTuple
   * boundary and prepends the reasoning value to the decoded tuple.
   *
   * **Scope**: named-tuple outputs only. Case-class outputs from
-  * `TypedSignature.derived[I, O <: Product]` would need an augmented
+  * `Signature.derived[I, O <: Product]` would need an augmented
   * synthesized case class at the call site; for those, use the untyped
   * `DynamicChainOfThought` directly and read `raw.value("reasoning")`.
   *
@@ -32,7 +32,7 @@ import scala.NamedTuple
   * tracing is an open design decision.
   */
 final case class TypedChainOfThought[I, O](
-    signature: TypedSignature[I, O],
+    signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
 ):

@@ -1,15 +1,15 @@
 package dspy4s.typed.internal
 
 import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureSpec}
-import dspy4s.typed.{InputField, OutputField, Shape, Spec, TypedSignature, FieldCodec}
+import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig, FieldCodec}
 import scala.quoted.*
 
 private[typed] object SpecMacro:
 
-  /** Implementation of `TypedSignature.of[T <: Spec]`. Inspects T's
+  /** Implementation of `Signature.of[T <: Spec]`. Inspects T's
     * abstract methods at compile time, validates each returns
     * `InputField[X]` or `OutputField[X]`, summons a `FieldCodec[X]`,
-    * and emits a `TypedSignature[I, O]` whose `I` and `O` are named
+    * and emits a `Signature[I, O]` whose `I` and `O` are named
     * tuples carrying the spec's input and output fields.
     *
     * Compile errors:
@@ -175,7 +175,7 @@ private[typed] object SpecMacro:
               ),
               identity
             )
-          TypedSignature[i, o](
+          TypedSig[i, o](
             name        = ${ sigNameExpr },
             untyped     = sig,
             inputShape  = new Shape.TupleShape[i](inFields,  ${ inputDecodersExpr }),

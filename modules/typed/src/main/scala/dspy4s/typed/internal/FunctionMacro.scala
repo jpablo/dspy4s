@@ -1,7 +1,7 @@
 package dspy4s.typed.internal
 
 import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureSpec}
-import dspy4s.typed.{Shape, TypedSignature, FieldCodec}
+import dspy4s.typed.{Shape, Signature as TypedSig, FieldCodec}
 import kyo.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
@@ -22,7 +22,7 @@ private[typed] object FunctionMacro:
       outputFieldsExpr: Expr[Vector[FieldSpec]],
       inputShapeExpr: Expr[Shape[I]],
       outputShapeExpr: Expr[Shape[O]]
-  )(using Quotes): Expr[TypedSignature[I, O]] =
+  )(using Quotes): Expr[TypedSig[I, O]] =
     val inputFieldExprs = inputFields.map(_.fieldSpec)
     val errorNameExpr = Expr(errorName)
     '{
@@ -41,7 +41,7 @@ private[typed] object FunctionMacro:
           ),
           identity
         )
-      TypedSignature[I, O](
+      TypedSig[I, O](
         name        = name,
         untyped     = sig,
         inputShape  = ${ inputShapeExpr },
@@ -49,7 +49,7 @@ private[typed] object FunctionMacro:
       )
     }
 
-  /** Implementation of `TypedSignature.from(method)`. The method itself is
+  /** Implementation of `Signature.from(method)`. The method itself is
     * never called; it is a declaration surface whose parameter names/types
     * become inputs and whose return type becomes outputs.
     */
@@ -73,8 +73,8 @@ private[typed] object FunctionMacro:
         case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
         case other =>
           report.errorAndAbort(
-            "TypedSignature.from expects a method reference, e.g. " +
-            "`TypedSignature.from(emotionsSig)`; got: " + other.show
+            "Signature.from expects a method reference, e.g. " +
+            "`Signature.from(emotionsSig)`; got: " + other.show
           )
 
     def methodDef(sym: Symbol): DefDef =
@@ -82,7 +82,7 @@ private[typed] object FunctionMacro:
         case dd: DefDef => dd
         case _ =>
           report.errorAndAbort(
-            s"TypedSignature.from could not inspect method '${sym.name}'"
+            s"Signature.from could not inspect method '${sym.name}'"
           )
 
     def calledMethod(term: Term): Option[Symbol] =
@@ -177,7 +177,7 @@ private[typed] object FunctionMacro:
         outputFieldsExpr: Expr[Vector[FieldSpec]],
         inputShapeExpr: Expr[Shape[I]],
         outputShapeExpr: Expr[Shape[O]]
-    ): Expr[TypedSignature[I, O]] =
+    ): Expr[TypedSig[I, O]] =
       materialize[I, O](
         sigNameExpr = Expr(sigName),
         instructionsExpr = Expr(""),
@@ -197,12 +197,12 @@ private[typed] object FunctionMacro:
         case _ => false
       }
     then
-      report.errorAndAbort(s"TypedSignature.from does not support polymorphic method '$sigName'")
+      report.errorAndAbort(s"Signature.from does not support polymorphic method '$sigName'")
 
     val termParamClauses = dd.paramss.collect { case clause: TermParamClause => clause }
     if termParamClauses.size != 1 then
       report.errorAndAbort(
-        s"TypedSignature.from expects method '$sigName' to have exactly one parameter list"
+        s"Signature.from expects method '$sigName' to have exactly one parameter list"
       )
 
     val params = termParamClauses.head.params.map { vd =>
@@ -210,7 +210,7 @@ private[typed] object FunctionMacro:
     }
 
     if params.isEmpty then
-      report.errorAndAbort(s"TypedSignature.from expects method '$sigName' to declare at least one input parameter")
+      report.errorAndAbort(s"Signature.from expects method '$sigName' to declare at least one input parameter")
 
     val duplicateInputs = params.groupBy(_._1).collect {
       case (name, occurrences) if occurrences.size > 1 => name
@@ -222,7 +222,7 @@ private[typed] object FunctionMacro:
 
     val returnType = dd.returnTpt.tpe
     if returnType =:= TypeRepr.of[Unit] then
-      report.errorAndAbort(s"TypedSignature.from requires method '$sigName' to return an output type, not Unit")
+      report.errorAndAbort(s"Signature.from requires method '$sigName' to return an output type, not Unit")
 
     val inputData = fieldData(sigName, FieldRole.Input, params)
     val inputType = namedTupleType(params)
@@ -247,7 +247,7 @@ private[typed] object FunctionMacro:
     namedTupleParts(returnType) match
       case Some(outputItems) =>
         if outputItems.isEmpty then
-          report.errorAndAbort(s"TypedSignature.from requires method '$sigName' to declare at least one output field")
+          report.errorAndAbort(s"Signature.from requires method '$sigName' to declare at least one output field")
         val outputData = fieldData(sigName, FieldRole.Output, outputItems)
         (inputType.asType, returnType.asType) match
           case ('[i], '[o]) =>
@@ -291,7 +291,7 @@ private[typed] object FunctionMacro:
                   scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
 
-  /** Implementation of `TypedSignature.fromType[F]`. Inspects a function
+  /** Implementation of `Signature.fromType[F]`. Inspects a function
     * type rather than a method term.
     */
   def fromTypeImpl[F : Type](
@@ -376,7 +376,7 @@ private[typed] object FunctionMacro:
             case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Function") =>
               args
             case other =>
-              report.errorAndAbort(s"TypedSignature.fromType expects a function type, got: ${other.show}")
+              report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
           val parentInputs = parentParts.dropRight(1)
           val inputs =
             if paramTypes.size == parentInputs.size then paramTypes
@@ -384,27 +384,27 @@ private[typed] object FunctionMacro:
           paramNames.map(Some(_)).zip(inputs) -> returnType
         case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Function") =>
           if args.size < 2 then
-            report.errorAndAbort("TypedSignature.fromType requires at least one input type")
+            report.errorAndAbort("Signature.fromType requires at least one input type")
           val inputTypes = args.dropRight(1)
           val returnType = args.last
           inputTypes.map(None -> _) -> returnType
         case other =>
-          report.errorAndAbort(s"TypedSignature.fromType expects a function type, got: ${other.show}")
+          report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
 
     def inputName(index: Int, total: Int, explicit: Option[String]): String =
       explicit.getOrElse(if total == 1 then "input" else s"input${index + 1}")
 
-    val sigName = name.value.filter(_.nonEmpty).getOrElse("SignatureSchema")
+    val sigName = name.value.filter(_.nonEmpty).getOrElse("Signature")
     val sigNameExpr = '{
       val explicitName = ${ name }
-      if explicitName.isEmpty then "SignatureSchema" else explicitName
+      if explicitName.isEmpty then "Signature" else explicitName
     }
     val (rawInputs, returnType) = functionParts(TypeRepr.of[F])
 
     if rawInputs.isEmpty then
-      report.errorAndAbort("TypedSignature.fromType expects at least one input type")
+      report.errorAndAbort("Signature.fromType expects at least one input type")
     if returnType =:= TypeRepr.of[Unit] then
-      report.errorAndAbort("TypedSignature.fromType requires an output type, not Unit")
+      report.errorAndAbort("Signature.fromType requires an output type, not Unit")
 
     val inputItems = rawInputs.zipWithIndex.map { case ((maybeName, tpe), index) =>
       inputName(index, rawInputs.size, maybeName) -> tpe
@@ -414,7 +414,7 @@ private[typed] object FunctionMacro:
     }
     if duplicateInputs.nonEmpty then
       report.errorAndAbort(
-        s"TypedSignature.fromType has duplicate input names: ${duplicateInputs.mkString(", ")}"
+        s"Signature.fromType has duplicate input names: ${duplicateInputs.mkString(", ")}"
       )
 
     val inputData = fieldData(sigName, FieldRole.Input, inputItems)
@@ -423,7 +423,7 @@ private[typed] object FunctionMacro:
     def signatureExpr[I : Type, O : Type](
         outputFieldsExpr: Expr[Vector[FieldSpec]],
         outputShapeExpr: Expr[Shape[O]]
-    ): Expr[TypedSignature[I, O]] =
+    ): Expr[TypedSig[I, O]] =
       materialize[I, O](
         sigNameExpr = sigNameExpr,
         instructionsExpr = instructions,
@@ -451,7 +451,7 @@ private[typed] object FunctionMacro:
     namedTupleParts(returnType) match
       case Some(outputItems) =>
         if outputItems.isEmpty then
-          report.errorAndAbort("TypedSignature.fromType requires at least one output field")
+          report.errorAndAbort("Signature.fromType requires at least one output field")
         val outputData = fieldData(sigName, FieldRole.Output, outputItems)
         (inputType.asType, returnType.asType) match
           case ('[i], '[o]) =>

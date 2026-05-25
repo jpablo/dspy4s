@@ -13,7 +13,7 @@ import kyo.Schema
   * Phase 2 supports `I <: Product` / `O <: Product` (case classes). Phase 3
   * adds the builder API.
   */
-final case class TypedSignature[I, O](
+final case class Signature[I, O](
     name: String,
     untyped: SignatureSchema,
     inputShape: Shape[I],
@@ -30,16 +30,16 @@ final case class TypedSignature[I, O](
     * untyped `SignatureSchema.withInstructions` behavior and leave the signature
     * unchanged.
     */
-  def withInstructions(text: String): TypedSignature[I, O] =
+  def withInstructions(text: String): Signature[I, O] =
     copy(untyped = untyped.withInstructions(text))
 
   /** Replace or clear signature-level instructions. */
-  def withInstructions(text: Option[String]): TypedSignature[I, O] =
+  def withInstructions(text: Option[String]): Signature[I, O] =
     copy(untyped = untyped.withInstructions(text))
 
-object TypedSignature:
+object Signature:
 
-  /** Derives a `TypedSignature[I, O]` from two case classes. The resulting
+  /** Derives a `Signature[I, O]` from two case classes. The resulting
     * untyped signature has all input fields followed by all output fields
     * (matching the `inputFields ++ outputFields` ordering used everywhere
     * else in dspy4s).
@@ -57,7 +57,7 @@ object TypedSignature:
       mo: scala.deriving.Mirror.ProductOf[O],
       inputSchema: Schema[I],
       outputSchema: Schema[O]
-  ): TypedSignature[I, O] =
+  ): Signature[I, O] =
     val inShape  = Shape.derivedWithRole[I](FieldRole.Input)
     val outShape = Shape.derivedWithRole[O](FieldRole.Output)
     val fields   = inShape.fieldSpecs ++ outShape.fieldSpecs
@@ -73,14 +73,14 @@ object TypedSignature:
         ),
         identity
       )
-    TypedSignature(name, sig, inShape, outShape)
+    Signature(name, sig, inShape, outShape)
 
   /** Programmatic builder for callers that don't want a case class per
     * signature. Returns a plain `SignatureSchema` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
   /** Function/method macro entry. Inspects a method reference at compile
-    * time and materializes a `TypedSignature` whose inputs come from the
+    * time and materializes a `Signature` whose inputs come from the
     * method parameters and whose outputs come from the method return type.
     *
     * Output rules:
@@ -104,20 +104,20 @@ object TypedSignature:
     * Output rules match `from(method)`.
     */
   transparent inline def fromType[F] =
-    ${ internal.FunctionMacro.fromTypeImpl[F]('{ "SignatureSchema" }, '{ "" }) }
+    ${ internal.FunctionMacro.fromTypeImpl[F]('{ "Signature" }, '{ "" }) }
 
   /** Type-only function signature macro with optional runtime name and
-    * instructions. The name defaults to `"SignatureSchema"` for DSPy-style
+    * instructions. The name defaults to `"Signature"` for DSPy-style
     * anonymous signatures.
     */
   transparent inline def fromType[F](
-      inline name: String = "SignatureSchema",
+      inline name: String = "Signature",
       inline instructions: String = ""
   ) =
     ${ internal.FunctionMacro.fromTypeImpl[F]('name, 'instructions) }
 
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at
-    * compile time and materializes a `TypedSignature` whose untyped
+    * compile time and materializes a `Signature` whose untyped
     * `SignatureSchema` reflects the trait's `InputField` / `OutputField` members.
     *
     * The precise input and output types are named tuples. That lets users

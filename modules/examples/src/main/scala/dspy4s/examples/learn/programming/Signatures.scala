@@ -9,12 +9,12 @@
  *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`,
  *     `dspy.ChainOfThought("a -> b")`, or `dspy.Signature("a -> b")`)
  *     become Scala **function signatures** via
- *     `TypedSignature.fromType[(in: I) => (out: O)]`.
+ *     `Signature.fromType[(in: I) => (out: O)]`.
  *   - Python **class-based** signatures (`class X(dspy.Signature): ...`)
  *     become Scala **spec traits** with `InputField[T]` / `OutputField[T]`
- *     members and `TypedSignature.of[T <: Spec]`.
+ *     members and `Signature.of[T <: Spec]`.
  *
- * Both surfaces produce a `TypedSignature[I, O]` where `I` / `O` are named
+ * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named
  * tuples, so call sites get typed dot-access:
  *
  *   TypedPredict(sig).run((field = "...")).map(_.output.field)
@@ -34,7 +34,7 @@ package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.{TypedChainOfThought, TypedPredict}
-import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, TypedSignature}
+import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, Signature}
 import kyo.Schema
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -52,7 +52,7 @@ import kyo.Schema
 
 object ToxicityExample:
   val signature =
-    TypedSignature.fromType[(comment: String) => (toxic: Boolean)](
+    Signature.fromType[(comment: String) => (toxic: Boolean)](
       instructions =
         "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
     )
@@ -72,7 +72,7 @@ object ToxicityExample:
 // | classify(sentence=sentence).sentiment
 
 object SentimentExample:
-  val classify = TypedPredict(TypedSignature.fromType[(sentence: String) => (sentiment: Boolean)])
+  val classify = TypedPredict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
     classify.run((sentence = sentence)).map(_.output.sentiment)
@@ -97,7 +97,7 @@ object SentimentExample:
 // are both typed dot-accesses with no `.value(...)` indirection.
 
 object SummarizeExample:
-  val program = TypedChainOfThought(TypedSignature.fromType[(document: String) => (summary: String)])
+  val program = TypedChainOfThought(Signature.fromType[(document: String) => (summary: String)])
 
   /** Snippet 3: just the summary. */
   def call(document: String)(using RuntimeContext): Either[DspyError, String] =
@@ -140,7 +140,7 @@ trait EmotionSpec extends Spec:
   def sentiment: OutputField[Emotion]
 
 object EmotionExample:
-  val classify = TypedPredict(TypedSignature.of[EmotionSpec](instructions = "Classify emotion."))
+  val classify = TypedPredict(Signature.of[EmotionSpec](instructions = "Classify emotion."))
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     classify.run((sentence = sentence)).map(_.output.sentiment)
@@ -168,7 +168,7 @@ trait CheckCitationFaithfulnessSpec extends Spec:
 
 object FaithfulnessExample:
   val signature =
-    TypedSignature.of[CheckCitationFaithfulnessSpec](
+    Signature.of[CheckCitationFaithfulnessSpec](
       instructions = "Verify that the text is based on the provided context."
     )
 
@@ -199,7 +199,7 @@ trait DogPictureSpec extends Spec:
 
 object DogPictureExample:
   val signature =
-    TypedSignature.of[DogPictureSpec](
+    Signature.of[DogPictureSpec](
       instructions = "Output the dog breed of the dog in the image."
     )
 
@@ -239,9 +239,9 @@ object MyContainer:
 
 object CustomTypesExample:
   val signature =
-    TypedSignature.fromType[(query: String) => (result: QueryResult)]
+    Signature.fromType[(query: String) => (result: QueryResult)]
 
   val nestedSignature =
-    TypedSignature.fromType[
+    Signature.fromType[
       (query: MyContainer.Query) => (score: MyContainer.Score)
     ]

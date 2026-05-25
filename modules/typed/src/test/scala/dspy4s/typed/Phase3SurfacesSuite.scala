@@ -20,14 +20,14 @@ case class P3ToneOutput(tone: P3Tone) derives Shape
 
 /** Phase 3 surfaces per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *
-  * The case-class API is already in Phase 2 (`TypedSignature.derived`); these
+  * The case-class API is already in Phase 2 (`Signature.derived`); these
   * tests round out coverage and add the new SignatureBuilder surface. */
 class Phase3SurfacesSuite extends FunSuite:
 
   // ── Builder API ─────────────────────────────────────────────────────────
 
   test("builder emits a SignatureSchema with input then output fields in declaration order") {
-    val sig = TypedSignature
+    val sig = Signature
       .builder("Classify")
       .input[String]("comment")
       .input[String]("lang")
@@ -44,7 +44,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder field TypeRefs come from the FieldCodec typeclass") {
-    val sig = TypedSignature
+    val sig = Signature
       .builder("Bag")
       .input[String]("a")
       .input[Int]("b")
@@ -60,7 +60,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder enum field carries TypeRef.string + EnumCases / EnumName metadata") {
-    val sig = TypedSignature
+    val sig = Signature
       .builder("ToneCheck")
       .input[String]("text")
       .output[P3Tone]("tone")
@@ -76,7 +76,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder is immutable — chained calls don't mutate earlier references") {
-    val base = TypedSignature.builder("Base").input[String]("a")
+    val base = Signature.builder("Base").input[String]("a")
     val withB = base.output[Int]("b")
     val withC = base.output[String]("c")  // forked from `base`, not `withB`
 
@@ -85,7 +85,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder empty instructions become None") {
-    val sig = TypedSignature
+    val sig = Signature
       .builder("Empty")
       .input[String]("x")
       .output[String]("y")
@@ -97,20 +97,20 @@ class Phase3SurfacesSuite extends FunSuite:
   // ── Case-class API parity (Phase 2 surface, exercised end-to-end) ────────
 
   test("case-class derived signature has expected field names and roles") {
-    val sig = TypedSignature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     assertEquals(sig.untyped.inputFields.map(_.name), Vector("comment", "lang"))
     assertEquals(sig.untyped.outputFields.map(_.name), Vector("toxic", "confidence"))
   }
 
   test("case-class encode produces a Map keyed by case-class field names") {
-    val sig = TypedSignature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val input = P3CommentInput("hello there", "en")
     val encoded = sig.inputShape.encode(input)
     assertEquals(encoded, Map[String, Any]("comment" -> "hello there", "lang" -> "en"))
   }
 
   test("decoded TypedPrediction exposes case-class fields directly") {
-    val sig = TypedSignature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val raw = PredictionData(values = Map(
       "toxic"      -> false,
       "confidence" -> 0.91
@@ -132,7 +132,7 @@ class Phase3SurfacesSuite extends FunSuite:
     // SignatureSpec.create routes through FieldSpec.normalize, so each
     // FieldSpec gets a prefix derived from its name and a description
     // template. Adapters depend on these for prompt rendering.
-    val sig = TypedSignature
+    val sig = Signature
       .builder("Bag")
       .input[String]("userName")  // camelCase exercises prefix inference
       .output[Int]("scoreValue")
@@ -146,7 +146,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("case-class derived fields are normalized identically to the builder path") {
-    val sig = TypedSignature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val byName = sig.untyped.fields.map(f => f.name -> f).toMap
     // P3CommentInput.comment / lang and P3ClassifyOutput.toxic / confidence
     // are all lowercase, so the inferred prefix is just the capitalized form.
@@ -159,7 +159,7 @@ class Phase3SurfacesSuite extends FunSuite:
     // SignatureSpec.create validates identifiers. The builder routes the
     // failure into a thrown exception (programmer error at construction).
     intercept[IllegalArgumentException] {
-      TypedSignature
+      Signature
         .builder("Bad")
         .input[String]("field-with-dash")
         .output[String]("ok")
@@ -168,7 +168,7 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder and case-class derivation produce equivalent Signatures for the same shape") {
-    val fromBuilder = TypedSignature
+    val fromBuilder = Signature
       .builder("Classify")
       .input[String]("comment")
       .input[String]("lang")
@@ -176,7 +176,7 @@ class Phase3SurfacesSuite extends FunSuite:
       .output[Double]("confidence")
       .build
 
-    val fromCases = TypedSignature
+    val fromCases = Signature
       .derived[P3CommentInput, P3ClassifyOutput]("Classify")
       .untyped
 

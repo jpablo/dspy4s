@@ -3,9 +3,9 @@ package dspy4s.programs
 import dspy4s.core.contracts.{DspyError, Example, NotFoundError, RuntimeContext}
 import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.{TypedPrediction, TypedSignature}
+import dspy4s.typed.{TypedPrediction, Signature}
 
-/** Typed counterpart to `DynamicPredict`. Wraps a `TypedSignature[I, O]` and
+/** Typed counterpart to `DynamicPredict`. Wraps a `Signature[I, O]` and
   * delegates execution to the underlying `DynamicPredict(signature.untyped, ...)`,
   * so all adapter/model/callback/cache/trace behavior is unchanged. The
   * typed layer adds two boundaries:
@@ -20,7 +20,7 @@ import dspy4s.typed.{TypedPrediction, TypedSignature}
   * on `TypedPrediction.raw` for callers that need it.
   */
 final case class TypedPredict[I, O](
-    signature: TypedSignature[I, O],
+    signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     name: Option[String] = None,
     runtime: ProgramRuntime = new SettingsProgramRuntime {}

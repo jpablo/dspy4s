@@ -9,7 +9,7 @@ import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
   Message, MessageRole
 }
-import dspy4s.typed.{InputField, OutputField, Shape, Spec, TypedSignature}
+import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature}
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).
@@ -76,7 +76,7 @@ class TypedPredictSuite extends FunSuite:
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test("TypedPredict.run returns a TypedPrediction with the decoded output case class") {
-    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = TypedPredict(sig).run(P4QAInput("Capital of France?"))
@@ -88,7 +88,7 @@ class TypedPredictSuite extends FunSuite:
   }
 
   test("TypedPredict.run supports spec-derived named-tuple input and typed output dot-access") {
-    val sig = TypedSignature.of[P4QASpec]
+    val sig = Signature.of[P4QASpec]
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = TypedPredict(sig).run((question = "Capital of France?"))
@@ -103,7 +103,7 @@ class TypedPredictSuite extends FunSuite:
   }
 
   test("TypedPredict.run supports method-derived named-tuple input and output") {
-    val sig = TypedSignature.from(p4QaMethod)
+    val sig = Signature.from(p4QaMethod)
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = TypedPredict(sig).run((question = "Capital of France?"))
@@ -138,7 +138,7 @@ class TypedPredictSuite extends FunSuite:
           "score"  -> 0.5
         )))
 
-    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(SettingsData(Map(
       SettingKeys.languageModel.name -> FixedLm,
       SettingKeys.adapter.name       -> capturingAdapter
@@ -154,7 +154,7 @@ class TypedPredictSuite extends FunSuite:
   // ── Raw prediction is preserved ─────────────────────────────────────────
 
   test("TypedPredict preserves completions and lmUsage on the raw prediction") {
-    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = TypedPredict(sig).run(P4QAInput("Capital of France?")).toOption.get
@@ -166,7 +166,7 @@ class TypedPredictSuite extends FunSuite:
   // ── Decode-failure path ─────────────────────────────────────────────────
 
   test("TypedPredict surfaces output decode failures as Left(DspyError)") {
-    val sig = TypedSignature.derived[P4QAInput, P4StrictOutput]("QA-strict")
+    val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     // LM returns a Double for `score`; P4StrictOutput expects Int.
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -189,7 +189,7 @@ class TypedPredictSuite extends FunSuite:
           usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
         ))
 
-    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(SettingsData(Map(
       SettingKeys.languageModel.name -> capturingLm,
       SettingKeys.adapter.name       -> EchoQuestionAdapter
@@ -206,7 +206,7 @@ class TypedPredictSuite extends FunSuite:
   }
 
   test("TypedPredict.run with traceEnabled=false suppresses the trace entry") {
-    val sig = TypedSignature.derived[P4QAInput, P4QAOutput]("QA")
+    val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val _ = TypedPredict(sig).run(P4QAInput("Capital of France?"), traceEnabled = false)
@@ -220,8 +220,8 @@ class TypedPredictSuite extends FunSuite:
     // Spec-derived signatures use Map[String, Any] for inputs, so a caller
     // could silently omit a declared input. The defensive check in
     // TypedPredict.run catches this before any LM call is dispatched.
-    val specSig = TypedSignature.of[P4QAMissingInputSpec]
-    val sig = TypedSignature(
+    val specSig = Signature.of[P4QAMissingInputSpec]
+    val sig = Signature(
       name = specSig.name,
       untyped = specSig.untyped,
       inputShape = new Shape.MapShape(specSig.untyped.inputFields),
@@ -256,7 +256,7 @@ class TypedPredictSuite extends FunSuite:
     // module-end event and appended to trace/history. Asserted so a future
     // Phase 5+ change that consolidates the typed boundary's tracing has
     // to update this test deliberately.
-    val sig = TypedSignature.derived[P4QAInput, P4StrictOutput]("QA-strict")
+    val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = TypedPredict(sig).run(P4QAInput("Capital of France?"))

@@ -37,16 +37,16 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(shape.fieldSpecs.map(_.name), Vector("sentence"))
   }
 
-  test("TypedSignature.derived assigns input and output roles correctly") {
-    val sig = TypedSignature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
+  test("Signature.derived assigns input and output roles correctly") {
+    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
     val inputs  = sig.untyped.inputFields.map(_.name)
     val outputs = sig.untyped.outputFields.map(_.name)
     assertEquals(inputs, Vector("sentence"))
     assertEquals(outputs, Vector("sentiment", "confidence"))
   }
 
-  test("TypedSignature.untyped emits the same shape as a hand-written SignatureSpec") {
-    val sig = TypedSignature.derived[P2SentenceInput, P2ScoredSentiment](
+  test("Signature.untyped emits the same shape as a hand-written SignatureSpec") {
+    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](
       name = "Emotion",
       instructions = "Classify emotion."
     )
@@ -63,8 +63,8 @@ class Phase2TypedCoreSuite extends FunSuite:
     )
   }
 
-  test("TypedSignature.withInstructions preserves typed shapes") {
-    val sig = TypedSignature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+  test("Signature.withInstructions preserves typed shapes") {
+    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
     val instructed = sig.withInstructions("Classify emotion.")
 
     assertEquals(instructed.instructions, Some("Classify emotion."))
@@ -192,10 +192,10 @@ class Phase2TypedCoreSuite extends FunSuite:
       case Left(err) => fail(s"expected success but got: $err")
   }
 
-  // ── End-to-end: TypedSignature round-trip ────────────────────────────────
+  // ── End-to-end: Signature round-trip ────────────────────────────────
 
-  test("TypedSignature encodes inputs and decodes outputs end-to-end") {
-    val sig = TypedSignature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+  test("Signature encodes inputs and decodes outputs end-to-end") {
+    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
     val input = P2SentenceInput("i started feeling vulnerable")
 
     // Encode input → Map (what TypedPredict will hand to ProgramCall)
