@@ -3,7 +3,7 @@
 > **Status:** Draft for review · 2026-05-24
 > **Scope:** dspy4s core + programs modules
 > **Targets:** Scala 3.8.1, minimal exposed dependency surface (Phase 1
-> may add one library dependency per the foundation chosen in §5.6)
+> may add one or two library dependencies per the foundation chosen in §5.6)
 
 ## TL;DR
 
@@ -12,7 +12,7 @@ forcing every typed access to a runtime cast. We propose a **layered
 architecture** that gives users compile-time typed predictions while
 keeping the existing runtime-flexible API intact:
 
-- **Engine layer** — one canonical typed carrier (`Signature[I, O]` +
+- **Engine layer** — one canonical typed carrier (`TypedSignature[I, O]` +
   `TypedPredict` + `TypedPrediction`) that lifts field/type info into
   the type system.
 - **Surface layers** — multiple ergonomic translators that all compile
@@ -159,7 +159,7 @@ code with proper Scala types. We surveyed four shapes:
 type EmotionIn  = (sentence: String)
 type EmotionOut = (sentiment: Emotion)
 
-val emotionSig = Signature.of[EmotionIn, EmotionOut](
+val emotionSig = TypedSignature.of[EmotionIn, EmotionOut](
   instructions = "Classify emotion."
 )
 ```
@@ -175,10 +175,10 @@ val emotionSig = Signature.of[EmotionIn, EmotionOut](
 ### 3.2 Two case classes (Input/Output)
 
 ```scala
-case class EmotionIn(sentence: String) derives Signature.Input
-case class EmotionOut(sentiment: Emotion) derives Signature.Output
+case class EmotionIn(sentence: String) derives TypedSignature.Input
+case class EmotionOut(sentiment: Emotion) derives TypedSignature.Output
 
-val emotionSig = Signature.of[EmotionIn, EmotionOut](
+val emotionSig = TypedSignature.of[EmotionIn, EmotionOut](
   instructions = "Classify emotion."
 )
 ```
@@ -198,7 +198,7 @@ opaque type Out[+T] = T
 case class Emotion(
   sentence:  In[String],
   sentiment: Out[Emotion]
-) derives Signature
+) derives TypedSignature
 ```
 
 - **Pros.** One declaration, mirrors Python's `class Emotion(dspy.Signature)`.
@@ -212,7 +212,7 @@ case class Emotion(
 ### 3.4 Typed builder DSL
 
 ```scala
-val emotionSig = Signature.builder
+val emotionSig = TypedSignature.builder
   .input[String]("sentence")
   .output[Emotion]("sentiment")
   .instructions("Classify emotion.")
@@ -291,10 +291,10 @@ object TypedSignature:
     def asUntyped: Signature = sig
 ```
 
-`Signature.builder` is the natural surface to this:
+`TypedSignature.builder` is the natural surface to this:
 
 ```scala
-val sig = Signature.builder
+val sig = TypedSignature.builder
   .input[String]("sentence")
   .output[Emotion]("sentiment")
   .instructions("Classify emotion.")
@@ -352,8 +352,8 @@ See §4.6 below for why this matters.
 | Surface | Translator |
 |---|---|
 | **Builder** (engine itself) | identity |
-| **Named tuples** (`Signature.of[I, O]`) | inline def using `NamedTuple.Names[I]` + `NamedTuple.From[I]` to walk I/O at compile time, emit a sequence of `.input`/`.output` calls |
-| **Case classes** (`derives Signature.Input/Output`) | Mirror-based: walk `m.MirroredElemLabels` + `m.MirroredElemTypes`, produce the carrier |
+| **Named tuples** (`TypedSignature.of[I, O]`) | inline def using `NamedTuple.Names[I]` + `NamedTuple.From[I]` to walk I/O at compile time, emit a sequence of `.input`/`.output` calls |
+| **Case classes** (`derives TypedSignature.Input/Output`) | Mirror-based: walk `m.MirroredElemLabels` + `m.MirroredElemTypes`, produce the carrier |
 | **String DSL** (`Signature("…")`) | macro: parse the literal at compile time, emit the carrier; for non-literals, fall back to the untyped `SignatureSpec` |
 
 Each translator is approximately 50–100 lines, isolated, and exercises
@@ -514,18 +514,18 @@ around two `Schema`s:
 ```scala
 import zio.blocks.schema.Schema
 
-final case class Signature[I, O](
+final case class TypedSignature[I, O](
   inputSchema:  Schema[I],
   outputSchema: Schema[O],
   instructions: Option[String] = None
 )
 
-object Signature:
+object TypedSignature:
   // Surface 1 — named-tuple types (free: Schema.derived handles them)
   def of[I, O](instructions: String = "")(
     using inSch: Schema[I], outSch: Schema[O]
-  ): Signature[I, O] =
-    Signature(inSch, outSch, Option(instructions).filter(_.nonEmpty))
+  ): TypedSignature[I, O] =
+    TypedSignature(inSch, outSch, Option(instructions).filter(_.nonEmpty))
 
   // Surface 2 — case classes: just `derives Schema` upstream
   // Surface 3 — builder DSL: delegates to Reflect.Record construction
@@ -560,9 +560,10 @@ work over the carrier (§4.2's `FieldOf`) becomes mostly unnecessary —
 **Strategic note.** Project owner preference is to **lean into
 zio-blocks where it gives us pieces we need**. The 0.0.x churn risk
 is accepted in exchange for not reimplementing primitives. Mitigation
-is to keep `Signature` as a dspy4s-owned wrapper so churn is contained
-at one layer — adapters / programs see `Signature[I, O]`, never raw
-`Schema[A]`.
+is to keep `TypedSignature` as a dspy4s-owned wrapper so churn is
+contained at one layer — typed programs see `TypedSignature[I, O]`,
+runtime adapters still see the existing untyped `Signature` trait via
+`asUntyped`, and no downstream code sees raw `Schema[A]`.
 
 ### 5.3 Option B — Self-built engine
 
@@ -655,7 +656,7 @@ thin wrappers in dspy4s.
 **Use in dspy4s.** Wrap as:
 
 ```scala
-final case class Signature[I, O](
+final case class TypedSignature[I, O](
   input:        Record[I],
   output:       Record[O],
   instructions: Option[String] = None
@@ -695,11 +696,11 @@ already works via `Record.selectDynamic`. Surface translators:
   `XmlAdapter` already implement it).
 - New vocabulary at the engine layer: `Record`, `~`, `&`, `Fields`,
   `stage`, `Dict`. Smaller surface than zio-blocks but still visible.
-- **Verify** that `kyo-data` does not transitively pull the full Kyo
-  effect runtime (`Abort`, `Async`, fibers). The Kyo project is
-  structured to keep `kyo-data` self-contained, but this must be
-  confirmed in `kyo-data`'s POM/build before committing. Same
-  zero-effect-leakage discipline we required of zio-blocks.
+- **Locally verified** that `kyo-data` does not transitively pull the
+  full Kyo effect runtime (`Abort`, `Async`, fibers) in checkout
+  `e075492a`; re-check the published POM for the exact pinned version
+  before committing. Same zero-effect-leakage discipline we required
+  of zio-blocks.
 - Smaller community + ecosystem than zio-blocks.
 
 **Possible hybrid: A + C.** Use `kyo-data` `Record[F]` for the typed
@@ -757,9 +758,9 @@ genuinely open. The key trade is **scope** vs **structural fit**:
 
 **Items to confirm before the binding decision:**
 
-1. `kyo-data` transitive dependencies — does it pull the full Kyo
-   runtime (`Abort`, `Async`, fibers)? Required reading: `kyo-data`'s
-   `build.sbt` settings and POM for the published artifact.
+1. `kyo-data` published-artifact dependencies — the local checkout
+   does not pull the full Kyo runtime, but confirm the POM for the
+   exact version we pin.
 2. `zio-blocks-schema` derivation behavior on our actual signature
    shapes (especially DSPy patterns with `Literal[...]` enums, union
    types, custom types).
@@ -788,42 +789,47 @@ trait Prediction extends Record:
   def asInt(key: String):     Either[DspyError, Int]
   def asString(key: String):  Either[DspyError, String]
   def asDouble(key: String):  Either[DspyError, Double]   // already exists
-  def asJson(key: String):    Either[DspyError, ujson.Value]
 ```
 
-This eliminates the silent-cast risk for every translated example
-without locking us out of the engine work. ~30 lines, no design
-commitments.
+This eliminates the silent-cast risk for the primitive translated
+examples without locking us out of the engine work. `TypeRef.json`
+continues to use `.value` until the typed engine or a codec-backed
+adapter path can represent JSON without adding `ujson` to `core`.
+~30 lines, no design commitments.
 
 ---
 
-## 7. Phased rollout *(schema-first)*
+## 7. Phased rollout *(foundation-neutral)*
 
-Assumes Option A (§5.2). If we fall back to Option B, the same phases
-apply but each is bigger because we own the engine.
+The phases are written against the public typed surface. The concrete
+carrier underneath is foundation-specific: Option A uses
+`Schema[I]`/`Schema[O]`, Option C uses `Record[I]`/`Record[O]`, and
+Option B uses the self-built fallback engine from §4.2.
 
 1. **Phase 0 (optional, immediate)** — Typed accessor ladder (Section
    6). Pure win, independent of the foundation choice.
 
 2. **Phase 1 — Adopt the foundation chosen in §5.6 + wrap as
-   `Signature[I, O]`.** Add the dependency (zio-blocks-schema, kyo-data,
+   `TypedSignature[I, O]`.** Add the dependency (zio-blocks-schema, kyo-data,
    or both for an A+C hybrid), build the thin wrapper, write a small
    compatibility shim from the chosen library's mirror type to the
    existing `FieldSpec` so current adapters keep working unchanged.
-   Tests prove `Signature.of[(sentence: String), (sentiment: Boolean)]`
+   Tests prove `TypedSignature.of[(sentence: String), (sentiment: Boolean)]`
    round-trips field names and types correctly. If B is chosen,
    substitute the self-built engine from §4.2 enriched with the
    `Name ~ Value` and `stage`-style patterns from §5.3.
 
 3. **Phase 2 — Typed `Predict`/`Prediction`.** Add `TypedPredict[I,
-   O]` (consumes `Signature[I, O]`) and `TypedPrediction[O]` (returns
-   typed values via `NamedTuple` + Selectable). Re-translate
-   `Signatures.scala` Snippet 5 against it to validate ergonomics on
-   a real example. Existing `Predict(sig: Signature)` API stays
-   untouched.
+   O]` (consumes `TypedSignature[I, O]`) and `TypedPrediction[O]`.
+   The underlying prediction carrier is foundation-specific
+   (`NamedTuple`/Selectable for A or B, `Record[O]` for C), but the
+   public ergonomic target is the same: typed dot-access and typed
+   `.value[K]`. Re-translate `Signatures.scala` Snippet 5 against it
+   to validate ergonomics on a real example. Existing
+   `Predict(sig: Signature)` API stays untouched.
 
 4. **Phase 3 — Case-class surface parity.** Verify `case class Foo
-   derives Schema` works end-to-end through `Signature.of[Foo,
+   derives Schema` works end-to-end through `TypedSignature.of[Foo,
    Bar]`. Most or all of the work should already be done via
    `Schema.derived` — this phase is mostly validation + tests.
 
@@ -845,7 +851,7 @@ its weight in practice.
 
 ## 8. Open questions for review
 
-1. **Module placement.** Does `Signature[I, O]` live in `core`, or do
+1. **Module placement.** Does `TypedSignature[I, O]` live in `core`, or do
    we add a new `core-schema` module so the `zio-blocks-schema`
    dependency is opt-in for downstream module authors? (Most modules
    would still pull it transitively via `core`, so the split is
@@ -920,7 +926,7 @@ its weight in practice.
 
 11. **Foundation: A vs. C vs. A+C.** The binding decision is held for
     external review. Items to confirm beforehand are listed in §5.6.
-    The Phase 1 surface API (`Signature[I, O]`, `TypedPredict`,
+    The Phase 1 surface API (`TypedSignature[I, O]`, `TypedPredict`,
     `TypedPrediction`) is intended to be identical across foundations
     so a late switch is recoverable, but the engine internals and
     derivation macros differ.
