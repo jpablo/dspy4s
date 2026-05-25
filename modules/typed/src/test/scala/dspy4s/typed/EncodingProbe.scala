@@ -8,12 +8,13 @@ enum ProbeMood derives Schema:
 
 case class ProbeResult(mood: ProbeMood) derives Schema
 
-/** Probe: what wire form does kyo-schema produce for a case class containing
-  * a Scala enum? Printed so we can read it from the test log. Delete after
-  * Phase 0 once the format is documented. */
+/** Regression check for the Phase 0 finding that kyo-schema encodes Scala
+  * enums as a discriminated wrapper object (`{"caseName":{}}`), not as a
+  * flat string. This shape affects how adapters must serialize enum-typed
+  * output fields if they ever round-trip through kyo-schema. */
 class EncodingProbe extends FunSuite:
 
-  test("probe: encode shape for case-class-with-enum") {
+  test("kyo-schema encodes Scala enums as discriminated wrapper objects") {
     val encoded = Json.encode(ProbeResult(ProbeMood.happy))
-    println(s"[probe] ProbeResult(ProbeMood.happy) -> $encoded")
+    assertEquals(encoded, """{"mood":{"happy":{}}}""")
   }

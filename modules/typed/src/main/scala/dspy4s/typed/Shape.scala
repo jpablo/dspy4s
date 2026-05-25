@@ -49,7 +49,12 @@ object Shape:
 
     val fieldSpecs: Vector[FieldSpec] =
       names.lazyZip(decoders).map { (name, dec) =>
-        FieldSpec(name = name, role = role, typeRef = dec.typeRef)
+        FieldSpec(
+          name     = name,
+          role     = role,
+          typeRef  = dec.typeRef,
+          metadata = dec.metadata
+        )
       }.toVector
 
     def encode(value: A): Map[String, Any] =

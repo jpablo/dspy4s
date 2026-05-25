@@ -22,7 +22,25 @@ trait ValueDecoder[A]:
   def decode(raw: Any): Either[DspyError, A]
   def encode(value: A): Any
 
+  /** Optional per-field metadata surfaced into `FieldSpec.metadata` at
+    * `Shape` derivation time. Adapters can read well-known keys to enrich
+    * prompts (e.g. listing allowed enum case names). Defaults to empty. */
+  def metadata: Map[String, String] = Map.empty
+
 object ValueDecoder:
+
+  /** Well-known `metadata` keys produced by built-in decoders. Adapters
+    * that understand these may surface them to the LM (e.g. by rendering
+    * the allowed enum cases in a prompt). */
+  object Meta:
+    /** Comma-separated case names for fields backed by a Scala enum.
+      * Example: `"sadness,joy,love,anger,fear,surprise"`. */
+    val EnumCases: String = "enum.cases"
+
+    /** The original Scala display name of an enum type (e.g. `"Sentiment"`).
+      * Useful for adapter prompt rendering when the type label is more
+      * informative than the lowercased `TypeRef`. */
+    val EnumName: String = "enum.name"
 
   // ── Primitive instances ──────────────────────────────────────────────────
 
@@ -95,7 +113,12 @@ object ValueDecoder:
 
   /** Extracted from `derived` so the inline def doesn't duplicate the
     * anonymous class at each call site. Package-private so inline expansion
-    * sites outside `ValueDecoder` (but inside `dspy4s.typed`) can reach it. */
+    * sites outside `ValueDecoder` (but inside `dspy4s.typed`) can reach it.
+    *
+    * The wire form for enum fields is a plain `String` — `typeRef =
+    * TypeRef.string` reflects that honestly. The allowed-case constraint
+    * is surfaced via `metadata(Meta.EnumCases)` so adapters can render it
+    * into the prompt. */
   private[typed] final class EnumDecoder[A](
       caseNames: List[String],
       cases: List[A],
@@ -103,7 +126,12 @@ object ValueDecoder:
   ) extends ValueDecoder[A]:
 
     private val byName: Map[String, A] = caseNames.zip(cases).toMap
-    val typeRef: TypeRef               = TypeRef(displayName.toLowerCase)
+    val typeRef: TypeRef               = TypeRef.string
+
+    override val metadata: Map[String, String] = Map(
+      Meta.EnumCases -> caseNames.mkString(","),
+      Meta.EnumName  -> displayName
+    )
 
     def decode(raw: Any): Either[DspyError, A] = raw match
       case a if cases.contains(a) => Right(a.asInstanceOf[A])

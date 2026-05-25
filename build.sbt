@@ -39,17 +39,19 @@ lazy val core = (project in file("modules/core"))
     Test / parallelExecution := false
   )
 
-// Typed signatures layer. Adds kyo-data and kyo-schema as the typed
-// carrier + schema-backed decoding substrate per the TYPED_SIGNATURES
-// implementation plan (Phase 0 feasibility spike).
+// Typed signatures layer. kyo-data / kyo-schema are currently Test-scope
+// because production sources don't import them yet -- the Phase 0
+// feasibility suite uses them to probe the wire contract. When a later
+// phase actually wires kyo APIs into the production path (e.g. wrapping
+// TypedPrediction in a kyo.Record), promote these to compile scope.
 lazy val typed = (project in file("modules/typed"))
   .dependsOn(core)
   .settings(commonSettings)
   .settings(name := "dspy4s-typed")
   .settings(
     libraryDependencies ++= Seq(
-      "io.getkyo"     %% "kyo-data"   % kyoVersion,
-      "io.getkyo"     %% "kyo-schema" % kyoVersion,
+      "io.getkyo"     %% "kyo-data"   % kyoVersion   % Test,
+      "io.getkyo"     %% "kyo-schema" % kyoVersion   % Test,
       "org.scalameta" %% "munit"      % munitVersion % Test
     )
   )
