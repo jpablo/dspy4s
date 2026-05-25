@@ -295,11 +295,11 @@ object Cheatsheet {
   // | from sentence_transformers import SentenceTransformer
   // | from dspy import Embedder
   // | from dspy.teleprompt import KNNFewShot
-  // | from dspy import ChainOfThought
+  // | from dspy import DynamicChainOfThought
   // |
   // | knn_optimizer = KNNFewShot(k=3, trainset=trainset, vectorizer=Embedder(SentenceTransformer("all-MiniLM-L6-v2").encode))
   // |
-  // | qa_compiled = knn_optimizer.compile(student=ChainOfThought("question -> answer"))
+  // | qa_compiled = knn_optimizer.compile(student=DynamicChainOfThought("question -> answer"))
   // TODO translate snippet 24
 
   // ── Snippet 25 (lines 375–381) ────────────────────

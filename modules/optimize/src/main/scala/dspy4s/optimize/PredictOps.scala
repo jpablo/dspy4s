@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.SignatureSchema
-import dspy4s.programs.ChainOfThought
+import dspy4s.programs.DynamicChainOfThought
 import dspy4s.programs.DynamicPredict
 
 trait PredictOps[P]:
@@ -19,10 +19,10 @@ object PredictOps:
     def withDemos(program: DynamicPredict, demos: Vector[Example]): DynamicPredict =
       program.copy(demos = demos)
 
-  given chainOfThoughtOps: PredictOps[ChainOfThought] with
-    def name(program: ChainOfThought): String = "chain_of_thought"
-    def signature(program: ChainOfThought): SignatureSchema =
+  given chainOfThoughtOps: PredictOps[DynamicChainOfThought] with
+    def name(program: DynamicChainOfThought): String = "chain_of_thought"
+    def signature(program: DynamicChainOfThought): SignatureSchema =
       program.signature.toOption.getOrElse(program.baseSignature)
-    def demos(program: ChainOfThought): Vector[Example] = program.demos
-    def withDemos(program: ChainOfThought, demos: Vector[Example]): ChainOfThought =
+    def demos(program: DynamicChainOfThought): Vector[Example] = program.demos
+    def withDemos(program: DynamicChainOfThought, demos: Vector[Example]): DynamicChainOfThought =
       program.copy(demos = demos)

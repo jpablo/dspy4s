@@ -19,7 +19,7 @@
  *
  *   TypedPredict(sig).run((field = "...")).map(_.output.field)
  *
- * `ChainOfThought` has a typed counterpart `TypedChainOfThought` that
+ * `DynamicChainOfThought` has a typed counterpart `TypedChainOfThought` that
  * augments the output named tuple with `reasoning: String` (the field CoT
  * injects at the runtime layer). Snippets 3, 4, and 6 use it directly.
  *

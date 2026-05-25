@@ -13,7 +13,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
-final case class ChainOfThought(
+final case class DynamicChainOfThought(
     baseSignature: SignatureSchema,
     demos: Vector[Example] = Vector.empty,
     reasoningFieldName: String = "reasoning",

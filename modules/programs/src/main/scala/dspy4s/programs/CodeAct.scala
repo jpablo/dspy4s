@@ -28,7 +28,7 @@ import scala.util.matching.Regex
   *   4. Append the snippet + observation to `trajectory`. Exit early if the
   *      LM set `finished=true`.
   *
-  * After the loop, a [[ChainOfThought]] "extractor" reads the full
+  * After the loop, a [[DynamicChainOfThought]] "extractor" reads the full
   * trajectory and produces the user-visible outputs declared in
   * `baseSignature`.
   *
@@ -137,7 +137,7 @@ final case class CodeAct(
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val codeActPredict = DynamicPredict(signature = codeActSignature, name = Some(codeActProgramName))
-    val extractor = ChainOfThought(baseSignature = extractorSignature)
+    val extractor = DynamicChainOfThought(baseSignature = extractorSignature)
 
     runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>
       val extractInputs = call.inputs.updated("trajectory", trajectory.render)

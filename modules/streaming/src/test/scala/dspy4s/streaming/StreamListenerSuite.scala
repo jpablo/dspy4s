@@ -3,7 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
-import dspy4s.programs.ChainOfThought
+import dspy4s.programs.DynamicChainOfThought
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.core.contracts.DspyError
@@ -237,7 +237,7 @@ class StreamListenerSuite extends FunSuite:
     }
   }
 
-  test("ChainOfThought: listener receives the augmented signature's fields") {
+  test("DynamicChainOfThought: listener receives the augmented signature's fields") {
     val chunks = Vector(
       LmChunk(
         text = "[[ ## reasoning ## ]]\nwalked through it\n[[ ## answer ## ]]\n42\n[[ ## completed ## ]]",
@@ -256,7 +256,7 @@ class StreamListenerSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = ChainOfThought(baseSignature = baseSignature)
+      val program = DynamicChainOfThought(baseSignature = baseSignature)
       val stream = Streamify.streamify(
         program = program,
         streamListeners = Vector(
@@ -271,12 +271,12 @@ class StreamListenerSuite extends FunSuite:
       assertEquals(grouped.get("reasoning"), Some("walked through it"))
       assertEquals(grouped.get("answer"), Some("42"))
       // predictName is the innermost active DynamicPredict's name (matches Python
-      // DSPy parity). ChainOfThought delegates to a default-named inner DynamicPredict.
+      // DSPy parity). DynamicChainOfThought delegates to a default-named inner DynamicPredict.
       assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
     }
   }
 
-  test("ChainOfThought: listener filtering by predictName works against the inner DynamicPredict's name") {
+  test("DynamicChainOfThought: listener filtering by predictName works against the inner DynamicPredict's name") {
     val chunks = Vector(
       LmChunk(
         text = "[[ ## reasoning ## ]]\nr\n[[ ## answer ## ]]\na\n[[ ## completed ## ]]",
@@ -296,7 +296,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = ChainOfThought(baseSignature = baseSignature),
+        program = DynamicChainOfThought(baseSignature = baseSignature),
         streamListeners = Vector(
           StreamListener("answer", predictName = Some("predict"))
         )

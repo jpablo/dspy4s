@@ -55,7 +55,7 @@ class ChainOfThoughtSuite extends FunSuite:
 
   test("chain of thought augments output signature with reasoning field") {
     val base = SignatureDsl.parse("question -> answer").toOption.get
-    val program = ChainOfThought(base)
+    val program = DynamicChainOfThought(base)
     val signature = program.signature.toOption.get
 
     assertEquals(signature.outputFields.map(_.name), Vector("reasoning", "answer"))
@@ -73,7 +73,7 @@ class ChainOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = ChainOfThought(base).run(ProgramCall(inputs = Map("question" -> "What is 1+1?")))
+      val result = DynamicChainOfThought(base).run(ProgramCall(inputs = Map("question" -> "What is 1+1?")))
 
       assert(result.isRight)
       val prediction = result.toOption.get
@@ -86,7 +86,7 @@ class ChainOfThoughtSuite extends FunSuite:
     val base = SignatureDsl.parse("question -> answer").toOption.get
     RuntimeEnvironment.withSettings(SettingsData(Map(SettingKeys.languageModel.name -> DummyLanguageModel))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = ChainOfThought(base).run(ProgramCall(inputs = Map("question" -> "x")))
+      val result = DynamicChainOfThought(base).run(ProgramCall(inputs = Map("question" -> "x")))
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
     }

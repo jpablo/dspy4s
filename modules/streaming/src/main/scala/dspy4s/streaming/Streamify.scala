@@ -11,7 +11,7 @@ import dspy4s.core.contracts.SignatureSchema
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.programs.ChainOfThought
+import dspy4s.programs.DynamicChainOfThought
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ProgramCall
@@ -153,7 +153,7 @@ object Streamify:
     program match
       case p: DynamicPredict =>
         Vector((p.moduleName, p.signature))
-      case cot: ChainOfThought =>
+      case cot: DynamicChainOfThought =>
         cot.signature.toOption.map(sig => (cot.moduleName, sig)).toVector
       case react: ReAct =>
         collectKnownSignatures(react.module)

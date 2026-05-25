@@ -8,7 +8,7 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{TypedPrediction, TypedSignature}
 import scala.NamedTuple
 
-/** Typed counterpart to `ChainOfThought`. Wraps a `TypedSignature[I, O]`
+/** Typed counterpart to `DynamicChainOfThought`. Wraps a `TypedSignature[I, O]`
   * whose output is a named tuple (typically produced by
   * `TypedSignature.of[T <: Spec]` or `TypedSignature.fromType[F]("...")`)
   * and produces a `TypedPrediction[Out]` whose output named tuple has
@@ -16,17 +16,17 @@ import scala.NamedTuple
   *
   * Inputs flow through `signature.inputShape.encode` unchanged. The
   * runtime CoT augmentation (inserting the reasoning field, formatting,
-  * parsing, callbacks) is delegated to the existing `ChainOfThought`
+  * parsing, callbacks) is delegated to the existing `DynamicChainOfThought`
   * program — this typed wrapper only inserts the encode → decode
   * boundary and prepends the reasoning value to the decoded tuple.
   *
   * **Scope**: named-tuple outputs only. Case-class outputs from
   * `TypedSignature.derived[I, O <: Product]` would need an augmented
   * synthesized case class at the call site; for those, use the untyped
-  * `ChainOfThought` directly and read `raw.value("reasoning")`.
+  * `DynamicChainOfThought` directly and read `raw.value("reasoning")`.
   *
   * **Known limitation** (inherited from `TypedPredict`): when the inner
-  * `ChainOfThought` succeeds but the typed decode fails, the trace still
+  * `DynamicChainOfThought` succeeds but the typed decode fails, the trace still
   * records a successful module call while `run` returns `Left`. The
   * underlying CoT really did succeed; consolidating the typed boundary's
   * tracing is an open design decision.
@@ -59,7 +59,7 @@ final case class TypedChainOfThought[I, O](
           s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
       ))
     else
-      val program = ChainOfThought(
+      val program = DynamicChainOfThought(
         baseSignature = signature.untyped,
         demos         = demos,
         runtime       = runtime
@@ -89,7 +89,7 @@ final case class TypedChainOfThought[I, O](
       case None =>
         Left(NotFoundError(
           resource = "prediction_field",
-          message  = "Required field 'reasoning' is missing from the ChainOfThought prediction"
+          message  = "Required field 'reasoning' is missing from the DynamicChainOfThought prediction"
         ))
 
 object TypedChainOfThought:

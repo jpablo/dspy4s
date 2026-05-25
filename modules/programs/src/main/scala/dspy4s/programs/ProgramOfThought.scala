@@ -20,7 +20,7 @@ import scala.util.matching.Regex
   * and feed the output back to the LM for a structured response. Port of
   * Python DSPy's `dspy.ProgramOfThought`.
   *
-  * Three [[ChainOfThought]] passes:
+  * Three [[DynamicChainOfThought]] passes:
   *
   *   1. **generate** — inputs → `generated_code` (Python source)
   *   2. **regenerate** — on execution error, the LM gets `previous_code` +
@@ -140,9 +140,9 @@ final case class ProgramOfThought(
       }))
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val generator = ChainOfThought(baseSignature = generateSignature, runtime = SignatureProgramRuntime)
-    val regenerator = ChainOfThought(baseSignature = regenerateSignature, runtime = SignatureProgramRuntime)
-    val answerer = ChainOfThought(baseSignature = answerSignature, runtime = SignatureProgramRuntime)
+    val generator = DynamicChainOfThought(baseSignature = generateSignature, runtime = SignatureProgramRuntime)
+    val regenerator = DynamicChainOfThought(baseSignature = regenerateSignature, runtime = SignatureProgramRuntime)
+    val answerer = DynamicChainOfThought(baseSignature = answerSignature, runtime = SignatureProgramRuntime)
 
     tryIteration(call, generator, regenerator, attempt = 1).flatMap { case (code, codeOutput) =>
       val extractInputs = call.inputs
@@ -153,8 +153,8 @@ final case class ProgramOfThought(
 
   private def tryIteration(
       call: ProgramCall,
-      generator: ChainOfThought,
-      regenerator: ChainOfThought,
+      generator: DynamicChainOfThought,
+      regenerator: DynamicChainOfThought,
       attempt: Int,
       previous: Option[(String, String)] = None // (code, error) from last attempt
   )(using RuntimeContext): Either[DspyError, (String, String)] =
@@ -212,7 +212,7 @@ final case class ProgramOfThought(
           Right(trimmed)
 
   /** Use the default settings-based runtime resolution for the inner
-    * ChainOfThought programs. */
+    * DynamicChainOfThought programs. */
   private object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
 
 object ProgramOfThought:
