@@ -37,13 +37,6 @@ import dspy4s.programs.{TypedChainOfThought, TypedPredict}
 import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, TypedSignature}
 import kyo.Schema
 
-/** Shared helper: `TypedSignature.fromType` and `TypedSignature.of` don't
-  * take an `instructions` parameter, so attach them by re-wrapping the
-  * untyped signature. */
-extension [I, O](sig: TypedSignature[I, O])
-  def withInstructions(text: String): TypedSignature[I, O] =
-    sig.copy(untyped = sig.untyped.withInstructions(text))
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 1 (lines 37–46) — string DSL with instructions
 // ═══════════════════════════════════════════════════════════════════════════

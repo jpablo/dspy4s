@@ -18,7 +18,24 @@ final case class TypedSignature[I, O](
     untyped: Signature,
     inputShape: Shape[I],
     outputShape: Shape[O]
-)
+):
+
+  /** Signature-level instructions carried into adapter prompt formatting.
+    * This mirrors the underlying untyped `Signature` API while preserving
+    * the typed input/output shapes.
+    */
+  def instructions: Option[String] = untyped.instructions
+
+  /** Replace signature-level instructions. Empty strings keep the current
+    * untyped `Signature.withInstructions` behavior and leave the signature
+    * unchanged.
+    */
+  def withInstructions(text: String): TypedSignature[I, O] =
+    copy(untyped = untyped.withInstructions(text))
+
+  /** Replace or clear signature-level instructions. */
+  def withInstructions(text: Option[String]): TypedSignature[I, O] =
+    copy(untyped = untyped.withInstructions(text))
 
 object TypedSignature:
 

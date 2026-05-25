@@ -204,6 +204,23 @@ because each has a niche where it's a better fit.
 
 ---
 
+## Signature Instructions
+
+All typed signatures can carry DSPy-style signature-level instructions:
+
+```scala
+val sig =
+  TypedSignature
+    .fromType[(comment: String) => (toxic: Boolean)]("Toxicity")
+    .withInstructions("Mark toxic comments...")
+```
+
+`TypedSignature.withInstructions(...)` preserves the typed input and
+output shapes while updating the underlying runtime `Signature` that
+adapters use for prompt formatting.
+
+---
+
 ## Supported field types
 
 The `FieldCodec` typeclass covers the MVP type vocabulary:

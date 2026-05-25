@@ -63,6 +63,24 @@ class Phase2TypedCoreSuite extends FunSuite:
     )
   }
 
+  test("TypedSignature.withInstructions preserves typed shapes") {
+    val sig = TypedSignature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+    val instructed = sig.withInstructions("Classify emotion.")
+
+    assertEquals(instructed.instructions, Some("Classify emotion."))
+    assertEquals(instructed.untyped.instructions, Some("Classify emotion."))
+    assertEquals(
+      instructed.inputShape.encode(P2SentenceInput("hello")),
+      Map[String, Any]("sentence" -> "hello")
+    )
+    assertEquals(
+      instructed.outputShape.decode(Map("sentiment" -> "joy", "confidence" -> 0.9)),
+      Right(P2ScoredSentiment("joy", 0.9))
+    )
+
+    assertEquals(instructed.withInstructions(None).instructions, None)
+  }
+
   // ── Shape encode/decode round-trip ────────────────────────────────────────
 
   test("Shape.encode produces a Map keyed by field name") {
