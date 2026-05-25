@@ -2,7 +2,8 @@
 
 > **Status:** Draft for review · 2026-05-24
 > **Scope:** dspy4s core + programs modules
-> **Targets:** Scala 3.8.1, no new runtime dependencies
+> **Targets:** Scala 3.8.1, minimal exposed dependency surface (Phase 1
+> may add one library dependency per the foundation chosen in §5.6)
 
 ## TL;DR
 
@@ -85,6 +86,12 @@ pred.map(_.sentiment)
 //         : Either[DspyError, Emotion]
 // pred.map(_.typo)   ← compile error
 ```
+
+In the example above the dot-access (`_.sentiment`) returns the **raw**
+typed value, not an `Either`. Missing-field-at-runtime would indicate
+a contract violation between the adapter and the LM (the adapter
+parsed a response that lacked a declared output field), not a normal
+user-facing error — see §8 Q2 for the design choice.
 
 …without losing the existing dynamic-signature path for cases that
 genuinely need runtime DSL construction.
@@ -586,10 +593,11 @@ self-built design materially:
   level. Schema reads identically to construction:
   `Record["k1" ~ V1 & "k2" ~ V2]` ↔ `("k1" ~ v1) & ("k2" ~ v2)`. This
   replaces our `.input[T]("name")` builder with something tighter.
-- **`stage` / `stageNamed`** — a single inline-staged primitive that
-  walks a type's fields with a per-field polymorphic function. It is
-  the right abstraction for derive-from-NamedTuple, derive-from-case-class,
-  and build-decoder-from-output-type — all the same shape. Replaces a
+- **`stage[A]`-style polymorphic field iteration** — a single
+  inline-staged primitive that walks a type's fields with a per-field
+  polymorphic function. The right abstraction for
+  derive-from-NamedTuple, derive-from-case-class, and
+  build-decoder-from-output-type — all the same shape. Replaces a
   collection of per-surface Mirror-derivation macros with one
   primitive plus calls.
 
@@ -625,19 +633,24 @@ composition of schemas. Duplicate keys normalize to a union via `~`
 being contravariant in `Value` (`"f" ~ Int & "f" ~ String` ≡ `"f" ~
 (Int | String)`).
 
-**Polymorphic field iteration.** `Record.stageNamed[A]` walks a type's
-fields at compile time, runs a poly function per field, and rewrites
-each `Name ~ V` into `Name ~ G[V]`:
+**Polymorphic field iteration.** `Record.stage[A]` (verified at
+`~/GitHub/kyo/kyo-data/shared/src/main/scala/kyo/Record.scala:204`,
+checkout `e075492a`) takes a `Fields[A]` instance and returns a
+`StageOps[A, f.AsTuple]` builder for compile-time field transformation:
 
 ```scala
-val cols = Record.stageNamed[User](
-  [n <: String, v] => (f: Field[n, v]) => Column[n, v](f.name)
-)
-// cols : Record[ "id" ~ Column["id", Long] & "name" ~ Column["name", String] ]
+inline def stage[A](using f: Fields[A]): StageOps[A, f.AsTuple]
 ```
 
-This *is* the abstraction we would otherwise hand-roll for
-derivation — but it is a published primitive, not a per-case macro.
+Combined with `Record.fromProduct[A <: Product]`
+(`Record.scala:270` — `transparent inline def`), this is the public
+field-iteration surface today. Conceptually it does what we'd otherwise
+hand-roll for derivation, but **the user-facing helpers we'd want
+(`stageNamed`, `fromNamedTuple`) are not yet in the published source**
+— they appear in the kyo-sql preview gist as aspirational API. The
+gap is small (each is a few lines on top of `stage` / `fromProduct`),
+but we'd need to either contribute them upstream or ship our own
+thin wrappers in dspy4s.
 
 **Use in dspy4s.** Wrap as:
 
@@ -650,22 +663,23 @@ final case class Signature[I, O](
 ```
 
 `TypedPrediction[O]` becomes a `Record[O]` directly — typed dot-access
-already works. Surface translators reduce to one-liners:
+already works via `Record.selectDynamic`. Surface translators:
 
-- Named-tuple types — `Record.fromNamedTuple[(sentence: String)]`
-- Case classes — `Record.fromProduct(...)` or `stageNamed` to build a
-  schema-derived Record
-- Builder DSL — `Record["k1" ~ V1 & "k2" ~ V2]` via `~` and `&`
-  (no separate `.input[T]` chain needed)
-- String DSL (later) — macro emits a `Record[Schema]` literal
+- **Builder DSL** — `Record["k1" ~ V1 & "k2" ~ V2]` via `~` and `&`
+  (works today; no `.input[T]` chain needed)
+- **Case classes** — `Record.fromProduct(emotionIn)` (works today,
+  *transparent inline* returns the typed Record schema)
+- **Named-tuple types** — needs a helper we'd add: e.g.
+  `Record.from[(sentence: String)]` built on `stage[NamedTuple]`
+- **String DSL (later)** — macro emits a `Record[Schema]` literal
 
 **What we gain.**
 - The structural carrier we want, already implemented.
 - `~` and `&` as bidirectional operators give the cleanest DSL
   syntax. Schema in the type parameter reads identically to
   construction. No separate builder vocabulary.
-- `stage` / `stageNamed` primitives replace per-surface Mirror-based
-  derivation code.
+- `stage[A]` + `fromProduct` cover most derivation we'd need; the
+  remaining helpers we'd add are thin.
 - Constant-depth field access regardless of arity (no nested-tuple
   destructuring like §4.4's option 1).
 - Subtyping is intersection-subtyping (wider Record subtypes narrower)
@@ -680,8 +694,7 @@ already works. Surface translators reduce to one-liners:
   (which is roughly the status quo — `ChatAdapter`/`JsonAdapter`/
   `XmlAdapter` already implement it).
 - New vocabulary at the engine layer: `Record`, `~`, `&`, `Fields`,
-  `stageNamed`, `Dict`. Smaller surface than zio-blocks but still
-  visible.
+  `stage`, `Dict`. Smaller surface than zio-blocks but still visible.
 - **Verify** that `kyo-data` does not transitively pull the full Kyo
   effect runtime (`Abort`, `Async`, fibers). The Kyo project is
   structured to keep `kyo-data` self-contained, but this must be
@@ -702,7 +715,7 @@ of concerns.
 |  | A (zio-blocks-schema) | B (self-built) | C (kyo-data Record) |
 |---|---|---|---|
 | Engine LOC | ~100 wrapper | ~300 engine + match-type work | ~50 wrapper |
-| Macro work | None (`Schema.derived`) | Case-class + string-DSL macros | None (`stageNamed`) |
+| Macro work | None (`Schema.derived`) | Case-class + string-DSL macros | Small (thin wrappers on `stage`/`fromProduct` for NamedTuple surface) |
 | Carrier shape | `Schema[A]` / `Reflect.Record` | Tuple of pairs in opaque type | Intersection of `Name ~ Value` |
 | Schema composition | wrapper-level | tuple concat ops | `&` (intersection types) |
 | Typed dot-access | NamedTuple + Selectable | Selectable + match types | Built-in `selectDynamic` + `Fields.Have` |
@@ -711,7 +724,13 @@ of concerns.
 | Stability risk | 0.0.x (accepted) | None external | Lower than zio-blocks; verify version + transitive deps |
 | Vocabulary footprint | `Reflect` / `Term` / `Format` / `TypeId` | All dspy4s names | `Record` / `~` / `&` / `Fields` / `Dict` |
 | Lock-in | Moderate (wrapped) | None | Moderate (wrapped) |
-| Time to working prototype | ~1–2 sessions | ~3–5 sessions | ~1 session |
+| Time to working prototype | ~1–3 sessions* | ~3–5 sessions | ~1–3 sessions* |
+
+\* First integration with any external library reliably uncovers
+surprises (macro edge cases, error-message quality, perf on real
+shapes). Estimates assume an initial prototype + one round of
+integration fixes. The relative cost of A vs. C is roughly equal once
+this padding is included.
 
 ### 5.6 Current lean — pending external review
 
@@ -726,9 +745,12 @@ genuinely open. The key trade is **scope** vs **structural fit**:
 - **Option C** is structurally a better match for the typed-carrier
   problem specifically (intersection types compose better than tuples
   for structural records; `~` and `&` are the cleanest DSL syntax we
-  could ask for; `stageNamed` is the right primitive for derivation).
-  Smaller scope means no codec story — but our existing adapters
-  already cover that.
+  could ask for; `stage`/`fromProduct` is the right derivation
+  primitive). Caveat: a few helpers shown in the kyo-sql preview
+  (`stageNamed`, `fromNamedTuple`) are *not* in the published
+  `kyo-data` source today — we'd ship thin wrappers in dspy4s or
+  contribute them upstream. Smaller scope than A means no codec
+  story, but our existing adapters already cover that.
 - **A+C hybrid** uses each library for its strength: `Record` for
   typed prediction access, `Schema` for codec/format work in adapters.
   Two deps, but each wrapped.
@@ -741,8 +763,10 @@ genuinely open. The key trade is **scope** vs **structural fit**:
 2. `zio-blocks-schema` derivation behavior on our actual signature
    shapes (especially DSPy patterns with `Literal[...]` enums, union
    types, custom types).
-3. `kyo-data` `Record.fromNamedTuple` / `stageNamed` behavior on
-   identical shapes.
+3. `kyo-data` `Record.stage[A]` / `fromProduct[A]` behavior on
+   identical shapes — plus prototyping the thin wrappers we'd need
+   (`fromNamedTuple` equivalent) since they're not in the published
+   source.
 4. Performance: macro-derived signature construction time. Could
    matter if we end up with hundreds of `Signature` instances.
 
@@ -789,7 +813,7 @@ apply but each is bigger because we own the engine.
    Tests prove `Signature.of[(sentence: String), (sentiment: Boolean)]`
    round-trips field names and types correctly. If B is chosen,
    substitute the self-built engine from §4.2 enriched with the
-   `Name ~ Value` and `stage`/`stageNamed` patterns from §5.3.
+   `Name ~ Value` and `stage`-style patterns from §5.3.
 
 3. **Phase 2 — Typed `Predict`/`Prediction`.** Add `TypedPredict[I,
    O]` (consumes `Signature[I, O]`) and `TypedPrediction[O]` (returns
@@ -827,10 +851,30 @@ its weight in practice.
    would still pull it transitively via `core`, so the split is
    mostly about declared dependencies.)
 
-2. **`Either` at the typed boundary.** Should `TypedPrediction.value[K]`
-   return `FieldOf[O, K]` directly (constructed from LM, "always
-   present") or `Either[DspyError, FieldOf[O, K]]` (consistent with
-   the rest of the API)? Recommendation: `Either` for now.
+2. **`Either` at the typed boundary — *unilateral resolution pending
+   sign-off*.** Both dot-access (`pred.sentiment`) and the explicit
+   accessor (`pred.value[K]`) currently return the **raw** typed
+   value, not `Either`. Either lives one level up: `Predict.run`
+   returns `Either[DspyError, TypedPrediction[O]]`, so all error
+   handling is at the prediction-as-a-whole boundary. Missing-field-
+   at-runtime would be a contract violation between adapter and LM
+   (the adapter parsed a response that omitted a declared output
+   field) and surfaces as a thrown exception — the same semantics
+   Scala's `Map.apply` uses, and what `Record.selectDynamic` does in
+   kyo-data. The examples in §1.3 reflect this.
+
+   **Alternative not chosen:** make field access return `Either[DspyError,
+   T]` for consistency with the rest of dspy4s's pervasive
+   `Either`-everywhere discipline. The case for the alternative is
+   that returning raw values is admitting we don't fully trust the
+   type-level guarantee; defensive `Either` at every level removes
+   that asymmetry at the cost of one more `.flatMap` per field access.
+
+   The current pick was made on the rationale that the type-level
+   guarantee *is the whole point* of this layer, so wrapping every
+   typed access in `Either` would undermine it. External reviewers
+   may disagree and ask for the alternative; if so, the change is
+   local (swap return types in two methods + update one §1.3 example).
 
 3. **Dot-access default.** `Selectable` enables `pred.toxic`. Worth the
    small abstraction layer? Recommendation: yes for the typed layer;
@@ -881,10 +925,13 @@ its weight in practice.
     so a late switch is recoverable, but the engine internals and
     derivation macros differ.
 
-12. **kyo-data effect-runtime independence.** Before adopting Option
-    C or A+C, verify `kyo-data` does not transitively pull Kyo's
-    effect runtime (`Abort`, `Async`, fibers). Same zero-leakage
-    discipline we required of zio-blocks.
+12. **kyo-data effect-runtime independence — *locally verified*.**
+    Against checkout `e075492a` (`~/GitHub/kyo/build.sbt:395`):
+    `kyo-data` depends only on `kyo-stats-registry`, `pprint`
+    (compile), and `izumi-reflect` (Test). It does **not** depend on
+    `kyo-core`, the scheduler, or fibers. Re-check the published POM
+    of whatever version we pin before adopting, in case a release has
+    altered the transitive set.
 
 ---
 
