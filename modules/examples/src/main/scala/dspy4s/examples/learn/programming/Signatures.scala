@@ -57,10 +57,10 @@ object ToxicityExample:
         "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
     )
 
-  val program = TypedPredict(signature)
+  val toxicity = TypedPredict(signature)
 
   def call(comment: String)(using RuntimeContext): Either[DspyError, Boolean] =
-    program.run((comment = comment)).map(_.output.toxic)
+    toxicity.run((comment = comment)).map(_.output.toxic)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 2 (lines 56–61) — Example A: Sentiment Classification
@@ -72,13 +72,10 @@ object ToxicityExample:
 // | classify(sentence=sentence).sentiment
 
 object SentimentExample:
-  val signature =
-    TypedSignature.fromType[(sentence: String) => (sentiment: Boolean)]
-
-  val program = TypedPredict(signature)
+  val classify = TypedPredict(TypedSignature.fromType[(sentence: String) => (sentiment: Boolean)])
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
-    program.run((sentence = sentence)).map(_.output.sentiment)
+    classify.run((sentence = sentence)).map(_.output.sentiment)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippets 3 + 4 (lines 69–89) — Example B: Summarization with CoT + reasoning
@@ -100,18 +97,14 @@ object SentimentExample:
 // are both typed dot-accesses with no `.value(...)` indirection.
 
 object SummarizeExample:
-  val signature =
-    TypedSignature.fromType[(document: String) => (summary: String)]
-
-  val program = TypedChainOfThought(signature)
+  val program = TypedChainOfThought(TypedSignature.fromType[(document: String) => (summary: String)])
 
   /** Snippet 3: just the summary. */
   def call(document: String)(using RuntimeContext): Either[DspyError, String] =
     program.run((document = document)).map(_.output.summary)
 
   /** Snippet 4: both reasoning and summary. */
-  def callWithReasoning(document: String)(using RuntimeContext)
-      : Either[DspyError, (String, String)] =
+  def callWithReasoning(document: String)(using RuntimeContext): Either[DspyError, (String, String)] =
     program.run((document = document)).map { tp =>
       (tp.output.reasoning, tp.output.summary)
     }
@@ -147,13 +140,10 @@ trait EmotionSpec extends Spec:
   def sentiment: OutputField[Emotion]
 
 object EmotionExample:
-  val signature =
-    TypedSignature.of[EmotionSpec](instructions = "Classify emotion.")
-
-  val program = TypedPredict(signature)
+  val classify = TypedPredict(TypedSignature.of[EmotionSpec](instructions = "Classify emotion."))
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    program.run((sentence = sentence)).map(_.output.sentiment)
+    classify.run((sentence = sentence)).map(_.output.sentiment)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 6 (lines 132–146) — Example D: faithfulness check
