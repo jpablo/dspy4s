@@ -33,7 +33,7 @@ class MultiChainComparisonSuite extends FunSuite:
     override val name: String = "scripted-mcc-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("q")))))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = Map("rationale" -> "my rationale", "answer" -> "blue")))

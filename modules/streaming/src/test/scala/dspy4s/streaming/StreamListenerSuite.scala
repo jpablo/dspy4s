@@ -71,7 +71,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener(signatureFieldName = "answer"))
       )(Map("question" -> "x"))
 
@@ -103,7 +103,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector(
           StreamListener("reasoning"),
           StreamListener("answer")
@@ -138,7 +138,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("q" -> "x"))
 
@@ -169,7 +169,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector.empty
       )(Map("q" -> "x"))
 
@@ -197,7 +197,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("q" -> "x"))
 
@@ -226,7 +226,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(Map("q" -> "x"))
 
@@ -325,7 +325,7 @@ class StreamListenerSuite extends FunSuite:
         Right("ok")
 
     val signature = SignatureDsl.parse("q -> answer, tool_name, tool_args").toOption.get
-    val innerPredict = DynamicPredict(signature = signature)
+    val innerPredict = DynamicPredict(layout = signature)
 
     RuntimeEnvironment.withSettings(
       SettingsData(
@@ -375,8 +375,8 @@ class StreamListenerSuite extends FunSuite:
 
     val composite = new PredictProgram:
       override val moduleName: String = "my_program"
-      private val predict1 = DynamicPredict(signature = sig1, name = Some("predict1"))
-      private val predict2 = DynamicPredict(signature = sig2, name = Some("predict2"))
+      private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
+      private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.run(input)
@@ -435,7 +435,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer", predictName = Some("other-predict"))),
         warningSink = _ => () // suppress the expected validation warning
       )(Map("q" -> "x"))
@@ -469,8 +469,8 @@ class StreamListenerSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new PredictProgram:
       override val moduleName: String = "my_program"
-      private val predict1 = DynamicPredict(signature = sig, name = Some("predict1"))
-      private val predict2 = DynamicPredict(signature = sig, name = Some("predict2"))
+      private val predict1 = DynamicPredict(layout = sig, name = Some("predict1"))
+      private val predict2 = DynamicPredict(layout = sig, name = Some("predict2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _      <- predict1.run(input)
@@ -522,8 +522,8 @@ class StreamListenerSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new PredictProgram:
       override val moduleName: String = "my_program"
-      private val p1 = DynamicPredict(signature = sig, name = Some("p1"))
-      private val p2 = DynamicPredict(signature = sig, name = Some("p2"))
+      private val p1 = DynamicPredict(layout = sig, name = Some("p1"))
+      private val p2 = DynamicPredict(layout = sig, name = Some("p2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _ <- p1.run(input)
@@ -567,7 +567,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = sig),
+        program = DynamicPredict(layout = sig),
         streamListeners = Vector(
           StreamListener("nonexistent_field"),
           StreamListener("answer") // valid; should not warn
@@ -599,7 +599,7 @@ class StreamListenerSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = sig),
+        program = DynamicPredict(layout = sig),
         streamListeners = Vector(StreamListener("answer", predictName = Some("nonexistent_predict"))),
         warningSink = sink
       )(Map("q" -> "x"))

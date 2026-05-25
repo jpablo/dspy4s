@@ -22,7 +22,7 @@ class XMLAdapterSuite extends FunSuite:
   test("format injects xml schema instructions and demo xml") {
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
     val invocation = AdapterInvocation(
-      signature = signature,
+      layout = signature,
       demos = Vector(
         ExampleData(
           values = Map("question" -> "Capital of France?", "answer" -> "Paris", "score" -> 0.95),

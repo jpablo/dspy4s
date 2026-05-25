@@ -65,10 +65,10 @@ class CodeActSuite extends FunSuite:
     override val name: String = "scripted-codeact-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val outputNames = signature.outputFields.map(_.name).toSet
+      val outputNames = layout.outputFields.map(_.name).toSet
       val text = output.text
       if outputNames.contains("generated_code") then
         // Codeact step: split the text on the pipe `||`. Convention used
@@ -79,7 +79,7 @@ class CodeActSuite extends FunSuite:
         Right(ParsedOutput(values = Map("generated_code" -> code, "finished" -> finished)))
       else
         // Extractor step: every remaining output field gets the full text.
-        Right(ParsedOutput(values = signature.outputFields.map(_.name -> text).toMap))
+        Right(ParsedOutput(values = layout.outputFields.map(_.name -> text).toMap))
 
   // ── Wiring smoke test (scripted LM + scripted interpreter) ──────────────
 

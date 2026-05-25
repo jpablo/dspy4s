@@ -24,16 +24,16 @@ final case class JSONAdapter(
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val fieldList = invocation.signature.outputFields.map(_.name).mkString(", ")
+    val fieldList = invocation.layout.outputFields.map(_.name).mkString(", ")
     val jsonInstruction =
       s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
-    val systemText = invocation.signature.instructions match
+    val systemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$jsonInstruction"
       case None               => jsonInstruction
 
     val demoMessages = invocation.demos.flatMap { demo =>
-      val userText = renderFields(invocation.signature.inputFields, demo.values)
-      val assistantJson = invocation.signature.outputFields
+      val userText = renderFields(invocation.layout.inputFields, demo.values)
+      val assistantJson = invocation.layout.outputFields
         .flatMap(field => demo.values.get(field.name).map(value => field.name -> value.toString))
         .toMap
       Vector(
@@ -44,7 +44,7 @@ final case class JSONAdapter(
 
     val inputMessage = Message(
       role = MessageRole.User,
-      text = Some(renderFields(invocation.signature.inputFields, invocation.inputs.values))
+      text = Some(renderFields(invocation.layout.inputFields, invocation.inputs.values))
     )
 
     Right(
@@ -55,13 +55,13 @@ final case class JSONAdapter(
       )
     )
 
-  override def streamingState(signature: SignatureLayout): Option[AdapterStreamingState] =
-    Some(new JsonStreamingState(signature.outputFields))
+  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+    Some(new JsonStreamingState(layout.outputFields))
 
-  override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    parseStructured(signature, output).orElse {
-      if allowTextFallbackForSingleOutput && signature.outputFields.size == 1 then
-        val field = signature.outputFields.head
+  override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    parseStructured(layout, output).orElse {
+      if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
+        val field = layout.outputFields.head
         val trimmed = output.text.trim
         if trimmed.nonEmpty then
           Right(
@@ -75,11 +75,11 @@ final case class JSONAdapter(
       else Left(ParseError("adapter", "JSON parse failed and no fallback was applied"))
     }
 
-  private def parseStructured(signature: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
+  private def parseStructured(layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
     for
       jsonText <- extractJson(output.text)
       root <- parseJsonObject(jsonText)
-      values <- signature.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
+      values <- layout.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
         for
           soFar <- acc
           value <- root.obj.get(field.name) match

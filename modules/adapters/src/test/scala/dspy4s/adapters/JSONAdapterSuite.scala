@@ -22,7 +22,7 @@ class JSONAdapterSuite extends FunSuite:
   test("format injects json output contract into system message") {
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
     val invocation = AdapterInvocation(
-      signature = signature,
+      layout = signature,
       demos = Vector(
         ExampleData(
           values = Map("question" -> "Capital of France?", "answer" -> "Paris", "score" -> 0.95),

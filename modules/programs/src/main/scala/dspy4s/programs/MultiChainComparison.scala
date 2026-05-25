@@ -93,7 +93,7 @@ final case class MultiChainComparison(
       val augmentedInputs = input.inputs ++ attemptLines.zipWithIndex.map { case (line, idx) =>
         s"reasoning_attempt_${idx + 1}" -> line
       }.toMap
-      DynamicPredict(signature = augmentedSignature)
+      DynamicPredict(layout = augmentedSignature)
         .run(input.copy(inputs = augmentedInputs))
 
   /** Renders a single attempt as Python does:

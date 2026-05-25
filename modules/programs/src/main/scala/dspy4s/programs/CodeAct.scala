@@ -136,7 +136,7 @@ final case class CodeAct(
        |You have access to the Python Standard Library.""".stripMargin
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val codeActPredict = DynamicPredict(signature = codeActSignature, name = Some(codeActProgramName))
+    val codeActPredict = DynamicPredict(layout = codeActSignature, name = Some(codeActProgramName))
     val extractor = DynamicChainOfThought(baseSignature = extractorSignature)
 
     runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>

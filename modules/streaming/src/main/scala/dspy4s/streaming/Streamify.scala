@@ -152,7 +152,7 @@ object Streamify:
   private def collectKnownSignatures(program: Module[?, ?]): Vector[(String, SignatureLayout)] =
     program match
       case p: DynamicPredict =>
-        Vector((p.moduleName, p.signature))
+        Vector((p.moduleName, p.layout))
       case cot: DynamicChainOfThought =>
         cot.signature.toOption.map(sig => (cot.moduleName, sig)).toVector
       case react: ReAct =>

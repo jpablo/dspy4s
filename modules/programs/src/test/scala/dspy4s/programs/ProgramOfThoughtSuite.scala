@@ -64,8 +64,8 @@ class ProgramOfThoughtSuite extends FunSuite:
     override val name: String = "scripted-pot-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-      val names = signature.outputFields.map(_.name)
+    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+      val names = layout.outputFields.map(_.name)
       if names.contains("generated_code") then
         Right(ParsedOutput(values = Map("generated_code" -> output.text) ++
           // DynamicChainOfThought also wants `reasoning`; supply a placeholder.

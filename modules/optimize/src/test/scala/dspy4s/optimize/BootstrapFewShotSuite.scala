@@ -83,7 +83,7 @@ class BootstrapFewShotSuite extends FunSuite:
 
     val blowingUp = ScriptedPredictProgram(
       answers = Map.empty,
-      signature = signature,
+      layout = signature,
       failsWith = Some(new RuntimeException("boom"))
     )
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](

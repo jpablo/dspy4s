@@ -42,7 +42,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
         Message(role = MessageRole.User, text = Some("scripted prompt"))
       )))
 
-    override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext)
+    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = baseValues + ("reasoning" -> reasoning)))
 
@@ -56,7 +56,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
       Right(FormattedPrompt(messages = Vector(
         Message(role = MessageRole.User, text = Some("hi"))
       )))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext)
+    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = baseValues))
 
@@ -159,7 +159,7 @@ class TypedChainOfThoughtSuite extends FunSuite:
         Right(FormattedPrompt(messages = Vector(
           Message(role = MessageRole.User, text = Some("hi"))
         )))
-      def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext) =
+      def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values = Map(
           "reasoning" -> 42,   // wrong type
           "summary"   -> "ok"

@@ -103,7 +103,7 @@ final class StreamingLanguageModelWrapper private (
   private def activeContext(): CallContext =
     ActivePredictContext.current match
       case Some(active) =>
-        val state = adapter.flatMap(_.streamingState(active.signature))
+        val state = adapter.flatMap(_.streamingState(active.layout))
         CallContext(active.name, state)
       case None =>
         CallContext(predictName = "", state = None)

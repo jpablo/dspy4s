@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.MessageRole
 
 import scala.util.matching.Regex
 
-/** Chat-style adapter that frames each signature field with
+/** Chat-style adapter that frames each layout field with
   * `[[ ## field_name ## ]]` markers and terminates output with
   * `[[ ## completed ## ]]`. Mirrors Python DSPy's `ChatAdapter`.
   *
@@ -30,16 +30,16 @@ import scala.util.matching.Regex
 final case class ChatAdapter(name: String = "chat") extends Adapter:
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val signature = invocation.signature
+    val layout = invocation.layout
 
     val systemMessage = Message(
       role = MessageRole.System,
-      text = Some(buildSystemPrompt(signature))
+      text = Some(buildSystemPrompt(layout))
     )
 
     val demoMessages = invocation.demos.flatMap { demo =>
-      val userText = renderInputs(signature.inputFields, demo.values)
-      val assistantText = renderOutputs(signature.outputFields, demo.values) + "\n\n" + ChatAdapter.CompletedMarker + "\n"
+      val userText = renderInputs(layout.inputFields, demo.values)
+      val assistantText = renderOutputs(layout.outputFields, demo.values) + "\n\n" + ChatAdapter.CompletedMarker + "\n"
       Vector(
         Message(role = MessageRole.User, text = Some(userText)),
         Message(role = MessageRole.Assistant, text = Some(assistantText))
@@ -49,29 +49,29 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     val inputMessage = Message(
       role = MessageRole.User,
       text = Some(
-        renderInputs(signature.inputFields, invocation.inputs.values) + "\n\n" + outputRequirements(signature)
+        renderInputs(layout.inputFields, invocation.inputs.values) + "\n\n" + outputRequirements(layout)
       )
     )
 
     Right(FormattedPrompt(messages = Vector(systemMessage) ++ demoMessages ++ Vector(inputMessage)))
 
-  override def streamingState(signature: SignatureLayout): Option[AdapterStreamingState] =
-    Some(new ChatStreamingState(signature.outputFields))
+  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+    Some(new ChatStreamingState(layout.outputFields))
 
-  override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    val outputNames = signature.outputFields.map(_.name).toSet
+  override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    val outputNames = layout.outputFields.map(_.name).toSet
     val sections = extractSections(output.text, outputNames)
 
     val values = sections.view.filterKeys(outputNames.contains).toMap
 
     // Single-output fallback: when the model produced no markers and the
-    // signature has exactly one output, treat the whole text as that field.
+    // layout has exactly one output, treat the whole text as that field.
     val resolved =
-      if values.isEmpty && signature.outputFields.size == 1 && output.text.trim.nonEmpty then
-        Map(signature.outputFields.head.name -> output.text.trim)
+      if values.isEmpty && layout.outputFields.size == 1 && output.text.trim.nonEmpty then
+        Map(layout.outputFields.head.name -> output.text.trim)
       else values
 
-    signature.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
+    layout.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
       for
         soFar <- acc
         raw <- resolved.get(field.name) match
@@ -118,12 +118,12 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     }
     out.iterator.map { (k, v) => k -> v.toString.stripTrailing }.toMap
 
-  private def buildSystemPrompt(signature: SignatureLayout): String =
-    val inputBlock = fieldDescriptionBlock(signature.inputFields, role = "input")
-    val outputBlock = fieldDescriptionBlock(signature.outputFields, role = "output")
-    val structureExample = exampleStructure(signature)
+  private def buildSystemPrompt(layout: SignatureLayout): String =
+    val inputBlock = fieldDescriptionBlock(layout.inputFields, role = "input")
+    val outputBlock = fieldDescriptionBlock(layout.outputFields, role = "output")
+    val structureExample = exampleStructure(layout)
     val instructions =
-      signature.instructions.getOrElse(defaultInstructions(signature))
+      layout.instructions.getOrElse(defaultInstructions(layout))
     s"""$inputBlock
        |
        |$outputBlock
@@ -138,7 +138,7 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     * Each line:
     *   `  N. `field_name` (type): description`
     * with the description omitted when `FieldSpec.description` is the
-    * default `${field_name}` placeholder that signature normalisation
+    * default `${field_name}` placeholder that layout normalisation
     * inserts (see `FieldSpec.normalize`). */
   private def fieldDescriptionBlock(fields: Vector[FieldSpec], role: String): String =
     if fields.isEmpty then s"Your $role fields are: (none)."
@@ -154,20 +154,20 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
       }
       (header +: lines).mkString("\n")
 
-  private def defaultInstructions(signature: SignatureLayout): String =
-    val inputs = signature.inputFields.map(_.name).mkString(", ")
-    val outputs = signature.outputFields.map(_.name).mkString(", ")
+  private def defaultInstructions(layout: SignatureLayout): String =
+    val inputs = layout.inputFields.map(_.name).mkString(", ")
+    val outputs = layout.outputFields.map(_.name).mkString(", ")
     s"Given the fields $inputs, produce the fields $outputs."
 
   /** Renders an example showing the full marker framing — input markers,
     * output markers, and the closing `[[ ## completed ## ]]`. Output-field
     * placeholders carry a `# note:` typing constraint when the field has
     * a non-string type, reinforcing the type contract structurally. */
-  private def exampleStructure(signature: SignatureLayout): String =
-    val inputBlock = signature.inputFields.map { field =>
+  private def exampleStructure(layout: SignatureLayout): String =
+    val inputBlock = layout.inputFields.map { field =>
       s"[[ ## ${field.name} ## ]]\n{${field.name}}"
     }.mkString("\n\n")
-    val outputBlock = signature.outputFields.map { field =>
+    val outputBlock = layout.outputFields.map { field =>
       val note = ChatAdapter.structureHint(field.typeRef).fold("") { hint =>
         s"        # note: the value you produce $hint"
       }
@@ -175,8 +175,8 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     }.mkString("\n\n")
     Vector(inputBlock, outputBlock, ChatAdapter.CompletedMarker).filter(_.nonEmpty).mkString("\n\n")
 
-  private def outputRequirements(signature: SignatureLayout): String =
-    val outputs = signature.outputFields.map { f =>
+  private def outputRequirements(layout: SignatureLayout): String =
+    val outputs = layout.outputFields.map { f =>
       val hint = ChatAdapter.reminderHint(f.typeRef).fold("") { h => s" ($h)" }
       s"`[[ ## ${f.name} ## ]]`$hint"
     }.mkString(", then ")

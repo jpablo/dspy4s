@@ -19,7 +19,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
 
   private def oracleTeacher: DemoAwarePredictProgram =
     DemoAwarePredictProgram(
-      signature = signature,
+      layout = signature,
       answers = (1 to 10).map(i => s"q$i" -> s"a$i").toMap
     )
 

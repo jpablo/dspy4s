@@ -25,21 +25,21 @@ import dspy4s.programs.runtime.BasePredictProgram
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
 final case class DynamicPredict(
-    signature: SignatureLayout,
+    layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     name: Option[String] = None,
     runtime: ProgramRuntime = new SettingsProgramRuntime {}
 ) extends BasePredictProgram(moduleName = name.getOrElse("predict")):
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    ActivePredictContext.withActive(moduleName, signature) {
+    ActivePredictContext.withActive(moduleName, layout) {
       for
         model <- runtime.resolveModel
         adapter <- runtime.resolveAdapter
         invocation = buildInvocation(call, model)
         prompt <- CallbackDispatcher.withAdapter(
           adapterName = adapter.name,
-          inputs = Map("phase" -> "format", "signature" -> signature.name)
+          inputs = Map("phase" -> "format", "signature" -> layout.name)
         ) {
           adapter.format(invocation)
         }
@@ -55,9 +55,9 @@ final case class DynamicPredict(
     }
 
   private def buildInvocation(call: ProgramCall, model: LanguageModel): AdapterInvocation =
-    val inputKeys = signature.inputFields.map(_.name).toSet
+    val inputKeys = layout.inputFields.map(_.name).toSet
     AdapterInvocation(
-      signature = signature,
+      layout = layout,
       demos = demos,
       inputs = ExampleData(values = call.inputs, inputKeys = inputKeys),
       request = LmRequest(
@@ -78,7 +78,7 @@ final case class DynamicPredict(
           adapterName = adapter.name,
           inputs = Map("phase" -> "parse", "index" -> index)
         ) {
-          adapter.parse(signature, output)
+          adapter.parse(layout, output)
         }
       yield soFar :+ parsed
     }

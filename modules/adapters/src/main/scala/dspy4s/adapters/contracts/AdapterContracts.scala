@@ -12,7 +12,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 
 final case class AdapterInvocation(
-    signature: SignatureLayout,
+    layout: SignatureLayout,
     demos: Vector[Example],
     inputs: Example,
     request: LmRequest
@@ -54,28 +54,28 @@ trait Adapter extends AdapterRef:
 
   def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt]
 
-  def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
+  def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
 
   /** Streaming-aware adapters override this to return a per-call state
     * machine. The default returns [[None]] and the streaming pipeline falls
     * back to emitting raw tokens with an empty field name.
     */
-  def streamingState(signature: SignatureLayout): Option[AdapterStreamingState] = None
+  def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] = None
 
   def execute(languageModel: LanguageModel, invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, Vector[ParsedOutput]] =
     for
       prompt <- format(invocation)
       response <- languageModel.call(invocation.request.copy(messages = prompt.messages))
-      parsed <- parseOutputs(invocation.signature, response.outputs)
+      parsed <- parseOutputs(invocation.layout, response.outputs)
     yield parsed
 
-  private def parseOutputs(signature: SignatureLayout, outputs: Vector[LmOutput])(using
+  private def parseOutputs(layout: SignatureLayout, outputs: Vector[LmOutput])(using
       RuntimeContext
   ): Either[DspyError, Vector[ParsedOutput]] =
     outputs.foldLeft(Right(Vector.empty): Either[DspyError, Vector[ParsedOutput]]) { (acc, output) =>
       for
         soFar <- acc
-        parsed <- parse(signature, output)
+        parsed <- parse(layout, output)
       yield soFar :+ parsed
     }
 

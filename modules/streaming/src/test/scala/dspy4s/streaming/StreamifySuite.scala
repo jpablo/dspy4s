@@ -71,7 +71,7 @@ class StreamifySuite extends FunSuite:
     )
     val lm = new ScriptedStreamingLm(chunks)
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val program = DynamicPredict(signature = signature)
+    val program = DynamicPredict(layout = signature)
 
     RuntimeEnvironment.withSettings(
       SettingsData(
@@ -112,7 +112,7 @@ class StreamifySuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(new StatusMessageProvider:
           override def lmStart(modelId: String, inputs: Map[String, Any]): Option[String] =
             Some(s"Calling $modelId...")
@@ -152,7 +152,7 @@ class StreamifySuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
-        program = DynamicPredict(signature = signature),
+        program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(provider)
       )(Map("question" -> "x"))
 
@@ -199,7 +199,7 @@ class StreamifySuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val streamFn = Streamify.streamify(DynamicPredict(signature = signature))
+      val streamFn = Streamify.streamify(DynamicPredict(layout = signature))
 
       val first = ArrayBuffer.empty[StreamEvent]
       val iter1 = streamFn(Map("q" -> "1"))

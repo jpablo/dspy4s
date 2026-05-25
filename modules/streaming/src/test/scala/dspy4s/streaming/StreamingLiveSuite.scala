@@ -78,8 +78,8 @@ class StreamingLiveSuite extends FunSuite:
     val sig2 = SignatureDsl.parse("question, answer -> judgement").toOption.get
     new PredictProgram:
       override val moduleName: String = "my_program"
-      private val predict1 = DynamicPredict(signature = sig1, name = Some("predict1"))
-      private val predict2 = DynamicPredict(signature = sig2, name = Some("predict2"))
+      private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
+      private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.run(input)

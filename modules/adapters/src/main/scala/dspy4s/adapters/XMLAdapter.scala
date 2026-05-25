@@ -25,16 +25,16 @@ final case class XMLAdapter(
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val fieldTags = invocation.signature.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
+    val fieldTags = invocation.layout.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
     val xmlInstruction =
       s"Return XML only using this shape:\n<outputs>\n$fieldTags\n</outputs>"
-    val systemText = invocation.signature.instructions match
+    val systemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$xmlInstruction"
       case None               => xmlInstruction
 
     val demoMessages = invocation.demos.flatMap { demo =>
-      val userText = renderFields(invocation.signature.inputFields, demo.values)
-      val assistantXml = buildOutputXml(invocation.signature, demo.values)
+      val userText = renderFields(invocation.layout.inputFields, demo.values)
+      val assistantXml = buildOutputXml(invocation.layout, demo.values)
       Vector(
         Message(role = MessageRole.User, text = Some(userText)),
         Message(role = MessageRole.Assistant, text = Some(assistantXml))
@@ -43,7 +43,7 @@ final case class XMLAdapter(
 
     val inputMessage = Message(
       role = MessageRole.User,
-      text = Some(renderFields(invocation.signature.inputFields, invocation.inputs.values))
+      text = Some(renderFields(invocation.layout.inputFields, invocation.inputs.values))
     )
 
     Right(
@@ -54,13 +54,13 @@ final case class XMLAdapter(
       )
     )
 
-  override def streamingState(signature: SignatureLayout): Option[AdapterStreamingState] =
-    Some(new XmlStreamingState(signature.outputFields))
+  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+    Some(new XmlStreamingState(layout.outputFields))
 
-  override def parse(signature: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    parseStructured(signature, output).orElse {
-      if allowTextFallbackForSingleOutput && signature.outputFields.size == 1 then
-        val field = signature.outputFields.head
+  override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    parseStructured(layout, output).orElse {
+      if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
+        val field = layout.outputFields.head
         val trimmed = output.text.trim
         if trimmed.nonEmpty then
           Right(
@@ -74,11 +74,11 @@ final case class XMLAdapter(
       else Left(ParseError("adapter", "XML parse failed and no fallback was applied"))
     }
 
-  private def parseStructured(signature: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
+  private def parseStructured(layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
     for
       xmlText <- extractXml(output.text)
       document <- parseXml(xmlText)
-      values <- signature.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
+      values <- layout.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
         for
           soFar <- acc
           raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name))
@@ -87,8 +87,8 @@ final case class XMLAdapter(
       }
     yield ParsedOutput(values = values, rawText = Some(output.text), metadata = Map("adapter" -> name))
 
-  private def buildOutputXml(signature: SignatureLayout, values: Map[String, Any]): String =
-    val body = signature.outputFields.flatMap { field =>
+  private def buildOutputXml(layout: SignatureLayout, values: Map[String, Any]): String =
+    val body = layout.outputFields.flatMap { field =>
       values.get(field.name).map(value => s"<${field.name}>${escapeXml(value.toString)}</${field.name}>")
     }.mkString
     s"<outputs>$body</outputs>"

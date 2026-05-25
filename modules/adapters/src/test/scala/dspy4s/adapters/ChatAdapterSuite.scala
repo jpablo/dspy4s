@@ -23,7 +23,7 @@ class ChatAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
       .withInstructions(Some("Be concise."))
     val invocation = AdapterInvocation(
-      signature = signature,
+      layout = signature,
       demos = Vector(
         ExampleData(
           values = Map("question" -> "Capital of France?", "answer" -> "Paris"),
@@ -71,7 +71,7 @@ class ChatAdapterSuite extends FunSuite:
   test("format emits type hints in the system prompt's structure example for non-string outputs") {
     val signature = SignatureDsl.parse("question -> answer: int, score: float, flag: bool, payload: json").toOption.get
     val invocation = AdapterInvocation(
-      signature = signature,
+      layout = signature,
       demos = Vector.empty,
       inputs = ExampleData(values = Map("question" -> "?"), inputKeys = Set("question")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
@@ -93,7 +93,7 @@ class ChatAdapterSuite extends FunSuite:
   test("format emits type hints in the final user reminder for non-string outputs") {
     val signature = SignatureDsl.parse("q -> answer: int, summary").toOption.get
     val invocation = AdapterInvocation(
-      signature = signature,
+      layout = signature,
       demos = Vector.empty,
       inputs = ExampleData(values = Map("q" -> "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
@@ -132,7 +132,7 @@ class ChatAdapterSuite extends FunSuite:
         )
       )
     val invocation = AdapterInvocation(
-      signature = signature,
+      layout = signature,
       demos = Vector.empty,
       inputs = ExampleData(values = Map("q" -> "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)

@@ -8,7 +8,7 @@ import dspy4s.core.contracts.SignatureLayout
   * [[dspy4s.streaming.contracts.StreamListener]]s with the correct
   * signature-derived field labels.
   */
-final case class ActivePredict(name: String, signature: SignatureLayout)
+final case class ActivePredict(name: String, layout: SignatureLayout)
 
 /** Thread-local stack of [[ActivePredict]] entries, pushed for the duration of
   * a `DynamicPredict.execute` body and read by downstream components (notably
@@ -38,8 +38,8 @@ object ActivePredictContext:
     try thunk
     finally tl.set(previous)
 
-  def withActive[A](name: String, signature: SignatureLayout)(thunk: => A): A =
-    withActive(ActivePredict(name, signature))(thunk)
+  def withActive[A](name: String, layout: SignatureLayout)(thunk: => A): A =
+    withActive(ActivePredict(name, layout))(thunk)
 
   /** Replace the entire stack; used by [[ContextPropagation]] when copying
     * runtime state across thread boundaries. */
