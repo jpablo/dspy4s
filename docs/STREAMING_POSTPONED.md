@@ -288,4 +288,4 @@ If async program streaming lands later, a `Streamify.toSyncIterator(asyncIterato
 1. Port the full Python parity test matrix for the feature first
 2. Add a new section here documenting any intentional behavioral deltas from Python
 3. Update `PORT_SCOPE.md` Tier 1 parity notes when a postponed item ships
-4. Update `PHASE8_PROGRESS.md` (to be created when streaming reaches completion milestone)
+4. Update `progress/PHASE8_PROGRESS.md` (to be created when streaming reaches completion milestone)
