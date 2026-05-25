@@ -20,7 +20,7 @@ import scala.util.matching.Regex
   * and feed the output back to the LM for a structured response. Port of
   * Python DSPy's `dspy.ProgramOfThought`.
   *
-  * Three [[DynamicChainOfThought]] passes:
+  * Three reasoning-augmented [[DynamicPredict]] passes:
   *
   *   1. **generate** — inputs → `generated_code` (Python source)
   *   2. **regenerate** — on execution error, the LM gets `previous_code` +
@@ -140,21 +140,25 @@ final case class ProgramOfThought(
       }))
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val generator = DynamicChainOfThought(baseSignature = generateSignature, runtime = SignatureProgramRuntime)
-    val regenerator = DynamicChainOfThought(baseSignature = regenerateSignature, runtime = SignatureProgramRuntime)
-    val answerer = DynamicChainOfThought(baseSignature = answerSignature, runtime = SignatureProgramRuntime)
-
-    tryIteration(call, generator, regenerator, attempt = 1).flatMap { case (code, codeOutput) =>
-      val extractInputs = call.inputs
-        .updated("final_generated_code", code)
-        .updated("code_output", codeOutput)
-      answerer.run(call.copy(inputs = extractInputs))
-    }
+    for
+      generatorLayout   <- ChainOfThought.augmentLayout(generateSignature)
+      regeneratorLayout <- ChainOfThought.augmentLayout(regenerateSignature)
+      answerLayout      <- ChainOfThought.augmentLayout(answerSignature)
+      generator = DynamicPredict(layout = generatorLayout, runtime = SignatureProgramRuntime)
+      regenerator = DynamicPredict(layout = regeneratorLayout, runtime = SignatureProgramRuntime)
+      answerer = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
+      result <- tryIteration(call, generator, regenerator, attempt = 1).flatMap { case (code, codeOutput) =>
+        val extractInputs = call.inputs
+          .updated("final_generated_code", code)
+          .updated("code_output", codeOutput)
+        answerer.run(call.copy(inputs = extractInputs))
+      }
+    yield result
 
   private def tryIteration(
       call: ProgramCall,
-      generator: DynamicChainOfThought,
-      regenerator: DynamicChainOfThought,
+      generator: DynamicPredict,
+      regenerator: DynamicPredict,
       attempt: Int,
       previous: Option[(String, String)] = None // (code, error) from last attempt
   )(using RuntimeContext): Either[DspyError, (String, String)] =
@@ -212,7 +216,7 @@ final case class ProgramOfThought(
           Right(trimmed)
 
   /** Use the default settings-based runtime resolution for the inner
-    * DynamicChainOfThought programs. */
+    * DynamicPredict programs. */
   private object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
 
 object ProgramOfThought:

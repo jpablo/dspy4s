@@ -68,7 +68,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       val names = layout.outputFields.map(_.name)
       if names.contains("generated_code") then
         Right(ParsedOutput(values = Map("generated_code" -> output.text) ++
-          // DynamicChainOfThought also wants `reasoning`; supply a placeholder.
+          // ProgramOfThought's reasoning-augmented predicts also want `reasoning`; supply a placeholder.
           (if names.contains("reasoning") then Map("reasoning" -> "scripted reasoning") else Map.empty)))
       else
         // Answer signature — every output field gets the LM's text.

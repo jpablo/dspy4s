@@ -133,7 +133,7 @@ final case class SignatureLayout(
 
   // ── Field-mutation helpers ──────────────────────────────────────────
   // Narrowed to `private[dspy4s]`: composite programs (CodeAct,
-  // MultiChainComparison, ProgramOfThought, DynamicChainOfThought)
+  // MultiChainComparison, ProgramOfThought, ChainOfThought)
   // augment a base layout by appending / prepending / inserting fields
   // before handing it to a `DynamicPredict`. User code should use the
   // typed `Signature` surface (`derived`, `fromType`, `of[Spec]`,

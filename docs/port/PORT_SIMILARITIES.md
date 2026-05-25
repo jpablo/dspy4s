@@ -120,7 +120,7 @@ behavior:
 | Python | dspy4s | Notes |
 |---|---|---|
 | `Predict` | `Predict[I, O]` + `DynamicPredict` | typed + erased pair |
-| `ChainOfThought` | `ChainOfThought[I, O]` + `DynamicChainOfThought` | prepends `reasoning` output field |
+| `ChainOfThought` | `ChainOfThought[I, O]` | prepends `reasoning` output field and delegates through typed `Predict` |
 | `ReAct` | `ReAct` | tool loop with `next_thought` / `next_tool_name` / `next_tool_args` |
 | `BestOfN` | `BestOfN` | run-and-score-N times |
 | `Refine` | `Refine` | iterative correction loop |

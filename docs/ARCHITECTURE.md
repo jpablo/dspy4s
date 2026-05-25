@@ -79,8 +79,8 @@ graph TD
    - `runtime/BasePredictProgram` — module-level callback + trace wrapping
    - `DynamicPredict` — erased predict, extends `PredictProgram`
    - `Predict[I, O]` — typed predict, wraps a memoized `DynamicPredict`
-   - Composite programs: `ChainOfThought` (typed) / `DynamicChainOfThought`,
-     `ReAct`, `CodeAct`, `ProgramOfThought`, `MultiChainComparison`,
+   - Composite programs: `ChainOfThought`, `ReAct`, `CodeAct`,
+     `ProgramOfThought`, `MultiChainComparison`,
      `Refine`, `BestOfN`, `Parallel`, `Aggregation`
    - `contracts/ProgramContracts.scala` — `PredictProgram`, `ProgramCall`,
      `ProgramRuntime`, `ToolFunction`
@@ -112,7 +112,7 @@ SignatureLayout ──→ ProgramCall ──→ DynamicPredict ──→ Dynamic
 `SignatureLayout` carries a name, optional instructions, and an ordered
 `Vector[FieldSpec]` (each spec has a role, a `TypeRef`, and metadata).
 Adapters consume `SignatureLayout` directly; composite programs (e.g.
-`CodeAct`, `MultiChainComparison`, `DynamicChainOfThought`) augment a
+`ChainOfThought`, `CodeAct`, `MultiChainComparison`) augment a
 base layout with extra fields before handing it to a `DynamicPredict`.
 
 The mutation helpers on `SignatureLayout` (`append`, `prepend`, `insert`,

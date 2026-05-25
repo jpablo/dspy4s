@@ -28,8 +28,8 @@ import scala.util.matching.Regex
   *   4. Append the snippet + observation to `trajectory`. Exit early if the
   *      LM set `finished=true`.
   *
-  * After the loop, a [[DynamicChainOfThought]] "extractor" reads the full
-  * trajectory and produces the user-visible outputs declared in
+  * After the loop, a reasoning-augmented [[DynamicPredict]] extractor reads
+  * the full trajectory and produces the user-visible outputs declared in
   * `baseSignature`.
   *
   * '''Scope of this scaffolding.''' The wiring + prompt are present and
@@ -137,20 +137,22 @@ final case class CodeAct(
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val codeActPredict = DynamicPredict(layout = codeActSignature, name = Some(codeActProgramName))
-    val extractor = DynamicChainOfThought(baseSignature = extractorSignature)
-
-    runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>
-      val extractInputs = call.inputs.updated("trajectory", trajectory.render)
-      extractor.run(call.copy(inputs = extractInputs)).map { extracted =>
-        // Attach the trajectory to the extracted prediction's values so
-        // callers can inspect it after the fact.
-        PredictionData(
-          values = extracted.values.updated("trajectory", trajectory.render),
-          completions = extracted.completions,
-          lmUsage = extracted.lmUsage
-        )
+    for
+      extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
+      extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
+      extracted <- runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>
+        val extractInputs = call.inputs.updated("trajectory", trajectory.render)
+        extractor.run(call.copy(inputs = extractInputs)).map { extracted =>
+          // Attach the trajectory to the extracted prediction's values so
+          // callers can inspect it after the fact.
+          PredictionData(
+            values = extracted.values.updated("trajectory", trajectory.render),
+            completions = extracted.completions,
+            lmUsage = extracted.lmUsage
+          )
+        }
       }
-    }
+    yield extracted
 
   /** Recursive iteration loop. Tail-call friendly via @annotation.tailrec
     * would require Either-flattening — leaving as while-loop-equivalent

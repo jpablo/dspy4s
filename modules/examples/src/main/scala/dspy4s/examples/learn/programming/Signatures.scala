@@ -19,9 +19,8 @@
  *
  *   Predict(sig).run((field = "...")).map(_.output.field)
  *
- * `DynamicChainOfThought` has a typed counterpart `ChainOfThought` that
- * augments the output named tuple with `reasoning: String` (the field CoT
- * injects at the runtime layer). Snippets 3, 4, and 6 use it directly.
+ * `ChainOfThought` augments the output named tuple with `reasoning: String`
+ * and delegates through typed `Predict`. Snippets 3, 4, and 6 use it directly.
  *
  * Structure note: each snippet is a self-contained block — heading
  * comment + python original + supporting types (when any) + example

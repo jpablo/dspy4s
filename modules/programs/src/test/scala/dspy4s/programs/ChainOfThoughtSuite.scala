@@ -85,6 +85,13 @@ class TypedChainOfThoughtSuite extends FunSuite:
 
   // ── Happy path ──────────────────────────────────────────────────────────
 
+  test("ChainOfThought.augmentLayout prepends reasoning to the runtime output signature") {
+    val sig = Signature.of[TcotSummarizeSpec]
+    val layout = ChainOfThought.augmentLayout(sig.layout).toOption.get
+
+    assertEquals(layout.outputFields.map(_.name), Vector("reasoning", "summary"))
+  }
+
   test("ChainOfThought.run returns a typed prediction with reasoning prepended") {
     val sig = Signature.of[TcotSummarizeSpec]
     val adapter = new ScriptedAdapter(

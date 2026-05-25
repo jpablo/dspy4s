@@ -1,40 +1,41 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{
-  DspyError, Example, NotFoundError, RuntimeContext, ValidationError
+  DspyError, Example, FieldRole, FieldSpec, NotFoundError, RuntimeContext,
+  SignatureLayout, TypeRef, ValidationError
 }
-import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
+import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.{Prediction, Signature}
+import dspy4s.typed.{Prediction, Shape, Signature}
 import scala.NamedTuple
 
-/** Typed counterpart to `DynamicChainOfThought`. Wraps a `Signature[I, O]`
-  * whose output is a named tuple (typically produced by
-  * `Signature.of[T <: Spec]` or `Signature.fromType[F]("...")`)
-  * and produces a `Prediction[Out]` whose output named tuple has
-  * `reasoning: String` prepended to O's fields.
+/** Typed ChainOfThought, defined as a small signature transformation on top of
+  * [[Predict]]. Wraps a `Signature[I, O]` whose output is a named tuple
+  * (typically produced by `Signature.of[T <: Spec]` or
+  * `Signature.fromType[F]("...")`) and produces a `Prediction[Out]` whose
+  * output named tuple has `reasoning: String` prepended to O's fields.
   *
-  * Inputs flow through `signature.inputShape.encode` unchanged. The
-  * runtime CoT augmentation (inserting the reasoning field, formatting,
-  * parsing, callbacks) is delegated to the existing `DynamicChainOfThought`
-  * program — this typed wrapper only inserts the encode → decode
-  * boundary and prepends the reasoning value to the decoded tuple.
+  * Inputs flow through `Predict` unchanged. CoT contributes only the augmented
+  * signature: a leading `reasoning` output field in the runtime layout and an
+  * output `Shape` that decodes the underlying prediction as
+  * `(reasoning = ..., <base outputs...>)`.
   *
   * **Scope**: named-tuple outputs only. Case-class outputs from
   * `Signature.derived[I, O <: Product]` would need an augmented
-  * synthesized case class at the call site; for those, use the untyped
-  * `DynamicChainOfThought` directly and read `raw.value("reasoning")`.
+  * synthesized case class at the call site; for those, define the reasoning
+  * field in the output case class and use [[Predict]] directly.
   *
   * **Known limitation** (inherited from `Predict`): when the inner
-  * `DynamicChainOfThought` succeeds but the typed decode fails, the trace still
-  * records a successful module call while `run` returns `Left`. The
-  * underlying CoT really did succeed; consolidating the typed boundary's
-  * tracing is an open design decision.
+  * `Predict` succeeds but the typed decode fails, the trace still records a
+  * successful module call while `run` returns `Left`. The underlying LM call
+  * really did succeed; consolidating the typed boundary's tracing is an open
+  * design decision.
   */
 final case class ChainOfThought[I, O](
     signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
-    runtime: ProgramRuntime = new SettingsProgramRuntime {}
+    runtime: ProgramRuntime = new SettingsProgramRuntime {},
+    name: Option[String] = None
 ):
 
   /** The augmented output type: `reasoning: String` prepended to O's
@@ -47,32 +48,40 @@ final case class ChainOfThought[I, O](
       config: Map[String, Any] = Map.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    val inputMap = signature.inputShape.encode(input)
+    predictor.flatMap(_.run(input, config, traceEnabled))
 
-    // Same defensive missing-input check as Predict.run.
-    val requiredInputs = signature.layout.inputFields.iterator.map(_.name).toSet
-    val missing        = requiredInputs.diff(inputMap.keySet)
-    if missing.nonEmpty then
-      Left(NotFoundError(
-        resource = "program_input",
-        message  =
-          s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
-      ))
-    else
-      val program = DynamicChainOfThought(
-        baseSignature = signature.layout,
-        demos         = demos,
-        runtime       = runtime
+  private lazy val predictor: Either[DspyError, Predict[I, Out]] =
+    augmentedSignature.map { sig =>
+      Predict(sig, demos, name.orElse(Some("chain_of_thought")), runtime)
+    }
+
+  private def augmentedSignature: Either[DspyError, Signature[I, Out]] =
+    augmentedLayout.map { layout =>
+      Signature(
+        name        = signature.name,
+        layout      = layout,
+        inputShape  = signature.inputShape,
+        outputShape = augmentedOutputShape
       )
-      program
-        .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
-        .flatMap { raw =>
-          for
-            reasoning <- extractReasoning(raw.values)
-            baseOut   <- signature.outputShape.decode(raw.values)
-            augmented <- prependReasoning(reasoning, baseOut)
-          yield Prediction(augmented, raw)
-        }
+    }
+
+  private def augmentedLayout: Either[DspyError, SignatureLayout] =
+    ChainOfThought.augmentLayout(signature.layout)
+
+  private def augmentedOutputShape: Shape[Out] = new Shape[Out]:
+    val fieldSpecs: Vector[FieldSpec] =
+      ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
+
+    def encode(value: Out): Map[String, Any] =
+      val values = value.asInstanceOf[Product].productIterator.toVector
+      fieldSpecs.zip(values).map { (field, raw) => field.name -> raw }.toMap
+
+    def decode(raw: Map[String, Any]): Either[DspyError, Out] =
+      for
+        reasoning <- extractReasoning(raw)
+        baseOut   <- signature.outputShape.decode(raw)
+        augmented <- prependReasoning(reasoning, baseOut)
+      yield augmented
 
   /** Cons `reasoning` onto the base output to materialize the augmented
     * named tuple. Named tuples erase to plain tuples at runtime, so the
@@ -97,7 +106,7 @@ final case class ChainOfThought[I, O](
           s"ChainOfThought requires a named-tuple output signature " +
           s"(Signature.of[Spec] or Signature.fromType[F]); got " +
           s"${other.getClass.getSimpleName} from '${signature.name}'. " +
-          s"Use DynamicChainOfThought for case-class or Map-shaped outputs."
+          s"For case-class outputs, include reasoning in the output type and use Predict directly."
         ))
 
   private def extractReasoning(values: Map[String, Any]): Either[DspyError, String] =
@@ -110,10 +119,22 @@ final case class ChainOfThought[I, O](
       case None =>
         Left(NotFoundError(
           resource = "prediction_field",
-          message  = "Required field 'reasoning' is missing from the DynamicChainOfThought prediction"
+          message  = "Required field 'reasoning' is missing from the ChainOfThought prediction"
         ))
 
 object ChainOfThought:
+
+  private[programs] val reasoningField: FieldSpec = FieldSpec(
+    name        = "reasoning",
+    role        = FieldRole.Output,
+    typeRef     = TypeRef.string,
+    description = Some("${reasoning}"),
+    prefix      = Some("Reasoning:")
+  )
+
+  private[dspy4s] def augmentLayout(layout: SignatureLayout): Either[DspyError, SignatureLayout] =
+    if layout.outputFields.exists(_.name == reasoningField.name) then Right(layout)
+    else layout.insert(index = 0, field = reasoningField)
 
   /** Match type prepending `reasoning: String` to a named-tuple output. */
   type WithReasoning[O] = O match

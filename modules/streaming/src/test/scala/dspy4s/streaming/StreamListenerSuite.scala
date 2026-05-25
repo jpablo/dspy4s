@@ -3,7 +3,8 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
-import dspy4s.programs.DynamicChainOfThought
+import dspy4s.programs.ChainOfThought
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.core.contracts.DspyError
@@ -237,7 +238,7 @@ class StreamListenerSuite extends FunSuite:
     }
   }
 
-  test("DynamicChainOfThought: listener receives the augmented signature's fields") {
+  test("reasoning-augmented DynamicPredict: listener receives the augmented signature's fields") {
     val chunks = Vector(
       LmChunk(
         text = "[[ ## reasoning ## ]]\nwalked through it\n[[ ## answer ## ]]\n42\n[[ ## completed ## ]]",
@@ -256,7 +257,7 @@ class StreamListenerSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = DynamicChainOfThought(baseSignature = baseSignature)
+      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature).toOption.get)
       val stream = Streamify.streamify(
         program = program,
         streamListeners = Vector(
@@ -270,13 +271,12 @@ class StreamListenerSuite extends FunSuite:
       val grouped = tokens.groupMapReduce(_.fieldName)(_.chunk)(_ + _)
       assertEquals(grouped.get("reasoning"), Some("walked through it"))
       assertEquals(grouped.get("answer"), Some("42"))
-      // predictName is the innermost active DynamicPredict's name (matches Python
-      // DSPy parity). DynamicChainOfThought delegates to a default-named inner DynamicPredict.
+      // predictName is the active DynamicPredict's name.
       assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
     }
   }
 
-  test("DynamicChainOfThought: listener filtering by predictName works against the inner DynamicPredict's name") {
+  test("reasoning-augmented DynamicPredict: listener filtering by predictName works") {
     val chunks = Vector(
       LmChunk(
         text = "[[ ## reasoning ## ]]\nr\n[[ ## answer ## ]]\na\n[[ ## completed ## ]]",
@@ -295,8 +295,9 @@ class StreamListenerSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
+      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature).toOption.get)
       val stream = Streamify.streamify(
-        program = DynamicChainOfThought(baseSignature = baseSignature),
+        program = program,
         streamListeners = Vector(
           StreamListener("answer", predictName = Some("predict"))
         )

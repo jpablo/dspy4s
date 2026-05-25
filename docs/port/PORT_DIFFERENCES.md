@@ -99,8 +99,8 @@ The `Shape[A]` typeclass has three implementations
 for named-tuple I/O from the macros, `MapShape` for the string DSL).
 The pair-of-types pattern (erased + typed) repeats: `Prediction`
 becomes `DynamicPrediction` + `Prediction[O]`, `Predict` becomes
-`DynamicPredict` + `Predict[I, O]`, `ChainOfThought` becomes
-`DynamicChainOfThought` + `ChainOfThought[I, O]`. Each typed wrapper
+`DynamicPredict` + `Predict[I, O]`, and `ChainOfThought` is a typed
+signature augmentation over `Predict[I, O]`. Each typed wrapper
 holds a memoized instance of its erased counterpart, so the runtime
 stack only knows about the erased side.
 
@@ -315,7 +315,7 @@ doesn't have:
 - `Predict[I, O]` — typed predict, wraps a memoized
   `DynamicPredict`.
 
-Mirror pair for `ChainOfThought` / `DynamicChainOfThought`. The
+`ChainOfThought` is now defined in terms of typed `Predict`. The
 typed wrappers are a Scala-native addition that doesn't change the
 underlying call flow; the engine is the single home for the
 adapter/LM/callback dance that Python has spread across

@@ -42,7 +42,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 4. Program modules
 - `Predict[I, O]` (typed) and `DynamicPredict` (erased), backed by a
   shared `PredictEngine`
-- `ChainOfThought` (typed) and `DynamicChainOfThought`
+- `ChainOfThought` (typed)
 - `ReAct`, `Parallel`, `BestOfN`, `Refine`, `Aggregation.majority`
 - `MultiChainComparison`, `ProgramOfThought`, `CodeAct` (scaffolded — see
   PORT_MAP §2a for interpreter parity caveats)
