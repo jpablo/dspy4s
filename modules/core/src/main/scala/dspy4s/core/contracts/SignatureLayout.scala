@@ -2,19 +2,35 @@ package dspy4s.core.contracts
 
 import scala.util.matching.Regex
 
+/** Discriminator on [[FieldSpec]] that partitions a [[SignatureLayout]]'s fields into the values the LM is given
+  * (`Input`) versus the values it must produce (`Output`). Adapters use this to drive prompt structure and to know
+  * which keys to expect in the parsed response. */
 enum FieldRole:
   case Input
   case Output
 
+/** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
+  *
+  * This is the *adapter / prompt* type, not the Scala type -- the typed layer's `Shape[A]` carries the static
+  * Scala-side encoding. A Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire
+  * level (the LM sees a flat string like `"joy"`, and [[FieldMetadata.EnumCases]] tells adapters which strings
+  * are allowed).
+  *
+  * Five well-known refs cover the common cases. Anything outside that set passes through as an opaque token --
+  * adapters that don't recognize it fall back to rendering it as a free-form string. */
 final case class TypeRef(repr: String)
 
 object TypeRef:
   val string: TypeRef = TypeRef("string")
-  val int: TypeRef = TypeRef("int")
+  val int: TypeRef    = TypeRef("int")
   val double: TypeRef = TypeRef("double")
-  val bool: TypeRef = TypeRef("bool")
-  val json: TypeRef = TypeRef("json")
+  val bool: TypeRef   = TypeRef("bool")
+  val json: TypeRef   = TypeRef("json")
 
+  /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
+    * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`)
+    * and is case-insensitive. Unknown tokens become opaque `TypeRef(other)`. An empty / missing token defaults to
+    * [[TypeRef.string]] (DSPy convention -- fields without a type annotation are strings). */
   def fromToken(token: String): TypeRef =
     token.trim.toLowerCase match
       case "" | "str" | "string"         => string
@@ -24,6 +40,21 @@ object TypeRef:
       case "json" | "dict" | "map"       => json
       case other                         => TypeRef(other)
 
+/** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses;
+  * the typed layer's `Shape[A]` produces and consumes the field-value `Map[String, Any]` keyed by `name`.
+  *
+  *   - [[name]] is the canonical field key used in input / output maps.
+  *   - [[role]] partitions the field into input vs output.
+  *   - [[typeRef]] is the wire-format type the LM sees in the prompt -- see [[TypeRef]].
+  *   - [[description]] is a per-field hint shown in adapter prompts (e.g. `"the question to answer"`). When
+  *     `None`, [[FieldSpec.normalize]] defaults it to a placeholder like `"${question}"` so the prompt always
+  *     names the slot.
+  *   - [[prefix]] is the section header in adapter prompts (e.g. `"Question:"`); inferred from `name` by
+  *     [[FieldSpec.inferPrefix]] when `None`.
+  *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo
+  *     example omits this field. (Not used for live-call inputs.)
+  *   - [[metadata]] is the open-ended map for adapter-aware hints. See [[FieldMetadata]] for the well-known keys.
+  */
 final case class FieldSpec(
     name: String,
     role: FieldRole,
@@ -34,22 +65,27 @@ final case class FieldSpec(
     metadata: Map[String, String] = Map.empty
 )
 
-/** Well-known string keys that may appear in `FieldSpec.metadata`. Defined
-  * here in `core` so any producer (the typed layer, custom builders, future
-  * derivation macros) and any consumer (adapters in `lm`, prompt formatters
-  * in `adapters`, etc.) can share one contract without depending on each
-  * other. Adapters that understand a key may surface it to the LM; adapters
-  * that don't ignore it harmlessly. */
+/** Well-known string keys that may appear in `FieldSpec.metadata`. Defined here in `core` so any producer (the
+  * typed layer, custom builders, future derivation macros) and any consumer (adapters in `lm`, prompt formatters
+  * in `adapters`, etc.) can share one contract without depending on each other. Adapters that understand a key
+  * may surface it to the LM; adapters that don't ignore it harmlessly. */
 object FieldMetadata:
-  /** Comma-separated allowed case names for a field backed by a closed set
-    * (typically a Scala enum). Example: `"sadness,joy,love"`. */
+  /** Comma-separated allowed case names for a field backed by a closed set (typically a Scala enum). Example:
+    * `"sadness,joy,love"`. */
   val EnumCases: String = "enum.cases"
 
-  /** The original Scala display name of an enum-typed field (e.g.
-    * `"Sentiment"`). Useful for adapter prompt rendering when the lowercased
-    * `TypeRef` is less informative than the source type name. */
+  /** The original Scala display name of an enum-typed field (e.g. `"Sentiment"`). Useful for adapter prompt
+    * rendering when the lowercased `TypeRef` is less informative than the source type name. */
   val EnumName: String = "enum.name"
 
+/** Partial update DTO for the field-mutation surface on [[SignatureLayout]]. Each `Option` field that's `Some`
+  * overwrites the corresponding [[FieldSpec]] property; metadata is merged additively.
+  *
+  * `typeToken` is a string alternative to `typeRef`: callers that have the DSL type word (`"bool"`, `"int"`, ...)
+  * can pass it and the runtime resolves via [[TypeRef.fromToken]]. If both are set, `typeRef` wins.
+  *
+  * Public mostly as a transitional artifact -- the consumer
+  * (`SignatureLayout.withUpdatedFields`) is `private[dspy4s]`, so user code currently has no path to call it. */
 final case class FieldUpdate(
     typeRef: Option[TypeRef] = None,
     typeToken: Option[String] = None,
@@ -64,8 +100,14 @@ final case class FieldUpdate(
 object FieldSpec:
   private val identifierPattern: Regex = raw"[A-Za-z_][A-Za-z0-9_]*".r
 
+  /** True if `name` is a valid Scala-style identifier (alphanumeric + underscore, must start with letter or
+    * underscore). Adapters require this -- field names appear as keys in `Map[String, Any]` payloads and as
+    * named-tuple labels in the typed layer, so non-identifier names would break the typed surface. */
   def validateName(name: String): Boolean = identifierPattern.matches(name)
 
+  /** Convert a camelCase or snake_case field name into a human-readable prompt label (e.g. `"scoreValue"` →
+    * `"Score Value"`). Used by [[normalize]] to default the [[FieldSpec.prefix]] when one isn't explicitly set.
+    * Handles letter-digit boundaries (`"v2"` → `"V 2"`) and preserves all-caps acronyms unchanged. */
   def inferPrefix(name: String): String =
     val step1 = name.replaceAll("(.)([A-Z][a-z]+)", "$1_$2")
     val step2 = step1.replaceAll("([a-z0-9])([A-Z])", "$1_$2")
@@ -81,6 +123,12 @@ object FieldSpec:
       }
       .mkString(" ")
 
+  /** Fill in adapter-friendly defaults for a [[FieldSpec]]: if `prefix` is `None`, derive one from `name` via
+    * [[inferPrefix]] and append `":"`; if `description` is `None`, default to a `${name}` placeholder. Existing
+    * values are preserved -- this only ever adds.
+    *
+    * Applied to every field by [[SignatureLayout.create]], so adapters always see uniform prefix / description
+    * surfaces regardless of which factory built the layout. */
   def normalize(field: FieldSpec): FieldSpec =
     val inferredPrefix = inferPrefix(field.name) + ":"
     field.copy(
@@ -88,25 +136,32 @@ object FieldSpec:
       description = field.description.orElse(Some(s"$${${field.name}}"))
     )
 
-/** The compiled runtime layout of a typed Signature: a name, optional
-  * instructions, and an ordered list of `FieldSpec`s. Adapters, programs,
-  * and the rest of the runtime stack consume this directly; the typed
-  * `Signature[I, O]` is the user-facing wrapper around it.
+/** The compiled runtime layout of a typed Signature: a name, optional instructions, and an ordered list of
+  * [[FieldSpec]]s. Adapters, programs, and the rest of the runtime stack consume this directly; the typed
+  * `Signature[I, O]` (in `dspy4s.typed`) is the user-facing wrapper around it.
   *
-  * Construction paths:
-  *   - The typed surface (`dspy4s.typed.Signature.of[T]`,
-  *     `Signature.fromType[F]`, `Signature.derived[I, O]`) — the
-  *     primary path; the resulting `Signature.layout` is the value
-  *     adapters see.
-  *   - `SignatureLayout.create(name, fields, instructions)` —
-  *     validating + normalizing factory for programmatic construction.
-  *   - `SignatureLayout.parse(dsl, instructions)` — string-DSL parser
-  *     escape hatch; prefer `dspy4s.typed.Signature.fromString` from
-  *     user code.
+  * '''Construction paths.'''
   *
-  * The case-class `apply(name, fields, instructions)` form is also
-  * available but skips normalization — only use it from internal code
-  * that builds the field list deliberately. */
+  *   - Typed surface (`dspy4s.typed.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
+  *     primary path; the resulting `Signature.layout` is the value adapters see.
+  *   - [[SignatureLayout.create]] -- validating + normalizing factory for programmatic construction.
+  *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.typed.Signature.fromString`
+  *     from user code.
+  *   - [[SignatureLayout.fromState]] -- re-hydrate from the JSON-friendly map produced by [[dumpState]].
+  *
+  * The case-class `apply(name, fields, instructions)` form is also available but skips normalization -- use only
+  * from internal code that builds the field list deliberately.
+  *
+  * '''Field mutation.''' The `append` / `prepend` / `insert` / `delete` / `withFields` / `updateField` /
+  * `withUpdatedField*` methods are `private[dspy4s]`. They exist because composite programs (`ChainOfThought`,
+  * `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base layout with auxiliary fields
+  * (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User code should mutate at the
+  * typed `Signature` surface (use a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather
+  * than reaching into the layout directly.
+  *
+  * '''Invariants.''' The `require` block at construction guarantees that a built layout has a non-empty `name`,
+  * unique field names, and identifier-shaped field names. Adapters can rely on those without re-checking.
+  */
 final case class SignatureLayout(
     name: String,
     fields: Vector[FieldSpec],
@@ -123,11 +178,18 @@ final case class SignatureLayout(
   )
 
   // ── Stable public accessors / settings ──────────────────────────────
+
+  /** All input-role fields in declaration order. */
   def inputFields: Vector[FieldSpec]  = fields.filter(_.role == FieldRole.Input)
+
+  /** All output-role fields in declaration order. */
   def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
 
+  /** Replace signature-level instructions. */
   def withInstructions(text: Option[String]): SignatureLayout = copy(instructions = text)
 
+  /** Same as the `Option` overload, but treats the empty string as "no change" so callers can pass
+    * `withInstructions("")` to leave instructions intact. */
   def withInstructions(text: String): SignatureLayout =
     if text.isEmpty then this else withInstructions(Some(text))
 
@@ -233,14 +295,23 @@ final case class SignatureLayout(
       )
     }
 
+  // ── Read helpers ────────────────────────────────────────────────────
+
+  /** Render the DSPy-style string DSL for this layout (e.g. `"comment, lang -> toxic, confidence"`). Inverse of
+    * [[SignatureLayout.parse]] for the shape only -- types / instructions / metadata are dropped. */
   def signatureString: String =
     val inputs = inputFields.map(_.name).mkString(", ")
     val outputs = outputFields.map(_.name).mkString(", ")
     s"$inputs -> $outputs"
 
+  /** Equality that ignores the [[name]]. Useful for comparing two layouts that describe the same shape but were
+    * constructed with different anonymous names (e.g. `"Signature"` from `fromType` vs `"X"` from a builder). */
   def equalsByStructure(other: SignatureLayout): Boolean =
     instructions == other.instructions && fields == other.fields
 
+  /** Serialize to a JSON-friendly `Map[String, Any]`. Round-trips with [[SignatureLayout.fromState]]. The shape is
+    * dspy4s-native -- this is the building block of the load/save story (a deliberately non-Python-pickle path,
+    * see PORT_DIFFERENCES). */
   def dumpState: Map[String, Any] =
     Map(
       "name" -> name,
@@ -260,9 +331,8 @@ final case class SignatureLayout(
 
 object SignatureLayout:
 
-  /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a
-    * `SignatureLayout`. Prefer `dspy4s.typed.Signature.fromString` from
-    * user code; this is the lower-level entry point that the typed
+  /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a `SignatureLayout`. Prefer
+    * `dspy4s.typed.Signature.fromString` from user code; this is the lower-level entry point that the typed
     * surface delegates to. */
   def parse(
       dsl: String,
@@ -275,10 +345,9 @@ object SignatureLayout:
         else layout.withInstructions(instructions)
       )
 
-  /** Validating + normalizing factory. Returns `Left` with a structured
-    * `DspyError` when validation fails (empty name, no fields, duplicate
-    * names, invalid identifiers); on success, applies `FieldSpec.normalize`
-    * to each field so adapters see consistent prefixes / descriptions. */
+  /** Validating + normalizing factory. Returns `Left` with a structured `DspyError` when validation fails (empty
+    * name, no fields, duplicate names, invalid identifiers); on success, applies `FieldSpec.normalize` to each
+    * field so adapters see consistent prefixes / descriptions. */
   def create(
       name: String,
       fields: Vector[FieldSpec],
@@ -294,8 +363,8 @@ object SignatureLayout:
       val normalized = fields.map(FieldSpec.normalize)
       Right(SignatureLayout(name = name, fields = normalized, instructions = instructions))
 
-  /** Re-hydrate a layout from the `Map[String, Any]` produced by
-    * `dumpState`. Used by persistence / state-snapshot paths. */
+  /** Re-hydrate a layout from the `Map[String, Any]` produced by `dumpState`. Used by persistence / state-snapshot
+    * paths. */
   def fromState(state: Map[String, Any]): Either[DspyError, SignatureLayout] =
     def readName: Either[DspyError, String] =
       state.get("name") match
