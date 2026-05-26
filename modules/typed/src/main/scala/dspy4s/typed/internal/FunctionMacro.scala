@@ -137,6 +137,17 @@ private[typed] object FunctionMacro:
           Some(nameParts.zip(valueParts))
         case _ => None
 
+    def unnamedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
+      tpe.dealias match
+        case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
+          unnamedTupleParts(tail) match
+            case Some(rest) => Some(("_" + (rest.size + 1), head) :: rest)
+            case None       => None
+        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
+          Some(args.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
+        case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
+        case _                                          => None
+
     def decoderExpr(owner: String, fieldName: String, fieldTpe: TypeRepr): Expr[FieldCodec[Any]] =
       fieldTpe.asType match
         case '[t] =>
@@ -244,7 +255,7 @@ private[typed] object FunctionMacro:
         case _ =>
           report.errorAndAbort(s"Internal error materializing scalar output for method '$sigName'")
 
-    namedTupleParts(returnType) match
+    namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
       case Some(outputItems) =>
         if outputItems.isEmpty then
           report.errorAndAbort(s"Signature.from requires method '$sigName' to declare at least one output field")
@@ -260,7 +271,7 @@ private[typed] object FunctionMacro:
               outputShapeExpr = '{ new Shape.TupleShape[o](Vector(${ Varargs(outFieldExprs) }*), ${ decoderMapExpr(outputData) }) }
             )
           case _ =>
-            report.errorAndAbort(s"Internal error materializing named-tuple output for method '$sigName'")
+            report.errorAndAbort(s"Internal error materializing tuple output for method '$sigName'")
       case None =>
         if returnType.typeSymbol.flags.is(Flags.Case) || returnType <:< TypeRepr.of[Product] then
           returnType.asType match
@@ -334,6 +345,17 @@ private[typed] object FunctionMacro:
           val valueParts = tupleParts(values)
           Some(nameParts.zip(valueParts))
         case _ => None
+
+    def unnamedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
+      tpe.dealias match
+        case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
+          unnamedTupleParts(tail) match
+            case Some(rest) => Some(("_" + (rest.size + 1), head) :: rest)
+            case None       => None
+        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
+          Some(args.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
+        case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
+        case _                                          => None
 
     def decoderExpr(owner: String, fieldName: String, fieldTpe: TypeRepr): Expr[FieldCodec[Any]] =
       fieldTpe.asType match
@@ -448,7 +470,7 @@ private[typed] object FunctionMacro:
         case _ =>
           report.errorAndAbort("Internal error materializing scalar output for function type")
 
-    namedTupleParts(returnType) match
+    namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
       case Some(outputItems) =>
         if outputItems.isEmpty then
           report.errorAndAbort("Signature.fromType requires at least one output field")

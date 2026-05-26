@@ -3,12 +3,6 @@ ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.1"
 
 lazy val munitVersion = "1.1.1"
-lazy val kyoVersion   = "1.0.0-RC2"
-
-lazy val kyoSchemaDeps = Seq(
-  "io.getkyo" %% "kyo-data"   % kyoVersion,
-  "io.getkyo" %% "kyo-schema" % kyoVersion
-)
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -45,19 +39,15 @@ lazy val core = (project in file("modules/core"))
     Test / parallelExecution := false
   )
 
-// Typed signatures layer. kyo-schema is used in production as the structured
-// codec backend behind dspy4s's FieldCodec boundary. kyo-data is explicit
-// because kyo-schema's Structure.Value tree and test Record probes use its
-// collection/data primitives.
-//
-// Migration in progress: zio-blocks-schema is being introduced as the
-// replacement for kyo-schema; both libs coexist during the migration.
+// Typed signatures layer. zio-blocks-schema is the structured codec backend
+// behind dspy4s's FieldCodec boundary (see ZioSchemaCodec) and provides the
+// Schema typeclass that `Signature.derived` / `Shape.derived` summon.
 lazy val typed = (project in file("modules/typed"))
   .dependsOn(core)
   .settings(commonSettings)
   .settings(name := "dspy4s-typed")
   .settings(
-    libraryDependencies ++= kyoSchemaDeps ++ Seq(
+    libraryDependencies ++= Seq(
       "dev.zio"       %% "zio-blocks-schema" % "0.0.40",
       "org.scalameta" %% "munit"             % munitVersion % Test
     )
@@ -94,8 +84,7 @@ lazy val programs = (project in file("modules/programs"))
   .settings(commonSettings)
   .settings(name := "dspy4s-modules")
   .settings(
-    libraryDependencies ++= kyoSchemaDeps :+
-      ("org.scalameta" %% "munit" % munitVersion % Test)
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
   )
 
 lazy val evaluate = (project in file("modules/evaluate"))
@@ -138,8 +127,7 @@ lazy val examples = (project in file("modules/examples"))
   .settings(commonSettings)
   .settings(name := "dspy4s-examples")
   .settings(
-    publish / skip := true,
-    libraryDependencies ++= kyoSchemaDeps
+    publish / skip := true
   )
 
 // Throwaway experiment: evaluate whether zio-blocks Schema could replace
