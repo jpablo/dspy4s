@@ -92,8 +92,9 @@ private[typed] object ZioSchemaCodec:
     DynamicValue.Record(zio.blocks.chunk.Chunk.from(converted))
 
   /** Best-effort: wrap a value as a `DynamicValue` without target-type guidance. Used for the
-    * fallback branch in [[anyToDynamic]] when no `Reflect` is available. */
-  private def anyToDynamicLoose(value: Any): DynamicValue = value match
+    * fallback branch in [[anyToDynamic]] when no `Reflect` is available, and also from the
+    * `Shape.encodeToDynamic` default for shapes without a backing `Schema[A]`. */
+  def anyToDynamicLoose(value: Any): DynamicValue = value match
     case null         => DynamicValue.Null
     case s: String    => DynamicValue.Primitive(PrimitiveValue.String(s))
     case b: Boolean   => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
@@ -204,8 +205,18 @@ private[typed] object ZioSchemaCodec:
       override lazy val jsonSchemaString: Option[String] =
         Some(schema.toJsonSchema.toJson.toString)
 
+      // Native DynamicValue path -- no Map round-trip.
+
+      override def encodeToDynamic(value: A): DynamicValue =
+        schema.toDynamicValue(value)
+
+      override def decodeFromDynamic(dyn: DynamicValue): Either[DspyError, A] =
+        schema.fromDynamicValue(dyn).left.map(err => ValidationError(err.toString))
+
+      // Map-based shims for callers that produce / consume `Map[String, Any]`.
+
       override def encode(value: A): Map[String, Any] =
-        dynamicToAny(schema.toDynamicValue(value)) match
+        dynamicToAny(encodeToDynamic(value)) match
           case map: Map[?, ?] => map.asInstanceOf[Map[String, Any]]
           case other =>
             throw new IllegalStateException(
@@ -220,5 +231,4 @@ private[typed] object ZioSchemaCodec:
             message  = s"Missing required fields: ${missing.mkString(", ")}"
           ))
         else
-          val dyn = anyToDynamic(raw, rootReflect)
-          schema.fromDynamicValue(dyn).left.map(err => ValidationError(err.toString))
+          decodeFromDynamic(anyToDynamic(raw, rootReflect))

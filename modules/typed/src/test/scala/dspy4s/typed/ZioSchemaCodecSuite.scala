@@ -66,6 +66,26 @@ class ZioSchemaCodecSuite extends FunSuite:
     assertEquals(out, Right(Probe(flag = true, count = 42, score = 0.9)))
   }
 
+  test("encodeToDynamic / decodeFromDynamic round-trip skips the Map conversion") {
+    import zio.blocks.schema.DynamicValue
+    import ZsClassifyOutput.given
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput](FieldRole.Output)
+    val value = ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.42)
+
+    val dyn = shape.encodeToDynamic(value)
+    // Native: the record holds a Variant for the enum (not a flat string).
+    dyn match
+      case rec: DynamicValue.Record =>
+        val sentiment = rec.fields.toMap.get("sentiment")
+        assert(sentiment.exists(_.isInstanceOf[DynamicValue.Variant]),
+          s"expected Variant for sentiment, got: $sentiment")
+      case other =>
+        fail(s"expected Record, got: ${other.getClass.getSimpleName}")
+
+    val decoded = shape.decodeFromDynamic(dyn)
+    assertEquals(decoded, Right(value))
+  }
+
   test("encode/decode round-trip for a case-class input") {
     import ZsCommentInput.given
     val shape = ZioSchemaCodec.derivedFromZioSchema[ZsCommentInput](FieldRole.Input)

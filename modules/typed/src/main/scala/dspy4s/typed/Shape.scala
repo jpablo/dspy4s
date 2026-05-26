@@ -3,7 +3,7 @@ package dspy4s.typed
 import dspy4s.core.contracts.{
   DspyError, FieldRole, FieldSpec, NotFoundError, ValidationError
 }
-import zio.blocks.schema.Schema
+import zio.blocks.schema.{DynamicValue, Schema}
 import scala.deriving.Mirror
 
 /** A schema-aware view of a user type `A`, used as the input or output of a
@@ -17,8 +17,32 @@ import scala.deriving.Mirror
   */
 trait Shape[A]:
   def fieldSpecs: Vector[FieldSpec]
+
+  /** Encode a typed value to the adapter intermediate `Map[String, Any]`. */
   def encode(value: A): Map[String, Any]
+
+  /** Decode a typed value from the adapter intermediate `Map[String, Any]`. */
   def decode(raw: Map[String, Any]): Either[DspyError, A]
+
+  /** Encode a typed value to a `DynamicValue` (the zio-blocks structural ADT). Default implementation wraps
+    * [[encode]] via the codec converter; backends with a native `Schema[A]` (the ZioSchema-derived shape)
+    * override this to skip the `Map` round-trip. */
+  def encodeToDynamic(value: A): DynamicValue =
+    ZioSchemaCodec.anyToDynamicLoose(encode(value))
+
+  /** Decode a typed value from a `DynamicValue`. Default implementation walks the value into a
+    * `Map[String, Any]` (via the codec converter) and delegates to [[decode]]; backends with a native
+    * `Schema[A]` override this to call `Schema.fromDynamicValue` directly. */
+  def decodeFromDynamic(dyn: DynamicValue): Either[DspyError, A] =
+    dyn match
+      case rec: DynamicValue.Record =>
+        val map = ZioSchemaCodec.dynamicToAny(rec) match
+          case m: Map[?, ?] => m.asInstanceOf[Map[String, Any]]
+          case other =>
+            return Left(ValidationError(s"Expected a record-shaped DynamicValue, got: $other"))
+        decode(map)
+      case other =>
+        Left(ValidationError(s"Expected DynamicValue.Record, got: ${other.getClass.getSimpleName}"))
 
   /** Render this shape as a JSON Schema string suitable for prompt instructions to LMs that follow
     * structured-output hints. Returns `None` for shapes that don't have a backing `zio.blocks.schema.Schema`
