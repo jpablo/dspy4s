@@ -22,8 +22,7 @@ lazy val root = (project in file("."))
     evaluate,
     optimize,
     streaming,
-    examples,
-    prototypeZioBlocks
+    examples
   )
   .settings(commonSettings)
   .settings(
@@ -130,17 +129,3 @@ lazy val examples = (project in file("modules/examples"))
     publish / skip := true
   )
 
-// Throwaway experiment: evaluate whether zio-blocks Schema could replace
-// kyo-schema + our Shape / FieldCodec glue. Self-contained, no `dependsOn`
-// edges to the main codebase, so deleting this directory removes the dep
-// cleanly.
-lazy val prototypeZioBlocks = (project in file("prototype/zio-blocks"))
-  .settings(commonSettings)
-  .settings(
-    name := "dspy4s-prototype-zio-blocks",
-    publish / skip := true,
-    libraryDependencies ++= Seq(
-      "dev.zio"        %% "zio-blocks-schema" % "0.0.40",
-      "org.scalameta"  %% "munit"             % munitVersion % Test
-    )
-  )
