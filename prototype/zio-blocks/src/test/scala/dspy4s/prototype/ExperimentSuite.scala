@@ -107,6 +107,38 @@ class ExperimentSuite extends FunSuite:
         s.trim.toIntOption.fold(dyn)(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
       case _ => dyn
 
+  test("fieldSpecsFrom walks a Reflect.Record and produces per-field metadata") {
+    import Experiment.BaseOutput.given
+    val specs = Experiment.fieldSpecsFrom(summon[zio.blocks.schema.Schema[Experiment.BaseOutput]].reflect)
+    assertEquals(specs.map(_.name), Vector("answer", "score"))
+    assertEquals(specs.map(_.typeKind), Vector("primitive", "primitive"))
+  }
+
+  test("fieldSpecsFrom surfaces enum cases on Variant-typed fields as dspy.enum.cases") {
+    import Experiment.ClassifyOutput.given
+    val specs = Experiment.fieldSpecsFrom(summon[zio.blocks.schema.Schema[Experiment.ClassifyOutput]].reflect)
+    assertEquals(specs.size, 1)
+    val sentiment = specs.head
+    assertEquals(sentiment.name, "sentiment")
+    assertEquals(sentiment.typeKind, "variant")
+    assertEquals(sentiment.metadata.get("dspy.enum.cases"), Some("sadness,joy,love"))
+  }
+
+  test("augmentedLayout prepends reasoning to the base output's field list") {
+    import Experiment.BaseOutput.given
+    val layout = Experiment.augmentedLayout[Experiment.BaseOutput]("ReasonedOutput")
+    assertEquals(layout.name, "ReasonedOutput")
+    assertEquals(layout.fields.map(_.name), Vector("reasoning", "answer", "score"))
+  }
+
+  test("base Schema[O] is untouched by augmentation; round-trip still works") {
+    import Experiment.BaseOutput.given
+    val schema = summon[zio.blocks.schema.Schema[Experiment.BaseOutput]]
+    val value  = Experiment.BaseOutput(answer = "Paris", score = 0.95)
+    val dyn    = schema.toDynamicValue(value)
+    assertEquals(schema.fromDynamicValue(dyn), Right(value))
+  }
+
   test("DynamicValue shape for ClassifyOutput is a Record-of-Variant") {
     import zio.blocks.schema.{DynamicValue, Schema}
     val schema = summon[Schema[Experiment.ClassifyOutput]]

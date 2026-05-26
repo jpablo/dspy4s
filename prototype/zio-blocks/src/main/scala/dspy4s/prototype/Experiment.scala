@@ -134,6 +134,60 @@ object Experiment:
   // Optionally probe the spelled-out NamedTuple form too. Kept commented unless we want to test directly.
   // type ExpandedInput = NamedTuple.NamedTuple[("sentence" *: EmptyTuple), (String *: EmptyTuple)]
   // given Schema[ExpandedInput] = Schema.derived
+
+  // ── Field augmentation (ChainOfThought-style) ──────────────────────
+
+  // Today: `ChainOfThought` calls SignatureLayout's private[dspy4s] `insert(index = 0, reasoningField)` to
+  // prepend a reasoning output field to the base signature. The augmented layout is what the adapter sees;
+  // the typed wrapper handles decoding the reasoning string separately from the base output type.
+  //
+  // After migration: SignatureLayout is the adapter contract (unchanged). We derive its FieldSpec list from
+  // a Schema by walking Reflect.Record.fields. Augmentation = prepend an extra FieldSpec; no Schema mutation
+  // needed because the base type doesn't change. The typed wrapper splits the decoded record into reasoning
+  // + base output, same shape as today.
+
+  /** A field descriptor we'd derive from a Schema's Reflect during migration. Standin for the existing
+    * dspy4s.core.contracts.FieldSpec.
+    */
+  final case class ProtoFieldSpec(name: String, typeKind: String, metadata: Map[String, String] = Map.empty)
+
+  /** Walk a Reflect for a record and produce the per-field metadata an adapter would render. */
+  def fieldSpecsFrom(r: Reflect[?, ?]): Vector[ProtoFieldSpec] = r match
+    case rec: Reflect.Record[?, ?] =>
+      rec.fields.toVector.map { term =>
+        val typeKind = term.value match
+          case _: Reflect.Primitive[?, ?]   => "primitive"
+          case _: Reflect.Variant[?, ?]     => "variant"
+          case _: Reflect.Record[?, ?]      => "record"
+          case _: Reflect.Sequence[?, ?, ?] => "sequence"
+          case _: Reflect.Map[?, ?, ?, ?]   => "map"
+          case _                            => "other"
+        // For enum-typed fields (Variant), capture the case names as "dspy.enum.cases" -- the same metadata
+        // we surface today via FieldMetadata.EnumCases.
+        val meta = term.value match
+          case v: Reflect.Variant[?, ?] =>
+            val caseNames = v.cases.toVector.map(_.name).mkString(",")
+            Map("dspy.enum.cases" -> caseNames)
+          case _ => Map.empty[String, String]
+        ProtoFieldSpec(term.name, typeKind, meta)
+      }
+    case _ => Vector.empty
+
+  /** ChainOfThought-style augmentation: prepend a reasoning output field to the base output schema's field list.
+    * Returns a `ProtoSignatureLayout` ready for an adapter to render. */
+  final case class ProtoSignatureLayout(name: String, fields: Vector[ProtoFieldSpec])
+
+  val reasoningField: ProtoFieldSpec =
+    ProtoFieldSpec(name = "reasoning", typeKind = "primitive")
+
+  case class BaseOutput(answer: String, score: Double)
+  object BaseOutput:
+    given Schema[BaseOutput] = Schema.derived
+
+  /** Derive the SignatureLayout an adapter would see for the augmented (CoT-style) output schema. */
+  def augmentedLayout[O](name: String)(using s: Schema[O]): ProtoSignatureLayout =
+    val base = fieldSpecsFrom(s.reflect)
+    ProtoSignatureLayout(name, reasoningField +: base)
   //
   //   - Coercive decode: `fromDynamicValue` is strict. LM output is fuzzy ("true" -> Boolean, "42" -> Int).
   //     Need to either normalize the DynamicValue before decode (cheap fix) or hook the format-codec layer.
