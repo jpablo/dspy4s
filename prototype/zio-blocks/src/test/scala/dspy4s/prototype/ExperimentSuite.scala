@@ -62,6 +62,51 @@ class ExperimentSuite extends FunSuite:
     assertEquals(decoded, Right(value))
   }
 
+  test("fromDynamicValue is strict: rejects a String where Boolean is expected") {
+    import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+
+    // Construct a DynamicValue.Record by hand that has the same shape as ClassifyOutput would expect
+    // (sentiment field) but uses a String "joy" where the Variant is expected.
+    // Simpler probe: ask a Boolean schema to decode a String.
+    val boolSchema = summon[Schema[Boolean]]
+    val strInput   = DynamicValue.Primitive(PrimitiveValue.String("true"))
+    val result     = boolSchema.fromDynamicValue(strInput)
+    assert(
+      result.isLeft,
+      s"expected fromDynamicValue to reject 'true' as Boolean; got: $result"
+    )
+  }
+
+  test("fromDynamicValue is strict: rejects a String where Int is expected") {
+    import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+    val intSchema = summon[Schema[Int]]
+    val result    = intSchema.fromDynamicValue(DynamicValue.Primitive(PrimitiveValue.String("42")))
+    assert(result.isLeft, s"expected fromDynamicValue to reject '42' as Int; got: $result")
+  }
+
+  test("a manual normalizer can coerce String -> Boolean before decode") {
+    import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+    val boolSchema = summon[Schema[Boolean]]
+    val strInput   = DynamicValue.Primitive(PrimitiveValue.String("true"))
+    val normalized = coerce(strInput, expectedKind = "boolean")
+    val result     = boolSchema.fromDynamicValue(normalized)
+    assertEquals(result, Right(true))
+  }
+
+  /** Minimal coercion helper: rewrite a `DynamicValue.Primitive(String(...))` into the expected primitive kind.
+    * A full version would walk the whole DynamicValue tree against the target Reflect. */
+  private def coerce(dyn: zio.blocks.schema.DynamicValue, expectedKind: String): zio.blocks.schema.DynamicValue =
+    import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+    (dyn, expectedKind) match
+      case (DynamicValue.Primitive(PrimitiveValue.String(s)), "boolean") =>
+        s.trim.toLowerCase match
+          case "true"  => DynamicValue.Primitive(PrimitiveValue.Boolean(true))
+          case "false" => DynamicValue.Primitive(PrimitiveValue.Boolean(false))
+          case _       => dyn
+      case (DynamicValue.Primitive(PrimitiveValue.String(s)), "int") =>
+        s.trim.toIntOption.fold(dyn)(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
+      case _ => dyn
+
   test("DynamicValue shape for ClassifyOutput is a Record-of-Variant") {
     import zio.blocks.schema.{DynamicValue, Schema}
     val schema = summon[Schema[Experiment.ClassifyOutput]]
