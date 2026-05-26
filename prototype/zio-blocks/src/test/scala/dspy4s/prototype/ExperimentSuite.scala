@@ -30,6 +30,38 @@ class ExperimentSuite extends FunSuite:
     assertEquals(result, Right(in))
   }
 
+  test("Schema.derived works for a named-tuple type alias") {
+    import zio.blocks.schema.{Reflect, Schema}
+    import Experiment.namedTupleSchema
+    val schema = summon[Schema[Experiment.SimpleInput]]
+    schema.reflect match
+      case rec: Reflect.Record[?, ?] =>
+        val names = rec.fields.toVector.map(_.name)
+        assertEquals(names, Vector("sentence", "lang"))
+      case other =>
+        fail(s"expected Record reflect for named tuple, got: ${other.getClass.getSimpleName}")
+  }
+
+  test("named tuple round-trips through DynamicValue") {
+    import zio.blocks.schema.{DynamicValue, Schema}
+    import Experiment.namedTupleSchema
+    val schema = summon[Schema[Experiment.SimpleInput]]
+    val value: Experiment.SimpleInput = (sentence = "Best movie ever!", lang = "en")
+    val dyn = schema.toDynamicValue(value)
+
+    // Inspect the shape: should be a Record with two fields.
+    dyn match
+      case rec: DynamicValue.Record =>
+        val byName = rec.fields.toMap
+        assertEquals(byName.keySet, Set("sentence", "lang"))
+      case other =>
+        fail(s"expected Record, got: ${other.getClass.getSimpleName}")
+
+    // Round-trip back to the named tuple.
+    val decoded = schema.fromDynamicValue(dyn)
+    assertEquals(decoded, Right(value))
+  }
+
   test("DynamicValue shape for ClassifyOutput is a Record-of-Variant") {
     import zio.blocks.schema.{DynamicValue, Schema}
     val schema = summon[Schema[Experiment.ClassifyOutput]]

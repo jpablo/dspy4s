@@ -118,11 +118,22 @@ object Experiment:
   // Option (a) maps cleanly to the existing API. Recommendation: keep the I/O split at the typed surface, use
   // Schema for each side's structural model.
 
-  // ── Open questions to verify ───────────────────────────────────────
+  // ── Named-tuple probe ──────────────────────────────────────────────
+
+  // Our Signature.of[Spec] macro materializes named-tuple I/O like
+  //   NamedTuple.NamedTuple["sentence" *: EmptyTuple, String *: EmptyTuple]
   //
-  //   - Named tuples: does Schema.derived work for them? The Spec macro produces named-tuple I/O. If yes, the
-  //     macro becomes a thin wrapper over Schema.derived[NamedTupleType]. If no, we either restrict the Spec
-  //     macro to case-class I/O (loses ergonomics) or hand-write a Reflect for the named tuple.
+  // Question: does Schema.derived work on a named-tuple type? Below: a type-alias form and the structurally
+  // equivalent NamedTuple type. The munit suite probes both via summon[Schema[T]].
+
+  type SimpleInput = (sentence: String, lang: String)
+
+  // Try with explicit derivation. If this compiles, the macro can target named tuples directly.
+  given namedTupleSchema: Schema[SimpleInput] = Schema.derived
+
+  // Optionally probe the spelled-out NamedTuple form too. Kept commented unless we want to test directly.
+  // type ExpandedInput = NamedTuple.NamedTuple[("sentence" *: EmptyTuple), (String *: EmptyTuple)]
+  // given Schema[ExpandedInput] = Schema.derived
   //
   //   - Coercive decode: `fromDynamicValue` is strict. LM output is fuzzy ("true" -> Boolean, "42" -> Int).
   //     Need to either normalize the DynamicValue before decode (cheap fix) or hook the format-codec layer.
