@@ -48,20 +48,15 @@ class DataSuite extends FunSuite:
     assertEquals(built.score, Right(0.9))
   }
 
-  test("completions fromRows and toPredictions") {
+  test("completions fromRows builds equal-length columns indexable via at(i)") {
     val rows = Vector(
       Map("answer" -> "a", "score" -> 0.1),
       Map("answer" -> "b", "score" -> 0.2)
     )
-    val completions = Completions.fromRows(rows)
-
-    assert(completions.isRight)
-    val predictions = completions.toOption.get.toPredictions
-    assert(predictions.isRight)
-    val vector = predictions.toOption.get
-    assertEquals(vector.size, 2)
-    assertEquals(vector.head.values("answer"), "a")
-    assertEquals(vector(1).values("answer"), "b")
+    val completions = Completions.fromRows(rows).toOption.get
+    assertEquals(completions.size, 2)
+    assertEquals(completions.at(0).toOption.get.values("answer"), "a")
+    assertEquals(completions.at(1).toOption.get.values("answer"), "b")
   }
 
   test("completions fromRows fails on inconsistent row keys") {
@@ -175,21 +170,11 @@ class DataSuite extends FunSuite:
     assert(p.asBoolean("number").isLeft)
   }
 
-  test("completion single exposes first and last prediction") {
-    val completions = Completions.single(Map("answer" -> "hello", "score" -> 0.42))
-
-    assertEquals(completions.size, 1)
-    assertEquals(completions.first.map(_.values("answer")), Right("hello"))
-    assertEquals(completions.last.map(_.values("answer")), Right("hello"))
-  }
-
-  test("completion empty first and last fail with validation error") {
+  test("completion at out-of-bounds index fails with validation error") {
     val completions = Completions(Map.empty)
-
-    assert(completions.first.isLeft)
-    assert(completions.last.isLeft)
-    assert(completions.first.left.toOption.get.isInstanceOf[ValidationError])
-    assert(completions.last.left.toOption.get.isInstanceOf[ValidationError])
+    val result = completions.at(0)
+    assert(result.isLeft)
+    assert(result.left.toOption.get.isInstanceOf[ValidationError])
   }
 
   test("prediction from empty rows fails") {

@@ -23,7 +23,6 @@ object SettingKeys:
   val numThreads: SettingKey[Int] = SettingKey("num_threads")
   val maxErrors: SettingKey[Int] = SettingKey("max_errors")
   val maxHistorySize: SettingKey[Int] = SettingKey("max_history_size")
-  val asyncMaxWorkers: SettingKey[Int] = SettingKey("async_max_workers")
   val disableHistory: SettingKey[Boolean] = SettingKey("disable_history")
   val trackUsage: SettingKey[Boolean] = SettingKey("track_usage")
 

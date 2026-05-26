@@ -118,7 +118,7 @@ object RuntimeEnvironment:
     try thunk
     finally contextRef.set(previous)
 
-  def scoped[A](update: RuntimeContext => RuntimeContext)(thunk: => A): A =
+  private def scoped[A](update: RuntimeContext => RuntimeContext)(thunk: => A): A =
     withContext(update(current))(thunk)
 
   def withSettings[A](settings: Settings)(thunk: => A): A =

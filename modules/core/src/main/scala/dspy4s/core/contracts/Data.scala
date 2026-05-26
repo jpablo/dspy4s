@@ -20,10 +20,9 @@ final case class Example(
     inputKeys: Set[String] = Set.empty,
     augmented: Boolean = false
 ):
+  /** Field-value accessor. Used by `Evaluate`'s metrics + persistence layers to read example / prediction values
+    * without unwrapping the underlying `Map`. */
   def get(key: String): Option[Any] = values.get(key)
-  def contains(key: String): Boolean = values.contains(key)
-  def keys: Set[String] = values.keySet
-  def size: Int = values.size
 
   def inputs: Map[String, Any] = values.filter((key, _) => inputKeys.contains(key))
   def labels: Map[String, Any] = values.removedAll(inputKeys)
@@ -35,21 +34,17 @@ final case class Example(
   def withAugmented(flag: Boolean): Example = copy(augmented = flag)
 
 object Example:
-  def empty: Example = Example(values = Map.empty)
-
   /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input
     * keys; call `withInputs(...)` to mark a subset as inputs. */
   def apply(entries: (String, Any)*): Example = Example(values = entries.toMap)
 
 /** A column-oriented view of N candidate completions for one LM call. Each field name maps to a vector of N values
-  * (one per candidate). All columns must have the same length, which defines [[size]]. The column layout makes
-  * "give me all the answers" cheap (`field("answer")`); [[at]] / [[toPredictions]] convert back to row form when a
-  * call site wants per-candidate records.
+  * (one per candidate). All columns must have the same length, which defines [[size]]. [[at]] converts a single
+  * column index back to row form when a call site wants a per-candidate record.
   *
-  * Most code paths see exactly one completion per call (`size == 1`), produced by [[Completions.single]] or
-  * [[Completions.fromRows]] with a single-row input. Multiple completions arise when an LM provider returns
-  * `n > 1` choices (e.g. OpenAI's `n` parameter) or when `BestOfN` runs `Predict` multiple times and packages the
-  * results.
+  * Most code paths see exactly one completion per call (`size == 1`), produced by [[Completions.fromRows]] with a
+  * single-row input. Multiple completions arise when an LM provider returns `n > 1` choices (e.g. OpenAI's `n`
+  * parameter) or when `BestOfN` runs `Predict` multiple times and packages the results.
   *
   * The `require` enforces the equal-column-length invariant at construction time so all downstream `at(i)` calls
   * can read column `i` without bounds-checking each field individually.
@@ -59,11 +54,6 @@ final case class Completions(fields: Map[String, Vector[Any]]):
   require(lengths.size <= 1, "All completion fields must have the same number of values")
 
   def size: Int = fields.values.headOption.map(_.size).getOrElse(0)
-  def fieldNames: Vector[String] = fields.keys.toVector
-  def items: Vector[(String, Vector[Any])] = fields.toVector
-
-  def field(name: String): Either[DspyError, Vector[Any]] =
-    fields.get(name).toRight(NotFoundError("completion_field", s"Completion field '$name' does not exist"))
 
   def at(index: Int): Either[DspyError, DynamicPrediction] =
     if index < 0 || index >= size then
@@ -71,23 +61,6 @@ final case class Completions(fields: Map[String, Vector[Any]]):
     else
       val row = fields.map { case (key, values) => key -> values(index) }
       Right(DynamicPrediction(values = row))
-
-  def first: Either[DspyError, DynamicPrediction] =
-    if size == 0 then Left(ValidationError("Cannot access first completion from empty completions"))
-    else at(0)
-
-  def last: Either[DspyError, DynamicPrediction] =
-    if size == 0 then Left(ValidationError("Cannot access last completion from empty completions"))
-    else at(size - 1)
-
-  def toPredictions: Either[DspyError, Vector[DynamicPrediction]] =
-    (0 until size).toVector.foldLeft[Either[DspyError, Vector[DynamicPrediction]]](Right(Vector.empty)) {
-      (acc, index) =>
-        for
-          soFar <- acc
-          prediction <- at(index)
-        yield soFar :+ prediction
-    }
 
 object Completions:
   /** Convert N row-shaped maps into the columnar layout. Fails if any row's key set differs from the first row's --
@@ -102,10 +75,6 @@ object Completions:
       else
         val columns = expectedKeys.map { key => key -> rows.map(_(key)) }.toMap
         Right(Completions(columns))
-
-  /** Single-completion convenience: every field becomes a one-element column. Bypasses the row/column conversion. */
-  def single(values: Map[String, Any]): Completions =
-    Completions(values.view.mapValues(value => Vector(value)).toMap)
 
 /** Result of a single `DynamicPredict.run` (the erased predict path): the primary completion's field values, plus
   * optional [[completions]] (when the underlying LM returned multiple candidates) and [[lmUsage]] (token
@@ -134,10 +103,9 @@ final case class DynamicPrediction(
     completions: Option[Completions] = None,
     lmUsage: Option[Map[String, Long]] = None
 ):
+  /** Field-value accessor. Used by `Evaluate`'s metrics + persistence layers to read prediction values without
+    * unwrapping the underlying `Map`. */
   def get(key: String): Option[Any] = values.get(key)
-  def contains(key: String): Boolean = values.contains(key)
-  def keys: Set[String] = values.keySet
-  def size: Int = values.size
 
   def withUsage(usage: Map[String, Long]): DynamicPrediction = copy(lmUsage = Some(usage))
 
