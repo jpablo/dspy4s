@@ -1,10 +1,16 @@
 # dspy4s Architecture
 
-A Scala 3 port of the Stanford DSPy framework. The defining design choice
-is that **`Signature[I, O]` is the user-facing surface**: inputs and
-outputs are statically typed, encoded/decoded by `Shape[A]` typeclass
-instances, and adapters / language models still flow through a single
-erased runtime contract (`SignatureLayout`).
+A Scala 3 port of the Stanford DSPy framework. The defining design choices:
+
+- **`Signature[I, O]` is the user-facing surface**: inputs and outputs are
+  statically typed, encoded/decoded by `Shape[A]` typeclass instances, and
+  adapters / language models flow through a single erased runtime contract
+  (`SignatureLayout`).
+- **`zio.blocks.schema.DynamicValue.Record` is the codec spine**: a single
+  intermediate carried through `Example`, `ProgramCall`, `DynamicPrediction`,
+  `ParsedOutput`, and `Shape.encode/decode`. Adapters parse straight into
+  Records; the typed surface encodes / decodes via `Schema.toDynamicValue` /
+  `Schema.fromDynamicValue` with no `Map[String, Any]` round-trip.
 
 ## Module graph
 
@@ -45,26 +51,40 @@ graph TD
 
 ## Modules
 
-1. **`core`** — pure contracts, no dependencies.
+1. **`core`** — contracts. Single external dependency: `zio-blocks-schema`
+   (for `DynamicValue`, the codec spine type).
    - `SignatureLayout` and `FieldSpec` (erased runtime contract for adapters)
-   - `Example`, `DynamicPrediction`, `Completions`
+   - `Example`, `DynamicPrediction`, `Completions` — all field-carrying types
+     hold a `DynamicValue.Record` for their values
+   - `DynamicValues` — helpers (`fromAny`, `toAny`, `recordGet`,
+     `recordUpdated`, `recordFromEntries`, `renderText`, `recordToMap`) used
+     at user-input and observability boundaries to lift plain Scala values
+     into the spine and back. The codec spine itself never goes through
+     these helpers.
    - `Module[I, O]` trait, `RuntimeContext`, `Settings`
    - Error ADT (`DspyError`, `ValidationError`, `ParseError`, …)
    - Callbacks + thread-local context machinery
      (`CallbackDispatcher`, `ActivePredictContext`, `ContextPropagation`)
    - DSL parser (`SignatureDsl.parse`)
 
-2. **`typed`** — typed surface over `SignatureLayout`. Depends only on `core`.
+2. **`typed`** — typed surface over `SignatureLayout`. Depends on `core`.
    - `Signature[I, O]` — wraps a `SignatureLayout` plus `Shape[I]` / `Shape[O]`
-   - `Shape[A]` typeclass with three impls: `KyoProductShape`, `TupleShape`, `MapShape`
+   - `Shape[A]` typeclass with three impls: a product Shape produced by
+     `ZioSchemaCodec.derivedFromZioSchema` (backed by `Schema[A]`),
+     `TupleShape` (for named-tuple outputs from `Signature.of[Spec]` /
+     `Signature.fromType[F]`), and `MapShape` (for string-DSL signatures
+     where I and O are `DynamicValue.Record`).
    - `FieldCodec[A]` typeclass + `FieldCodec.FlatEnum[E]` helper
    - `Spec` trait + `InputField[+A]` / `OutputField[+A]` opaque types
    - `Prediction[O]` typed wrapper
    - Macros: `Signature.from(method)`, `Signature.fromType[F]`,
      `Signature.of[T <: Spec]`, plus `Signature.derived[I, O]` (inline)
    - Backed by `zio-blocks-schema` (`Schema` / `Reflect` / `DynamicValue`)
-     for product encode/decode; `ZioSchemaCodec` bridges between
-     `DynamicValue` and the adapter intermediate `Map[String, Any]`
+     for product encode/decode; `ZioSchemaCodec` derives `FieldSpec`s from
+     `Reflect.Record` and exposes a `normalize(dv, target)` helper that
+     coerces LM-shaped string primitives (`"true"` → `Boolean`, `"42"` →
+     `Int`, bare case-name string → `Variant`) before
+     `Schema.fromDynamicValue` on the decode path.
    - See [TYPE_BRIDGE.md](TYPE_BRIDGE.md) for how Scala types translate to
      the LM-visible wire vocabulary on the way out and back.
 
@@ -110,7 +130,7 @@ graph TD
 
 ```
 SignatureLayout ──→ ProgramCall ──→ DynamicPredict ──→ DynamicPrediction
-                    (Map[String, Any])                  (Map[String, Any])
+                    (DynamicValue.Record)              (DynamicValue.Record)
 ```
 
 `SignatureLayout` carries a name, optional instructions, and an ordered
@@ -128,7 +148,7 @@ goes through the typed surface.
 
 ```
 Signature[I, O] ──→ Predict[I, O].run(input: I) ──→ Prediction[O]
-                    encode I via Shape[I]            decode Map via Shape[O]
+                    encode I via Shape[I]            decode Record via Shape[O]
 ```
 
 `Predict[I, O].run` encodes the input through `signature.inputShape`,
@@ -146,7 +166,7 @@ field access.
 | `Signature.fromType[F]` | function type only, no impl | inferred from `F` |
 | `Signature.of[T <: Spec]` | abstract trait with `InputField` / `OutputField` members | named tuples |
 | `Signature.builder("X").input[A]("a").output[B]("b").build` | programmatic, no class needed | returns a `SignatureLayout` |
-| `Signature.fromString("q -> a")` | runtime-defined string DSL | `Map[String, Any]` both sides |
+| `Signature.fromString("q -> a")` | runtime-defined string DSL | `DynamicValue.Record` both sides |
 
 The first four are the static-typed surfaces. `fromString` is the
 typed wrapper over `SignatureLayout.parse` for cases where the DSL is
@@ -156,9 +176,10 @@ discovered at runtime.
 
 When `Predict[I, O].run(input)` fires:
 
-1. **Encode** — `signature.inputShape.encode(input)` produces
-   `Map[String, Any]`. A defensive check verifies all declared input
-   fields are present (catches Map-shape callers missing a field).
+1. **Encode** — `signature.inputShape.encode(input)` produces a
+   `DynamicValue.Record`. A defensive check verifies all declared input
+   fields are present (catches `MapShape` callers from the string DSL
+   missing a field).
 2. **Hand off** — wrap in `ProgramCall(inputs, config, traceEnabled)`,
    call the memoized inner `DynamicPredict.run(call)`.
 3. **`BasePredictProgram.run` wraps** —
@@ -267,21 +288,30 @@ For comparison with the upstream Python DSPy architecture:
   factories (`parse`, `create`, `fromState`). Mutation helpers are
   `private[dspy4s]`.
 - `core/contracts/Data.scala` — `Example`, `DynamicPrediction`,
-  `Completions`.
+  `Completions`. All field values live in a `DynamicValue.Record`.
+- `core/contracts/DynamicValues.scala` — boundary helpers for lifting
+  plain Scala values into `DynamicValue` (`fromAny`,
+  `recordFromEntries`) and flattening back (`toAny`, `recordToMap`,
+  `renderText`). Used at user-input and observability surfaces; not in
+  the codec spine.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `typed/Signature.scala` — typed wrapper + six factory entry points.
-- `typed/Shape.scala` — three shape implementations (`MapShape`,
-  `TupleShape`, and the product shape produced by
-  `ZioSchemaCodec.derivedFromZioSchema`). Native `DynamicValue`
-  encode / decode methods plus `Map`-based shims.
+- `typed/Shape.scala` — three shape implementations (`MapShape` for
+  string-DSL signatures, `TupleShape` for named-tuple outputs, and
+  the product shape produced by `ZioSchemaCodec.derivedFromZioSchema`).
+  All three speak `DynamicValue.Record` natively in
+  `encode` / `decode` — there is no `Map[String, Any]` shim.
 - `typed/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
-  `DynamicValue` ↔ `Map[String, Any]` converter with coercive
-  primitive normalization, `FieldSpec` derivation from
-  `Reflect.Record`, and the product Shape factory.
+  the product `Shape[A]` factory (`derivedFromZioSchema`), `FieldSpec`
+  derivation from `Reflect.Record`, and `normalize(dv, target)` which
+  coerces LM-shaped primitives against the target Reflect on the
+  decode path. Encode uses `Schema.toDynamicValue` directly.
 - `typed/Spec.scala` — `InputField[+A]` / `OutputField[+A]` opaque
   types and the `Spec` trait.
 - `programs/runtime/PredictEngine.scala` — the shared execute body.
 - `programs/runtime/BasePredictProgram.scala` — module-level wrapping
-  (callbacks + trace).
+  (callbacks + trace). Converts `DynamicValue.Record` payloads to
+  `Map[String, Any]` at the observability boundary (callback event
+  bags, `TraceEntry`, `HistoryEntry` are free-form maps, not records).
 - `programs/Predict.scala` and `programs/DynamicPredict.scala` — the
   typed and erased facades.
