@@ -13,8 +13,7 @@ enum FieldRole:
   *
   * This is the *adapter / prompt* type, not the Scala type -- the typed layer's `Shape[A]` carries the static
   * Scala-side encoding. A Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire
-  * level (the LM sees a flat string like `"joy"`, and [[FieldMetadata.EnumCases]] tells adapters which strings
-  * are allowed).
+  * level (the LM sees a flat string like `"joy"`).
   *
   * Five well-known refs cover the common cases. Anything outside that set passes through as an opaque token --
   * adapters that don't recognize it fall back to rendering it as a free-form string. */
@@ -40,10 +39,9 @@ object TypeRef:
       case "json" | "dict" | "map"       => json
       case other                         => TypeRef(other)
 
-/** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses;
-  * the typed layer's `Shape[A]` produces and consumes the field-value `Map[String, Any]` keyed by `name`.
+/** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses.
   *
-  *   - [[name]] is the canonical field key used in input / output maps.
+  *   - [[name]] is the canonical field key used in input / output records.
   *   - [[role]] partitions the field into input vs output.
   *   - [[typeRef]] is the wire-format type the LM sees in the prompt -- see [[TypeRef]].
   *   - [[description]] is a per-field hint shown in adapter prompts (e.g. `"the question to answer"`). When
@@ -53,7 +51,6 @@ object TypeRef:
   *     [[FieldSpec.inferPrefix]] when `None`.
   *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo
   *     example omits this field. (Not used for live-call inputs.)
-  *   - [[metadata]] is the open-ended map for adapter-aware hints. See [[FieldMetadata]] for the well-known keys.
   */
 final case class FieldSpec(
     name: String,
@@ -61,22 +58,8 @@ final case class FieldSpec(
     typeRef: TypeRef = TypeRef.string,
     description: Option[String] = None,
     prefix: Option[String] = None,
-    defaultValue: Option[Any] = None,
-    metadata: Map[String, String] = Map.empty
+    defaultValue: Option[Any] = None
 )
-
-/** Well-known string keys that may appear in `FieldSpec.metadata`. Defined here in `core` so any producer (the
-  * typed layer, custom builders, future derivation macros) and any consumer (adapters in `lm`, prompt formatters
-  * in `adapters`, etc.) can share one contract without depending on each other. Adapters that understand a key
-  * may surface it to the LM; adapters that don't ignore it harmlessly. */
-object FieldMetadata:
-  /** Comma-separated allowed case names for a field backed by a closed set (typically a Scala enum). Example:
-    * `"sadness,joy,love"`. */
-  val EnumCases: String = "enum.cases"
-
-  /** The original Scala display name of an enum-typed field (e.g. `"Sentiment"`). Useful for adapter prompt
-    * rendering when the lowercased `TypeRef` is less informative than the source type name. */
-  val EnumName: String = "enum.name"
 
 /** Partial update DTO for the field-mutation surface on [[SignatureLayout]]. Each `Option` field that's `Some`
   * overwrites the corresponding [[FieldSpec]] property; metadata is merged additively.
@@ -91,8 +74,7 @@ final case class FieldUpdate(
     typeToken: Option[String] = None,
     description: Option[String] = None,
     prefix: Option[String] = None,
-    defaultValue: Option[Any] = None,
-    metadata: Map[String, String] = Map.empty
+    defaultValue: Option[Any] = None
 ):
   def resolvedTypeRef: Option[TypeRef] =
     typeRef.orElse(typeToken.map(TypeRef.fromToken))
@@ -152,7 +134,7 @@ object FieldSpec:
   * The case-class `apply(name, fields, instructions)` form is also available but skips normalization -- use only
   * from internal code that builds the field list deliberately.
   *
-  * '''Field mutation.''' The `append` / `prepend` / `insert` / `delete` / `withFields` / `updateField` /
+  * '''Field mutation.''' The `append` / `prepend` / `insert` / `delete` / `withFields` /
   * `withUpdatedField*` methods are `private[dspy4s]`. They exist because composite programs (`ChainOfThought`,
   * `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base layout with auxiliary fields
   * (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User code should mutate at the
@@ -232,21 +214,12 @@ final case class SignatureLayout(
   private[dspy4s] def delete(fieldName: String): SignatureLayout =
     withFields(fields.filterNot(_.name == fieldName))
 
-  private[dspy4s] def updateField(fieldName: String, metadata: Map[String, String]): SignatureLayout =
-    withFields(
-      fields.map { field =>
-        if field.name == fieldName then field.copy(metadata = field.metadata ++ metadata)
-        else field
-      }
-    )
-
   private[dspy4s] def withUpdatedField(
       fieldName: String,
       typeRef: Option[TypeRef] = None,
       description: Option[String] = None,
       prefix: Option[String] = None,
-      defaultValue: Option[Any] = None,
-      metadata: Map[String, String] = Map.empty
+      defaultValue: Option[Any] = None
   ): Either[DspyError, SignatureLayout] =
     fields.find(_.name == fieldName) match
       case None =>
@@ -256,8 +229,7 @@ final case class SignatureLayout(
           typeRef = typeRef.getOrElse(existing.typeRef),
           description = description.orElse(existing.description),
           prefix = prefix.orElse(existing.prefix),
-          defaultValue = defaultValue.orElse(existing.defaultValue),
-          metadata = existing.metadata ++ metadata
+          defaultValue = defaultValue.orElse(existing.defaultValue)
         )
         Right(withFields(fields.map { field => if field.name == fieldName then updated else field }))
 
@@ -267,16 +239,14 @@ final case class SignatureLayout(
       typeToken: Option[String] = None,
       description: Option[String] = None,
       prefix: Option[String] = None,
-      defaultValue: Option[Any] = None,
-      metadata: Map[String, String] = Map.empty
+      defaultValue: Option[Any] = None
   ): Either[DspyError, SignatureLayout] =
     withUpdatedField(
       fieldName = fieldName,
       typeRef = typeRef.orElse(typeToken.map(TypeRef.fromToken)),
       description = description,
       prefix = prefix,
-      defaultValue = defaultValue,
-      metadata = metadata
+      defaultValue = defaultValue
     )
 
   private[dspy4s] def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureLayout] =
@@ -289,8 +259,7 @@ final case class SignatureLayout(
           typeToken = update.typeToken,
           description = update.description,
           prefix = update.prefix,
-          defaultValue = update.defaultValue,
-          metadata = update.metadata
+          defaultValue = update.defaultValue
         )
       )
     }
@@ -323,8 +292,7 @@ final case class SignatureLayout(
           "typeRef" -> field.typeRef.repr,
           "description" -> field.description,
           "prefix" -> field.prefix,
-          "defaultValue" -> field.defaultValue,
-          "metadata" -> field.metadata
+          "defaultValue" -> field.defaultValue
         )
       }
     )
@@ -425,21 +393,13 @@ object SignatureLayout:
                 case Some(value: Option[?]) => value
                 case Some(value)            => Some(value)
                 case None                   => None
-              metadata = fieldMap.get("metadata") match
-                case Some(value: collection.Map[?, ?]) =>
-                  val parsed: Map[String, String] = value.iterator.collect {
-                    case (k: String, v: String) => k -> v
-                  }.toMap
-                  parsed
-                case _ => Map.empty[String, String]
             yield fields :+ FieldSpec(
               name = name,
               role = roleValue,
               typeRef = typeRef,
               description = description,
               prefix = prefix,
-              defaultValue = defaultValue,
-              metadata = metadata
+              defaultValue = defaultValue
             )
           }
         case _ => Left(ValidationError("SignatureLayout state is missing 'fields'"))

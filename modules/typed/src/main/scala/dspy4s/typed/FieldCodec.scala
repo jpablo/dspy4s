@@ -1,33 +1,23 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldMetadata, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, TypeRef, ValidationError}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 
-/** Field-level codec at the typed-layer boundary. Maps a Scala type to a
-  * `TypeRef` for adapter metadata, decodes raw prediction values (already
-  * deserialized by the adapter — typically `String`, `Int`, `Boolean`,
-  * `Double`, or an existing typed value) into the target Scala type, and
-  * encodes typed inputs back into the untyped `Map[String, Any]` carried
-  * through `ProgramCall`.
+/** Field-level codec at the typed-layer boundary. Maps a Scala type to a `TypeRef` for the adapter prompt,
+  * decodes raw prediction values (already deserialized by the adapter — typically `String`, `Int`, `Boolean`,
+  * `Double`, or an existing typed value) into the target Scala type, and encodes typed inputs back into the
+  * loose `Any` form the spine helpers (`DynamicValues.fromAny`) consume.
   *
-  * Decodes from `Any`, not from JSON bytes — adapters are responsible for
-  * extracting raw field values from the LM response. For enums, the
-  * built-in `EnumDecoder` accepts either an already-typed enum value (e.g.
-  * when an adapter has pre-resolved the case) or a flat string carrying
-  * the case name. For structured product values, the low-priority
-  * schema-backed decoder delegates to `kyo-schema` through
-  * `Structure.Value`. */
+  * Decodes from `Any`, not from JSON bytes — adapters are responsible for extracting raw field values from the
+  * LM response. For enums, the built-in `EnumDecoder` accepts either an already-typed enum value (e.g. when an
+  * adapter has pre-resolved the case) or a flat string carrying the case name. For structured product values,
+  * the low-priority schema-backed decoder delegates to `zio-blocks-schema` through
+  * `Schema.toDynamicValue` / `fromDynamicValue`. */
 trait FieldCodec[A]:
   def typeRef: TypeRef
   def decode(raw: Any): Either[DspyError, A]
   def encode(value: A): Any
-
-  /** Optional per-field metadata surfaced into `FieldSpec.metadata` at
-    * `Shape` derivation time. Well-known keys live in
-    * `dspy4s.core.contracts.FieldMetadata` so adapter readers and decoder
-    * writers share one contract. Defaults to empty. */
-  def metadata: Map[String, String] = Map.empty
 
 object FieldCodec extends LowPriorityFieldCodecs:
 
@@ -84,18 +74,15 @@ object FieldCodec extends LowPriorityFieldCodecs:
 
   // ── zio-blocks Schema interop ───────────────────────────────────────────
 
-  /** Builds a field decoder from a `zio.blocks.schema.Schema[A]`. This is the bridge for
-    * structured/nested values: adapter-produced `Map` / `Seq` / primitive values flow through
-    * [[ZioSchemaCodec]] which normalizes them to `DynamicValue` and decodes via the schema. */
+  /** Builds a field decoder from a `zio.blocks.schema.Schema[A]`. This is the bridge for structured/nested
+    * values: adapter-produced values flow through [[ZioSchemaCodec]] which normalizes them to `DynamicValue`
+    * and decodes via the schema. */
   inline def fromSchema[A](
-      typeRef: TypeRef = TypeRef.json,
-      metadata: Map[String, String] = Map.empty
+      typeRef: TypeRef = TypeRef.json
   )(using schema: Schema[A]): FieldCodec[A] =
     val capturedTypeRef = typeRef
-    val capturedMetadata = metadata
     new FieldCodec[A]:
       val typeRef: TypeRef = capturedTypeRef
-      override val metadata: Map[String, String] = capturedMetadata
       def encode(value: A): Any =
         DynamicValues.toAny(schema.toDynamicValue(value))
       def decode(raw: Any): Either[DspyError, A] =
@@ -135,24 +122,17 @@ object FieldCodec extends LowPriorityFieldCodecs:
   inline def derived[A <: scala.reflect.Enum](using m: Mirror.SumOf[A]): FieldCodec[A] =
     new EnumDecoder[A](EnumInfo.derived[A])
 
-  /** Extracted from `derived` so the inline def doesn't duplicate the
-    * anonymous class at each call site. Package-private so inline expansion
-    * sites outside `FieldCodec` (but inside `dspy4s.typed`) can reach it.
+  /** Extracted from `derived` so the inline def doesn't duplicate the anonymous class at each call site.
+    * Package-private so inline expansion sites outside `FieldCodec` (but inside `dspy4s.typed`) can reach it.
     *
-    * The wire form for enum fields is a plain `String` — `typeRef =
-    * TypeRef.string` reflects that honestly. The allowed-case constraint
-    * is surfaced via `metadata(FieldMetadata.EnumCases)` so adapters can
-    * render it into the prompt. */
+    * The wire form for enum fields is a plain `String` — `typeRef = TypeRef.string` reflects that honestly.
+    * Enum allowed-cases are conveyed to the LM through `Shape.jsonSchemaString` (rendered from the
+    * `Schema[A].toJsonSchema`) by adapters that inline the JSON schema (currently `JSONAdapter`). */
   private[typed] final class EnumDecoder[A](
       info: EnumInfo[A]
   ) extends FieldCodec[A]:
 
     val typeRef: TypeRef = TypeRef.string
-
-    override val metadata: Map[String, String] = Map(
-      FieldMetadata.EnumCases -> info.caseNames.mkString(","),
-      FieldMetadata.EnumName  -> info.displayName
-    )
 
     def decode(raw: Any): Either[DspyError, A] = raw match
       case a if info.cases.contains(a) => Right(a.asInstanceOf[A])

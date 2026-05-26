@@ -55,11 +55,10 @@ class SignatureParserSuite extends FunSuite:
     assertEquals(updated.outputFields.map(_.name), Vector("answer"))
   }
 
-  test("withUpdatedField updates type and metadata") {
+  test("withUpdatedField updates description and prefix") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
     val updated = signature.withUpdatedField(
       fieldName = "answer",
-      metadata = Map("desc" -> "final answer"),
       description = Some("final answer"),
       prefix = Some("Answer:")
     )
@@ -68,21 +67,18 @@ class SignatureParserSuite extends FunSuite:
     val answer = updated.toOption.get.outputFields.head
     assertEquals(answer.description, Some("final answer"))
     assertEquals(answer.prefix, Some("Answer:"))
-    assertEquals(answer.metadata.get("desc"), Some("final answer"))
   }
 
   test("withUpdatedFields supports python-style type token update") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
     val updated = signature.withUpdatedFields(
       fieldName = "question",
-      typeToken = Some("int"),
-      metadata = Map("prefix_hint" -> "Question")
+      typeToken = Some("int")
     )
 
     assert(updated.isRight)
     val question = updated.toOption.get.inputFields.head
     assertEquals(question.typeRef, TypeRef.int)
-    assertEquals(question.metadata.get("prefix_hint"), Some("Question"))
   }
 
   test("withUpdatedFields supports multi-field patching") {

@@ -104,10 +104,9 @@ private[typed] object SpecMacro:
           if isInput then '{ FieldRole.Input } else '{ FieldRole.Output }
         val fieldSpecExpr = '{
           FieldSpec(
-            name     = ${ nameExpr },
-            role     = ${ roleExpr },
-            typeRef  = ${ decoderExpr }.typeRef,
-            metadata = ${ decoderExpr }.metadata
+            name    = ${ nameExpr },
+            role    = ${ roleExpr },
+            typeRef = ${ decoderExpr }.typeRef
           )
         }
 

@@ -2,7 +2,7 @@ package dspy4s.typed
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{FieldMetadata, TypeRef}
+import dspy4s.core.contracts.TypeRef
 import munit.FunSuite
 
 enum P7Emotion:
@@ -86,12 +86,10 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(decoded, Right((P7Emotion.joy, 0.8)))
   }
 
-  test("method signature propagates enum metadata") {
+  test("method signature enum output uses TypeRef.string at the wire boundary") {
     val sig = Signature.from(p7NamedEmotion)
     val field = sig.layout.outputFields.head
     assertEquals(field.typeRef, TypeRef.string)
-    assertEquals(field.metadata.get(FieldMetadata.EnumCases), Some("sadness,joy,love"))
-    assertEquals(field.metadata.get(FieldMetadata.EnumName), Some("P7Emotion"))
   }
 
   test("type-only function signature supports anonymous input and scalar output") {

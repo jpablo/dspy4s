@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, DynamicValues, FieldMetadata, FieldRole, FieldSpec, NotFoundError, TypeRef, ValidationError
+  DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError, TypeRef, ValidationError
 }
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, Schema}
@@ -12,9 +12,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, 
   *     `Schema.toDynamicValue` directly; decode normalizes the incoming record (coercing LM-shaped string
   *     primitives like `"true"` / `"42"` into the target primitive types) and then calls
   *     `Schema.fromDynamicValue`.
-  *   - [[fieldSpecsFromReflect]] / [[metadataFor]] -- derive `FieldSpec` list from a `Reflect.Record`, attaching
-  *     metadata (`FieldMetadata.EnumCases` / `EnumName` for variant-typed fields) used by adapters and prompt
-  *     rendering.
+  *   - [[fieldSpecsFromReflect]] -- derive `FieldSpec` list from a `Reflect.Record`.
   *   - [[normalize]] -- DynamicValue → DynamicValue coercion guided by a target `Reflect`. Public for the rare
   *     caller that needs to pre-coerce a record before decoding.
   *
@@ -90,31 +88,19 @@ private[typed] object ZioSchemaCodec:
 
   private def isInt(l: Long): Boolean = l >= Int.MinValue && l <= Int.MaxValue
 
-  /** Walk a `Reflect.Record` and produce the FieldSpec list with role applied and standard metadata
-    * (`EnumCases` / `EnumName` for variants) attached. */
+  /** Walk a `Reflect.Record` and produce the FieldSpec list with role applied. */
   def fieldSpecsFromReflect(reflect: Reflect[?, ?], role: FieldRole): Vector[FieldSpec] = reflect match
     case rec: Reflect.Record[?, ?] =>
-      rec.fields.toVector.map(term => fieldSpec(term.name, term.value, role))
+      rec.fields.toVector.map(term => FieldSpec(name = term.name, role = role, typeRef = typeRefFor(term.value)))
     case _ => Vector.empty
 
-  private def fieldSpec(name: String, reflect: Reflect[?, ?], role: FieldRole): FieldSpec =
-    val (typeRef, metadata) = metadataFor(reflect)
-    FieldSpec(name = name, role = role, typeRef = typeRef, metadata = metadata)
-
-  private def metadataFor(reflect: Reflect[?, ?]): (TypeRef, Map[String, String]) =
-    reflect match
-      case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType) -> Map.empty
-      case variant: Reflect.Variant[?, ?] =>
-        val caseNames = variant.cases.toVector.map(_.name)
-        val typeName  = variant.typeId.name
-        TypeRef.string -> Map(
-          FieldMetadata.EnumCases -> caseNames.mkString(","),
-          FieldMetadata.EnumName  -> typeName
-        )
-      case _: Reflect.Record[?, ?]      => TypeRef.json -> Map.empty
-      case _: Reflect.Sequence[?, ?, ?] => TypeRef.json -> Map.empty
-      case _: Reflect.Map[?, ?, ?, ?]   => TypeRef.json -> Map.empty
-      case _                             => TypeRef.json -> Map.empty
+  private def typeRefFor(reflect: Reflect[?, ?]): TypeRef = reflect match
+    case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
+    case _: Reflect.Variant[?, ?]      => TypeRef.string
+    case _: Reflect.Record[?, ?]       => TypeRef.json
+    case _: Reflect.Sequence[?, ?, ?]  => TypeRef.json
+    case _: Reflect.Map[?, ?, ?, ?]    => TypeRef.json
+    case _                              => TypeRef.json
 
   private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef = prim match
     case _: PrimitiveType.String  => TypeRef.string

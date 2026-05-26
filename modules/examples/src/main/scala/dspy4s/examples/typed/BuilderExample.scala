@@ -33,10 +33,9 @@ object BuilderExample:
       )
       .build
 
-  /** Reusing an enum that has a `FieldCodec` (see CaseClassExample's
-    * `Emotion`) gives the builder enum metadata for free — adapters can
-    * read `FieldSpec.metadata(FieldMetadata.EnumCases)` to render the
-    * allowed values into the prompt. */
+  /** Reusing an enum that has a `FieldCodec` (see CaseClassExample's `Emotion`) gives the builder a
+    * `TypeRef.string` field with the enum decoder wired up; enum allowed-values reach the LM through the typed
+    * Predict path's `Shape.jsonSchemaString` (inlined by `JSONAdapter`). */
   val classifyEmotion: SignatureLayout =
     Signature
       .builder("Emotion")

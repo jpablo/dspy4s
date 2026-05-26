@@ -12,11 +12,9 @@ import dspy4s.core.contracts.{
   * case class per signature (REPL exploration, dynamic shapes assembled
   * from config, tests).
   *
-  * Each `.input[T]` / `.output[T]` call summons a `FieldCodec[T]` to
-  * derive the `TypeRef` and any well-known metadata (e.g. enum allowed
-  * cases) for the resulting `FieldSpec`. The same primitives + Scala enum
-  * support that case-class derivation gets in Phase 2 are available here
-  * without writing a case class.
+  * Each `.input[T]` / `.output[T]` call summons a `FieldCodec[T]` to derive the `TypeRef` for the resulting
+  * `FieldSpec`. The same primitives + Scala enum support that case-class derivation gets in Phase 2 are
+  * available here without writing a case class.
   *
   * Returns a plain `SignatureLayout` from `.build`; callers needing typed
   * `DynamicPredict.run` should use `Signature.derived[I, O]` instead.
@@ -65,10 +63,9 @@ final class SignatureBuilder private[typed] (
 
   private def fieldSpec(name: String, role: FieldRole, dec: FieldCodec[?]): FieldSpec =
     FieldSpec(
-      name     = name,
-      role     = role,
-      typeRef  = dec.typeRef,
-      metadata = dec.metadata
+      name    = name,
+      role    = role,
+      typeRef = dec.typeRef
     )
 
   private def copy(

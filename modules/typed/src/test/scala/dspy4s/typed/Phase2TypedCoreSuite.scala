@@ -142,19 +142,11 @@ class Phase2TypedCoreSuite extends FunSuite:
       case other => fail(s"expected ValidationError, got: $other")
   }
 
-  test("enum field uses TypeRef.string with allowed-cases metadata for adapters") {
+  test("enum field uses TypeRef.string at the wire boundary") {
     val shape = Shape.derived[P2EnumOutput]
     val fs = shape.fieldSpecs.head
     assertEquals(fs.name, "sentiment")
     assertEquals(fs.typeRef, dspy4s.core.contracts.TypeRef.string)
-    assertEquals(
-      fs.metadata.get(dspy4s.core.contracts.FieldMetadata.EnumCases),
-      Some("sadness,joy,love,anger,fear,surprise")
-    )
-    assertEquals(
-      fs.metadata.get(dspy4s.core.contracts.FieldMetadata.EnumName),
-      Some("P2Sentiment")
-    )
   }
 
   test("enum encoder uses case name (not toString) so overrides can't drift") {
@@ -163,13 +155,6 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(dec.encode(P2Sentiment.sadness), "sadness")
     // Encoded value must round-trip through decode.
     assertEquals(dec.decode(dec.encode(P2Sentiment.love)), Right(P2Sentiment.love))
-  }
-
-  test("primitive fields carry empty metadata (no enum constraints)") {
-    val shape = Shape.derived[P2ScoredSentiment]
-    shape.fieldSpecs.foreach { fs =>
-      assertEquals(fs.metadata, Map.empty[String, String], s"field '${fs.name}'")
-    }
   }
 
   // ── Prediction: never constructed after a decode failure ───────────

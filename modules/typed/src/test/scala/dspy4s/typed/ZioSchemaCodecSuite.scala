@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DynamicValues, FieldMetadata, FieldRole, TypeRef}
+import dspy4s.core.contracts.{DynamicValues, FieldRole, TypeRef}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -33,14 +33,11 @@ class ZioSchemaCodecSuite extends FunSuite:
     assertEquals(specs.map(_.typeRef), Vector(TypeRef.string, TypeRef.string))
   }
 
-  test("Variant-typed fields carry EnumCases / EnumName metadata") {
+  test("Variant-typed fields surface as TypeRef.string at the wire boundary") {
     import ZsClassifyOutput.given
     val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect, FieldRole.Output)
     val sentiment = specs.find(_.name == "sentiment").get
     assertEquals(sentiment.typeRef, TypeRef.string)
-    assertEquals(sentiment.metadata.get(FieldMetadata.EnumCases), Some("sadness,joy,love"))
-    // The display name from TypeId; the exact string depends on zio-blocks naming.
-    assert(sentiment.metadata.contains(FieldMetadata.EnumName))
   }
 
   test("derivedFromZioSchema encode produces a DynamicValue.Record with each output field present") {

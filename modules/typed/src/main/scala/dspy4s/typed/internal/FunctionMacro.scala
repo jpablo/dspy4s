@@ -166,10 +166,9 @@ private[typed] object FunctionMacro:
           if role == FieldRole.Input then '{ FieldRole.Input } else '{ FieldRole.Output }
         val fieldSpecExpr = '{
           FieldSpec(
-            name     = ${ nameExpr },
-            role     = ${ roleExpr },
-            typeRef  = ${ dec }.typeRef,
-            metadata = ${ dec }.metadata
+            name    = ${ nameExpr },
+            role    = ${ roleExpr },
+            typeRef = ${ dec }.typeRef
           )
         }
         FieldData(name, fieldSpecExpr, dec)
@@ -375,10 +374,9 @@ private[typed] object FunctionMacro:
           if role == FieldRole.Input then '{ FieldRole.Input } else '{ FieldRole.Output }
         val fieldSpecExpr = '{
           FieldSpec(
-            name     = ${ nameExpr },
-            role     = ${ roleExpr },
-            typeRef  = ${ dec }.typeRef,
-            metadata = ${ dec }.metadata
+            name    = ${ nameExpr },
+            role    = ${ roleExpr },
+            typeRef = ${ dec }.typeRef
           )
         }
         FieldData(fieldName, fieldSpecExpr, dec)

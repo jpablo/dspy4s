@@ -3,7 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{
-  FieldMetadata, FieldRole, NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
+  FieldRole, NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
 }
 import munit.FunSuite
 
@@ -60,7 +60,7 @@ class Phase3SurfacesSuite extends FunSuite:
     assertEquals(tref("d"), "bool")
   }
 
-  test("builder enum field carries TypeRef.string + EnumCases / EnumName metadata") {
+  test("builder enum field carries TypeRef.string at the wire boundary") {
     val sig = Signature
       .builder("ToneCheck")
       .input[String]("text")
@@ -69,11 +69,6 @@ class Phase3SurfacesSuite extends FunSuite:
 
     val toneField = sig.outputFields.find(_.name == "tone").get
     assertEquals(toneField.typeRef, TypeRef.string)
-    assertEquals(
-      toneField.metadata.get(FieldMetadata.EnumCases),
-      Some("neutral,positive,negative")
-    )
-    assertEquals(toneField.metadata.get(FieldMetadata.EnumName), Some("P3Tone"))
   }
 
   test("builder is immutable — chained calls don't mutate earlier references") {

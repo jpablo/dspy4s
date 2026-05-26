@@ -30,12 +30,12 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
  * outputs. The resulting signature is fully typed at the program boundary:
  *
  *   - encode: `Predict.run(EmotionInput("..."))` accepts a typed value;
- *     the typed shape encodes it into the `ProgramCall.inputs` map.
+ *     the typed shape encodes it into the `ProgramCall.inputs` record.
  *   - decode: `Prediction.output` is a typed `EmotionOutput`, so
  *     `tp.output.sentiment` has type `Emotion` with no runtime cast.
- *   - metadata: enum-typed fields surface their allowed cases through
- *     `FieldSpec.metadata` (under `FieldMetadata.EnumCases`) so adapters
- *     can render valid options in prompts.
+ *   - enum constraints reach the LM via `Shape.jsonSchemaString` (rendered
+ *     from the backing `Schema[O]`); the `JSONAdapter` inlines that schema
+ *     into its prompt.
  */
 object CaseClassExample:
 

@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{FieldMetadata, FieldRole, TypeRef}
+import dspy4s.core.contracts.{FieldRole, TypeRef}
 import zio.blocks.schema.Schema
 import munit.FunSuite
 
@@ -81,15 +81,10 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(byName("score"),    "double")
   }
 
-  test("spec trait propagates enum metadata to FieldSpec.metadata") {
+  test("spec trait enum field uses TypeRef.string at the wire boundary") {
     val sig = Signature.of[P5ToneSpec]
     val toneField = sig.layout.outputFields.find(_.name == "tone").get
     assertEquals(toneField.typeRef, TypeRef.string)
-    assertEquals(
-      toneField.metadata.get(FieldMetadata.EnumCases),
-      Some("calm,urgent,frustrated")
-    )
-    assertEquals(toneField.metadata.get(FieldMetadata.EnumName), Some("P5Tone"))
   }
 
   test("spec trait fields are normalized (inferred prefix + description)") {
