@@ -78,8 +78,7 @@ object ProviderResponseParser:
             outputs = entries,
             usage = parseUsage(raw),
             modelName = raw.get("model").collect { case model: String => model },
-            cacheHit = false,
-            raw = Some(raw)
+            cacheHit = false
           )
         )
     }

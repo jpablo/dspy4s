@@ -136,7 +136,6 @@ private object DiskCacheModel:
 
   final case class PersistedOutput(
       text: String,
-      logProbs: Array[Double] | Null,
       toolCalls: Array[PersistedToolCall],
       metadata: java.util.Map[String, String]
   ) extends Serializable
@@ -258,7 +257,6 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
       }.toArray
       PersistedOutput(
         text = output.text,
-        logProbs = output.logProbs.map(_.toArray).orNull,
         toolCalls = toolCalls,
         metadata = toJavaStringMap(output.metadata)
       )
@@ -280,7 +278,6 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
       }
       LmOutput(
         text = Option(output.text).getOrElse(""),
-        logProbs = Option(output.logProbs).map(_.toVector),
         toolCalls = toolCalls,
         metadata = fromJavaStringMap(output.metadata)
       )
@@ -297,8 +294,7 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
       outputs = outputs,
       usage = usage,
       modelName = Option(response.modelName),
-      cacheHit = false,
-      raw = None
+      cacheHit = false
     )
 
   private def toJavaStringMap(values: Map[String, Any]): java.util.Map[String, String] =

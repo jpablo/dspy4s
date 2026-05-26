@@ -1,11 +1,7 @@
 package dspy4s.streaming.contracts
 
-import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.programs.contracts.ProgramCall
 
 import java.time.Instant
 
@@ -46,9 +42,3 @@ final case class StreamListener(
 ):
   def matches(predict: String, field: String): Boolean =
     field == signatureFieldName && predictName.forall(_ == predict)
-
-trait Streamifier:
-  def streamify(
-      program: Module[ProgramCall, DynamicPrediction],
-      listeners: Vector[StreamListener] = Vector.empty
-  ): Map[String, Any] => ClosableIterator[StreamEvent]

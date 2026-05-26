@@ -16,8 +16,6 @@ enum MessageRole:
   case System
   case User
   case Assistant
-  case Tool
-  case Developer
 
 final case class ContentPart(kind: String, payload: String, metadata: Map[String, String] = Map.empty)
 
@@ -47,7 +45,6 @@ final case class ToolCall(name: String, args: Map[String, Any])
 
 final case class LmOutput(
     text: String,
-    logProbs: Option[Vector[Double]] = None,
     toolCalls: Vector[ToolCall] = Vector.empty,
     metadata: Map[String, Any] = Map.empty
 )
@@ -56,8 +53,7 @@ final case class LmResponse(
     outputs: Vector[LmOutput],
     usage: Option[LmUsage] = None,
     modelName: Option[String] = None,
-    cacheHit: Boolean = false,
-    raw: Option[Any] = None
+    cacheHit: Boolean = false
 )
 
 trait LmCache:
