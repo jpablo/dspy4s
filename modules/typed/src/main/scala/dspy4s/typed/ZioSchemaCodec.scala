@@ -201,6 +201,9 @@ private[typed] object ZioSchemaCodec:
     new Shape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
+      override lazy val jsonSchemaString: Option[String] =
+        Some(schema.toJsonSchema.toJson.toString)
+
       override def encode(value: A): Map[String, Any] =
         dynamicToAny(schema.toDynamicValue(value)) match
           case map: Map[?, ?] => map.asInstanceOf[Map[String, Any]]

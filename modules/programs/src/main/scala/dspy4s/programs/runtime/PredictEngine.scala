@@ -34,7 +34,12 @@ private[dspy4s] final case class PredictEngine(
     layout: SignatureLayout,
     demos: Vector[Example],
     moduleName: String,
-    runtime: ProgramRuntime
+    runtime: ProgramRuntime,
+    /** Optional pre-rendered JSON Schema for the output. Populated by the typed [[dspy4s.programs.Predict]]
+      * path (which has a `Schema[O]` to render via `Shape.jsonSchemaString`); left `None` by
+      * [[dspy4s.programs.DynamicPredict]]. Passed straight through to [[AdapterInvocation]]; adapters that
+      * understand it inline the schema in their prompt instruction. */
+    outputJsonSchema: Option[String] = None
 ):
 
   def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
@@ -66,6 +71,7 @@ private[dspy4s] final case class PredictEngine(
       layout = layout,
       demos = demos,
       inputs = Example(values = call.inputs, inputKeys = inputKeys),
+      outputJsonSchema = outputJsonSchema,
       request = LmRequest(
         model = model.id,
         mode = model.mode,

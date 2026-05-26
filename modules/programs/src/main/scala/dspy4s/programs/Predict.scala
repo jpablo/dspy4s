@@ -30,7 +30,13 @@ final case class Predict[I, O](
   // wired into a program once and called many times, and the inner
   // `DynamicPredict` is a pure function of the case-class fields.
   private lazy val inner: DynamicPredict =
-    DynamicPredict(signature.layout, demos, name, runtime)
+    DynamicPredict(
+      layout           = signature.layout,
+      demos            = demos,
+      name             = name,
+      runtime          = runtime,
+      outputJsonSchema = signature.outputShape.jsonSchemaString
+    )
 
   /** Encode `input`, dispatch through the existing `DynamicPredict` runtime, then
     * decode the resulting prediction into `Prediction[O]`.

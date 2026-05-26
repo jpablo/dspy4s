@@ -20,6 +20,12 @@ trait Shape[A]:
   def encode(value: A): Map[String, Any]
   def decode(raw: Map[String, Any]): Either[DspyError, A]
 
+  /** Render this shape as a JSON Schema string suitable for prompt instructions to LMs that follow
+    * structured-output hints. Returns `None` for shapes that don't have a backing `zio.blocks.schema.Schema`
+    * (e.g. `MapShape` from `Signature.fromString`); adapters that use this fall back to their default
+    * natural-language instruction in that case. */
+  def jsonSchemaString: Option[String] = None
+
 object Shape:
 
   /** A `Shape[Map[String, Any]]` whose `fieldSpecs` are provided at

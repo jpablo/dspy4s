@@ -45,6 +45,47 @@ class JSONAdapterSuite extends FunSuite:
     assert(messages.last.text.get.contains("Question: Capital of Belgium?"))
   }
 
+  test("format inlines outputJsonSchema in the system message when supplied") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val schemaString =
+      """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
+    val invocation = AdapterInvocation(
+      layout           = signature,
+      demos            = Vector.empty,
+      inputs           = Example(values = Map("question" -> "x"), inputKeys = Set("question")),
+      request          = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      outputJsonSchema = Some(schemaString)
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val formatted = JSONAdapter().format(invocation)
+
+    assert(formatted.isRight)
+    val systemText = formatted.toOption.get.messages.head.text.get
+    assert(systemText.contains("conforms to the following JSON Schema"),
+      s"expected schema-aware instruction, got:\n$systemText")
+    assert(systemText.contains(schemaString),
+      s"expected schema inlined in system message, got:\n$systemText")
+  }
+
+  test("format falls back to the keys-list instruction when outputJsonSchema is None") {
+    val signature = SignatureDsl.parse("question -> answer, score").toOption.get
+    val invocation = AdapterInvocation(
+      layout = signature,
+      demos  = Vector.empty,
+      inputs = Example(values = Map("question" -> "x"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      // outputJsonSchema defaults to None
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val systemText = JSONAdapter().format(invocation).toOption.get.messages.head.text.get
+    assert(systemText.contains("exactly these keys: answer, score"),
+      s"expected key-list instruction, got:\n$systemText")
+    assert(!systemText.contains("JSON Schema"),
+      s"unexpected schema mention in fallback instruction:\n$systemText")
+  }
+
   test("parse reads plain json payload and coerces scalar types") {
     val signature = SignatureDsl.parse("question -> answer, score: float, ok: bool").toOption.get
 

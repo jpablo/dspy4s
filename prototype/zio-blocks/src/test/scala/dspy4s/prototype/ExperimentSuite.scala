@@ -30,6 +30,28 @@ class ExperimentSuite extends FunSuite:
     assertEquals(result, Right(in))
   }
 
+  test("Schema.toJsonSchema renders primitives, enums, and required fields correctly") {
+    import zio.blocks.schema.Schema
+
+    case class Mix(name: String, count: Int, value: Double, flag: Boolean, mood: Experiment.Sentiment) derives Schema
+    val rendered = summon[Schema[Mix]].toJsonSchema.toJson.toString
+
+    // Each primitive maps to the right JSON Schema type. (zio-blocks pretty-prints with " : " spacing.)
+    assert(rendered.contains("\"string\""),  s"missing string type: $rendered")
+    assert(rendered.contains("\"integer\""), s"missing integer type: $rendered")
+    assert(rendered.contains("\"number\""),  s"missing number type: $rendered")
+    assert(rendered.contains("\"boolean\""), s"missing boolean type: $rendered")
+    // Enum renders as enum [...] with case names.
+    assert(rendered.contains("\"sadness\""), s"missing enum case 'sadness': $rendered")
+    assert(rendered.contains("\"joy\""), s"missing enum case 'joy': $rendered")
+    // All fields appear in `required`.
+    assert(rendered.contains("\"name\""), s"missing field name: $rendered")
+    assert(rendered.contains("\"count\""), s"missing field count: $rendered")
+    assert(rendered.contains("\"value\""), s"missing field value: $rendered")
+    assert(rendered.contains("\"flag\""), s"missing field flag: $rendered")
+    assert(rendered.contains("\"mood\""), s"missing field mood: $rendered")
+  }
+
   test("Schema.derived works for a named-tuple type alias") {
     import zio.blocks.schema.{Reflect, Schema}
     import Experiment.namedTupleSchema

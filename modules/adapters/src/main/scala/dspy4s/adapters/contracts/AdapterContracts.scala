@@ -11,11 +11,18 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 
+/** Optional pre-rendered JSON Schema describing the signature's output fields.
+  *
+  * Populated by the typed `Predict[I, O]` path (which has a static `Schema[O]` available and can render it
+  * via zio-blocks' `Schema.toJsonSchema`); left `None` by `DynamicPredict` (where there's no static schema to
+  * render from). Adapters that understand structured-output hints (currently [[JSONAdapter]]) inline this
+  * string into their prompt instruction; adapters that don't ignore it. */
 final case class AdapterInvocation(
     layout: SignatureLayout,
     demos: Vector[Example],
     inputs: Example,
-    request: LmRequest
+    request: LmRequest,
+    outputJsonSchema: Option[String] = None
 )
 
 final case class FormattedPrompt(messages: Vector[Message], metadata: Map[String, Any] = Map.empty)

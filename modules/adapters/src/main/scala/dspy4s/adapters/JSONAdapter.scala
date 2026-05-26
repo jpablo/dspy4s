@@ -25,8 +25,17 @@ final case class JSONAdapter(
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val fieldList = invocation.layout.outputFields.map(_.name).mkString(", ")
-    val jsonInstruction =
-      s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
+    // When the typed Predict path supplies a JSON Schema (rendered from the output `Schema[O]` via
+    // `Shape.jsonSchemaString`), inline it so the LM has the precise output contract -- field names, types,
+    // enum constraints, and required fields. Falls back to the natural-language instruction when no schema is
+    // available (DynamicPredict path, or shapes without a backing Schema like `MapShape`).
+    val jsonInstruction = invocation.outputJsonSchema match
+      case Some(schema) =>
+        s"""Return a valid JSON object that conforms to the following JSON Schema. Do not include markdown fences.
+           |
+           |$schema""".stripMargin
+      case None =>
+        s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
     val systemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$jsonInstruction"
       case None               => jsonInstruction
