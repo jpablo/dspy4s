@@ -63,6 +63,8 @@ graph TD
    - Macros: `Signature.from(method)`, `Signature.fromType[F]`,
      `Signature.of[T <: Spec]`, plus `Signature.derived[I, O]` (inline)
    - Backed by kyo-schema (`Structure` / `Schema`) for product encode/decode
+   - See [TYPE_BRIDGE.md](TYPE_BRIDGE.md) for how Scala types translate to
+     the LM-visible wire vocabulary on the way out and back.
 
 3. **`lm`** — provider-agnostic LM API.
    - `LanguageModel` trait, `LmRequest` / `LmResponse` / `Message` / `ToolCall`

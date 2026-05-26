@@ -448,6 +448,9 @@ These are documented gaps, surfaced so you can plan around them:
 ## Where to go from here
 
 - **Examples**: [`modules/examples/.../typed/`](../modules/examples/src/main/scala/dspy4s/examples/typed/)
+- **Type bridge** (how Scala types translate to LM-visible types,
+  why the wire vocabulary is small, what you can put on the Scala
+  side): [TYPE_BRIDGE.md](TYPE_BRIDGE.md)
 - **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
 - **Design doc**: [TYPED_SIGNATURES.md](TYPED_SIGNATURES.md)
 - **Implementation arc** (phase-by-phase outcomes, design deviations,
