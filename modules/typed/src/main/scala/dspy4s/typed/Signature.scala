@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout}
-import kyo.Schema
+import zio.blocks.schema.Schema
 
 /** A signature with compile-time knowledge of its input (`I`) and output
   * (`O`) shapes. Wraps an untyped `SignatureLayout` for compatibility with the

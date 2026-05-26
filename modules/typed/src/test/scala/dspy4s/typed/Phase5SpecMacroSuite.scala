@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{FieldMetadata, FieldRole, TypeRef}
-import kyo.Schema
+import zio.blocks.schema.Schema
 import munit.FunSuite
 
 // Top-level fixtures: spec traits + supporting enum.

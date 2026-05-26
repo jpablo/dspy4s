@@ -1,5 +1,7 @@
 package dspy4s.typed
 
+import zio.blocks.schema.Schema
+
 import dspy4s.core.contracts.{
   FieldMetadata, FieldRole, NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
 }
@@ -7,15 +9,15 @@ import munit.FunSuite
 
 // Top-level fixtures (Phase 0 finding: Mirror derivation needs top-level types,
 // and per-suite-prefixed names avoid collisions across test files).
-case class P3CommentInput(comment: String, lang: String)
-case class P3ClassifyOutput(toxic: Boolean, confidence: Double)
+case class P3CommentInput(comment: String, lang: String) derives Schema
+case class P3ClassifyOutput(toxic: Boolean, confidence: Double) derives Schema
 
 enum P3Tone:
   case neutral, positive, negative
 
 object P3Tone extends FieldCodec.FlatEnum[P3Tone]
 
-case class P3ToneOutput(tone: P3Tone) derives Shape
+case class P3ToneOutput(tone: P3Tone) derives Schema
 
 /** Phase 3 surfaces per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *

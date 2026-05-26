@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, FieldMetadata, TypeRef, ValidationError}
-import kyo.Schema
+import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 
 /** Field-level codec at the typed-layer boundary. Maps a Scala type to a
@@ -82,40 +82,25 @@ object FieldCodec extends LowPriorityFieldCodecs:
       case other => Left(ValidationError(s"Cannot decode as Boolean: $other"))
     def encode(value: Boolean): Any = value
 
-  // ── kyo-schema interop ──────────────────────────────────────────────────
+  // ── zio-blocks Schema interop ───────────────────────────────────────────
 
-  /** Builds a field decoder from a `kyo.Schema[A]`. This is the bridge for
-    * structured/nested values: adapter-produced `Map` / `Seq` / primitive
-    * values are normalized to `kyo.Structure.Value` and decoded through the
-    * schema.
-    *
-    * Primitive and enum decoders above remain preferred because they encode
-    * dspy4s's LLM-friendly coercion policy (e.g. `"0.5"` -> `Double`) and
-    * enum metadata. Schema-backed decoding uses the same conservative
-    * primitive normalization as product `Shape`s. */
+  /** Builds a field decoder from a `zio.blocks.schema.Schema[A]`. This is the bridge for
+    * structured/nested values: adapter-produced `Map` / `Seq` / primitive values flow through
+    * [[ZioSchemaCodec]] which normalizes them to `DynamicValue` and decodes via the schema. */
   inline def fromSchema[A](
       typeRef: TypeRef = TypeRef.json,
       metadata: Map[String, String] = Map.empty
   )(using schema: Schema[A]): FieldCodec[A] =
-    KyoSchemaFieldCodec[A](schema, schema.structure, typeRef, metadata)
-
-  /** Flat-string schema for parameterless Scala enums. Kyo's default enum
-    * schema is a discriminated object (`{"joy":{}}`); DSPy-style LM outputs
-    * generally use plain case-name strings (`"joy"`). Use this given when
-    * a domain type wants `derives Schema`-style structured decoding while
-    * preserving flat enum wire values:
-    *
-    * {{{
-    * enum Emotion:
-    *   case joy, sadness
-    *
-    * object Emotion extends FieldCodec.FlatEnum[Emotion]
-    * }}}
-    */
-  inline def flatEnumSchema[A <: scala.reflect.Enum](using
-      m: Mirror.SumOf[A]
-  ): Schema[A] =
-    KyoSchemaFieldCodec.flatEnumSchema[A]
+    val capturedTypeRef = typeRef
+    val capturedMetadata = metadata
+    new FieldCodec[A]:
+      val typeRef: TypeRef = capturedTypeRef
+      override val metadata: Map[String, String] = capturedMetadata
+      def encode(value: A): Any =
+        ZioSchemaCodec.dynamicToAny(schema.toDynamicValue(value))
+      def decode(raw: Any): Either[DspyError, A] =
+        val dyn = ZioSchemaCodec.anyToDynamic(raw, schema.reflect)
+        schema.fromDynamicValue(dyn).left.map(err => ValidationError(err.toString))
 
   /** One-line companion helper for DSPy-style flat enum fields.
     *
@@ -126,16 +111,15 @@ object FieldCodec extends LowPriorityFieldCodecs:
     * object Emotion extends FieldCodec.FlatEnum[Emotion]
     * }}}
     *
-    * The companion then provides both `FieldCodec[Emotion]` for field
-    * metadata / tuple-shaped signatures and `Schema[Emotion]` for
-    * schema-backed products.
+    * The companion provides both `FieldCodec[Emotion]` (for the typed-layer field-metadata + decoding
+    * surface) and `Schema[Emotion]` (zio-blocks-derived; produces a `Variant` reflect that
+    * [[ZioSchemaCodec.dynamicToAny]] flattens to a case-name string at the adapter boundary).
     */
   trait FlatEnum[A <: scala.reflect.Enum]:
     inline given fieldCodec(using Mirror.SumOf[A]): FieldCodec[A] =
       FieldCodec.derived[A]
 
-    inline given schema(using Mirror.SumOf[A]): Schema[A] =
-      FieldCodec.flatEnumSchema[A]
+    inline given schema: Schema[A] = Schema.derived
 
   // ── Scala enum derivation ────────────────────────────────────────────────
   //
@@ -275,14 +259,9 @@ trait LowPriorityFieldCodecs:
       case other =>
         Left(ValidationError(s"Cannot decode as $typeName: $other"))
 
-  /** Fallback decoder for types that have a `kyo.Schema[A]` but no more
-    * specific dspy4s `FieldCodec[A]`. Restricted to product types so an
-    * arbitrary undecodable class still reports "No FieldCodec" instead of
-    * triggering kyo-schema's generic derivation error. Kept low-priority so
-    * primitive and enum decoders above continue to define the default
-    * flat-field behavior. */
-  inline given schemaBackedProduct[A <: Product](using
-      m: Mirror.ProductOf[A],
-      schema: Schema[A]
-  ): FieldCodec[A] =
+  /** Fallback decoder for product types that have a `zio.blocks.schema.Schema[A]` but no more specific
+    * dspy4s `FieldCodec[A]`. Restricted to product types so an arbitrary undecodable class still reports
+    * "No FieldCodec" instead of triggering Schema's generic derivation error. Kept low-priority so
+    * primitive and enum decoders above continue to define the default flat-field behavior. */
+  inline given schemaBackedProduct[A <: Product](using schema: Schema[A]): FieldCodec[A] =
     FieldCodec.fromSchema[A]()(using schema)

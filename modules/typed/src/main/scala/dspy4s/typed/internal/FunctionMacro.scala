@@ -2,7 +2,7 @@ package dspy4s.typed.internal
 
 import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureLayout}
 import dspy4s.typed.{Shape, Signature as TypedSig, FieldCodec}
-import kyo.Schema
+import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
 
@@ -276,17 +276,17 @@ private[typed] object FunctionMacro:
                             inputFields = inputData,
                             outputFieldsExpr = '{
                               Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror }, ${ schema })
+                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
                                 .fieldSpecs
                             },
                             inputShapeExpr = '{ new Shape.TupleShape[i](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
                             outputShapeExpr = '{
                               Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror }, ${ schema })
+                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
                             }
                           )
                     case None =>
-                      report.errorAndAbort(s"No kyo.Schema for product output type '${returnType.show}'")
+                      report.errorAndAbort(s"No zio.blocks.schema.Schema for product output type '${returnType.show}'")
                 case None =>
                   scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
@@ -475,16 +475,16 @@ private[typed] object FunctionMacro:
                           signatureExpr[i, o](
                             outputFieldsExpr = '{
                               Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror }, ${ schema })
+                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
                                 .fieldSpecs
                             },
                             outputShapeExpr = '{
                               Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ mirror }, ${ schema })
+                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
                             }
                           )
                     case None =>
-                      report.errorAndAbort(s"No kyo.Schema for product output type '${returnType.show}'")
+                      report.errorAndAbort(s"No zio.blocks.schema.Schema for product output type '${returnType.show}'")
                 case None =>
                   scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)

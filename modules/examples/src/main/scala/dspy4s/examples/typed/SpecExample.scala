@@ -19,7 +19,7 @@ package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.typed.{InputField, OutputField, Spec, Signature}
-import kyo.Schema
+import zio.blocks.schema.Schema
 
 trait EmotionSpec extends Spec:
   def sentence:  InputField[String]

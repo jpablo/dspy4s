@@ -1,5 +1,7 @@
 package dspy4s.programs
 
+import zio.blocks.schema.Schema
+
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
   DspyError, RuntimeContext, SignatureLayout
@@ -13,10 +15,10 @@ import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature}
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).
-case class P4QAInput(question: String)
-case class P4QAOutput(answer: String, score: Double)
+case class P4QAInput(question: String) derives Schema
+case class P4QAOutput(answer: String, score: Double) derives Schema
 
-case class P4StrictOutput(answer: String, score: Int)  // forces decode failure: LM returns Double
+case class P4StrictOutput(answer: String, score: Int) derives Schema
 
 trait P4QASpec extends Spec:
   def question: InputField[String]

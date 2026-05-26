@@ -1,10 +1,9 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, FieldMetadata, FieldRole, FieldSpec, NotFoundError, TypeRef,
-  ValidationError
+  DspyError, FieldRole, FieldSpec, NotFoundError, ValidationError
 }
-import kyo.{Chunk, Schema, Structure}
+import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 
 /** A schema-aware view of a user type `A`, used as the input or output of a
@@ -121,108 +120,17 @@ object Shape:
               builder += rawValue
         Right(Tuple.fromArray(builder.result()).asInstanceOf[A])
 
-  /** Derives a `Shape[A]` from any case class with a `kyo.Schema[A]` in
-    * scope. kyo-schema owns product encode/decode; dspy4s derives the
-    * DSPy-facing field metadata from the same structural description. */
-  inline def derived[A <: Product](using
-      m: Mirror.ProductOf[A],
-      schema: Schema[A]
-  ): Shape[A] =
-    derivedWithRole[A](FieldRole.Output)
+  /** Derives a `Shape[A]` from any case class / product type with a `zio.blocks.schema.Schema[A]` in scope.
+    * zio-blocks owns product encode/decode; dspy4s derives the DSPy-facing field metadata from the same
+    * structural Reflect description (see [[ZioSchemaCodec]] for the converter + metadata story). */
+  inline def derived[A <: Product](using schema: Schema[A]): Shape[A] =
+    ZioSchemaCodec.derivedFromZioSchema[A](FieldRole.Output)
 
-  /** Derives a `Shape[A]` and stamps every field with the given role. Use
-    * `FieldRole.Input` for input case classes, `FieldRole.Output` for
-    * output case classes. `derived` defaults to `Output`; `Signature`
-    * builders that need inputs invoke this explicitly. */
-  inline def derivedWithRole[A <: Product](role: FieldRole)(using
-      m: Mirror.ProductOf[A],
-      schema: Schema[A]
-  ): Shape[A] =
-    derivedProductWithRole[A](role)
+  /** Derives a `Shape[A]` and stamps every field with the given role. Use `FieldRole.Input` for input case
+    * classes, `FieldRole.Output` for output case classes. `derived` defaults to `Output`; `Signature` builders
+    * that need inputs invoke this explicitly. */
+  inline def derivedWithRole[A <: Product](role: FieldRole)(using schema: Schema[A]): Shape[A] =
+    ZioSchemaCodec.derivedFromZioSchema[A](role)
 
-  private[typed] inline def derivedProductWithRole[A](role: FieldRole)(using
-      m: Mirror.ProductOf[A],
-      schema: Schema[A]
-  ): Shape[A] =
-    new KyoProductShape[A](schema, schema.structure, role)
-
-  // ── Internal: kyo-schema-backed Shape implementation ─────────────────────
-
-  private[typed] final class KyoProductShape[A](
-      schema: Schema[A],
-      structure: Structure.Type,
-      role: FieldRole
-  ) extends Shape[A]:
-
-    private val fields: Chunk[Structure.Field] =
-      structure match
-        case Structure.Type.Product(_, _, _, fields) => fields
-        case other =>
-          throw new IllegalArgumentException(
-            s"Shape derivation requires a product type, got ${other.name}"
-          )
-
-    val fieldSpecs: Vector[FieldSpec] =
-      fields.map(field => fieldSpec(field, role)).toVector
-
-    def encode(value: A): Map[String, Any] =
-      KyoSchemaFieldCodec.fromStructure(
-        Structure.encode[A](value)(using schema, summon),
-        structure
-      ) match
-        case map: Map[?, ?] =>
-          map.asInstanceOf[Map[String, Any]]
-        case other =>
-          throw new IllegalStateException(
-            s"Expected schema encode of ${structure.name} to produce a record, got: $other"
-          )
-
-    def decode(raw: Map[String, Any]): Either[DspyError, A] =
-      val builder = Vector.newBuilder[(String, Structure.Value)]
-      val it = fields.iterator
-      while it.hasNext do
-        val field = it.next()
-        raw.get(field.name) match
-          case None =>
-            return Left(NotFoundError(
-              resource = "prediction_field",
-              message  = s"Required field '${field.name}' is missing from the raw prediction"
-            ))
-          case Some(value) =>
-            builder += field.name -> KyoSchemaFieldCodec.toStructure(value, field.fieldType)
-      val record = Structure.Value.Record(Chunk.from(builder.result()))
-      KyoSchemaFieldCodec.toEither(Structure.decode[A](record)(using schema, summon))
-
-  private def fieldSpec(field: Structure.Field, role: FieldRole): FieldSpec =
-    val (typeRef, metadata) = metadataFor(field.fieldType)
-    FieldSpec(
-      name     = field.name,
-      role     = role,
-      typeRef  = typeRef,
-      metadata = metadata
-    )
-
-  private def metadataFor(tpe: Structure.Type): (TypeRef, Map[String, String]) =
-    tpe match
-      case Structure.Type.Primitive(kind, _) =>
-        kind match
-          case Structure.PrimitiveKind.String | Structure.PrimitiveKind.Char =>
-            TypeRef.string -> Map.empty
-          case Structure.PrimitiveKind.Boolean =>
-            TypeRef.bool -> Map.empty
-          case Structure.PrimitiveKind.Int | Structure.PrimitiveKind.Long |
-              Structure.PrimitiveKind.Short | Structure.PrimitiveKind.Byte |
-              Structure.PrimitiveKind.BigInt =>
-            TypeRef.int -> Map.empty
-          case Structure.PrimitiveKind.Float | Structure.PrimitiveKind.Double |
-              Structure.PrimitiveKind.BigDecimal =>
-            TypeRef.double -> Map.empty
-          case Structure.PrimitiveKind.Unit =>
-            TypeRef.json -> Map.empty
-      case Structure.Type.Sum(name, _, _, _, enumValues) if enumValues.nonEmpty =>
-        TypeRef.string -> Map(
-          FieldMetadata.EnumCases -> enumValues.mkString(","),
-          FieldMetadata.EnumName  -> name
-        )
-      case _ =>
-        TypeRef.json -> Map.empty
+  private[typed] inline def derivedProductWithRole[A](role: FieldRole)(using schema: Schema[A]): Shape[A] =
+    ZioSchemaCodec.derivedFromZioSchema[A](role)

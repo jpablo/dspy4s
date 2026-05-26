@@ -1,5 +1,7 @@
 package dspy4s.programs
 
+import zio.blocks.schema.Schema
+
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
   DspyError, NotFoundError, RuntimeContext, SignatureLayout,
@@ -25,8 +27,8 @@ trait TcotMultiOutputSpec extends Spec:
 
 // Case-class I/O fixtures for the negative-path test that exercises
 // the case-class-output rejection in ChainOfThought.
-case class TcotCaseInput(document: String)
-case class TcotCaseOutput(summary: String)
+case class TcotCaseInput(document: String) derives Schema
+case class TcotCaseOutput(summary: String) derives Schema
 
 class ChainOfThoughtSuite extends FunSuite:
 

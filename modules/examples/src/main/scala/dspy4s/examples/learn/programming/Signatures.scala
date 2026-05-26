@@ -34,7 +34,7 @@ package dspy4s.examples.learn.programming
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.{ChainOfThought, Predict}
 import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, Signature}
-import kyo.Schema
+import zio.blocks.schema.Schema
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 1 (lines 37–46) — string DSL with instructions
