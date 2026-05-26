@@ -2,13 +2,18 @@ package dspy4s.programs.contracts
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
+import zio.blocks.schema.DynamicValue
 
+/** `inputs` is the spine record passed to the adapter and codec layers. `config` stays a plain `Map[String, Any]`
+  * because it's an opaque option bag forwarded to the LM provider (model overrides, sampling params, cache /
+  * rollout flags) — it has no codec story. */
 final case class ProgramCall(
-    inputs: Map[String, Any],
+    inputs: DynamicValue.Record,
     config: Map[String, Any] = Map.empty,
     traceEnabled: Boolean = true
 )
@@ -26,7 +31,7 @@ trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
     * `run(input: ProgramCall)` remains available when `config` or
     * `traceEnabled` need to be customized. */
   def run(inputs: (String, Any)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    run(ProgramCall(inputs = inputs.toMap))
+    run(ProgramCall(inputs = DynamicValues.recordFromEntries(inputs)))
 
 trait ToolFunction:
   def name: String

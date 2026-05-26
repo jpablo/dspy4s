@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
@@ -11,8 +12,15 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.MessageRole
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 class ChatAdapterSuite extends FunSuite:
+  private def rec(entries: (String, Any)*): DynamicValue.Record =
+    DynamicValues.recordFromEntries(entries)
+  private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
+    DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
+
+
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
 
@@ -26,11 +34,11 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector(
         Example(
-          values = Map("question" -> "Capital of France?", "answer" -> "Paris"),
+          values = rec("question" -> "Capital of France?", "answer" -> "Paris"),
           inputKeys = Set("question")
         )
       ),
-      inputs = Example(values = Map("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
+      inputs = Example(values = rec("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
     )
 
@@ -73,7 +81,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = Example(values = Map("question" -> "?"), inputKeys = Set("question")),
+      inputs = Example(values = rec("question" -> "?"), inputKeys = Set("question")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -95,7 +103,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = Example(values = Map("q" -> "?"), inputKeys = Set("q")),
+      inputs = Example(values = rec("q" -> "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -134,7 +142,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = Example(values = Map("q" -> "?"), inputKeys = Set("q")),
+      inputs = Example(values = rec("q" -> "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -162,8 +170,8 @@ class ChatAdapterSuite extends FunSuite:
 
     assert(parsed.isRight, s"parse failed: ${parsed.left.toOption.map(_.message).getOrElse("?")}")
     val values = parsed.toOption.get.values
-    assertEquals(values("answer"), "Brussels")
-    assertEquals(values("score"), 0.91)
+    assertEquals(lookup(values, "answer"), Some("Brussels": Any))
+    assertEquals(lookup(values, "score"), Some(0.91: Any))
   }
 
   test("parse preserves multi-line field values verbatim") {
@@ -184,10 +192,10 @@ class ChatAdapterSuite extends FunSuite:
     assert(parsed.isRight)
     val values = parsed.toOption.get.values
     assertEquals(
-      values("reasoning"),
-      "First I consider X.\nThen I weigh Y.\nFinally I conclude Z."
+      lookup(values, "reasoning"),
+      Some("First I consider X.\nThen I weigh Y.\nFinally I conclude Z.": Any)
     )
-    assertEquals(values("answer"), "42")
+    assertEquals(lookup(values, "answer"), Some("42": Any))
   }
 
   test("parse tolerates a missing completed marker") {
@@ -195,7 +203,7 @@ class ChatAdapterSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val parsed = ChatAdapter().parse(signature, LmOutput(text = "[[ ## answer ## ]]\nBrussels"))
     assert(parsed.isRight)
-    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
   }
 
   test("parse falls back to full text for single output signatures when no markers present") {
@@ -203,7 +211,7 @@ class ChatAdapterSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val parsed = ChatAdapter().parse(signature, LmOutput(text = "Brussels"))
     assert(parsed.isRight)
-    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
   }
 
   test("parse fails when a required output field is missing from the markers") {
@@ -227,6 +235,6 @@ class ChatAdapterSuite extends FunSuite:
         |[[ ## completed ## ]]""".stripMargin
     val parsed = ChatAdapter().parse(signature, LmOutput(text = completion))
     assert(parsed.isRight)
-    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
-    assert(!parsed.toOption.get.values.contains("thinking"))
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
+    assert(DynamicValues.recordGet(parsed.toOption.get.values, "thinking").isEmpty)
   }

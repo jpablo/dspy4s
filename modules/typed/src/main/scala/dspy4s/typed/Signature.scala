@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout}
-import zio.blocks.schema.Schema
+import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A signature with compile-time knowledge of its input (`I`) and output
   * (`O`) shapes. Wraps an untyped `SignatureLayout` for compatibility with the
@@ -79,21 +79,20 @@ object Signature:
     * signature. Returns a plain `SignatureLayout` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
-  /** Parse a DSPy-style string DSL (`"question -> answer"`) into a
-    * `Signature` whose input/output shapes are `Map[String, Any]`.
+  /** Parse a DSPy-style string DSL (`"question -> answer"`) into a `Signature` whose input/output shapes are the
+    * raw spine type `DynamicValue.Record`.
     *
-    * This is the typed entry point for runtime-defined signatures: the
-    * resulting `Signature` flows through `Predict` and adapter pipelines
-    * exactly like a typed one, but inputs and outputs remain untyped
-    * `Map[String, Any]` because the DSL carries no static schema.
+    * This is the typed entry point for runtime-defined signatures: the resulting `Signature` flows through
+    * `Predict` and adapter pipelines exactly like a typed one, but inputs and outputs remain at the spine type
+    * because the DSL carries no static schema. Use `DynamicValues.recordFromEntries(...)` to build inputs from
+    * plain Scala values.
     *
-    * For static type-safe inputs and outputs, prefer
-    * `Signature.fromType[F]`, `Signature.from(method)`, or
+    * For static type-safe inputs and outputs, prefer `Signature.fromType[F]`, `Signature.from(method)`, or
     * `Signature.of[T <: Spec]`. */
   def fromString(
       dsl: String,
       instructions: String = ""
-  ): Either[DspyError, Signature[Map[String, Any], Map[String, Any]]] =
+  ): Either[DspyError, Signature[DynamicValue.Record, DynamicValue.Record]] =
     SignatureLayout.parse(dsl, instructions).map { layout =>
       val inShape  = Shape.MapShape(layout.inputFields)
       val outShape = Shape.MapShape(layout.outputFields)

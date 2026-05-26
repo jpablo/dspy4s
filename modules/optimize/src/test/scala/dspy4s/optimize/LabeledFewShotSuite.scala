@@ -18,7 +18,7 @@ class LabeledFewShotSuite extends FunSuite:
   private val signature = SignatureDsl.parse("question: str -> answer: str").toOption.get
 
   test("LabeledFewShot samples k demos from trainset with seed-based determinism") {
-    val trainset = (1 to 20).map(i => Example(Map("question" -> s"q$i", "answer" -> s"a$i"))).toVector
+    val trainset = (1 to 20).map(i => Example(rec("question" -> s"q$i", "answer" -> s"a$i"))).toVector
     val student = DynamicPredict(layout = signature)
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 5, seed = 42L))
     given RuntimeContext = RuntimeEnvironment.current
@@ -28,8 +28,8 @@ class LabeledFewShotSuite extends FunSuite:
     val compiled = result.toOption.get.bestProgram
     assertEquals(compiled.demos.size, 5)
 
-    val firstRunDemos = compiled.demos.map(_.values("question"))
-    val rerun = optimizer.compile(student, trainset).toOption.get.bestProgram.demos.map(_.values("question"))
+    val firstRunDemos = compiled.demos.map((d => lookupString(d.values, "question")))
+    val rerun = optimizer.compile(student, trainset).toOption.get.bestProgram.demos.map((d => lookupString(d.values, "question")))
     assertEquals(firstRunDemos, rerun, "sampling should be deterministic under the same seed")
   }
 
@@ -44,18 +44,18 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot with sample=false takes the first k examples in input order") {
-    val trainset = (1 to 10).map(i => Example(Map("question" -> s"q$i", "answer" -> s"a$i"))).toVector
+    val trainset = (1 to 10).map(i => Example(rec("question" -> s"q$i", "answer" -> s"a$i"))).toVector
     val student = DynamicPredict(layout = signature)
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 3, sample = false))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
     assertEquals(compiled.demos.size, 3)
-    assertEquals(compiled.demos.map(_.values("question")).toList, List("q1", "q2", "q3"))
+    assertEquals(compiled.demos.map((d => lookupString(d.values, "question"))).toList, List("q1", "q2", "q3"))
   }
 
   test("LabeledFewShot caps demo count at trainset size when k exceeds it") {
-    val trainset = Vector(Example(Map("question" -> "only", "answer" -> "one")))
+    val trainset = Vector(Example(rec("question" -> "only", "answer" -> "one")))
     val student = DynamicPredict(layout = signature)
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 10))
     given RuntimeContext = RuntimeEnvironment.current
@@ -67,8 +67,8 @@ class LabeledFewShotSuite extends FunSuite:
   test("LabeledFewShot preserves student signature") {
     val student = DynamicPredict(layout = signature)
     val trainset = Vector(
-      Example(Map("question" -> "q1", "answer" -> "a1")),
-      Example(Map("question" -> "q2", "answer" -> "a2"))
+      Example(rec("question" -> "q1", "answer" -> "a1")),
+      Example(rec("question" -> "q2", "answer" -> "a2"))
     )
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 1, sample = false))
     given RuntimeContext = RuntimeEnvironment.current
@@ -76,5 +76,5 @@ class LabeledFewShotSuite extends FunSuite:
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
     assert(compiled.layout.equalsByStructure(signature), "signature should be preserved")
     assertEquals(compiled.demos.size, 1)
-    assertEquals(compiled.demos.head.values("question"), "q1")
+    assertEquals(lookupString(compiled.demos.head.values, "question"), "q1")
   }

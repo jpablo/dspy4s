@@ -2,6 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.ToolCall
@@ -11,6 +12,7 @@ import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.BasePredictProgram
 import dspy4s.programs.runtime.ToolExecutor
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final case class ReAct(
     module: PredictProgram,
@@ -27,12 +29,14 @@ final case class ReAct(
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     var currentInputs = call.inputs
-    var toolHistory = Vector.empty[Map[String, Any]]
+    var toolHistory   = Vector.empty[Map[String, Any]]
     var lastPrediction: Option[DynamicPrediction] = None
     var iteration = 0
 
     while iteration < maxIterations do
-      val stepCall = call.copy(inputs = currentInputs.updated(toolHistoryField, toolHistory))
+      val stepCall = call.copy(
+        inputs = DynamicValues.recordUpdated(currentInputs, toolHistoryField, DynamicValues.fromAny(toolHistory))
+      )
       module.run(stepCall) match
         case Left(error) =>
           return Left(error)
@@ -64,28 +68,31 @@ final case class ReAct(
                         iterationSteps += Map(
                           "tool_name" -> request.name,
                           "tool_args" -> request.args,
-                          "result" -> value,
-                          "index" -> idx
+                          "result"    -> value,
+                          "index"     -> idx
                         )
                 idx += 1
 
               val batch = iterationSteps.result()
               toolHistory = toolHistory ++ batch
-              currentInputs = currentInputs
-                .updated(toolHistoryField, toolHistory)
-                .updated(toolResultsField, batch)
+              currentInputs = DynamicValues.recordUpdated(
+                DynamicValues.recordUpdated(currentInputs, toolHistoryField, DynamicValues.fromAny(toolHistory)),
+                toolResultsField,
+                DynamicValues.fromAny(batch)
+              )
               lastToolResult.foreach { result =>
-                currentInputs = currentInputs.updated(toolResultField, result)
+                currentInputs = DynamicValues.recordUpdated(currentInputs, toolResultField, DynamicValues.fromAny(result))
               }
       iteration += 1
 
     Left(RuntimeError("react", s"Reached max iterations ($maxIterations) without producing an answer"))
 
   private def hasAnswer(prediction: DynamicPrediction): Boolean =
-    prediction.values.get(answerField) match
-      case Some(text: String) => text.trim.nonEmpty
-      case Some(_)            => true
-      case None               => false
+    prediction.get(answerField) match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(text))) => text.trim.nonEmpty
+      case Some(DynamicValue.Null)                                    => false
+      case Some(_)                                                    => true
+      case None                                                       => false
 
   private def extractToolRequests(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
     extractNativeToolCalls(prediction) match
@@ -94,60 +101,62 @@ final case class ReAct(
       case Right(_)             => extractLegacyToolRequest(prediction).map(_.toVector)
 
   private def extractLegacyToolRequest(prediction: DynamicPrediction): Either[DspyError, Option[ToolCallRequest]] =
-    prediction.values.get(toolNameField) match
-      case None => Right(None)
-      case Some(name: String) if name.trim.isEmpty =>
-        Right(None)
-      case Some(name: String) =>
-        Right(Some(ToolCallRequest(name = name.trim, args = parseToolArgs(prediction.values.get(toolArgsField)))))
+    prediction.get(toolNameField) match
+      case None                                                                    => Right(None)
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(name))) if name.trim.isEmpty => Right(None)
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(name))) =>
+        Right(Some(ToolCallRequest(
+          name = name.trim,
+          args = parseToolArgs(prediction.get(toolArgsField))
+        )))
       case Some(other) =>
         Left(RuntimeError("react", s"Tool name must be a non-empty string, found: $other"))
 
   private def extractNativeToolCalls(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
-    prediction.values.get("tool_calls") match
-      case None => Right(Vector.empty)
-      case Some(calls: Vector[?]) =>
-        parseToolCallsSequence(calls)
-      case Some(calls: Seq[?]) =>
-        parseToolCallsSequence(calls.toVector)
+    prediction.get("tool_calls") match
+      case None                       => Right(Vector.empty)
+      case Some(DynamicValue.Null)    => Right(Vector.empty)
+      case Some(seq: DynamicValue.Sequence) =>
+        parseToolCallsSequence(seq.elements.iterator.toVector)
       case Some(other) =>
         Left(RuntimeError("react", s"tool_calls must be an array, found: $other"))
 
-  private def parseToolCallsSequence(calls: Vector[?]): Either[DspyError, Vector[ToolCallRequest]] =
+  private def parseToolCallsSequence(calls: Vector[DynamicValue]): Either[DspyError, Vector[ToolCallRequest]] =
     calls.foldLeft[Either[DspyError, Vector[ToolCallRequest]]](Right(Vector.empty)) { (acc, entry) =>
       for
-        soFar <- acc
+        soFar  <- acc
         parsed <- parseToolCallEntry(entry)
       yield soFar :+ parsed
     }
 
-  private def parseToolCallEntry(entry: Any): Either[DspyError, ToolCallRequest] =
+  private def parseToolCallEntry(entry: DynamicValue): Either[DspyError, ToolCallRequest] =
     entry match
-      case call: ToolCall =>
-        Right(ToolCallRequest(call.name, call.args))
-      case call: collection.Map[?, ?] =>
-        parseToolCallMap(call)
+      case rec: DynamicValue.Record => parseToolCallRecord(rec)
       case other =>
-        Left(RuntimeError("react", s"Unsupported tool_calls entry: $other"))
+        // Fallback: an already-realized ToolCall lifted into DynamicValue is round-tripped through toAny.
+        DynamicValues.toAny(other) match
+          case call: ToolCall =>
+            Right(ToolCallRequest(call.name, call.args))
+          case unsupported =>
+            Left(RuntimeError("react", s"Unsupported tool_calls entry: $unsupported"))
 
-  private def parseToolCallMap(raw: collection.Map[?, ?]): Either[DspyError, ToolCallRequest] =
-    val map = raw.iterator.collect { case (key: String, value) => key -> value }.toMap
-    map.get("name") match
-      case Some(name: String) if name.trim.nonEmpty =>
-        val args = map.get("args").orElse(map.get("arguments"))
-        Right(ToolCallRequest(name.trim, parseToolArgs(args)))
+  private def parseToolCallRecord(rec: DynamicValue.Record): Either[DspyError, ToolCallRequest] =
+    DynamicValues.recordGet(rec, "name") match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(name))) if name.trim.nonEmpty =>
+        val argsDv = DynamicValues.recordGet(rec, "args").orElse(DynamicValues.recordGet(rec, "arguments"))
+        Right(ToolCallRequest(name.trim, parseToolArgs(argsDv)))
       case Some(other) =>
         Left(RuntimeError("react", s"Tool call name must be non-empty string, found: $other"))
       case None =>
         Left(RuntimeError("react", "Tool call payload is missing 'name'"))
 
-  private def parseToolArgs(raw: Option[Any]): Map[String, Any] =
+  private def parseToolArgs(raw: Option[DynamicValue]): Map[String, Any] =
     raw match
-      case Some(value: collection.Map[?, ?]) =>
-        value.iterator.collect { case (k: String, v) => k -> v }.toMap
-      case Some(value: String) if value.trim.nonEmpty =>
+      case Some(rec: DynamicValue.Record) =>
+        rec.fields.iterator.map((k, v) => k -> DynamicValues.toAny(v)).toMap
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(value))) if value.trim.nonEmpty =>
         Map("input" -> value)
-      case Some(value) =>
-        Map("value" -> value)
-      case None =>
+      case Some(DynamicValue.Null) | None =>
         Map.empty
+      case Some(other) =>
+        Map("value" -> DynamicValues.toAny(other))

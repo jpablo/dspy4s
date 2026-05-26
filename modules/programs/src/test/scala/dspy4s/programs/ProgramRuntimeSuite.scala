@@ -50,13 +50,17 @@ class ProgramRuntimeSuite extends FunSuite:
     override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = Map("text" -> output.text)))
+      Right(ParsedOutput(values = rec("text" -> output.text)))
 
   private object RuntimeResolver extends SettingsProgramRuntime
 
   private final class EchoProgram extends BasePredictProgram("echo"):
     override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(DynamicPrediction(values = call.inputs.updated("answer", "ok")))
+      Right(DynamicPrediction(values = dspy4s.core.contracts.DynamicValues.recordUpdated(
+        call.inputs,
+        "answer",
+        zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))
+      )))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -91,10 +95,10 @@ class ProgramRuntimeSuite extends FunSuite:
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = EchoProgram()
-      val output = program.run(ProgramCall(inputs = Map("question" -> "hello")))
+      val output = program.run(ProgramCall(inputs = rec("question" -> "hello")))
 
       assert(output.isRight)
-      assertEquals(output.toOption.get.values("answer"), "ok")
+      assertEquals(lookupString(output.toOption.get.values, "answer"), "ok")
       assert(events.head.isInstanceOf[ModuleStartEvent])
       assert(events.last.isInstanceOf[ModuleEndEvent])
       assertEquals(RuntimeEnvironment.current.trace.size, 1)
@@ -105,7 +109,7 @@ class ProgramRuntimeSuite extends FunSuite:
   test("base predict program respects traceEnabled=false") {
     given RuntimeContext = RuntimeEnvironment.current
     val program = EchoProgram()
-    val output = program.run(ProgramCall(inputs = Map("question" -> "hello"), traceEnabled = false))
+    val output = program.run(ProgramCall(inputs = rec("question" -> "hello"), traceEnabled = false))
 
     assert(output.isRight)
     assertEquals(RuntimeEnvironment.current.trace.size, 0)

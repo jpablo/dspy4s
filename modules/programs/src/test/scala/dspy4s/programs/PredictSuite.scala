@@ -42,14 +42,14 @@ class TypedPredictSuite extends FunSuite:
 
     override def format(invocation: AdapterInvocation)(using RuntimeContext)
         : Either[DspyError, FormattedPrompt] =
-      val q = invocation.inputs.values.get("question").map(_.toString).getOrElse("")
+      val q = lookupString(invocation.inputs.values, "question")
       Right(FormattedPrompt(messages = Vector(
         Message(role = MessageRole.User, text = Some(q))
       )))
 
     override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = Map(
+      Right(ParsedOutput(values = rec(
         "answer" -> output.text,
         "score"  -> output.metadata.getOrElse("score", 0.0)
       )))
@@ -130,12 +130,12 @@ class TypedPredictSuite extends FunSuite:
     val capturingAdapter = new Adapter:
       override val name = "capturing"
       override def format(invocation: AdapterInvocation)(using RuntimeContext) =
-        capturedInputs += invocation.inputs.values
+        capturedInputs += dspy4s.core.contracts.DynamicValues.recordToMap(invocation.inputs.values)
         Right(FormattedPrompt(messages = Vector(
           Message(role = MessageRole.User, text = Some("hi"))
         )))
       override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
-        Right(ParsedOutput(values = Map(
+        Right(ParsedOutput(values = rec(
           "answer" -> "x",
           "score"  -> 0.5
         )))
@@ -242,7 +242,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(EchoQuestionAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(Map[String, Any]("question" -> "Capital of France?"))
+      val result = Predict(sig).run(rec("question" -> "Capital of France?"))
       // Missing 'context' input -> Left, LM never invoked.
       assert(result.isLeft, s"expected missing-input failure, got: $result")
       assert(!lmCalled, "expected LM not to be called when required inputs are missing")
@@ -278,8 +278,8 @@ class TypedPredictSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer, score").toOption.get
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(sig).run(ProgramCall(inputs = Map("question" -> "x")))
+      val result = DynamicPredict(sig).run(ProgramCall(inputs = rec("question" -> "x")))
       assert(result.isRight)
-      assertEquals(result.toOption.get.values("answer"), "Paris")
+      assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
     }
   }

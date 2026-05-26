@@ -52,7 +52,7 @@ class StreamifySuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
     override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = signature.outputFields.map(_.name -> output.text).toMap))
+      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name -> output.text)*)))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -78,7 +78,7 @@ class StreamifySuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(program)(Map("question" -> "x"))
+      val stream = Streamify.streamify(program)(rec("question" -> "x"))
 
       val events = ArrayBuffer.empty[StreamEvent]
       while stream.hasNext do events += stream.next()
@@ -87,7 +87,7 @@ class StreamifySuite extends FunSuite:
       val predictionEvents = events.collect { case e: PredictionEvent => e }
 
       assertEquals(predictionEvents.size, 1)
-      assertEquals(predictionEvents.head.prediction.values("answer"), "To get there.")
+      assertEquals(lookupString(predictionEvents.head.prediction.values, "answer"), "To get there.")
       assert(tokenEvents.size >= 1)
       assertEquals(tokenEvents.map(_.chunk).mkString, "To get there.")
       assertEquals(tokenEvents.last.isLastChunk, true)
@@ -111,7 +111,7 @@ class StreamifySuite extends FunSuite:
           override def lmStart(modelId: String, inputs: Map[String, Any]): Option[String] =
             Some(s"Calling $modelId...")
         )
-      )(Map("question" -> "x"))
+      )(rec("question" -> "x"))
 
       val statuses = ArrayBuffer.empty[StatusEvent]
       while stream.hasNext do
@@ -146,7 +146,7 @@ class StreamifySuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(provider)
-      )(Map("question" -> "x"))
+      )(rec("question" -> "x"))
 
       val events = ArrayBuffer.empty[StreamEvent]
       while stream.hasNext do events += stream.next()
@@ -156,7 +156,7 @@ class StreamifySuite extends FunSuite:
       val tokens = events.collect { case e: TokenEvent => e }
 
       assertEquals(predictions.size, 1)
-      assertEquals(predictions.head.prediction.values("answer"), "complete answer")
+      assertEquals(lookupString(predictions.head.prediction.values, "answer"), "complete answer")
       assert(statuses.nonEmpty)
       assertEquals(tokens.size, 0)
     }
@@ -169,7 +169,7 @@ class StreamifySuite extends FunSuite:
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
     given RuntimeContext = RuntimeEnvironment.current
-    val stream = Streamify.streamify(program = failing)(Map.empty)
+    val stream = Streamify.streamify(program = failing)(rec())
 
     val events = ArrayBuffer.empty[StreamEvent]
     while stream.hasNext do events += stream.next()
@@ -192,17 +192,17 @@ class StreamifySuite extends FunSuite:
       val streamFn = Streamify.streamify(DynamicPredict(layout = signature))
 
       val first = ArrayBuffer.empty[StreamEvent]
-      val iter1 = streamFn(Map("q" -> "1"))
+      val iter1 = streamFn(rec("q" -> "1"))
       while iter1.hasNext do first += iter1.next()
       iter1.close()
 
       val second = ArrayBuffer.empty[StreamEvent]
-      val iter2 = streamFn(Map("q" -> "2"))
+      val iter2 = streamFn(rec("q" -> "2"))
       while iter2.hasNext do second += iter2.next()
       iter2.close()
 
-      val firstPredictions = first.collect { case e: PredictionEvent => e.prediction.values("a") }
-      val secondPredictions = second.collect { case e: PredictionEvent => e.prediction.values("a") }
+      val firstPredictions = first.collect { case e: PredictionEvent => lookupString(e.prediction.values, "a") }
+      val secondPredictions = second.collect { case e: PredictionEvent => lookupString(e.prediction.values, "a") }
       assertEquals(firstPredictions.size, 1)
       assertEquals(secondPredictions.size, 1)
     }

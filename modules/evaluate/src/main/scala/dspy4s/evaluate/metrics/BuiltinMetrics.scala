@@ -1,16 +1,17 @@
 package dspy4s.evaluate.metrics
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.NotFoundError
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.ValidationError
 import dspy4s.evaluate.contracts.Metric
 
 object MetricHelpers:
   def extractString(example: Example, prediction: DynamicPrediction, fieldName: String): Either[DspyError, (String, Vector[String])] =
-    val exampleValue = example.get(fieldName) match
+    val exampleValue = example.get(fieldName).map(DynamicValues.toAny) match
       case Some(text: String) => Right(Vector(text))
       case Some(seq: Iterable[?]) =>
         val strings = seq.collect { case s: String => s }.toVector
@@ -19,7 +20,7 @@ object MetricHelpers:
       case Some(other) => Right(Vector(other.toString))
       case None => Left(NotFoundError(fieldName, s"Example is missing field '$fieldName'"))
 
-    val predictionValue = prediction.get(fieldName) match
+    val predictionValue = prediction.get(fieldName).map(DynamicValues.toAny) match
       case Some(text: String) => Right(text)
       case Some(other) => Right(other.toString)
       case None => Left(NotFoundError(fieldName, s"Prediction is missing field '$fieldName'"))
@@ -91,7 +92,7 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
   val name: String = "answer_passage_match"
 
   override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
-    val contexts = prediction.get(contextField) match
+    val contexts = prediction.get(contextField).map(DynamicValues.toAny) match
       case Some(texts: Iterable[?]) =>
         Right(texts.collect { case s: String => s }.toVector)
       case Some(text: String) =>
@@ -101,7 +102,7 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
       case None =>
         Left(NotFoundError(contextField, s"Prediction is missing field '$contextField'"))
 
-    val answers = example.get(answerField) match
+    val answers = example.get(answerField).map(DynamicValues.toAny) match
       case Some(texts: Iterable[?]) =>
         Right(texts.collect { case s: String => s }.toVector)
       case Some(text: String) =>

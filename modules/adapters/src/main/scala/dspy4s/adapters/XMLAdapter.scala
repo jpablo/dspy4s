@@ -7,6 +7,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -15,6 +16,8 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.Try
 import scala.xml.Elem
@@ -65,7 +68,9 @@ final case class XMLAdapter(
         if trimmed.nonEmpty then
           Right(
             ParsedOutput(
-              values = Map(field.name -> trimmed),
+              values = DynamicValue.Record(Chunk.single(
+                field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))
+              )),
               rawText = Some(output.text),
               metadata = Map("adapter" -> name, "fallback" -> "text")
             )
@@ -78,24 +83,32 @@ final case class XMLAdapter(
     for
       xmlText <- extractXml(output.text)
       document <- parseXml(xmlText)
-      values <- layout.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
+      entries <- layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc
           raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name))
           coerced <- coerce(field.typeRef, raw)
-        yield soFar.updated(field.name, coerced)
+        yield soFar :+ (field.name -> coerced)
       }
-    yield ParsedOutput(values = values, rawText = Some(output.text), metadata = Map("adapter" -> name))
+    yield ParsedOutput(
+      values   = DynamicValue.Record(Chunk.from(entries)),
+      rawText  = Some(output.text),
+      metadata = Map("adapter" -> name)
+    )
 
-  private def buildOutputXml(layout: SignatureLayout, values: Map[String, Any]): String =
+  private def buildOutputXml(layout: SignatureLayout, values: DynamicValue.Record): String =
     val body = layout.outputFields.flatMap { field =>
-      values.get(field.name).map(value => s"<${field.name}>${escapeXml(value.toString)}</${field.name}>")
+      DynamicValues.recordGet(values, field.name).map { value =>
+        s"<${field.name}>${escapeXml(DynamicValues.renderText(value))}</${field.name}>"
+      }
     }.mkString
     s"<outputs>$body</outputs>"
 
-  private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: Map[String, Any]): String =
+  private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: DynamicValue.Record): String =
     fields.flatMap { field =>
-      val value = values.get(field.name).orElse(field.defaultValue).map(_.toString)
+      val value = DynamicValues.recordGet(values, field.name)
+        .map(DynamicValues.renderText)
+        .orElse(field.defaultValue.map(_.toString))
       value.map { v =>
         val prefix = field.prefix.getOrElse(s"${field.name}:")
         s"$prefix $v"
@@ -121,19 +134,21 @@ final case class XMLAdapter(
   private def extractFieldText(xml: Elem, fieldName: String): Option[String] =
     (xml \\ fieldName).headOption.map(_.text.trim).filter(_.nonEmpty)
 
-  private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, Any] =
+  private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     typeRef match
       case TypeRef.int =>
         raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
+          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
       case TypeRef.double =>
         raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
+          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
       case TypeRef.bool =>
         raw.trim.toLowerCase match
-          case "true"  => Right(true)
-          case "false" => Right(false)
+          case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
+          case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
           case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
       case _ =>
-        Right(raw)
+        Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
 
   private def escapeXml(value: String): String =
     value

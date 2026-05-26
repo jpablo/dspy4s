@@ -2,8 +2,8 @@ package dspy4s.streaming
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
-import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
@@ -16,6 +16,7 @@ import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
+import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
@@ -40,7 +41,7 @@ object Streamify:
       includeFinalPrediction: Boolean = true,
       queueCapacity: Int = 64,
       warningSink: String => Unit = msg => System.err.println(s"[dspy4s.streamify] $msg")
-  )(using outerContext: RuntimeContext): Map[String, Any] => ClosableIterator[StreamEvent] =
+  )(using outerContext: RuntimeContext): DynamicValue.Record => ClosableIterator[StreamEvent] =
     // Validate listener field names against the program structure as far as
     // we can statically see it. This is dspy4s's equivalent of Python's
     // `find_predictor_for_stream_listeners`: warn (don't fail) if a listener

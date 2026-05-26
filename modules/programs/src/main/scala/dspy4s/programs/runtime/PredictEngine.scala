@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -19,6 +20,8 @@ import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Shared execution body for the predict module: pushes the
   * `ActivePredict` scope, resolves the model + adapter, runs
@@ -114,5 +117,12 @@ private[dspy4s] final case class PredictEngine(
       "completion_tokens" -> usage.completionTokens
     )
 
-  private def toToolCallPayload(toolCalls: Vector[ToolCall]): Vector[Map[String, Any]] =
-    toolCalls.map(call => Map("name" -> call.name, "args" -> call.args))
+  private def toToolCallPayload(toolCalls: Vector[ToolCall]): DynamicValue =
+    DynamicValue.Sequence(Chunk.from(
+      toolCalls.map { call =>
+        DynamicValue.Record(Chunk(
+          "name" -> DynamicValue.Primitive(PrimitiveValue.String(call.name)),
+          "args" -> DynamicValues.fromAny(call.args)
+        ))
+      }
+    ))

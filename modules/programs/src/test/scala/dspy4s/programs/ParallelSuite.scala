@@ -18,7 +18,7 @@ class ParallelSuite extends FunSuite:
       behavior: Int => Either[DspyError, DynamicPrediction]
   ) extends PredictProgram:
     override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      val value = input.inputs("value").asInstanceOf[Int]
+      val value = lookup(input.inputs, "value").get.asInstanceOf[Int]
       behavior(value)
 
   override def beforeEach(context: BeforeEach): Unit =
@@ -29,16 +29,16 @@ class ParallelSuite extends FunSuite:
 
   test("parallel executes programs and preserves task ordering") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(behavior = value => Right(DynamicPrediction(values = Map("output" -> value * 2))))
+    val program = StubProgram(behavior = value => Right(DynamicPrediction(values = rec("output" -> value * 2))))
     val tasks = (1 to 5).toVector.map { value =>
-      program -> ProgramCall(inputs = Map("value" -> value))
+      program -> ProgramCall(inputs = rec("value" -> value))
     }
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
 
     assert(result.isRight)
-    val outputs = result.toOption.get.results.map(_.get.values("output"))
-    assertEquals(outputs, Vector(2, 4, 6, 8, 10))
+    val outputs = result.toOption.get.results.map(p => lookup(p.get.values, "output").get)
+    assertEquals(outputs, Vector(2, 4, 6, 8, 10): Vector[Any])
   }
 
   test("parallel keeps partial results when failures are below threshold") {
@@ -46,10 +46,10 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 3 then Left(ValidationError("boom"))
-        else Right(DynamicPrediction(values = Map("output" -> value)))
+        else Right(DynamicPrediction(values = rec("output" -> value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
-      program -> ProgramCall(inputs = Map("value" -> value))
+      program -> ProgramCall(inputs = rec("value" -> value))
     }
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
@@ -66,10 +66,10 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value % 2 == 0 then Left(ValidationError("fail"))
-        else Right(DynamicPrediction(values = Map("output" -> value)))
+        else Right(DynamicPrediction(values = rec("output" -> value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
-      program -> ProgramCall(inputs = Map("value" -> value))
+      program -> ProgramCall(inputs = rec("value" -> value))
     }
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(1)).run(tasks)
@@ -82,9 +82,9 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 2 then Left(ValidationError("boom"))
-        else Right(DynamicPrediction(values = Map("output" -> value)))
+        else Right(DynamicPrediction(values = rec("output" -> value)))
     )
-    val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = Map("value" -> value)))
+    val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = rec("value" -> value)))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -104,17 +104,17 @@ class ParallelSuite extends FunSuite:
       behavior = _ =>
         Right(
           DynamicPrediction(
-            values = Map("sample" -> RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"))
+            values = rec("sample" -> RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"))
           )
         )
     )
-    val tasks = Vector.fill(4)(program -> ProgramCall(inputs = Map("value" -> 1)))
+    val tasks = Vector.fill(4)(program -> ProgramCall(inputs = rec("value" -> 1)))
 
     RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
       assert(result.isRight)
-      val values = result.toOption.get.results.flatten.map(_.values("sample"))
+      val values = result.toOption.get.results.flatten.map(p => lookupString(p.values, "sample"))
       assertEquals(values, Vector("42", "42", "42", "42"))
     }
   }
@@ -125,7 +125,7 @@ class ParallelSuite extends FunSuite:
       behavior = value =>
         Right(
           DynamicPrediction(
-            values = Map(
+            values = rec(
               "answer" -> s"answer-$value",
               "tool_calls" -> Vector(
                 Map("name" -> "search", "args" -> Map("query" -> s"q-$value"))
@@ -134,14 +134,17 @@ class ParallelSuite extends FunSuite:
           )
         )
     )
-    val tasks = Vector(1, 2).map(value => program -> ProgramCall(inputs = Map("value" -> value)))
+    val tasks = Vector(1, 2).map(value => program -> ProgramCall(inputs = rec("value" -> value)))
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
 
     assert(result.isRight)
     val outputs = result.toOption.get.results.flatten
-    assertEquals(outputs.map(_.values("answer")), Vector("answer-1", "answer-2"))
-    val toolCalls = outputs.map(_.values("tool_calls").asInstanceOf[Vector[Map[String, Any]]])
-    assertEquals(toolCalls.map(_.head("name")), Vector("search", "search"))
-    assertEquals(toolCalls.map(_.head("args")), Vector(Map("query" -> "q-1"), Map("query" -> "q-2")))
+    assertEquals(outputs.map(p => lookupString(p.values, "answer")), Vector("answer-1", "answer-2"))
+    val toolCalls = outputs.map(p => lookup(p.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]])
+    assertEquals(toolCalls.map(_.head("name")), Vector("search", "search"): Vector[Any])
+    assertEquals(
+      toolCalls.map(_.head("args")),
+      Vector(Map("query" -> "q-1"), Map("query" -> "q-2")): Vector[Any]
+    )
   }

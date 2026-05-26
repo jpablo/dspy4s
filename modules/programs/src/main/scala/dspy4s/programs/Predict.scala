@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, Example, NotFoundError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, Example, NotFoundError, RuntimeContext}
 import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Signature}
@@ -58,15 +58,14 @@ final case class Predict[I, O](
       config: Map[String, Any] = Map.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val inputMap = signature.inputShape.encode(input)
-    // Defensive: shape implementations that don't statically guarantee
-    // full coverage of declared input fields (notably the Map-based
-    // shape used by trait specs) could let a caller silently omit a
-    // required input. Validate before spending an LM call. Case-class
-    // derivations always produce a complete map, so the check never
-    // fires for them; cost is one Set.diff per call.
+    val inputRecord = signature.inputShape.encode(input)
+    // Defensive: shape implementations that don't statically guarantee full coverage of declared input fields
+    // (notably the Map-based shape used by trait specs) could let a caller silently omit a required input.
+    // Validate before spending an LM call. Case-class derivations always produce a complete record, so the
+    // check never fires for them; cost is one Set.diff per call.
     val requiredInputs = signature.layout.inputFields.iterator.map(_.name).toSet
-    val missing        = requiredInputs.diff(inputMap.keySet)
+    val presentInputs  = DynamicValues.recordKeys(inputRecord).toSet
+    val missing        = requiredInputs.diff(presentInputs)
     if missing.nonEmpty then
       Left(NotFoundError(
         resource = "program_input",
@@ -74,5 +73,5 @@ final case class Predict[I, O](
       ))
     else
       inner
-        .run(ProgramCall(inputs = inputMap, config = config, traceEnabled = traceEnabled))
+        .run(ProgramCall(inputs = inputRecord, config = config, traceEnabled = traceEnabled))
         .flatMap(raw => Prediction.from(raw, signature.outputShape))

@@ -5,11 +5,12 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
+import zio.blocks.schema.DynamicValue
 
 final case class Refine(
     module: PredictProgram,
     n: Int,
-    rewardFn: (Map[String, Any], DynamicPrediction) => Double,
+    rewardFn: (DynamicValue.Record, DynamicPrediction) => Double,
     threshold: Double,
     failCount: Option[Int] = None
 ) extends PredictProgram:

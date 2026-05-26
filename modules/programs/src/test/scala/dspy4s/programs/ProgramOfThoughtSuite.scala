@@ -65,12 +65,13 @@ class ProgramOfThoughtSuite extends FunSuite:
     override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
       val names = layout.outputFields.map(_.name)
       if names.contains("generated_code") then
-        Right(ParsedOutput(values = Map("generated_code" -> output.text) ++
-          // ProgramOfThought's reasoning-augmented predicts also want `reasoning`; supply a placeholder.
-          (if names.contains("reasoning") then Map("reasoning" -> "scripted reasoning") else Map.empty)))
+        val entries: Seq[(String, Any)] =
+          Seq("generated_code" -> output.text) ++
+            (if names.contains("reasoning") then Seq("reasoning" -> "scripted reasoning") else Seq.empty)
+        Right(ParsedOutput(values = rec(entries*)))
       else
         // Answer signature — every output field gets the LM's text.
-        Right(ParsedOutput(values = names.map(_ -> output.text).toMap))
+        Right(ParsedOutput(values = rec(names.map(_ -> output.text)*)))
 
   // ── Single-shot success ────────────────────────────────────────────────
 
@@ -92,10 +93,10 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("question" -> "what is 6 * 7?")))
+      val result = program.run(ProgramCall(inputs = rec("question" -> "what is 6 * 7?")))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      assertEquals(pred.values("answer"), "42")
+      assertEquals(lookupString(pred.values, "answer"), "42")
       assertEquals(interpreter.received.size, 1)
       assert(interpreter.received.head.contains("import json"))
     }
@@ -123,10 +124,10 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("question" -> "?")))
+      val result = program.run(ProgramCall(inputs = rec("question" -> "?")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       assertEquals(interpreter.received.size, 2, "should have retried after error")
-      assertEquals(result.toOption.get.values("answer"), "ok")
+      assertEquals(lookupString(result.toOption.get.values, "answer"), "ok")
     }
   }
 
@@ -151,7 +152,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("question" -> "?")))
+      val result = program.run(ProgramCall(inputs = rec("question" -> "?")))
       assert(result.isLeft, s"expected Left after maxIterations, got $result")
       val err = result.left.toOption.get.asInstanceOf[RuntimeError]
       assertEquals(err.component, "program_of_thought")
@@ -174,7 +175,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      program.run(ProgramCall(inputs = Map("q" -> "?")))
+      program.run(ProgramCall(inputs = rec("q" -> "?")))
       assert(!interpreter.closed)
     }
   }
@@ -198,9 +199,9 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("q" -> "sum 0..10")))
+      val result = program.run(ProgramCall(inputs = rec("q" -> "sum 0..10")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
-      assertEquals(result.toOption.get.values("answer"), "55")
+      assertEquals(lookupString(result.toOption.get.values, "answer"), "55")
     }
     interpreter.close()
   }

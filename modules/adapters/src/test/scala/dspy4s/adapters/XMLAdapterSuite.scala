@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
@@ -11,8 +12,15 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.MessageRole
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 class XMLAdapterSuite extends FunSuite:
+  private def rec(entries: (String, Any)*): DynamicValue.Record =
+    DynamicValues.recordFromEntries(entries)
+  private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
+    DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
+
+
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
 
@@ -25,11 +33,11 @@ class XMLAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector(
         Example(
-          values = Map("question" -> "Capital of France?", "answer" -> "Paris", "score" -> 0.95),
+          values = rec("question" -> "Capital of France?", "answer" -> "Paris", "score" -> 0.95),
           inputKeys = Set("question")
         )
       ),
-      inputs = Example(values = Map("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
+      inputs = Example(values = rec("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
     )
 
@@ -53,9 +61,9 @@ class XMLAdapterSuite extends FunSuite:
 
     assert(parsed.isRight)
     val values = parsed.toOption.get.values
-    assertEquals(values("answer"), "Brussels")
-    assertEquals(values("score"), 0.91)
-    assertEquals(values("ok"), true)
+    assertEquals(lookup(values, "answer"), Some("Brussels": Any))
+    assertEquals(lookup(values, "score"), Some(0.91: Any))
+    assertEquals(lookup(values, "ok"), Some(true: Any))
   }
 
   test("parse supports fenced xml payloads") {
@@ -69,7 +77,7 @@ class XMLAdapterSuite extends FunSuite:
     val parsed = XMLAdapter().parse(signature, LmOutput(text = text))
 
     assert(parsed.isRight)
-    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
   }
 
   test("parse fails when xml is malformed") {
@@ -89,6 +97,6 @@ class XMLAdapterSuite extends FunSuite:
     val parsed = XMLAdapter().parse(signature, LmOutput(text = "Brussels"))
 
     assert(parsed.isRight)
-    assertEquals(parsed.toOption.get.values("answer"), "Brussels")
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
     assertEquals(parsed.toOption.get.metadata("fallback"), "text")
   }

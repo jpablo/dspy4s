@@ -35,7 +35,7 @@ class PredictSuite extends FunSuite:
           messages = Vector(
             Message(
               role = MessageRole.User,
-              text = Some(invocation.inputs.values.get("question").map(_.toString).getOrElse(""))
+              text = Some(lookupString(invocation.inputs.values, "question"))
             )
           )
         )
@@ -46,7 +46,7 @@ class PredictSuite extends FunSuite:
     ): Either[DspyError, ParsedOutput] =
       Right(
         ParsedOutput(
-          values = Map(
+          values = rec(
             "answer" -> output.text,
             "score" -> output.metadata.getOrElse("score", 0.0)
           )
@@ -106,11 +106,11 @@ class PredictSuite extends FunSuite:
     ) {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(signature).run(ProgramCall(inputs = Map("question" -> "Capital of France?")))
+        val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" -> "Capital of France?")))
 
         assert(result.isRight)
         val prediction = result.toOption.get
-        assertEquals(prediction.values("answer"), "Paris")
+        assertEquals(lookupString(prediction.values, "answer"), "Paris")
         assertEquals(prediction.asDouble("score"), Right(0.95))
         assertEquals(prediction.completions.get.size, 2)
         assertEquals(prediction.lmUsage.flatMap(_.get("total_tokens")), Some(12L))
@@ -145,7 +145,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).run(ProgramCall(inputs = Map("question" -> "x")))
+      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" -> "x")))
 
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
@@ -162,12 +162,12 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).run(ProgramCall(inputs = Map("question" -> "x")))
+      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" -> "x")))
 
       assert(result.isRight)
-      val toolCalls = result.toOption.get.values("tool_calls").asInstanceOf[Vector[Map[String, Any]]]
+      val toolCalls = lookup(result.toOption.get.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]]
       assertEquals(toolCalls.size, 1)
-      assertEquals(toolCalls.head("name"), "search")
-      assertEquals(toolCalls.head("args"), Map("query" -> "capital of belgium"))
+      assertEquals(toolCalls.head("name"), "search": Any)
+      assertEquals(toolCalls.head("args"), Map("query" -> "capital of belgium"): Any)
     }
   }

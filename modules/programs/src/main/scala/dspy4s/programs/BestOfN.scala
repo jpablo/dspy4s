@@ -1,21 +1,22 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
+import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
 final case class BestOfN(
     module: PredictProgram,
     n: Int,
-    rewardFn: (Map[String, Any], DynamicPrediction) => Double,
+    rewardFn: (DynamicValue.Record, DynamicPrediction) => Double,
     threshold: Double,
     failCount: Option[Int] = None
 ) extends PredictProgram:
@@ -83,7 +84,7 @@ final case class BestOfN(
         Left(lastError.getOrElse(RuntimeError("best_of_n", "No successful predictions were produced")))
 
   private def evaluateReward(
-      inputs: Map[String, Any],
+      inputs: DynamicValue.Record,
       prediction: DynamicPrediction
   ): Either[DspyError, Double] =
     try Right(rewardFn(inputs, prediction))

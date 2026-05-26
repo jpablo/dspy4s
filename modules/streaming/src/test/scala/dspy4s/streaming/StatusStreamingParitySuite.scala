@@ -43,7 +43,7 @@ class StatusStreamingParitySuite extends FunSuite:
       override val moduleName: String = "tool_caller"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(name = tool.name, args = toolArgs), Vector(tool)).map { _ =>
-          DynamicPrediction(values = Map("answer" -> "ok"))
+          DynamicPrediction(values = rec("answer" -> "ok"))
         }
 
   test("concurrent status-message providers don't bleed messages across streamify invocations") {
@@ -79,7 +79,7 @@ class StatusStreamingParitySuite extends FunSuite:
         val stream = Streamify.streamify(
           program = buildToolProgram(toolA, Map.empty),
           statusMessageProvider = Some(providerA)
-        )(Map.empty)
+        )(rec())
         ready.countDown()
         ready.await(5, TimeUnit.SECONDS)
         val msgs = ArrayBuffer.empty[String]
@@ -96,7 +96,7 @@ class StatusStreamingParitySuite extends FunSuite:
         val stream = Streamify.streamify(
           program = buildToolProgram(toolB, Map.empty),
           statusMessageProvider = Some(providerB)
-        )(Map.empty)
+        )(rec())
         ready.countDown()
         ready.await(5, TimeUnit.SECONDS)
         val msgs = ArrayBuffer.empty[String]
@@ -139,7 +139,7 @@ class StatusStreamingParitySuite extends FunSuite:
     val stream = Streamify.streamify(
       program = buildToolProgram(slowTool, Map.empty),
       statusMessageProvider = Some(StatusMessageProvider.default)
-    )(Map.empty)
+    )(rec())
 
     val statusTimestamps = ArrayBuffer.empty[(String, Long)]
     while stream.hasNext do

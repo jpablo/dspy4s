@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, FieldMetadata, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldMetadata, TypeRef, ValidationError}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 
@@ -97,9 +97,9 @@ object FieldCodec extends LowPriorityFieldCodecs:
       val typeRef: TypeRef = capturedTypeRef
       override val metadata: Map[String, String] = capturedMetadata
       def encode(value: A): Any =
-        ZioSchemaCodec.dynamicToAny(schema.toDynamicValue(value))
+        DynamicValues.toAny(schema.toDynamicValue(value))
       def decode(raw: Any): Either[DspyError, A] =
-        val dyn = ZioSchemaCodec.anyToDynamic(raw, schema.reflect)
+        val dyn = ZioSchemaCodec.normalize(DynamicValues.fromAny(raw), schema.reflect)
         schema.fromDynamicValue(dyn).left.map(err => ValidationError(err.toString))
 
   /** One-line companion helper for DSPy-style flat enum fields.

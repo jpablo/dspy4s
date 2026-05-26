@@ -2,10 +2,10 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
@@ -13,6 +13,7 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.BasePredictProgram
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.matching.Regex
 
@@ -141,14 +142,15 @@ final case class CodeAct(
       extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
       extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
       extracted <- runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>
-        val extractInputs = call.inputs.updated("trajectory", trajectory.render)
+        val rendered      = trajectory.render
+        val renderedDv    = DynamicValue.Primitive(PrimitiveValue.String(rendered))
+        val extractInputs = DynamicValues.recordUpdated(call.inputs, "trajectory", renderedDv)
         extractor.run(call.copy(inputs = extractInputs)).map { extracted =>
-          // Attach the trajectory to the extracted prediction's values so
-          // callers can inspect it after the fact.
+          // Attach the trajectory to the extracted prediction's values so callers can inspect it after the fact.
           DynamicPrediction(
-            values = extracted.values.updated("trajectory", trajectory.render),
+            values      = DynamicValues.recordUpdated(extracted.values, "trajectory", renderedDv),
             completions = extracted.completions,
-            lmUsage = extracted.lmUsage
+            lmUsage     = extracted.lmUsage
           )
         }
       }
@@ -165,11 +167,15 @@ final case class CodeAct(
   )(using RuntimeContext): Either[DspyError, Vector[CodeAct.TrajectoryEntry]] =
     if iteration >= maxIterations then Right(trajectory)
     else
-      val stepInputs = call.inputs.updated("trajectory", CodeAct.renderTrajectory(trajectory))
+      val stepInputs = DynamicValues.recordUpdated(
+        call.inputs,
+        "trajectory",
+        DynamicValue.Primitive(PrimitiveValue.String(CodeAct.renderTrajectory(trajectory)))
+      )
       codeActPredict.run(call.copy(inputs = stepInputs)).flatMap { prediction =>
-        val rawCode = prediction.values.getOrElse("generated_code", "").toString
-        val finished = isFinished(prediction.values.get("finished"))
-        val code = extractCode(rawCode).getOrElse(rawCode.trim)
+        val rawCode  = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
+        val finished = isFinished(prediction.get("finished"))
+        val code     = extractCode(rawCode).getOrElse(rawCode.trim)
 
         if code.isEmpty then
           val entry = CodeAct.TrajectoryEntry(iteration, code = "", observation = "Failed to parse the generated code: empty code", isError = true)
@@ -202,11 +208,11 @@ final case class CodeAct(
             case Left(other) => Left(other)
       }
 
-  private def isFinished(value: Option[Any]): Boolean =
+  private def isFinished(value: Option[DynamicValue]): Boolean =
     value match
-      case Some(b: Boolean)            => b
-      case Some(s: String)             => s.trim.equalsIgnoreCase("true")
-      case _                           => false
+      case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(b))) => b
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s)))  => s.trim.equalsIgnoreCase("true")
+      case _                                                       => false
 
   /** Strip a fenced ```python / ``` block from the LM's `generated_code`
     * field. The LM is instructed to emit fenced code, but it sometimes

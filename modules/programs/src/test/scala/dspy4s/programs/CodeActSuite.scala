@@ -74,10 +74,10 @@ class CodeActSuite extends FunSuite:
         val parts = text.split("\\|\\|", -1)
         val code = if parts.length >= 1 then parts(0) else ""
         val finished = parts.length >= 2 && parts(1).trim.equalsIgnoreCase("true")
-        Right(ParsedOutput(values = Map("generated_code" -> code, "finished" -> finished)))
+        Right(ParsedOutput(values = rec("generated_code" -> code, "finished" -> finished)))
       else
         // Extractor step: every remaining output field gets the full text.
-        Right(ParsedOutput(values = layout.outputFields.map(_.name -> text).toMap))
+        Right(ParsedOutput(values = rec(layout.outputFields.map(_.name -> text)*)))
 
   // ── Wiring smoke test (scripted LM + scripted interpreter) ──────────────
 
@@ -99,11 +99,11 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("question" -> "what is 40 + 2?")))
+      val result = program.run(ProgramCall(inputs = rec("question" -> "what is 40 + 2?")))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      assertEquals(pred.values("answer"), "42")
-      val traj = pred.values("trajectory").asInstanceOf[String]
+      assertEquals(lookupString(pred.values, "answer"), "42")
+      val traj = lookupString(pred.values, "trajectory")
       assert(traj.contains("print(40 + 2)"), s"trajectory missing code: $traj")
       assert(traj.contains("42"), s"trajectory missing stdout: $traj")
       // Interpreter saw exactly one execute() call with the stripped code.
@@ -134,7 +134,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("q" -> "?")))
+      val result = program.run(ProgramCall(inputs = rec("q" -> "?")))
       assert(result.isRight)
       assertEquals(interpreter.received.size, 3, "should run exactly maxIterations times")
     }
@@ -159,9 +159,9 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("q" -> "?")))
+      val result = program.run(ProgramCall(inputs = rec("q" -> "?")))
       assert(result.isRight, s"CodeAct should not propagate user-code errors as Left; got $result")
-      val traj = result.toOption.get.values("trajectory").asInstanceOf[String]
+      val traj = lookupString(result.toOption.get.values, "trajectory")
       assert(traj.contains("Failed to execute"), s"trajectory missing error label: $traj")
       assert(traj.contains("NameError"), traj)
     }
@@ -182,7 +182,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      program.run(ProgramCall(inputs = Map("q" -> "?")))
+      program.run(ProgramCall(inputs = rec("q" -> "?")))
       assert(!interpreter.closed, "CodeAct must not auto-close — that's the caller's job")
     }
   }
@@ -206,9 +206,9 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = Map("q" -> "sum 0..9")))
+      val result = program.run(ProgramCall(inputs = rec("q" -> "sum 0..9")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
-      val traj = result.toOption.get.values("trajectory").asInstanceOf[String]
+      val traj = lookupString(result.toOption.get.values, "trajectory")
       assert(traj.contains("45"), s"expected '45' in trajectory: $traj")
     }
     interpreter.close()

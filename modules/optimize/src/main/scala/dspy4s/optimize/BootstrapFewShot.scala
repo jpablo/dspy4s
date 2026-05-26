@@ -91,7 +91,11 @@ final class BootstrapFewShot[P <: Module[ProgramCall, DynamicPrediction]: Predic
                         case Left(_) => false
 
                   if metricOk then
-                    val demoValues = example.inputs ++ prediction.values
+                    val demoValues = zio.blocks.schema.DynamicValue.Record(
+                      zio.blocks.chunk.Chunk.from(
+                        example.inputs.fields.iterator.toSeq ++ prediction.values.fields.iterator.toSeq
+                      )
+                    )
                     val demo = Example(values = demoValues, inputKeys = example.inputKeys, augmented = true)
                     bootstrapped += demo
                     success = true

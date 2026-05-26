@@ -34,9 +34,9 @@ class RefineSuite extends FunSuite:
   test("refine returns best prediction among attempts") {
     val module = StubProgram(
       Vector(
-        Right(DynamicPrediction(values = Map("answer" -> "Brussels", "score" -> 0.4))),
-        Right(DynamicPrediction(values = Map("answer" -> "City of Brussels", "score" -> 0.2))),
-        Right(DynamicPrediction(values = Map("answer" -> "Brussels", "score" -> 0.9)))
+        Right(DynamicPrediction(values = rec("answer" -> "Brussels", "score" -> 0.4))),
+        Right(DynamicPrediction(values = rec("answer" -> "City of Brussels", "score" -> 0.2))),
+        Right(DynamicPrediction(values = rec("answer" -> "Brussels", "score" -> 0.9)))
       )
     )
     val refine = Refine(
@@ -47,10 +47,10 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = Map("question" -> "What is the capital of Belgium?")))
+    val result = refine.run(ProgramCall(inputs = rec("question" -> "What is the capital of Belgium?")))
 
     assert(result.isRight)
-    assertEquals(result.toOption.get.values("answer"), "Brussels")
+    assertEquals(lookupString(result.toOption.get.values, "answer"), "Brussels")
     assertEquals(module.calls.get(), 3)
   }
 
@@ -70,7 +70,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = Map("q" -> "x")))
+    val result = refine.run(ProgramCall(inputs = rec("q" -> "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 3)
     assertEquals(result.left.toOption.get.message, "f3")
@@ -81,7 +81,7 @@ class RefineSuite extends FunSuite:
       Vector(
         Left(RuntimeError("stub", "f1")),
         Left(RuntimeError("stub", "f2")),
-        Right(DynamicPrediction(values = Map("answer" -> "ok", "score" -> 1.0)))
+        Right(DynamicPrediction(values = rec("answer" -> "ok", "score" -> 1.0)))
       )
     )
     val refine = Refine(
@@ -93,7 +93,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = Map("q" -> "x")))
+    val result = refine.run(ProgramCall(inputs = rec("q" -> "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")

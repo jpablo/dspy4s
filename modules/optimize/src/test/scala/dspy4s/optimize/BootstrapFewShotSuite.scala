@@ -30,9 +30,9 @@ class BootstrapFewShotSuite extends FunSuite:
   test("BootstrapFewShot bootstraps demos from examples where teacher succeeds") {
     val teacher = ScriptedPredictProgram(Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3"), signature)
     val trainset = Vector(
-      Example(Map("question" -> "q1", "answer" -> "a1"), inputKeys = Set("question")),
-      Example(Map("question" -> "q2", "answer" -> "a2"), inputKeys = Set("question")),
-      Example(Map("question" -> "q3", "answer" -> "a3"), inputKeys = Set("question"))
+      Example(rec("question" -> "q1", "answer" -> "a1"), inputKeys = Set("question")),
+      Example(rec("question" -> "q2", "answer" -> "a2"), inputKeys = Set("question")),
+      Example(rec("question" -> "q3", "answer" -> "a3"), inputKeys = Set("question"))
     )
     val student = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
@@ -52,9 +52,9 @@ class BootstrapFewShotSuite extends FunSuite:
   test("BootstrapFewShot uses metric to filter which traces to keep") {
     val teacher = ScriptedPredictProgram(Map("q1" -> "wrong", "q2" -> "expected", "q3" -> "also-wrong"), signature)
     val trainset = Vector(
-      Example(Map("question" -> "q1", "answer" -> "expected"), inputKeys = Set("question")),
-      Example(Map("question" -> "q2", "answer" -> "expected"), inputKeys = Set("question")),
-      Example(Map("question" -> "q3", "answer" -> "expected"), inputKeys = Set("question"))
+      Example(rec("question" -> "q1", "answer" -> "expected"), inputKeys = Set("question")),
+      Example(rec("question" -> "q2", "answer" -> "expected"), inputKeys = Set("question")),
+      Example(rec("question" -> "q3", "answer" -> "expected"), inputKeys = Set("question"))
     )
 
     val exactMatch = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
@@ -73,12 +73,12 @@ class BootstrapFewShotSuite extends FunSuite:
     assert(result.isRight)
     val bootstrapped = result.toOption.get.bestProgram.demos.filter(_.augmented)
     assertEquals(bootstrapped.size, 1, "only q2 should pass the exact match metric")
-    assertEquals(bootstrapped.head.values("question"), "q2")
+    assertEquals(lookupString(bootstrapped.head.values, "question"), "q2")
   }
 
   test("BootstrapFewShot returns RuntimeError when teacher throws and errors exceed maxErrors") {
     val trainset = (1 to 5).map(i =>
-      Example(Map("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
+      Example(rec("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
     ).toVector
 
     val blowingUp = ScriptedPredictProgram(
@@ -101,7 +101,7 @@ class BootstrapFewShotSuite extends FunSuite:
     // so other examples go into the failed pool and fill labeled slots.
     val teacher = ScriptedPredictProgram(Map("q1" -> "a1"), signature)
     val trainset = (1 to 5).map(i =>
-      Example(Map("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
+      Example(rec("question" -> s"q$i", "answer" -> s"a$i"), inputKeys = Set("question"))
     ).toVector
 
     val student = ScriptedPredictProgram(Map.empty, signature)

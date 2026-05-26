@@ -58,5 +58,7 @@ object CaseClassExample:
     * map without invoking an LM. Useful for tests and for showing the
     * decode boundary. */
   def fromRawValues(rawSentiment: String): Either[DspyError, Prediction[EmotionOutput]] =
-    val raw = DynamicPrediction(values = Map("sentiment" -> rawSentiment))
+    val raw = DynamicPrediction(values =
+      dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" -> rawSentiment))
+    )
     Prediction.from(raw, signature.outputShape)

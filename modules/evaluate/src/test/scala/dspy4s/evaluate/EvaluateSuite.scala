@@ -1,5 +1,6 @@
 package dspy4s.evaluate
 
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -9,8 +10,11 @@ import dspy4s.evaluate.metrics.AnswerMatch
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.evaluate.metrics.FunctionMetric
 import munit.FunSuite
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class EvaluateSuite extends FunSuite:
+  private def rec(entries: (String, Any)*): DynamicValue.Record =
+    DynamicValues.recordFromEntries(entries)
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -18,15 +22,15 @@ class EvaluateSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
 
-  private def ex(values: (String, Any)*): Example = Example(values.toMap)
-  private def pred(values: (String, Any)*): DynamicPrediction = DynamicPrediction(values.toMap)
+  private def ex(values: (String, Any)*): Example = Example(values*)
+  private def pred(values: (String, Any)*): DynamicPrediction = DynamicPrediction(rec(values*))
 
   private def scriptedPredict(mappings: Map[String, DynamicPrediction]): Example => Either[dspy4s.core.contracts.DspyError, DynamicPrediction] =
     (ex: Example) =>
-      val key = ex.get("question").map(_.toString).getOrElse("")
+      val key = ex.get("question").map(DynamicValues.renderText).getOrElse("")
       mappings.get(key) match
         case Some(p) => Right(p)
-        case None    => Right(DynamicPrediction(Map("answer" -> "unknown")))
+        case None    => Right(DynamicPrediction(rec("answer" -> "unknown")))
 
   test("Evaluate runs a program over a dev set and aggregates metric scores as percentage") {
     val dataset = Vector(
@@ -75,9 +79,9 @@ class EvaluateSuite extends FunSuite:
   test("Evaluate parallel execution preserves devset order") {
     val dataset = (1 to 20).map(i => ex("question" -> s"q$i", "answer" -> s"a$i")).toVector
     val program: Example => Either[dspy4s.core.contracts.DspyError, DynamicPrediction] = ex =>
-      val q = ex.get("question").map(_.toString).getOrElse("")
+      val q = ex.get("question").map(DynamicValues.renderText).getOrElse("")
       Thread.sleep(5)
-      Right(DynamicPrediction(Map("answer" -> s"a${q.stripPrefix("q")}")))
+      Right(DynamicPrediction(rec("answer" -> s"a${q.stripPrefix("q")}")))
 
     val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), numThreads = Some(4))
     given RuntimeContext = RuntimeEnvironment.current
@@ -87,7 +91,10 @@ class EvaluateSuite extends FunSuite:
     val eval = result.toOption.get
     assertEquals(eval.score, 100.0)
     (0 until 20).foreach { i =>
-      assertEquals(eval.results(i).example.values("question"), s"q${i + 1}")
+      assertEquals(
+        eval.results(i).example.get("question").map(DynamicValues.renderText),
+        Some(s"q${i + 1}")
+      )
     }
   }
 
@@ -104,7 +111,10 @@ class EvaluateSuite extends FunSuite:
 
   test("Evaluate accepts a FunctionMetric and runs it on each example") {
     val metric = FunctionMetric.bool("lengthy")((_, pred) =>
-      pred.get("answer").exists { case s: String => s.length > 3; case _ => false }
+      pred.get("answer").exists {
+        case DynamicValue.Primitive(PrimitiveValue.String(s)) => s.length > 3
+        case _                                                => false
+      }
     )
     val dataset = Vector(
       ex("answer" -> "hi"),

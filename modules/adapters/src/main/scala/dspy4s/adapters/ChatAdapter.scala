@@ -7,6 +7,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -15,6 +16,8 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.matching.Regex
 
@@ -71,16 +74,20 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
         Map(layout.outputFields.head.name -> output.text.trim)
       else values
 
-    layout.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
+    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
       for
         soFar <- acc
         raw <- resolved.get(field.name) match
           case Some(v) => Right(v)
           case None    => Left(AdapterErrors.missingField(field.name))
         coerced <- coerce(field.typeRef, raw)
-      yield soFar.updated(field.name, coerced)
-    }.map { values =>
-      ParsedOutput(values = values, rawText = Some(output.text), metadata = Map("adapter" -> name))
+      yield soFar :+ (field.name -> coerced)
+    }.map { entries =>
+      ParsedOutput(
+        values   = DynamicValue.Record(Chunk.from(entries)),
+        rawText  = Some(output.text),
+        metadata = Map("adapter" -> name)
+      )
     }
 
   /** Walks the LM completion line by line, opening a new section every time a
@@ -182,33 +189,35 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     }.mkString(", then ")
     s"Respond with the corresponding output fields, starting with the field $outputs, and then ending with the marker for `${ChatAdapter.CompletedMarker}`."
 
-  private def renderInputs(fields: Vector[FieldSpec], values: Map[String, Any]): String =
+  private def renderInputs(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
+    renderFieldBlock(fields, values)
+
+  private def renderOutputs(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
+    renderFieldBlock(fields, values)
+
+  private def renderFieldBlock(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
     fields.flatMap { field =>
-      values.get(field.name).orElse(field.defaultValue).map { value =>
-        s"[[ ## ${field.name} ## ]]\n${value.toString}"
-      }
+      val resolved = DynamicValues.recordGet(values, field.name)
+        .map(DynamicValues.renderText)
+        .orElse(field.defaultValue.map(_.toString))
+      resolved.map(rendered => s"[[ ## ${field.name} ## ]]\n$rendered")
     }.mkString("\n\n")
 
-  private def renderOutputs(fields: Vector[FieldSpec], values: Map[String, Any]): String =
-    fields.flatMap { field =>
-      values.get(field.name).orElse(field.defaultValue).map { value =>
-        s"[[ ## ${field.name} ## ]]\n${value.toString}"
-      }
-    }.mkString("\n\n")
-
-  private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, Any] =
+  private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     typeRef match
       case TypeRef.int =>
         raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
+          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
       case TypeRef.double =>
         raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
+          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
       case TypeRef.bool =>
         raw.trim.toLowerCase match
-          case "true"  => Right(true)
-          case "false" => Right(false)
+          case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
+          case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
           case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
       case _ =>
-        Right(raw)
+        Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
 
 object ChatAdapter:
   /** Pattern matching `[[ ## field_name ## ]]`. Capture group 1 is the

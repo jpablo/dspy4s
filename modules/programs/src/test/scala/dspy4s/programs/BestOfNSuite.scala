@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
@@ -10,11 +10,18 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
 class BestOfNSuite extends FunSuite:
+  private def rec(entries: (String, Any)*): DynamicValue.Record =
+    DynamicValues.recordFromEntries(entries)
+
+  private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
+    DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
+
   private final class StubProgram(
       results: Vector[Either[DspyError, DynamicPrediction]]
   ) extends PredictProgram:
@@ -32,7 +39,11 @@ class BestOfNSuite extends FunSuite:
       val result = results(Math.min(idx, results.size - 1))
       result.foreach { prediction =>
         RuntimeEnvironment.appendTrace(
-          TraceEntry(component = moduleName, inputs = input.inputs, outputs = prediction.values)
+          TraceEntry(
+            component = moduleName,
+            inputs    = DynamicValues.recordToMap(input.inputs),
+            outputs   = DynamicValues.recordToMap(prediction.values)
+          )
         )
       }
       result
@@ -46,9 +57,9 @@ class BestOfNSuite extends FunSuite:
   test("best of n returns highest reward candidate and rolls out n attempts") {
     val module = StubProgram(
       Vector(
-        Right(DynamicPrediction(values = Map("answer" -> "A", "score" -> 0.1))),
-        Right(DynamicPrediction(values = Map("answer" -> "B", "score" -> 0.9))),
-        Right(DynamicPrediction(values = Map("answer" -> "C", "score" -> 0.5)))
+        Right(DynamicPrediction(values = rec("answer" -> "A", "score" -> 0.1))),
+        Right(DynamicPrediction(values = rec("answer" -> "B", "score" -> 0.9))),
+        Right(DynamicPrediction(values = rec("answer" -> "C", "score" -> 0.5)))
       )
     )
     val bestOfN = BestOfN(
@@ -59,14 +70,14 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = Map("q" -> "x"), config = Map("rollout_id" -> 7)))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x"), config = Map("rollout_id" -> 7)))
 
     assert(result.isRight)
-    assertEquals(result.toOption.get.values("answer"), "B")
+    assertEquals(lookup(result.toOption.get.values, "answer"), Some("B": Any))
     assertEquals(module.calls.get(), 3)
     assertEquals(module.rolloutIds.toVector, Vector(7, 8, 9))
     assertEquals(RuntimeEnvironment.current.trace.size, 1)
-    assertEquals(RuntimeEnvironment.current.trace.head.outputs("answer"), "B")
+    assertEquals(RuntimeEnvironment.current.trace.head.outputs.get("answer"), Some("B": Any))
   }
 
   test("best of n default fail count raises after repeated failures") {
@@ -85,7 +96,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = Map("q" -> "x")))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 3)
     assertEquals(result.left.toOption.get.message, "f3")
@@ -96,7 +107,7 @@ class BestOfNSuite extends FunSuite:
       Vector(
         Left(RuntimeError("stub", "f1")),
         Left(RuntimeError("stub", "f2")),
-        Right(DynamicPrediction(values = Map("answer" -> "ok", "score" -> 1.0)))
+        Right(DynamicPrediction(values = rec("answer" -> "ok", "score" -> 1.0)))
       )
     )
     val bestOfN = BestOfN(
@@ -108,7 +119,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = Map("q" -> "x")))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
@@ -119,7 +130,7 @@ class BestOfNSuite extends FunSuite:
       Vector(
         Right(
           DynamicPrediction(
-            values = Map(
+            values = rec(
               "answer" -> "A",
               "score" -> 0.2,
               "tool_calls" -> Vector(Map("name" -> "search", "args" -> Map("query" -> "a")))
@@ -128,7 +139,7 @@ class BestOfNSuite extends FunSuite:
         ),
         Right(
           DynamicPrediction(
-            values = Map(
+            values = rec(
               "answer" -> "B",
               "score" -> 0.9,
               "tool_calls" -> Vector(Map("name" -> "lookup", "args" -> Map("entity" -> "b")))
@@ -145,12 +156,17 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = Map("q" -> "x")))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x")))
 
     assert(result.isRight)
     val prediction = result.toOption.get
-    assertEquals(prediction.values("answer"), "B")
-    val toolCalls = prediction.values("tool_calls").asInstanceOf[Vector[Map[String, Any]]]
-    assertEquals(toolCalls.head("name"), "lookup")
-    assertEquals(RuntimeEnvironment.current.trace.head.outputs("tool_calls"), toolCalls)
+    assertEquals(lookup(prediction.values, "answer"), Some("B": Any))
+    val toolCalls = lookup(prediction.values, "tool_calls")
+      .map(_.asInstanceOf[List[Map[String, Any]]])
+      .getOrElse(List.empty)
+    assertEquals(toolCalls.head("name"), "lookup": Any)
+    assertEquals(
+      RuntimeEnvironment.current.trace.head.outputs.get("tool_calls"),
+      Some(toolCalls: Any)
+    )
   }

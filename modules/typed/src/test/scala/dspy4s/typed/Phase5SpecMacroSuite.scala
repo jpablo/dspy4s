@@ -106,16 +106,16 @@ class Phase5SpecMacroSuite extends FunSuite:
     val sig = Signature.of[P5SentimentSpec]
     val input = (sentence = "hello there")
     val encoded = sig.inputShape.encode(input)
-    val decoded = sig.outputShape.decode(Map("sentiment" -> "positive")).toOption.get
+    val decoded = sig.outputShape.decode(rec("sentiment" -> "positive")).toOption.get
 
-    assertEquals(encoded, Map[String, Any]("sentence" -> "hello there"))
+    assertEquals(encoded, rec("sentence" -> "hello there"))
     val sentiment: String = decoded.sentiment
     assertEquals(sentiment, "positive")
   }
 
   test("of[T] outputShape rejects raw maps missing required fields") {
     val sig = Signature.of[P5MultiSpec]
-    val incomplete = Map[String, Any]("answer" -> "Paris")  // missing 'score'
+    val incomplete = rec("answer" -> "Paris")  // missing 'score'
     val result = sig.outputShape.decode(incomplete)
     assert(result.isLeft, s"expected decode failure for missing field, got: $result")
   }
@@ -124,7 +124,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec outputShape decodes enum case names through the field's FieldCodec") {
     val sig = Signature.of[P5ToneSpec]
-    val raw = Map[String, Any]("tone" -> "calm")
+    val raw = rec("tone" -> "calm")
     val decoded = sig.outputShape.decode(raw).toOption.get
     val tone: P5Tone = decoded.tone
     assertEquals(tone, P5Tone.calm)  // typed enum value, not the raw string
@@ -132,7 +132,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec outputShape coerces numeric strings to the declared primitive type") {
     val sig = Signature.of[P5MultiSpec]
-    val raw = Map[String, Any]("answer" -> "Paris", "score" -> "0.5")
+    val raw = rec("answer" -> "Paris", "score" -> "0.5")
     val decoded = sig.outputShape.decode(raw).toOption.get
     val answer: String = decoded.answer
     val score:  Double = decoded.score
@@ -142,7 +142,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec outputShape surfaces decoder failures as Left(DspyError)") {
     val sig = Signature.of[P5ToneSpec]
-    val raw = Map[String, Any]("tone" -> "confused")  // not a valid P5Tone case
+    val raw = rec("tone" -> "confused")  // not a valid P5Tone case
     val result = sig.outputShape.decode(raw)
     assert(result.isLeft, s"expected decode failure for invalid enum value, got: $result")
   }
@@ -151,12 +151,12 @@ class Phase5SpecMacroSuite extends FunSuite:
     val sig = Signature.of[P5ToneInputSpec]
     val input = (tone = P5Tone.urgent)
     val encoded = sig.inputShape.encode(input)
-    assertEquals(encoded("tone"), "urgent")
+    assertEquals(lookup(encoded, "tone"), Some("urgent": Any))
   }
 
   test("spec outputShape decodes nested product fields through kyo-schema") {
     val sig = Signature.of[P5StructuredSpec]
-    val raw = Map[String, Any](
+    val raw = rec(
       "result" -> Map(
         "answer" -> "Paris",
         "tone" -> "calm",
@@ -178,7 +178,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   test("spec outputShape decodes collection fields through library FieldCodecs") {
     val sig = Signature.of[P5CollectionSpec]
-    val raw = Map[String, Any](
+    val raw = rec(
       "evidence" -> Map(
         "claim_1" -> List("Paris", "France"),
         "claim_2" -> List("Berlin")

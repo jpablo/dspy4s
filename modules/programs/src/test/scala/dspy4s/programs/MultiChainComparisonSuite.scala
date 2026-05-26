@@ -34,7 +34,7 @@ class MultiChainComparisonSuite extends FunSuite:
     override def parse(layout: SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = Map("rationale" -> "my rationale", "answer" -> "blue")))
+      Right(ParsedOutput(values = rec("rationale" -> "my rationale", "answer" -> "blue")))
 
   private object DummyLm extends LanguageModel:
     override val id: String = "dummy-mcc-lm"
@@ -73,15 +73,15 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = base, m = 3)
 
     val completions = Vector(
-      DynamicPrediction(values = Map(
+      DynamicPrediction(values = rec(
         "rationale" -> "I recall that during clear days, the sky often appears this color.",
         "answer" -> "blue"
       )),
-      DynamicPrediction(values = Map(
+      DynamicPrediction(values = rec(
         "rationale" -> "Based on common knowledge, I believe the sky is typically seen as this color.",
         "answer" -> "green"
       )),
-      DynamicPrediction(values = Map(
+      DynamicPrediction(values = rec(
         "rationale" -> "From images and depictions in media, the sky is frequently represented with this hue.",
         "answer" -> "blue"
       ))
@@ -94,12 +94,12 @@ class MultiChainComparisonSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val call = ProgramCall(inputs = Map("question" -> "What is the color of the sky?"))
+      val call = ProgramCall(inputs = rec("question" -> "What is the color of the sky?"))
       val result = mcc.runWithAttempts(call, completions.toVector)
       assert(result.isRight, s"runWithAttempts failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      assertEquals(pred.values("rationale"), "my rationale")
-      assertEquals(pred.values("answer"), "blue")
+      assertEquals(lookupString(pred.values, "rationale"), "my rationale")
+      assertEquals(lookupString(pred.values, "answer"), "blue")
     }
   }
 
@@ -114,8 +114,8 @@ class MultiChainComparisonSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val call = ProgramCall(inputs = Map("question" -> "?"))
-      val result = mcc.runWithAttempts(call, Vector(DynamicPrediction(values = Map.empty)))
+      val call = ProgramCall(inputs = rec("question" -> "?"))
+      val result = mcc.runWithAttempts(call, Vector(DynamicPrediction.empty))
       assert(result.isLeft)
       assert(result.left.toOption.get.message.contains("doesn't match the configured m"), result.left.toOption.get.message)
     }

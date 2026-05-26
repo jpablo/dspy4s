@@ -3,8 +3,9 @@ package dspy4s.programs.runtime
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.CallbackDispatcher
@@ -53,20 +54,21 @@ abstract class BasePredictProgram(
   protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction]
 
   protected def tracePayload(prediction: DynamicPrediction): Map[String, Any] =
-    prediction.values
+    DynamicValues.recordToMap(prediction.values)
 
   override final def run(input: ProgramCall)(using runtime: RuntimeContext): Either[DspyError, DynamicPrediction] =
-    CallbackDispatcher.withModule(moduleName, input.inputs) {
+    val inputBag = DynamicValues.recordToMap(input.inputs)
+    CallbackDispatcher.withModule(moduleName, inputBag) {
       val result = execute(input)
       if input.traceEnabled then
         result match
           case Right(prediction) =>
             val outputs = tracePayload(prediction)
             RuntimeEnvironment.appendTrace(
-              TraceEntry(component = moduleName, inputs = input.inputs, outputs = outputs)
+              TraceEntry(component = moduleName, inputs = inputBag, outputs = outputs)
             )
             RuntimeEnvironment.appendHistory(
-              HistoryEntry(component = moduleName, payload = Map("inputs" -> input.inputs, "outputs" -> outputs))
+              HistoryEntry(component = moduleName, payload = Map("inputs" -> inputBag, "outputs" -> outputs))
             )
           case Left(_) => ()
       result

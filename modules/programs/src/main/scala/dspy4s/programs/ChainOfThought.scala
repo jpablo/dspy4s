@@ -1,12 +1,14 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{
-  DspyError, Example, FieldRole, FieldSpec, NotFoundError, RuntimeContext,
+  DspyError, DynamicValues, Example, FieldRole, FieldSpec, NotFoundError, RuntimeContext,
   SignatureLayout, TypeRef, ValidationError
 }
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Shape, Signature}
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import scala.NamedTuple
 
 /** ChainOfThought, defined as a small signature transformation on top of
@@ -72,11 +74,14 @@ final case class ChainOfThought[I, O](
     val fieldSpecs: Vector[FieldSpec] =
       ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
 
-    def encode(value: Out): Map[String, Any] =
+    def encode(value: Out): DynamicValue.Record =
       val values = value.asInstanceOf[Product].productIterator.toVector
-      fieldSpecs.zip(values).map { (field, raw) => field.name -> raw }.toMap
+      val entries = fieldSpecs.zip(values).map { (field, raw) =>
+        field.name -> DynamicValues.fromAny(raw)
+      }
+      DynamicValue.Record(Chunk.from(entries))
 
-    def decode(raw: Map[String, Any]): Either[DspyError, Out] =
+    def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
       for
         reasoning <- extractReasoning(raw)
         baseOut   <- signature.outputShape.decode(raw)
@@ -109,9 +114,9 @@ final case class ChainOfThought[I, O](
           s"For case-class outputs, include reasoning in the output type and use Predict directly."
         ))
 
-  private def extractReasoning(values: Map[String, Any]): Either[DspyError, String] =
-    values.get("reasoning") match
-      case Some(s: String) => Right(s)
+  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
+    DynamicValues.recordGet(values, "reasoning") match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
       case Some(other) =>
         Left(ValidationError(
           s"CoT reasoning field must be a String, got: $other"

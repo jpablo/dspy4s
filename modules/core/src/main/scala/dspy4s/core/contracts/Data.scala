@@ -1,7 +1,10 @@
 package dspy4s.core.contracts
 
-/** A single labeled data point: a `Map[String, Any]` of field values plus a [[inputKeys]] partition that names which
-  * fields are inputs (everything else is a label / expected output). Used as training data for optimizers
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+
+/** A single labeled data point: a `DynamicValue.Record` of field values plus an [[inputKeys]] partition that names
+  * which fields are inputs (everything else is a label / expected output). Used as training data for optimizers
   * (`BootstrapFewShot`, `LabeledFewShot`), evaluation datasets (`Evaluate`), and few-shot demos attached to a
   * `Predict`.
   *
@@ -11,32 +14,48 @@ package dspy4s.core.contracts
   *     trainset examples stay `false`. The optimizer surface reads this flag to count bootstrapped vs labeled demos
   *     against the configured caps.
   *
-  * Immutable; all mutators return a copy. `withInputs` intersects the requested key set with the current
-  * `values.keySet`, so passing keys that aren't in `values` silently drops them rather than declaring phantom
-  * inputs.
+  * Immutable; all mutators return a copy. `withInputs` intersects the requested key set with the current field
+  * names, so passing keys that aren't in `values` silently drops them rather than declaring phantom inputs.
   */
 final case class Example(
-    values: Map[String, Any],
+    values: DynamicValue.Record,
     inputKeys: Set[String] = Set.empty,
     augmented: Boolean = false
 ):
-  /** Field-value accessor. Used by `Evaluate`'s metrics + persistence layers to read example / prediction values
-    * without unwrapping the underlying `Map`. */
-  def get(key: String): Option[Any] = values.get(key)
+  /** Field-value accessor by name. */
+  def get(key: String): Option[DynamicValue] = DynamicValues.recordGet(values, key)
 
-  def inputs: Map[String, Any] = values.filter((key, _) => inputKeys.contains(key))
-  def labels: Map[String, Any] = values.removedAll(inputKeys)
+  def inputs: DynamicValue.Record = DynamicValues.recordFilterKeys(values, inputKeys.contains)
+  def labels: DynamicValue.Record = DynamicValues.recordFilterKeys(values, name => !inputKeys.contains(name))
 
-  def withInputs(keys: Set[String]): Example = copy(inputKeys = keys.intersect(values.keySet))
-  def withValue(key: String, value: Any): Example = copy(values = values.updated(key, value))
+  def withInputs(keys: Set[String]): Example =
+    copy(inputKeys = keys.intersect(DynamicValues.recordKeys(values).toSet))
+
+  def withValue(key: String, value: DynamicValue): Example =
+    copy(values = DynamicValues.recordUpdated(values, key, value))
+
+  /** Convenience overload for callers passing plain Scala values (Strings, primitives, collections). Lifts via
+    * [[DynamicValues.fromAny]]. */
+  def withRawValue(key: String, value: Any): Example =
+    withValue(key, DynamicValues.fromAny(value))
+
   def without(keys: Set[String]): Example =
-    copy(values = values.removedAll(keys), inputKeys = inputKeys -- keys)
+    copy(
+      values    = DynamicValues.recordFilterKeys(values, name => !keys.contains(name)),
+      inputKeys = inputKeys -- keys
+    )
+
   def withAugmented(flag: Boolean): Example = copy(augmented = flag)
 
 object Example:
   /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input
-    * keys; call `withInputs(...)` to mark a subset as inputs. */
-  def apply(entries: (String, Any)*): Example = Example(values = entries.toMap)
+    * keys; call `withInputs(...)` to mark a subset as inputs. Values are lifted into the spine via
+    * [[DynamicValues.fromAny]]. */
+  def apply(entries: (String, Any)*): Example =
+    Example(values = DynamicValues.recordFromEntries(entries))
+
+  /** An example with no fields. */
+  def empty: Example = Example(values = DynamicValue.Record.empty)
 
 /** A column-oriented view of N candidate completions for one LM call. Each field name maps to a vector of N values
   * (one per candidate). All columns must have the same length, which defines [[size]]. [[at]] converts a single
@@ -49,7 +68,7 @@ object Example:
   * The `require` enforces the equal-column-length invariant at construction time so all downstream `at(i)` calls
   * can read column `i` without bounds-checking each field individually.
   */
-final case class Completions(fields: Map[String, Vector[Any]]):
+final case class Completions(fields: Map[String, Vector[DynamicValue]]):
   private val lengths = fields.values.map(_.size).toSet
   require(lengths.size <= 1, "All completion fields must have the same number of values")
 
@@ -59,21 +78,23 @@ final case class Completions(fields: Map[String, Vector[Any]]):
     if index < 0 || index >= size then
       Left(ValidationError(s"Completion index $index out of bounds for size $size"))
     else
-      val row = fields.map { case (key, values) => key -> values(index) }
+      val row = DynamicValue.Record(Chunk.from(fields.iterator.map((k, vs) => k -> vs(index)).toSeq))
       Right(DynamicPrediction(values = row))
 
 object Completions:
-  /** Convert N row-shaped maps into the columnar layout. Fails if any row's key set differs from the first row's --
-    * since `Completions.at(i)` is supposed to return a row whose fields are uniform across all candidates, missing
-    * fields would corrupt that invariant. An empty input is the empty completion (`size == 0`). */
-  def fromRows(rows: Vector[Map[String, Any]]): Either[DspyError, Completions] =
+  /** Convert N row-shaped records into the columnar layout. Fails if any row's key set differs from the first
+    * row's — since `Completions.at(i)` is supposed to return a row whose fields are uniform across all candidates,
+    * missing fields would corrupt that invariant. An empty input is the empty completion (`size == 0`). */
+  def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, Completions] =
     if rows.isEmpty then Right(Completions(Map.empty))
     else
-      val expectedKeys = rows.head.keySet
-      if rows.exists(_.keySet != expectedKeys) then
+      val expectedKeys = DynamicValues.recordKeys(rows.head).toSet
+      if rows.exists(r => DynamicValues.recordKeys(r).toSet != expectedKeys) then
         Left(ValidationError("All completion rows must include the same set of fields"))
       else
-        val columns = expectedKeys.map { key => key -> rows.map(_(key)) }.toMap
+        val columns = expectedKeys.iterator.map { key =>
+          key -> rows.map(r => DynamicValues.recordGet(r, key).getOrElse(DynamicValue.Null))
+        }.toMap
         Right(Completions(columns))
 
 /** Result of a single `DynamicPredict.run` (the erased predict path): the primary completion's field values, plus
@@ -87,7 +108,7 @@ object Completions:
   *
   * Coercion rules (deliberately strict to avoid silent surprises):
   *
-  *   - [[asString]] -- accepts `String`, `Boolean`, and numeric primitives (`Int` / `Long` / `Float` / `Double`).
+  *   - [[asString]] -- accepts `String`, `Boolean`, and numeric primitives. Variants render as their case name.
   *     Everything else is a [[ValidationError]].
   *   - [[asInt]] -- accepts `Int`; `Long` only when it fits in `Int` range (rejects out-of-range, no silent
   *     truncation); strings via `String.toIntOption`. `Double`/`Float` are rejected (no silent rounding).
@@ -99,66 +120,36 @@ object Completions:
   * [[score]] helper is a thin alias for `asDouble("score")` used by metrics and optimizers.
   */
 final case class DynamicPrediction(
-    values: Map[String, Any],
+    values: DynamicValue.Record,
     completions: Option[Completions] = None,
     lmUsage: Option[Map[String, Long]] = None
 ):
-  /** Field-value accessor. Used by `Evaluate`'s metrics + persistence layers to read prediction values without
-    * unwrapping the underlying `Map`. */
-  def get(key: String): Option[Any] = values.get(key)
+  /** Field-value accessor by name. */
+  def get(key: String): Option[DynamicValue] = DynamicValues.recordGet(values, key)
 
   def withUsage(usage: Map[String, Long]): DynamicPrediction = copy(lmUsage = Some(usage))
 
-  def withValue(key: String, value: Any): DynamicPrediction = copy(values = values.updated(key, value))
+  def withValue(key: String, value: DynamicValue): DynamicPrediction =
+    copy(values = DynamicValues.recordUpdated(values, key, value))
 
-  def value(key: String): Either[DspyError, Any] =
-    values.get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
+  /** Convenience overload for callers passing plain Scala values; lifts via [[DynamicValues.fromAny]]. */
+  def withRawValue(key: String, value: Any): DynamicPrediction =
+    withValue(key, DynamicValues.fromAny(value))
+
+  def value(key: String): Either[DspyError, DynamicValue] =
+    get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
 
   def asString(key: String): Either[DspyError, String] =
-    value(key).flatMap {
-      case s: String                                       => Right(s)
-      case b: Boolean                                      => Right(b.toString)
-      case n @ (_: Int | _: Long | _: Float | _: Double)   => Right(n.toString)
-      case other =>
-        Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
-    }
+    value(key).flatMap(dv => DynamicPrediction.asString(key, dv))
 
   def asInt(key: String): Either[DspyError, Int] =
-    value(key).flatMap {
-      case n: Int                                          => Right(n)
-      case n: Long if n >= Int.MinValue && n <= Int.MaxValue => Right(n.toInt)
-      case s: String =>
-        s.trim.toIntOption.toRight(
-          ValidationError(s"Prediction field '$key' is not a valid Int: $s")
-        )
-      case other =>
-        Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
-    }
+    value(key).flatMap(dv => DynamicPrediction.asInt(key, dv))
 
   def asDouble(key: String): Either[DspyError, Double] =
-    value(key).flatMap {
-      case number: Int    => Right(number.toDouble)
-      case number: Long   => Right(number.toDouble)
-      case number: Float  => Right(number.toDouble)
-      case number: Double => Right(number)
-      case s: String =>
-        s.trim.toDoubleOption.toRight(
-          ValidationError(s"Prediction field '$key' is not a valid Double: $s")
-        )
-      case other          => Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
-    }
+    value(key).flatMap(dv => DynamicPrediction.asDouble(key, dv))
 
   def asBoolean(key: String): Either[DspyError, Boolean] =
-    value(key).flatMap {
-      case b: Boolean => Right(b)
-      case s: String  =>
-        s.trim.toLowerCase match
-          case "true"  => Right(true)
-          case "false" => Right(false)
-          case _       =>
-            Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
-      case other => Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))
-    }
+    value(key).flatMap(dv => DynamicPrediction.asBoolean(key, dv))
 
   /** Convenience for the conventional `"score"` field used by metrics and optimizers. Equivalent to
     * `asDouble("score")`. */
@@ -166,7 +157,7 @@ final case class DynamicPrediction(
     asDouble("score")
 
 object DynamicPrediction:
-  def empty: DynamicPrediction = DynamicPrediction(values = Map.empty)
+  def empty: DynamicPrediction = DynamicPrediction(values = DynamicValue.Record.empty)
 
   /** Lift the primary completion (index 0) of a multi-candidate [[Completions]] into a `DynamicPrediction`,
     * retaining the full completions on the result's [[DynamicPrediction.completions]] so callers can still reach
@@ -176,5 +167,50 @@ object DynamicPrediction:
 
   /** Row-form convenience: turns N rows into completions, then extracts the primary one as in [[fromCompletions]].
     */
-  def fromRows(rows: Vector[Map[String, Any]]): Either[DspyError, DynamicPrediction] =
+  def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, DynamicPrediction] =
     Completions.fromRows(rows).flatMap(fromCompletions)
+
+  // ---- coercive accessors over DynamicValue ----
+
+  private[contracts] def asString(key: String, dv: DynamicValue): Either[DspyError, String] = dv match
+    case DynamicValue.Primitive(PrimitiveValue.String(s))  => Right(s)
+    case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b.toString)
+    case DynamicValue.Primitive(PrimitiveValue.Int(n))     => Right(n.toString)
+    case DynamicValue.Primitive(PrimitiveValue.Long(n))    => Right(n.toString)
+    case DynamicValue.Primitive(PrimitiveValue.Float(n))   => Right(n.toString)
+    case DynamicValue.Primitive(PrimitiveValue.Double(n))  => Right(n.toString)
+    case variant: DynamicValue.Variant                     =>
+      variant.caseName.toRight(ValidationError(
+        s"Prediction field '$key' is a variant without a case name"
+      ))
+    case other                                             =>
+      Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
+
+  private[contracts] def asInt(key: String, dv: DynamicValue): Either[DspyError, Int] = dv match
+    case DynamicValue.Primitive(PrimitiveValue.Int(n))                                           => Right(n)
+    case DynamicValue.Primitive(PrimitiveValue.Long(n)) if n >= Int.MinValue && n <= Int.MaxValue =>
+      Right(n.toInt)
+    case DynamicValue.Primitive(PrimitiveValue.String(s))                                         =>
+      s.trim.toIntOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Int: $s"))
+    case other =>
+      Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
+
+  private[contracts] def asDouble(key: String, dv: DynamicValue): Either[DspyError, Double] = dv match
+    case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Right(n.toDouble)
+    case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Right(n.toDouble)
+    case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Right(n.toDouble)
+    case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Right(n)
+    case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
+      s.trim.toDoubleOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Double: $s"))
+    case other =>
+      Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
+
+  private[contracts] def asBoolean(key: String, dv: DynamicValue): Either[DspyError, Boolean] = dv match
+    case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b)
+    case DynamicValue.Primitive(PrimitiveValue.String(s))  =>
+      s.trim.toLowerCase match
+        case "true"  => Right(true)
+        case "false" => Right(false)
+        case _       => Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
+    case other =>
+      Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))

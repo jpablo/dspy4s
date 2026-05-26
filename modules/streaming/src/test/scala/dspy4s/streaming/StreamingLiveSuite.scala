@@ -82,7 +82,11 @@ class StreamingLiveSuite extends FunSuite:
         for
           answer    <- predict1.run(input)
           judgement <- predict2.run(input.copy(
-                          inputs = input.inputs.updated("answer", answer.values("answer"))
+                          inputs = dspy4s.core.contracts.DynamicValues.recordUpdated(
+                            input.inputs,
+                            "answer",
+                            answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+                          )
                         ))
         yield judgement
 
@@ -117,7 +121,7 @@ class StreamingLiveSuite extends FunSuite:
           StreamListener("judgement")
         ),
         includeFinalPrediction = false
-      )(Map("question" -> "why did a chicken cross the kitchen?"))
+      )(rec("question" -> "why did a chicken cross the kitchen?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assert(tokens.nonEmpty, "expected at least one TokenEvent from a live stream")
@@ -167,7 +171,7 @@ class StreamingLiveSuite extends FunSuite:
           StreamListener("judgement")
         ),
         includeFinalPrediction = false
-      )(Map("question" -> "why did a chicken cross the kitchen?"))
+      )(rec("question" -> "why did a chicken cross the kitchen?"))
 
       // Sync iteration — same shape as Python's `for value in output` loop.
       val tokens = ArrayBuffer.empty[TokenEvent]
@@ -212,7 +216,7 @@ class StreamingLiveSuite extends FunSuite:
           StreamListener("judgement")
         ),
         includeFinalPrediction = false
-      )(Map("question" -> "why did a chicken cross the kitchen?"))
+      )(rec("question" -> "why did a chicken cross the kitchen?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assert(tokens.nonEmpty, "expected at least one TokenEvent from a live stream")

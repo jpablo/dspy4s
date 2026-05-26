@@ -2,10 +2,10 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
@@ -13,8 +13,12 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.BasePredictProgram
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.matching.Regex
+
+private def stringDv(s: String): DynamicValue =
+  DynamicValue.Primitive(PrimitiveValue.String(s))
 
 /** Generate Python code that programmatically computes the answer, run it,
   * and feed the output back to the LM for a structured response. Port of
@@ -148,9 +152,11 @@ final case class ProgramOfThought(
       regenerator = DynamicPredict(layout = regeneratorLayout, runtime = SignatureProgramRuntime)
       answerer = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
       result <- tryIteration(call, generator, regenerator, attempt = 1).flatMap { case (code, codeOutput) =>
-        val extractInputs = call.inputs
-          .updated("final_generated_code", code)
-          .updated("code_output", codeOutput)
+        val extractInputs = DynamicValues.recordUpdated(
+          DynamicValues.recordUpdated(call.inputs, "final_generated_code", stringDv(code)),
+          "code_output",
+          stringDv(codeOutput)
+        )
         answerer.run(call.copy(inputs = extractInputs))
       }
     yield result
@@ -169,10 +175,14 @@ final case class ProgramOfThought(
     val inputs = previous match
       case None                  => baseInputs
       case Some((code, error))   =>
-        baseInputs.updated("previous_code", code).updated("error", error)
+        DynamicValues.recordUpdated(
+          DynamicValues.recordUpdated(baseInputs, "previous_code", stringDv(code)),
+          "error",
+          stringDv(error)
+        )
 
     predict.run(call.copy(inputs = inputs)).flatMap { prediction =>
-      val rawCode = prediction.values.getOrElse("generated_code", "").toString
+      val rawCode = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
       val parsed = extractCode(rawCode)
 
       parsed match

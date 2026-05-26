@@ -1,5 +1,6 @@
 package dspy4s.evaluate
 
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.evaluate.contracts.EvaluationResult
 
 import java.io.PrintWriter
@@ -12,11 +13,14 @@ object EvaluationResultPersistence:
   def saveAsJson(result: EvaluationResult, path: String): Either[String, Unit] =
     try
       val rows = result.results.map { eval =>
-        val entry = scala.collection.mutable.LinkedHashMap[String, ujson.Value]()
-        eval.example.values.foreach { (k, v) => entry += (s"example_$k" -> toJson(v)) }
-        eval.prediction.values.foreach { (k, v) =>
-          val key = if eval.example.values.contains(k) then s"pred_$k" else k
-          entry += (key -> toJson(v))
+        val entry        = scala.collection.mutable.LinkedHashMap[String, ujson.Value]()
+        val exampleKeys  = DynamicValues.recordKeys(eval.example.values).toSet
+        DynamicValues.recordEntries(eval.example.values).foreach { (k, v) =>
+          entry += (s"example_$k" -> toJson(DynamicValues.toAny(v)))
+        }
+        DynamicValues.recordEntries(eval.prediction.values).foreach { (k, v) =>
+          val key = if exampleKeys.contains(k) then s"pred_$k" else k
+          entry += (key -> toJson(DynamicValues.toAny(v)))
         }
         entry += (result.metricName -> ujson.Num(eval.score))
         ujson.Obj.from(entry)
@@ -33,11 +37,12 @@ object EvaluationResultPersistence:
     try
       val headerBuilder = scala.collection.mutable.LinkedHashSet[String]()
       result.results.foreach { eval =>
-        eval.example.values.keys.foreach(k => headerBuilder += s"example_$k")
-        eval.prediction.values.keys.foreach(k =>
-          val key = if eval.example.values.contains(k) then s"pred_$k" else k
+        val exampleKeys = DynamicValues.recordKeys(eval.example.values).toSet
+        DynamicValues.recordKeys(eval.example.values).foreach(k => headerBuilder += s"example_$k")
+        DynamicValues.recordKeys(eval.prediction.values).foreach { k =>
+          val key = if exampleKeys.contains(k) then s"pred_$k" else k
           headerBuilder += key
-        )
+        }
       }
       headerBuilder += result.metricName
       val header = headerBuilder.toVector
@@ -50,12 +55,12 @@ object EvaluationResultPersistence:
             if key == result.metricName then eval.score.toString
             else if key.startsWith("example_") then
               val realKey = key.stripPrefix("example_")
-              eval.example.get(realKey).map(toCsvString).getOrElse("")
+              eval.example.get(realKey).map(dv => toCsvString(DynamicValues.toAny(dv))).getOrElse("")
             else if key.startsWith("pred_") then
               val realKey = key.stripPrefix("pred_")
-              eval.prediction.get(realKey).map(toCsvString).getOrElse("")
+              eval.prediction.get(realKey).map(dv => toCsvString(DynamicValues.toAny(dv))).getOrElse("")
             else
-              eval.prediction.get(key).map(toCsvString).getOrElse("")
+              eval.prediction.get(key).map(dv => toCsvString(DynamicValues.toAny(dv))).getOrElse("")
           }
           writer.println(row.map(csvEscape).mkString(","))
         }

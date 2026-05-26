@@ -1,13 +1,16 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Compares multiple candidate reasoning chains for the same task and asks
   * an LM to produce a corrected reasoning + final answer.
@@ -90,34 +93,36 @@ final case class MultiChainComparison(
       ))
     else
       val attemptLines = attempts.map(formatAttempt)
-      val augmentedInputs = input.inputs ++ attemptLines.zipWithIndex.map { case (line, idx) =>
-        s"reasoning_attempt_${idx + 1}" -> line
-      }.toMap
+      val appended = attemptLines.zipWithIndex.map { case (line, idx) =>
+        s"reasoning_attempt_${idx + 1}" -> (DynamicValue.Primitive(PrimitiveValue.String(line)): DynamicValue)
+      }
+      val augmentedInputs = DynamicValue.Record(Chunk.from(
+        input.inputs.fields.iterator.toSeq ++ appended
+      ))
       DynamicPredict(layout = augmentedSignature)
         .run(input.copy(inputs = augmentedInputs))
 
   /** Renders a single attempt as Python does:
     * `«I'm trying to {rationale}. I'm not sure but my prediction is {answer}»`.
-    * Accepts either a `DynamicPrediction` or a `Map[String, Any]` row. */
+    * Accepts either a `DynamicPrediction` or a `DynamicValue.Record` row. */
   private def formatAttempt(attempt: Any): String =
-    val rowOpt: Option[Map[String, Any]] = attempt match
-      case p: DynamicPrediction          => Some(p.values)
-      case row: Map[String, Any] @unchecked
-          if row.keys.forall(_.isInstanceOf[String]) => Some(row)
-      case _                      => None
+    val rowOpt: Option[DynamicValue.Record] = attempt match
+      case p: DynamicPrediction      => Some(p.values)
+      case rec: DynamicValue.Record  => Some(rec)
+      case _                         => None
 
     rowOpt match
       case Some(row) =>
         val rationale = firstNonEmpty(row, Seq("rationale", "reasoning"))
-        val answerKey = lastOutputName
-        val answer = answerKey.flatMap(row.get).map(_.toString).getOrElse("")
+        val answer    = lastOutputName.flatMap(name => DynamicValues.recordGet(row, name))
+          .map(DynamicValues.renderText).getOrElse("")
         s"«I'm trying to $rationale I'm not sure but my prediction is $answer»"
       case None =>
         s"«$attempt»"
 
-  private def firstNonEmpty(row: Map[String, Any], keys: Seq[String]): String =
+  private def firstNonEmpty(row: DynamicValue.Record, keys: Seq[String]): String =
     keys.iterator
-      .flatMap(k => row.get(k).map(_.toString))
+      .flatMap(k => DynamicValues.recordGet(row, k).map(DynamicValues.renderText))
       .map(_.trim)
       .filter(_.nonEmpty)
       .map(_.linesIterator.next().trim)

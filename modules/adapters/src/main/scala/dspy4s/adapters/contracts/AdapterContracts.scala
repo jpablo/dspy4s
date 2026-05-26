@@ -27,8 +27,11 @@ final case class AdapterInvocation(
 
 final case class FormattedPrompt(messages: Vector[Message], metadata: Map[String, Any] = Map.empty)
 
+/** Adapter parse result. `values` is the structured record of output field values produced from the LM completion;
+  * `metadata` is a free-form bag of debug / adapter-specific annotations (e.g. `{"adapter" -> "json", "fallback"
+  * -> "text"}`) and stays a plain Map. */
 final case class ParsedOutput(
-    values: Map[String, Any],
+    values: zio.blocks.schema.DynamicValue.Record,
     rawText: Option[String] = None,
     metadata: Map[String, Any] = Map.empty
 )

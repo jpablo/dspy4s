@@ -7,6 +7,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -16,6 +17,8 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import ujson.Value
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.Try
 
@@ -43,7 +46,10 @@ final case class JSONAdapter(
     val demoMessages = invocation.demos.flatMap { demo =>
       val userText = renderFields(invocation.layout.inputFields, demo.values)
       val assistantJson = invocation.layout.outputFields
-        .flatMap(field => demo.values.get(field.name).map(value => field.name -> value.toString))
+        .flatMap(field =>
+          DynamicValues.recordGet(demo.values, field.name)
+            .map(dv => field.name -> DynamicValues.renderText(dv))
+        )
         .toMap
       Vector(
         Message(role = MessageRole.User, text = Some(userText)),
@@ -75,7 +81,9 @@ final case class JSONAdapter(
         if trimmed.nonEmpty then
           Right(
             ParsedOutput(
-              values = Map(field.name -> trimmed),
+              values = DynamicValue.Record(Chunk.single(
+                field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))
+              )),
               rawText = Some(output.text),
               metadata = Map("adapter" -> name, "fallback" -> "text")
             )
@@ -88,15 +96,19 @@ final case class JSONAdapter(
     for
       jsonText <- extractJson(output.text)
       root <- parseJsonObject(jsonText)
-      values <- layout.outputFields.foldLeft[Either[DspyError, Map[String, Any]]](Right(Map.empty)) { (acc, field) =>
+      entries <- layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc
           value <- root.obj.get(field.name) match
             case Some(raw) => coerce(field.typeRef, raw)
             case None      => Left(AdapterErrors.missingField(field.name))
-        yield soFar.updated(field.name, value)
+        yield soFar :+ (field.name -> value)
       }
-    yield ParsedOutput(values = values, rawText = Some(output.text), metadata = Map("adapter" -> name))
+    yield ParsedOutput(
+      values   = DynamicValue.Record(Chunk.from(entries)),
+      rawText  = Some(output.text),
+      metadata = Map("adapter" -> name)
+    )
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim
@@ -132,38 +144,50 @@ final case class JSONAdapter(
       else Left(ParseError("adapter", "Parsed JSON output is not an object"))
     }
 
-  private def coerce(typeRef: TypeRef, value: Value): Either[DspyError, Any] =
+  private def coerce(typeRef: TypeRef, value: Value): Either[DspyError, DynamicValue] =
     typeRef match
       case TypeRef.int =>
         value.numOpt.map(_.toInt).toRight(ValidationError(s"Expected integer value, found: $value"))
+          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
       case TypeRef.double =>
         value.numOpt.toRight(ValidationError(s"Expected numeric value, found: $value"))
+          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
       case TypeRef.bool =>
         value.boolOpt.toRight(ValidationError(s"Expected boolean value, found: $value"))
+          .map(b => DynamicValue.Primitive(PrimitiveValue.Boolean(b)))
       case TypeRef.json =>
         Right(fromJson(value))
       case _ =>
-        Right(value.strOpt.getOrElse(renderJson(value)))
+        Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
 
-  private def fromJson(value: Value): Any =
+  private def fromJson(value: Value): DynamicValue =
     value match
-      case ujson.Str(v)  => v
-      case ujson.Num(v)  => v
-      case ujson.Bool(v) => v
-      case ujson.Null    => null
+      case ujson.Str(v)  => DynamicValue.Primitive(PrimitiveValue.String(v))
+      case ujson.Num(v)  =>
+        if v.isWhole && v >= Int.MinValue && v <= Int.MaxValue then
+          DynamicValue.Primitive(PrimitiveValue.Int(v.toInt))
+        else if v.isWhole && v >= Long.MinValue && v <= Long.MaxValue then
+          DynamicValue.Primitive(PrimitiveValue.Long(v.toLong))
+        else DynamicValue.Primitive(PrimitiveValue.Double(v))
+      case ujson.Bool(v) => DynamicValue.Primitive(PrimitiveValue.Boolean(v))
+      case ujson.Null    => DynamicValue.Null
       case obj: ujson.Obj =>
-        obj.value.iterator.map { case (k, v) => k -> fromJson(v) }.toMap
+        DynamicValue.Record(Chunk.from(
+          obj.value.iterator.map { case (k, v) => k -> fromJson(v) }.toSeq
+        ))
       case arr: ujson.Arr =>
-        arr.value.toVector.map(fromJson)
+        DynamicValue.Sequence(Chunk.from(arr.value.toVector.map(fromJson)))
 
   private def renderJson(value: Value): String =
     value match
       case ujson.Str(v) => v
       case other        => other.render()
 
-  private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: Map[String, Any]): String =
+  private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: DynamicValue.Record): String =
     fields.flatMap { field =>
-      val rendered = values.get(field.name).orElse(field.defaultValue).map(_.toString)
+      val rendered = DynamicValues.recordGet(values, field.name)
+        .map(DynamicValues.renderText)
+        .orElse(field.defaultValue.map(_.toString))
       rendered.map { value =>
         val prefix = field.prefix.getOrElse(s"${field.name}:")
         s"$prefix $value"
