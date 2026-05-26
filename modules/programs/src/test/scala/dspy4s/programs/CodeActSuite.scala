@@ -8,9 +8,7 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.core.signatures.SignatureDsl
@@ -95,10 +93,10 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> lm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(lm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = program.run(ProgramCall(inputs = Map("question" -> "what is 40 + 2?")))
@@ -130,10 +128,10 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> lm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(lm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = program.run(ProgramCall(inputs = Map("q" -> "?")))
@@ -155,10 +153,10 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 2)
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> lm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(lm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = program.run(ProgramCall(inputs = Map("q" -> "?")))
@@ -178,10 +176,10 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 1)
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> lm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(lm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       program.run(ProgramCall(inputs = Map("q" -> "?")))
@@ -202,10 +200,10 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 1)
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> lm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(lm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = program.run(ProgramCall(inputs = Map("q" -> "sum 0..9")))

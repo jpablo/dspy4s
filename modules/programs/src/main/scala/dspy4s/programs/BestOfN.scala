@@ -42,10 +42,7 @@ final case class BestOfN(
           .updated("temperature", 1.0d)
       )
 
-      val isolated = RuntimeContext(
-        settings = baseContext.settings,
-        callbacks = baseContext.callbacks
-      )
+      val isolated = baseContext.copy(trace = Vector.empty, history = Vector.empty)
 
       val (attemptResult, trace, history) = RuntimeEnvironment.withContext(isolated) {
         given RuntimeContext = RuntimeEnvironment.current

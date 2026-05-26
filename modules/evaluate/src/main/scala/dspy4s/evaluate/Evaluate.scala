@@ -5,7 +5,6 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
 import dspy4s.evaluate.contracts.ExampleEvaluation
@@ -119,12 +118,9 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     )
 
   private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
-    val resolvedNumThreads = cfg.numThreads.getOrElse(
-      summon[RuntimeContext].settings.get(SettingKeys.numThreads).getOrElse(8)
-    )
-    val resolvedMaxErrors = cfg.maxErrors.getOrElse(
-      summon[RuntimeContext].settings.get(SettingKeys.maxErrors).getOrElse(10)
-    )
+    val ctx = summon[RuntimeContext]
+    val resolvedNumThreads = cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(8))
+    val resolvedMaxErrors  = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(10))
     ParallelExecutor(
       numThreads = resolvedNumThreads,
       maxErrors = math.max(1, resolvedMaxErrors),

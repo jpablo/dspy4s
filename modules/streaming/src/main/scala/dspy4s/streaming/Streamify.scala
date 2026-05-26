@@ -5,8 +5,6 @@ import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -58,10 +56,8 @@ object Streamify:
       val provider = statusMessageProvider.getOrElse(StatusMessageProvider.default)
       val callback = new StatusStreamingCallback(provider, queue)
 
-      val currentLm = outerContext.settings.entries.get(SettingKeys.languageModel.name)
-      val adapter = outerContext.settings.entries
-        .get(SettingKeys.adapter.name)
-        .collect { case a: Adapter => a }
+      val currentLm = outerContext.lm
+      val adapter = outerContext.adapter.collect { case a: Adapter => a }
 
       val wrappedLm = currentLm.collect { case slm: StreamingLanguageModel =>
         StreamingLanguageModelWrapper(
@@ -72,18 +68,16 @@ object Streamify:
         )
       }
 
-      val extraSettings: Map[String, Any] = wrappedLm match
-        case Some(wrapper) => Map(SettingKeys.languageModel.name -> wrapper)
-        case None          => Map.empty
+      val lmOverride: RuntimeContext = wrappedLm match
+        case Some(wrapper) => RuntimeContext(lm = Some(wrapper))
+        case None          => RuntimeContext()
 
       val producer = new Thread(
         new Runnable:
           override def run(): Unit =
             ContextPropagation.inContext(captured) {
-              RuntimeEnvironment.withSettings(Settings(extraSettings)) {
-                val existingCallbacks = RuntimeEnvironment.current.settings
-                  .get(SettingKeys.callbacks)
-                  .getOrElse(Vector.empty)
+              RuntimeEnvironment.withSettings(lmOverride) {
+                val existingCallbacks = RuntimeEnvironment.current.callbacks
                 RuntimeEnvironment.withCallbacks(existingCallbacks :+ callback) {
                   given RuntimeContext = RuntimeEnvironment.current
                   try

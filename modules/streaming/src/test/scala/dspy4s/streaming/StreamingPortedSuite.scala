@@ -9,8 +9,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LmChunk
@@ -74,10 +72,10 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> new ScriptedLm(chunks),
-        SettingKeys.adapter.name -> ChatAdapter()
-      ))
+      RuntimeContext(
+        lm = Some(new ScriptedLm(chunks)),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -117,10 +115,10 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> new ScriptedLm(chunks),
-        SettingKeys.adapter.name -> ChatAdapter()
-      ))
+      RuntimeContext(
+        lm = Some(new ScriptedLm(chunks)),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -153,10 +151,10 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> new ScriptedLm(chunks),
-        SettingKeys.adapter.name -> ChatAdapter()
-      ))
+      RuntimeContext(
+        lm = Some(new ScriptedLm(chunks)),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -189,10 +187,10 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> new ScriptedLm(chunks),
-        SettingKeys.adapter.name -> JSONAdapter()
-      ))
+      RuntimeContext(
+        lm = Some(new ScriptedLm(chunks)),
+        adapter = Some(JSONAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -227,10 +225,10 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> response: json").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> new ScriptedLm(chunks),
-        SettingKeys.adapter.name -> JSONAdapter()
-      ))
+      RuntimeContext(
+        lm = Some(new ScriptedLm(chunks)),
+        adapter = Some(JSONAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -261,10 +259,10 @@ class StreamingPortedSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> first: json, second: json").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> new ScriptedLm(chunks),
-        SettingKeys.adapter.name -> JSONAdapter()
-      ))
+      RuntimeContext(
+        lm = Some(new ScriptedLm(chunks)),
+        adapter = Some(JSONAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(

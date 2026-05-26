@@ -9,8 +9,6 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -101,12 +99,10 @@ class PredictSuite extends FunSuite:
         events += event
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> DummyLanguageModel,
-          SettingKeys.adapter.name -> DummyAdapter
+      RuntimeContext(
+          lm = Some(DummyLanguageModel),
+          adapter = Some(DummyAdapter)
         )
-      )
     ) {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         given RuntimeContext = RuntimeEnvironment.current
@@ -144,11 +140,9 @@ class PredictSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> DummyLanguageModel
+      RuntimeContext(
+          lm = Some(DummyLanguageModel)
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = DynamicPredict(signature).run(ProgramCall(inputs = Map("question" -> "x")))
@@ -162,12 +156,10 @@ class PredictSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer, score").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> DummyToolCallLanguageModel,
-          SettingKeys.adapter.name -> DummyAdapter
+      RuntimeContext(
+          lm = Some(DummyToolCallLanguageModel),
+          adapter = Some(DummyAdapter)
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = DynamicPredict(signature).run(ProgramCall(inputs = Map("question" -> "x")))

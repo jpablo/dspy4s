@@ -6,7 +6,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.ContextPropagation
@@ -21,30 +20,30 @@ import scala.concurrent.Future
 
 trait SettingsProgramRuntime extends ProgramRuntime:
   override def resolveModel(using RuntimeContext): Either[DspyError, LanguageModel] =
-    summon[RuntimeContext].settings.entries.get(SettingKeys.languageModel.name) match
+    summon[RuntimeContext].lm match
       case Some(model: LanguageModel) =>
         Right(model)
       case Some(other) =>
         Left(
           ConfigurationError(
-            s"Configured '${SettingKeys.languageModel.name}' must be a LanguageModel, found: ${other.getClass.getSimpleName}"
+            s"Configured 'lm' must be a LanguageModel, found: ${other.getClass.getSimpleName}"
           )
         )
       case None =>
-        Left(ConfigurationError(s"Missing '${SettingKeys.languageModel.name}' in runtime settings"))
+        Left(ConfigurationError("Missing 'lm' in runtime context"))
 
   override def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter] =
-    summon[RuntimeContext].settings.entries.get(SettingKeys.adapter.name) match
+    summon[RuntimeContext].adapter match
       case Some(adapter: Adapter) =>
         Right(adapter)
       case Some(other) =>
         Left(
           ConfigurationError(
-            s"Configured '${SettingKeys.adapter.name}' must be an Adapter, found: ${other.getClass.getSimpleName}"
+            s"Configured 'adapter' must be an Adapter, found: ${other.getClass.getSimpleName}"
           )
         )
       case None =>
-        Left(ConfigurationError(s"Missing '${SettingKeys.adapter.name}' in runtime settings"))
+        Left(ConfigurationError("Missing 'adapter' in runtime context"))
 
 abstract class BasePredictProgram(
     override val moduleName: String

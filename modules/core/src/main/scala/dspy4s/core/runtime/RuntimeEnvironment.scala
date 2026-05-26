@@ -4,18 +4,15 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKey
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
-import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.TraceEntry
 
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 object RuntimeEnvironment:
-  private val globalSettingsRef = new AtomicReference[Settings](Settings())
+  private val globalRef = new AtomicReference[RuntimeContext](RuntimeContext())
   private val configureOwnerThreadId = new AtomicLong(-1L)
   private val configureOwnerAsyncTaskId = new AtomicReference[String | Null](null)
   private val asyncTaskCounter = new AtomicLong(0L)
@@ -26,9 +23,6 @@ object RuntimeEnvironment:
 
   private def localContext: RuntimeContext = contextRef.get()
 
-  private def mergedSettings(local: Settings): Settings =
-    Settings(globalSettingsRef.get().entries ++ local.entries)
-
   private def ensureConfigureAllowed(): Either[DspyError, Unit] =
     val caller = Thread.currentThread().threadId()
     val owner = configureOwnerThreadId.get()
@@ -37,7 +31,7 @@ object RuntimeEnvironment:
       else ensureConfigureAllowed()
     else if owner != caller then Left(ConfigurationError("Cannot call RuntimeEnvironment.configure from a non-owner thread"))
     else
-      current.settings.get(SettingKeys.asyncTaskId) match
+      current.asyncTaskId match
         case None => Right(())
         case Some(taskId) =>
           val asyncOwner = configureOwnerAsyncTaskId.get()
@@ -52,33 +46,23 @@ object RuntimeEnvironment:
               )
             )
 
-  def current: RuntimeContext =
-    val context = localContext
-    context.withSettings(mergedSettings(context.settings))
+  /** The currently-active [[RuntimeContext]] for this thread. Starts from the live thread-local context (which
+    * owns trace / history / accumulated state) and fills in any unset configured field from the global. */
+  def current: RuntimeContext = localContext.fillFrom(globalRef.get())
 
-  def currentSettings: Settings = current.settings
-
-  def configure(settings: Settings): Either[DspyError, Unit] =
+  /** Set the process-wide default context. Only the first thread to call `configure` may call it again; cross-task
+    * mutation must use `withSettings` instead. */
+  def configure(context: RuntimeContext): Either[DspyError, Unit] =
     ensureConfigureAllowed().map { _ =>
-      globalSettingsRef.set(settings)
+      globalRef.set(context)
       ()
     }
 
-  def configureEntries(entries: Map[String, Any]): Either[DspyError, Unit] =
-    configure(Settings(entries))
-
-  def configure(updates: (SettingKey[?], Any)*): Either[DspyError, Unit] =
-    val merged = updates.foldLeft(globalSettingsRef.get().entries) { (acc, entry) =>
-      val (key, value) = entry
-      acc.updated(key.name, value)
-    }
-    configure(Settings(merged))
-
-  def withSetting[A, B](key: SettingKey[A], value: A)(thunk: => B): B =
-    withSettings(Settings(Map(key.name -> value)))(thunk)
+  def withSetting[A](update: RuntimeContext => RuntimeContext)(thunk: => A): A =
+    withContext(update(current))(thunk)
 
   def withAsyncTask[A](taskId: String)(thunk: => A): A =
-    withSetting(SettingKeys.asyncTaskId, taskId)(thunk)
+    withSetting(_.copy(asyncTaskId = Some(taskId)))(thunk)
 
   def withGeneratedAsyncTask[A](prefix: String = "async-task")(thunk: => A): A =
     val taskId = s"$prefix-${asyncTaskCounter.incrementAndGet()}"
@@ -87,30 +71,23 @@ object RuntimeEnvironment:
   def nextCallId(prefix: String = "call"): String =
     s"$prefix-${callbackCallCounter.incrementAndGet()}"
 
-  def activeCallStack: Vector[String] =
-    current.settings.get(SettingKeys.callStack).getOrElse(Vector.empty)
+  def activeCallStack: Vector[String] = current.callStack
 
-  def activeCallDepth: Int =
-    activeCallStack.size
+  def activeCallDepth: Int = activeCallStack.size
 
-  def activeCallId: Option[String] =
-    activeCallStack.lastOption.orElse(current.settings.get(SettingKeys.activeCallId))
+  def activeCallId: Option[String] = current.callStack.lastOption.orElse(current.activeCallId)
 
   def withActiveCall[A](callId: String)(thunk: => A): A =
     val previous = localContext
-    val previousSettings = previous.settings
-    val previousCallStack = previousSettings.get(SettingKeys.callStack).getOrElse(Vector.empty)
-    val updatedCallStack = previousCallStack :+ callId
-    val updatedSettings = Settings(
-      previousSettings.entries
-        .updated(SettingKeys.activeCallId.name, callId)
-        .updated(SettingKeys.callStack.name, updatedCallStack)
+    val updated = previous.copy(
+      activeCallId = Some(callId),
+      callStack    = previous.callStack :+ callId
     )
-    contextRef.set(previous.withSettings(updatedSettings))
+    contextRef.set(updated)
     try thunk
     finally
       val after = localContext
-      contextRef.set(after.withSettings(previousSettings))
+      contextRef.set(after.copy(activeCallId = previous.activeCallId, callStack = previous.callStack))
 
   def withContext[A](context: RuntimeContext)(thunk: => A): A =
     val previous = contextRef.get()
@@ -118,35 +95,25 @@ object RuntimeEnvironment:
     try thunk
     finally contextRef.set(previous)
 
-  private def scoped[A](update: RuntimeContext => RuntimeContext)(thunk: => A): A =
-    withContext(update(current))(thunk)
-
-  def withSettings[A](settings: Settings)(thunk: => A): A =
-    scoped { context =>
-      val merged = Settings(context.settings.entries ++ settings.entries)
-      context.withSettings(merged)
-    }(thunk)
+  def withSettings[A](settings: RuntimeContext)(thunk: => A): A =
+    withContext(settings.fillFrom(current))(thunk)
 
   def withCallbacks[A](callbacks: Vector[CallbackHandler])(thunk: => A): A =
-    scoped { context =>
-      val settings = Settings(context.settings.entries.updated(SettingKeys.callbacks.name, callbacks))
-      context.withSettings(settings).withCallbacks(callbacks)
-    }(thunk)
+    withContext(current.copy(callbacks = callbacks))(thunk)
 
   def appendTrace(entry: TraceEntry): Unit =
     contextRef.set(localContext.appendTrace(entry))
 
   def appendHistory(entry: HistoryEntry): Unit =
-    val effectiveSettings = current.settings
-    val historyDisabled = effectiveSettings.get(SettingKeys.disableHistory).getOrElse(false)
-    val maxHistorySize = effectiveSettings.get(SettingKeys.maxHistorySize).getOrElse(10000)
-    if !historyDisabled && maxHistorySize > 0 then
+    val effective = current
+    val historyDisabled = effective.disableHistory.getOrElse(false)
+    val cap = effective.maxHistorySize.getOrElse(10000)
+    if !historyDisabled && cap > 0 then
       val base = localContext
-      val nextHistory = (base.history :+ entry).takeRight(maxHistorySize)
+      val nextHistory = (base.history :+ entry).takeRight(cap)
       contextRef.set(base.withHistory(nextHistory))
 
-  def activeCallbacks: Vector[CallbackHandler] =
-    current.settings.get(SettingKeys.callbacks).getOrElse(current.callbacks)
+  def activeCallbacks: Vector[CallbackHandler] = current.callbacks
 
   def emit(event: CallbackEvent): Unit =
     val context = current
@@ -154,7 +121,7 @@ object RuntimeEnvironment:
     activeCallbacks.foreach(_.onEvent(event))
 
   def resetForTests(): Unit =
-    globalSettingsRef.set(Settings())
+    globalRef.set(RuntimeContext())
     configureOwnerThreadId.set(-1L)
     configureOwnerAsyncTaskId.set(null)
     asyncTaskCounter.set(0L)

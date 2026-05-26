@@ -2,7 +2,6 @@ package dspy4s.lm
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ConfigurationError
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -201,7 +200,7 @@ class LmRuntimeSuite extends FunSuite:
 
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
-      RuntimeEnvironment.withSetting(SettingKeys.trackUsage, false) {
+      RuntimeEnvironment.withSettings(RuntimeContext(trackUsage = Some(false))) {
         assert(managed.call(baseRequest).isRight)
       }
     }

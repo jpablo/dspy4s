@@ -2,16 +2,12 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.SettingKey
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.runtime.ParallelExecutor
 import munit.FunSuite
 import java.util.concurrent.atomic.AtomicInteger
 
 class ParallelExecutorSuite extends FunSuite:
-  private val sampleKey = SettingKey[String]("sample")
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -20,18 +16,18 @@ class ParallelExecutorSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("worker threads inherit captured runtime context") {
-    RuntimeEnvironment.withSettings(Settings(Map(sampleKey.name -> "scoped"))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
       given RuntimeContext = RuntimeEnvironment.current
       val executor = ParallelExecutor(numThreads = 3, maxErrors = 3)
 
       val result = executor.execute(
-        task = (_: Int) => RuntimeEnvironment.currentSettings.get(sampleKey).getOrElse("missing"),
+        task = (_: Int) => RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"),
         data = Vector(1, 2, 3, 4, 5)
       )
 
       assert(result.isRight)
       val values = result.toOption.get.results.flatten
-      assertEquals(values, Vector("scoped", "scoped", "scoped", "scoped", "scoped"))
+      assertEquals(values, Vector("42", "42", "42", "42", "42"))
     }
   }
 
@@ -72,12 +68,10 @@ class ParallelExecutorSuite extends FunSuite:
 
   test("fromSettings uses runtime numThreads and maxErrors values") {
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.numThreads.name -> 2,
-          SettingKeys.maxErrors.name -> 1
+      RuntimeContext(
+          numThreads = Some(2),
+          maxErrors = Some(1)
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val executor = ParallelExecutor.fromSettings()

@@ -13,8 +13,6 @@ import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -68,12 +66,8 @@ class ProgramRuntimeSuite extends FunSuite:
 
   test("resolve model and adapter from settings") {
     given RuntimeContext = RuntimeContext(
-      settings = Settings(
-        Map(
-          SettingKeys.languageModel.name -> DummyLanguageModel,
-          SettingKeys.adapter.name -> DummyAdapter
-        )
-      )
+      lm = Some(DummyLanguageModel),
+      adapter = Some(DummyAdapter)
     )
 
     assertEquals(RuntimeResolver.resolveModel, Right(DummyLanguageModel))
@@ -81,7 +75,7 @@ class ProgramRuntimeSuite extends FunSuite:
   }
 
   test("resolve model fails with wrong setting type") {
-    given RuntimeContext = RuntimeContext(settings = Settings(Map(SettingKeys.languageModel.name -> "bad")))
+    given RuntimeContext = RuntimeContext(lm = Some(new dspy4s.core.contracts.LanguageModelRef {}))
 
     val result = RuntimeResolver.resolveModel
     assert(result.isLeft)

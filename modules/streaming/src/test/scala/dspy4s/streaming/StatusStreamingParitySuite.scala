@@ -4,8 +4,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -76,7 +74,7 @@ class StatusStreamingParitySuite extends FunSuite:
     @volatile var messagesB: Vector[String] = Vector.empty
 
     val runA: Runnable = () => {
-      RuntimeEnvironment.withSettings(Settings(Map.empty)) {
+      RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
         val stream = Streamify.streamify(
           program = buildToolProgram(toolA, Map.empty),
@@ -93,7 +91,7 @@ class StatusStreamingParitySuite extends FunSuite:
       }
     }
     val runB: Runnable = () => {
-      RuntimeEnvironment.withSettings(Settings(Map.empty)) {
+      RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
         val stream = Streamify.streamify(
           program = buildToolProgram(toolB, Map.empty),

@@ -9,8 +9,6 @@ import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -63,12 +61,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -95,12 +91,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -130,12 +124,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -161,12 +153,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -189,12 +179,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> JSONAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(JSONAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -218,12 +206,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> XMLAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(XMLAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -249,12 +235,10 @@ class StreamListenerSuite extends FunSuite:
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature).toOption.get)
@@ -287,12 +271,10 @@ class StreamListenerSuite extends FunSuite:
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature).toOption.get)
@@ -329,12 +311,10 @@ class StreamListenerSuite extends FunSuite:
     val innerPredict = DynamicPredict(layout = signature)
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val react = ReAct(module = innerPredict, tools = Vector(noopTool), maxIterations = 2)
@@ -387,12 +367,10 @@ class StreamListenerSuite extends FunSuite:
         yield judgement
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> multiCallLm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(multiCallLm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -427,12 +405,10 @@ class StreamListenerSuite extends FunSuite:
     val signature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -479,12 +455,10 @@ class StreamListenerSuite extends FunSuite:
         yield second
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> multiCallLm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(multiCallLm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -532,12 +506,10 @@ class StreamListenerSuite extends FunSuite:
         yield out
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> multiCallLm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(multiCallLm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -559,12 +531,10 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     ))
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(
@@ -591,12 +561,10 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     ))
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.languageModel.name -> lm,
-          SettingKeys.adapter.name -> ChatAdapter()
+      RuntimeContext(
+          lm = Some(lm),
+          adapter = Some(ChatAdapter())
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream = Streamify.streamify(

@@ -3,7 +3,6 @@ package dspy4s.programs.runtime
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 
@@ -156,7 +155,9 @@ final class ParallelExecutor(
 
 object ParallelExecutor:
   def fromSettings(timeout: FiniteDuration = 120.seconds)(using RuntimeContext): ParallelExecutor =
-    val settings = summon[RuntimeContext].settings
-    val numThreads = settings.get(SettingKeys.numThreads).getOrElse(8)
-    val maxErrors = settings.get(SettingKeys.maxErrors).getOrElse(10)
-    ParallelExecutor(numThreads = numThreads, maxErrors = maxErrors, timeout = timeout)
+    val ctx = summon[RuntimeContext]
+    ParallelExecutor(
+      numThreads = ctx.numThreads.getOrElse(8),
+      maxErrors  = ctx.maxErrors.getOrElse(10),
+      timeout    = timeout
+    )

@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  DspyError, RuntimeContext, SettingKeys, Settings, SignatureLayout
+  DspyError, RuntimeContext, SignatureLayout
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{
@@ -65,10 +65,10 @@ class TypedPredictSuite extends FunSuite:
         usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
       ))
 
-  private val defaultSettings: Settings = Settings(Map(
-    SettingKeys.languageModel.name -> FixedLm,
-    SettingKeys.adapter.name       -> EchoQuestionAdapter
-  ))
+  private val defaultSettings: RuntimeContext = RuntimeContext(
+    lm = Some(FixedLm),
+    adapter = Some(EchoQuestionAdapter)
+  )
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
@@ -139,10 +139,10 @@ class TypedPredictSuite extends FunSuite:
         )))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
-    RuntimeEnvironment.withSettings(Settings(Map(
-      SettingKeys.languageModel.name -> FixedLm,
-      SettingKeys.adapter.name       -> capturingAdapter
-    ))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(
+      lm = Some(FixedLm),
+      adapter = Some(capturingAdapter)
+    )) {
       given RuntimeContext = RuntimeEnvironment.current
       val _ = Predict(sig).run(P4QAInput("Capital of France?"))
     }
@@ -190,10 +190,10 @@ class TypedPredictSuite extends FunSuite:
         ))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
-    RuntimeEnvironment.withSettings(Settings(Map(
-      SettingKeys.languageModel.name -> capturingLm,
-      SettingKeys.adapter.name       -> EchoQuestionAdapter
-    ))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(
+      lm = Some(capturingLm),
+      adapter = Some(EchoQuestionAdapter)
+    )) {
       given RuntimeContext = RuntimeEnvironment.current
       val _ = Predict(sig).run(
         P4QAInput("hi"),
@@ -235,10 +235,10 @@ class TypedPredictSuite extends FunSuite:
         lmCalled = true
         Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
 
-    RuntimeEnvironment.withSettings(Settings(Map(
-      SettingKeys.languageModel.name -> sentinelLm,
-      SettingKeys.adapter.name       -> EchoQuestionAdapter
-    ))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(
+      lm = Some(sentinelLm),
+      adapter = Some(EchoQuestionAdapter)
+    )) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = Predict(sig).run(Map[String, Any]("question" -> "Capital of France?"))
       // Missing 'context' input -> Left, LM never invoked.

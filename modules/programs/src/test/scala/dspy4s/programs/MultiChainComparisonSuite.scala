@@ -7,9 +7,7 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.Settings
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -90,10 +88,10 @@ class MultiChainComparisonSuite extends FunSuite:
     )
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> DummyLm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(DummyLm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val call = ProgramCall(inputs = Map("question" -> "What is the color of the sky?"))
@@ -110,10 +108,10 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = base, m = 3)
 
     RuntimeEnvironment.withSettings(
-      Settings(Map(
-        SettingKeys.languageModel.name -> DummyLm,
-        SettingKeys.adapter.name -> ScriptedAdapter
-      ))
+      RuntimeContext(
+        lm = Some(DummyLm),
+        adapter = Some(ScriptedAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val call = ProgramCall(inputs = Map("question" -> "?"))

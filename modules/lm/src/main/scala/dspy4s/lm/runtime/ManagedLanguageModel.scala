@@ -3,7 +3,6 @@ package dspy4s.lm.runtime
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SettingKeys
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
@@ -183,10 +182,10 @@ final case class ManagedLanguageModel(
       )
 
   private def historyEnabled(using RuntimeContext): Boolean =
-    !summon[RuntimeContext].settings.get(SettingKeys.disableHistory).getOrElse(false)
+    !summon[RuntimeContext].disableHistory.getOrElse(false)
 
   private def trackUsage(request: LmRequest, response: LmResponse)(using RuntimeContext): Unit =
-    val usageEnabled = summon[RuntimeContext].settings.get(SettingKeys.trackUsage).getOrElse(true)
+    val usageEnabled = summon[RuntimeContext].trackUsage.getOrElse(true)
     if usageEnabled && !response.cacheHit then
       response.usage.foreach { usage =>
         UsageTracking.record(request.model, usage)

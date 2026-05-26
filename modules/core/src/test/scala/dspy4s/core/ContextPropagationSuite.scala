@@ -1,8 +1,7 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.SettingKey
-import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.ConfigurationError
+import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
@@ -15,7 +14,6 @@ import scala.concurrent.duration.DurationInt
 import java.util.concurrent.Executors
 
 class ContextPropagationSuite extends FunSuite:
-  private val sampleKey = SettingKey[String]("sample")
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -26,24 +24,24 @@ class ContextPropagationSuite extends FunSuite:
   test("plain future does not inherit thread-local runtime context") {
     val base = ExecutionContext.global
 
-    val observed = RuntimeEnvironment.withSettings(Settings(Map(sampleKey.name -> "scoped"))) {
-      Await.result(Future(RuntimeEnvironment.currentSettings.get(sampleKey))(using base), 3.seconds)
+    val observed = RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
+      Await.result(Future(RuntimeEnvironment.current.numThreads)(using base), 3.seconds)
     }
 
-    assertNotEquals(observed, Some("scoped"))
+    assertNotEquals(observed, Some(42))
   }
 
   test("context propagation wraps execution context with captured runtime context") {
     val base = ExecutionContext.global
 
-    val observed = RuntimeEnvironment.withSettings(Settings(Map(sampleKey.name -> "scoped"))) {
+    val observed = RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
       Await.result(
-        ContextPropagation.future(RuntimeEnvironment.currentSettings.get(sampleKey))(using base),
+        ContextPropagation.future(RuntimeEnvironment.current.numThreads)(using base),
         3.seconds
       )
     }
 
-    assertEquals(observed, Some("scoped"))
+    assertEquals(observed, Some(42))
   }
 
   test("context propagation assigns distinct async task ids across futures") {
@@ -55,11 +53,11 @@ class ContextPropagationSuite extends FunSuite:
       given ExecutionContext = singleThread
 
       val first = Await.result(
-        ContextPropagation.future(RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "a"))),
+        ContextPropagation.future(RuntimeEnvironment.configure(RuntimeContext(asyncTaskId = Some("a")))),
         3.seconds
       )
       val second = Await.result(
-        ContextPropagation.future(RuntimeEnvironment.configureEntries(Map(sampleKey.name -> "b"))),
+        ContextPropagation.future(RuntimeEnvironment.configure(RuntimeContext(asyncTaskId = Some("b")))),
         3.seconds
       )
 
@@ -69,3 +67,4 @@ class ContextPropagationSuite extends FunSuite:
     finally
       singleThread.shutdownNow()
   }
+

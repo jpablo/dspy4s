@@ -5,9 +5,6 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.SettingKey
-import dspy4s.core.contracts.SettingKeys
-import dspy4s.core.contracts.Settings
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
@@ -15,7 +12,6 @@ import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 
 class ParallelSuite extends FunSuite:
-  private val sampleKey = SettingKey[String]("sample")
 
   private final case class StubProgram(
       override val moduleName: String = "stub",
@@ -91,12 +87,10 @@ class ParallelSuite extends FunSuite:
     val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = Map("value" -> value)))
 
     RuntimeEnvironment.withSettings(
-      Settings(
-        Map(
-          SettingKeys.numThreads.name -> 2,
-          SettingKeys.maxErrors.name -> 1
+      RuntimeContext(
+          numThreads = Some(2),
+          maxErrors = Some(1)
         )
-      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = Parallel().run(tasks)
@@ -110,18 +104,18 @@ class ParallelSuite extends FunSuite:
       behavior = _ =>
         Right(
           DynamicPrediction(
-            values = Map("sample" -> RuntimeEnvironment.currentSettings.get(sampleKey).getOrElse("missing"))
+            values = Map("sample" -> RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"))
           )
         )
     )
     val tasks = Vector.fill(4)(program -> ProgramCall(inputs = Map("value" -> 1)))
 
-    RuntimeEnvironment.withSettings(Settings(Map(sampleKey.name -> "scoped"))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
       assert(result.isRight)
       val values = result.toOption.get.results.flatten.map(_.values("sample"))
-      assertEquals(values, Vector("scoped", "scoped", "scoped", "scoped"))
+      assertEquals(values, Vector("42", "42", "42", "42"))
     }
   }
 

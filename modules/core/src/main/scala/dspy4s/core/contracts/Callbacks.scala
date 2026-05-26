@@ -30,7 +30,7 @@ import java.util.UUID
   * thunk threw, then rethrows). User code does not emit events directly.
   *
   * '''Consumer.''' Implement [[CallbackHandler]] and register it via
-  * [[dspy4s.core.runtime.RuntimeEnvironment.withCallbacks]] or by setting [[SettingKeys.callbacks]] on a
+  * [[dspy4s.core.runtime.RuntimeEnvironment.withCallbacks]] or by setting the `callbacks` field on a
   * [[RuntimeContext]]. All registered handlers receive every event in registration order.
   *
   * '''Note on default ids.''' The `callId = UUID.randomUUID().toString` default exists only as a fallback for
@@ -154,8 +154,8 @@ trait CallbackHandler:
   def onEvent(event: CallbackEvent)(using RuntimeContext): Unit
 
 object CallbackHandler:
-  /** Discards every event. The default value of [[SettingKeys.callbacks]] is an empty `Vector`, so this instance is
-    * offered for callers that explicitly want a placeholder handler (tests, dependency injection where `null` is
+  /** Discards every event. [[RuntimeContext.callbacks]] defaults to an empty `Vector`, so this instance is offered
+    * for callers that explicitly want a placeholder handler (tests, dependency injection where `null` is
     * undesired). */
   val noop: CallbackHandler = new CallbackHandler:
     override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = ()
