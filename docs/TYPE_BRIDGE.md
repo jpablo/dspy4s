@@ -20,7 +20,7 @@ For any field in a signature, there are three "types" in play:
 | Layer | What it stores | Owner |
 |---|---|---|
 | **Scala type** | The static type in your code (e.g. `Sentiment`, `List[Citation]`, `Boolean`) | You |
-| **Codec** (`Shape[A]` + `FieldCodec[A]`) | The encode / decode logic that turns Scala values into a `Map[String, Any]` and back | `dspy4s.typed` |
+| **Codec** (`Shape[A]` + `FieldCodec[A]`) | The encode / decode logic that turns Scala values into a `DynamicValue` (and into the adapter-facing `Map[String, Any]` view) | `dspy4s.typed` (backed by `zio-blocks-schema`) |
 | **Wire format** (`TypeRef` + `FieldSpec.metadata`) | The label / hint the LM sees in the prompt | `dspy4s.core.contracts` |
 
 The **codec** is the funnel: it knows how to take your `Sentiment.joy` and produce the string `"joy"` that ships
@@ -85,15 +85,16 @@ def tags: OutputField[List[String]]              // wire: TypeRef.json (a JSON a
 def meta: OutputField[Map[String, Int]]          // wire: TypeRef.json (a JSON object)
 def note: OutputField[Option[String]]            // wire: TypeRef.json (string-or-null)
 
-// 4. Case classes (need kyo.Schema in scope; auto-derived for common shapes)
-case class Citation(title: String, score: Double) derives kyo.Schema
+// 4. Case classes (need zio.blocks.schema.Schema in scope; auto-derived for common shapes)
+import zio.blocks.schema.Schema
+case class Citation(title: String, score: Double) derives Schema
 def cite: OutputField[Citation]
 //   Scala type: Citation
 //   Wire type:  TypeRef.json
 //   LM sees:    {"title": "...", "score": 0.9}
 
 // 5. Nested combinations
-case class Classification(sentiment: Sentiment, citations: List[Citation]) derives kyo.Schema
+case class Classification(sentiment: Sentiment, citations: List[Citation]) derives Schema
 def result: OutputField[Classification]
 //   Scala type: Classification
 //   Wire type:  TypeRef.json
@@ -104,17 +105,17 @@ You are not restricted to "primitives only" on the Scala side.
 
 ## The actual constraint
 
-It's not "primitives only" — it's "**there must be a `FieldCodec[A]` or `kyo.Schema[A]` for it**." Concretely:
+It's not "primitives only" — it's "**there must be a `FieldCodec[A]` or `zio.blocks.schema.Schema[A]` for it**." Concretely:
 
 | Type shape | What's needed | Out of the box? |
 |---|---|---|
 | `String`, `Int`, `Double`, `Boolean` | Built-in `FieldCodec` instances | yes |
 | Scala enum | `object E extends FieldCodec.FlatEnum[E]` (one line) | yes (with the boilerplate) |
-| Case class | `kyo.Schema[A]` (auto-derived if all fields are supported) | usually |
+| Case class | `derives Schema` (auto-derived if all fields are supported) | usually |
 | `List[A]` / `Vector[A]` / `Set[A]` / `Map[K, V]` / `Option[A]` | Built-in codecs, recurse into element types | yes |
-| Sealed-trait ADT with multiple variants | `kyo.Schema` derivation | usually |
+| Sealed-trait ADT with multiple variants | `derives Schema` (zio-blocks `Variant` derivation) | usually |
 | Literal-union types (`"a" \| "b"`) | Not yet — use an enum instead | no |
-| Function types, opaque types without a codec, anything that can't round-trip through JSON | Write a custom `FieldCodec` | no, until you write one |
+| Function types, opaque types without a codec, anything that can't round-trip through `DynamicValue` | Write a custom `FieldCodec` | no, until you write one |
 
 The escape hatch for unsupported types: define `given FieldCodec[YourType] = ...` and the typed surface picks
 it up.
@@ -204,7 +205,7 @@ shape of any Scala ↔ external-system interop layer.
 | **Codec** | `Encoder[A]` / `Decoder[A]` | `Get[A]` / `Put[A]` | `Shape[A]` + `FieldCodec[A]` |
 | **External primitive vocabulary** | JSON types (string, number, bool, null, array, object) | SQL column types (`VARCHAR`, `INT`, `JSONB`, …) | `TypeRef.{string, int, double, bool, json}` |
 | **Schema / metadata** | Implicit (JSON is self-describing per value) | DDL schema, `Meta[A]` for type hints | `FieldSpec.typeRef` + `FieldSpec.metadata` shown in prompt |
-| **Derivation** | `circe-generic` (Mirror-based) | Doobie `derive`, sql-typed | kyo-schema + dspy4s macros |
+| **Derivation** | `circe-generic` (Mirror-based) | Doobie `derive`, sql-typed | `zio-blocks-schema` (`derives Schema`) + dspy4s macros for the trait-spec / function-type surfaces |
 
 dspy4s is the LM-call instance of the same family of problem.
 

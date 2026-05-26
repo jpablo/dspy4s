@@ -141,15 +141,17 @@ See [`modules/examples/.../typed/FunctionExample.scala`](../modules/examples/src
 
 ### 3. Case classes — `Signature.derived[I, O]`
 
-Two case classes describe inputs and outputs; `kyo.Schema`-backed
+Two case classes describe inputs and outputs; `zio.blocks.schema.Schema`-backed
 derivation produces the runtime metadata and performs product
 encoding/decoding. This is useful when you already have domain case
 classes, want case-class `copy` / pattern matching, or prefer named
 product types over named tuples.
 
 ```scala
-case class EmotionInput(sentence: String)
-case class EmotionOutput(sentiment: Emotion)
+import zio.blocks.schema.Schema
+
+case class EmotionInput(sentence: String) derives Schema
+case class EmotionOutput(sentiment: Emotion) derives Schema
 
 val sig = Signature.derived[EmotionInput, EmotionOutput]("Emotion")
 ```
@@ -158,12 +160,11 @@ End-to-end typed I/O: `Predict(sig).run(EmotionInput("..."))`
 returns `Either[DspyError, Prediction[EmotionOutput]]`, and
 `tp.output.sentiment` is typed as `Emotion`.
 
-Requires `kyo.Schema[I]` and `kyo.Schema[O]` in scope. kyo-schema
-**auto-derives** `Schema[Product]` as long as every field's type
-already has a `Schema` (primitives and `FieldCodec.FlatEnum`-companion
-enums do). If your case class contains a custom type without a
-`Schema`, add `derives kyo.Schema` on the case class itself (or on
-the custom type) to make derivation explicit.
+Requires `Schema[I]` and `Schema[O]` in scope. zio-blocks
+**auto-derives** `Schema[Product]` for case classes whose fields
+already have a `Schema` (primitives, `FieldCodec.FlatEnum`-companion
+enums, standard collections). `derives Schema` on the case class is
+the one-line way to make that derivation explicit.
 
 See [`modules/examples/.../typed/CaseClassExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/typed/CaseClassExample.scala).
 
@@ -273,7 +274,7 @@ The `FieldCodec` typeclass covers the MVP type vocabulary:
 | `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
 | Scala enum (`FieldCodec.FlatEnum`) | already-typed enum value | flat case name like `"joy"` |
 | Standard containers, e.g. `List[A]`, `Seq[A]`, `Vector[A]`, `Set[A]`, `Map[K, V]`, `Option[A]` | adapter-like `Map` / `Seq` / primitive tree, when nested types have `FieldCodec`s | clear primitive strings inside nested values |
-| Product with `kyo.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
+| Product with `zio.blocks.schema.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
 
 Notably **not** auto-coerced:
 
@@ -283,9 +284,9 @@ Notably **not** auto-coerced:
 Supported for structured fields:
 
 - Trait specs, method signatures, and case-class signatures can all use
-  product fields with a `kyo.Schema[A]` in scope.
-- Nested lists, maps, options, and other `kyo-schema`-supported members are
-  supported inside those product fields.
+  product fields with a `zio.blocks.schema.Schema[A]` in scope.
+- Nested lists, maps, options, and other `zio-blocks-schema`-supported
+  members are supported inside those product fields.
 - Use `FieldCodec.FlatEnum[A]` for enum companions when the enum appears in
   a schema-backed product. It supplies both the field decoder and the flat
   Kyo schema.
@@ -328,22 +329,26 @@ fieldSpec.metadata.get(FieldMetadata.EnumName)
 Adapters that don't understand these well-known keys (defined in
 `dspy4s.core.contracts.FieldMetadata`) ignore them harmlessly.
 
-This one-line companion also provides `kyo.Schema[Sentiment]`, so the
-same enum works inside nested schema-backed products:
+This one-line companion also provides `zio.blocks.schema.Schema[Sentiment]`,
+so the same enum works inside nested schema-backed products:
 
 ```scala
-case class Citation(title: String, score: Double) derives kyo.Schema
-case class Classification(sentiment: Sentiment, citations: List[Citation]) derives kyo.Schema
+import zio.blocks.schema.Schema
+
+case class Citation(title: String, score: Double) derives Schema
+case class Classification(sentiment: Sentiment, citations: List[Citation]) derives Schema
 
 trait Classify extends Spec:
   def sentence: InputField[String]
   def result:   OutputField[Classification]
 ```
 
-**Wire-format finding from Phase 0**: `kyo-schema`'s default enum
-derivation encodes Scala enums as `{"caseName":{}}` (discriminated
-object), not as flat strings. `FieldCodec.FlatEnum` overrides that
-with the LLM-friendly flat string form.
+**Wire-format note**: `zio-blocks-schema`'s default enum derivation encodes
+Scala enums as `DynamicValue.Variant` (which serializes to a discriminated
+object `{"caseName":{}}`), not as flat strings. dspy4s's
+`ZioSchemaCodec.dynamicToAny` flattens the variant to the case-name string
+(`"joy"`) at the adapter boundary, so the LM sees the LLM-friendly form
+while the typed layer keeps the structural shape internally.
 
 ```scala
 enum Mood:
@@ -353,8 +358,9 @@ object Mood extends FieldCodec.FlatEnum[Mood]
 ```
 
 Schema-backed products normalize clear primitive strings before handing
-the record to `kyo-schema`, so `"0.9"` can decode as `Double`. They still
-reject lossy conversions such as `0.9` into `Int`; no silent truncation.
+the record to `zio-blocks-schema`, so `"0.9"` can decode as `Double`.
+They still reject lossy conversions such as `0.9` into `Int`; no silent
+truncation.
 
 ---
 

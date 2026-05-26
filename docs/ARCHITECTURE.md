@@ -62,7 +62,9 @@ graph TD
    - `Prediction[O]` typed wrapper
    - Macros: `Signature.from(method)`, `Signature.fromType[F]`,
      `Signature.of[T <: Spec]`, plus `Signature.derived[I, O]` (inline)
-   - Backed by kyo-schema (`Structure` / `Schema`) for product encode/decode
+   - Backed by `zio-blocks-schema` (`Schema` / `Reflect` / `DynamicValue`)
+     for product encode/decode; `ZioSchemaCodec` bridges between
+     `DynamicValue` and the adapter intermediate `Map[String, Any]`
    - See [TYPE_BRIDGE.md](TYPE_BRIDGE.md) for how Scala types translate to
      the LM-visible wire vocabulary on the way out and back.
 
@@ -268,8 +270,14 @@ For comparison with the upstream Python DSPy architecture:
   `Completions`.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `typed/Signature.scala` — typed wrapper + six factory entry points.
-- `typed/Shape.scala` — three shape implementations + kyo-schema
-  derivation.
+- `typed/Shape.scala` — three shape implementations (`MapShape`,
+  `TupleShape`, and the product shape produced by
+  `ZioSchemaCodec.derivedFromZioSchema`). Native `DynamicValue`
+  encode / decode methods plus `Map`-based shims.
+- `typed/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
+  `DynamicValue` ↔ `Map[String, Any]` converter with coercive
+  primitive normalization, `FieldSpec` derivation from
+  `Reflect.Record`, and the product Shape factory.
 - `typed/Spec.scala` — `InputField[+A]` / `OutputField[+A]` opaque
   types and the `Spec` trait.
 - `programs/runtime/PredictEngine.scala` — the shared execute body.

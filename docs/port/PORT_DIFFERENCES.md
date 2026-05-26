@@ -95,8 +95,9 @@ dspy4s splits the picture in two:
   statically `Boolean`.
 
 The `Shape[A]` typeclass has three implementations
-(`KyoProductShape` for case-class I/O via kyo-schema, `TupleShape`
-for named-tuple I/O from the macros, `MapShape` for the string DSL).
+(the product shape from `ZioSchemaCodec.derivedFromZioSchema` for
+case-class I/O via `zio-blocks-schema`, `TupleShape` for named-tuple
+I/O from the macros, `MapShape` for the string DSL).
 The pair-of-types pattern (erased + typed) repeats: `Prediction`
 becomes `DynamicPrediction` + `Prediction[O]`, `Predict` becomes
 `DynamicPredict` + `Predict[I, O]`, and `ChainOfThought` is a typed
