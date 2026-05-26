@@ -49,13 +49,18 @@ lazy val core = (project in file("modules/core"))
 // codec backend behind dspy4s's FieldCodec boundary. kyo-data is explicit
 // because kyo-schema's Structure.Value tree and test Record probes use its
 // collection/data primitives.
+//
+// Migration in progress: zio-blocks-schema is being introduced as the
+// replacement for kyo-schema; both libs coexist during the migration.
 lazy val typed = (project in file("modules/typed"))
   .dependsOn(core)
   .settings(commonSettings)
   .settings(name := "dspy4s-typed")
   .settings(
-    libraryDependencies ++= kyoSchemaDeps :+
-      ("org.scalameta" %% "munit" % munitVersion % Test)
+    libraryDependencies ++= kyoSchemaDeps ++ Seq(
+      "dev.zio"       %% "zio-blocks-schema" % "0.0.40",
+      "org.scalameta" %% "munit"             % munitVersion % Test
+    )
   )
 
 lazy val lm = (project in file("modules/lm"))
