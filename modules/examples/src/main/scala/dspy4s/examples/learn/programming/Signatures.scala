@@ -31,7 +31,10 @@
  */
 package dspy4s.examples.learn.programming
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.{ChainOfThought, Predict}
 import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
@@ -244,3 +247,32 @@ object CustomTypesExample:
     Signature.fromType[
       (query: MyContainer.Query) => (score: MyContainer.Score)
     ]
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Runnable entrypoint
+// ═══════════════════════════════════════════════════════════════════════════
+// The example objects above only declare programs; running them needs a
+// `RuntimeContext` carrying a live LM + adapter. This wires the real OpenAI
+// provider (reading `OPENAI_API_KEY` from the environment) plus a `ChatAdapter`,
+// installs them as the active context, and exposes it as the `given` the
+// `call` methods require.
+//
+// Run with:  OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.main"
+@main def main(): Unit =
+  val model = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
+
+  val lm = OpenAiLanguageModel.fromEnv(model) match
+    case Right(m)  => m
+    case Left(err) => sys.error(s"Could not initialize LM (is OPENAI_API_KEY set?): $err")
+
+  val settings = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
+
+  RuntimeEnvironment.withSettings(settings) {
+    given RuntimeContext = RuntimeEnvironment.current
+
+    println("Toxicity:  " + ToxicityExample.call("you are beautiful."))
+    println("Sentiment: " + SentimentExample.call("it's a charming and often affecting journey."))
+    println("Emotion:   " + EmotionExample.call("i started feeling a little vulnerable"))
+    println("Summary:   " + SummarizeExample.call("The cat sat on the mat. The sun was warm."))
+  }
