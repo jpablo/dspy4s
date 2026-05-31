@@ -80,14 +80,19 @@ object FieldCodec extends LowPriorityFieldCodecs:
   inline def fromSchema[A](
       typeRef: TypeRef = TypeRef.json
   )(using schema: Schema[A]): FieldCodec[A] =
-    val capturedTypeRef = typeRef
-    new FieldCodec[A]:
-      val typeRef: TypeRef = capturedTypeRef
-      def encode(value: A): Any =
-        DynamicValues.toAny(schema.toDynamicValue(value))
-      def decode(raw: Any): Either[DspyError, A] =
-        val dyn = ZioSchemaCodec.normalize(DynamicValues.fromAny(raw), schema.reflect)
-        schema.fromDynamicValue(dyn).left.map(err => ValidationError(err.toString))
+    new SchemaBackedCodec[A](typeRef)
+
+  /** Extracted from `fromSchema` so the inline def doesn't duplicate the anonymous class at each call site
+    * (E197). Package-private so inline expansion sites outside `FieldCodec` (but inside `dspy4s.typed`) can
+    * reach it. */
+  private[typed] final class SchemaBackedCodec[A](
+      val typeRef: TypeRef
+  )(using schema: Schema[A]) extends FieldCodec[A]:
+    def encode(value: A): Any =
+      DynamicValues.toAny(schema.toDynamicValue(value))
+    def decode(raw: Any): Either[DspyError, A] =
+      val dyn = ZioSchemaCodec.normalize(DynamicValues.fromAny(raw), schema.reflect)
+      schema.fromDynamicValue(dyn).left.map(err => ValidationError(err.toString))
 
   /** One-line companion helper for DSPy-style flat enum fields.
     *
