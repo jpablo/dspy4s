@@ -195,7 +195,7 @@ class ChainOfThoughtSuite extends FunSuite:
   }
 
   test("ChainOfThought rejects case-class-output signatures with a ValidationError") {
-    // Signature.derived produces a KyoProductShape that decodes into the
+    // Signature.derived produces a Schema-derived Shape that decodes into the
     // case class -- not a Tuple -- so the augmented-tuple construction
     // can't proceed. The boundary must surface a structured error, not
     // a ClassCastException.

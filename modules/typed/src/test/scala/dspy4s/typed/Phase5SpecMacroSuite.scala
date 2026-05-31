@@ -149,7 +149,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(lookup(encoded, "tone"), Some("urgent": Any))
   }
 
-  test("spec outputShape decodes nested product fields through kyo-schema") {
+  test("spec outputShape decodes nested product fields through zio-blocks-schema") {
     val sig = Signature.of[P5StructuredSpec]
     val raw = rec(
       "result" -> Map(

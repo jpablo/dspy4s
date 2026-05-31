@@ -25,7 +25,7 @@
  * Structure note: each snippet is a self-contained block — heading
  * comment + python original + supporting types (when any) + example
  * object. Supporting types (enums, case classes, spec traits)
- * must stay at the package level for kyo-schema / Mirror derivation and
+ * must stay at the package level for zio-blocks-schema / Mirror derivation and
  * for the trait-spec macro to see them, so the per-snippet block places
  * them immediately above the example object that uses them.
  */

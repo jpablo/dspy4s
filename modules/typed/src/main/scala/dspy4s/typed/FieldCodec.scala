@@ -111,11 +111,11 @@ object FieldCodec extends LowPriorityFieldCodecs:
   // ── Scala enum derivation ────────────────────────────────────────────────
   //
   // Decodes enums from their `.toString` form (which equals the case name
-  // for parameterless cases). Phase 0 finding: kyo-schema's default enum
-  // wire form uses `{"caseName":{}}`. The typed-layer boundary accepts
-  // raw strings instead — adapters that produce discriminated objects can
-  // transform before handoff, or callers can pass the typed enum value
-  // directly.
+  // for parameterless cases). Schema-derived sum types (zio-blocks) carry a
+  // discriminated `Variant` wire form; the typed-layer boundary accepts
+  // raw case-name strings instead — adapters that produce discriminated
+  // objects can transform before handoff, or callers can pass the typed
+  // enum value directly.
 
   /** Enables `derives FieldCodec` on Scala enums. Decodes case names from
     * strings or accepts already-typed enum values. */

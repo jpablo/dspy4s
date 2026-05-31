@@ -52,7 +52,7 @@ object SpecExample:
   val qa = Signature.of[QASpec]
 
   /** A structured-output spec. Nested products, lists, and primitive
-    * coercions are decoded through kyo-schema. */
+    * coercions are decoded through zio-blocks-schema. */
   val citedQa = Signature.of[CitedQASpec]
 
   /** Illustrative call: with an LM and adapter configured, run the

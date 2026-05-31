@@ -93,8 +93,9 @@ final case class ChainOfThought[I, O](
     * cons is well-defined only when `baseOut` is a `Tuple` -- which holds
     * for `Signature.of[Spec]` / `Signature.fromType[F]` outputs (backed
     * by `TupleShape`) but not for case-class outputs from
-    * `Signature.derived[I, O <: Product]` (backed by `KyoProductShape`,
-    * which decodes into a non-tuple case class) or `Map[String, Any]`
+    * `Signature.derived[I, O <: Product]` (backed by a Schema-derived
+    * `Shape` from `ZioSchemaCodec`, which decodes into a non-tuple case
+    * class) or `Map[String, Any]`
     * outputs from `Signature.fromString` (backed by `MapShape`).
     *
     * Surfaces the unsupported-shape case as a `ValidationError` instead
