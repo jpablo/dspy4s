@@ -5,19 +5,23 @@ import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Signature}
 
-/** Typed counterpart to `DynamicPredict`. Wraps a `Signature[I, O]` and
-  * delegates execution to an internal `DynamicPredict`, so all
-  * adapter/model/callback/cache/trace behavior is unchanged. The typed
-  * layer adds two boundaries:
+/** The fundamental typed prediction module: given a `Signature[I, O]`, `run`
+  * takes a typed input `I`, formats and dispatches a language-model request
+  * through the configured adapter and model, and returns a typed
+  * `Prediction[O]`. Other programs (`ChainOfThought`, `ReAct`, ...) build on it.
   *
-  *   1. Inputs are encoded through `signature.inputShape` before reaching
-  *      `ProgramCall`.
-  *   2. Outputs are decoded through `signature.outputShape` into a typed
-  *      `Prediction[O]`; decode failures surface as `Left(DspyError)`
-  *      at this `run` boundary, never via lazy field access.
+  * The signature's shapes bracket the call:
   *
-  * The raw `DynamicPrediction` (including completions and LM usage) is preserved
-  * on `Prediction.raw` for callers that need it.
+  *   1. Inputs are encoded through `signature.inputShape` before the request
+  *      is built.
+  *   2. The model's reply is decoded through `signature.outputShape` into a
+  *      typed `Prediction[O]`; decode failures surface as `Left(DspyError)`
+  *      from `run`, never via lazy field access.
+  *
+  * Adapter selection, caching, retries, callbacks, and tracing are handled by
+  * the shared program runtime. The untyped prediction (including the raw
+  * completions and LM usage) is preserved on `Prediction.raw` for callers that
+  * need it.
   */
 final case class Predict[I, O](
     signature: Signature[I, O],
@@ -38,21 +42,17 @@ final case class Predict[I, O](
       outputJsonSchema = signature.outputShape.jsonSchemaString
     )
 
-  /** Encode `input`, dispatch through the existing `DynamicPredict` runtime, then
-    * decode the resulting prediction into `Prediction[O]`.
+  /** Encode `input`, dispatch the language-model request, then decode the reply
+    * into `Prediction[O]`.
     *
-    * `config` is forwarded into `ProgramCall.config`, which `DynamicPredict`
-    * surfaces as `LmRequest.options` (per-call LM options, cache /
-    * rollout controls, anything the underlying provider understands).
-    * `traceEnabled` controls whether the inner `DynamicPredict` writes a trace
-    * entry for this call.
+    * `config` is forwarded as `LmRequest.options` -- per-call LM options, cache /
+    * rollout controls, and anything else the underlying provider understands.
+    * `traceEnabled` controls whether this call writes a trace entry.
     *
-    * **Known limitation (Phase 4):** when the inner `DynamicPredict` succeeds
-    * but the typed decode fails, callbacks / trace / history still
-    * record the inner predict as a successful module call. The
-    * `Left(DspyError)` returned here does not retroactively un-record
-    * those events. Wrapping the typed boundary in its own
-    * callback/trace scope is a design decision deferred to Phase 5+. */
+    * Note: callbacks, trace, and history record the model call as soon as it
+    * succeeds, before the typed decode runs. So if the model responds but the
+    * reply can't be decoded into `O`, `run` returns `Left(DspyError)` even
+    * though those events still show a successful call. */
   def run(
       input: I,
       config: Map[String, Any] = Map.empty,
