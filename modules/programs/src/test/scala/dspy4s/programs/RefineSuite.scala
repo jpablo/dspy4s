@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -33,9 +34,9 @@ class RefineSuite extends FunSuite:
   test("refine returns best prediction among attempts") {
     val module = StubProgram(
       Vector(
-        Right(DynamicPrediction(values = rec("answer" -> "Brussels", "score" -> 0.4))),
-        Right(DynamicPrediction(values = rec("answer" -> "City of Brussels", "score" -> 0.2))),
-        Right(DynamicPrediction(values = rec("answer" -> "Brussels", "score" -> 0.9)))
+        Right(DynamicPrediction(values = rec("answer" := "Brussels", "score" := 0.4))),
+        Right(DynamicPrediction(values = rec("answer" := "City of Brussels", "score" := 0.2))),
+        Right(DynamicPrediction(values = rec("answer" := "Brussels", "score" := 0.9)))
       )
     )
     val refine = Refine(
@@ -46,7 +47,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = rec("question" -> "What is the capital of Belgium?")))
+    val result = refine.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Brussels")
@@ -69,7 +70,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = rec("q" -> "x")))
+    val result = refine.run(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 3)
     assertEquals(result.left.toOption.get.message, "f3")
@@ -80,7 +81,7 @@ class RefineSuite extends FunSuite:
       Vector(
         Left(RuntimeError("stub", "f1")),
         Left(RuntimeError("stub", "f2")),
-        Right(DynamicPrediction(values = rec("answer" -> "ok", "score" -> 1.0)))
+        Right(DynamicPrediction(values = rec("answer" := "ok", "score" := 1.0)))
       )
     )
     val refine = Refine(
@@ -92,7 +93,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = rec("q" -> "x")))
+    val result = refine.run(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")

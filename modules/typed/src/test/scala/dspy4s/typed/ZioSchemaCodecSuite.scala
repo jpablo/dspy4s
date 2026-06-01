@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DynamicValues, FieldRole, TypeRef}
+import dspy4s.core.contracts.{:=, DynamicValues, FieldRole, TypeRef}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -55,7 +55,7 @@ class ZioSchemaCodecSuite extends FunSuite:
   test("derivedFromZioSchema decode accepts a DynamicValue.Record with the enum as a flat string") {
     import ZsClassifyOutput.given
     val shape = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput](FieldRole.Output)
-    val raw   = DynamicValues.recordFromEntries(Seq("sentiment" -> "joy", "confidence" -> 0.95))
+    val raw   = DynamicValues.recordFromEntries(Seq("sentiment" := "joy", "confidence" := 0.95))
     val out   = shape.decode(raw)
     assertEquals(out, Right(ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.95)))
   }
@@ -65,7 +65,7 @@ class ZioSchemaCodecSuite extends FunSuite:
     object Probe { given Schema[Probe] = Schema.derived }
     import Probe.given
     val shape = ZioSchemaCodec.derivedFromZioSchema[Probe](FieldRole.Output)
-    val raw   = DynamicValues.recordFromEntries(Seq("flag" -> "true", "count" -> "42", "score" -> "0.9"))
+    val raw   = DynamicValues.recordFromEntries(Seq("flag" := "true", "count" := "42", "score" := "0.9"))
     val out   = shape.decode(raw)
     assertEquals(out, Right(Probe(flag = true, count = 42, score = 0.9)))
   }

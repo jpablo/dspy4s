@@ -6,6 +6,8 @@ import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, P
 import dspy4s.core.contracts.{
   DspyError, RuntimeContext, SignatureLayout
 }
+import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
@@ -50,8 +52,8 @@ class TypedPredictSuite extends FunSuite:
     override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec(
-        "answer" -> output.text,
-        "score"  -> output.metadata.getOrElse("score", 0.0)
+        "answer" := output.text,
+        "score"  -> DynamicValues.fromAny(output.metadata.getOrElse("score", 0.0))
       )))
 
   private object FixedLm extends LanguageModel:
@@ -136,8 +138,8 @@ class TypedPredictSuite extends FunSuite:
         )))
       override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values = rec(
-          "answer" -> "x",
-          "score"  -> 0.5
+          "answer" := "x",
+          "score"  := 0.5
         )))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
@@ -242,7 +244,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(EchoQuestionAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(rec("question" -> "Capital of France?"))
+      val result = Predict(sig).run(rec("question" := "Capital of France?"))
       // Missing 'context' input -> Left, LM never invoked.
       assert(result.isLeft, s"expected missing-input failure, got: $result")
       assert(!lmCalled, "expected LM not to be called when required inputs are missing")
@@ -278,7 +280,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer, score").toOption.get
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(sig).run(ProgramCall(inputs = rec("question" -> "x")))
+      val result = DynamicPredict(sig).run(ProgramCall(inputs = rec("question" := "x")))
       assert(result.isRight)
       assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
     }

@@ -12,6 +12,7 @@ import dspy4s.core.contracts.ModuleEndEvent
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -49,7 +50,7 @@ class ProgramRuntimeSuite extends FunSuite:
     override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec("text" -> output.text)))
+      Right(ParsedOutput(values = rec("text" := output.text)))
 
   private object RuntimeResolver extends SettingsProgramRuntime
 
@@ -94,7 +95,7 @@ class ProgramRuntimeSuite extends FunSuite:
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = EchoProgram()
-      val output = program.run(ProgramCall(inputs = rec("question" -> "hello")))
+      val output = program.run(ProgramCall(inputs = rec("question" := "hello")))
 
       assert(output.isRight)
       assertEquals(lookupString(output.toOption.get.values, "answer"), "ok")
@@ -108,7 +109,7 @@ class ProgramRuntimeSuite extends FunSuite:
   test("base predict program respects traceEnabled=false") {
     given RuntimeContext = RuntimeEnvironment.current
     val program = EchoProgram()
-    val output = program.run(ProgramCall(inputs = rec("question" -> "hello"), traceEnabled = false))
+    val output = program.run(ProgramCall(inputs = rec("question" := "hello"), traceEnabled = false))
 
     assert(output.isRight)
     assertEquals(RuntimeEnvironment.current.trace.size, 0)

@@ -3,6 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.:=
 import munit.FunSuite
 
 import scala.annotation.nowarn
@@ -46,9 +47,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(sig.layout.signatureString, "sentence -> result")
 
     val encoded = sig.inputShape.encode((sentence = "I missed the train"))
-    assertEquals(encoded, rec("sentence" -> "I missed the train"))
+    assertEquals(encoded, rec("sentence" := "I missed the train"))
 
-    val decoded = sig.outputShape.decode(rec("result" -> "joy")).toOption.get
+    val decoded = sig.outputShape.decode(rec("result" := "joy")).toOption.get
     val result: P7Emotion = decoded.result
     assertEquals(result, P7Emotion.joy)
   }
@@ -57,7 +58,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val sig = Signature.from(p7NamedEmotion)
     assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" -> "sadness")).toOption.get
+    val decoded = sig.outputShape.decode(rec("sentiment" := "sadness")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
     assertEquals(sentiment, P7Emotion.sadness)
   }
@@ -68,9 +69,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
 
     val encoded = sig.inputShape.encode((sentence = "hi", hint = "warm"))
-    assertEquals(encoded, rec("sentence" -> "hi", "hint" -> "warm"))
+    assertEquals(encoded, rec("sentence" := "hi", "hint" := "warm"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" -> "love", "confidence" -> "0.75")).toOption.get
+    val decoded = sig.outputShape.decode(rec("sentiment" := "love", "confidence" := "0.75")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
     val confidence: Double = decoded.confidence
     assertEquals(sentiment, P7Emotion.love)
@@ -81,7 +82,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val sig = Signature.from(p7CaseClassEmotion)
     assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" -> "joy", "confidence" -> 0.8))
+    val decoded = sig.outputShape.decode(rec("sentiment" := "joy", "confidence" := 0.8))
     assertEquals(decoded, Right(P7Score(P7Emotion.joy, 0.8)))
   }
 
@@ -89,7 +90,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val sig = Signature.from(p7TupleEmotion)
     assertEquals(sig.layout.outputFields.map(_.name), Vector("_1", "_2"))
 
-    val decoded = sig.outputShape.decode(rec("_1" -> "joy", "_2" -> "0.8"))
+    val decoded = sig.outputShape.decode(rec("_1" := "joy", "_2" := "0.8"))
     assertEquals(decoded, Right((P7Emotion.joy, 0.8)))
   }
 
@@ -108,9 +109,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(sig.layout.signatureString, "input -> result")
 
     val encoded = sig.inputShape.encode((input = "I missed the train"))
-    assertEquals(encoded, rec("input" -> "I missed the train"))
+    assertEquals(encoded, rec("input" := "I missed the train"))
 
-    val decoded = sig.outputShape.decode(rec("result" -> "joy")).toOption.get
+    val decoded = sig.outputShape.decode(rec("result" := "joy")).toOption.get
     val result: P7Emotion = decoded.result
     assertEquals(result, P7Emotion.joy)
   }
@@ -131,9 +132,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(sig.layout.signatureString, "sentence, hint -> sentiment, confidence")
 
     val encoded = sig.inputShape.encode((sentence = "hi", hint = "warm"))
-    assertEquals(encoded, rec("sentence" -> "hi", "hint" -> "warm"))
+    assertEquals(encoded, rec("sentence" := "hi", "hint" := "warm"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" -> "love", "confidence" -> "0.75")).toOption.get
+    val decoded = sig.outputShape.decode(rec("sentiment" := "love", "confidence" := "0.75")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
     val confidence: Double = decoded.confidence
     assertEquals(sentiment, P7Emotion.love)
@@ -148,7 +149,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(sig.layout.signatureString, "input1, input2 -> result")
 
     val encoded = sig.inputShape.encode((input1 = "hi", input2 = "warm"))
-    assertEquals(encoded, rec("input1" -> "hi", "input2" -> "warm"))
+    assertEquals(encoded, rec("input1" := "hi", "input2" := "warm"))
   }
 
   test("type-only function signature supports case class output products") {
@@ -156,7 +157,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(sig.layout.inputFields.map(_.name), Vector("sentence"))
     assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment", "confidence"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" -> "joy", "confidence" -> 0.8))
+    val decoded = sig.outputShape.decode(rec("sentiment" := "joy", "confidence" := 0.8))
     assertEquals(decoded, Right(P7Score(P7Emotion.joy, 0.8)))
   }
 

@@ -1,5 +1,6 @@
 package dspy4s.evaluate
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
@@ -13,7 +14,7 @@ import java.nio.file.Paths
 import scala.io.Source
 
 class PersistenceSuite extends FunSuite:
-  private def rec(entries: (String, Any)*): DynamicValue.Record =
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
   private def tmpPath(suffix: String) =
@@ -24,18 +25,18 @@ class PersistenceSuite extends FunSuite:
       score = 66.67,
       results = Vector(
         ExampleEvaluation(
-          Example(rec("question" -> "cap of France?", "answer" -> "Paris")),
-          DynamicPrediction(rec("answer" -> "Paris")),
+          Example(rec("question" := "cap of France?", "answer" := "Paris")),
+          DynamicPrediction(rec("answer" := "Paris")),
           score = 1.0
         ),
         ExampleEvaluation(
-          Example(rec("question" -> "cap of Italy?", "answer" -> "Rome")),
-          DynamicPrediction(rec("answer" -> "Naples")),
+          Example(rec("question" := "cap of Italy?", "answer" := "Rome")),
+          DynamicPrediction(rec("answer" := "Naples")),
           score = 0.0
         ),
         ExampleEvaluation(
-          Example(rec("question" -> "cap of Spain?", "answer" -> "Madrid")),
-          DynamicPrediction(rec("answer" -> "Madrid")),
+          Example(rec("question" := "cap of Spain?", "answer" := "Madrid")),
+          DynamicPrediction(rec("answer" := "Madrid")),
           score = 1.0
         )
       ),
@@ -82,8 +83,8 @@ class PersistenceSuite extends FunSuite:
       score = 50.0,
       results = Vector(
         ExampleEvaluation(
-          Example(rec("answer" -> "Paris")),
-          DynamicPrediction(rec("answer" -> "Lyon")),
+          Example(rec("answer" := "Paris")),
+          DynamicPrediction(rec("answer" := "Lyon")),
           score = 0.0
         )
       ),
@@ -103,8 +104,8 @@ class PersistenceSuite extends FunSuite:
     val withNumbers = sampleResult.copy(
       results = Vector(
         ExampleEvaluation(
-          Example(rec("answer" -> "Paris", "score" -> 0.8)),
-          DynamicPrediction(rec("answer" -> "Paris", "confidence" -> 0.95)),
+          Example(rec("answer" := "Paris", "score" := 0.8)),
+          DynamicPrediction(rec("answer" := "Paris", "confidence" := 0.95)),
           score = 1.0
         )
       )

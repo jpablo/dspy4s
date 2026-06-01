@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.contracts.:=
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -15,7 +16,7 @@ class DataSuite extends FunSuite:
   private def dbl(d: Double): DynamicValue   = DynamicValue.Primitive(PrimitiveValue.Double(d))
 
   test("example inputs and labels split by input keys") {
-    val example = Example("question" -> "What is 1+1?", "answer" -> "2").withInputs(Set("question"))
+    val example = Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question"))
 
     assertEquals(example.inputs, DynamicValue.Record(Chunk("question" -> str("What is 1+1?"))))
     assertEquals(example.labels, DynamicValue.Record(Chunk("answer" -> str("2"))))
@@ -57,8 +58,8 @@ class DataSuite extends FunSuite:
 
   test("completions fromRows builds equal-length columns indexable via at(i)") {
     val rows = Vector(
-      DynamicValues.recordFromEntries(Vector("answer" -> "a", "score" -> 0.1)),
-      DynamicValues.recordFromEntries(Vector("answer" -> "b", "score" -> 0.2))
+      DynamicValues.recordFromEntries(Vector("answer" := "a", "score" := 0.1)),
+      DynamicValues.recordFromEntries(Vector("answer" := "b", "score" := 0.2))
     )
     val completions = Completions.fromRows(rows).toOption.get
     assertEquals(completions.size, 2)
@@ -68,8 +69,8 @@ class DataSuite extends FunSuite:
 
   test("completions fromRows fails on inconsistent row keys") {
     val rows = Vector(
-      DynamicValues.recordFromEntries(Vector("answer" -> "a", "score" -> 0.1)),
-      DynamicValues.recordFromEntries(Vector("answer" -> "b"))
+      DynamicValues.recordFromEntries(Vector("answer" := "a", "score" := 0.1)),
+      DynamicValues.recordFromEntries(Vector("answer" := "b"))
     )
     val completions = Completions.fromRows(rows)
 

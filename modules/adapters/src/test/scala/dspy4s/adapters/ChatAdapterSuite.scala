@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ParseError
@@ -15,7 +16,7 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 class ChatAdapterSuite extends FunSuite:
-  private def rec(entries: (String, Any)*): DynamicValue.Record =
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
     DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
@@ -34,11 +35,11 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector(
         Example(
-          values = rec("question" -> "Capital of France?", "answer" -> "Paris"),
+          values = rec("question" := "Capital of France?", "answer" := "Paris"),
           inputKeys = Set("question")
         )
       ),
-      inputs = Example(values = rec("question" -> "Capital of Belgium?"), inputKeys = Set("question")),
+      inputs = Example(values = rec("question" := "Capital of Belgium?"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
     )
 
@@ -81,7 +82,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = Example(values = rec("question" -> "?"), inputKeys = Set("question")),
+      inputs = Example(values = rec("question" := "?"), inputKeys = Set("question")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -103,7 +104,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = Example(values = rec("q" -> "?"), inputKeys = Set("q")),
+      inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -142,7 +143,7 @@ class ChatAdapterSuite extends FunSuite:
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
-      inputs = Example(values = rec("q" -> "?"), inputKeys = Set("q")),
+      inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current

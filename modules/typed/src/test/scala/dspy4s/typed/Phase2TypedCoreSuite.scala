@@ -3,7 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{
-  DspyError, DynamicPrediction, FieldRole, NotFoundError, ValidationError
+  DspyError, DynamicPrediction, FieldRole, NotFoundError, ValidationError, :=
 }
 import munit.FunSuite
 
@@ -73,10 +73,10 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(instructed.layout.instructions, Some("Classify emotion."))
     assertEquals(
       instructed.inputShape.encode(P2SentenceInput("hello")),
-      rec("sentence" -> "hello")
+      rec("sentence" := "hello")
     )
     assertEquals(
-      instructed.outputShape.decode(rec("sentiment" -> "joy", "confidence" -> 0.9)),
+      instructed.outputShape.decode(rec("sentiment" := "joy", "confidence" := 0.9)),
       Right(P2ScoredSentiment("joy", 0.9))
     )
 
@@ -88,18 +88,18 @@ class Phase2TypedCoreSuite extends FunSuite:
   test("Shape.encode produces a DynamicValue.Record keyed by field name") {
     val shape = Shape.derived[P2ScoredSentiment]
     val encoded = shape.encode(P2ScoredSentiment("joy", 0.92))
-    assertEquals(encoded, rec("sentiment" -> "joy", "confidence" -> 0.92))
+    assertEquals(encoded, rec("sentiment" := "joy", "confidence" := 0.92))
   }
 
   test("Shape.decode round-trips a typed value") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val decoded = shape.decode(rec("sentiment" -> "joy", "confidence" -> 0.92))
+    val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := 0.92))
     assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.92)))
   }
 
   test("Shape.decode tolerates primitive coercion (string -> double)") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val decoded = shape.decode(rec("sentiment" -> "joy", "confidence" -> "0.5"))
+    val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := "0.5"))
     assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.5)))
   }
 
@@ -107,7 +107,7 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("missing required output field produces a NotFoundError") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val decoded = shape.decode(rec("sentiment" -> "joy"))
+    val decoded = shape.decode(rec("sentiment" := "joy"))
     decoded match
       case Left(_: NotFoundError) => ()
       case other => fail(s"expected NotFoundError, got: $other")
@@ -115,7 +115,7 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("invalid primitive conversion produces a ValidationError") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val decoded = shape.decode(rec("sentiment" -> "joy", "confidence" -> "not-a-number"))
+    val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := "not-a-number"))
     decoded match
       case Left(_: ValidationError) => ()
       case other => fail(s"expected ValidationError, got: $other")
@@ -136,7 +136,7 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("enum-like outputs reject values outside the declared set") {
     val shape = Shape.derived[P2EnumOutput]
-    val decoded = shape.decode(rec("sentiment" -> "confused"))
+    val decoded = shape.decode(rec("sentiment" := "confused"))
     decoded match
       case Left(_: ValidationError) => () // zio-blocks Schema error format is opaque; just verify it's a Left
       case other => fail(s"expected ValidationError, got: $other")
@@ -161,14 +161,14 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("Prediction is never constructed when decode fails") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = DynamicPrediction(values = rec("sentiment" -> "joy"))  // missing 'confidence'
+    val raw   = DynamicPrediction(values = rec("sentiment" := "joy"))  // missing 'confidence'
     val result = Prediction.from(raw, shape)
     assert(result.isLeft, s"expected failure but got: $result")
   }
 
   test("Prediction.from succeeds when all required outputs decode") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = DynamicPrediction(values = rec("sentiment" -> "joy", "confidence" -> 0.92))
+    val raw   = DynamicPrediction(values = rec("sentiment" := "joy", "confidence" := 0.92))
     val result = Prediction.from(raw, shape)
     result match
       case Right(tp) =>
@@ -185,10 +185,10 @@ class Phase2TypedCoreSuite extends FunSuite:
 
     // Encode input → Record (what Predict will hand to ProgramCall)
     val inputRec = sig.inputShape.encode(input)
-    assertEquals(inputRec, rec("sentence" -> "i started feeling vulnerable"))
+    assertEquals(inputRec, rec("sentence" := "i started feeling vulnerable"))
 
     // Decode output ← Record (what Predict will receive from DynamicPrediction)
-    val outputRec = rec("sentiment" -> "joy", "confidence" -> 0.85)
+    val outputRec = rec("sentiment" := "joy", "confidence" := 0.85)
     val output    = sig.outputShape.decode(outputRec)
     assertEquals(output, Right(P2ScoredSentiment("joy", 0.85)))
   }

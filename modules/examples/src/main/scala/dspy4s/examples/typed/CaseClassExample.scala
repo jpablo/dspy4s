@@ -11,7 +11,7 @@ package dspy4s.examples.typed
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{DspyError, DynamicPrediction, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicPrediction, RuntimeContext, :=}
 import dspy4s.typed.{Prediction, Signature, FieldCodec}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
@@ -59,6 +59,6 @@ object CaseClassExample:
     * decode boundary. */
   def fromRawValues(rawSentiment: String): Either[DspyError, Prediction[EmotionOutput]] =
     val raw = DynamicPrediction(values =
-      dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" -> rawSentiment))
+      dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" := rawSentiment))
     )
     Prediction.from(raw, signature.outputShape)

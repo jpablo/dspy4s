@@ -9,6 +9,8 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -47,8 +49,8 @@ class PredictSuite extends FunSuite:
       Right(
         ParsedOutput(
           values = rec(
-            "answer" -> output.text,
-            "score" -> output.metadata.getOrElse("score", 0.0)
+            "answer" := output.text,
+            "score" -> DynamicValues.fromAny(output.metadata.getOrElse("score", 0.0))
           )
         )
       )
@@ -106,7 +108,7 @@ class PredictSuite extends FunSuite:
     ) {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" -> "Capital of France?")))
+        val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" := "Capital of France?")))
 
         assert(result.isRight)
         val prediction = result.toOption.get
@@ -145,7 +147,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" -> "x")))
+      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" := "x")))
 
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
@@ -162,7 +164,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" -> "x")))
+      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" := "x")))
 
       assert(result.isRight)
       val toolCalls = lookup(result.toOption.get.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]]

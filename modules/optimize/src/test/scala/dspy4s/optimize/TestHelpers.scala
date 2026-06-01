@@ -1,5 +1,6 @@
 package dspy4s.optimize
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
@@ -10,7 +11,7 @@ import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 
-private def rec(entries: (String, Any)*): DynamicValue.Record =
+private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
   DynamicValues.recordFromEntries(entries)
 
 private def lookupString(rec: DynamicValue.Record, key: String): String =
@@ -28,7 +29,7 @@ final case class ScriptedPredictProgram(
       case Some(err) => throw err
       case None =>
         val q = lookupString(input.inputs, "question")
-        Right(DynamicPrediction(rec("answer" -> answers.getOrElse(q, "unknown"))))
+        Right(DynamicPrediction(rec("answer" := answers.getOrElse(q, "unknown"))))
 
 final case class DemoAwarePredictProgram(
     layout: SignatureLayout,
@@ -46,7 +47,7 @@ final case class DemoAwarePredictProgram(
           .flatMap(_.get("answer").map(DynamicValues.renderText))
       )
       .getOrElse("unknown")
-    Right(DynamicPrediction(rec("answer" -> answer)))
+    Right(DynamicPrediction(rec("answer" := answer)))
 
 object DemoAwarePredictProgram:
   given demoAwareOps: PredictOps[DemoAwarePredictProgram] with

@@ -5,6 +5,8 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -28,9 +30,9 @@ class ParallelSuite extends FunSuite:
 
   test("parallel executes programs and preserves task ordering") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(behavior = value => Right(DynamicPrediction(values = rec("output" -> value * 2))))
+    val program = StubProgram(behavior = value => Right(DynamicPrediction(values = rec("output" := value * 2))))
     val tasks = (1 to 5).toVector.map { value =>
-      program -> ProgramCall(inputs = rec("value" -> value))
+      program -> ProgramCall(inputs = rec("value" := value))
     }
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
@@ -45,10 +47,10 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 3 then Left(ValidationError("boom"))
-        else Right(DynamicPrediction(values = rec("output" -> value)))
+        else Right(DynamicPrediction(values = rec("output" := value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
-      program -> ProgramCall(inputs = rec("value" -> value))
+      program -> ProgramCall(inputs = rec("value" := value))
     }
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
@@ -65,10 +67,10 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value % 2 == 0 then Left(ValidationError("fail"))
-        else Right(DynamicPrediction(values = rec("output" -> value)))
+        else Right(DynamicPrediction(values = rec("output" := value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
-      program -> ProgramCall(inputs = rec("value" -> value))
+      program -> ProgramCall(inputs = rec("value" := value))
     }
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(1)).run(tasks)
@@ -81,9 +83,9 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 2 then Left(ValidationError("boom"))
-        else Right(DynamicPrediction(values = rec("output" -> value)))
+        else Right(DynamicPrediction(values = rec("output" := value)))
     )
-    val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = rec("value" -> value)))
+    val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(inputs = rec("value" := value)))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -103,11 +105,11 @@ class ParallelSuite extends FunSuite:
       behavior = _ =>
         Right(
           DynamicPrediction(
-            values = rec("sample" -> RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"))
+            values = rec("sample" := RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"))
           )
         )
     )
-    val tasks = Vector.fill(4)(program -> ProgramCall(inputs = rec("value" -> 1)))
+    val tasks = Vector.fill(4)(program -> ProgramCall(inputs = rec("value" := 1)))
 
     RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -125,15 +127,15 @@ class ParallelSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "answer" -> s"answer-$value",
-              "tool_calls" -> Vector(
+              "answer" := s"answer-$value",
+              "tool_calls" -> DynamicValues.fromAny(Vector(
                 Map("name" -> "search", "args" -> Map("query" -> s"q-$value"))
-              )
+              ))
             )
           )
         )
     )
-    val tasks = Vector(1, 2).map(value => program -> ProgramCall(inputs = rec("value" -> value)))
+    val tasks = Vector(1, 2).map(value => program -> ProgramCall(inputs = rec("value" := value)))
 
     val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
 

@@ -9,6 +9,7 @@ import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.core.signatures.SignatureDsl
@@ -74,10 +75,10 @@ class CodeActSuite extends FunSuite:
         val parts = text.split("\\|\\|", -1)
         val code = if parts.length >= 1 then parts(0) else ""
         val finished = parts.length >= 2 && parts(1).trim.equalsIgnoreCase("true")
-        Right(ParsedOutput(values = rec("generated_code" -> code, "finished" -> finished)))
+        Right(ParsedOutput(values = rec("generated_code" := code, "finished" := finished)))
       else
         // Extractor step: every remaining output field gets the full text.
-        Right(ParsedOutput(values = rec(layout.outputFields.map(_.name -> text)*)))
+        Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := text)*)))
 
   // ── Wiring smoke test (scripted LM + scripted interpreter) ──────────────
 
@@ -99,7 +100,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("question" -> "what is 40 + 2?")))
+      val result = program.run(ProgramCall(inputs = rec("question" := "what is 40 + 2?")))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(lookupString(pred.values, "answer"), "42")
@@ -134,7 +135,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" -> "?")))
+      val result = program.run(ProgramCall(inputs = rec("q" := "?")))
       assert(result.isRight)
       assertEquals(interpreter.received.size, 3, "should run exactly maxIterations times")
     }
@@ -159,7 +160,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" -> "?")))
+      val result = program.run(ProgramCall(inputs = rec("q" := "?")))
       assert(result.isRight, s"CodeAct should not propagate user-code errors as Left; got $result")
       val traj = lookupString(result.toOption.get.values, "trajectory")
       assert(traj.contains("Failed to execute"), s"trajectory missing error label: $traj")
@@ -182,7 +183,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.run(ProgramCall(inputs = rec("q" -> "?")))
+      val _ = program.run(ProgramCall(inputs = rec("q" := "?")))
       assert(!interpreter.closed, "CodeAct must not auto-close — that's the caller's job")
     }
   }
@@ -206,7 +207,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" -> "sum 0..9")))
+      val result = program.run(ProgramCall(inputs = rec("q" := "sum 0..9")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       val traj = lookupString(result.toOption.get.values, "trajectory")
       assert(traj.contains("45"), s"expected '45' in trajectory: $traj")

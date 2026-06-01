@@ -6,6 +6,7 @@ import dspy4s.adapters.XMLAdapter
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.DynamicPrediction
@@ -69,7 +70,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener(signatureFieldName = "answer"))
-      )(rec("question" -> "x"))
+      )(rec("question" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -102,7 +103,7 @@ class StreamListenerSuite extends FunSuite:
           StreamListener("reasoning"),
           StreamListener("answer")
         )
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -132,7 +133,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -161,7 +162,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector.empty
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -187,7 +188,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -214,7 +215,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -247,7 +248,7 @@ class StreamListenerSuite extends FunSuite:
           StreamListener("reasoning"),
           StreamListener("answer")
         )
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -282,7 +283,7 @@ class StreamListenerSuite extends FunSuite:
         streamListeners = Vector(
           StreamListener("answer", predictName = Some("predict"))
         )
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.chunk).mkString, "a")
@@ -320,7 +321,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = react,
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.chunk).mkString, "42")
@@ -382,7 +383,7 @@ class StreamListenerSuite extends FunSuite:
           StreamListener("answer"),
           StreamListener("judgement")
         )
-      )(rec("question" -> "what is the capital of france"))
+      )(rec("question" := "what is the capital of france"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       // Token grouping per DynamicPredict.
@@ -418,7 +419,7 @@ class StreamListenerSuite extends FunSuite:
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer", predictName = Some("other-predict"))),
         warningSink = _ => () // suppress the expected validation warning
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -468,7 +469,7 @@ class StreamListenerSuite extends FunSuite:
         program = composite,
         streamListeners = Vector(StreamListener("answer", allowReuse = false)),
         warningSink = _ => ()
-      )(rec("question" -> "x"))
+      )(rec("question" := "x"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       // Only the first LM call's chunks for "answer" should appear; the
@@ -518,7 +519,7 @@ class StreamListenerSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = composite,
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("question" -> "x"))
+      )(rec("question" := "x"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.predictName).toSet, Set("p1", "p2"))
@@ -547,7 +548,7 @@ class StreamListenerSuite extends FunSuite:
           StreamListener("answer") // valid; should not warn
         ),
         warningSink = sink
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
       collectStream(stream)
     }
     assertEquals(warnings.size, 1, s"warnings: ${warnings.mkString("; ")}")
@@ -574,7 +575,7 @@ class StreamListenerSuite extends FunSuite:
         program = DynamicPredict(layout = sig),
         streamListeners = Vector(StreamListener("answer", predictName = Some("nonexistent_predict"))),
         warningSink = sink
-      )(rec("q" -> "x"))
+      )(rec("q" := "x"))
       collectStream(stream)
     }
     assertEquals(warnings.size, 1)
@@ -588,7 +589,7 @@ class StreamListenerSuite extends FunSuite:
     val opaqueProgram = new PredictProgram:
       override val moduleName: String = "opaque"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-        Right(dspy4s.core.contracts.DynamicPrediction(values = rec("answer" -> "x")))
+        Right(dspy4s.core.contracts.DynamicPrediction(values = rec("answer" := "x")))
 
     given RuntimeContext = RuntimeEnvironment.current
     // We don't actually invoke the stream — validation runs eagerly when

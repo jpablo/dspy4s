@@ -2,6 +2,7 @@ package dspy4s.streaming
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -121,7 +122,7 @@ class StreamingLiveSuite extends FunSuite:
           StreamListener("judgement")
         ),
         includeFinalPrediction = false
-      )(rec("question" -> "why did a chicken cross the kitchen?"))
+      )(rec("question" := "why did a chicken cross the kitchen?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assert(tokens.nonEmpty, "expected at least one TokenEvent from a live stream")
@@ -171,7 +172,7 @@ class StreamingLiveSuite extends FunSuite:
           StreamListener("judgement")
         ),
         includeFinalPrediction = false
-      )(rec("question" -> "why did a chicken cross the kitchen?"))
+      )(rec("question" := "why did a chicken cross the kitchen?"))
 
       // Sync iteration — same shape as Python's `for value in output` loop.
       val tokens = ArrayBuffer.empty[TokenEvent]
@@ -216,7 +217,7 @@ class StreamingLiveSuite extends FunSuite:
           StreamListener("judgement")
         ),
         includeFinalPrediction = false
-      )(rec("question" -> "why did a chicken cross the kitchen?"))
+      )(rec("question" := "why did a chicken cross the kitchen?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assert(tokens.nonEmpty, "expected at least one TokenEvent from a live stream")

@@ -4,7 +4,7 @@ import zio.blocks.schema.Schema
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  DspyError, DynamicValues, NotFoundError, RuntimeContext, SignatureLayout,
+  :=, DspyError, DynamicValues, NotFoundError, RuntimeContext, SignatureLayout,
   ValidationError
 }
 import zio.blocks.schema.DynamicValue
@@ -33,7 +33,7 @@ case class TcotCaseOutput(summary: String) derives Schema
 
 class ChainOfThoughtSuite extends FunSuite:
 
-  private def rec(entries: (String, Any)*): DynamicValue.Record =
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
   // ── Test doubles ────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ class ChainOfThoughtSuite extends FunSuite:
     override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = DynamicValues.recordFromEntries(
-        (baseValues + ("reasoning" -> reasoning)).toSeq
+        (baseValues + ("reasoning" -> reasoning)).toSeq.map((k, v) => k -> DynamicValues.fromAny(v))
       )))
 
   /** Adapter that emits the base fields but FORGETS to emit `reasoning`.
@@ -71,7 +71,7 @@ class ChainOfThoughtSuite extends FunSuite:
       )))
     override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
         : Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = DynamicValues.recordFromEntries(baseValues.toSeq)))
+      Right(ParsedOutput(values = DynamicValues.recordFromEntries(baseValues.toSeq.map((k, v) => k -> DynamicValues.fromAny(v)))))
 
   private object FixedLm extends LanguageModel:
     override val id: String   = "fixed-lm"
@@ -181,8 +181,8 @@ class ChainOfThoughtSuite extends FunSuite:
         )))
       def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values = rec(
-          "reasoning" -> 42,   // wrong type
-          "summary"   -> "ok"
+          "reasoning" := 42,   // wrong type
+          "summary"   := "ok"
         )))
     RuntimeEnvironment.withSettings(settings(brokenAdapter)) {
       given RuntimeContext = RuntimeEnvironment.current

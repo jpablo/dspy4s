@@ -1,5 +1,6 @@
 package dspy4s.optimize
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -18,7 +19,7 @@ class LabeledFewShotSuite extends FunSuite:
   private val signature = SignatureDsl.parse("question: str -> answer: str").toOption.get
 
   test("LabeledFewShot samples k demos from trainset with seed-based determinism") {
-    val trainset = (1 to 20).map(i => Example(rec("question" -> s"q$i", "answer" -> s"a$i"))).toVector
+    val trainset = (1 to 20).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
     val student = DynamicPredict(layout = signature)
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 5, seed = 42L))
     given RuntimeContext = RuntimeEnvironment.current
@@ -44,7 +45,7 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot with sample=false takes the first k examples in input order") {
-    val trainset = (1 to 10).map(i => Example(rec("question" -> s"q$i", "answer" -> s"a$i"))).toVector
+    val trainset = (1 to 10).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
     val student = DynamicPredict(layout = signature)
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 3, sample = false))
     given RuntimeContext = RuntimeEnvironment.current
@@ -55,7 +56,7 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot caps demo count at trainset size when k exceeds it") {
-    val trainset = Vector(Example(rec("question" -> "only", "answer" -> "one")))
+    val trainset = Vector(Example(rec("question" := "only", "answer" := "one")))
     val student = DynamicPredict(layout = signature)
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 10))
     given RuntimeContext = RuntimeEnvironment.current
@@ -67,8 +68,8 @@ class LabeledFewShotSuite extends FunSuite:
   test("LabeledFewShot preserves student signature") {
     val student = DynamicPredict(layout = signature)
     val trainset = Vector(
-      Example(rec("question" -> "q1", "answer" -> "a1")),
-      Example(rec("question" -> "q2", "answer" -> "a2"))
+      Example(rec("question" := "q1", "answer" := "a1")),
+      Example(rec("question" := "q2", "answer" := "a2"))
     )
     val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 1, sample = false))
     given RuntimeContext = RuntimeEnvironment.current

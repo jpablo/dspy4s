@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
@@ -16,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
 class BestOfNSuite extends FunSuite:
-  private def rec(entries: (String, Any)*): DynamicValue.Record =
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
@@ -57,9 +58,9 @@ class BestOfNSuite extends FunSuite:
   test("best of n returns highest reward candidate and rolls out n attempts") {
     val module = StubProgram(
       Vector(
-        Right(DynamicPrediction(values = rec("answer" -> "A", "score" -> 0.1))),
-        Right(DynamicPrediction(values = rec("answer" -> "B", "score" -> 0.9))),
-        Right(DynamicPrediction(values = rec("answer" -> "C", "score" -> 0.5)))
+        Right(DynamicPrediction(values = rec("answer" := "A", "score" := 0.1))),
+        Right(DynamicPrediction(values = rec("answer" := "B", "score" := 0.9))),
+        Right(DynamicPrediction(values = rec("answer" := "C", "score" := 0.5)))
       )
     )
     val bestOfN = BestOfN(
@@ -70,7 +71,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x"), config = Map("rollout_id" -> 7)))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x"), config = Map("rollout_id" -> 7)))
 
     assert(result.isRight)
     assertEquals(lookup(result.toOption.get.values, "answer"), Some("B": Any))
@@ -96,7 +97,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x")))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 3)
     assertEquals(result.left.toOption.get.message, "f3")
@@ -107,7 +108,7 @@ class BestOfNSuite extends FunSuite:
       Vector(
         Left(RuntimeError("stub", "f1")),
         Left(RuntimeError("stub", "f2")),
-        Right(DynamicPrediction(values = rec("answer" -> "ok", "score" -> 1.0)))
+        Right(DynamicPrediction(values = rec("answer" := "ok", "score" := 1.0)))
       )
     )
     val bestOfN = BestOfN(
@@ -119,7 +120,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x")))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
@@ -131,18 +132,18 @@ class BestOfNSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "answer" -> "A",
-              "score" -> 0.2,
-              "tool_calls" -> Vector(Map("name" -> "search", "args" -> Map("query" -> "a")))
+              "answer" := "A",
+              "score" := 0.2,
+              "tool_calls" -> DynamicValues.fromAny(Vector(Map("name" -> "search", "args" -> Map("query" -> "a"))))
             )
           )
         ),
         Right(
           DynamicPrediction(
             values = rec(
-              "answer" -> "B",
-              "score" -> 0.9,
-              "tool_calls" -> Vector(Map("name" -> "lookup", "args" -> Map("entity" -> "b")))
+              "answer" := "B",
+              "score" := 0.9,
+              "tool_calls" -> DynamicValues.fromAny(Vector(Map("name" -> "lookup", "args" -> Map("entity" -> "b"))))
             )
           )
         )
@@ -156,7 +157,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" -> "x")))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x")))
 
     assert(result.isRight)
     val prediction = result.toOption.get

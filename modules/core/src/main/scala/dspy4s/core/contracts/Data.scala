@@ -1,7 +1,7 @@
 package dspy4s.core.contracts
 
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** A single labeled data point: a `DynamicValue.Record` of field values plus an [[inputKeys]] partition that names
   * which fields are inputs (everything else is a label / expected output). Used as training data for optimizers
@@ -34,10 +34,10 @@ final case class Example(
   def withValue(key: String, value: DynamicValue): Example =
     copy(values = DynamicValues.recordUpdated(values, key, value))
 
-  /** Convenience overload for callers passing plain Scala values (Strings, primitives, collections). Lifts via
-    * [[DynamicValues.fromAny]]. */
-  def withRawValue(key: String, value: Any): Example =
-    withValue(key, DynamicValues.fromAny(value))
+  /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. A value
+    * type without a `Schema` is a compile error. */
+  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): Example =
+    withValue(key, schema.toDynamicValue(value))
 
   def without(keys: Set[String]): Example =
     copy(
@@ -51,7 +51,7 @@ object Example:
   /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input
     * keys; call `withInputs(...)` to mark a subset as inputs. Values are lifted into the spine via
     * [[DynamicValues.fromAny]]. */
-  def apply(entries: (String, Any)*): Example =
+  def apply(entries: (String, DynamicValue)*): Example =
     Example(values = DynamicValues.recordFromEntries(entries))
 
   /** An example with no fields. */
@@ -132,9 +132,9 @@ final case class DynamicPrediction(
   def withValue(key: String, value: DynamicValue): DynamicPrediction =
     copy(values = DynamicValues.recordUpdated(values, key, value))
 
-  /** Convenience overload for callers passing plain Scala values; lifts via [[DynamicValues.fromAny]]. */
-  def withRawValue(key: String, value: Any): DynamicPrediction =
-    withValue(key, DynamicValues.fromAny(value))
+  /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. */
+  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): DynamicPrediction =
+    withValue(key, schema.toDynamicValue(value))
 
   def value(key: String): Either[DspyError, DynamicValue] =
     get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))

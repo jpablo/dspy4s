@@ -25,12 +25,12 @@ trait ProgramRuntime:
 trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
   /** Convenience overload of `run` so call sites can write:
     *
-    *   predict.run("comment" -> comment, "lang" -> "en")
+    *   predict.run("comment" := comment, "lang" := "en")
     *
     * instead of `run(ProgramCall(inputs = Map(...)))`. The inherited
     * `run(input: ProgramCall)` remains available when `config` or
     * `traceEnabled` need to be customized. */
-  def run(inputs: (String, Any)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  def run(inputs: (String, DynamicValue)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     run(ProgramCall(inputs = DynamicValues.recordFromEntries(inputs)))
 
 trait ToolFunction:

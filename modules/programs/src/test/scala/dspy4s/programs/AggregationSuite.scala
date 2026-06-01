@@ -3,6 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -10,7 +11,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * Each test mirrors a Python `test_majority_*` case. */
 class AggregationSuite extends FunSuite:
 
-  private def rec(entries: (String, Any)*): DynamicValue.Record =
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
@@ -18,9 +19,9 @@ class AggregationSuite extends FunSuite:
 
   test("majority with DynamicPrediction picks the most common answer") {
     val rows = Vector(
-      rec("answer" -> "2"),
-      rec("answer" -> "2"),
-      rec("answer" -> "3")
+      rec("answer" := "2"),
+      rec("answer" := "2"),
+      rec("answer" := "3")
     )
     val prediction = DynamicPrediction.fromRows(rows).toOption.get
     val result = Aggregation.majorityOf(prediction).toOption.get
@@ -29,9 +30,9 @@ class AggregationSuite extends FunSuite:
 
   test("majority with Completions picks the most common answer") {
     val completions = Completions.fromRows(Vector(
-      rec("answer" -> "2"),
-      rec("answer" -> "2"),
-      rec("answer" -> "3")
+      rec("answer" := "2"),
+      rec("answer" := "2"),
+      rec("answer" := "3")
     )).toOption.get
     val result = Aggregation.majorityOf(completions, field = None, normalize = Aggregation.defaultNormalize).toOption.get
     assertEquals(lookup(result.values, "answer"), Some("2": Any))
@@ -39,9 +40,9 @@ class AggregationSuite extends FunSuite:
 
   test("majority with raw row list picks the most common answer") {
     val rows = Vector(
-      rec("answer" -> "2"),
-      rec("answer" -> "2"),
-      rec("answer" -> "3")
+      rec("answer" := "2"),
+      rec("answer" := "2"),
+      rec("answer" := "3")
     )
     val result = Aggregation.majority(rows).toOption.get
     assertEquals(lookup(result.values, "answer"), Some("2": Any))
@@ -52,9 +53,9 @@ class AggregationSuite extends FunSuite:
     // we supply an equivalent inline normalizer (lowercase + strip) that
     // canonicalizes "2" and " 2" to the same key.
     val rows = Vector(
-      rec("answer" -> "2"),
-      rec("answer" -> " 2"),
-      rec("answer" -> "3")
+      rec("answer" := "2"),
+      rec("answer" := " 2"),
+      rec("answer" := "3")
     )
     val normalize: DynamicValue => Option[String] = {
       case _: DynamicValue.Null.type                        => None
@@ -68,9 +69,9 @@ class AggregationSuite extends FunSuite:
 
   test("majority with explicit field uses that field for the vote") {
     val rows = Vector(
-      rec("answer" -> "2", "other" -> "1"),
-      rec("answer" -> "2", "other" -> "1"),
-      rec("answer" -> "3", "other" -> "2")
+      rec("answer" := "2", "other" := "1"),
+      rec("answer" := "2", "other" := "1"),
+      rec("answer" := "3", "other" := "2")
     )
     val result = Aggregation.majority(rows, field = Some("other")).toOption.get
     assertEquals(lookup(result.values, "other"), Some("1": Any))
@@ -78,9 +79,9 @@ class AggregationSuite extends FunSuite:
 
   test("majority with no actual majority returns the first completion (tie broken by order)") {
     val rows = Vector(
-      rec("answer" -> "2"),
-      rec("answer" -> "3"),
-      rec("answer" -> "4")
+      rec("answer" := "2"),
+      rec("answer" := "3"),
+      rec("answer" := "4")
     )
     val result = Aggregation.majority(rows).toOption.get
     assertEquals(lookup(result.values, "answer"), Some("2": Any))

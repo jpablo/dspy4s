@@ -5,6 +5,7 @@ import dspy4s.adapters.ChatStreamingState
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.JsonStreamingState
 import dspy4s.adapters.XmlStreamingState
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -80,7 +81,7 @@ class StreamingPortedSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("question" -> "What is the capital of France?"))
+      )(rec("question" := "What is the capital of France?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.chunk).mkString, "How are you doing?")
@@ -123,7 +124,7 @@ class StreamingPortedSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
-      )(rec("question" -> "Test question"))
+      )(rec("question" := "Test question"))
 
       val events = collectStream(stream)
       val tokens = events.collect { case e: TokenEvent => e }
@@ -159,7 +160,7 @@ class StreamingPortedSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("reasoning"), StreamListener("answer"))
-      )(rec("question" -> "Why did the chicken cross the kitchen?"))
+      )(rec("question" := "Why did the chicken cross the kitchen?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       val reasoningChunks = tokens.filter(_.fieldName == "reasoning")
@@ -195,7 +196,7 @@ class StreamingPortedSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("reasoning"), StreamListener("answer"))
-      )(rec("question" -> "Why did the chicken cross the kitchen?"))
+      )(rec("question" := "Why did the chicken cross the kitchen?"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       val reasoningChunks = tokens.filter(_.fieldName == "reasoning")
@@ -233,7 +234,7 @@ class StreamingPortedSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("response"))
-      )(rec("question" -> "Generate complex JSON"))
+      )(rec("question" := "Generate complex JSON"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assert(tokens.nonEmpty, "expected at least one chunk")
@@ -267,7 +268,7 @@ class StreamingPortedSuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("first"), StreamListener("second"))
-      )(rec("question" -> "Generate two responses"))
+      )(rec("question" := "Generate two responses"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       val firstChunks = tokens.filter(_.fieldName == "first")
@@ -296,7 +297,7 @@ class StreamingPortedSuite extends FunSuite:
       override val moduleName: String = "my_program"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, Map.empty), Vector(tool)).map { _ =>
-          DynamicPrediction(values = rec("answer" -> "blue"))
+          DynamicPrediction(values = rec("answer" := "blue"))
         }
 
     given RuntimeContext = RuntimeEnvironment.current

@@ -8,6 +8,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -34,7 +35,7 @@ class MultiChainComparisonSuite extends FunSuite:
     override def parse(layout: SignatureLayout, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec("rationale" -> "my rationale", "answer" -> "blue")))
+      Right(ParsedOutput(values = rec("rationale" := "my rationale", "answer" := "blue")))
 
   private object DummyLm extends LanguageModel:
     override val id: String = "dummy-mcc-lm"
@@ -74,16 +75,16 @@ class MultiChainComparisonSuite extends FunSuite:
 
     val completions = Vector(
       DynamicPrediction(values = rec(
-        "rationale" -> "I recall that during clear days, the sky often appears this color.",
-        "answer" -> "blue"
+        "rationale" := "I recall that during clear days, the sky often appears this color.",
+        "answer" := "blue"
       )),
       DynamicPrediction(values = rec(
-        "rationale" -> "Based on common knowledge, I believe the sky is typically seen as this color.",
-        "answer" -> "green"
+        "rationale" := "Based on common knowledge, I believe the sky is typically seen as this color.",
+        "answer" := "green"
       )),
       DynamicPrediction(values = rec(
-        "rationale" -> "From images and depictions in media, the sky is frequently represented with this hue.",
-        "answer" -> "blue"
+        "rationale" := "From images and depictions in media, the sky is frequently represented with this hue.",
+        "answer" := "blue"
       ))
     )
 
@@ -94,7 +95,7 @@ class MultiChainComparisonSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val call = ProgramCall(inputs = rec("question" -> "What is the color of the sky?"))
+      val call = ProgramCall(inputs = rec("question" := "What is the color of the sky?"))
       val result = mcc.runWithAttempts(call, completions.toVector)
       assert(result.isRight, s"runWithAttempts failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
@@ -114,7 +115,7 @@ class MultiChainComparisonSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val call = ProgramCall(inputs = rec("question" -> "?"))
+      val call = ProgramCall(inputs = rec("question" := "?"))
       val result = mcc.runWithAttempts(call, Vector(DynamicPrediction.empty))
       assert(result.isLeft)
       assert(result.left.toOption.get.message.contains("doesn't match the configured m"), result.left.toOption.get.message)

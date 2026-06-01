@@ -3,7 +3,7 @@ package dspy4s.typed
 import dspy4s.core.contracts.DynamicValues
 import zio.blocks.schema.DynamicValue
 
-private[typed] def rec(entries: (String, Any)*): DynamicValue.Record =
+private[typed] def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
   DynamicValues.recordFromEntries(entries)
 
 private[typed] def lookup(rec: DynamicValue.Record, key: String): Option[Any] =

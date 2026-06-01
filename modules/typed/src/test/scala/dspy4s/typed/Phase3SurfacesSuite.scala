@@ -3,7 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{
-  NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
+  NotFoundError, DynamicPrediction, SignatureLayout, TypeRef, :=
 }
 import munit.FunSuite
 
@@ -102,14 +102,14 @@ class Phase3SurfacesSuite extends FunSuite:
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val input = P3CommentInput("hello there", "en")
     val encoded = sig.inputShape.encode(input)
-    assertEquals(encoded, rec("comment" -> "hello there", "lang" -> "en"))
+    assertEquals(encoded, rec("comment" := "hello there", "lang" := "en"))
   }
 
   test("decoded Prediction exposes case-class fields directly") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val raw = DynamicPrediction(values = rec(
-      "toxic"      -> false,
-      "confidence" -> 0.91
+      "toxic"      := false,
+      "confidence" := 0.91
     ))
     val result = Prediction.from(raw, sig.outputShape)
     result match
@@ -213,12 +213,12 @@ class Phase3SurfacesSuite extends FunSuite:
     assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
 
     // Map-shape encode is identity for the input record.
-    val encoded = sig.inputShape.encode(rec("question" -> "what is 2+2?"))
-    assertEquals(encoded, rec("question" -> "what is 2+2?"))
+    val encoded = sig.inputShape.encode(rec("question" := "what is 2+2?"))
+    assertEquals(encoded, rec("question" := "what is 2+2?"))
 
     // Output decode succeeds for the declared field, fails when missing.
-    val decoded = sig.outputShape.decode(rec("answer" -> "4"))
-    assertEquals(decoded, Right(rec("answer" -> "4")))
+    val decoded = sig.outputShape.decode(rec("answer" := "4"))
+    assertEquals(decoded, Right(rec("answer" := "4")))
 
     sig.outputShape.decode(zio.blocks.schema.DynamicValue.Record.empty) match
       case Left(_: NotFoundError) => () // expected

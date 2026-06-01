@@ -9,6 +9,8 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
+import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
@@ -29,8 +31,8 @@ class ReActSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "tool_name" -> "search",
-              "tool_args" -> Map("query" -> lookupString(input.inputs, "question"))
+              "tool_name" := "search",
+              "tool_args" := Map("query" -> lookupString(input.inputs, "question"))
             )
           )
         )
@@ -38,7 +40,7 @@ class ReActSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "answer" -> s"Final: ${lookupString(input.inputs, "tool_result")}"
+              "answer" := s"Final: ${lookupString(input.inputs, "tool_result")}"
             )
           )
         )
@@ -46,7 +48,7 @@ class ReActSuite extends FunSuite:
   private final class LoopingProgram extends PredictProgram:
     override val moduleName: String = "loop"
     override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(DynamicPrediction(values = rec("tool_name" -> "search", "tool_args" -> Map("query" -> "q"))))
+      Right(DynamicPrediction(values = rec("tool_name" := "search", "tool_args" := Map("query" -> "q"))))
 
   private final class NativeToolCallsProgram extends PredictProgram:
     private val calls = AtomicInteger(0)
@@ -58,9 +60,9 @@ class ReActSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "tool_calls" -> Vector(
+              "tool_calls" -> DynamicValues.fromAny(Vector(
                 Map("name" -> "search", "args" -> Map("query" -> lookupString(input.inputs, "question")))
-              )
+              ))
             )
           )
         )
@@ -68,7 +70,7 @@ class ReActSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "answer" -> s"Final: ${lookupString(input.inputs, "tool_result")}"
+              "answer" := s"Final: ${lookupString(input.inputs, "tool_result")}"
             )
           )
         )
@@ -83,10 +85,10 @@ class ReActSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "tool_calls" -> Vector(
+              "tool_calls" -> DynamicValues.fromAny(Vector(
                 Map("name" -> "search", "args" -> Map("query" -> lookupString(input.inputs, "question"))),
                 Map("name" -> "lookup", "args" -> Map("entity" -> "belgium"))
-              )
+              ))
             )
           )
         )
@@ -98,7 +100,7 @@ class ReActSuite extends FunSuite:
         Right(
           DynamicPrediction(
             values = rec(
-              "answer" -> s"Tools executed: ${batch.size}"
+              "answer" := s"Tools executed: ${batch.size}"
             )
           )
         )
@@ -110,10 +112,10 @@ class ReActSuite extends FunSuite:
       Right(
         DynamicPrediction(
           values = rec(
-            "answer" -> "Final without tools",
-            "tool_calls" -> Vector(
+            "answer" := "Final without tools",
+            "tool_calls" -> DynamicValues.fromAny(Vector(
               Map("name" -> "search", "args" -> Map("query" -> "ignored"))
-            )
+            ))
           )
         )
       )
@@ -141,7 +143,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(module = ScriptedProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" -> "What is the capital of Belgium?")))
+    val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Final: Brussels")
@@ -151,7 +153,7 @@ class ReActSuite extends FunSuite:
   test("react fails when requested tool is missing") {
     val react = ReAct(module = ScriptedProgram(), tools = Vector.empty, maxIterations = 3)
     given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" -> "x")))
+    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
 
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[NotFoundError])
@@ -161,7 +163,7 @@ class ReActSuite extends FunSuite:
     val counter = AtomicInteger(0)
     val react = ReAct(module = LoopingProgram(), tools = Vector(SearchTool(counter)), maxIterations = 2)
     given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" -> "x")))
+    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
 
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[RuntimeError])
@@ -179,7 +181,7 @@ class ReActSuite extends FunSuite:
 
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = react.run(ProgramCall(inputs = rec("question" -> "x")))
+      val result = react.run(ProgramCall(inputs = rec("question" := "x")))
       assert(result.isRight)
     }
 
@@ -197,7 +199,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(module = NativeToolCallsProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" -> "What is the capital of Belgium?")))
+    val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Final: Brussels")
@@ -214,7 +216,7 @@ class ReActSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" -> "What is the capital of Belgium?")))
+    val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Tools executed: 2")
@@ -227,7 +229,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(module = AnswerAndToolCallsProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" -> "x")))
+    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Final without tools")

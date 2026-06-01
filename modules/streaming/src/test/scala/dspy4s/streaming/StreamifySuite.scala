@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -52,7 +53,7 @@ class StreamifySuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
     override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name -> output.text)*)))
+      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name := output.text)*)))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -78,7 +79,7 @@ class StreamifySuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(program)(rec("question" -> "x"))
+      val stream = Streamify.streamify(program)(rec("question" := "x"))
 
       val events = ArrayBuffer.empty[StreamEvent]
       while stream.hasNext do events += stream.next()
@@ -111,7 +112,7 @@ class StreamifySuite extends FunSuite:
           override def lmStart(modelId: String, inputs: Map[String, Any]): Option[String] =
             Some(s"Calling $modelId...")
         )
-      )(rec("question" -> "x"))
+      )(rec("question" := "x"))
 
       val statuses = ArrayBuffer.empty[StatusEvent]
       while stream.hasNext do
@@ -146,7 +147,7 @@ class StreamifySuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(provider)
-      )(rec("question" -> "x"))
+      )(rec("question" := "x"))
 
       val events = ArrayBuffer.empty[StreamEvent]
       while stream.hasNext do events += stream.next()
@@ -192,12 +193,12 @@ class StreamifySuite extends FunSuite:
       val streamFn = Streamify.streamify(DynamicPredict(layout = signature))
 
       val first = ArrayBuffer.empty[StreamEvent]
-      val iter1 = streamFn(rec("q" -> "1"))
+      val iter1 = streamFn(rec("q" := "1"))
       while iter1.hasNext do first += iter1.next()
       iter1.close()
 
       val second = ArrayBuffer.empty[StreamEvent]
-      val iter2 = streamFn(rec("q" -> "2"))
+      val iter2 = streamFn(rec("q" := "2"))
       while iter2.hasNext do second += iter2.next()
       iter2.close()
 

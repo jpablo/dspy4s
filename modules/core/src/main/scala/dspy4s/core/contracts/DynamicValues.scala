@@ -1,9 +1,18 @@
 package dspy4s.core.contracts
 
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.util.Objects
+
+/** `"name" := value` builds a schema-lifted `(name, DynamicValue)` entry for the data-bag constructors
+  * (`Example(...)`, [[DynamicValues.recordFromEntries]], the dynamic `ProgramRuntime.run`). The value is
+  * converted with zio-blocks' `Schema.toDynamicValue`, so it is lifted losslessly and a value type without a
+  * `Schema` is a compile error (contrast the legacy `Any`-based [[DynamicValues.fromAny]]). Import via
+  * `dspy4s.core.contracts.:=`. A value that is already a `DynamicValue` can use the plain `"name" -> value`. */
+extension (key: String)
+  infix def :=[A](value: A)(using schema: Schema[A]): (String, DynamicValue) =
+    (key, schema.toDynamicValue(value))
 
 /** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the
   * user-input boundary — `Example("q" -> "hello")`, `DynamicPredict.run("text" -> text)` — where
@@ -33,10 +42,11 @@ object DynamicValues:
           DynamicValue.Record(Chunk.from(entries))
         case other             => DynamicValue.Primitive(PrimitiveValue.String(other.toString))
 
-  /** Build a `DynamicValue.Record` from a sequence of `(name, value)` pairs. Convenience for varargs
-    * APIs like `Example.apply` and `DynamicPredict.run`. */
-  def recordFromEntries(entries: Seq[(String, Any)]): DynamicValue.Record =
-    DynamicValue.Record(Chunk.from(entries.map((k, v) => k -> fromAny(v))))
+  /** Build a `DynamicValue.Record` from already-lifted `(name, DynamicValue)` pairs — typically produced by the
+    * `"name" := value` extension. Convenience for varargs APIs like `Example.apply` and the dynamic
+    * `ProgramRuntime.run`. */
+  def recordFromEntries(entries: Seq[(String, DynamicValue)]): DynamicValue.Record =
+    DynamicValue.Record(Chunk.from(entries))
 
   /** Lookup by field name. Returns `None` if the record has no such field. */
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
