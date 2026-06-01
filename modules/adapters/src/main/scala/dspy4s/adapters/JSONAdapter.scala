@@ -127,13 +127,23 @@ final case class JSONAdapter(
       var depth = 0
       var end = -1
       var i = start
+      var inString = false
+      var escaped = false
       while i < text.length && end < 0 do
-        text.charAt(i) match
-          case '{' => depth += 1
-          case '}' =>
-            depth -= 1
-            if depth == 0 then end = i
-          case _ => ()
+        val c = text.charAt(i)
+        if inString then
+          // Inside a JSON string literal: braces are data, not structure.
+          if escaped then escaped = false
+          else if c == '\\' then escaped = true
+          else if c == '"' then inString = false
+        else
+          c match
+            case '"' => inString = true
+            case '{' => depth += 1
+            case '}' =>
+              depth -= 1
+              if depth == 0 then end = i
+            case _ => ()
         i += 1
       if end >= start then Some(text.substring(start, end + 1))
       else None

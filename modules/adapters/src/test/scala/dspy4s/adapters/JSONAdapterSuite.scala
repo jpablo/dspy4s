@@ -124,6 +124,21 @@ class JSONAdapterSuite extends FunSuite:
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
   }
 
+  test("parse extracts prose-embedded json with braces inside string values") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+
+    given RuntimeContext = RuntimeEnvironment.current
+    // Model wraps the JSON in prose (so the direct start-{/end-} path is skipped and
+    // extractFirstJsonObject runs), and the string value itself contains } and {.
+    val parsed = JSONAdapter().parse(
+      signature,
+      LmOutput(text = """Sure, here you go: {"answer":"use the } brace { here"} -- hope that helps""")
+    )
+
+    assert(parsed.isRight, s"expected Right, got $parsed")
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("use the } brace { here": Any))
+  }
+
   test("parse fails when json payload is malformed") {
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
