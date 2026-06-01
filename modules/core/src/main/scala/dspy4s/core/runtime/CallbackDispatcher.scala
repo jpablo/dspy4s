@@ -14,10 +14,28 @@ import dspy4s.core.contracts.ToolStartEvent
 
 import scala.util.control.NonFatal
 
+/** Opens and closes callback scopes around the units of work a program runs -- module executions, LM calls,
+  * adapter format/parse passes, and tool invocations. Each `with*` helper emits a `*StartEvent` before the
+  * wrapped thunk and the matching `*EndEvent` after, correlated by a shared `callId`, so handlers observe a
+  * properly nested call tree (see [[dspy4s.core.contracts.CallbackEvent]] for the correlation model).
+  *
+  * Two guarantees hold for every scope:
+  *
+  *   - The end event ALWAYS fires -- on success, on a `Left(DspyError)`, and even when the thunk throws. A
+  *     thrown exception is reported as a `Left(RuntimeError("callback_dispatch", ...))` end event and then
+  *     rethrown, so observability never swallows a failure.
+  *   - The scope's `callId` is installed as the active call for the duration of the thunk, so any scope opened
+  *     inside it inherits that id as its `parentCallId`.
+  *
+  * Events reach the registered handlers through [[RuntimeEnvironment.emit]].
+  */
 object CallbackDispatcher:
+
+  /** Deliver one event to every callback handler registered on the active runtime context. */
   def emit(event: CallbackEvent): Unit =
     RuntimeEnvironment.emit(event)
 
+  /** Wrap a module execution in a `ModuleStartEvent` / `ModuleEndEvent` pair. */
   def withModule[A](moduleName: String, inputs: Map[String, Any])(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope("module", prefix = "module") { (callId, parentCallId) =>
       emit(
@@ -40,6 +58,7 @@ object CallbackDispatcher:
       }
     }
 
+  /** Wrap a language-model call in an `LmStartEvent` / `LmEndEvent` pair. */
   def withLm[A](modelId: String, request: Map[String, Any])(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope("lm", prefix = "lm") { (callId, parentCallId) =>
       emit(
@@ -62,6 +81,7 @@ object CallbackDispatcher:
       }
     }
 
+  /** Wrap an adapter pass (format or parse) in an `AdapterStartEvent` / `AdapterEndEvent` pair. */
   def withAdapter[A](
       adapterName: String,
       inputs: Map[String, Any]
@@ -87,6 +107,7 @@ object CallbackDispatcher:
       }
     }
 
+  /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. */
   def withTool[A](
       toolName: String,
       args: Map[String, Any]
@@ -112,6 +133,9 @@ object CallbackDispatcher:
       }
     }
 
+  /** Allocate a fresh `prefix`-tagged `callId`, capture the enclosing scope's id as the parent, and run `thunk`
+    * with the new id installed as the active call so any nested scope nests under it. The thunk receives
+    * `(callId, parentCallId)` to stamp onto its start/end events. */
   private def withCallScope[A](
       _label: String,
       prefix: String
@@ -122,6 +146,9 @@ object CallbackDispatcher:
       thunk(callId, parentCallId)
     }
 
+  /** Run `thunk` and ensure `emitEnd` fires exactly once with the outcome before returning: the thunk's own
+    * `Right`/`Left`, or -- if it throws a non-fatal exception -- a `Left(RuntimeError("callback_dispatch", ...))`,
+    * after which the original exception is rethrown so it still propagates to the caller. */
   private def runWithEnd[A](
       thunk: => Either[DspyError, A]
   )(emitEnd: Either[DspyError, Any] => Unit): Either[DspyError, A] =
