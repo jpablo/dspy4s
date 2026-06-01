@@ -10,19 +10,22 @@ import dspy4s.core.contracts.SignatureLayout
   */
 final case class ActivePredict(name: String, layout: SignatureLayout)
 
-/** Thread-local stack of [[ActivePredict]] entries, pushed for the duration of
-  * a `DynamicPredict.execute` body and read by downstream components (notably
-  * `StreamingLanguageModelWrapper`) that need to know which predictor's
-  * signature applies to the LM call they are observing.
+/** Thread-local stack of [[ActivePredict]] entries. A predictor's `execute` (in `PredictEngine`) pushes its
+  * entry via [[withActive]] for the duration of the body and pops it on exit; downstream components -- notably
+  * `StreamingLanguageModelWrapper` -- read [[current]] to learn which predictor's signature applies to the LM
+  * call they are observing.
   *
-  * Stack semantics handle nested calls (e.g. a `DynamicPredict` invoked from inside
-  * another `DynamicPredict.run` via a custom composite module): the most recent push
-  * always wins via `current`.
+  * Stack semantics handle nested calls (e.g. a `DynamicPredict` invoked from inside another via a custom
+  * composite module): the most recent push wins via [[current]], and the caller resurfaces when the inner
+  * scope exits.
   *
-  * Context is propagated across thread boundaries by
-  * [[ContextPropagation]], which copies the stack into worker threads at
-  * capture time. Concurrent invocations on different threads remain isolated
-  * because the underlying storage is a [[ThreadLocal]].
+  * '''Single-thread by design.''' The push and the read are always co-located on one thread -- the LM call that
+  * reads [[current]] runs synchronously inside the `withActive` body that pushed it. So this stack deliberately
+  * does NOT cross thread boundaries: when work runs on a pool thread (a `Future`, a parallel worker, or
+  * Streamify's producer thread), that thread re-runs `execute` and re-establishes its own stack, which is
+  * exactly the identity its LM calls should see. [[ContextPropagation]] carries the [[RuntimeContext]] across
+  * threads but intentionally leaves this stack alone. Concurrent invocations stay isolated because the storage
+  * is a [[ThreadLocal]].
   */
 object ActivePredictContext:
   private val tl: ThreadLocal[List[ActivePredict]] =
@@ -30,8 +33,22 @@ object ActivePredictContext:
 
   def current: Option[ActivePredict] = tl.get.headOption
 
+  /** The full active-predictor stack, innermost first. */
   def stack: List[ActivePredict] = tl.get
 
+  /** Publish `active` as the innermost running predictor for the dynamic extent of `thunk`, then pop it
+    * (restoring the prior stack) on exit.
+    *
+    * '''Why this is needed.''' When a predictor runs an LM call, the call goes through the generic,
+    * provider-facing `LanguageModel.call(request)` -- which carries only an `LmRequest` and has no slot for
+    * dspy4s's predictor name or output signature. Yet the streaming wrapper observing that call needs both: the
+    * name to label emitted `TokenEvent`s (`predictName`) and the signature `layout` to split the stream into
+    * per-field chunks. `withActive` is the out-of-band channel that carries that identity from
+    * `PredictEngine.execute` down to the wrapper without widening the provider-facing LM contract.
+    *
+    * The try/finally bounds the identity to exactly the predict's execution, so an LM call made after the
+    * predict returns is never misattributed to it; the stack lets a nested predict shadow its caller via
+    * [[current]] and the caller resurface once the inner scope completes. */
   def withActive[A](active: ActivePredict)(thunk: => A): A =
     val previous = tl.get
     tl.set(active :: previous)
@@ -40,11 +57,3 @@ object ActivePredictContext:
 
   def withActive[A](name: String, layout: SignatureLayout)(thunk: => A): A =
     withActive(ActivePredict(name, layout))(thunk)
-
-  /** Replace the entire stack; used by [[ContextPropagation]] when copying
-    * runtime state across thread boundaries. */
-  def restore[A](snapshot: List[ActivePredict])(thunk: => A): A =
-    val previous = tl.get
-    tl.set(snapshot)
-    try thunk
-    finally tl.set(previous)
