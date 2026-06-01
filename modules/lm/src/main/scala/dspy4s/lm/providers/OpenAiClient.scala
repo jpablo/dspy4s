@@ -147,8 +147,8 @@ final case class OpenAiClient(
     RuntimeError(code, s"OpenAI HTTP $status: ${body.take(400)}")
 
   private def asVector(value: Any): Option[Vector[Any]] = value match
-    case v: Vector[?] => Some(v.asInstanceOf[Vector[Any]])
-    case s: Seq[?]    => Some(s.toVector.asInstanceOf[Vector[Any]])
+    case v: Vector[?] => Some(v)
+    case s: Seq[?]    => Some(s.toVector)
     case _            => None
 
   private def asMap(value: Any): Option[Map[String, Any]] = value match

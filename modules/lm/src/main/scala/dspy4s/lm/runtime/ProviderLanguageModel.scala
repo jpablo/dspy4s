@@ -192,9 +192,9 @@ object ProviderResponseParser:
     value match
       case None => Right(Vector.empty)
       case Some(vector: Vector[?]) =>
-        Right(vector.asInstanceOf[Vector[Any]])
+        Right(vector)
       case Some(seq: Seq[?]) =>
-        Right(seq.toVector.asInstanceOf[Vector[Any]])
+        Right(seq.toVector)
       case Some(other) =>
         Left(ParseError("lm", s"Expected array-like response field, found: ${other.getClass.getSimpleName}"))
 

@@ -3,6 +3,8 @@ package dspy4s.core.contracts
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+import java.util.Objects
+
 /** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the
   * user-input boundary — `Example("q" -> "hello")`, `DynamicPredict.run("text" -> text)` — where
   * callers pass plain Scala values that need to be lifted into the spine type. The codec spine
@@ -14,7 +16,7 @@ object DynamicValues:
   /** Lift a plain Scala value into a `DynamicValue`. Pass-through for values that are already a
     * `DynamicValue`. Used only at user-facing boundaries — not in the codec spine. */
   def fromAny(value: Any): DynamicValue =
-    if value.asInstanceOf[AnyRef] eq null then DynamicValue.Null
+    if Objects.isNull(value) then DynamicValue.Null
     else
       value match
         case dv: DynamicValue  => dv

@@ -3,6 +3,7 @@ package dspy4s.typed
 import dspy4s.core.contracts.{DspyError, DynamicValues, TypeRef, ValidationError}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
+import java.util.Objects
 
 /** Field-level codec at the typed-layer boundary. Maps a Scala type to a `TypeRef` for the adapter prompt,
   * decodes raw prediction values (already deserialized by the adapter — typically `String`, `Int`, `Boolean`,
@@ -222,7 +223,7 @@ trait LowPriorityFieldCodecs:
     val typeRef: TypeRef = TypeRef.json
     def decode(raw: Any): Either[DspyError, Option[A]] =
       raw match
-        case _ if raw.asInstanceOf[AnyRef] eq null => Right(None)
+        case _ if Objects.isNull(raw) => Right(None)
         case value =>
           item.decode(value).map(Some(_))
     def encode(value: Option[A]): Any =

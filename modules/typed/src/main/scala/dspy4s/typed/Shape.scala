@@ -97,7 +97,7 @@ object Shape:
     def encode(value: A): DynamicValue.Record =
       val values = value.asInstanceOf[Product].productIterator.toVector
       val entries = fieldSpecs.zip(values).map { (fs, raw) =>
-        val encoded = decoders.get(fs.name).fold(raw)(_.encode(raw.asInstanceOf[Any]))
+        val encoded = decoders.get(fs.name).fold(raw)(_.encode(raw))
         fs.name -> DynamicValues.fromAny(encoded)
       }
       DynamicValue.Record(Chunk.from(entries))

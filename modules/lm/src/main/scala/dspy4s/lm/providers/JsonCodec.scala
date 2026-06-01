@@ -4,6 +4,8 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ParseError
 import ujson.Value
 
+import java.util.Objects
+
 object JsonCodec:
 
   def encode(value: Any): Value = value match
@@ -60,7 +62,7 @@ object JsonCodec:
         Left(ParseError("json", Option(error.getMessage).getOrElse("parse failure")))
 
   private def isNone(value: Any): Boolean =
-    if value.asInstanceOf[AnyRef] eq null then true
+    if Objects.isNull(value) then true
     else value match
       case _: None.type => true
       case _: Void      => true
@@ -69,12 +71,12 @@ object JsonCodec:
   def stripNone(payload: Map[String, Any]): Map[String, Any] =
     payload.iterator.flatMap { case (k, v) =>
       v match
-        case _ if v.asInstanceOf[AnyRef] eq null => None
+        case _ if Objects.isNull(v) => None
         case _: None.type          => None
-        case m: Map[?, ?]          => Some(k -> stripNone(m.asInstanceOf[Map[String, Any]]))
+        case m: Map[?, ?]          => Some(k -> stripNone(m.collect { case (k: String, v) => k -> v }))
         case seq: Iterable[?]     =>
           val cleaned = seq.filterNot(isNone).map {
-            case m: Map[?, ?] => stripNone(m.asInstanceOf[Map[String, Any]])
+            case m: Map[?, ?] => stripNone(m.collect { case (k: String, v) => k -> v })
             case other        => other
           }
           Some(k -> cleaned)

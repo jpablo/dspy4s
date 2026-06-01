@@ -2,6 +2,7 @@ package dspy4s.lm.runtime
 
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LmCache
+import java.util.Objects
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
@@ -45,7 +46,7 @@ object RequestHash:
 
   private def normalizeAny(value: Any): String =
     value match
-      case _ if value.asInstanceOf[AnyRef] eq null => "null"
+      case _ if Objects.isNull(value) => "null"
       case s: String       => quote(s)
       case c: Char         => quote(c.toString)
       case b: Boolean      => b.toString
