@@ -95,7 +95,14 @@ object Shape:
   ) extends Shape[A]:
 
     def encode(value: A): DynamicValue.Record =
-      val values = value.asInstanceOf[Product].productIterator.toVector
+      val product: Product = value match
+        case p: Product => p
+        case _ =>
+          throw new IllegalArgumentException(
+            "TupleShape requires a (named-)tuple value; got a non-Product. This shape is " +
+            "constructed only by the Signature macros, which always supply named tuples."
+          )
+      val values = product.productIterator.toVector
       val entries = fieldSpecs.zip(values).map { (fs, raw) =>
         val encoded = decoders.get(fs.name).fold(raw)(_.encode(raw))
         fs.name -> DynamicValues.fromAny(encoded)

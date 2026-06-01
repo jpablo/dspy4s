@@ -75,7 +75,14 @@ final case class ChainOfThought[I, O](
       ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
 
     def encode(value: Out): DynamicValue.Record =
-      val values = value.asInstanceOf[Product].productIterator.toVector
+      val product: Product = value match
+        case p: Product => p
+        case _ =>
+          throw new IllegalArgumentException(
+            "ChainOfThought output must be a named-tuple value (a Product); got a non-Product. " +
+            "This shape is built only from the augmented Signature, which supplies named tuples."
+          )
+      val values = product.productIterator.toVector
       val entries = fieldSpecs.zip(values).map { (field, raw) =>
         field.name -> DynamicValues.fromAny(raw)
       }
