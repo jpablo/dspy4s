@@ -74,10 +74,9 @@ final case class MultiChainComparison(
     )
 
   override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val attempts = input.config.get("attempts") match
-      case Some(seq: Seq[?]) => seq.toVector
-      case _                 => Vector.empty
-    runWithAttempts(input, attempts)
+    // Candidate completions are program data, not provider config: they are supplied through the typed
+    // `runWithAttempts` entry below. The generic `run` has none and surfaces the usual size error.
+    runWithAttempts(input, Vector.empty)
 
   /** Public entry that accepts the candidate completions directly. Mirrors
     * Python's `compare_answers(completions, question=...)` shape — the

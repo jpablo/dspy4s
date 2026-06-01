@@ -26,7 +26,7 @@ final case class BestOfN(
 
   override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val baseContext = RuntimeEnvironment.current
-    val rolloutStart = readRolloutId(input.config)
+    val rolloutStart = input.rolloutId.getOrElse(0)
     var remainingFailures = failCount.getOrElse(n)
     var bestReward = Double.NegativeInfinity
     var bestPrediction: Option[DynamicPrediction] = None
@@ -38,9 +38,8 @@ final case class BestOfN(
     while idx < n do
       val rolloutId = rolloutStart + idx
       val attemptCall = input.copy(
-        config = input.config
-          .updated("rollout_id", rolloutId)
-          .updated("temperature", 1.0d)
+        rolloutId = Some(rolloutId),                       // framework cache-busting selector (typed)
+        config    = input.config.updated("temperature", 1.0d)  // real provider knob -> stays in the bag
       )
 
       val isolated = baseContext.copy(trace = Vector.empty, history = Vector.empty)
@@ -97,11 +96,3 @@ final case class BestOfN(
           )
         )
 
-  private def readRolloutId(config: Map[String, Any]): Int =
-    config.get("rollout_id") match
-      case Some(value: Int)    => value
-      case Some(value: Long)   => value.toInt
-      case Some(value: Short)  => value.toInt
-      case Some(value: Double) => value.toInt
-      case Some(value: Float)  => value.toInt
-      case _                   => 0

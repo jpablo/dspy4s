@@ -118,17 +118,18 @@ final case class ManagedLanguageModel(
         appendHistory(request, cached, cacheHit = true)
         Right(cached.copy(cacheHit = true))
       case None =>
-        val providerRequest = request.copy(options = request.options.removed("rollout_id"))
-        val result = executeWithRetry(providerRequest)
+        // rolloutId is a typed field (not in `options`) and `normalize` only spreads `options` to the wire,
+        // so there is nothing to strip before the provider call -- it cannot reach the request body.
+        val result = executeWithRetry(request)
         result match
           case Left(error) =>
-            appendFailureHistory(providerRequest, error)
+            appendFailureHistory(request, error)
             Left(error)
           case Right(response) =>
             val uncached = response.copy(cacheHit = false)
             cache.foreach(_.put(request, uncached))
-            appendHistory(providerRequest, uncached, cacheHit = false)
-            trackUsage(providerRequest, uncached)
+            appendHistory(request, uncached, cacheHit = false)
+            trackUsage(request, uncached)
             Right(uncached)
 
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =

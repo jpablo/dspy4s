@@ -36,7 +36,8 @@ object RequestHash:
     val messages = request.messages.map(encodeMessage).mkString("[", ",", "]")
     val options = normalizeAny(request.options)
     val requestId = request.requestId.map(quote).getOrElse("null")
-    s"""{"model":${quote(request.model)},"mode":${quote(request.mode.toString)},"messages":$messages,"options":$options,"request_id":$requestId}"""
+    val rolloutId = request.rolloutId.map(_.toString).getOrElse("null")
+    s"""{"model":${quote(request.model)},"mode":${quote(request.mode.toString)},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
 
   private def encodeMessage(message: Message): String =
     val parts = message.parts.map(encodePart).mkString("[", ",", "]")

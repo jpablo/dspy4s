@@ -88,24 +88,27 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(cached.get.usage, None)
   }
 
-  test("managed language model caches by rollout id and strips rollout before delegate call") {
+  test("managed language model caches by typed rolloutId and keeps it out of provider options") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse), Right(baseResponse)))
     val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(16)))
-    val request = baseRequest.copy(options = baseRequest.options ++ Map("rollout_id" -> 1))
+    val request = baseRequest.copy(rolloutId = Some(1))
 
     given RuntimeContext = RuntimeEnvironment.current
     val first = managed.call(request)
     val second = managed.call(request)
-    val third = managed.call(request.copy(options = request.options.updated("rollout_id", 2)))
+    val third = managed.call(request.copy(rolloutId = Some(2)))
 
     assert(first.isRight)
     assert(second.isRight)
     assert(third.isRight)
+    // Distinct rolloutId -> distinct cache key -> cache miss; same rolloutId -> hit.
     assertEquals(first.toOption.get.cacheHit, false)
     assertEquals(second.toOption.get.cacheHit, true)
     assertEquals(third.toOption.get.cacheHit, false)
     assertEquals(delegate.calls.size, 2)
-    assert(delegate.calls.forall(request => !request.options.contains("rollout_id")))
+    // rolloutId rides as a typed field to the delegate (no strip) and never leaks into the provider option bag.
+    assertEquals(delegate.calls.map(_.rolloutId).toVector, Vector[Option[Int]](Some(1), Some(2)))
+    assert(delegate.calls.forall(c => !c.options.contains("rollout_id")))
   }
 
   test("managed language model retries until policy max retries is reached") {

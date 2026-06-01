@@ -10,12 +10,16 @@ import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** `inputs` is the spine record passed to the adapter and codec layers. `config` stays a plain `Map[String, Any]`
-  * because it's an opaque option bag forwarded to the LM provider (model overrides, sampling params, cache /
-  * rollout flags) — it has no codec story. */
+  * because it's an opaque option bag forwarded *verbatim to the LM provider* (model overrides, sampling params) —
+  * it has no codec story and the provider's API defines its keys. Framework-only control values do NOT live here:
+  * they are typed fields (e.g. [[rolloutId]]) so the provider bag stays purely provider-bound. */
 final case class ProgramCall(
     inputs: DynamicValue.Record,
     config: Map[String, Any] = Map.empty,
-    traceEnabled: Boolean = true
+    traceEnabled: Boolean = true,
+    // Cache-busting selector for repeated samples (used by `BestOfN`). Threaded into `LmRequest.rolloutId`; a
+    // framework concern, never forwarded to the provider. Was previously smuggled as `config("rollout_id")`.
+    rolloutId: Option[Int] = None
 )
 
 trait ProgramRuntime:

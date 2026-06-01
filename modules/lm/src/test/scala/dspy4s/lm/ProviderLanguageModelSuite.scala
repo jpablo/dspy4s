@@ -42,6 +42,23 @@ class ProviderLanguageModelSuite extends FunSuite:
     assertEquals(messages.last("content"), "Hello")
   }
 
+  test("normalizer never serializes the framework-only rolloutId into the provider body") {
+    val request = LmRequest(
+      model = "openai/test",
+      mode = LmMode.Chat,
+      messages = Vector(Message(role = MessageRole.User, text = Some("Hi"))),
+      options = Map("temperature" -> 0.2),
+      rolloutId = Some(5)
+    )
+
+    val normalized = ProviderRequestNormalizer.normalize(request)
+
+    // Provider knobs from `options` are spread in; the typed control field is not.
+    assertEquals(normalized("temperature"), 0.2)
+    assert(!normalized.contains("rollout_id"), s"rolloutId leaked into the request body: $normalized")
+    assert(!normalized.contains("rolloutId"), s"rolloutId leaked into the request body: $normalized")
+  }
+
   test("normalizer encodes text mode as prompt") {
     val request = LmRequest(
       model = "openai/test",

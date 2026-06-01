@@ -77,7 +77,8 @@ private[dspy4s] final case class PredictEngine(
       request = LmRequest(
         model = model.id,
         mode = model.mode,
-        options = call.config
+        options = call.config,
+        rolloutId = call.rolloutId
       )
     )
 

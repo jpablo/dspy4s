@@ -33,7 +33,11 @@ final case class LmRequest(
     mode: LmMode = LmMode.Chat,
     messages: Vector[Message] = Vector.empty,
     options: Map[String, Any] = Map.empty,
-    requestId: Option[String] = None
+    requestId: Option[String] = None,
+    // Framework-only control field (cache-busting for repeated samples), NOT a provider parameter: it is folded
+    // into the cache key but never serialized into the request body. Contrast `options`, which is spread verbatim
+    // to the provider. See `RequestHash` / `ProviderRequestNormalizer`.
+    rolloutId: Option[Int] = None
 )
 
 final case class LmUsage(

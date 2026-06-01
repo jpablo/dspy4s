@@ -33,7 +33,7 @@ class BestOfNSuite extends FunSuite:
 
     override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       calls.incrementAndGet()
-      val rollout = input.config.get("rollout_id").collect { case v: Int => v }.getOrElse(-1)
+      val rollout = input.rolloutId.getOrElse(-1)
       rolloutIds += rollout
 
       val idx = counter.getAndIncrement()
@@ -71,7 +71,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x"), config = Map("rollout_id" -> 7)))
+    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x"), rolloutId = Some(7)))
 
     assert(result.isRight)
     assertEquals(lookup(result.toOption.get.values, "answer"), Some("B": Any))
