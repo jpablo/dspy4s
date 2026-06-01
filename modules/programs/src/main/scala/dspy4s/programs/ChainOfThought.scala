@@ -99,7 +99,7 @@ final case class ChainOfThought[I, O](
     * named tuple. Named tuples erase to plain tuples at runtime, so the
     * cons is well-defined only when `baseOut` is a `Tuple` -- which holds
     * for `Signature.of[Spec]` / `Signature.fromType[F]` outputs (backed
-    * by `TupleShape`) but not for case-class outputs from
+    * by `Shape.SchemaTupleShape`) but not for case-class outputs from
     * `Signature.derived[I, O <: Product]` (backed by a Schema-derived
     * `Shape` from `ZioSchemaCodec`, which decodes into a non-tuple case
     * class) or `Map[String, Any]`

@@ -160,14 +160,14 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(decoded, Right(P7Score(P7Emotion.joy, 0.8)))
   }
 
-  test("compile error: missing input FieldCodec") {
+  test("compile error: missing input Schema") {
     val errors = compileErrors("""
       class NotDecodable
       def badInput(value: NotDecodable): String = ""
       val sig = dspy4s.typed.Signature.from(badInput)
     """)
-    assert(errors.contains("No FieldCodec"),
-      s"expected helpful error about missing FieldCodec, got:\n$errors")
+    assert(errors.contains("No Schema"),
+      s"expected helpful error about missing Schema, got:\n$errors")
   }
 
   test("compile error: Unit output") {

@@ -1,7 +1,8 @@
 package dspy4s.typed.internal
 
-import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureLayout}
-import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig, FieldCodec}
+import dspy4s.core.contracts.{FieldRole, SignatureLayout}
+import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig}
+import zio.blocks.schema.Schema
 import scala.quoted.*
 
 private[typed] object SpecMacro:
@@ -54,11 +55,10 @@ private[typed] object SpecMacro:
         s"Spec trait '$specName' must declare at least one InputField or OutputField method"
       )
 
-    // For each method: (name, isInput, inner type, FieldSpec-Expr,
-    // FieldCodec-Expr).
-    // The decoder expression is cast to FieldCodec[Any] so we can carry
-    // a uniform list-of-decoders type into the macro output.
-    val fieldData: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[FieldCodec[Any]])] =
+    // For each method: (name, isInput, inner type X from InputField[X] / OutputField[X]).
+    // Field metadata (typeRef) and the value codec are both derived later from the
+    // zio-blocks `Schema` of the input / output named tuple -- no per-field FieldCodec.
+    val fieldData: List[(String, Boolean, TypeRepr)] =
       methods.map { m =>
         val name = m.name
 
@@ -87,30 +87,17 @@ private[typed] object SpecMacro:
               s"Spec method '$specName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
             )
 
-        // Summon a FieldCodec[X] at the macro expansion site, then cast
-        // to FieldCodec[Any] so the runtime decoder map can carry
-        // heterogeneous types.
-        val decoderExpr: Expr[FieldCodec[Any]] = innerType.asType match
+        // Validate up front that the field type has a zio-blocks Schema, so a missing one
+        // gives a per-field error here rather than a derivation failure on the whole tuple.
+        innerType.asType match
           case '[t] =>
-            Expr.summon[FieldCodec[t]] match
-              case Some(d) => '{ ${ d }.asInstanceOf[FieldCodec[Any]] }
-              case None =>
-                report.errorAndAbort(
-                  s"No FieldCodec[${innerType.show}] in scope for spec field '$specName.$name'"
-                )
+            if Expr.summon[Schema[t]].isEmpty then
+              report.errorAndAbort(
+                s"No Schema[${innerType.show}] in scope for spec field '$specName.$name'. Spec field " +
+                "types must have a zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
+              )
 
-        val nameExpr = Expr(name)
-        val roleExpr =
-          if isInput then '{ FieldRole.Input } else '{ FieldRole.Output }
-        val fieldSpecExpr = '{
-          FieldSpec(
-            name    = ${ nameExpr },
-            role    = ${ roleExpr },
-            typeRef = ${ decoderExpr }.typeRef
-          )
-        }
-
-        (name, isInput, innerType, fieldSpecExpr, decoderExpr)
+        (name, isInput, innerType)
       }
 
     // Reject duplicate field names.
@@ -121,14 +108,6 @@ private[typed] object SpecMacro:
       report.errorAndAbort(
         s"Spec trait '$specName' has duplicate field names: ${duplicates.mkString(", ")}"
       )
-
-    def buildDecoderMapExpr(items: List[(String, Boolean, TypeRepr, Expr[FieldSpec], Expr[FieldCodec[Any]])])
-        : Expr[Map[String, FieldCodec[Any]]] =
-      val pairs: List[Expr[(String, FieldCodec[Any])]] = items.map { case (n, _, _, _, dec) =>
-        val nameExpr = Expr(n)
-        '{ ${ nameExpr } -> ${ dec } }
-      }
-      '{ Map(${ Varargs(pairs) }*) }
 
     def tupleType(parts: List[TypeRepr]): TypeRepr =
       parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
@@ -145,27 +124,25 @@ private[typed] object SpecMacro:
     val inputData  = fieldData.filter(_._2)
     val outputData = fieldData.filterNot(_._2)
 
-    val inputFieldExprs:  List[Expr[FieldSpec]] = inputData.map(_._4)
-    val outputFieldExprs: List[Expr[FieldSpec]] = outputData.map(_._4)
-    val inputDecodersExpr  = buildDecoderMapExpr(fieldData.filter(_._2))
-    val outputDecodersExpr = buildDecoderMapExpr(fieldData.filterNot(_._2))
     val sigNameExpr = '{
       val explicitName = ${ name }
       if explicitName.isEmpty then ${ Expr(specName) } else explicitName
     }
 
-    val inputType  = namedTupleType(inputData.map { case (n, _, tpe, _, _) => n -> tpe })
-    val outputType = namedTupleType(outputData.map { case (n, _, tpe, _, _) => n -> tpe })
+    val inputType  = namedTupleType(inputData.map { case (n, _, tpe) => n -> tpe })
+    val outputType = namedTupleType(outputData.map { case (n, _, tpe) => n -> tpe })
 
     (inputType.asType, outputType.asType) match
       case ('[i], '[o]) =>
         '{
-          val inFields:  Vector[FieldSpec] = Vector(${ Varargs(inputFieldExprs)  }*)
-          val outFields: Vector[FieldSpec] = Vector(${ Varargs(outputFieldExprs) }*)
+          // Shapes are fully schema-backed; their `fieldSpecs` (names, wire typeRefs) come from the
+          // derived `Reflect`, with the role stamped per side. The layout is assembled from them.
+          val inputShape  = new Shape.SchemaTupleShape[i](FieldRole.Input,  Schema.derived[i])
+          val outputShape = new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o])
           val sig = SignatureLayout
             .create(
               name         = ${ sigNameExpr },
-              fields       = inFields ++ outFields,
+              fields       = inputShape.fieldSpecs ++ outputShape.fieldSpecs,
               instructions = Option(${ instructions }).filter(_.nonEmpty)
             )
             .fold(
@@ -176,9 +153,9 @@ private[typed] object SpecMacro:
             )
           TypedSig[i, o](
             name        = ${ sigNameExpr },
-            layout = sig,
-            inputShape  = new Shape.TupleShape[i](inFields,  ${ inputDecodersExpr }),
-            outputShape = new Shape.TupleShape[o](outFields, ${ outputDecodersExpr })
+            layout      = sig,
+            inputShape  = inputShape,
+            outputShape = outputShape
           )
         }
       case _ =>

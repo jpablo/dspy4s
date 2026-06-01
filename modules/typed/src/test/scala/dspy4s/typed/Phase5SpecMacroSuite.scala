@@ -72,7 +72,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(sig.layout.signatureString, "question, context -> answer, score")
   }
 
-  test("spec trait field TypeRefs come from the FieldCodec typeclass") {
+  test("spec trait field TypeRefs are derived from the field's Schema") {
     val sig = Signature.of[P5MultiSpec]
     val byName = sig.layout.fields.map(f => f.name -> f.typeRef.repr).toMap
     assertEquals(byName("question"), "string")
@@ -117,7 +117,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   // ── Decoder-aware MapShape: spec output types are honored at decode ─────
 
-  test("spec outputShape decodes enum case names through the field's FieldCodec") {
+  test("spec outputShape decodes enum case names through the field's Schema") {
     val sig = Signature.of[P5ToneSpec]
     val raw = rec("tone" -> "calm")
     val decoded = sig.outputShape.decode(raw).toOption.get
@@ -171,7 +171,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     )
   }
 
-  test("spec outputShape decodes collection fields through library FieldCodecs") {
+  test("spec outputShape decodes collection fields through the field's Schema") {
     val sig = Signature.of[P5CollectionSpec]
     val raw = rec(
       "evidence" -> Map(
@@ -234,15 +234,15 @@ class Phase5SpecMacroSuite extends FunSuite:
       s"expected helpful error about parameters, got:\n$errors")
   }
 
-  test("compile error: missing FieldCodec for inner type") {
+  test("compile error: missing Schema for inner type") {
     val errors = compileErrors("""
       class NotDecodable
       trait BadSpec extends dspy4s.typed.Spec:
         def field: dspy4s.typed.OutputField[NotDecodable]
       val sig = dspy4s.typed.Signature.of[BadSpec]
     """)
-    assert(errors.contains("No FieldCodec"),
-      s"expected helpful error about missing FieldCodec, got:\n$errors")
+    assert(errors.contains("No Schema"),
+      s"expected helpful error about missing Schema, got:\n$errors")
   }
 
   test("compile error: empty spec trait") {

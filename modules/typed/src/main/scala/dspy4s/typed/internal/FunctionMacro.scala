@@ -1,38 +1,31 @@
 package dspy4s.typed.internal
 
-import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureLayout}
-import dspy4s.typed.{Shape, Signature as TypedSig, FieldCodec}
+import dspy4s.core.contracts.{FieldRole, SignatureLayout}
+import dspy4s.typed.{Shape, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
 
 private[typed] object FunctionMacro:
 
-  case class FieldData(
-      name: String,
-      fieldSpec: Expr[FieldSpec],
-      decoder: Expr[FieldCodec[Any]]
-  )
-
   private def materialize[I : Type, O : Type](
       sigNameExpr: Expr[String],
       instructionsExpr: Expr[String],
       errorName: String,
-      inputFields: List[FieldData],
-      outputFieldsExpr: Expr[Vector[FieldSpec]],
       inputShapeExpr: Expr[Shape[I]],
       outputShapeExpr: Expr[Shape[O]]
   )(using Quotes): Expr[TypedSig[I, O]] =
-    val inputFieldExprs = inputFields.map(_.fieldSpec)
     val errorNameExpr = Expr(errorName)
     '{
       val name: String = ${ sigNameExpr }
-      val inFields: Vector[FieldSpec] = Vector(${ Varargs(inputFieldExprs) }*)
-      val outFields: Vector[FieldSpec] = ${ outputFieldsExpr }
+      // Shapes are schema-backed; their `fieldSpecs` (names, wire typeRefs) come from the derived
+      // `Reflect`, with the role stamped per side. The layout is assembled from them.
+      val inputShape  = ${ inputShapeExpr }
+      val outputShape = ${ outputShapeExpr }
       val sig = SignatureLayout
         .create(
           name         = name,
-          fields       = inFields ++ outFields,
+          fields       = inputShape.fieldSpecs ++ outputShape.fieldSpecs,
           instructions = Option(${ instructionsExpr }).filter(_.nonEmpty)
         )
         .fold(
@@ -43,9 +36,9 @@ private[typed] object FunctionMacro:
         )
       TypedSig[I, O](
         name        = name,
-        layout = sig,
-        inputShape  = ${ inputShapeExpr },
-        outputShape = ${ outputShapeExpr }
+        layout      = sig,
+        inputShape  = inputShape,
+        outputShape = outputShape
       )
     }
 
@@ -149,43 +142,19 @@ private[typed] object FunctionMacro:
         case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
         case _                                          => None
 
-    def decoderExpr(owner: String, fieldName: String, fieldTpe: TypeRepr): Expr[FieldCodec[Any]] =
-      fieldTpe.asType match
-        case '[t] =>
-          Expr.summon[FieldCodec[t]] match
-            case Some(d) => '{ ${ d }.asInstanceOf[FieldCodec[Any]] }
-            case None =>
+    def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
+      items.foreach { (fieldName, tpe) =>
+        tpe.asType match
+          case '[t] =>
+            if Expr.summon[Schema[t]].isEmpty then
               report.errorAndAbort(
-                s"No FieldCodec[${fieldTpe.show}] in scope for field '$owner.$fieldName'"
+                s"No Schema[${tpe.show}] in scope for field '$owner.$fieldName'. Field types must have a " +
+                "zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
               )
-
-    def fieldData(owner: String, role: FieldRole, items: List[(String, TypeRepr)]): List[FieldData] =
-      items.map { (name, tpe) =>
-        val dec = decoderExpr(owner, name, tpe)
-        val nameExpr = Expr(name)
-        val roleExpr =
-          if role == FieldRole.Input then '{ FieldRole.Input } else '{ FieldRole.Output }
-        val fieldSpecExpr = '{
-          FieldSpec(
-            name    = ${ nameExpr },
-            role    = ${ roleExpr },
-            typeRef = ${ dec }.typeRef
-          )
-        }
-        FieldData(name, fieldSpecExpr, dec)
       }
-
-    def decoderMapExpr(items: List[FieldData]): Expr[Map[String, FieldCodec[Any]]] =
-      val pairs = items.map { item =>
-        val nameExpr = Expr(item.name)
-        '{ ${ nameExpr } -> ${ item.decoder } }
-      }
-      '{ Map(${ Varargs(pairs) }*) }
 
     def signatureExpr[I : Type, O : Type](
         sigName: String,
-        inputFields: List[FieldData],
-        outputFieldsExpr: Expr[Vector[FieldSpec]],
         inputShapeExpr: Expr[Shape[I]],
         outputShapeExpr: Expr[Shape[O]]
     ): Expr[TypedSig[I, O]] =
@@ -193,8 +162,6 @@ private[typed] object FunctionMacro:
         sigNameExpr = Expr(sigName),
         instructionsExpr = Expr(""),
         errorName = sigName,
-        inputFields = inputFields,
-        outputFieldsExpr = outputFieldsExpr,
         inputShapeExpr = inputShapeExpr,
         outputShapeExpr = outputShapeExpr
       )
@@ -235,22 +202,19 @@ private[typed] object FunctionMacro:
     if returnType =:= TypeRepr.of[Unit] then
       report.errorAndAbort(s"Signature.from requires method '$sigName' to return an output type, not Unit")
 
-    val inputData = fieldData(sigName, FieldRole.Input, params)
+    validateSchemas(sigName, params)
     val inputType = namedTupleType(params)
 
     def scalarOutputExpr(returnType: TypeRepr): Expr[Any] =
       val outputItems = List("result" -> returnType)
-      val outputData = fieldData(sigName, FieldRole.Output, outputItems)
+      validateSchemas(sigName, outputItems)
       val outputType = namedTupleType(outputItems)
       (inputType.asType, outputType.asType) match
         case ('[i], '[o]) =>
-          val outFieldExprs = outputData.map(_.fieldSpec)
           signatureExpr[i, o](
             sigName = sigName,
-            inputFields = inputData,
-            outputFieldsExpr = '{ Vector(${ Varargs(outFieldExprs) }*) },
-            inputShapeExpr = '{ new Shape.TupleShape[i](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
-            outputShapeExpr = '{ new Shape.TupleShape[o](Vector(${ Varargs(outFieldExprs) }*), ${ decoderMapExpr(outputData) }) }
+            inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](FieldRole.Input,  Schema.derived[i]) },
+            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o]) }
           )
         case _ =>
           report.errorAndAbort(s"Internal error materializing scalar output for method '$sigName'")
@@ -259,16 +223,13 @@ private[typed] object FunctionMacro:
       case Some(outputItems) =>
         if outputItems.isEmpty then
           report.errorAndAbort(s"Signature.from requires method '$sigName' to declare at least one output field")
-        val outputData = fieldData(sigName, FieldRole.Output, outputItems)
+        validateSchemas(sigName, outputItems)
         (inputType.asType, returnType.asType) match
           case ('[i], '[o]) =>
-            val outFieldExprs = outputData.map(_.fieldSpec)
             signatureExpr[i, o](
               sigName = sigName,
-              inputFields = inputData,
-              outputFieldsExpr = '{ Vector(${ Varargs(outFieldExprs) }*) },
-              inputShapeExpr = '{ new Shape.TupleShape[i](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
-              outputShapeExpr = '{ new Shape.TupleShape[o](Vector(${ Varargs(outFieldExprs) }*), ${ decoderMapExpr(outputData) }) }
+              inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](FieldRole.Input,  Schema.derived[i]) },
+              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o]) }
             )
           case _ =>
             report.errorAndAbort(s"Internal error materializing tuple output for method '$sigName'")
@@ -284,17 +245,8 @@ private[typed] object FunctionMacro:
                         case '[i] =>
                           signatureExpr[i, o](
                             sigName = sigName,
-                            inputFields = inputData,
-                            outputFieldsExpr = '{
-                              Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
-                                .fieldSpecs
-                            },
-                            inputShapeExpr = '{ new Shape.TupleShape[i](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
-                            outputShapeExpr = '{
-                              Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
-                            }
+                            inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](FieldRole.Input, Schema.derived[i]) },
+                            outputShapeExpr = '{ Shape.derivedProductWithRole[o](FieldRole.Output)(using ${ schema }) }
                           )
                     case None =>
                       report.errorAndAbort(s"No zio.blocks.schema.Schema for product output type '${returnType.show}'")
@@ -358,38 +310,16 @@ private[typed] object FunctionMacro:
         case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
         case _                                          => None
 
-    def decoderExpr(owner: String, fieldName: String, fieldTpe: TypeRepr): Expr[FieldCodec[Any]] =
-      fieldTpe.asType match
-        case '[t] =>
-          Expr.summon[FieldCodec[t]] match
-            case Some(d) => '{ ${ d }.asInstanceOf[FieldCodec[Any]] }
-            case None =>
+    def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
+      items.foreach { (fieldName, tpe) =>
+        tpe.asType match
+          case '[t] =>
+            if Expr.summon[Schema[t]].isEmpty then
               report.errorAndAbort(
-                s"No FieldCodec[${fieldTpe.show}] in scope for field '$owner.$fieldName'"
+                s"No Schema[${tpe.show}] in scope for field '$owner.$fieldName'. Field types must have a " +
+                "zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
               )
-
-    def fieldData(owner: String, role: FieldRole, items: List[(String, TypeRepr)]): List[FieldData] =
-      items.map { (fieldName, tpe) =>
-        val dec = decoderExpr(owner, fieldName, tpe)
-        val nameExpr = Expr(fieldName)
-        val roleExpr =
-          if role == FieldRole.Input then '{ FieldRole.Input } else '{ FieldRole.Output }
-        val fieldSpecExpr = '{
-          FieldSpec(
-            name    = ${ nameExpr },
-            role    = ${ roleExpr },
-            typeRef = ${ dec }.typeRef
-          )
-        }
-        FieldData(fieldName, fieldSpecExpr, dec)
       }
-
-    def decoderMapExpr(items: List[FieldData]): Expr[Map[String, FieldCodec[Any]]] =
-      val pairs = items.map { item =>
-        val nameExpr = Expr(item.name)
-        '{ ${ nameExpr } -> ${ item.decoder } }
-      }
-      '{ Map(${ Varargs(pairs) }*) }
 
     def functionParts(tpe: TypeRepr): (List[(Option[String], TypeRepr)], TypeRepr) =
       tpe.dealias match
@@ -439,33 +369,28 @@ private[typed] object FunctionMacro:
         s"Signature.fromType has duplicate input names: ${duplicateInputs.mkString(", ")}"
       )
 
-    val inputData = fieldData(sigName, FieldRole.Input, inputItems)
+    validateSchemas(sigName, inputItems)
     val inputType = namedTupleType(inputItems)
 
     def signatureExpr[I : Type, O : Type](
-        outputFieldsExpr: Expr[Vector[FieldSpec]],
         outputShapeExpr: Expr[Shape[O]]
     ): Expr[TypedSig[I, O]] =
       materialize[I, O](
         sigNameExpr = sigNameExpr,
         instructionsExpr = instructions,
         errorName = sigName,
-        inputFields = inputData,
-        outputFieldsExpr = outputFieldsExpr,
-        inputShapeExpr = '{ new Shape.TupleShape[I](Vector(${ Varargs(inputData.map(_.fieldSpec)) }*), ${ decoderMapExpr(inputData) }) },
+        inputShapeExpr = '{ new Shape.SchemaTupleShape[I](FieldRole.Input, Schema.derived[I]) },
         outputShapeExpr = outputShapeExpr
       )
 
     def scalarOutputExpr(returnType: TypeRepr): Expr[Any] =
       val outputItems = List("result" -> returnType)
-      val outputData = fieldData(sigName, FieldRole.Output, outputItems)
+      validateSchemas(sigName, outputItems)
       val outputType = namedTupleType(outputItems)
       (inputType.asType, outputType.asType) match
         case ('[i], '[o]) =>
-          val outFieldExprs = outputData.map(_.fieldSpec)
           signatureExpr[i, o](
-            outputFieldsExpr = '{ Vector(${ Varargs(outFieldExprs) }*) },
-            outputShapeExpr = '{ new Shape.TupleShape[o](Vector(${ Varargs(outFieldExprs) }*), ${ decoderMapExpr(outputData) }) }
+            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o]) }
           )
         case _ =>
           report.errorAndAbort("Internal error materializing scalar output for function type")
@@ -474,13 +399,11 @@ private[typed] object FunctionMacro:
       case Some(outputItems) =>
         if outputItems.isEmpty then
           report.errorAndAbort("Signature.fromType requires at least one output field")
-        val outputData = fieldData(sigName, FieldRole.Output, outputItems)
+        validateSchemas(sigName, outputItems)
         (inputType.asType, returnType.asType) match
           case ('[i], '[o]) =>
-            val outFieldExprs = outputData.map(_.fieldSpec)
             signatureExpr[i, o](
-              outputFieldsExpr = '{ Vector(${ Varargs(outFieldExprs) }*) },
-              outputShapeExpr = '{ new Shape.TupleShape[o](Vector(${ Varargs(outFieldExprs) }*), ${ decoderMapExpr(outputData) }) }
+              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o]) }
             )
           case _ =>
             report.errorAndAbort("Internal error materializing named-tuple output for function type")
@@ -495,15 +418,7 @@ private[typed] object FunctionMacro:
                       inputType.asType match
                         case '[i] =>
                           signatureExpr[i, o](
-                            outputFieldsExpr = '{
-                              Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
-                                .fieldSpecs
-                            },
-                            outputShapeExpr = '{
-                              Shape
-                                .derivedProductWithRole[o](FieldRole.Output)(using ${ schema })
-                            }
+                            outputShapeExpr = '{ Shape.derivedProductWithRole[o](FieldRole.Output)(using ${ schema }) }
                           )
                     case None =>
                       report.errorAndAbort(s"No zio.blocks.schema.Schema for product output type '${returnType.show}'")

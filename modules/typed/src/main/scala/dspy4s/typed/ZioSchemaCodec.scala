@@ -45,6 +45,12 @@ private[typed] object ZioSchemaCodec:
       DynamicValue.Map(Chunk.from(m.entries.iterator.map((k, v) =>
         normalize(k, mapTarget.key) -> normalize(v, mapTarget.value)
       ).toSeq))
+    case (rec: DynamicValue.Record, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
+      // dspy4s lifts string-keyed maps into `DynamicValue.Record` (see DynamicValues.fromAny),
+      // whereas zio-blocks `Schema[Map[K, V]]` consumes a `DynamicValue.Map`. Bridge field -> entry.
+      DynamicValue.Map(Chunk.from(rec.fields.iterator.map { (k, v) =>
+        normalize(DynamicValue.Primitive(PrimitiveValue.String(k)), mapTarget.key) -> normalize(v, mapTarget.value)
+      }.toSeq))
     case _ => dv
 
   private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[?, ?]): DynamicValue.Record =
