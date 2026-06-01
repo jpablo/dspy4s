@@ -23,6 +23,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ToolExecutor
+import zio.blocks.schema.DynamicValue
 import dspy4s.streaming.contracts.PredictionEvent
 import dspy4s.streaming.contracts.StatusEvent
 import dspy4s.streaming.contracts.StreamEvent
@@ -290,13 +291,13 @@ class StreamingPortedSuite extends FunSuite:
     // messages, not LM output.
     val tool = new ToolFunction:
       override val name: String = "generate_question"
-      override def invoke(args: Map[String, Any])(using RuntimeContext) =
-        Right("What color is the sky?")
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
+        Right(ToolFunction.result("What color is the sky?"))
 
     val program = new PredictProgram:
       override val moduleName: String = "my_program"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-        ToolExecutor.invoke(ToolCallRequest(tool.name, Map.empty), Vector(tool)).map { _ =>
+        ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>
           DynamicPrediction(values = rec("answer" := "blue"))
         }
 

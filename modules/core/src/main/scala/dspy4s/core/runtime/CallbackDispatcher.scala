@@ -11,6 +11,7 @@ import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
+import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
@@ -107,11 +108,12 @@ object CallbackDispatcher:
       }
     }
 
-  /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. */
-  def withTool[A](
+  /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. Fixed to `DynamicValue` (not generic
+    * like the other scopes) because tool args and results travel the spine as `DynamicValue` end to end. */
+  def withTool(
       toolName: String,
-      args: Map[String, Any]
-  )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
+      args: DynamicValue.Record
+  )(thunk: => Either[DspyError, DynamicValue]): Either[DspyError, DynamicValue] =
     withCallScope(prefix = "tool") { (callId, parentCallId) =>
       emit(
         ToolStartEvent(
@@ -150,17 +152,14 @@ object CallbackDispatcher:
     * after which the original exception is rethrown so it still propagates to the caller. */
   private def runWithEnd[A](
       thunk: => Either[DspyError, A]
-  )(emitEnd: Either[DspyError, Any] => Unit): Either[DspyError, A] =
+  )(emitEnd: Either[DspyError, A] => Unit): Either[DspyError, A] =
     try
       val result = thunk
-      val lifted: Either[DspyError, Any] = result match
-        case Left(error)  => Left(error)
-        case Right(value) => Right(value)
-      emitEnd(lifted)
+      emitEnd(result)
       result
     catch
       case NonFatal(error) =>
-        val runtimeError: Either[DspyError, Any] = Left(
+        val runtimeError: Either[DspyError, A] = Left(
           RuntimeError("callback_dispatch", Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
         )
         emitEnd(runtimeError)

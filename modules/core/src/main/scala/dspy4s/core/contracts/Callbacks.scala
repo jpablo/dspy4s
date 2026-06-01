@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import zio.blocks.schema.DynamicValue
+
 import java.time.Instant
 import java.util.UUID
 
@@ -117,7 +119,7 @@ final case class AdapterEndEvent(
   * `ToolFunction`. Paired with [[ToolEndEvent]]. */
 final case class ToolStartEvent(
     toolName: String,
-    args: Map[String, Any],
+    args: DynamicValue.Record,
     callId: String = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
     timestamp: Instant = Instant.now()
@@ -126,7 +128,7 @@ final case class ToolStartEvent(
 /** Closes a tool-invocation scope opened by a [[ToolStartEvent]] with the same `callId`. */
 final case class ToolEndEvent(
     toolName: String,
-    output: Either[DspyError, Any],
+    output: Either[DspyError, DynamicValue],
     callId: String = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
     timestamp: Instant = Instant.now()

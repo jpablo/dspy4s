@@ -7,7 +7,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, Schema}
 
 /** `inputs` is the spine record passed to the adapter and codec layers. `config` stays a plain `Map[String, Any]`
   * because it's an opaque option bag forwarded to the LM provider (model overrides, sampling params, cache /
@@ -33,9 +33,20 @@ trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
   def run(inputs: (String, DynamicValue)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     run(ProgramCall(inputs = DynamicValues.recordFromEntries(inputs)))
 
+/** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
+  * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a
+  * `DynamicValue`, so both ends travel the spine without a lossy `Any` round-trip. Extract args with
+  * `DynamicValues.recordGet` / a `Schema`-backed decode; build the result with [[ToolFunction.result]]. */
 trait ToolFunction:
   def name: String
-  def invoke(args: Map[String, Any])(using RuntimeContext): Either[DspyError, Any]
+  def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue]
 
-final case class ToolCallRequest(name: String, args: Map[String, Any])
-final case class ToolCallResult(name: String, result: Either[DspyError, Any])
+object ToolFunction:
+  /** Lift a `Schema`-typed return value into the `DynamicValue` a tool yields, so authors can write
+    * `Right(ToolFunction.result("Brussels"))` (or return any case class with a `Schema`) instead of
+    * hand-constructing `DynamicValue.Primitive(...)`. */
+  def result[A](value: A)(using schema: Schema[A]): DynamicValue =
+    schema.toDynamicValue(value)
+
+final case class ToolCallRequest(name: String, args: DynamicValue.Record)
+final case class ToolCallResult(name: String, result: Either[DspyError, DynamicValue])

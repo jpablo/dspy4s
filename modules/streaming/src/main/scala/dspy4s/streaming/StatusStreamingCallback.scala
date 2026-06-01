@@ -11,6 +11,7 @@ import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.streaming.contracts.StatusEvent
 import dspy4s.streaming.contracts.StreamEvent
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final class StatusStreamingCallback(
     val provider: StatusMessageProvider,
@@ -25,8 +26,11 @@ final class StatusStreamingCallback(
       case e: LmEndEvent       => provider.lmEnd(e.modelId, e.response.fold(identity, identity))
       case e: ToolStartEvent if e.toolName != "finish" =>
         provider.toolStart(e.toolName, e.args)
-      case e: ToolEndEvent if !e.output.exists { case s: String => s == "Completed."; case _ => false } =>
-        provider.toolEnd(e.toolName, e.output.fold(identity, identity))
+      case e: ToolEndEvent if !e.output.exists {
+            case DynamicValue.Primitive(PrimitiveValue.String("Completed.")) => true
+            case _                                                           => false
+          } =>
+        provider.toolEnd(e.toolName, e.output)
       case _ => None
 
     message.foreach(message => queue.offer(StatusEvent(message = message)))

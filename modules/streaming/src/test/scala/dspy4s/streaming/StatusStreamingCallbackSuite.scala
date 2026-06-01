@@ -10,6 +10,9 @@ import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.streaming.contracts.StatusEvent
 import dspy4s.streaming.contracts.StreamEvent
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
+import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
 class StatusStreamingCallbackSuite extends FunSuite:
@@ -32,8 +35,8 @@ class StatusStreamingCallbackSuite extends FunSuite:
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
-    callback.onEvent(ToolStartEvent(toolName = "search", args = Map("q" -> "hi")))
-    callback.onEvent(ToolEndEvent(toolName = "search", output = Right("Brussels")))
+    callback.onEvent(ToolStartEvent(toolName = "search", args = DynamicValues.recordFromEntries(Seq("q" := "hi"))))
+    callback.onEvent(ToolEndEvent(toolName = "search", output = Right(DynamicValues.fromAny("Brussels"))))
 
     val events = drain(queue)
     assertEquals(events.size, 2)
@@ -49,7 +52,7 @@ class StatusStreamingCallbackSuite extends FunSuite:
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
-    callback.onEvent(ToolStartEvent(toolName = "finish", args = Map.empty))
+    callback.onEvent(ToolStartEvent(toolName = "finish", args = DynamicValue.Record.empty))
 
     assertEquals(drain(queue).size, 0)
   }
@@ -59,7 +62,7 @@ class StatusStreamingCallbackSuite extends FunSuite:
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
-    callback.onEvent(ToolEndEvent(toolName = "anything", output = Right("Completed.")))
+    callback.onEvent(ToolEndEvent(toolName = "anything", output = Right(DynamicValues.fromAny("Completed."))))
 
     assertEquals(drain(queue).size, 0)
   }

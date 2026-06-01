@@ -11,6 +11,7 @@ import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.streaming.contracts.StatusEvent
+import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
 import java.util.concurrent.CountDownLatch
@@ -36,7 +37,7 @@ class StatusStreamingParitySuite extends FunSuite:
   /** A program that invokes a tool and then "predicts" a fixed answer. We
     * keep it minimal — no LM is configured because the test only inspects
     * status events. */
-  private def buildToolProgram(tool: ToolFunction, toolArgs: Map[String, Any]): PredictProgram =
+  private def buildToolProgram(tool: ToolFunction, toolArgs: DynamicValue.Record): PredictProgram =
     new PredictProgram:
       override val moduleName: String = "tool_caller"
       override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
@@ -49,20 +50,20 @@ class StatusStreamingParitySuite extends FunSuite:
     // provider. Each consumer must see only its own provider's messages.
     val toolA = new ToolFunction:
       override val name: String = "tool_a"
-      override def invoke(args: Map[String, Any])(using RuntimeContext) = Right("a-done")
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) = Right(ToolFunction.result("a-done"))
     val toolB = new ToolFunction:
       override val name: String = "tool_b"
-      override def invoke(args: Map[String, Any])(using RuntimeContext) = Right("b-done")
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) = Right(ToolFunction.result("b-done"))
 
     val providerA = new StatusMessageProvider:
-      override def toolStart(name: String, args: Map[String, Any]): Option[String] =
+      override def toolStart(name: String, args: DynamicValue.Record): Option[String] =
         Some(s"ProviderA: $name starting!")
-      override def toolEnd(name: String, output: Any): Option[String] =
+      override def toolEnd(name: String, output: Either[DspyError, DynamicValue]): Option[String] =
         Some(s"ProviderA: $name finished!")
     val providerB = new StatusMessageProvider:
-      override def toolStart(name: String, args: Map[String, Any]): Option[String] =
+      override def toolStart(name: String, args: DynamicValue.Record): Option[String] =
         Some(s"ProviderB: $name starting!")
-      override def toolEnd(name: String, output: Any): Option[String] =
+      override def toolEnd(name: String, output: Either[DspyError, DynamicValue]): Option[String] =
         Some(s"ProviderB: $name finished!")
 
     val pool = Executors.newFixedThreadPool(2)
@@ -75,7 +76,7 @@ class StatusStreamingParitySuite extends FunSuite:
       RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
         val stream = Streamify.streamify(
-          program = buildToolProgram(toolA, Map.empty),
+          program = buildToolProgram(toolA, DynamicValue.Record.empty),
           statusMessageProvider = Some(providerA)
         )(rec())
         ready.countDown()
@@ -92,7 +93,7 @@ class StatusStreamingParitySuite extends FunSuite:
       RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
         val stream = Streamify.streamify(
-          program = buildToolProgram(toolB, Map.empty),
+          program = buildToolProgram(toolB, DynamicValue.Record.empty),
           statusMessageProvider = Some(providerB)
         )(rec())
         ready.countDown()
@@ -129,13 +130,13 @@ class StatusStreamingParitySuite extends FunSuite:
     val sleepMillis = 200L
     val slowTool = new ToolFunction:
       override val name: String = "slow"
-      override def invoke(args: Map[String, Any])(using RuntimeContext) =
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
         Thread.sleep(sleepMillis)
-        Right("done")
+        Right(ToolFunction.result("done"))
 
     given RuntimeContext = RuntimeEnvironment.current
     val stream = Streamify.streamify(
-      program = buildToolProgram(slowTool, Map.empty),
+      program = buildToolProgram(slowTool, DynamicValue.Record.empty),
       statusMessageProvider = Some(StatusMessageProvider.default)
     )(rec())
 

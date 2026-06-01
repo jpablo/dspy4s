@@ -15,6 +15,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
+import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -122,15 +123,15 @@ class ReActSuite extends FunSuite:
 
   private final class SearchTool(counter: AtomicInteger) extends ToolFunction:
     override val name: String = "search"
-    override def invoke(args: Map[String, Any])(using RuntimeContext): Either[DspyError, Any] =
+    override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
       counter.incrementAndGet()
-      Right("Brussels")
+      Right(ToolFunction.result("Brussels"))
 
   private final class LookupTool(counter: AtomicInteger) extends ToolFunction:
     override val name: String = "lookup"
-    override def invoke(args: Map[String, Any])(using RuntimeContext): Either[DspyError, Any] =
+    override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
       counter.incrementAndGet()
-      Right("Europe")
+      Right(ToolFunction.result("Europe"))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()

@@ -6,6 +6,7 @@ import dspy4s.adapters.XMLAdapter
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
+import zio.blocks.schema.DynamicValue
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -304,8 +305,8 @@ class StreamListenerSuite extends FunSuite:
     val lm = new ScriptedLm(chunks)
     val noopTool = new ToolFunction:
       override val name: String = "noop"
-      override def invoke(args: Map[String, Any])(using RuntimeContext) =
-        Right("ok")
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
+        Right(ToolFunction.result("ok"))
 
     val signature = SignatureDsl.parse("q -> answer, tool_name, tool_args").toOption.get
     val innerPredict = DynamicPredict(layout = signature)

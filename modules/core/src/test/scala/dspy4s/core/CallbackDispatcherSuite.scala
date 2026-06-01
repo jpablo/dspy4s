@@ -12,6 +12,8 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -161,8 +163,8 @@ class CallbackDispatcherSuite extends FunSuite:
         events += event
 
     val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
-      CallbackDispatcher.withTool("search", Map("query" -> "scala")) {
-        Right(Map("ok" -> true))
+      CallbackDispatcher.withTool("search", DynamicValues.recordFromEntries(Seq("query" := "scala"))) {
+        Right(DynamicValues.recordFromEntries(Seq("ok" := true)))
       }
     }
 
@@ -187,9 +189,9 @@ class CallbackDispatcherSuite extends FunSuite:
       Await.result(
         ContextPropagation.future {
           snapshots += RuntimeEnvironment.activeCallStack
-          val _ = CallbackDispatcher.withTool("search", Map("query" -> "scala")) {
+          val _ = CallbackDispatcher.withTool("search", DynamicValues.recordFromEntries(Seq("query" := "scala"))) {
             snapshots += RuntimeEnvironment.activeCallStack
-            Right("ok")
+            Right(DynamicValues.fromAny("ok"))
           }
           snapshots += RuntimeEnvironment.activeCallStack
           Right("done")
