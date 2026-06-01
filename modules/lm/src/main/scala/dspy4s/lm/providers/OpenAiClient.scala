@@ -68,7 +68,7 @@ final case class OpenAiClient(
             else if trimmed.startsWith("data:") then
               val data = trimmed.stripPrefix("data:").trim
               if data == "[DONE]" then
-                innerClosed = true
+                close()
                 return
               else
                 JsonCodec.decodeString(data) match
@@ -76,6 +76,9 @@ final case class OpenAiClient(
                     pending = chunkFromPayload(value)
                     return
                   case Left(_) => ()
+          // Lines exhausted without an explicit [DONE]: the upstream response is
+          // finished, so release the connection instead of leaving it for GC.
+          close()
 
       override def hasNext: Boolean =
         if innerClosed then false

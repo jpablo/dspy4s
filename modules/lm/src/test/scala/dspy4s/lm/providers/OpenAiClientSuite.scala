@@ -127,6 +127,23 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(finalUsage.get.promptTokens, 3L)
   }
 
+  test("stream closes the underlying connection once the SSE stream is fully consumed") {
+    val source = new VectorClosableIterator(sampleStreamLines)
+    val transport = new ScriptedTransport(
+      streamingResponses = Vector(Right(HttpStreamResponse(
+        status = 200,
+        headers = Map.empty,
+        dataLines = source
+      )))
+    )
+    val client = OpenAiClient(apiKey = "x", transport = transport)
+
+    val iter = client.stream(Map("model" -> "m")).toOption.get
+    while iter.hasNext do iter.next()
+
+    assert(source.closed, "underlying SSE connection should be closed after the stream reaches [DONE]")
+  }
+
   test("stream injects stream=true and include_usage into payload") {
     val transport = new ScriptedTransport(
       streamingResponses = Vector(Right(HttpStreamResponse(
