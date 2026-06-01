@@ -222,7 +222,7 @@ trait LowPriorityFieldCodecs:
     val typeRef: TypeRef = TypeRef.json
     def decode(raw: Any): Either[DspyError, Option[A]] =
       raw match
-        case null => Right(None)
+        case _ if raw.asInstanceOf[AnyRef] eq null => Right(None)
         case value =>
           item.decode(value).map(Some(_))
     def encode(value: Option[A]): Any =

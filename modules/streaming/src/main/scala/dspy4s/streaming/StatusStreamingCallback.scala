@@ -25,7 +25,7 @@ final class StatusStreamingCallback(
       case e: LmEndEvent       => provider.lmEnd(e.modelId, e.response.fold(identity, identity))
       case e: ToolStartEvent if e.toolName != "finish" =>
         provider.toolStart(e.toolName, e.args)
-      case e: ToolEndEvent if e.output != Right("Completed.") =>
+      case e: ToolEndEvent if !e.output.exists { case s: String => s == "Completed."; case _ => false } =>
         provider.toolEnd(e.toolName, e.output.fold(identity, identity))
       case _ => None
 

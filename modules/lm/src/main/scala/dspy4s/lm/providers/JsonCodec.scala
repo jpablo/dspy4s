@@ -17,7 +17,7 @@ object JsonCodec:
     case n: Float         => ujson.Num(n.toDouble)
     case n: BigInt        => ujson.Num(n.toDouble)
     case n: BigDecimal    => ujson.Num(n.toDouble)
-    case None             => ujson.Null
+    case _: None.type     => ujson.Null
     case Some(inner)      => encode(inner)
     case m: Map[?, ?]    =>
       ujson.Obj.from(m.iterator.collect {
@@ -34,7 +34,7 @@ object JsonCodec:
       case ujson.Bool(b)    => b
       case ujson.Num(n)     =>
         if n.toDouble.isWhole && n >= Long.MinValue.toDouble && n <= Long.MaxValue.toDouble then n.toLong else n
-      case ujson.Null       => None
+      case _: ujson.Null.type => None
       case obj: ujson.Obj   =>
         obj.value.iterator.map { (k, v) => k -> decode(v) }.toMap
       case arr: ujson.Arr   =>
@@ -59,16 +59,18 @@ object JsonCodec:
       case error: Exception =>
         Left(ParseError("json", Option(error.getMessage).getOrElse("parse failure")))
 
-  private def isNone(value: Any): Boolean = value match
-    case None        => true
-    case null        => true
-    case _ : Void    => true
-    case _           => false
+  private def isNone(value: Any): Boolean =
+    if value.asInstanceOf[AnyRef] eq null then true
+    else value match
+      case _: None.type => true
+      case _: Void      => true
+      case _            => false
 
   def stripNone(payload: Map[String, Any]): Map[String, Any] =
     payload.iterator.flatMap { case (k, v) =>
       v match
-        case None | null           => None
+        case _ if v.asInstanceOf[AnyRef] eq null => None
+        case _: None.type          => None
         case m: Map[?, ?]          => Some(k -> stripNone(m.asInstanceOf[Map[String, Any]]))
         case seq: Iterable[?]     =>
           val cleaned = seq.filterNot(isNone).map {

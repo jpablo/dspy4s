@@ -45,7 +45,7 @@ object RequestHash:
 
   private def normalizeAny(value: Any): String =
     value match
-      case null            => "null"
+      case _ if value.asInstanceOf[AnyRef] eq null => "null"
       case s: String       => quote(s)
       case c: Char         => quote(c.toString)
       case b: Boolean      => b.toString

@@ -23,6 +23,7 @@ private[typed] object SpecMacro:
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
+    given CanEqual[Symbol, Symbol] = CanEqual.derived
 
     val tpe        = TypeRepr.of[T]
     val typeSym    = tpe.typeSymbol

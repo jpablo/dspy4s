@@ -13,21 +13,23 @@ object DynamicValues:
 
   /** Lift a plain Scala value into a `DynamicValue`. Pass-through for values that are already a
     * `DynamicValue`. Used only at user-facing boundaries — not in the codec spine. */
-  def fromAny(value: Any): DynamicValue = value match
-    case null              => DynamicValue.Null
-    case dv: DynamicValue  => dv
-    case s: String         => DynamicValue.Primitive(PrimitiveValue.String(s))
-    case b: Boolean        => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
-    case i: Int            => DynamicValue.Primitive(PrimitiveValue.Int(i))
-    case l: Long           => DynamicValue.Primitive(PrimitiveValue.Long(l))
-    case f: Float          => DynamicValue.Primitive(PrimitiveValue.Float(f))
-    case d: Double         => DynamicValue.Primitive(PrimitiveValue.Double(d))
-    case seq: Seq[?]       =>
-      DynamicValue.Sequence(Chunk.from(seq.map(fromAny)))
-    case m: collection.Map[?, ?] =>
-      val entries = m.iterator.collect { case (k: String, v) => k -> fromAny(v) }.toSeq
-      DynamicValue.Record(Chunk.from(entries))
-    case other             => DynamicValue.Primitive(PrimitiveValue.String(other.toString))
+  def fromAny(value: Any): DynamicValue =
+    if value.asInstanceOf[AnyRef] eq null then DynamicValue.Null
+    else
+      value match
+        case dv: DynamicValue  => dv
+        case s: String         => DynamicValue.Primitive(PrimitiveValue.String(s))
+        case b: Boolean        => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
+        case i: Int            => DynamicValue.Primitive(PrimitiveValue.Int(i))
+        case l: Long           => DynamicValue.Primitive(PrimitiveValue.Long(l))
+        case f: Float          => DynamicValue.Primitive(PrimitiveValue.Float(f))
+        case d: Double         => DynamicValue.Primitive(PrimitiveValue.Double(d))
+        case seq: Seq[?]       =>
+          DynamicValue.Sequence(Chunk.from(seq.map(fromAny)))
+        case m: collection.Map[?, ?] =>
+          val entries = m.iterator.collect { case (k: String, v) => k -> fromAny(v) }.toSeq
+          DynamicValue.Record(Chunk.from(entries))
+        case other             => DynamicValue.Primitive(PrimitiveValue.String(other.toString))
 
   /** Build a `DynamicValue.Record` from a sequence of `(name, value)` pairs. Convenience for varargs
     * APIs like `Example.apply` and `DynamicPredict.run`. */
@@ -76,7 +78,7 @@ object DynamicValues:
     case DynamicValue.Primitive(PrimitiveValue.Short(n))   => n
     case DynamicValue.Primitive(PrimitiveValue.Byte(n))    => n
     case DynamicValue.Primitive(PrimitiveValue.Char(c))    => c
-    case DynamicValue.Primitive(PrimitiveValue.Unit)       => ()
+    case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => ()
     case DynamicValue.Primitive(other)                     => other.toString
     case variant: DynamicValue.Variant                     =>
       variant.caseName.getOrElse(toAny(variant.value))
@@ -86,7 +88,7 @@ object DynamicValues:
       rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
     case m: DynamicValue.Map                               =>
       m.entries.iterator.map((k, v) => toAny(k) -> toAny(v)).toMap
-    case DynamicValue.Null                                 => null
+    case _: DynamicValue.Null.type                         => null
 
   /** Convenience: `toAny` specialized to a `Record`, returning a `Map[String, Any]`. */
   def recordToMap(rec: DynamicValue.Record): Map[String, Any] =
@@ -105,7 +107,7 @@ object DynamicValues:
     case DynamicValue.Primitive(PrimitiveValue.Short(n))   => n.toString
     case DynamicValue.Primitive(PrimitiveValue.Byte(n))    => n.toString
     case DynamicValue.Primitive(PrimitiveValue.Char(c))    => c.toString
-    case DynamicValue.Primitive(PrimitiveValue.Unit)       => "()"
+    case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => "()"
     case DynamicValue.Primitive(other)                     => other.toString
     case variant: DynamicValue.Variant                     =>
       variant.caseName.getOrElse(renderText(variant.value))
@@ -115,4 +117,4 @@ object DynamicValues:
       rec.fields.iterator.map((k, v) => s"\"$k\": ${renderText(v)}").mkString("{", ", ", "}")
     case m: DynamicValue.Map                               =>
       m.entries.iterator.map((k, v) => s"${renderText(k)}: ${renderText(v)}").mkString("{", ", ", "}")
-    case DynamicValue.Null                                 => "null"
+    case _: DynamicValue.Null.type                         => "null"

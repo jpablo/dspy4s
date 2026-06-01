@@ -55,6 +55,7 @@ private[typed] object FunctionMacro:
     */
   def fromImpl[F : Type](fn: Expr[F])(using Quotes): Expr[Any] =
     import quotes.reflect.*
+    given CanEqual[Symbol, Symbol] = CanEqual.derived
 
     def unwrap(term: Term): Term = term match
       case Inlined(_, _, inner) => unwrap(inner)
@@ -309,6 +310,7 @@ private[typed] object FunctionMacro:
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
+    given CanEqual[Symbol, Symbol] = CanEqual.derived
 
     def tupleType(parts: List[TypeRepr]): TypeRepr =
       parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>

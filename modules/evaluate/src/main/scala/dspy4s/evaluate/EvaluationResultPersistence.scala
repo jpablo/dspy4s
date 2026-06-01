@@ -76,7 +76,7 @@ object EvaluationResultPersistence:
     case n: Long     => ujson.Num(n.toDouble)
     case n: Double   => ujson.Num(n)
     case n: Float    => ujson.Num(n.toDouble)
-    case None        => ujson.Null
+    case _: None.type => ujson.Null
     case Some(inner) => toJson(inner)
     case m: Map[?, ?] =>
       ujson.Obj.from(m.iterator.collect { case (k: String, v) => k -> toJson(v) })
@@ -90,7 +90,7 @@ object EvaluationResultPersistence:
     case s: String  => s
     case b: Boolean => b.toString
     case n: Number  => n.toString
-    case None       => ""
+    case _: None.type => ""
     case Some(inner) => toCsvString(inner)
     case seq: Iterable[?] => seq.map(toCsvString).mkString("; ")
     case arr: Array[?] => arr.map(toCsvString).mkString("; ")

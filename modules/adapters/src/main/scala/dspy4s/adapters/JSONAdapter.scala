@@ -180,7 +180,7 @@ final case class JSONAdapter(
           DynamicValue.Primitive(PrimitiveValue.Long(v.toLong))
         else DynamicValue.Primitive(PrimitiveValue.Double(v))
       case ujson.Bool(v) => DynamicValue.Primitive(PrimitiveValue.Boolean(v))
-      case ujson.Null    => DynamicValue.Null
+      case _: ujson.Null.type => DynamicValue.Null
       case obj: ujson.Obj =>
         DynamicValue.Record(Chunk.from(
           obj.value.iterator.map { case (k, v) => k -> fromJson(v) }.toSeq

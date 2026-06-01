@@ -25,7 +25,7 @@ import scala.util.control.NonFatal
 final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends AdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
 
-  private enum Phase:
+  private enum Phase derives CanEqual:
     case PreDoc, BetweenTags, TagStart, ReadingOpenTag, SkippingAttrs,
          ReadingCloseTag, InContent, InContentSeenLt, InEntity, PostDoc
 

@@ -32,7 +32,7 @@ private[typed] object ZioSchemaCodec:
     * dropped); sequences are walked element-wise. Everything else (and values whose target shape doesn't match
     * the dispatch above) passes through unchanged. */
   def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue = (dv, target) match
-    case (DynamicValue.Null, _)                                  => DynamicValue.Null
+    case (_: DynamicValue.Null.type, _)                          => DynamicValue.Null
     case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) =>
       coercePrimitive(prim, p.primitiveType)
     case (DynamicValue.Primitive(PrimitiveValue.String(s)), _: Reflect.Variant[?, ?]) =>
@@ -112,7 +112,7 @@ private[typed] object ZioSchemaCodec:
     case _: PrimitiveType.Byte    => TypeRef.int
     case _: PrimitiveType.Float   => TypeRef.double
     case _: PrimitiveType.Double  => TypeRef.double
-    case PrimitiveType.Unit       => TypeRef.json
+    case _: PrimitiveType.Unit.type => TypeRef.json
     case _                         => TypeRef.json
 
   /** Build a `Shape[A]` from a zio-blocks `Schema[A]`. Encode goes through `Schema.toDynamicValue` directly;

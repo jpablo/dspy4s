@@ -22,7 +22,7 @@ object Aggregation:
 
   /** Minimal default: stringify the value, trim whitespace; treat blank as absent. */
   val defaultNormalize: DynamicValue => Option[String] = {
-    case DynamicValue.Null                                  => None
+    case _: DynamicValue.Null.type                          => None
     case DynamicValue.Primitive(PrimitiveValue.String(s))   => Option(s.trim).filter(_.nonEmpty)
     case other =>
       val rendered = DynamicValues.renderText(other).trim

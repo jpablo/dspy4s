@@ -81,15 +81,15 @@ final case class OpenAiClient(
 
       override def hasNext: Boolean =
         if innerClosed then false
-        else if pending != null then true
+        else if pending ne null then true
         else
           advance()
-          pending != null
+          pending ne null
 
       override def next(): LmChunk =
-        if pending == null then advance()
+        if pending eq null then advance()
         val out = pending
-        if out == null then throw new NoSuchElementException("SSE stream exhausted")
+        if out eq null then throw new NoSuchElementException("SSE stream exhausted")
         pending = null
         out
 

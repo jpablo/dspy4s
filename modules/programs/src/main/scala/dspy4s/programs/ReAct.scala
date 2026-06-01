@@ -88,7 +88,7 @@ final case class ReAct(
   private def hasAnswer(prediction: DynamicPrediction): Boolean =
     prediction.get(answerField) match
       case Some(DynamicValue.Primitive(PrimitiveValue.String(text))) => text.trim.nonEmpty
-      case Some(DynamicValue.Null)                                    => false
+      case Some(_: DynamicValue.Null.type)                            => false
       case Some(_)                                                    => true
       case None                                                       => false
 
@@ -113,7 +113,7 @@ final case class ReAct(
   private def extractNativeToolCalls(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
     prediction.get("tool_calls") match
       case None                       => Right(Vector.empty)
-      case Some(DynamicValue.Null)    => Right(Vector.empty)
+      case Some(_: DynamicValue.Null.type) => Right(Vector.empty)
       case Some(seq: DynamicValue.Sequence) =>
         parseToolCallsSequence(seq.elements.iterator.toVector)
       case Some(other) =>
@@ -154,7 +154,7 @@ final case class ReAct(
         rec.fields.iterator.map((k, v) => k -> DynamicValues.toAny(v)).toMap
       case Some(DynamicValue.Primitive(PrimitiveValue.String(value))) if value.trim.nonEmpty =>
         Map("input" -> value)
-      case Some(DynamicValue.Null) | None =>
+      case Some(_: DynamicValue.Null.type) | None =>
         Map.empty
       case Some(other) =>
         Map("value" -> DynamicValues.toAny(other))

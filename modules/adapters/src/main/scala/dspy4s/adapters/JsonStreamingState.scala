@@ -33,7 +33,7 @@ import scala.collection.mutable
 final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends AdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
 
-  private enum Phase:
+  private enum Phase derives CanEqual:
     case PreObj, ObjStart, InKey, AfterKey, BeforeValue, InStringValue, InOtherValue, AfterValue, PostObj
 
   import Phase.*

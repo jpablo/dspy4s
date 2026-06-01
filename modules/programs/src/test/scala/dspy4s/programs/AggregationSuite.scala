@@ -57,7 +57,7 @@ class AggregationSuite extends FunSuite:
       rec("answer" -> "3")
     )
     val normalize: DynamicValue => Option[String] = {
-      case DynamicValue.Null                                => None
+      case _: DynamicValue.Null.type                        => None
       case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s.trim.toLowerCase).filter(_.nonEmpty)
       case other                                            => Some(DynamicValues.renderText(other).trim.toLowerCase).filter(_.nonEmpty)
     }

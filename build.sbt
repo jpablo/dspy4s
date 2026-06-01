@@ -13,6 +13,7 @@ lazy val commonSettings = Seq(
     "-deprecation",
     "-feature",
     "-unchecked",
+    "-language:strictEquality",
     "-Werror",
     "-Wunused:all",
     "-Wvalue-discard",

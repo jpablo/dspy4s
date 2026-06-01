@@ -5,7 +5,7 @@ import scala.util.matching.Regex
 /** Discriminator on [[FieldSpec]] that partitions a [[SignatureLayout]]'s fields into the values the LM is given
   * (`Input`) versus the values it must produce (`Output`). Adapters use this to drive prompt structure and to know
   * which keys to expect in the parsed response. */
-enum FieldRole:
+enum FieldRole derives CanEqual:
   case Input
   case Output
 
@@ -17,7 +17,7 @@ enum FieldRole:
   *
   * Five well-known refs cover the common cases. Anything outside that set passes through as an opaque token --
   * adapters that don't recognize it fall back to rendering it as a free-form string. */
-final case class TypeRef(repr: String)
+final case class TypeRef(repr: String) derives CanEqual
 
 object TypeRef:
   val string: TypeRef = TypeRef("string")
@@ -59,7 +59,7 @@ final case class FieldSpec(
     description: Option[String] = None,
     prefix: Option[String] = None,
     defaultValue: Option[Any] = None
-)
+) derives CanEqual
 
 /** Partial update DTO for the field-mutation surface on [[SignatureLayout]]. Each `Option` field that's `Some`
   * overwrites the corresponding [[FieldSpec]] property; metadata is merged additively.
@@ -276,7 +276,7 @@ final case class SignatureLayout(
   /** Equality that ignores the [[name]]. Useful for comparing two layouts that describe the same shape but were
     * constructed with different anonymous names (e.g. `"Signature"` from `fromType` vs `"X"` from a builder). */
   def equalsByStructure(other: SignatureLayout): Boolean =
-    instructions == other.instructions && fields == other.fields
+    instructions == other.instructions && fields.sameElements(other.fields)
 
   /** Serialize to a JSON-friendly `Map[String, Any]`. Round-trips with [[SignatureLayout.fromState]]. The shape is
     * dspy4s-native -- this is the building block of the load/save story (a deliberately non-Python-pickle path,
@@ -343,7 +343,6 @@ object SignatureLayout:
     def readInstructions: Either[DspyError, Option[String]] =
       state.get("instructions") match
         case None                 => Right(None)
-        case Some(None)           => Right(None)
         case Some(value: String)  => Right(Some(value))
         case Some(value: Option[?]) =>
           value match

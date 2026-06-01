@@ -8,12 +8,12 @@ import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
-enum LmMode:
+enum LmMode derives CanEqual:
   case Chat
   case Text
   case Responses
 
-enum MessageRole:
+enum MessageRole derives CanEqual:
   case System
   case User
   case Assistant
