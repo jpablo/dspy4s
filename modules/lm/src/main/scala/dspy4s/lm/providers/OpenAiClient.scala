@@ -6,8 +6,6 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmChunk
-import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.contracts.LmUsage
 import zio.blocks.schema.DynamicValue
 
 final case class OpenAiClient(
@@ -16,8 +14,6 @@ final case class OpenAiClient(
     transport: HttpTransport = HttpTransport.jdk(),
     chatEndpoint: String = "/chat/completions"
 ):
-  import DynamicJson.{field, asRecord, asString, asLong, asSequence}
-
   private val defaultHeaders: Map[String, String] = Map(
     "Authorization" -> s"Bearer $apiKey"
   )
@@ -108,45 +104,17 @@ final case class OpenAiClient(
           innerClosed = true
           lines.close()
 
+  /** Map the typed wire chunk onto the domain `LmChunk`. Text, finish reason and tool-call deltas come from the
+    * first choice (OpenAI emits one choice per streaming chunk); usage rides the final, choice-less chunk. */
   private def chunkFromPayload(payload: DynamicValue): LmChunk =
-    val choice = field(payload, "choices").map(asSequence).flatMap(_.headOption).flatMap(asRecord)
-    val delta  = choice.flatMap(c => field(c, "delta")).flatMap(asRecord)
-
-    val text = delta.flatMap(d => field(d, "content")).flatMap(asString).getOrElse("")
-    val finishReason = choice.flatMap(c => field(c, "finish_reason")).flatMap(asString)
-    val usage = field(payload, "usage").flatMap(asRecord).map(parseUsage)
-    val toolCalls = delta
-      .flatMap(d => field(d, "tool_calls"))
-      .map(asSequence)
-      .map(parseToolCallDeltas)
-      .getOrElse(Vector.empty)
-
-    LmChunk(text = text, finishReason = finishReason, usage = usage, toolCalls = toolCalls, raw = Some(payload))
-
-  private def parseToolCallDeltas(entries: Vector[DynamicValue]): Vector[LmToolCallDelta] =
-    entries.zipWithIndex.flatMap { case (raw, fallbackIdx) =>
-      asRecord(raw).map { entry =>
-        val index = field(entry, "index").flatMap(asLong).map(_.toInt).getOrElse(fallbackIdx)
-        val id = field(entry, "id").flatMap(asString)
-        val function = field(entry, "function").flatMap(asRecord)
-        val name = function.flatMap(f => field(f, "name")).flatMap(asString)
-        val arguments = function.flatMap(f => field(f, "arguments")).flatMap(asString)
-        LmToolCallDelta(index = index, id = id, name = name, argumentsFragment = arguments)
-      }
-    }
-
-  private def parseUsage(usage: DynamicValue.Record): LmUsage =
-    val promptTokens = field(usage, "prompt_tokens").flatMap(asLong).getOrElse(0L)
-    val completionTokens = field(usage, "completion_tokens").flatMap(asLong).getOrElse(0L)
-    val totalTokens = field(usage, "total_tokens").flatMap(asLong).getOrElse(promptTokens + completionTokens)
-    val details = usage.fields.iterator.collect {
-      case (k, v) if asLong(v).isDefined => k -> asLong(v).get
-    }.toMap
-    LmUsage(
-      totalTokens = totalTokens,
-      promptTokens = promptTokens,
-      completionTokens = completionTokens,
-      details = details
+    val chunk = OpenAiStreamChunk.decode(payload)
+    val choice = chunk.choices.headOption
+    LmChunk(
+      text = choice.flatMap(_.content).getOrElse(""),
+      finishReason = choice.flatMap(_.finishReason),
+      usage = chunk.usage,
+      toolCalls = choice.map(_.toolCalls).getOrElse(Vector.empty),
+      raw = Some(payload)
     )
 
   private def statusError(status: Int, body: String): DspyError =
