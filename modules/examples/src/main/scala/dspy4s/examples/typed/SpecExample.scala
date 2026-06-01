@@ -5,8 +5,8 @@
  * `class Foo(dspy.Signature)` style. A trait extending `Spec` declares
  * input/output fields as abstract method members tagged with
  * `InputField[T]` / `OutputField[T]`. The macro `Signature.of[T]`
- * walks the trait at compile time, validates each member, summons a
- * `FieldCodec[T]` for the wrapped type, and emits the runtime
+ * walks the trait at compile time, validates each member, confirms a
+ * `Schema[T]` for the wrapped type, and emits the runtime
  * `Signature`.
  *
  * `Signature.of[T]` exposes named-tuple input/output types, so callers

@@ -12,16 +12,14 @@ package dspy4s.examples.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{DspyError, DynamicPrediction, RuntimeContext, :=}
-import dspy4s.typed.{Prediction, Signature, FieldCodec}
+import dspy4s.typed.{Prediction, Signature}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
 // enum's Schema must come from outside any enclosing class.
 case class EmotionInput(sentence: String) derives Schema
 
-enum Emotion:
+enum Emotion derives Schema:
   case sadness, joy, love, anger, fear, surprise
-
-object Emotion extends FieldCodec.FlatEnum[Emotion]
 
 case class EmotionOutput(sentiment: Emotion) derives Schema
 

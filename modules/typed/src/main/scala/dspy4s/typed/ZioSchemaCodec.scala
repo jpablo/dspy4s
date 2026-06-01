@@ -100,6 +100,11 @@ private[typed] object ZioSchemaCodec:
       rec.fields.toVector.map(term => FieldSpec(name = term.name, role = role, typeRef = typeRefFor(term.value)))
     case _ => Vector.empty
 
+  /** Derive the wire `TypeRef` for a single value type from its `Schema`. This is the same mapping
+    * `fieldSpecsFromReflect` applies to each record field, exposed for the programmatic [[SignatureBuilder]]
+    * (which types one field at a time rather than deriving a whole record). */
+  def typeRefForSchema[A](using schema: Schema[A]): TypeRef = typeRefFor(schema.reflect)
+
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef = reflect match
     case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
     case _: Reflect.Variant[?, ?]      => TypeRef.string

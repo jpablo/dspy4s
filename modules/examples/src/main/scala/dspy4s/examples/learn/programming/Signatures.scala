@@ -36,7 +36,7 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.{ChainOfThought, Predict}
-import dspy4s.typed.{FieldCodec, InputField, OutputField, Spec, Signature}
+import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -128,14 +128,11 @@ object SummarizeExample:
 // | classify = dspy.Predict(Emotion)
 // | classify(sentence=sentence)
 
-/** Python's `Literal[...]` becomes a top-level Scala enum.
-  * `FieldCodec.FlatEnum` gives the companion both a `FieldCodec` (for
-  * top-level OutputField use) and a flat-string `Schema` (for nested-
-  * product use). */
-enum Emotion:
+/** Python's `Literal[...]` becomes a top-level Scala enum. `derives Schema`
+  * gives it a flat-string wire form (the enum case name) at both the
+  * top-level OutputField boundary and inside nested products. */
+enum Emotion derives Schema:
   case sadness, joy, love, anger, fear, surprise
-
-object Emotion extends FieldCodec.FlatEnum[Emotion]
 
 trait EmotionSpec extends Spec:
   def sentence:  InputField[String]
@@ -229,9 +226,9 @@ object DogPictureExample:
 // |
 // | signature = dspy.Signature("query: MyContainer.Query -> score: MyContainer.Score")
 //
-// Pydantic models port to Scala case classes with `derives Schema`. Their
-// `FieldCodec` comes from the `schemaBackedProduct` fallback, which fires
-// automatically for any `<: Product` type with a `Schema` in scope.
+// Pydantic models port to Scala case classes with `derives Schema`. The
+// `Schema` drives both the field's wire `TypeRef` and its nested encode/decode
+// at the typed-signature boundary.
 
 case class QueryResult(text: String, score: Double) derives Schema
 

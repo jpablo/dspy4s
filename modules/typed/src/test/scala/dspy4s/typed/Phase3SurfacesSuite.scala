@@ -12,10 +12,8 @@ import munit.FunSuite
 case class P3CommentInput(comment: String, lang: String) derives Schema
 case class P3ClassifyOutput(toxic: Boolean, confidence: Double) derives Schema
 
-enum P3Tone:
+enum P3Tone derives Schema:
   case neutral, positive, negative
-
-object P3Tone extends FieldCodec.FlatEnum[P3Tone]
 
 case class P3ToneOutput(tone: P3Tone) derives Schema
 
@@ -44,7 +42,7 @@ class Phase3SurfacesSuite extends FunSuite:
     assertEquals(sig.signatureString, "comment, lang -> toxic, confidence")
   }
 
-  test("builder field TypeRefs come from the FieldCodec typeclass") {
+  test("builder field TypeRefs are derived from each field's Schema") {
     val sig = Signature
       .builder("Bag")
       .input[String]("a")

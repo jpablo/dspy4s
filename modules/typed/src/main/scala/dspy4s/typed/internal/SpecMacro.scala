@@ -9,16 +9,18 @@ private[typed] object SpecMacro:
 
   /** Implementation of `Signature.of[T <: Spec]`. Inspects T's
     * abstract methods at compile time, validates each returns
-    * `InputField[X]` or `OutputField[X]`, summons a `FieldCodec[X]`,
-    * and emits a `Signature[I, O]` whose `I` and `O` are named
-    * tuples carrying the spec's input and output fields.
+    * `InputField[X]` or `OutputField[X]`, confirms a `Schema[X]` is in
+    * scope, and emits a `Signature[I, O]` whose `I` and `O` are named
+    * tuples carrying the spec's input and output fields. Field metadata
+    * (`TypeRef`) and the value codec are both derived from the named
+    * tuple's `Schema` -- there is no per-field `FieldCodec`.
     *
     * Compile errors:
     *   - concrete (non-abstract) methods on the spec trait
     *   - methods that don't return `InputField[X]` or `OutputField[X]`
     *   - methods with parameters
     *   - duplicate field names
-    *   - missing `FieldCodec[X]` for any wrapped type */
+    *   - missing `Schema[X]` for any wrapped type */
   def ofImpl[T <: Spec : Type](
       name: Expr[String],
       instructions: Expr[String]

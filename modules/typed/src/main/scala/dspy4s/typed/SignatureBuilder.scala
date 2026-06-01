@@ -3,6 +3,7 @@ package dspy4s.typed
 import dspy4s.core.contracts.{
   FieldRole, FieldSpec, SignatureLayout
 }
+import zio.blocks.schema.Schema
 
 /** Fluent, type-driven builder for runtime `SignatureLayout` values.
   *
@@ -12,9 +13,10 @@ import dspy4s.core.contracts.{
   * case class per signature (REPL exploration, dynamic shapes assembled
   * from config, tests).
   *
-  * Each `.input[T]` / `.output[T]` call summons a `FieldCodec[T]` to derive the `TypeRef` for the resulting
-  * `FieldSpec`. The same primitives + Scala enum support that case-class derivation gets in Phase 2 are
-  * available here without writing a case class.
+  * Each `.input[T]` / `.output[T]` call summons a `zio.blocks.schema.Schema[T]` and derives the field's wire
+  * `TypeRef` from it (via [[ZioSchemaCodec.typeRefForSchema]]) — the same mapping case-class derivation applies
+  * per record field. Any type with a `Schema` (primitives, Scala enums, collections, nested products) works
+  * here without writing a case class.
   *
   * Returns a plain `SignatureLayout` from `.build`; callers needing typed
   * `DynamicPredict.run` should use `Signature.derived[I, O]` instead.
@@ -28,13 +30,13 @@ final class SignatureBuilder private[typed] (
 
   /** Append an input field typed `T`. Order of `.input` calls becomes the
     * input-field order in the resulting `SignatureLayout`. */
-  def input[T](name: String)(using dec: FieldCodec[T]): SignatureBuilder =
-    copy(inputs = inputs :+ fieldSpec(name, FieldRole.Input, dec))
+  def input[T](name: String)(using Schema[T]): SignatureBuilder =
+    copy(inputs = inputs :+ fieldSpec(name, FieldRole.Input))
 
   /** Append an output field typed `T`. Order of `.output` calls becomes the
     * output-field order in the resulting `SignatureLayout`. */
-  def output[T](name: String)(using dec: FieldCodec[T]): SignatureBuilder =
-    copy(outputs = outputs :+ fieldSpec(name, FieldRole.Output, dec))
+  def output[T](name: String)(using Schema[T]): SignatureBuilder =
+    copy(outputs = outputs :+ fieldSpec(name, FieldRole.Output))
 
   /** Replace the signature-level instructions. Empty strings become `None`. */
   def instructions(text: String): SignatureBuilder =
@@ -61,11 +63,11 @@ final class SignatureBuilder private[typed] (
         identity
       )
 
-  private def fieldSpec(name: String, role: FieldRole, dec: FieldCodec[?]): FieldSpec =
+  private def fieldSpec[T](name: String, role: FieldRole)(using Schema[T]): FieldSpec =
     FieldSpec(
       name    = name,
       role    = role,
-      typeRef = dec.typeRef
+      typeRef = ZioSchemaCodec.typeRefForSchema[T]
     )
 
   private def copy(

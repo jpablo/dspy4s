@@ -8,10 +8,8 @@ import munit.FunSuite
 
 import scala.annotation.nowarn
 
-enum P7Emotion:
+enum P7Emotion derives Schema:
   case sadness, joy, love
-
-object P7Emotion extends FieldCodec.FlatEnum[P7Emotion]
 
 case class P7Score(sentiment: P7Emotion, confidence: Double) derives Schema
 

@@ -5,10 +5,8 @@ import zio.blocks.schema.Schema
 import munit.FunSuite
 
 // Top-level fixtures: spec traits + supporting enum.
-enum P5Tone:
+enum P5Tone derives Schema:
   case calm, urgent, frustrated
-
-object P5Tone extends FieldCodec.FlatEnum[P5Tone]
 
 case class P5Citation(title: String, score: Double) derives Schema
 case class P5StructuredAnswer(

@@ -12,10 +12,8 @@ import munit.FunSuite
 case class P2SentenceInput(sentence: String) derives Schema
 case class P2ScoredSentiment(sentiment: String, confidence: Double) derives Schema
 
-enum P2Sentiment:
+enum P2Sentiment derives Schema:
   case sadness, joy, love, anger, fear, surprise
-
-object P2Sentiment extends FieldCodec.FlatEnum[P2Sentiment]
 
 case class P2EnumOutput(sentiment: P2Sentiment) derives Schema
 
@@ -123,15 +121,10 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   // ── Enum decoding ────────────────────────────────────────────────────────
 
-  test("FieldCodec enum derivation accepts case names as strings") {
-    val dec = summon[FieldCodec[P2Sentiment]]
-    assertEquals(dec.decode("joy"),       Right(P2Sentiment.joy))
-    assertEquals(dec.decode("sadness"),   Right(P2Sentiment.sadness))
-  }
-
-  test("FieldCodec enum derivation accepts already-typed enum values") {
-    val dec = summon[FieldCodec[P2Sentiment]]
-    assertEquals(dec.decode(P2Sentiment.fear), Right(P2Sentiment.fear))
+  test("enum output decodes case names from raw strings through the field's Schema") {
+    val shape = Shape.derived[P2EnumOutput]
+    assertEquals(shape.decode(rec("sentiment" := "joy")),     Right(P2EnumOutput(P2Sentiment.joy)))
+    assertEquals(shape.decode(rec("sentiment" := "sadness")), Right(P2EnumOutput(P2Sentiment.sadness)))
   }
 
   test("enum-like outputs reject values outside the declared set") {
@@ -149,12 +142,12 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(fs.typeRef, dspy4s.core.contracts.TypeRef.string)
   }
 
-  test("enum encoder uses case name (not toString) so overrides can't drift") {
-    val dec = summon[FieldCodec[P2Sentiment]]
-    assertEquals(dec.encode(P2Sentiment.joy), "joy")
-    assertEquals(dec.encode(P2Sentiment.sadness), "sadness")
-    // Encoded value must round-trip through decode.
-    assertEquals(dec.decode(dec.encode(P2Sentiment.love)), Right(P2Sentiment.love))
+  test("enum output round-trips through Shape encode/decode by case name") {
+    val shape = Shape.derived[P2EnumOutput]
+    val encoded = shape.encode(P2EnumOutput(P2Sentiment.love))
+    // Encoded wire form carries the flat case-name string, not a discriminated object.
+    assertEquals(lookup(encoded, "sentiment"), Some("love": Any))
+    assertEquals(shape.decode(encoded), Right(P2EnumOutput(P2Sentiment.love)))
   }
 
   // ── Prediction: never constructed after a decode failure ───────────

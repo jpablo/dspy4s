@@ -7,9 +7,8 @@
  * typed `DynamicPredict.run` should use the trait-spec, method, or case-class
  * APIs instead.
  *
- * Each `.input[T]` / `.output[T]` call summons a `FieldCodec[T]` so the
- * resulting `FieldSpec` carries the right `TypeRef` and any well-known
- * metadata (enum allowed cases, display name, etc.).
+ * Each `.input[T]` / `.output[T]` call summons a `Schema[T]` and derives the
+ * resulting `FieldSpec`'s wire `TypeRef` from it.
  *
  * Status: example
  */
@@ -33,9 +32,9 @@ object BuilderExample:
       )
       .build
 
-  /** Reusing an enum that has a `FieldCodec` (see CaseClassExample's `Emotion`) gives the builder a
-    * `TypeRef.string` field with the enum decoder wired up; enum allowed-values reach the LM through the typed
-    * Predict path's `Shape.jsonSchemaString` (inlined by `JSONAdapter`). */
+  /** Reusing an enum that has a `Schema` (see CaseClassExample's `Emotion`) gives the builder a
+    * `TypeRef.string` field; enum allowed-values reach the LM through the typed Predict path's
+    * `Shape.jsonSchemaString` (inlined by `JSONAdapter`). */
   val classifyEmotion: SignatureLayout =
     Signature
       .builder("Emotion")

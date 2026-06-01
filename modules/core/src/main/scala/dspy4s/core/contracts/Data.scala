@@ -102,9 +102,9 @@ object Completions:
   * accounting). The typed surface wraps a `DynamicPrediction` on [[dspy4s.typed.Prediction.raw]]; adapters,
   * callbacks, trace, and history all see this same object.
   *
-  * The `as*` coercive accessors mirror what [[dspy4s.typed.FieldCodec]] does at the typed layer (they apply the
-  * same lenient parsing rules) and are the standard escape hatch when consuming a prediction without a typed
-  * `Signature[I, O]`.
+  * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that the typed layer's
+  * Schema-backed decode performs (`dspy4s.typed.ZioSchemaCodec`), and are the standard escape hatch when
+  * consuming a prediction without a typed `Signature[I, O]`.
   *
   * Coercion rules (deliberately strict to avoid silent surprises):
   *
