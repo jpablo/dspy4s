@@ -78,6 +78,13 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(RequestHash.forRequest(requestA), RequestHash.forRequest(requestB))
   }
 
+  test("request hash distinguishes primitive types with equal text") {
+    val asInt    = baseRequest.copy(options = DynamicValues.record("v" := 1))
+    val asString = baseRequest.copy(options = DynamicValues.record("v" := "1"))
+
+    assertNotEquals(RequestHash.forRequest(asInt), RequestHash.forRequest(asString))
+  }
+
   test("in-memory cache returns cache hit response without usage") {
     val cache = new InMemoryLmCache(maxEntries = 8)
     cache.put(baseRequest, baseResponse)

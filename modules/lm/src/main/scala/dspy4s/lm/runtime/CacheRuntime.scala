@@ -1,9 +1,7 @@
 package dspy4s.lm.runtime
 
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LmCache
-import java.util.Objects
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
@@ -35,54 +33,50 @@ object RequestHash:
 
   private def encodeRequest(request: LmRequest): String =
     val messages = request.messages.map(encodeMessage).mkString("[", ",", "]")
-    val options = normalizeAny(DynamicValues.toAny(request.options))
+    val options = normalizeDynamic(request.options)
     val requestId = request.requestId.map(quote).getOrElse("null")
     val rolloutId = request.rolloutId.map(_.toString).getOrElse("null")
     s"""{"model":${quote(request.model)},"mode":${quote(request.mode.toString)},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
 
   private def encodeMessage(message: Message): String =
     val parts = message.parts.map(encodePart).mkString("[", ",", "]")
-    s"""{"role":${quote(message.role.toString)},"text":${message.text.map(quote).getOrElse("null")},"parts":$parts,"metadata":${normalizeAny(message.metadata)}}"""
+    s"""{"role":${quote(message.role.toString)},"text":${message.text.map(quote).getOrElse("null")},"parts":$parts,"metadata":${normalizeStringMap(message.metadata)}}"""
 
   private def encodePart(part: ContentPart): String =
-    s"""{"kind":${quote(part.kind)},"payload":${quote(part.payload)},"metadata":${normalizeAny(part.metadata)}}"""
+    s"""{"kind":${quote(part.kind)},"payload":${quote(part.payload)},"metadata":${normalizeStringMap(part.metadata)}}"""
 
-  private def normalizeAny(value: Any): String =
+  /** Canonical, order-independent string for the cache key. Records and Maps sort their keys so that two requests
+    * differing only in option insertion order collide onto the same entry (which `Schema.dynamic.jsonCodec` would
+    * not, since it preserves insertion order). Primitives are tagged by their case-class name so a string `"1"`
+    * cannot collide with an int `1`. */
+  private def normalizeDynamic(value: DynamicValue): String =
     value match
-      case _ if Objects.isNull(value) => "null"
-      case s: String       => quote(s)
-      case c: Char         => quote(c.toString)
-      case b: Boolean      => b.toString
-      case n: Byte         => n.toString
-      case n: Short        => n.toString
-      case n: Int          => n.toString
-      case n: Long         => n.toString
-      case n: Float        => n.toString
-      case n: Double       => n.toString
-      case n: BigInt       => n.toString
-      case n: BigDecimal   => n.toString
-      case opt: Option[?]  => opt.map(normalizeAny).getOrElse("null")
-      case map: Map[?, ?] =>
-        map.iterator
-          .map { case (k, v) => quote(String.valueOf(k)) -> normalizeAny(v) }
+      case DynamicValue.Primitive(p)      => quote(p.toString)
+      case DynamicValue.Sequence(elems)   => elems.iterator.map(normalizeDynamic).mkString("[", ",", "]")
+      case DynamicValue.Variant(name, v)  => s"{${quote(name)}:${normalizeDynamic(v)}}"
+      case DynamicValue.Record(fields) =>
+        fields.iterator
+          .map { case (k, v) => quote(k) -> normalizeDynamic(v) }
           .toVector
           .sortBy(_._1)
           .map { case (k, v) => s"$k:$v" }
           .mkString("{", ",", "}")
-      case iterable: Iterable[?] =>
-        iterable.iterator.map(normalizeAny).mkString("[", ",", "]")
-      case array: Array[?] =>
-        array.iterator.map(normalizeAny).mkString("[", ",", "]")
-      case product: Product =>
-        val values = product.productIterator.toVector
-        val names = product.productElementNames.toVector
-        if names.nonEmpty && names.size == values.size then
-          names.zip(values).map { case (name, item) =>
-            quote(name) -> normalizeAny(item)
-          }.sortBy(_._1).map { case (k, v) => s"$k:$v" }.mkString("{", ",", "}")
-        else values.map(normalizeAny).mkString("[", ",", "]")
-      case other =>
-        quote(other.toString)
+      case DynamicValue.Map(entries) =>
+        entries.iterator
+          .map { case (k, v) => normalizeDynamic(k) -> normalizeDynamic(v) }
+          .toVector
+          .sortBy(_._1)
+          .map { case (k, v) => s"$k:$v" }
+          .mkString("{", ",", "}")
+      case _ => "null" // DynamicValue.Null
+
+  private def normalizeStringMap(map: Map[String, String]): String =
+    map.iterator
+      .map { case (k, v) => quote(k) -> quote(v) }
+      .toVector
+      .sortBy(_._1)
+      .map { case (k, v) => s"$k:$v" }
+      .mkString("{", ",", "}")
 
   private def quote(text: String): String =
     val escaped = text
