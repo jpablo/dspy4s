@@ -72,9 +72,9 @@ class StatusStreamingCallbackSuite extends FunSuite:
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
-    callback.onEvent(ModuleStartEvent("predict", Map("q" -> "x")))
+    callback.onEvent(ModuleStartEvent("predict", DynamicValues.record("q" := "x")))
     callback.onEvent(ModuleEndEvent("predict", Right("y")))
-    callback.onEvent(LmStartEvent("model-id", Map.empty))
+    callback.onEvent(LmStartEvent("model-id", DynamicValue.Record.empty))
     callback.onEvent(LmEndEvent("model-id", Right("response")))
 
     assertEquals(drain(queue).size, 0)
@@ -82,17 +82,17 @@ class StatusStreamingCallbackSuite extends FunSuite:
 
   test("custom provider emits messages for module and lm events") {
     val provider = new StatusMessageProvider:
-      override def moduleStart(instanceName: String, inputs: Map[String, Any]): Option[String] =
+      override def moduleStart(instanceName: String, inputs: DynamicValue.Record): Option[String] =
         Some(s"Module $instanceName starting")
-      override def lmStart(modelId: String, inputs: Map[String, Any]): Option[String] =
+      override def lmStart(modelId: String, inputs: DynamicValue.Record): Option[String] =
         Some(s"Calling $modelId")
 
     val queue = StreamingQueue[StreamEvent](16)
     val callback = new StatusStreamingCallback(provider, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
-    callback.onEvent(ModuleStartEvent("predict", Map.empty))
-    callback.onEvent(LmStartEvent("gpt-4", Map.empty))
+    callback.onEvent(ModuleStartEvent("predict", DynamicValue.Record.empty))
+    callback.onEvent(LmStartEvent("gpt-4", DynamicValue.Record.empty))
 
     val events = drain(queue)
     assertEquals(events.size, 2)

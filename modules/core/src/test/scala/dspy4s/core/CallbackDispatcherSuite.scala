@@ -38,7 +38,7 @@ class CallbackDispatcherSuite extends FunSuite:
         events += event
 
     val result = RuntimeEnvironment.withCallbacks(Vector(callback)) {
-      CallbackDispatcher.withModule("predict", Map("question" -> "hi")) {
+      CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "hi")) {
         Right("ok")
       }
     }
@@ -57,7 +57,7 @@ class CallbackDispatcherSuite extends FunSuite:
 
     val _ = intercept[IllegalStateException] {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
-        CallbackDispatcher.withModule("predict", Map("question" -> "boom")) {
+        CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "boom")) {
           throw IllegalStateException("boom")
         }
       }
@@ -77,10 +77,10 @@ class CallbackDispatcherSuite extends FunSuite:
         events += event
 
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
-      val lmResult = CallbackDispatcher.withLm("gpt-test", Map("prompt" -> "hello")) {
+      val lmResult = CallbackDispatcher.withLm("gpt-test", DynamicValues.record("prompt" := "hello")) {
         Right(Map("text" -> "world"))
       }
-      val adapterResult = CallbackDispatcher.withAdapter("json", Map("input" -> "raw")) {
+      val adapterResult = CallbackDispatcher.withAdapter("json", DynamicValues.record("input" := "raw")) {
         Right(Map("output" -> "parsed"))
       }
 
@@ -102,8 +102,8 @@ class CallbackDispatcherSuite extends FunSuite:
         events += event
 
     val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
-      CallbackDispatcher.withModule("parent", Map("q" -> "x")) {
-        CallbackDispatcher.withModule("child", Map("q" -> "x")) {
+      CallbackDispatcher.withModule("parent", DynamicValues.record("q" := "x")) {
+        CallbackDispatcher.withModule("child", DynamicValues.record("q" := "x")) {
           Right("child")
         }.map(_ => "done")
       }
@@ -132,10 +132,10 @@ class CallbackDispatcherSuite extends FunSuite:
     val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given ExecutionContext = ExecutionContext.global
 
-      CallbackDispatcher.withModule("outer", Map("q" -> "x")) {
+      CallbackDispatcher.withModule("outer", DynamicValues.record("q" := "x")) {
         Await.result(
           ContextPropagation.future {
-            CallbackDispatcher.withLm("gpt-test", Map("prompt" -> "hello")) {
+            CallbackDispatcher.withLm("gpt-test", DynamicValues.record("prompt" := "hello")) {
               Right(Map("text" -> "ok"))
             }
           },
@@ -183,7 +183,7 @@ class CallbackDispatcherSuite extends FunSuite:
 
     given ExecutionContext = ExecutionContext.global
 
-    val _ = CallbackDispatcher.withModule("outer", Map("q" -> "x")) {
+    val _ = CallbackDispatcher.withModule("outer", DynamicValues.record("q" := "x")) {
       snapshots += RuntimeEnvironment.activeCallStack
 
       Await.result(

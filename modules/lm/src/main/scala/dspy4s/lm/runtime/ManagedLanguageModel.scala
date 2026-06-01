@@ -1,8 +1,10 @@
 package dspy4s.lm.runtime
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
@@ -159,11 +161,11 @@ final case class ManagedLanguageModel(
       RuntimeEnvironment.appendHistory(
         HistoryEntry(
           component = s"lm:$id",
-          payload = Map(
-            "model" -> request.model,
-            "cache_hit" -> cacheHit,
-            "outputs" -> response.outputs.size,
-            "mode" -> request.mode.toString
+          payload = DynamicValues.record(
+            "model" := request.model,
+            "cache_hit" := cacheHit,
+            "outputs" := response.outputs.size,
+            "mode" := request.mode.toString
           )
         )
       )
@@ -173,11 +175,11 @@ final case class ManagedLanguageModel(
       RuntimeEnvironment.appendHistory(
         HistoryEntry(
           component = s"lm:$id",
-          payload = Map(
-            "model" -> request.model,
-            "cache_hit" -> false,
-            "error_code" -> error.code,
-            "error_message" -> error.message
+          payload = DynamicValues.record(
+            "model" := request.model,
+            "cache_hit" := false,
+            "error_code" := error.code,
+            "error_message" := error.message
           )
         )
       )

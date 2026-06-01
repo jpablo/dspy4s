@@ -3,9 +3,11 @@ package dspy4s.core
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
 
@@ -48,7 +50,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
     val context = RuntimeContext(callbacks = Vector(callback))
 
     RuntimeEnvironment.withContext(context) {
-      RuntimeEnvironment.emit(ModuleStartEvent("predict", Map("q" -> "hi")))
+      RuntimeEnvironment.emit(ModuleStartEvent("predict", DynamicValues.record("q" := "hi")))
     }
 
     assertEquals(received.size, 1)
@@ -149,18 +151,18 @@ class RuntimeEnvironmentSuite extends FunSuite:
 
   test("appendHistory honors max history size and disable history settings") {
     RuntimeEnvironment.withSettings(RuntimeContext(maxHistorySize = Some(2))) {
-      RuntimeEnvironment.appendHistory(HistoryEntry("lm", Map("n" -> 1)))
-      RuntimeEnvironment.appendHistory(HistoryEntry("lm", Map("n" -> 2)))
-      RuntimeEnvironment.appendHistory(HistoryEntry("lm", Map("n" -> 3)))
+      RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 1)))
+      RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 2)))
+      RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 3)))
 
       val history = RuntimeEnvironment.current.history
       assertEquals(history.size, 2)
-      assertEquals(history.head.payload("n"), 2)
-      assertEquals(history.last.payload("n"), 3)
+      assertEquals(DynamicValues.recordToMap(history.head.payload)("n"), 2: Any)
+      assertEquals(DynamicValues.recordToMap(history.last.payload)("n"), 3: Any)
     }
 
     RuntimeEnvironment.withSettings(RuntimeContext(disableHistory = Some(true))) {
-      RuntimeEnvironment.appendHistory(HistoryEntry("lm", Map("n" -> 4)))
+      RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 4)))
       assertEquals(RuntimeEnvironment.current.history, Vector.empty)
     }
   }

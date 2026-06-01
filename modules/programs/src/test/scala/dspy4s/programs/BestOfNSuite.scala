@@ -42,8 +42,8 @@ class BestOfNSuite extends FunSuite:
         RuntimeEnvironment.appendTrace(
           TraceEntry(
             component = moduleName,
-            inputs    = DynamicValues.recordToMap(input.inputs),
-            outputs   = DynamicValues.recordToMap(prediction.values)
+            inputs    = input.inputs,
+            outputs   = prediction.values
           )
         )
       }
@@ -78,7 +78,7 @@ class BestOfNSuite extends FunSuite:
     assertEquals(module.calls.get(), 3)
     assertEquals(module.rolloutIds.toVector, Vector(7, 8, 9))
     assertEquals(RuntimeEnvironment.current.trace.size, 1)
-    assertEquals(RuntimeEnvironment.current.trace.head.outputs.get("answer"), Some("B": Any))
+    assertEquals(DynamicValues.recordToMap(RuntimeEnvironment.current.trace.head.outputs).get("answer"), Some("B": Any))
   }
 
   test("best of n default fail count raises after repeated failures") {
@@ -167,7 +167,7 @@ class BestOfNSuite extends FunSuite:
       .getOrElse(List.empty)
     assertEquals(toolCalls.head("name"), "lookup": Any)
     assertEquals(
-      RuntimeEnvironment.current.trace.head.outputs.get("tool_calls"),
+      DynamicValues.recordToMap(RuntimeEnvironment.current.trace.head.outputs).get("tool_calls"),
       Some(toolCalls: Any)
     )
   }

@@ -6,9 +6,11 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.lm.contracts.LanguageModel
@@ -52,13 +54,13 @@ private[dspy4s] final case class PredictEngine(
         invocation = buildInvocation(call, model)
         prompt <- CallbackDispatcher.withAdapter(
           adapterName = adapter.name,
-          inputs = Map("phase" -> "format", "signature" -> layout.name)
+          inputs = DynamicValues.record("phase" := "format", "signature" := layout.name)
         ) {
           adapter.format(invocation)
         }
         response <- CallbackDispatcher.withLm(
           modelId = model.id,
-          request = Map("model" -> model.id, "mode" -> model.mode.toString)
+          request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
         ) {
           model.call(invocation.request.copy(messages = prompt.messages))
         }
@@ -91,7 +93,7 @@ private[dspy4s] final case class PredictEngine(
         soFar <- acc
         parsed <- CallbackDispatcher.withAdapter(
           adapterName = adapter.name,
-          inputs = Map("phase" -> "parse", "index" -> index)
+          inputs = DynamicValues.record("phase" := "parse", "index" := index)
         ) {
           adapter.parse(layout, output)
         }

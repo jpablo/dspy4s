@@ -37,7 +37,7 @@ object CallbackDispatcher:
     RuntimeEnvironment.emit(event)
 
   /** Wrap a module execution in a `ModuleStartEvent` / `ModuleEndEvent` pair. */
-  def withModule[A](moduleName: String, inputs: Map[String, Any])(thunk: => Either[DspyError, A]): Either[DspyError, A] =
+  def withModule[A](moduleName: String, inputs: DynamicValue.Record)(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope(prefix = "module") { (callId, parentCallId) =>
       emit(
         ModuleStartEvent(
@@ -60,7 +60,7 @@ object CallbackDispatcher:
     }
 
   /** Wrap a language-model call in an `LmStartEvent` / `LmEndEvent` pair. */
-  def withLm[A](modelId: String, request: Map[String, Any])(thunk: => Either[DspyError, A]): Either[DspyError, A] =
+  def withLm[A](modelId: String, request: DynamicValue.Record)(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope(prefix = "lm") { (callId, parentCallId) =>
       emit(
         LmStartEvent(
@@ -85,7 +85,7 @@ object CallbackDispatcher:
   /** Wrap an adapter pass (format or parse) in an `AdapterStartEvent` / `AdapterEndEvent` pair. */
   def withAdapter[A](
       adapterName: String,
-      inputs: Map[String, Any]
+      inputs: DynamicValue.Record
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope(prefix = "adapter") { (callId, parentCallId) =>
       emit(

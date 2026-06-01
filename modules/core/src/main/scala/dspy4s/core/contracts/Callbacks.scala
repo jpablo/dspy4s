@@ -55,7 +55,7 @@ sealed trait CallbackEvent extends Product with Serializable:
 /** Opens a module-level scope (a `Predict`, `ChainOfThought`, `ReAct`, etc.). Paired with [[ModuleEndEvent]]. */
 final case class ModuleStartEvent(
     moduleName: String,
-    inputs: Map[String, Any],
+    inputs: DynamicValue.Record,
     callId: String = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
     timestamp: Instant = Instant.now()
@@ -77,7 +77,7 @@ final case class ModuleEndEvent(
   * [[LmEndEvent]]. */
 final case class LmStartEvent(
     modelId: String,
-    request: Map[String, Any],
+    request: DynamicValue.Record,
     callId: String = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
     timestamp: Instant = Instant.now()
@@ -99,7 +99,7 @@ final case class LmEndEvent(
   * [[AdapterEndEvent]]. */
 final case class AdapterStartEvent(
     adapterName: String,
-    inputs: Map[String, Any],
+    inputs: DynamicValue.Record,
     callId: String = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
     timestamp: Instant = Instant.now()

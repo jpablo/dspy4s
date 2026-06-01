@@ -27,6 +27,7 @@ import dspy4s.streaming.contracts.PredictionEvent
 import dspy4s.streaming.contracts.StatusEvent
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.TokenEvent
+import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -109,7 +110,7 @@ class StreamifySuite extends FunSuite:
       val stream = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(new StatusMessageProvider:
-          override def lmStart(modelId: String, inputs: Map[String, Any]): Option[String] =
+          override def lmStart(modelId: String, inputs: DynamicValue.Record): Option[String] =
             Some(s"Calling $modelId...")
         )
       )(rec("question" := "x"))
@@ -133,7 +134,7 @@ class StreamifySuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
     val receivedStatus = new AtomicInteger(0)
     val provider = new StatusMessageProvider:
-      override def moduleStart(instanceName: String, inputs: Map[String, Any]): Option[String] =
+      override def moduleStart(instanceName: String, inputs: DynamicValue.Record): Option[String] =
         receivedStatus.incrementAndGet()
         Some("starting")
 

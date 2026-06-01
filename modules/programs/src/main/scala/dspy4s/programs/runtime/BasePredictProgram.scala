@@ -15,6 +15,7 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
+import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
@@ -53,11 +54,11 @@ abstract class BasePredictProgram(
 
   protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction]
 
-  protected def tracePayload(prediction: DynamicPrediction): Map[String, Any] =
-    DynamicValues.recordToMap(prediction.values)
+  protected def tracePayload(prediction: DynamicPrediction): DynamicValue.Record =
+    prediction.values
 
   override final def run(input: ProgramCall)(using runtime: RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val inputBag = DynamicValues.recordToMap(input.inputs)
+    val inputBag = input.inputs
     CallbackDispatcher.withModule(moduleName, inputBag) {
       val result = execute(input)
       if input.traceEnabled then
@@ -68,7 +69,7 @@ abstract class BasePredictProgram(
               TraceEntry(component = moduleName, inputs = inputBag, outputs = outputs)
             )
             RuntimeEnvironment.appendHistory(
-              HistoryEntry(component = moduleName, payload = Map("inputs" -> inputBag, "outputs" -> outputs))
+              HistoryEntry(component = moduleName, payload = DynamicValues.record("inputs" -> inputBag, "outputs" -> outputs))
             )
           case Left(_) => ()
       result

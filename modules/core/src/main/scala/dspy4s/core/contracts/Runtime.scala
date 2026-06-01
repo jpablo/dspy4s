@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import zio.blocks.schema.DynamicValue
+
 import java.time.Instant
 
 /** Marker trait for the language-model context value. Empty by design -- this trait lives in `core` so
@@ -23,8 +25,8 @@ trait AdapterRef
   * call succeeds. Failed calls produce no trace entry. */
 final case class TraceEntry(
     component: String,
-    inputs: Map[String, Any],
-    outputs: Map[String, Any],
+    inputs: DynamicValue.Record,
+    outputs: DynamicValue.Record,
     timestamp: Instant = Instant.now()
 )
 
@@ -33,7 +35,7 @@ final case class TraceEntry(
   * caller-defined snapshot (typically `Map("inputs" -> ..., "outputs" -> ...)`).
   *
   * The history ring is capped by [[RuntimeContext.maxHistorySize]] in `RuntimeEnvironment.appendHistory`. */
-final case class HistoryEntry(component: String, payload: Map[String, Any], timestamp: Instant = Instant.now())
+final case class HistoryEntry(component: String, payload: DynamicValue.Record, timestamp: Instant = Instant.now())
 
 /** The unit of execution context: everything an in-flight call needs to know about its environment. Threaded as
   * `using RuntimeContext` on every `Module.run`, `Adapter.format` / `parse`, `LanguageModel.call`, and
