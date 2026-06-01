@@ -2,10 +2,13 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.LmUsage
+import zio.blocks.schema.DynamicValue
 
 final case class OpenAiClient(
     apiKey: String,
@@ -13,33 +16,41 @@ final case class OpenAiClient(
     transport: HttpTransport = HttpTransport.jdk(),
     chatEndpoint: String = "/chat/completions"
 ):
+  import DynamicJson.{field, asRecord, asString, asLong, asSequence}
+
   private val defaultHeaders: Map[String, String] = Map(
     "Authorization" -> s"Bearer $apiKey"
   )
 
-  private val streamOptionsIncludeUsage: Map[String, Any] =
-    Map("stream_options" -> Map("include_usage" -> true))
-
   private val providerInternalKeys: Set[String] = Set("mode")
 
-  private def outgoingPayload(payload: Map[String, Any]): Map[String, Any] =
-    JsonCodec.stripNone(payload).filterNot((k, _) => providerInternalKeys.contains(k))
+  /** Drop dspy4s-internal keys; `DynamicJson.encode` handles null-stripping. */
+  private def outgoingJson(payload: DynamicValue): String =
+    val filtered = payload match
+      case rec: DynamicValue.Record => DynamicValues.recordFilterKeys(rec, k => !providerInternalKeys.contains(k))
+      case other                    => other
+    DynamicJson.encode(filtered)
 
-  def invoke(payload: Map[String, Any]): Either[DspyError, Map[String, Any]] =
+  def invoke(payload: DynamicValue): Either[DspyError, DynamicValue] =
     val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
-    val body = JsonCodec.encodeString(outgoingPayload(payload))
-    transport.sendJson(url, defaultHeaders, body).flatMap { response =>
+    transport.sendJson(url, defaultHeaders, outgoingJson(payload)).flatMap { response =>
       if response.status < 200 || response.status >= 300 then
         Left(statusError(response.status, response.body))
       else
-        JsonCodec.decodeString(response.body)
+        DynamicJson.decode(response.body)
     }
 
-  def stream(payload: Map[String, Any]): Either[DspyError, ClosableIterator[LmChunk]] =
+  def stream(payload: DynamicValue): Either[DspyError, ClosableIterator[LmChunk]] =
     val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
-    val withStreaming = payload + ("stream" -> true) ++ streamOptionsIncludeUsage
-    val body = JsonCodec.encodeString(outgoingPayload(withStreaming))
-    transport.streamSse(url, defaultHeaders, body).flatMap { response =>
+    val withStreaming = payload match
+      case rec: DynamicValue.Record =>
+        val streamOptions = DynamicValues.recordFromEntries(Seq("include_usage" := true))
+        DynamicValues.recordUpdated(
+          DynamicValues.recordUpdated(rec, "stream", DynamicValues.fromAny(true)),
+          "stream_options", streamOptions
+        )
+      case other => other
+    transport.streamSse(url, defaultHeaders, outgoingJson(withStreaming)).flatMap { response =>
       if response.status < 200 || response.status >= 300 then
         val buffered = new StringBuilder
         val draining = response.dataLines
@@ -70,13 +81,12 @@ final case class OpenAiClient(
                 close()
                 return
               else
-                JsonCodec.decodeString(data) match
+                DynamicJson.decode(data) match
                   case Right(value) =>
                     pending = chunkFromPayload(value)
                     return
                   case Left(_) => ()
-          // Lines exhausted without an explicit [DONE]: the upstream response is
-          // finished, so release the connection instead of leaving it for GC.
+          // Lines exhausted without an explicit [DONE]: release the connection rather than leaving it for GC.
           close()
 
       override def hasNext: Boolean =
@@ -98,38 +108,40 @@ final case class OpenAiClient(
           innerClosed = true
           lines.close()
 
-  private def chunkFromPayload(payload: Map[String, Any]): LmChunk =
-    val choice = payload.get("choices").flatMap(asVector).flatMap(_.headOption).flatMap(asMap)
-    val delta = choice.flatMap(_.get("delta")).flatMap(asMap)
+  private def chunkFromPayload(payload: DynamicValue): LmChunk =
+    val choice = field(payload, "choices").map(asSequence).flatMap(_.headOption).flatMap(asRecord)
+    val delta  = choice.flatMap(c => field(c, "delta")).flatMap(asRecord)
 
-    val text = delta.flatMap(_.get("content")).collect { case s: String => s }.getOrElse("")
-    val finishReason = choice.flatMap(_.get("finish_reason")).collect { case s: String => s }
-    val usage = payload.get("usage").flatMap(asMap).map(parseUsage)
+    val text = delta.flatMap(d => field(d, "content")).flatMap(asString).getOrElse("")
+    val finishReason = choice.flatMap(c => field(c, "finish_reason")).flatMap(asString)
+    val usage = field(payload, "usage").flatMap(asRecord).map(parseUsage)
     val toolCalls = delta
-      .flatMap(_.get("tool_calls"))
-      .flatMap(asVector)
+      .flatMap(d => field(d, "tool_calls"))
+      .map(asSequence)
       .map(parseToolCallDeltas)
       .getOrElse(Vector.empty)
 
     LmChunk(text = text, finishReason = finishReason, usage = usage, toolCalls = toolCalls, raw = Some(payload))
 
-  private def parseToolCallDeltas(entries: Vector[Any]): Vector[LmToolCallDelta] =
+  private def parseToolCallDeltas(entries: Vector[DynamicValue]): Vector[LmToolCallDelta] =
     entries.zipWithIndex.flatMap { case (raw, fallbackIdx) =>
-      asMap(raw).map { entry =>
-        val index = asLong(entry.get("index")).map(_.toInt).getOrElse(fallbackIdx)
-        val id = entry.get("id").collect { case s: String => s }
-        val function = entry.get("function").flatMap(asMap)
-        val name = function.flatMap(_.get("name")).collect { case s: String => s }
-        val arguments = function.flatMap(_.get("arguments")).collect { case s: String => s }
+      asRecord(raw).map { entry =>
+        val index = field(entry, "index").flatMap(asLong).map(_.toInt).getOrElse(fallbackIdx)
+        val id = field(entry, "id").flatMap(asString)
+        val function = field(entry, "function").flatMap(asRecord)
+        val name = function.flatMap(f => field(f, "name")).flatMap(asString)
+        val arguments = function.flatMap(f => field(f, "arguments")).flatMap(asString)
         LmToolCallDelta(index = index, id = id, name = name, argumentsFragment = arguments)
       }
     }
 
-  private def parseUsage(map: Map[String, Any]): LmUsage =
-    val promptTokens = asLong(map.get("prompt_tokens")).getOrElse(0L)
-    val completionTokens = asLong(map.get("completion_tokens")).getOrElse(0L)
-    val totalTokens = asLong(map.get("total_tokens")).getOrElse(promptTokens + completionTokens)
-    val details = map.iterator.collect { case (k, v) if asLong(Some(v)).isDefined => k -> asLong(Some(v)).get }.toMap
+  private def parseUsage(usage: DynamicValue.Record): LmUsage =
+    val promptTokens = field(usage, "prompt_tokens").flatMap(asLong).getOrElse(0L)
+    val completionTokens = field(usage, "completion_tokens").flatMap(asLong).getOrElse(0L)
+    val totalTokens = field(usage, "total_tokens").flatMap(asLong).getOrElse(promptTokens + completionTokens)
+    val details = usage.fields.iterator.collect {
+      case (k, v) if asLong(v).isDefined => k -> asLong(v).get
+    }.toMap
     LmUsage(
       totalTokens = totalTokens,
       promptTokens = promptTokens,
@@ -139,29 +151,12 @@ final case class OpenAiClient(
 
   private def statusError(status: Int, body: String): DspyError =
     val code = status match
-      case 401 | 403          => "openai_auth"
-      case 404                => "openai_not_found"
-      case 429                => "openai_rate_limit"
-      case s if s >= 500      => "openai_server"
-      case _                  => "openai_http"
+      case 401 | 403     => "openai_auth"
+      case 404           => "openai_not_found"
+      case 429           => "openai_rate_limit"
+      case s if s >= 500 => "openai_server"
+      case _             => "openai_http"
     RuntimeError(code, s"OpenAI HTTP $status: ${body.take(400)}")
-
-  private def asVector(value: Any): Option[Vector[Any]] = value match
-    case v: Vector[?] => Some(v)
-    case s: Seq[?]    => Some(s.toVector)
-    case _            => None
-
-  private def asMap(value: Any): Option[Map[String, Any]] = value match
-    case m: Map[?, ?] => Some(m.iterator.collect { case (k: String, v) => k -> v }.toMap)
-    case _            => None
-
-  private def asLong(value: Option[Any]): Option[Long] = value match
-    case Some(v: Long)       => Some(v)
-    case Some(v: Int)        => Some(v.toLong)
-    case Some(v: Double)     => Some(v.toLong)
-    case Some(v: Float)      => Some(v.toLong)
-    case Some(v: String)     => v.toLongOption
-    case _                   => None
 
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"

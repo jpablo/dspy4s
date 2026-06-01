@@ -2,8 +2,10 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.LmChunk
+import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
 class OpenAiClientSuite extends FunSuite:
@@ -61,13 +63,14 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "sk-test", baseUrl = "https://api.example.com/v1", transport = transport)
 
-    val result = client.invoke(Map("model" -> "gpt-4o-mini", "messages" -> Vector(Map("role" -> "user", "content" -> "hi"))))
+    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini", "messages" -> Vector(Map("role" -> "user", "content" -> "hi")))))
 
     assert(result.isRight)
     val payload = result.toOption.get
-    val choices = payload("choices").asInstanceOf[Vector[Map[String, Any]]]
+    val choices = DynamicJson.asSequence(DynamicJson.field(payload, "choices").getOrElse(DynamicValue.Null))
     assertEquals(choices.size, 1)
-    assertEquals(choices(0)("message").asInstanceOf[Map[String, Any]]("content"), "Paris")
+    val message = DynamicJson.field(choices(0), "message").getOrElse(DynamicValue.Null)
+    assertEquals(DynamicJson.field(message, "content").flatMap(DynamicJson.asString), Some("Paris"))
 
     assertEquals(transport.sentBodies.size, 1)
     val (url, body, auth) = transport.sentBodies.head
@@ -83,7 +86,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.invoke(Map("model" -> "m"))
+    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "m")))
     assert(result.isLeft)
     val error = result.left.toOption.get.asInstanceOf[RuntimeError]
     assertEquals(error.component, "openai_rate_limit")
@@ -95,7 +98,7 @@ class OpenAiClientSuite extends FunSuite:
       nonStreamingResponses = Vector(Right(HttpResponse(200, Map.empty, "not valid json{{{")))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val result = client.invoke(Map("model" -> "m"))
+    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "m")))
     assert(result.isLeft)
   }
 
@@ -109,7 +112,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.stream(Map("model" -> "gpt-4o-mini", "messages" -> Vector(Map("role" -> "user", "content" -> "hi"))))
+    val result = client.stream(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini", "messages" -> Vector(Map("role" -> "user", "content" -> "hi")))))
     assert(result.isRight)
     val iter = result.toOption.get
 
@@ -138,7 +141,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val iter = client.stream(Map("model" -> "m")).toOption.get
+    val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
     while iter.hasNext do { val _ = iter.next() }
 
     assert(source.closed, "underlying SSE connection should be closed after the stream reaches [DONE]")
@@ -153,7 +156,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val _ = client.stream(Map("model" -> "m"))
+    val _ = client.stream(DynamicValues.fromAny(Map("model" -> "m")))
 
     val (_, body, _) = transport.sentStreamBodies.head
     assert(body.contains("\"stream\":true"))
@@ -170,7 +173,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val result = client.stream(Map("model" -> "m"))
+    val result = client.stream(DynamicValues.fromAny(Map("model" -> "m")))
     assert(result.isLeft)
     val error = result.left.toOption.get.asInstanceOf[RuntimeError]
     assertEquals(error.component, "openai_server")
@@ -192,7 +195,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter = client.stream(Map("model" -> "m")).toOption.get
+    val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
     val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
     while iter.hasNext do chunks += iter.next()
 
@@ -222,7 +225,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter = client.stream(Map("model" -> "m")).toOption.get
+    val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
     val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
     while iter.hasNext do chunks += iter.next()
     assertEquals(chunks.size, 1)

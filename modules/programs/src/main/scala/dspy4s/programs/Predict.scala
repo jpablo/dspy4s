@@ -4,6 +4,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, Example, NotFoundError, 
 import dspy4s.programs.contracts.{ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Signature}
+import zio.blocks.schema.DynamicValue
 
 /** The fundamental typed prediction module: given a `Signature[I, O]`, `run`
   * takes a typed input `I`, formats and dispatches a language-model request
@@ -55,7 +56,7 @@ final case class Predict[I, O](
     * though those events still show a successful call. */
   def run(
       input: I,
-      config: Map[String, Any] = Map.empty,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputRecord = signature.inputShape.encode(input)

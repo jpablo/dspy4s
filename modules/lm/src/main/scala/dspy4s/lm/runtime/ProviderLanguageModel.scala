@@ -14,13 +14,15 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.ToolCall
-import zio.blocks.schema.DynamicValue
+import dspy4s.lm.providers.DynamicJson
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final case class ProviderLanguageModel(
     id: String,
     mode: LmMode,
-    invoke: Map[String, Any] => Either[DspyError, Map[String, Any]],
-    defaultOptions: Map[String, Any] = Map.empty
+    invoke: DynamicValue => Either[DspyError, DynamicValue],
+    defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends LanguageModel:
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val effectiveMode = request.mode
@@ -28,50 +30,58 @@ final case class ProviderLanguageModel(
     invoke(normalizedRequest).flatMap(raw => ProviderResponseParser.parse(raw, effectiveMode))
 
 object ProviderRequestNormalizer:
-  def normalize(request: LmRequest, defaultOptions: Map[String, Any] = Map.empty): Map[String, Any] =
-    val base = Map("model" -> request.model, "mode" -> request.mode.toString.toLowerCase)
-    val options = defaultOptions ++ request.options
-    val withRequestId = request.requestId match
-      case Some(requestId) => base.updated("request_id", requestId)
-      case None            => base
+  private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
+  /** Build the provider request payload as a `DynamicValue.Record`: the merged option bag (defaults overlaid by
+    * the request's options), plus model / mode / request_id and the encoded messages or prompt. */
+  def normalize(
+      request: LmRequest,
+      defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
+  ): DynamicValue.Record =
+    var rec = mergeRecords(defaultOptions, request.options)
+    rec = DynamicValues.recordUpdated(rec, "model", str(request.model))
+    rec = DynamicValues.recordUpdated(rec, "mode", str(request.mode.toString.toLowerCase))
+    request.requestId.foreach(id => rec = DynamicValues.recordUpdated(rec, "request_id", str(id)))
     request.mode match
       case LmMode.Chat | LmMode.Responses =>
-        withRequestId ++ options.updated("messages", request.messages.map(encodeMessage))
+        DynamicValues.recordUpdated(
+          rec, "messages", DynamicValue.Sequence(Chunk.from(request.messages.map(encodeMessage)))
+        )
       case LmMode.Text =>
         val prompt = request.messages.map(messageText).mkString("\n").trim
-        withRequestId ++ options.updated("prompt", prompt)
+        DynamicValues.recordUpdated(rec, "prompt", str(prompt))
 
-  private def encodeMessage(message: Message): Map[String, Any] =
+  private def mergeRecords(base: DynamicValue.Record, overlay: DynamicValue.Record): DynamicValue.Record =
+    overlay.fields.iterator.foldLeft(base)((acc, kv) => DynamicValues.recordUpdated(acc, kv._1, kv._2))
+
+  private def encodeMessage(message: Message): DynamicValue =
     val role = message.role.toString.toLowerCase
-    if message.parts.nonEmpty then
-      Map(
-        "role" -> role,
-        "content" -> message.parts.map(encodePart)
-      )
-    else
-      Map(
-        "role" -> role,
-        "content" -> message.text.getOrElse("")
-      )
+    val content: DynamicValue =
+      if message.parts.nonEmpty then DynamicValue.Sequence(Chunk.from(message.parts.map(encodePart)))
+      else str(message.text.getOrElse(""))
+    DynamicValue.Record(Chunk("role" -> str(role), "content" -> content))
 
-  private def encodePart(part: ContentPart): Map[String, Any] =
-    val base = Map("type" -> part.kind, "text" -> part.payload)
-    if part.metadata.nonEmpty then base.updated("metadata", part.metadata)
-    else base
+  private def encodePart(part: ContentPart): DynamicValue =
+    val base = Vector("type" -> str(part.kind), "text" -> str(part.payload))
+    val fields =
+      if part.metadata.nonEmpty then
+        base :+ ("metadata" -> DynamicValue.Record(
+          Chunk.from(part.metadata.iterator.map((k, v) => k -> str(v)).toSeq)
+        ))
+      else base
+    DynamicValue.Record(Chunk.from(fields))
 
   private def messageText(message: Message): String =
-    message.text.getOrElse {
-      message.parts.map(_.payload).mkString("\n")
-    }
+    message.text.getOrElse(message.parts.map(_.payload).mkString("\n"))
 
 object ProviderResponseParser:
-  def parse(raw: Map[String, Any], mode: LmMode): Either[DspyError, LmResponse] =
+  import DynamicJson.{field, asRecord, asString, asLong}
+
+  def parse(raw: DynamicValue, mode: LmMode): Either[DspyError, LmResponse] =
     val outputs = mode match
-      case LmMode.Chat => parseChatOutputs(raw)
-      case LmMode.Text => parseTextOutputs(raw)
-      case LmMode.Responses =>
-        parseResponsesOutputs(raw).orElse(parseChatOutputs(raw))
+      case LmMode.Chat      => parseChatOutputs(raw)
+      case LmMode.Text      => parseTextOutputs(raw)
+      case LmMode.Responses => parseResponsesOutputs(raw).orElse(parseChatOutputs(raw))
 
     outputs.flatMap { entries =>
       if entries.isEmpty then Left(ParseError("lm", "Provider response does not contain any outputs"))
@@ -80,57 +90,53 @@ object ProviderResponseParser:
           LmResponse(
             outputs = entries,
             usage = parseUsage(raw),
-            modelName = raw.get("model").collect { case model: String => model },
+            modelName = field(raw, "model").flatMap(asString),
             cacheHit = false
           )
         )
     }
 
-  private def parseChatOutputs(raw: Map[String, Any]): Either[DspyError, Vector[LmOutput]] =
-    asVector(raw.get("choices")).map { choices =>
+  private def parseChatOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
+    seqField(raw, "choices").map { choices =>
       choices.flatMap { choice =>
-        val map = asMap(choice)
-        val textFromMessage = map.flatMap(_.get("message")).flatMap(asMap).flatMap(extractText)
-        val textFromChoice = map.flatMap(_.get("text")).collect { case text: String => text }
+        val rec = asRecord(choice)
+        val textFromMessage = rec.flatMap(r => field(r, "message")).flatMap(extractText)
+        val textFromChoice  = rec.flatMap(r => field(r, "text")).flatMap(asString)
         val text = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
         text.map { value =>
-          val metadata = map.map(_.removed("message").removed("text")).getOrElse(Map.empty)
-          val toolCalls = map.flatMap(_.get("message")).flatMap(asMap).map(parseToolCalls).getOrElse(Vector.empty)
+          val metadata = rec
+            .map(r => DynamicValues.recordFilterKeys(r, k => k != "message" && k != "text"))
+            .getOrElse(DynamicValue.Record.empty)
+          val toolCalls = rec.flatMap(r => field(r, "message")).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
           LmOutput(text = value, toolCalls = toolCalls, metadata = metadata)
         }
       }
     }
 
-  private def parseTextOutputs(raw: Map[String, Any]): Either[DspyError, Vector[LmOutput]] =
-    raw.get("text") match
-      case Some(text: String) if text.trim.nonEmpty =>
-        Right(Vector(LmOutput(text = text.trim)))
-      case _ =>
-        parseChatOutputs(raw)
+  private def parseTextOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
+    field(raw, "text").flatMap(asString).map(_.trim).filter(_.nonEmpty) match
+      case Some(text) => Right(Vector(LmOutput(text = text)))
+      case None       => parseChatOutputs(raw)
 
-  private def parseResponsesOutputs(raw: Map[String, Any]): Either[DspyError, Vector[LmOutput]] =
-    asVector(raw.get("output")).map { output =>
+  private def parseResponsesOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
+    seqField(raw, "output").map { output =>
       output.flatMap { item =>
-        val map = asMap(item)
-        val maybeText = map.flatMap(extractText)
-        maybeText.map { text =>
-          val toolCalls = map.map(parseToolCalls).getOrElse(Vector.empty)
-          LmOutput(text = text.trim, toolCalls = toolCalls, metadata = map.getOrElse(Map.empty))
+        extractText(item).map { text =>
+          val toolCalls = asRecord(item).map(parseToolCalls).getOrElse(Vector.empty)
+          val metadata  = asRecord(item).getOrElse(DynamicValue.Record.empty)
+          LmOutput(text = text.trim, toolCalls = toolCalls, metadata = metadata)
         }
       }
     }
 
-  private def parseUsage(raw: Map[String, Any]): Option[LmUsage] =
-    raw.get("usage").flatMap(asMap).map { usage =>
-      val promptTokens = asLong(usage.get("prompt_tokens"))
-        .orElse(asLong(usage.get("input_tokens")))
-        .getOrElse(0L)
-      val completionTokens = asLong(usage.get("completion_tokens"))
-        .orElse(asLong(usage.get("output_tokens")))
-        .getOrElse(0L)
-      val totalTokens = asLong(usage.get("total_tokens")).getOrElse(promptTokens + completionTokens)
-      val details = usage.iterator.collect { case (key, value) if asLong(Some(value)).isDefined =>
-        key -> asLong(Some(value)).get
+  private def parseUsage(raw: DynamicValue): Option[LmUsage] =
+    field(raw, "usage").flatMap(asRecord).map { usage =>
+      val promptTokens = longField(usage, "prompt_tokens").orElse(longField(usage, "input_tokens")).getOrElse(0L)
+      val completionTokens =
+        longField(usage, "completion_tokens").orElse(longField(usage, "output_tokens")).getOrElse(0L)
+      val totalTokens = longField(usage, "total_tokens").getOrElse(promptTokens + completionTokens)
+      val details = usage.fields.iterator.collect {
+        case (key, value) if asLong(value).isDefined => key -> asLong(value).get
       }.toMap
       LmUsage(
         totalTokens = totalTokens,
@@ -140,81 +146,54 @@ object ProviderResponseParser:
       )
     }
 
-  private def parseToolCalls(message: Map[String, Any]): Vector[ToolCall] =
-    asVector(message.get("tool_calls")) match
+  private def parseToolCalls(message: DynamicValue.Record): Vector[ToolCall] =
+    seqField(message, "tool_calls") match
       case Right(entries) =>
         entries.flatMap { call =>
-          asMap(call).flatMap { map =>
-            val functionMap = map.get("function").flatMap(asMap).getOrElse(map)
-            functionMap.get("name").collect { case name: String =>
-              ToolCall(
-                name = name,
-                args = parseArgs(functionMap.get("arguments"))
-              )
+          asRecord(call).flatMap { rec =>
+            val functionRec = field(rec, "function").flatMap(asRecord).getOrElse(rec)
+            field(functionRec, "name").flatMap(asString).map { name =>
+              ToolCall(name = name, args = parseArgs(field(functionRec, "arguments")))
             }
           }
         }
-      case Left(_) =>
-        Vector.empty
+      case Left(_) => Vector.empty
 
-  private def parseArgs(raw: Option[Any]): DynamicValue.Record =
-    raw.flatMap(asMap) match
-      case Some(map) =>
-        DynamicValues.recordFromEntries(map.toSeq.map((k, v) => k -> DynamicValues.fromAny(v)))
+  private def parseArgs(raw: Option[DynamicValue]): DynamicValue.Record =
+    raw.flatMap(asRecord) match
+      case Some(rec) => rec
       case None =>
-        raw match
-          case Some(value: String) if value.trim.nonEmpty =>
-            DynamicValues.recordFromEntries(Seq("input" := value))
-          case Some(value) =>
-            DynamicValues.recordFromEntries(Seq("value" -> DynamicValues.fromAny(value)))
+        raw.flatMap(asString) match
+          case Some(value) if value.trim.nonEmpty => DynamicValues.recordFromEntries(Seq("input" := value))
+          case _ =>
+            raw match
+              case Some(other) => DynamicValues.recordFromEntries(Seq("value" -> other))
+              case None        => DynamicValue.Record.empty
+
+  private def extractText(node: DynamicValue): Option[String] =
+    field(node, "content") match
+      case Some(content) =>
+        asString(content) match
+          case Some(text) => Some(text)
           case None =>
-            DynamicValue.Record.empty
-
-  private def extractText(node: Map[String, Any]): Option[String] =
-    node.get("content") match
-      case Some(text: String) => Some(text)
-      case Some(items) =>
-        val fromParts = asVector(Some(items)) match
-          case Right(entries) =>
-            val text = entries.flatMap { item =>
-              asMap(item).flatMap { map =>
-                map.get("text").collect { case value: String => value.trim }
-              }
-            }.mkString("\n").trim
-            Option.when(text.nonEmpty)(text)
-          case Left(_) =>
-            None
-        fromParts.orElse {
-          node.get("text").collect { case value: String if value.trim.nonEmpty => value.trim }
-        }
+            val fromParts = DynamicJson.asSequence(content).iterator
+              .flatMap(item => asRecord(item).flatMap(r => field(r, "text")).flatMap(asString).map(_.trim))
+              .mkString("\n").trim
+            Option
+              .when(fromParts.nonEmpty)(fromParts)
+              .orElse(field(node, "text").flatMap(asString).map(_.trim).filter(_.nonEmpty))
       case None =>
-        node.get("text").collect { case value: String if value.trim.nonEmpty => value.trim }
+        field(node, "text").flatMap(asString).map(_.trim).filter(_.nonEmpty)
 
-  private def asMap(value: Any): Option[Map[String, Any]] =
-    value match
-      case map: Map[?, ?] =>
-        Some(map.iterator.collect { case (key: String, item) => key -> item }.toMap)
-      case _ => None
-
-  private def asVector(value: Option[Any]): Either[DspyError, Vector[Any]] =
-    value match
-      case None => Right(Vector.empty)
-      case Some(vector: Vector[?]) =>
-        Right(vector)
-      case Some(seq: Seq[?]) =>
-        Right(seq.toVector)
+  /** A response field treated as an array: absent or null -> empty; a sequence -> its elements; anything else
+    * -> a parse error (mirrors the old `asVector`). */
+  private def seqField(value: DynamicValue, name: String): Either[DspyError, Vector[DynamicValue]] =
+    field(value, name) match
+      case None                              => Right(Vector.empty)
+      case Some(_: DynamicValue.Null.type)   => Right(Vector.empty)
+      case Some(seq: DynamicValue.Sequence)  => Right(seq.elements.iterator.toVector)
       case Some(other) =>
-        Left(ParseError("lm", s"Expected array-like response field, found: ${other.getClass.getSimpleName}"))
+        Left(ParseError("lm", s"Expected array-like response field '$name', found: ${other.getClass.getSimpleName}"))
 
-  private def asLong(value: Option[Any]): Option[Long] =
-    value match
-      case Some(v: Long)       => Some(v)
-      case Some(v: Int)        => Some(v.toLong)
-      case Some(v: Short)      => Some(v.toLong)
-      case Some(v: Byte)       => Some(v.toLong)
-      case Some(v: Double)     => Some(v.toLong)
-      case Some(v: Float)      => Some(v.toLong)
-      case Some(v: BigInt)     => Some(v.toLong)
-      case Some(v: BigDecimal) => Some(v.toLong)
-      case Some(v: String)     => v.toLongOption
-      case _                   => None
+  private def longField(rec: DynamicValue.Record, name: String): Option[Long] =
+    field(rec, name).flatMap(asLong)

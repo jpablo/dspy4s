@@ -53,7 +53,7 @@ class TypedPredictSuite extends FunSuite:
         : Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec(
         "answer" := output.text,
-        "score"  -> DynamicValues.fromAny(output.metadata.getOrElse("score", 0.0))
+        "score"  -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
       )))
 
   private object FixedLm extends LanguageModel:
@@ -63,8 +63,8 @@ class TypedPredictSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(
         outputs = Vector(
-          LmOutput(text = "Paris",  metadata = Map("score" -> 0.95)),
-          LmOutput(text = "London", metadata = Map("score" -> 0.33))
+          LmOutput(text = "Paris",  metadata = DynamicValues.record("score" := 0.95)),
+          LmOutput(text = "London", metadata = DynamicValues.record("score" := 0.33))
         ),
         usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
       ))
@@ -189,7 +189,7 @@ class TypedPredictSuite extends FunSuite:
       def call(req: LmRequest)(using RuntimeContext) =
         capturedRequests += req
         Right(LmResponse(
-          outputs = Vector(LmOutput(text = "Paris", metadata = Map("score" -> 0.5))),
+          outputs = Vector(LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.5))),
           usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
         ))
 
@@ -201,12 +201,13 @@ class TypedPredictSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val _ = Predict(sig).run(
         P4QAInput("hi"),
-        config = Map("temperature" -> 0.7, "max_tokens" -> 50)
+        config = DynamicValues.record("temperature" := 0.7, "max_tokens" := 50)
       )
     }
     assertEquals(capturedRequests.size, 1)
-    assertEquals(capturedRequests.head.options.get("temperature"), Some(0.7))
-    assertEquals(capturedRequests.head.options.get("max_tokens"),  Some(50))
+    val opts = DynamicValues.recordToMap(capturedRequests.head.options)
+    assertEquals(opts.get("temperature"), Some(0.7: Any))
+    assertEquals(opts.get("max_tokens"),  Some(50: Any))
   }
 
   test("Predict.run with traceEnabled=false suppresses the trace entry") {

@@ -9,6 +9,7 @@ import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.core.contracts.DynamicValues
 import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
@@ -39,7 +40,8 @@ final case class BestOfN(
       val rolloutId = rolloutStart + idx
       val attemptCall = input.copy(
         rolloutId = Some(rolloutId),                       // framework cache-busting selector (typed)
-        config    = input.config.updated("temperature", 1.0d)  // real provider knob -> stays in the bag
+        // real provider knob -> stays in the bag
+        config    = DynamicValues.recordUpdated(input.config, "temperature", DynamicValues.fromAny(1.0d))
       )
 
       val isolated = baseContext.copy(trace = Vector.empty, history = Vector.empty)

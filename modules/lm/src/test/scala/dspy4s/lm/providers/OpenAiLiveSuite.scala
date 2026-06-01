@@ -1,6 +1,8 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
@@ -68,7 +70,7 @@ class OpenAiLiveSuite extends FunSuite:
       model = model,
       mode = LmMode.Chat,
       messages = Vector(Message(role = MessageRole.User, text = Some("Reply with exactly the text: integration-test-passed"))),
-      options = Map("max_tokens" -> 10, "temperature" -> 0.0)
+      options = DynamicValues.record("max_tokens" := 10, "temperature" := 0.0)
     )
     val result = lm.call(request)
     assert(result.isRight, s"call() failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
@@ -98,7 +100,7 @@ class OpenAiLiveSuite extends FunSuite:
         Message(role = MessageRole.System, text = Some("Be concise.")),
         Message(role = MessageRole.User, text = Some("Describe the color of the sky in two short sentences."))
       ),
-      options = Map("max_tokens" -> 30, "temperature" -> 0.0)
+      options = DynamicValues.record("max_tokens" := 30, "temperature" := 0.0)
     )
     val chunks = lm.stream(request).toVector
     assert(chunks.nonEmpty, "streamed no chunks")
@@ -131,7 +133,7 @@ class OpenAiLiveSuite extends FunSuite:
     val request = LmRequest(
       model = model,
       messages = Vector(Message(role = MessageRole.User, text = Some("x"))),
-      options = Map("max_tokens" -> 1)
+      options = DynamicValues.record("max_tokens" := 1)
     )
     val result = lm.call(request)
     assert(result.isLeft, "expected auth failure")

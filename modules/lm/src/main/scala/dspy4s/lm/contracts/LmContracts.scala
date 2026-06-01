@@ -32,7 +32,7 @@ final case class LmRequest(
     model: String,
     mode: LmMode = LmMode.Chat,
     messages: Vector[Message] = Vector.empty,
-    options: Map[String, Any] = Map.empty,
+    options: DynamicValue.Record = DynamicValue.Record.empty,
     requestId: Option[String] = None,
     // Framework-only control field (cache-busting for repeated samples), NOT a provider parameter: it is folded
     // into the cache key but never serialized into the request body. Contrast `options`, which is spread verbatim
@@ -55,7 +55,7 @@ final case class ToolCall(name: String, args: DynamicValue.Record)
 final case class LmOutput(
     text: String,
     toolCalls: Vector[ToolCall] = Vector.empty,
-    metadata: Map[String, Any] = Map.empty
+    metadata: DynamicValue.Record = DynamicValue.Record.empty
 )
 
 final case class LmResponse(

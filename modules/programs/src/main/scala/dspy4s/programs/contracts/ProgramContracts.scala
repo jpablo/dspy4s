@@ -9,13 +9,14 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.schema.{DynamicValue, Schema}
 
-/** `inputs` is the spine record passed to the adapter and codec layers. `config` stays a plain `Map[String, Any]`
-  * because it's an opaque option bag forwarded *verbatim to the LM provider* (model overrides, sampling params) —
-  * it has no codec story and the provider's API defines its keys. Framework-only control values do NOT live here:
-  * they are typed fields (e.g. [[rolloutId]]) so the provider bag stays purely provider-bound. */
+/** `inputs` is the spine record passed to the adapter and codec layers. `config` is the provider option bag
+  * (model overrides, sampling params) forwarded *verbatim to the LM provider* — its keys are defined by the
+  * provider's API. It is a `DynamicValue.Record` (built with `:=`), i.e. JSON-shaped: exactly as permissive as
+  * the wire, serialized losslessly, with no `Any`. Framework-only control values do NOT live here: they are
+  * typed fields (e.g. [[rolloutId]]) so the provider bag stays purely provider-bound. */
 final case class ProgramCall(
     inputs: DynamicValue.Record,
-    config: Map[String, Any] = Map.empty,
+    config: DynamicValue.Record = DynamicValue.Record.empty,
     traceEnabled: Boolean = true,
     // Cache-busting selector for repeated samples (used by `BestOfN`). Threaded into `LmRequest.rolloutId`; a
     // framework concern, never forwarded to the provider. Was previously smuggled as `config("rollout_id")`.

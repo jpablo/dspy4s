@@ -51,7 +51,7 @@ class LmRuntimeSuite extends FunSuite:
   private val baseRequest = LmRequest(
     model = "test-model",
     mode = LmMode.Chat,
-    options = Map("temperature" -> 0.7)
+    options = DynamicValues.record("temperature" := 0.7)
   )
 
   private val baseResponse = LmResponse(
@@ -69,10 +69,10 @@ class LmRuntimeSuite extends FunSuite:
 
   test("request hash is stable for equivalent map orderings") {
     val requestA = baseRequest.copy(
-      options = Map("a" -> 1, "nested" -> Map("x" -> 1, "y" -> 2), "items" -> Vector(1, 2, 3))
+      options = DynamicValues.record("a" := 1, "nested" := Map("x" -> 1, "y" -> 2), "items" := Vector(1, 2, 3))
     )
     val requestB = baseRequest.copy(
-      options = Map("items" -> Vector(1, 2, 3), "nested" -> Map("y" -> 2, "x" -> 1), "a" -> 1)
+      options = DynamicValues.record("items" := Vector(1, 2, 3), "nested" := Map("y" -> 2, "x" -> 1), "a" := 1)
     )
 
     assertEquals(RequestHash.forRequest(requestA), RequestHash.forRequest(requestB))
@@ -108,7 +108,7 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(delegate.calls.size, 2)
     // rolloutId rides as a typed field to the delegate (no strip) and never leaks into the provider option bag.
     assertEquals(delegate.calls.map(_.rolloutId).toVector, Vector[Option[Int]](Some(1), Some(2)))
-    assert(delegate.calls.forall(c => !c.options.contains("rollout_id")))
+    assert(delegate.calls.forall(c => DynamicValues.recordGet(c.options, "rollout_id").isEmpty))
   }
 
   test("managed language model retries until policy max retries is reached") {

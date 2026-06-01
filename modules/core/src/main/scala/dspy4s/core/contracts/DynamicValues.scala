@@ -48,6 +48,12 @@ object DynamicValues:
   def recordFromEntries(entries: Seq[(String, DynamicValue)]): DynamicValue.Record =
     DynamicValue.Record(Chunk.from(entries))
 
+  /** Varargs convenience for building a `DynamicValue.Record` from `:=` entries, e.g.
+    * `record("temperature" := 0.7, "max_tokens" := 256)`. The JSON-shaped counterpart to a `Map(...)` literal
+    * for provider config / option bags. */
+  def record(entries: (String, DynamicValue)*): DynamicValue.Record =
+    recordFromEntries(entries)
+
   /** Lookup by field name. Returns `None` if the record has no such field. */
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
     rec.fields.iterator.collectFirst { case (k, v) if k == name => v }

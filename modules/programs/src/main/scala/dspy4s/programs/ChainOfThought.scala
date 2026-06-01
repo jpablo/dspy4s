@@ -47,7 +47,7 @@ final case class ChainOfThought[I, O](
 
   def run(
       input: I,
-      config: Map[String, Any] = Map.empty,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predictor.flatMap(_.run(input, config, traceEnabled))

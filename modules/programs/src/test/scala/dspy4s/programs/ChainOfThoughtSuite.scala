@@ -79,7 +79,7 @@ class ChainOfThoughtSuite extends FunSuite:
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(
-        outputs = Vector(LmOutput(text = "lm output", metadata = Map.empty)),
+        outputs = Vector(LmOutput(text = "lm output", metadata = DynamicValues.record())),
         usage   = Some(LmUsage(totalTokens = 10, promptTokens = 4, completionTokens = 6))
       ))
 

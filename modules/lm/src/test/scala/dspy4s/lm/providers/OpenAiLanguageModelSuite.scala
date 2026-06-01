@@ -2,8 +2,10 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
@@ -122,7 +124,7 @@ class OpenAiLanguageModelSuite extends FunSuite:
       nonStreamingResponses = Vector(Right(HttpResponse(200, Map.empty, okResponse)))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val lm = OpenAiLanguageModel(model = "gpt-4o-mini", client = client, defaultOptions = Map("temperature" -> 0.7))
+    val lm = OpenAiLanguageModel(model = "gpt-4o-mini", client = client, defaultOptions = DynamicValues.record("temperature" := 0.7))
 
     given RuntimeContext = RuntimeEnvironment.current
     val request = LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("hi"))))

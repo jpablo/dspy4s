@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.ToolCall
-import dspy4s.lm.providers.JsonCodec
+import dspy4s.lm.providers.DynamicJson
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
@@ -46,8 +46,7 @@ object ToolCallAssembler:
     val trimmed = raw.trim
     if trimmed.isEmpty then DynamicValue.Record.empty
     else
-      JsonCodec.decodeString(trimmed) match
-        case Right(map) =>
-          DynamicValues.recordFromEntries(map.toSeq.map((k, v) => k -> DynamicValues.fromAny(v)))
-        case Left(_) =>
-          DynamicValues.recordFromEntries(Seq("input" := trimmed))
+      DynamicJson.decode(trimmed) match
+        case Right(rec: DynamicValue.Record) => rec
+        case Right(other)                    => DynamicValues.recordFromEntries(Seq("value" -> other))
+        case Left(_)                         => DynamicValues.recordFromEntries(Seq("input" := trimmed))

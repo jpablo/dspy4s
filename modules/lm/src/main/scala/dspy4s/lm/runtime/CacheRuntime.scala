@@ -1,5 +1,6 @@
 package dspy4s.lm.runtime
 
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LmCache
 import java.util.Objects
@@ -34,7 +35,7 @@ object RequestHash:
 
   private def encodeRequest(request: LmRequest): String =
     val messages = request.messages.map(encodeMessage).mkString("[", ",", "]")
-    val options = normalizeAny(request.options)
+    val options = normalizeAny(DynamicValues.toAny(request.options))
     val requestId = request.requestId.map(quote).getOrElse("null")
     val rolloutId = request.rolloutId.map(_.toString).getOrElse("null")
     s"""{"model":${quote(request.model)},"mode":${quote(request.mode.toString)},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
@@ -140,11 +141,11 @@ private object DiskCacheModel:
   final case class PersistedOutput(
       text: String,
       toolCalls: Array[PersistedToolCall],
-      metadata: java.util.Map[String, String]
+      metadataJson: String
   ) extends Serializable
 
-  // Tool-call args are a `DynamicValue.Record`; persist them as their natural JSON (via zio-blocks'
-  // DynamicValue JSON codec) rather than the lossy String-flattening used for the free-form metadata map.
+  // Tool-call args and output metadata are `DynamicValue.Record`s; persist them as their natural JSON (via
+  // zio-blocks' DynamicValue JSON codec), faithfully -- not the old lossy String-flattening.
   final case class PersistedToolCall(
       name: String,
       argsJson: String
@@ -152,13 +153,13 @@ private object DiskCacheModel:
 
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  def encodeToolArgs(args: DynamicValue.Record): String =
-    new String(dynamicJsonCodec.encode(args), StandardCharsets.UTF_8)
+  def encodeRecord(record: DynamicValue.Record): String =
+    new String(dynamicJsonCodec.encode(record), StandardCharsets.UTF_8)
 
-  def decodeToolArgs(argsJson: String | Null): DynamicValue.Record =
-    Option(argsJson) match
-      case Some(json) =>
-        dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
+  def decodeRecord(json: String | Null): DynamicValue.Record =
+    Option(json) match
+      case Some(j) =>
+        dynamicJsonCodec.decode(j.getBytes(StandardCharsets.UTF_8)) match
           case Right(rec: DynamicValue.Record) => rec
           case _                               => DynamicValue.Record.empty
       case None => DynamicValue.Record.empty
@@ -271,12 +272,12 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
   private def toPersisted(response: LmResponse): PersistedResponse =
     val outputs = response.outputs.map { output =>
       val toolCalls = output.toolCalls.map { call =>
-        PersistedToolCall(call.name, encodeToolArgs(call.args))
+        PersistedToolCall(call.name, encodeRecord(call.args))
       }.toArray
       PersistedOutput(
         text = output.text,
         toolCalls = toolCalls,
-        metadata = toJavaStringMap(output.metadata)
+        metadataJson = encodeRecord(output.metadata)
       )
     }.toArray
     val usage = response.usage.map { u =>
@@ -292,12 +293,12 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
   private def fromPersisted(response: PersistedResponse): LmResponse =
     val outputs = Option(response.outputs).getOrElse(Array.empty[PersistedOutput]).toVector.map { output =>
       val toolCalls = Option(output.toolCalls).getOrElse(Array.empty[PersistedToolCall]).toVector.map { call =>
-        ToolCall(name = call.name, args = decodeToolArgs(call.argsJson))
+        ToolCall(name = call.name, args = decodeRecord(call.argsJson))
       }
       LmOutput(
         text = Option(output.text).getOrElse(""),
         toolCalls = toolCalls,
-        metadata = fromJavaStringMap(output.metadata)
+        metadata = decodeRecord(output.metadataJson)
       )
     }
     val usage = Option(response.usage).map { u =>
@@ -314,16 +315,6 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
       modelName = Option(response.modelName),
       cacheHit = false
     )
-
-  private def toJavaStringMap(values: Map[String, Any]): java.util.Map[String, String] =
-    val map = java.util.HashMap[String, String]()
-    values.foreach { case (key, value) =>
-      map.put(key, String.valueOf(value))
-    }
-    map
-
-  private def fromJavaStringMap(values: java.util.Map[String, String] | Null): Map[String, Any] =
-    Option(values).map(_.asScala.toMap).getOrElse(Map.empty)
 
   private def toJavaLongMap(values: Map[String, Long]): java.util.Map[String, java.lang.Long] =
     val map = java.util.HashMap[String, java.lang.Long]()

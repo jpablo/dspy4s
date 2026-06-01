@@ -9,6 +9,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.ProviderRequestNormalizer
 import dspy4s.lm.runtime.ProviderResponseParser
+import zio.blocks.schema.DynamicValue
 
 /** The real OpenAI-compatible HTTP provider: a [[dspy4s.lm.contracts.StreamingLanguageModel]] that talks to a
   * chat-completions endpoint through an [[OpenAiClient]]. Both `call` and `stream` follow the same pipeline --
@@ -32,7 +33,7 @@ final case class OpenAiLanguageModel(
     model: String,
     mode: LmMode = LmMode.Chat,
     client: OpenAiClient,
-    defaultOptions: Map[String, Any] = Map.empty
+    defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends StreamingLanguageModel:
 
   override val id: String = model

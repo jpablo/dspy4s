@@ -50,7 +50,7 @@ class PredictSuite extends FunSuite:
         ParsedOutput(
           values = rec(
             "answer" := output.text,
-            "score" -> DynamicValues.fromAny(output.metadata.getOrElse("score", 0.0))
+            "score" -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
           )
         )
       )
@@ -63,8 +63,8 @@ class PredictSuite extends FunSuite:
       Right(
         LmResponse(
           outputs = Vector(
-            LmOutput(text = "Paris", metadata = Map("score" -> 0.95)),
-            LmOutput(text = "Lyon", metadata = Map("score" -> 0.33))
+            LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.95)),
+            LmOutput(text = "Lyon", metadata = DynamicValues.record("score" := 0.33))
           ),
           usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
         )
@@ -80,7 +80,7 @@ class PredictSuite extends FunSuite:
           outputs = Vector(
             LmOutput(
               text = "Need tool",
-              metadata = Map("score" -> 0.5),
+              metadata = DynamicValues.record("score" := 0.5),
               toolCalls = Vector(ToolCall(name = "search", args = DynamicValues.recordFromEntries(Seq("query" := "capital of belgium"))))
             )
           )
