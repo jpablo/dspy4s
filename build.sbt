@@ -2,7 +2,11 @@ ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.1"
 
-lazy val munitVersion = "1.3.1"
+lazy val munitVersion     = "1.3.1"
+lazy val zioBlocksVersion = "0.0.40"
+lazy val ujsonVersion     = "4.4.3"
+lazy val dotenvVersion    = "3.2.0"
+lazy val scalaXmlVersion  = "2.4.0"
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -43,7 +47,7 @@ lazy val core = (project in file("modules/core"))
   .settings(name := "dspy4s-core")
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"       %% "zio-blocks-schema" % "0.0.40",
+      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
       "org.scalameta" %% "munit"             % munitVersion % Test
     ),
     Test / parallelExecution := false
@@ -58,7 +62,7 @@ lazy val typed = (project in file("modules/typed"))
   .settings(name := "dspy4s-typed")
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"       %% "zio-blocks-schema" % "0.0.40",
+      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
       "org.scalameta" %% "munit"             % munitVersion % Test
     )
   )
@@ -70,8 +74,8 @@ lazy val lm = (project in file("modules/lm"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.4.3",
-      "io.github.cdimascio" % "dotenv-java" % "3.2.0" % Test
+      "com.lihaoyi" %% "ujson" % ujsonVersion,
+      "io.github.cdimascio" % "dotenv-java" % dotenvVersion % Test
     ),
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"
@@ -84,8 +88,8 @@ lazy val adapters = (project in file("modules/adapters"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.4.3",
-      "org.scala-lang.modules" %% "scala-xml" % "2.4.0"
+      "com.lihaoyi" %% "ujson" % ujsonVersion,
+      "org.scala-lang.modules" %% "scala-xml" % scalaXmlVersion
     )
   )
 
@@ -104,7 +108,7 @@ lazy val evaluate = (project in file("modules/evaluate"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.4.3"
+      "com.lihaoyi" %% "ujson" % ujsonVersion
     )
   )
 
