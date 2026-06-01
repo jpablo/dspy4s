@@ -9,6 +9,8 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.core.signatures.SignatureParser
 import dspy4s.core.signatures.SignatureDsl
 import munit.FunSuite
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class SignatureParserSuite extends FunSuite:
   test("parse simple untyped signature") {
@@ -116,19 +118,31 @@ class SignatureParserSuite extends FunSuite:
     assert(signature.equalsByStructure(rebuilt.toOption.get))
   }
 
+  test("signature dumpJson and fromJson roundtrip through clean JSON") {
+    val signature = SignatureDsl.parse("question: str -> answer: string").toOption.get
+    val json = signature.dumpJson
+
+    // Clean, natural JSON -- a top-level object with a fields array, no ADT tags.
+    assert(json.startsWith("{"), s"expected a JSON object, got: $json")
+    assert(json.contains("\"fields\""), s"expected a fields array, got: $json")
+
+    val rebuilt = SignatureLayout.fromJson(json)
+    assert(rebuilt.isRight, s"expected Right, got $rebuilt")
+    assert(signature.equalsByStructure(rebuilt.toOption.get))
+  }
+
   test("signature fromState fails on invalid role") {
-    val state: Map[String, Any] = Map(
-      "name" -> "BadSignature",
-      "instructions" -> Some("test"),
-      "fields" -> Vector(
-        Map(
-          "name" -> "question",
-          "role" -> "invalid",
-          "typeRef" -> "string",
-          "metadata" -> Map.empty[String, String]
-        )
-      )
-    )
+    val state = DynamicValue.Record(Chunk.from(Seq(
+      "name"         -> DynamicValue.Primitive(PrimitiveValue.String("BadSignature")),
+      "instructions" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
+      "fields" -> DynamicValue.Sequence(Chunk.from(Seq(
+        DynamicValue.Record(Chunk.from(Seq(
+          "name"    -> DynamicValue.Primitive(PrimitiveValue.String("question")),
+          "role"    -> DynamicValue.Primitive(PrimitiveValue.String("invalid")),
+          "typeRef" -> DynamicValue.Primitive(PrimitiveValue.String("string"))
+        )))
+      ))
+    ))))
 
     val rebuilt = SignatureLayout.fromState(state)
     assert(rebuilt.isLeft)
