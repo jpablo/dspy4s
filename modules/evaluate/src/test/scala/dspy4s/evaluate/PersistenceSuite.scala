@@ -11,7 +11,6 @@ import zio.blocks.schema.DynamicValue
 import java.nio.file.Files
 import java.nio.file.Paths
 import scala.io.Source
-import scala.jdk.CollectionConverters.*
 
 class PersistenceSuite extends FunSuite:
   private def rec(entries: (String, Any)*): DynamicValue.Record =
@@ -58,7 +57,7 @@ class PersistenceSuite extends FunSuite:
       assertEquals(arr(0)("exact_match").num, 1.0)
       assertEquals(arr(1)("exact_match").num, 0.0)
       assertEquals(arr(2)("exact_match").num, 1.0)
-    finally Files.deleteIfExists(Paths.get(path))
+    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
   }
 
   test("saveAsCsv writes header and one row per evaluation") {
@@ -74,7 +73,7 @@ class PersistenceSuite extends FunSuite:
       assert(header.contains("exact_match"))
       // prediction and example share 'answer', so CSV uses 'pred_answer'
       assert(header.contains("pred_answer"))
-    finally Files.deleteIfExists(Paths.get(path))
+    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
   }
 
   test("saveAsCsv prefixes pred fields on collision with example fields") {
@@ -96,7 +95,7 @@ class PersistenceSuite extends FunSuite:
       val header = Source.fromFile(path).getLines().next()
       assert(header.contains("example_answer"))
       assert(header.contains("pred_answer"))
-    finally Files.deleteIfExists(Paths.get(path))
+    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
   }
 
   test("saveAsJson supports non-string field values") {
@@ -117,5 +116,5 @@ class PersistenceSuite extends FunSuite:
       val parsed = ujson.read(content)
       assertEquals(parsed.arr(0)("example_score").num, 0.8)
       assertEquals(parsed.arr(0)("confidence").num, 0.95)
-    finally Files.deleteIfExists(Paths.get(path))
+    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
   }

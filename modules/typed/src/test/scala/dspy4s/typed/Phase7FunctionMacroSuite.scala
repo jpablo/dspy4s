@@ -5,6 +5,8 @@ import zio.blocks.schema.Schema
 import dspy4s.core.contracts.TypeRef
 import munit.FunSuite
 
+import scala.annotation.nowarn
+
 enum P7Emotion:
   case sadness, joy, love
 
@@ -12,18 +14,23 @@ object P7Emotion extends FieldCodec.FlatEnum[P7Emotion]
 
 case class P7Score(sentiment: P7Emotion, confidence: Double) derives Schema
 
+@nowarn("msg=unused")
 def p7ScalarEmotion(sentence: String): P7Emotion =
   P7Emotion.joy
 
+@nowarn("msg=unused")
 def p7NamedEmotion(sentence: String): (sentiment: P7Emotion) =
   (sentiment = P7Emotion.joy)
 
+@nowarn("msg=unused")
 def p7ScoredEmotion(sentence: String, hint: String): (sentiment: P7Emotion, confidence: Double) =
   (sentiment = P7Emotion.love, confidence = 0.9)
 
+@nowarn("msg=unused")
 def p7TupleEmotion(sentence: String): (P7Emotion, Double) =
   (P7Emotion.joy, 0.9)
 
+@nowarn("msg=unused")
 def p7CaseClassEmotion(sentence: String): P7Score =
   P7Score(P7Emotion.joy, 0.9)
 

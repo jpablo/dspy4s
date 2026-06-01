@@ -139,7 +139,7 @@ class OpenAiClientSuite extends FunSuite:
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
     val iter = client.stream(Map("model" -> "m")).toOption.get
-    while iter.hasNext do iter.next()
+    while iter.hasNext do { val _ = iter.next() }
 
     assert(source.closed, "underlying SSE connection should be closed after the stream reaches [DONE]")
   }

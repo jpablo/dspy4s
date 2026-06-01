@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LanguageModelRef
 import dspy4s.core.contracts.RuntimeContext
 
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
@@ -70,5 +71,6 @@ trait LanguageModel extends LanguageModelRef:
 
   def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse]
 
+  @nowarn("msg=unused")
   def acall(request: LmRequest)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, LmResponse]] =
     Future.successful(call(request))

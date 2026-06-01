@@ -10,7 +10,6 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.BasePredictProgram
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}

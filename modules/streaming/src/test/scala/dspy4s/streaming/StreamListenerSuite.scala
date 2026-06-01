@@ -4,7 +4,6 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
 import dspy4s.programs.ChainOfThought
-import dspy4s.programs.DynamicPredict
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.core.contracts.DspyError

@@ -1,5 +1,6 @@
 package dspy4s.core.contracts
 
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
@@ -28,5 +29,8 @@ trait Module[-In, +Out]:
 
   def run(input: In)(using RuntimeContext): Either[DspyError, Out]
 
+  // The default body doesn't use the ExecutionContext, but it's part of the contract for
+  // overrides that run real async work (e.g. BasePredictProgram.arun).
+  @nowarn("msg=unused")
   def arun(input: In)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Out]] =
     Future.successful(run(input))

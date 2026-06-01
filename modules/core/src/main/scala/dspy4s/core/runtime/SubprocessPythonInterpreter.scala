@@ -123,6 +123,7 @@ object SubprocessPythonInterpreter:
       pb.redirectErrorStream(true)
       val process = pb.start()
       val ok = process.waitFor(2, TimeUnit.SECONDS) && process.exitValue() == 0
-      if !ok then process.destroyForcibly()
+      if !ok then
+        val _ = process.destroyForcibly()
       ok
     catch case NonFatal(_) => false

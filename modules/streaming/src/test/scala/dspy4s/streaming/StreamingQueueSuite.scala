@@ -2,9 +2,7 @@ package dspy4s.streaming
 
 import munit.FunSuite
 
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.TimeUnit
 
 class StreamingQueueSuite extends FunSuite:
 
@@ -30,7 +28,7 @@ class StreamingQueueSuite extends FunSuite:
 
     val consumer = new Thread(() => {
       val iter = queue.asIterator
-      while iter.hasNext do received.add(iter.next())
+      while iter.hasNext do { val _ = received.add(iter.next()) }
       done.set(true)
     })
     consumer.start()

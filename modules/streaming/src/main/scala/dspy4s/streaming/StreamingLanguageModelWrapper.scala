@@ -115,7 +115,7 @@ final class StreamingLanguageModelWrapper private (
           s.receive(chunk.text).foreach(emitFieldChunk(ctx, _, isFinalChunk = chunk.isFinal))
       case None =>
         if chunk.text.nonEmpty && listenerAccepts(ctx.predictName, "") then
-          queue.offer(
+          val _ = queue.offer(
             TokenEvent(
               predictName = ctx.predictName,
               fieldName = "",

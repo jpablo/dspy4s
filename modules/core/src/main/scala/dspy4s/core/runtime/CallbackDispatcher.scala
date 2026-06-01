@@ -37,7 +37,7 @@ object CallbackDispatcher:
 
   /** Wrap a module execution in a `ModuleStartEvent` / `ModuleEndEvent` pair. */
   def withModule[A](moduleName: String, inputs: Map[String, Any])(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope("module", prefix = "module") { (callId, parentCallId) =>
+    withCallScope(prefix = "module") { (callId, parentCallId) =>
       emit(
         ModuleStartEvent(
           moduleName = moduleName,
@@ -60,7 +60,7 @@ object CallbackDispatcher:
 
   /** Wrap a language-model call in an `LmStartEvent` / `LmEndEvent` pair. */
   def withLm[A](modelId: String, request: Map[String, Any])(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope("lm", prefix = "lm") { (callId, parentCallId) =>
+    withCallScope(prefix = "lm") { (callId, parentCallId) =>
       emit(
         LmStartEvent(
           modelId = modelId,
@@ -86,7 +86,7 @@ object CallbackDispatcher:
       adapterName: String,
       inputs: Map[String, Any]
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope("adapter", prefix = "adapter") { (callId, parentCallId) =>
+    withCallScope(prefix = "adapter") { (callId, parentCallId) =>
       emit(
         AdapterStartEvent(
           adapterName = adapterName,
@@ -112,7 +112,7 @@ object CallbackDispatcher:
       toolName: String,
       args: Map[String, Any]
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope("tool", prefix = "tool") { (callId, parentCallId) =>
+    withCallScope(prefix = "tool") { (callId, parentCallId) =>
       emit(
         ToolStartEvent(
           toolName = toolName,
@@ -137,7 +137,6 @@ object CallbackDispatcher:
     * with the new id installed as the active call so any nested scope nests under it. The thunk receives
     * `(callId, parentCallId)` to stamp onto its start/end events. */
   private def withCallScope[A](
-      _label: String,
       prefix: String
   )(thunk: (String, Option[String]) => Either[DspyError, A]): Either[DspyError, A] =
     val parentCallId = RuntimeEnvironment.activeCallId

@@ -11,7 +11,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleEndEvent
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel

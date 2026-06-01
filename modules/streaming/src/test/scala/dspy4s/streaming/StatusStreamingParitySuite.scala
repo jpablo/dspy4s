@@ -2,7 +2,6 @@ package dspy4s.streaming
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.PredictProgram
@@ -11,10 +10,8 @@ import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.streaming.contracts.StatusEvent
-import dspy4s.streaming.contracts.StreamEvent
 import munit.FunSuite
 
-import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit

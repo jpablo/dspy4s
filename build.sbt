@@ -2,13 +2,16 @@ ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.1"
 
-lazy val munitVersion = "1.1.1"
+lazy val munitVersion = "1.3.1"
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-deprecation",
     "-feature",
-    "-unchecked"
+    "-unchecked",
+    "-Wunused:all",
+    "-Wvalue-discard",
+    "-Werror"
   )
 )
 
@@ -67,7 +70,7 @@ lazy val lm = (project in file("modules/lm"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.0.2",
+      "com.lihaoyi" %% "ujson" % "4.4.3",
       "io.github.cdimascio" % "dotenv-java" % "3.2.0" % Test
     ),
     Test / fork := true,
@@ -81,8 +84,8 @@ lazy val adapters = (project in file("modules/adapters"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.0.2",
-      "org.scala-lang.modules" %% "scala-xml" % "2.3.0"
+      "com.lihaoyi" %% "ujson" % "4.4.3",
+      "org.scala-lang.modules" %% "scala-xml" % "2.4.0"
     )
   )
 
@@ -101,7 +104,7 @@ lazy val evaluate = (project in file("modules/evaluate"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % "4.0.2"
+      "com.lihaoyi" %% "ujson" % "4.4.3"
     )
   )
 

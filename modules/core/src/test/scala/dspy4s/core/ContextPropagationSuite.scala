@@ -65,6 +65,6 @@ class ContextPropagationSuite extends FunSuite:
       assert(second.isLeft)
       assert(second.left.toOption.get.isInstanceOf[ConfigurationError])
     finally
-      singleThread.shutdownNow()
+      val _ = singleThread.shutdownNow()
   }
 

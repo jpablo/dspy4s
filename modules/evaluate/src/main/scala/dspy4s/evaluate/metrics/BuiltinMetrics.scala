@@ -6,7 +6,6 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.TraceEntry
-import dspy4s.core.contracts.ValidationError
 import dspy4s.evaluate.contracts.Metric
 
 object MetricHelpers:
@@ -33,7 +32,6 @@ object MetricHelpers:
   def maxOverReferences[A](references: Vector[String], transform: String => A, score: (A, A) => Double): (Double, A) =
     if references.isEmpty then (0.0, transform(""))
     else
-      val predTransformed: A = null.asInstanceOf[A]
       val scores = references.map(r => (score(transform(""), transform(r)), transform(r)))
       scores.maxBy(_._1)
 

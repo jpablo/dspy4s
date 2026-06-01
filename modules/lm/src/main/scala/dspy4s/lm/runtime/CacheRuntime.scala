@@ -210,10 +210,10 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
 
   private def moveIntoPlace(temp: Path, target: Path): Unit =
     try
-      Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+      val _ = Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     catch
       case _: AtomicMoveNotSupportedException =>
-        Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
+        val _ = Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
 
   private def serialize(response: LmResponse): Array[Byte] =
     val persisted = toPersisted(response)

@@ -264,4 +264,4 @@ class LmRuntimeSuite extends FunSuite:
         try
           children.iterator().asScala.foreach(child => deleteRecursively(child))
         finally children.close()
-      Files.deleteIfExists(path)
+      val _ = Files.deleteIfExists(path)

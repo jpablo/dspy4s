@@ -3,7 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{
-  FieldRole, NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
+  NotFoundError, DynamicPrediction, SignatureLayout, TypeRef
 }
 import munit.FunSuite
 

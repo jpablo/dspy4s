@@ -30,7 +30,6 @@ final case class ReAct(
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     var currentInputs = call.inputs
     var toolHistory   = Vector.empty[Map[String, Any]]
-    var lastPrediction: Option[DynamicPrediction] = None
     var iteration = 0
 
     while iteration < maxIterations do
@@ -41,7 +40,6 @@ final case class ReAct(
         case Left(error) =>
           return Left(error)
         case Right(prediction) =>
-          lastPrediction = Some(prediction)
           if hasAnswer(prediction) then return Right(prediction)
 
           extractToolRequests(prediction) match

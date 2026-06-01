@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
@@ -53,6 +54,7 @@ final class ParallelExecutor(
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
     executeInternal(task = task, data = data)
 
+  @nowarn("msg=unused")
   private def executeInternal[A, B](
       task: A => Either[DspyError, B],
       data: Vector[A]
@@ -67,7 +69,7 @@ final class ParallelExecutor(
 
     try
       def submit(index: Int): Unit =
-        completion.submit(new Callable[(Int, Option[Either[DspyError, B]])]:
+        val _ = completion.submit(new Callable[(Int, Option[Either[DspyError, B]])]:
           override def call(): (Int, Option[Either[DspyError, B]]) =
             RuntimeEnvironment.withContext(captured) {
               RuntimeEnvironment.withGeneratedAsyncTask("parallel-task") {
@@ -151,7 +153,7 @@ final class ParallelExecutor(
         )
     finally
       cancelRequested.set(true)
-      pool.shutdownNow()
+      val _ = pool.shutdownNow()
 
 object ParallelExecutor:
   def fromSettings(timeout: FiniteDuration = 120.seconds)(using RuntimeContext): ParallelExecutor =

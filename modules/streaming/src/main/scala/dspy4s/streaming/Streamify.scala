@@ -85,7 +85,7 @@ object Streamify:
                     val call = ProgramCall(inputs = inputs)
                     program.run(call) match
                       case Right(prediction) =>
-                        if includeFinalPrediction then queue.offer(PredictionEvent(prediction))
+                        if includeFinalPrediction then { val _ = queue.offer(PredictionEvent(prediction)) }
                       case Left(error) =>
                         queue.offer(ErrorEvent(error))
                   catch

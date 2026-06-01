@@ -5,8 +5,6 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.evaluate.contracts.ExampleEvaluation
-import dspy4s.evaluate.metrics.AnswerMatch
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.evaluate.metrics.FunctionMetric
 import munit.FunSuite

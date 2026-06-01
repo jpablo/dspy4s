@@ -11,6 +11,7 @@ import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.contracts.ProgramCall
 
+import scala.annotation.nowarn
 import scala.util.boundary
 import scala.util.boundary.break
 import scala.util.control.NonFatal
@@ -52,6 +53,7 @@ final class BootstrapFewShot[P <: Module[ProgramCall, DynamicPrediction]: Predic
     else
       compileInternal(student, trainset, teacher)
 
+  @nowarn("msg=unused")
   private def compileInternal(
       student: P,
       trainset: Vector[Example],
@@ -82,7 +84,6 @@ final class BootstrapFewShot[P <: Module[ProgramCall, DynamicPrediction]: Predic
                   val metricOk = config.metric match
                     case None => true
                     case Some(m) =>
-                      given RuntimeContext = ctx
                       m.score(example, prediction) match
                         case Right(score) =>
                           config.metricThreshold match

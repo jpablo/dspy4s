@@ -276,7 +276,7 @@ private[typed] object FunctionMacro:
           returnType.asType match
             case '[o] =>
               Expr.summon[Mirror.ProductOf[o]] match
-                case Some(mirror) =>
+                case Some(_) =>
                   Expr.summon[Schema[o]] match
                     case Some(schema) =>
                       inputType.asType match
@@ -487,7 +487,7 @@ private[typed] object FunctionMacro:
           returnType.asType match
             case '[o] =>
               Expr.summon[Mirror.ProductOf[o]] match
-                case Some(mirror) =>
+                case Some(_) =>
                   Expr.summon[Schema[o]] match
                     case Some(schema) =>
                       inputType.asType match

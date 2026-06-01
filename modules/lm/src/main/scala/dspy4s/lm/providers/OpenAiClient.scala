@@ -2,7 +2,6 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
@@ -45,7 +44,7 @@ final case class OpenAiClient(
         val buffered = new StringBuilder
         val draining = response.dataLines
         try
-          while draining.hasNext do buffered.append(draining.next()).append('\n')
+          while draining.hasNext do { val _ = buffered.append(draining.next()).append('\n') }
         finally draining.close()
         Left(statusError(response.status, buffered.toString))
       else

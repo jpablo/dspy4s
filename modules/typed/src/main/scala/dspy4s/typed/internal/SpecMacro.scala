@@ -27,7 +27,6 @@ private[typed] object SpecMacro:
     val tpe        = TypeRepr.of[T]
     val typeSym    = tpe.typeSymbol
     val specName   = typeSym.name
-    val sigName    = name.value.filter(_.nonEmpty).getOrElse(specName)
 
     val inputFieldSym  = TypeRepr.of[InputField[Any]].typeSymbol
     val outputFieldSym = TypeRepr.of[OutputField[Any]].typeSymbol

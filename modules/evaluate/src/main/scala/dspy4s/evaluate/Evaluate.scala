@@ -4,15 +4,12 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
 import dspy4s.evaluate.contracts.ExampleEvaluation
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.programs.runtime.ParallelExecutor
 
-import java.io.PrintWriter
-import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration.DurationInt
 
