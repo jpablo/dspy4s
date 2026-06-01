@@ -11,6 +11,9 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
+import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
 import dspy4s.lm.runtime.CompositeLmCache
 import dspy4s.lm.runtime.DiskLmCache
 import dspy4s.lm.runtime.InMemoryLmCache
@@ -220,6 +223,32 @@ class LmRuntimeSuite extends FunSuite:
       assert(cached.isDefined)
       assertEquals(cached.get.cacheHit, true)
       assertEquals(cached.get.usage, None)
+    finally deleteRecursively(tempDir)
+  }
+
+  test("disk cache round-trips typed tool-call args faithfully (not stringified)") {
+    val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache-tools")
+    try
+      val toolResponse = LmResponse(outputs = Vector(LmOutput(
+        text = "",
+        toolCalls = Vector(ToolCall(
+          name = "search",
+          args = DynamicValues.recordFromEntries(Seq("query" := "belgium", "top_k" := 3))
+        ))
+      )))
+      val first = new DiskLmCache(tempDir, maxEntries = 8)
+      first.put(baseRequest, toolResponse)
+
+      val second = new DiskLmCache(tempDir, maxEntries = 8)
+      val args   = DynamicValues.recordToMap(second.get(baseRequest).get.outputs.head.toolCalls.head.args)
+
+      assertEquals(args("query"), "belgium": Any)
+      // Before the DynamicValue migration the disk cache flattened args via String.valueOf,
+      // so top_k=3 round-tripped to the String "3". It must now stay numeric.
+      args("top_k") match
+        case n: Int  => assertEquals(n, 3)
+        case n: Long => assertEquals(n, 3L)
+        case other   => fail(s"top_k must round-trip as a number, not ${other.getClass.getSimpleName}: $other")
     finally deleteRecursively(tempDir)
   }
 

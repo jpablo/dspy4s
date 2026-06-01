@@ -4,6 +4,8 @@ import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSchemaBridge
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.ToolCall
 import munit.FunSuite
@@ -39,14 +41,15 @@ class ToolSchemaBridgeSuite extends FunSuite:
     val output = LmOutput(
       text = "",
       toolCalls = Vector(
-        ToolCall(name = "search", args = Map("query" -> "capital of belgium")),
-        ToolCall(name = "lookup", args = Map("id" -> 42))
+        ToolCall(name = "search", args = DynamicValues.recordFromEntries(Seq("query" := "capital of belgium"))),
+        ToolCall(name = "lookup", args = DynamicValues.recordFromEntries(Seq("id" := 42)))
       )
     )
 
     val calls = ToolSchemaBridge.fromOutput(output)
 
     assertEquals(calls.map(_.name), Vector("search", "lookup"))
-    assertEquals(calls.head.args("query"), "capital of belgium")
-    assertEquals(calls.last.args("id"), 42)
+    assertEquals(DynamicValues.recordToMap(calls.head.args)("query"), "capital of belgium": Any)
+    // Int stays Int through the DynamicValue round-trip (the old String-flattening cache would lose this).
+    assertEquals(DynamicValues.recordToMap(calls.last.args)("id"), 42: Any)
   }

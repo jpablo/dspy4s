@@ -9,6 +9,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.ToolCall
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -141,10 +142,25 @@ private object DiskCacheModel:
       metadata: java.util.Map[String, String]
   ) extends Serializable
 
+  // Tool-call args are a `DynamicValue.Record`; persist them as their natural JSON (via zio-blocks'
+  // DynamicValue JSON codec) rather than the lossy String-flattening used for the free-form metadata map.
   final case class PersistedToolCall(
       name: String,
-      args: java.util.Map[String, String]
+      argsJson: String
   ) extends Serializable
+
+  private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
+
+  def encodeToolArgs(args: DynamicValue.Record): String =
+    new String(dynamicJsonCodec.encode(args), StandardCharsets.UTF_8)
+
+  def decodeToolArgs(argsJson: String | Null): DynamicValue.Record =
+    Option(argsJson) match
+      case Some(json) =>
+        dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
+          case Right(rec: DynamicValue.Record) => rec
+          case _                               => DynamicValue.Record.empty
+      case None => DynamicValue.Record.empty
 
   final case class PersistedUsage(
       totalTokens: Long,
@@ -254,7 +270,7 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
   private def toPersisted(response: LmResponse): PersistedResponse =
     val outputs = response.outputs.map { output =>
       val toolCalls = output.toolCalls.map { call =>
-        PersistedToolCall(call.name, toJavaStringMap(call.args))
+        PersistedToolCall(call.name, encodeToolArgs(call.args))
       }.toArray
       PersistedOutput(
         text = output.text,
@@ -275,7 +291,7 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
   private def fromPersisted(response: PersistedResponse): LmResponse =
     val outputs = Option(response.outputs).getOrElse(Array.empty[PersistedOutput]).toVector.map { output =>
       val toolCalls = Option(output.toolCalls).getOrElse(Array.empty[PersistedToolCall]).toVector.map { call =>
-        ToolCall(name = call.name, args = fromJavaStringMap(call.args))
+        ToolCall(name = call.name, args = decodeToolArgs(call.argsJson))
       }
       LmOutput(
         text = Option(output.text).getOrElse(""),

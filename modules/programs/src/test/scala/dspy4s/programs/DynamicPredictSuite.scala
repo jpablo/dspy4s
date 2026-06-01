@@ -81,7 +81,7 @@ class PredictSuite extends FunSuite:
             LmOutput(
               text = "Need tool",
               metadata = Map("score" -> 0.5),
-              toolCalls = Vector(ToolCall(name = "search", args = Map("query" -> "capital of belgium")))
+              toolCalls = Vector(ToolCall(name = "search", args = DynamicValues.recordFromEntries(Seq("query" := "capital of belgium"))))
             )
           )
         )

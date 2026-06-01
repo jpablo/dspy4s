@@ -1,6 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmChunk
@@ -47,7 +48,7 @@ class StreamingToolCallSuite extends FunSuite:
     assertEquals(output.text, "")
     assertEquals(output.toolCalls.size, 1)
     assertEquals(output.toolCalls.head.name, "get_weather")
-    assertEquals(output.toolCalls.head.args, Map[String, Any]("city" -> "Paris"))
+    assertEquals(DynamicValues.recordToMap(output.toolCalls.head.args), Map[String, Any]("city" -> "Paris"))
   }
 
   test("wrapper does not emit TokenEvents for tool-call-only chunks") {
@@ -87,7 +88,7 @@ class StreamingToolCallSuite extends FunSuite:
     val calls = response.outputs.head.toolCalls
     assertEquals(calls.size, 2)
     assertEquals(calls.map(_.name).toSet, Set("alpha", "beta"))
-    val byName = calls.map(c => c.name -> c.args).toMap
+    val byName = calls.map(c => c.name -> DynamicValues.recordToMap(c.args)).toMap
     assertEquals(byName("alpha"), Map[String, Any]("x" -> 1L))
     assertEquals(byName("beta"), Map[String, Any]("y" -> 2L))
   }

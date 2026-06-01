@@ -2,6 +2,7 @@ package dspy4s.adapters.contracts
 
 import dspy4s.core.contracts.TypeRef
 import dspy4s.lm.contracts.LmOutput
+import zio.blocks.schema.DynamicValue
 
 final case class ToolParameterSpec(
     name: String,
@@ -18,7 +19,7 @@ final case class ToolSpec(
 
 final case class ToolCallData(
     name: String,
-    args: Map[String, Any],
+    args: DynamicValue.Record,
     id: Option[String] = None
 )
 

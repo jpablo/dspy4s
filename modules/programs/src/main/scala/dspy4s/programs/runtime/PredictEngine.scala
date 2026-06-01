@@ -6,7 +6,6 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -122,7 +121,7 @@ private[dspy4s] final case class PredictEngine(
       toolCalls.map { call =>
         DynamicValue.Record(Chunk(
           "name" -> DynamicValue.Primitive(PrimitiveValue.String(call.name)),
-          "args" -> DynamicValues.fromAny(call.args)
+          "args" -> call.args
         ))
       }
     ))

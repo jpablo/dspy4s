@@ -1,9 +1,14 @@
 package dspy4s.lm.runtime
 
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.lm.contracts.LmToolCallDelta
 import munit.FunSuite
 
 class ToolCallAssemblerSuite extends FunSuite:
+
+  // Args are now a DynamicValue.Record; project back to a Map for value comparison.
+  private def argsMap(call: dspy4s.lm.contracts.ToolCall): Map[String, Any] =
+    DynamicValues.recordToMap(call.args)
 
   test("assembles a single tool call from openai-style frame sequence") {
     val deltas = Vector(
@@ -14,7 +19,7 @@ class ToolCallAssemblerSuite extends FunSuite:
     val calls = ToolCallAssembler.assemble(deltas)
     assertEquals(calls.size, 1)
     assertEquals(calls.head.name, "get_weather")
-    assertEquals(calls.head.args, Map[String, Any]("location" -> "Paris"))
+    assertEquals(argsMap(calls.head), Map[String, Any]("location" -> "Paris"))
   }
 
   test("preserves first-seen order across multiple indices") {
@@ -42,7 +47,7 @@ class ToolCallAssemblerSuite extends FunSuite:
     val calls = ToolCallAssembler.assemble(deltas)
     assertEquals(calls.size, 1)
     assertEquals(calls.head.name, "late_name")
-    assertEquals(calls.head.args, Map[String, Any]("a" -> 1L))
+    assertEquals(argsMap(calls.head), Map[String, Any]("a" -> 1L))
   }
 
   test("falls back to input wrapper when arguments are not valid JSON") {
@@ -50,11 +55,11 @@ class ToolCallAssemblerSuite extends FunSuite:
       LmToolCallDelta(index = 0, name = Some("notify"), argumentsFragment = Some("plain text"))
     )
     val calls = ToolCallAssembler.assemble(deltas)
-    assertEquals(calls.head.args, Map[String, Any]("input" -> "plain text"))
+    assertEquals(argsMap(calls.head), Map[String, Any]("input" -> "plain text"))
   }
 
   test("empty arguments yield empty args map") {
     val deltas = Vector(LmToolCallDelta(index = 0, name = Some("ping")))
     val calls = ToolCallAssembler.assemble(deltas)
-    assertEquals(calls.head.args, Map.empty[String, Any])
+    assertEquals(argsMap(calls.head), Map.empty[String, Any])
   }

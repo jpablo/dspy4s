@@ -1,8 +1,10 @@
 package dspy4s.lm.runtime
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -12,6 +14,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.ToolCall
+import zio.blocks.schema.DynamicValue
 
 final case class ProviderLanguageModel(
     id: String,
@@ -154,13 +157,18 @@ object ProviderResponseParser:
       case Left(_) =>
         Vector.empty
 
-  private def parseArgs(raw: Option[Any]): Map[String, Any] =
-    raw.flatMap(asMap).getOrElse {
-      raw match
-        case Some(value: String) if value.trim.nonEmpty => Map("input" -> value)
-        case Some(value)                                => Map("value" -> value)
-        case None                                       => Map.empty
-    }
+  private def parseArgs(raw: Option[Any]): DynamicValue.Record =
+    raw.flatMap(asMap) match
+      case Some(map) =>
+        DynamicValues.recordFromEntries(map.toSeq.map((k, v) => k -> DynamicValues.fromAny(v)))
+      case None =>
+        raw match
+          case Some(value: String) if value.trim.nonEmpty =>
+            DynamicValues.recordFromEntries(Seq("input" := value))
+          case Some(value) =>
+            DynamicValues.recordFromEntries(Seq("value" -> DynamicValues.fromAny(value)))
+          case None =>
+            DynamicValue.Record.empty
 
   private def extractText(node: Map[String, Any]): Option[String] =
     node.get("content") match

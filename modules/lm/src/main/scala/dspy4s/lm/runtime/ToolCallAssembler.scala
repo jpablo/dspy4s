@@ -1,8 +1,11 @@
 package dspy4s.lm.runtime
 
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.ToolCall
 import dspy4s.lm.providers.JsonCodec
+import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
 
@@ -11,9 +14,9 @@ import scala.collection.mutable
   * OpenAI emits the function `name` and call `id` once (typically on the first
   * delta for a given `index`) and the `arguments` JSON string in fragments
   * across subsequent deltas. We accumulate by `index`, preserving the order in
-  * which indices first appeared, and JSON-decode the concatenated arguments.
-  * Falls back to `Map("input" -> raw)` when the arguments string is not a JSON
-  * object — matches the non-streaming `ProviderResponseParser.parseArgs`.
+  * which indices first appeared, and JSON-decode the concatenated arguments
+  * into a `DynamicValue.Record`. Falls back to `{input: raw}` when the arguments
+  * string is not valid JSON — matches the non-streaming `parseArgs`.
   */
 object ToolCallAssembler:
 
@@ -39,10 +42,12 @@ object ToolCallAssembler:
       }
     }.toVector
 
-  private def parseArguments(raw: String): Map[String, Any] =
+  private def parseArguments(raw: String): DynamicValue.Record =
     val trimmed = raw.trim
-    if trimmed.isEmpty then Map.empty
+    if trimmed.isEmpty then DynamicValue.Record.empty
     else
       JsonCodec.decodeString(trimmed) match
-        case Right(map) => map
-        case Left(_)    => Map("input" -> trimmed)
+        case Right(map) =>
+          DynamicValues.recordFromEntries(map.toSeq.map((k, v) => k -> DynamicValues.fromAny(v)))
+        case Left(_) =>
+          DynamicValues.recordFromEntries(Seq("input" := trimmed))
