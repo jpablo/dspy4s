@@ -53,7 +53,7 @@ class CallbackDispatcherSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
 
-    intercept[IllegalStateException] {
+    val _ = intercept[IllegalStateException] {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         CallbackDispatcher.withModule("predict", Map("question" -> "boom")) {
           throw IllegalStateException("boom")
@@ -99,7 +99,7 @@ class CallbackDispatcherSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
 
-    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+    val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
       CallbackDispatcher.withModule("parent", Map("q" -> "x")) {
         CallbackDispatcher.withModule("child", Map("q" -> "x")) {
           Right("child")
@@ -127,7 +127,7 @@ class CallbackDispatcherSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
 
-    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+    val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given ExecutionContext = ExecutionContext.global
 
       CallbackDispatcher.withModule("outer", Map("q" -> "x")) {
@@ -160,7 +160,7 @@ class CallbackDispatcherSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
 
-    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+    val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
       CallbackDispatcher.withTool("search", Map("query" -> "scala")) {
         Right(Map("ok" -> true))
       }
@@ -181,13 +181,13 @@ class CallbackDispatcherSuite extends FunSuite:
 
     given ExecutionContext = ExecutionContext.global
 
-    CallbackDispatcher.withModule("outer", Map("q" -> "x")) {
+    val _ = CallbackDispatcher.withModule("outer", Map("q" -> "x")) {
       snapshots += RuntimeEnvironment.activeCallStack
 
       Await.result(
         ContextPropagation.future {
           snapshots += RuntimeEnvironment.activeCallStack
-          CallbackDispatcher.withTool("search", Map("query" -> "scala")) {
+          val _ = CallbackDispatcher.withTool("search", Map("query" -> "scala")) {
             snapshots += RuntimeEnvironment.activeCallStack
             Right("ok")
           }

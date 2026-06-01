@@ -533,7 +533,7 @@ class StreamListenerSuite extends FunSuite:
     val lm = new ScriptedLm(Vector(
       LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     ))
-    RuntimeEnvironment.withSettings(
+    val _ = RuntimeEnvironment.withSettings(
       RuntimeContext(
           lm = Some(lm),
           adapter = Some(ChatAdapter())
@@ -563,7 +563,7 @@ class StreamListenerSuite extends FunSuite:
     val lm = new ScriptedLm(Vector(
       LmChunk(text = "[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     ))
-    RuntimeEnvironment.withSettings(
+    val _ = RuntimeEnvironment.withSettings(
       RuntimeContext(
           lm = Some(lm),
           adapter = Some(ChatAdapter())
@@ -593,7 +593,7 @@ class StreamListenerSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     // We don't actually invoke the stream — validation runs eagerly when
     // streamify is called, before any inputs flow.
-    Streamify.streamify(
+    val _ = Streamify.streamify(
       program = opaqueProgram,
       streamListeners = Vector(
         StreamListener("anything_at_all"),

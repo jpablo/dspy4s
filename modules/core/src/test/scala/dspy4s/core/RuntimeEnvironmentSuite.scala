@@ -62,7 +62,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
   }
 
   test("withSettings overrides global setting only inside scope") {
-    RuntimeEnvironment.configure(RuntimeContext(asyncTaskId = Some("global")))
+    val _ = RuntimeEnvironment.configure(RuntimeContext(asyncTaskId = Some("global")))
 
     RuntimeEnvironment.withSettings(RuntimeContext(asyncTaskId = Some("local"))) {
       assertEquals(RuntimeEnvironment.current.asyncTaskId, Some("local"))

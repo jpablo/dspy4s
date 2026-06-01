@@ -9,9 +9,9 @@ class StreamingQueueSuite extends FunSuite:
   test("queue delivers items in offer order") {
     val queue = StreamingQueue[Int](8)
     val producer = new Thread(() => {
-      queue.offer(1)
-      queue.offer(2)
-      queue.offer(3)
+      val _ = queue.offer(1)
+      val _ = queue.offer(2)
+      val _ = queue.offer(3)
       queue.close()
     })
     producer.start()
@@ -37,8 +37,8 @@ class StreamingQueueSuite extends FunSuite:
     assertEquals(done.get(), false)
     assertEquals(received.size(), 0)
 
-    queue.offer("a")
-    queue.offer("b")
+    val _ = queue.offer("a")
+    val _ = queue.offer("b")
     Thread.sleep(100)
     assertEquals(received.size(), 2)
 
@@ -57,8 +57,8 @@ class StreamingQueueSuite extends FunSuite:
 
   test("closing iterator stops consumption") {
     val queue = StreamingQueue[Int](8)
-    queue.offer(1)
-    queue.offer(2)
+    val _ = queue.offer(1)
+    val _ = queue.offer(2)
     val iter = queue.asIterator
     assertEquals(iter.hasNext, true)
     assertEquals(iter.next(), 1)
@@ -68,7 +68,7 @@ class StreamingQueueSuite extends FunSuite:
 
   test("close is idempotent") {
     val queue = StreamingQueue[Int](8)
-    queue.offer(1)
+    val _ = queue.offer(1)
     queue.close()
     queue.close()
     val iter = queue.asIterator

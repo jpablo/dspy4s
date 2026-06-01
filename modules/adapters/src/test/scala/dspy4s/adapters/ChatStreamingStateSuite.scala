@@ -117,7 +117,7 @@ class ChatStreamingStateSuite extends FunSuite:
 
   test("finish() is idempotent") {
     val state = new ChatStreamingState(Vector(output("answer")))
-    state.receive("[[ ## answer ## ]]\nx")
+    val _ = state.receive("[[ ## answer ## ]]\nx")
     val first = state.finish()
     val second = state.finish()
     assert(first.nonEmpty)

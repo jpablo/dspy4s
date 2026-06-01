@@ -91,7 +91,7 @@ class XmlStreamingStateSuite extends FunSuite:
 
   test("finish() flushes a value that was truncated mid-content") {
     val state = new XmlStreamingState(Vector(output("v")))
-    state.receive("<outputs><v>abc") // close tag never arrived
+    val _ = state.receive("<outputs><v>abc") // close tag never arrived
     val flushed = state.finish()
     val text = flushed.filter(_.fieldName == "v").map(_.text).mkString
     assertEquals(text, "abc")
@@ -100,7 +100,7 @@ class XmlStreamingStateSuite extends FunSuite:
 
   test("finish() is idempotent") {
     val state = new XmlStreamingState(Vector(output("v")))
-    state.receive("<outputs><v>abc")
+    val _ = state.receive("<outputs><v>abc")
     val first = state.finish()
     val second = state.finish()
     assert(first.nonEmpty)

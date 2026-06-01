@@ -75,7 +75,7 @@ class SubprocessPythonInterpreterSuite extends FunSuite:
   test("each execute is independent — no REPL state across calls") {
     val interp = new SubprocessPythonInterpreter()
     try
-      interp.execute("x = 42")
+      val _ = interp.execute("x = 42")
       val result = interp.execute("print(x)").toOption.get
       // x is gone — this is the documented limitation of the subprocess impl.
       assert(result.exitCode != 0, "expected NameError on second call")

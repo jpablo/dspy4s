@@ -153,7 +153,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    client.stream(Map("model" -> "m"))
+    val _ = client.stream(Map("model" -> "m"))
 
     val (_, body, _) = transport.sentStreamBodies.head
     assert(body.contains("\"stream\":true"))

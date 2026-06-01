@@ -13,9 +13,17 @@ lazy val commonSettings = Seq(
     "-deprecation",
     "-feature",
     "-unchecked",
+    "-Werror",
     "-Wunused:all",
     "-Wvalue-discard",
-    "-Werror"
+    "-Wnonunit-statement",
+    "-Wimplausible-patterns",
+    "-Wsafe-init",
+    "-Wshadow:all",
+    "-Wenum-comment-discard",
+    "-Wrecurse-with-default",
+    "-Wwrong-arrow",
+    "-explain"
   )
 )
 

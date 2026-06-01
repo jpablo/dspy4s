@@ -76,7 +76,7 @@ object Streamify:
       val producer = new Thread(
         new Runnable:
           override def run(): Unit =
-            ContextPropagation.inContext(captured) {
+            val _ = ContextPropagation.inContext(captured) {
               RuntimeEnvironment.withSettings(lmOverride) {
                 val existingCallbacks = RuntimeEnvironment.current.callbacks
                 RuntimeEnvironment.withCallbacks(existingCallbacks :+ callback) {

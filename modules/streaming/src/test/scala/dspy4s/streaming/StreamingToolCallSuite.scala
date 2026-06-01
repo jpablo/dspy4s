@@ -59,7 +59,7 @@ class StreamingToolCallSuite extends FunSuite:
     val wrapper = StreamingLanguageModelWrapper(new ScriptedStreamingLm(chunks), queue)
 
     given RuntimeContext = RuntimeEnvironment.current
-    wrapper.call(LmRequest(model = "m"))
+    val _ = wrapper.call(LmRequest(model = "m"))
     queue.close()
 
     val drained = ArrayBuffer.empty[StreamEvent]

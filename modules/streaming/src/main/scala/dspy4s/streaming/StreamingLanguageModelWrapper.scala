@@ -132,7 +132,7 @@ final class StreamingLanguageModelWrapper private (
   private def emitFieldChunk(ctx: CallContext, fc: FieldChunk, isFinalChunk: Boolean): Unit =
     val isLast = fc.isLast || isFinalChunk
     if listenerAccepts(ctx.predictName, fc.fieldName) then
-      queue.offer(
+      val _ = queue.offer(
         TokenEvent(
           predictName = ctx.predictName,
           fieldName = fc.fieldName,

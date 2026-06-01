@@ -98,7 +98,7 @@ class JsonStreamingStateSuite extends FunSuite:
 
   test("finish() flushes a value that the model truncated mid-stream") {
     val state = new JsonStreamingState(Vector(output("v")))
-    state.receive("""{"v": "abc""") // string never closes
+    val _ = state.receive("""{"v": "abc""") // string never closes
     val flushed = state.finish()
     val text = flushed.filter(_.fieldName == "v").map(_.text).mkString
     assertEquals(text, "abc")
@@ -107,7 +107,7 @@ class JsonStreamingStateSuite extends FunSuite:
 
   test("finish() is idempotent") {
     val state = new JsonStreamingState(Vector(output("v")))
-    state.receive("""{"v": "abc""") // truncated — value still open at stream end
+    val _ = state.receive("""{"v": "abc""") // truncated — value still open at stream end
     val first = state.finish()
     val second = state.finish()
     assert(first.nonEmpty)

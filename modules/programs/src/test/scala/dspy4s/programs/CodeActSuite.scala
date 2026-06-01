@@ -182,7 +182,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      program.run(ProgramCall(inputs = rec("q" -> "?")))
+      val _ = program.run(ProgramCall(inputs = rec("q" -> "?")))
       assert(!interpreter.closed, "CodeAct must not auto-close — that's the caller's job")
     }
   }
