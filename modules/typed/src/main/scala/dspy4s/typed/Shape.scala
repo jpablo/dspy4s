@@ -1,9 +1,8 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError, ValidationError
+  DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError
 }
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in
@@ -31,33 +30,15 @@ trait Shape[A]:
 
 object Shape:
 
-  /** A `Shape[DynamicValue.Record]` whose `fieldSpecs` are provided at construction. Used by the trait-spec macro
-    * and any other surface that produces field metadata without an accompanying case class.
-    *
-    * When `decoders` is non-empty, every declared field is run through its `FieldCodec` during `decode` (so a raw
-    * adapter value like the string `"joy"` becomes the typed enum value `Sentiment.joy`, then re-encoded back to a
-    * DynamicValue for the spine), and inputs are similarly encoded through the same decoders on the way out.
-    *
-    * Fields not present in `decoders` pass through unchanged. `decode` always validates that every field listed in
-    * `fieldSpecs` is present in the raw record. */
+  /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromString`), where the DSL carries no
+    * static schema so the "typed" value stays at the spine type. `encode` is the identity; `decode` only
+    * validates that every field listed in `fieldSpecs` is present in the raw record (no per-field coercion --
+    * that happens upstream in the adapter / `ZioSchemaCodec.normalize` for schema-backed shapes). */
   final class MapShape(
-      override val fieldSpecs: Vector[FieldSpec],
-      decoders: Map[String, FieldCodec[Any]] = Map.empty
+      override val fieldSpecs: Vector[FieldSpec]
   ) extends Shape[DynamicValue.Record]:
 
-    def encode(value: DynamicValue.Record): DynamicValue.Record =
-      if decoders.isEmpty then value
-      else
-        val out = value.fields.iterator.map { (k, v) =>
-          decoders.get(k) match
-            case Some(dec) =>
-              // Round-trip via the decoder: lift DynamicValue → Any → encoded → DynamicValue.
-              val asAny  = DynamicValues.toAny(v)
-              val encVal = dec.encode(asAny)
-              k -> DynamicValues.fromAny(encVal)
-            case None => k -> v
-        }.toSeq
-        DynamicValue.Record(Chunk.from(out))
+    def encode(value: DynamicValue.Record): DynamicValue.Record = value
 
     def decode(raw: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
       val present = DynamicValues.recordKeys(raw).toSet
@@ -67,24 +48,7 @@ object Shape:
           resource = "prediction_field",
           message  = s"Missing required fields: ${missing.mkString(", ")}"
         ))
-      else if decoders.isEmpty then
-        Right(raw)
-      else
-        val builder = Vector.newBuilder[(String, DynamicValue)]
-        val it = fieldSpecs.iterator
-        while it.hasNext do
-          val fs = it.next()
-          val rawValue = DynamicValues.recordGet(raw, fs.name).get
-          decoders.get(fs.name) match
-            case Some(dec) =>
-              dec.decode(DynamicValues.toAny(rawValue)) match
-                case Right(decoded) =>
-                  builder += (fs.name -> DynamicValues.fromAny(decoded))
-                case Left(err) =>
-                  return Left(ValidationError(s"Field '${fs.name}': ${err.message}"))
-            case None =>
-              builder += (fs.name -> rawValue)
-        Right(DynamicValue.Record(Chunk.from(builder.result())))
+      else Right(raw)
 
   /** A `Shape` for a (named-)tuple type `A`, fully backed by a zio-blocks `Schema[A]` derived for that tuple.
     * Used by the `Signature.of[Spec]` / `from` / `fromType` macros, which hand callers a named-tuple type,
