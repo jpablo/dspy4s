@@ -1,76 +1,97 @@
 package dspy4s.lm.providers
 
+import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ParseError
+import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.LmUsage
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.NameMapper
+import zio.blocks.schema.Schema
+import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Typed view of a single OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), decoded from one SSE
-  * `data:` JSON object. Modeling the chunk as a datatype lets the client map named fields instead of poking the raw
-  * `DynamicValue` by key throughout its streaming logic — all of that navigation lives here, next to the shape it
-  * describes.
+/** Typed wire model of one OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), parsed straight from
+  * the SSE `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror
+  * the wire shape (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is
+  * lenient exactly where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and
+  * unknown fields (`id`, `object`, `role`, `type`, …) are ignored.
   *
-  * Decoding is hand-written rather than `Schema.fromDynamicValue` on purpose: provider chunks are loose and highly
-  * partial — every delta omits a different subset of fields, `finish_reason` arrives as JSON `null`, and unknown
-  * fields (`id`, `object`, `role`, …) come and go. zio-blocks' derived decoder rejects both missing fields and
-  * `null`, and represents `Option` as a tagged `Variant`, none of which matches raw wire JSON. So the navigation
-  * helpers in [[DynamicJson]] are the right tool, confined to this one boundary. */
+  * The domain mapping to `LmChunk` lives on the DTO, reading typed fields only. */
 private[providers] final case class OpenAiStreamChunk(
-    choices: Vector[OpenAiStreamChoice],
-    usage: Option[LmUsage]
-)
+    choices: Vector[OpenAiStreamChoice] = Vector.empty,
+    usage: Option[OpenAiStreamUsage] = None
+) derives Schema:
 
-private[providers] final case class OpenAiStreamChoice(
-    content: Option[String],
-    finishReason: Option[String],
-    toolCalls: Vector[LmToolCallDelta]
-)
-
-private[providers] object OpenAiStreamChunk:
-  import DynamicJson.{field, asRecord, asString, asLong, asSequence}
-
-  def decode(payload: DynamicValue): OpenAiStreamChunk =
-    OpenAiStreamChunk(
-      choices = field(payload, "choices").map(asSequence).getOrElse(Vector.empty).flatMap(decodeChoice),
-      usage   = field(payload, "usage").flatMap(asRecord).map(decodeUsage)
+  /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk);
+    * usage rides the final, choice-less chunk. */
+  def toLmChunk: LmChunk =
+    val choice = choices.headOption
+    LmChunk(
+      text = choice.flatMap(_.delta).flatMap(_.content).getOrElse(""),
+      finishReason = choice.flatMap(_.finishReason),
+      usage = usage.map(_.toLmUsage),
+      toolCalls = choice.flatMap(_.delta).map(_.toLmToolCallDeltas).getOrElse(Vector.empty)
     )
 
-  private def decodeChoice(raw: DynamicValue): Option[OpenAiStreamChoice] =
-    asRecord(raw).map { choice =>
-      val delta = field(choice, "delta").flatMap(asRecord)
-      OpenAiStreamChoice(
-        content = delta.flatMap(d => field(d, "content")).flatMap(asString),
-        finishReason = field(choice, "finish_reason").flatMap(asString),
-        toolCalls = delta
-          .flatMap(d => field(d, "tool_calls"))
-          .map(asSequence)
-          .map(decodeToolCalls)
-          .getOrElse(Vector.empty)
+private[providers] final case class OpenAiStreamChoice(
+    delta: Option[OpenAiStreamDelta] = None,
+    finishReason: Option[String] = None
+) derives Schema
+
+private[providers] final case class OpenAiStreamDelta(
+    content: Option[String] = None,
+    toolCalls: Vector[OpenAiStreamToolCall] = Vector.empty
+) derives Schema:
+
+  /** OpenAI omits the explicit `index` on some deltas; fall back to the array position, matching the prior parser. */
+  def toLmToolCallDeltas: Vector[LmToolCallDelta] =
+    toolCalls.zipWithIndex.map { case (call, fallbackIdx) =>
+      LmToolCallDelta(
+        index = call.index.getOrElse(fallbackIdx),
+        id = call.id,
+        name = call.function.flatMap(_.name),
+        argumentsFragment = call.function.flatMap(_.arguments)
       )
     }
 
-  private def decodeToolCalls(entries: Vector[DynamicValue]): Vector[LmToolCallDelta] =
-    entries.zipWithIndex.flatMap { case (raw, fallbackIdx) =>
-      asRecord(raw).map { entry =>
-        val function = field(entry, "function").flatMap(asRecord)
-        LmToolCallDelta(
-          index = field(entry, "index").flatMap(asLong).map(_.toInt).getOrElse(fallbackIdx),
-          id = field(entry, "id").flatMap(asString),
-          name = function.flatMap(f => field(f, "name")).flatMap(asString),
-          argumentsFragment = function.flatMap(f => field(f, "arguments")).flatMap(asString)
-        )
-      }
-    }
+private[providers] final case class OpenAiStreamToolCall(
+    index: Option[Int] = None,
+    id: Option[String] = None,
+    function: Option[OpenAiStreamFunction] = None
+) derives Schema
 
-  private def decodeUsage(usage: DynamicValue.Record): LmUsage =
-    val promptTokens = field(usage, "prompt_tokens").flatMap(asLong).getOrElse(0L)
-    val completionTokens = field(usage, "completion_tokens").flatMap(asLong).getOrElse(0L)
-    val totalTokens = field(usage, "total_tokens").flatMap(asLong).getOrElse(promptTokens + completionTokens)
-    val details = usage.fields.iterator.collect {
-      case (k, v) if asLong(v).isDefined => k -> asLong(v).get
-    }.toMap
+private[providers] final case class OpenAiStreamFunction(
+    name: Option[String] = None,
+    arguments: Option[String] = None
+) derives Schema
+
+private[providers] final case class OpenAiStreamUsage(
+    promptTokens: Option[Long] = None,
+    completionTokens: Option[Long] = None,
+    totalTokens: Option[Long] = None
+) derives Schema:
+
+  /** `details` carries the present token counts (the prior parser collected the top-level numeric usage fields,
+    * which for OpenAI are exactly these three). `totalTokens` falls back to prompt + completion when absent. */
+  def toLmUsage: LmUsage =
+    val prompt = promptTokens.getOrElse(0L)
+    val completion = completionTokens.getOrElse(0L)
+    val details = Vector(
+      "prompt_tokens"     -> promptTokens,
+      "completion_tokens" -> completionTokens,
+      "total_tokens"      -> totalTokens
+    ).collect { case (k, Some(v)) => k -> v }.toMap
     LmUsage(
-      totalTokens = totalTokens,
-      promptTokens = promptTokens,
-      completionTokens = completionTokens,
+      totalTokens = totalTokens.getOrElse(prompt + completion),
+      promptTokens = prompt,
+      completionTokens = completion,
       details = details
     )
+
+private[providers] object OpenAiStreamChunk:
+  private val codec = Schema[OpenAiStreamChunk].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
+
+  /** Parse one SSE `data:` JSON object into the typed chunk. */
+  def decode(json: String): Either[DspyError, OpenAiStreamChunk] =
+    codec.decode(json) match
+      case Right(chunk) => Right(chunk)
+      case Left(err)    => Left(ParseError("json", s"Invalid OpenAI stream chunk: ${err.toString.take(200)}"))

@@ -77,9 +77,9 @@ final case class OpenAiClient(
                 close()
                 return
               else
-                DynamicJson.decode(data) match
-                  case Right(value) =>
-                    pending = chunkFromPayload(value)
+                OpenAiStreamChunk.decode(data) match
+                  case Right(chunk) =>
+                    pending = chunk.toLmChunk
                     return
                   case Left(_) => ()
           // Lines exhausted without an explicit [DONE]: release the connection rather than leaving it for GC.
@@ -103,19 +103,6 @@ final case class OpenAiClient(
         if !innerClosed then
           innerClosed = true
           lines.close()
-
-  /** Map the typed wire chunk onto the domain `LmChunk`. Text, finish reason and tool-call deltas come from the
-    * first choice (OpenAI emits one choice per streaming chunk); usage rides the final, choice-less chunk. */
-  private def chunkFromPayload(payload: DynamicValue): LmChunk =
-    val chunk = OpenAiStreamChunk.decode(payload)
-    val choice = chunk.choices.headOption
-    LmChunk(
-      text = choice.flatMap(_.content).getOrElse(""),
-      finishReason = choice.flatMap(_.finishReason),
-      usage = chunk.usage,
-      toolCalls = choice.map(_.toolCalls).getOrElse(Vector.empty),
-      raw = Some(payload)
-    )
 
   private def statusError(status: Int, body: String): DspyError =
     val code = status match
