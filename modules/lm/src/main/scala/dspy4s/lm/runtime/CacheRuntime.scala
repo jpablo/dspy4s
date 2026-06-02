@@ -7,6 +7,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.TokenCategory
 import dspy4s.lm.contracts.ToolCall
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -279,7 +280,7 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
         totalTokens = u.totalTokens,
         promptTokens = u.promptTokens,
         completionTokens = u.completionTokens,
-        details = toJavaLongMap(u.details)
+        details = toJavaLongMap(u.extras.map { case (category, value) => category.wireName -> value })
       )
     }.orNull
     PersistedResponse(outputs = outputs, usage = usage, modelName = response.modelName.orNull)
@@ -300,7 +301,7 @@ final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCac
         totalTokens = u.totalTokens,
         promptTokens = u.promptTokens,
         completionTokens = u.completionTokens,
-        details = fromJavaLongMap(u.details)
+        extras = fromJavaLongMap(u.details).map { case (name, value) => TokenCategory.fromWire(name) -> value }
       )
     }
     LmResponse(

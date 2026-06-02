@@ -35,20 +35,19 @@ class OpenAiStreamChunkSuite extends FunSuite:
     assertEquals(calls(1).argumentsFragment, Some("{\"q\":1}"))
   }
 
-  test("decodes the choice-less final usage chunk, exposing present token counts as details") {
+  test("decodes the choice-less final usage chunk into typed core fields") {
     val lm = decode("""{"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}""").toLmChunk
     assertEquals(lm.text, "")
     val usage = lm.usage.get
     assertEquals(usage.promptTokens, 3L)
     assertEquals(usage.completionTokens, 2L)
     assertEquals(usage.totalTokens, 5L)
-    assertEquals(usage.details, Map("prompt_tokens" -> 3L, "completion_tokens" -> 2L, "total_tokens" -> 5L))
+    assertEquals(usage.extras, Map.empty[dspy4s.lm.contracts.TokenCategory, Long])
   }
 
   test("total_tokens falls back to prompt + completion when absent") {
     val usage = decode("""{"usage":{"prompt_tokens":4,"completion_tokens":6}}""").toLmChunk.usage.get
     assertEquals(usage.totalTokens, 10L)
-    assertEquals(usage.details.get("total_tokens"), None) // not present on the wire -> not fabricated into details
   }
 
   test("returns Left for malformed JSON") {

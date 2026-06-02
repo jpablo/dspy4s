@@ -77,14 +77,14 @@ final class UsageTracker:
 
   private def aggregate(entries: Vector[LmUsage]): LmUsage =
     entries.foldLeft(LmUsage()) { (acc, usage) =>
-      val mergedDetails = usage.details.foldLeft(acc.details) { case (map, (key, value)) =>
-        map.updated(key, map.getOrElse(key, 0L) + value)
+      val mergedExtras = usage.extras.foldLeft(acc.extras) { case (map, (category, value)) =>
+        map.updated(category, map.getOrElse(category, 0L) + value)
       }
       acc.copy(
         totalTokens = acc.totalTokens + usage.totalTokens,
         promptTokens = acc.promptTokens + usage.promptTokens,
         completionTokens = acc.completionTokens + usage.completionTokens,
-        details = mergedDetails
+        extras = mergedExtras
       )
     }
 

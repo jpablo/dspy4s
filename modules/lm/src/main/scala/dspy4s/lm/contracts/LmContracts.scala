@@ -40,11 +40,14 @@ final case class LmRequest(
     rolloutId: Option[Int] = None
 )
 
+/** Token accounting for an LM call. The universal counters are typed fields; `extras` carries the open set of
+  * provider-specific categories (e.g. cached / reasoning tokens), keyed by [[TokenCategory]] so there are no magic
+  * string keys and the core counts are never duplicated into it. */
 final case class LmUsage(
     totalTokens: Long = 0L,
     promptTokens: Long = 0L,
     completionTokens: Long = 0L,
-    details: Map[String, Long] = Map.empty
+    extras: Map[TokenCategory, Long] = Map.empty
 )
 
 /** A tool invocation requested by the model. `args` is the call's `arguments` object, decoded from the

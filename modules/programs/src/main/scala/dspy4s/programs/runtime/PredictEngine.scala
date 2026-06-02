@@ -113,7 +113,7 @@ private[dspy4s] final case class PredictEngine(
     yield prediction
 
   private def usageToMap(usage: LmUsage): Map[String, Long] =
-    usage.details ++ Map(
+    usage.extras.map { case (category, value) => category.wireName -> value } ++ Map(
       "total_tokens" -> usage.totalTokens,
       "prompt_tokens" -> usage.promptTokens,
       "completion_tokens" -> usage.completionTokens

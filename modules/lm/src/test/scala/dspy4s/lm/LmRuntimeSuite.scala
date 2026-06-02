@@ -11,6 +11,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
+import dspy4s.lm.contracts.TokenCategory
 import dspy4s.lm.contracts.ToolCall
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
@@ -56,7 +57,7 @@ class LmRuntimeSuite extends FunSuite:
 
   private val baseResponse = LmResponse(
     outputs = Vector(LmOutput(text = "hello")),
-    usage = Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, details = Map("cached_tokens" -> 3L)))
+    usage = Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, extras = Map(TokenCategory.Cached -> 3L)))
   )
 
   override def beforeEach(context: BeforeEach): Unit =
@@ -203,7 +204,7 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(totals.totalTokens, 9L)
     assertEquals(totals.promptTokens, 4L)
     assertEquals(totals.completionTokens, 5L)
-    assertEquals(totals.details("cached_tokens"), 3L)
+    assertEquals(totals.extras(TokenCategory.Cached), 3L)
   }
 
   test("usage tracking respects track_usage setting") {
