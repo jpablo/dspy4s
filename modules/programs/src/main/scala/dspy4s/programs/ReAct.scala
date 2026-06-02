@@ -110,10 +110,14 @@ final case class ReAct(
       case None                                                      => false
 
   private def extractToolRequests(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
-    extractNativeToolCalls(prediction) match
-      case Right(requests) if requests.nonEmpty => Right(requests)
-      case Left(error)                          => Left(error)
-      case Right(_)                             => extractLegacyToolRequest(prediction).map(_.toVector)
+    for
+      native <- extractNativeToolCalls(prediction)
+      requests <-
+        if native.nonEmpty then
+          Right(native)
+        else
+          extractLegacyToolRequest(prediction).map(_.toVector)
+    yield requests
 
   private def extractLegacyToolRequest(prediction: DynamicPrediction): Either[DspyError, Option[ToolCallRequest]] =
     prediction.get(toolNameField) match
