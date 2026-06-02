@@ -15,6 +15,8 @@ import dspy4s.programs.runtime.ToolExecutor
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+import scala.annotation.tailrec
+
 final case class ReAct(
     module: PredictProgram,
     tools: Vector[ToolFunction],
@@ -29,62 +31,72 @@ final case class ReAct(
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
   override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    var currentInputs = call.inputs
-    var toolHistory   = Vector.empty[DynamicValue]
-    var iteration = 0
+    @tailrec
+    def loop(
+        iteration: Int,
+        currentInputs: DynamicValue.Record,
+        toolHistory: Vector[DynamicValue]
+    ): Either[DspyError, DynamicPrediction] =
+      if iteration >= maxIterations then
+        Left(RuntimeError("react", s"Reached max iterations ($maxIterations) without producing an answer"))
+      else
+        val stepCall = call.copy(
+          inputs = DynamicValues.recordUpdated(currentInputs, toolHistoryField, sequenceOf(toolHistory))
+        )
+        module
+          .run(stepCall)
+          .flatMap(prediction => processStep(prediction, currentInputs, toolHistory)) match
+            case Left(error)                               => Left(error)
+            case Right(StepOutcome.Done(prediction))       => Right(prediction)
+            case Right(StepOutcome.Continue(ins, history)) => loop(iteration + 1, ins, history)
 
-    while iteration < maxIterations do
-      val stepCall = call.copy(
-        inputs = DynamicValues.recordUpdated(currentInputs, toolHistoryField, sequenceOf(toolHistory))
-      )
-      module.run(stepCall) match
-        case Left(error) =>
-          return Left(error)
-        case Right(prediction) =>
-          if hasAnswer(prediction) then return Right(prediction)
+    loop(iteration = 0, currentInputs = call.inputs, toolHistory = Vector.empty)
 
-          extractToolRequests(prediction) match
-            case Left(error) =>
-              return Left(error)
-            case Right(requests) if requests.isEmpty =>
-              return Right(prediction)
-            case Right(requests) =>
-              var idx = 0
-              var lastToolResult: Option[DynamicValue] = None
-              val iterationSteps = Vector.newBuilder[DynamicValue]
+  /** Handle one model step: a final answer or an empty tool-request set ends the loop; otherwise run the requested
+    * tools and fold their results into the next iteration's inputs. */
+  private def processStep(
+      prediction: DynamicPrediction,
+      currentInputs: DynamicValue.Record,
+      toolHistory: Vector[DynamicValue]
+  )(using RuntimeContext): Either[DspyError, StepOutcome] =
+    if hasAnswer(prediction) then Right(StepOutcome.Done(prediction))
+    else
+      extractToolRequests(prediction).flatMap { requests =>
+        if requests.isEmpty then Right(StepOutcome.Done(prediction))
+        else runRequests(requests).map(steps => continueWith(steps, currentInputs, toolHistory))
+      }
 
-              while idx < requests.size do
-                val request = requests(idx)
-                ToolExecutor.invoke(request, tools) match
-                  case Left(error) =>
-                    return Left(error)
-                  case Right(callResult) =>
-                    callResult.result match
-                      case Left(error) =>
-                        return Left(error)
-                      case Right(value) =>
-                        lastToolResult = Some(value)
-                        iterationSteps += ReActStep(
-                          toolName = request.name,
-                          toolArgs = request.args,
-                          result   = value,
-                          index    = idx
-                        ).toRecord
-                idx += 1
+  /** Run each requested tool in order, short-circuiting on the first tool-lookup or execution failure. */
+  private def runRequests(
+      requests: Vector[ToolCallRequest]
+  )(using RuntimeContext): Either[DspyError, Vector[ReActStep]] =
+    requests.zipWithIndex.foldLeft[Either[DspyError, Vector[ReActStep]]](Right(Vector.empty)) {
+      case (acc, (request, idx)) =>
+        for
+          soFar      <- acc
+          callResult <- ToolExecutor.invoke(request, tools)
+          value      <- callResult.result
+        yield soFar :+ ReActStep(toolName = request.name, toolArgs = request.args, result = value, index = idx)
+    }
 
-              val batch = iterationSteps.result()
-              toolHistory = toolHistory ++ batch
-              currentInputs = DynamicValues.recordUpdated(
-                DynamicValues.recordUpdated(currentInputs, toolHistoryField, sequenceOf(toolHistory)),
-                toolResultsField,
-                sequenceOf(batch)
-              )
-              lastToolResult.foreach { result =>
-                currentInputs = DynamicValues.recordUpdated(currentInputs, toolResultField, result)
-              }
-      iteration += 1
-
-    Left(RuntimeError("react", s"Reached max iterations ($maxIterations) without producing an answer"))
+  /** Fold an executed batch into the next iteration's inputs: append it to the tool history, expose the batch as
+    * `tool_results`, and the final tool's value as `tool_result`. */
+  private def continueWith(
+      steps: Vector[ReActStep],
+      currentInputs: DynamicValue.Record,
+      toolHistory: Vector[DynamicValue]
+  ): StepOutcome =
+    val batch      = steps.map(_.toRecord)
+    val newHistory = toolHistory ++ batch
+    val withResults = DynamicValues.recordUpdated(
+      DynamicValues.recordUpdated(currentInputs, toolHistoryField, sequenceOf(newHistory)),
+      toolResultsField,
+      sequenceOf(batch)
+    )
+    val newInputs = steps.lastOption
+      .map(_.result)
+      .fold(withResults)(result => DynamicValues.recordUpdated(withResults, toolResultField, result))
+    StepOutcome.Continue(newInputs, newHistory)
 
   private def hasAnswer(prediction: DynamicPrediction): Boolean =
     prediction.get(answerField) match
@@ -162,6 +174,11 @@ final case class ReAct(
     * tool-results fields. */
   private def sequenceOf(items: Vector[DynamicValue]): DynamicValue =
     DynamicValue.Sequence(Chunk.from(items))
+
+/** Result of processing one ReAct model step: a final prediction, or the inputs/history to continue the loop with. */
+private enum StepOutcome:
+  case Done(prediction: DynamicPrediction)
+  case Continue(inputs: DynamicValue.Record, toolHistory: Vector[DynamicValue])
 
 /** One executed tool step recorded in ReAct's `tool_history` / `tool_results`. Modeled as a datatype and
   * serialized through [[ReActKeys]] so the history record carries no literal string keys. */
