@@ -4,7 +4,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ParseError
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.contracts.LmUsage
 import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
@@ -18,7 +17,7 @@ import zio.blocks.schema.json.JsonCodecDeriver
   * The domain mapping to `LmChunk` lives on the DTO, reading typed fields only. */
 private[providers] final case class OpenAiStreamChunk(
     choices: Vector[OpenAiStreamChoice] = Vector.empty,
-    usage: Option[OpenAiStreamUsage] = None
+    usage: Option[OpenAiUsage] = None
 ) derives Schema:
 
   /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk);
@@ -63,29 +62,6 @@ private[providers] final case class OpenAiStreamFunction(
     name: Option[String] = None,
     arguments: Option[String] = None
 ) derives Schema
-
-private[providers] final case class OpenAiStreamUsage(
-    promptTokens: Option[Long] = None,
-    completionTokens: Option[Long] = None,
-    totalTokens: Option[Long] = None
-) derives Schema:
-
-  /** `details` carries the present token counts (the prior parser collected the top-level numeric usage fields,
-    * which for OpenAI are exactly these three). `totalTokens` falls back to prompt + completion when absent. */
-  def toLmUsage: LmUsage =
-    val prompt = promptTokens.getOrElse(0L)
-    val completion = completionTokens.getOrElse(0L)
-    val details = Vector(
-      "prompt_tokens"     -> promptTokens,
-      "completion_tokens" -> completionTokens,
-      "total_tokens"      -> totalTokens
-    ).collect { case (k, Some(v)) => k -> v }.toMap
-    LmUsage(
-      totalTokens = totalTokens.getOrElse(prompt + completion),
-      promptTokens = prompt,
-      completionTokens = completion,
-      details = details
-    )
 
 private[providers] object OpenAiStreamChunk:
   private val codec = Schema[OpenAiStreamChunk].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))

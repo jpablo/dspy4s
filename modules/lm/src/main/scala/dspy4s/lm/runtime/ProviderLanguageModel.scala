@@ -15,6 +15,7 @@ import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.ToolCall
 import dspy4s.lm.providers.DynamicJson
+import dspy4s.lm.providers.OpenAiUsage
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -75,7 +76,7 @@ object ProviderRequestNormalizer:
     message.text.getOrElse(message.parts.map(_.payload).mkString("\n"))
 
 object ProviderResponseParser:
-  import DynamicJson.{field, asRecord, asString, asLong}
+  import DynamicJson.{field, asRecord, asString}
 
   def parse(raw: DynamicValue, mode: LmMode): Either[DspyError, LmResponse] =
     val outputs = mode match
@@ -130,21 +131,7 @@ object ProviderResponseParser:
     }
 
   private def parseUsage(raw: DynamicValue): Option[LmUsage] =
-    field(raw, "usage").flatMap(asRecord).map { usage =>
-      val promptTokens = longField(usage, "prompt_tokens").orElse(longField(usage, "input_tokens")).getOrElse(0L)
-      val completionTokens =
-        longField(usage, "completion_tokens").orElse(longField(usage, "output_tokens")).getOrElse(0L)
-      val totalTokens = longField(usage, "total_tokens").getOrElse(promptTokens + completionTokens)
-      val details = usage.fields.iterator.collect {
-        case (key, value) if asLong(value).isDefined => key -> asLong(value).get
-      }.toMap
-      LmUsage(
-        totalTokens = totalTokens,
-        promptTokens = promptTokens,
-        completionTokens = completionTokens,
-        details = details
-      )
-    }
+    field(raw, "usage").flatMap(asRecord).map(usage => OpenAiUsage.fromDynamic(usage).toLmUsage)
 
   private def parseToolCalls(message: DynamicValue.Record): Vector[ToolCall] =
     seqField(message, "tool_calls") match
@@ -195,5 +182,3 @@ object ProviderResponseParser:
       case Some(other) =>
         Left(ParseError("lm", s"Expected array-like response field '$name', found: ${other.getClass.getSimpleName}"))
 
-  private def longField(rec: DynamicValue.Record, name: String): Option[Long] =
-    field(rec, name).flatMap(asLong)
