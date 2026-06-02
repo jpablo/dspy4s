@@ -121,6 +121,15 @@ class ReActSuite extends FunSuite:
         )
       )
 
+  /** A step that produces neither an answer nor any tool request (just some other field). */
+  private final class NoAnswerNoToolsProgram extends PredictProgram:
+    val calls: AtomicInteger = AtomicInteger(0)
+    override val moduleName: String = "no-answer-no-tools"
+
+    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      calls.incrementAndGet()
+      Right(DynamicPrediction(values = rec("reasoning" := "I'm not sure how to proceed.")))
+
   private final class SearchTool(counter: AtomicInteger) extends ToolFunction:
     override val name: String = "search"
     override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
@@ -234,5 +243,23 @@ class ReActSuite extends FunSuite:
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Final without tools")
+    assertEquals(counter.get(), 0)
+  }
+
+  test("react returns the prediction as-is when the model gives neither an answer nor a tool call") {
+    val program = NoAnswerNoToolsProgram()
+    val counter = AtomicInteger(0)
+    val react = ReAct(module = program, tools = Vector(SearchTool(counter)), maxIterations = 3)
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
+
+    assert(result.isRight)
+    val prediction = result.toOption.get
+    // Returned verbatim: the model's field survives and there is no answer field.
+    assertEquals(lookupString(prediction.values, "reasoning"), "I'm not sure how to proceed.")
+    assertEquals(lookup(prediction.values, "answer"), None)
+    // Terminated on the first step rather than looping to maxIterations, and ran no tools.
+    assertEquals(program.calls.get(), 1)
     assertEquals(counter.get(), 0)
   }
