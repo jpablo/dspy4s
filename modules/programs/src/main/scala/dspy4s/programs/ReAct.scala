@@ -3,232 +3,210 @@ package dspy4s.programs
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.FieldRole
+import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.updated
-import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.BasePredictProgram
 import dspy4s.programs.runtime.ToolExecutor
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
+import java.nio.charset.StandardCharsets
 import scala.annotation.tailrec
 
+/** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized
+  * over any signature.
+  *
+  * Each iteration, the LM is shown the task inputs and the trajectory so far and emits three output fields —
+  * `next_thought` (its reasoning), `next_tool_name` (the tool to call), and `next_tool_args` (the JSON arguments).
+  * ReAct runs the named tool, appends the observation to the trajectory, and repeats until the LM selects the
+  * injected `finish` tool (or `maxIterations` is reached). A separate reasoning-augmented extractor then reads the
+  * full trajectory and produces the user-visible outputs declared in `baseSignature`.
+  *
+  * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling.
+  * Tool failures (unknown tool, invocation error) are recorded as trajectory observations rather than failing the
+  * program, mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
+  */
 final case class ReAct(
-    module: PredictProgram,
+    baseSignature: SignatureLayout,
     tools: Vector[ToolFunction],
     maxIterations: Int = 5,
-    answerField: String = ReActKeys.answer,
-    toolNameField: String = ReActKeys.toolName,
-    toolArgsField: String = ReActKeys.toolArgs,
-    toolResultField: String = ReActKeys.toolResult,
-    toolHistoryField: String = ReActKeys.toolHistory,
-    toolResultsField: String = ReActKeys.toolResults
+    reactProgramName: String = "react",
+    extractorProgramName: String = "react_extract"
 ) extends BasePredictProgram(moduleName = "react"):
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    @tailrec
-    def loop(
-        iteration: Int,
-        currentInputs: DynamicValue.Record,
-        toolHistory: Vector[DynamicValue]
-    ): Either[DspyError, DynamicPrediction] =
-      if iteration >= maxIterations then
-        Left(RuntimeError("react", s"Reached max iterations ($maxIterations) without producing an answer"))
-      else
-        val stepCall =
-          call.copy(inputs = currentInputs.updated(toolHistoryField, sequenceOf(toolHistory)))
-        val outcome =
-          for
-            prediction <- module.run(stepCall)
-            next       <- processStep(prediction, currentInputs, toolHistory)
-          yield next
-        // The match (not a further `flatMap`) keeps the recursive `loop` call in tail position for @tailrec.
-        outcome match
-          case Left(error)                               => Left(error)
-          case Right(StepOutcome.Done(prediction))       => Right(prediction)
-          case Right(StepOutcome.Continue(ins, history)) => loop(iteration + 1, ins, history)
+  /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */
+  private val allTools: Vector[ToolFunction] = tools :+ ReAct.finishTool(baseSignature)
+  private val toolsByName: Map[String, ToolFunction] = allTools.map(tool => tool.name -> tool).toMap
 
-    loop(iteration = 0, currentInputs = call.inputs, toolHistory = Vector.empty)
+  /** Per-iteration signature: base inputs + `trajectory` -> `next_thought` / `next_tool_name` / `next_tool_args`.
+    * The base output fields are intentionally dropped here — they are produced by the extractor, not the loop. */
+  val reactSignature: SignatureLayout =
+    baseSignature
+      .withFields(
+        baseSignature.inputFields ++ Vector(
+          FieldSpec(
+            name = "trajectory",
+            role = FieldRole.Input,
+            typeRef = TypeRef.string,
+            description = Some("The sequence of thoughts, tool calls, and observations so far.")
+          ),
+          FieldSpec(
+            name = "next_thought",
+            role = FieldRole.Output,
+            typeRef = TypeRef.string,
+            description = Some("Reasoning about the current situation and what to do next.")
+          ),
+          FieldSpec(
+            name = "next_tool_name",
+            role = FieldRole.Output,
+            typeRef = TypeRef.string,
+            description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
+          ),
+          FieldSpec(
+            name = "next_tool_args",
+            role = FieldRole.Output,
+            typeRef = TypeRef.json,
+            description = Some("Arguments for the next tool, as a JSON object.")
+          )
+        )
+      )
+      .withInstructions(Some(buildInstructions))
 
-  /** Handle one model step: a final answer or an empty tool-request set ends the loop; otherwise run the requested
-    * tools and fold their results into the next iteration's inputs.
-    */
-  private def processStep(
-      prediction: DynamicPrediction,
-      currentInputs: DynamicValue.Record,
-      toolHistory: Vector[DynamicValue]
-  )(using RuntimeContext): Either[DspyError, StepOutcome] =
-    if hasAnswer(prediction) then
-      Right(StepOutcome.Done(prediction))
-    else
-      for
-        requests <- extractToolRequests(prediction)
-        outcome <-
-          if requests.isEmpty then
-            Right(StepOutcome.Done(prediction))
-          else
-            runRequests(requests).map(steps => continueWith(steps, currentInputs, toolHistory))
-      yield outcome
-
-  /** Run each requested tool in order, short-circuiting on the first tool-lookup or execution failure. */
-  private def runRequests(
-      requests: Vector[ToolCallRequest]
-  )(using RuntimeContext): Either[DspyError, Vector[ReActStep]] =
-    requests.zipWithIndex.foldLeft[Either[DspyError, Vector[ReActStep]]](Right(Vector.empty)):
-      case (acc, (request, idx)) =>
-        for
-          soFar      <- acc
-          callResult <- ToolExecutor.invoke(request, tools)
-          value      <- callResult.result
-        yield soFar :+ ReActStep(toolName = request.name, toolArgs = request.args, result = value, index = idx)
-
-  /** Fold an executed batch into the next iteration's inputs: append it to the tool history, expose the batch as
-    * `tool_results`, and the final tool's value as `tool_result`.
-    */
-  private def continueWith(
-      steps: Vector[ReActStep],
-      currentInputs: DynamicValue.Record,
-      toolHistory: Vector[DynamicValue]
-  ): StepOutcome =
-    val batch      = steps.map(_.toRecord)
-    val newHistory = toolHistory ++ batch
-    val withResults = currentInputs
-      .updated(toolHistoryField, sequenceOf(newHistory))
-      .updated(toolResultsField, sequenceOf(batch))
-    val newInputs = steps.lastOption
-      .map(_.result)
-      .fold(withResults)(result => withResults.updated(toolResultField, result))
-    StepOutcome.Continue(newInputs, newHistory)
-
-  private def hasAnswer(prediction: DynamicPrediction): Boolean =
-    prediction.get(answerField) match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(text))) => text.trim.nonEmpty
-      case Some(_: DynamicValue.Null.type)                           => false
-      case Some(_)                                                   => true
-      case None                                                      => false
-
-  private def extractToolRequests(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
-    for
-      native <- extractNativeToolCalls(prediction)
-      requests <-
-        if native.nonEmpty then
-          Right(native)
-        else
-          extractLegacyToolRequest(prediction).map(_.toVector)
-    yield requests
-
-  private def extractLegacyToolRequest(prediction: DynamicPrediction): Either[DspyError, Option[ToolCallRequest]] =
-    prediction.get(toolNameField) match
-      case None                                                                           => Right(None)
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(name))) if name.trim.isEmpty => Right(None)
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(name))) =>
-        Right(Some(ToolCallRequest(
-          name = name.trim,
-          args = parseToolArgs(prediction.get(toolArgsField))
-        )))
-      case Some(other) =>
-        Left(RuntimeError("react", s"Tool name must be a non-empty string, found: $other"))
-
-  private def extractNativeToolCalls(prediction: DynamicPrediction): Either[DspyError, Vector[ToolCallRequest]] =
-    prediction.get(ReActKeys.toolCalls) match
-      case None                            => Right(Vector.empty)
-      case Some(_: DynamicValue.Null.type) => Right(Vector.empty)
-      case Some(seq: DynamicValue.Sequence) =>
-        parseToolCallsSequence(seq.elements.iterator.toVector)
-      case Some(other) =>
-        Left(RuntimeError("react", s"tool_calls must be an array, found: $other"))
-
-  private def parseToolCallsSequence(calls: Vector[DynamicValue]): Either[DspyError, Vector[ToolCallRequest]] =
-    calls.foldLeft[Either[DspyError, Vector[ToolCallRequest]]](Right(Vector.empty)) { (acc, entry) =>
-      for
-        soFar  <- acc
-        parsed <- parseToolCallEntry(entry)
-      yield soFar :+ parsed
-    }
-
-  private def parseToolCallEntry(entry: DynamicValue): Either[DspyError, ToolCallRequest] =
-    entry match
-      case rec: DynamicValue.Record => parseToolCallRecord(rec)
-      case other =>
-        Left(RuntimeError("react", s"Unsupported tool_calls entry: $other"))
-
-  private def parseToolCallRecord(rec: DynamicValue.Record): Either[DspyError, ToolCallRequest] =
-    DynamicValues.recordGet(rec, ReActKeys.name) match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(name))) if name.trim.nonEmpty =>
-        val argsDv =
-          DynamicValues.recordGet(rec, ReActKeys.args).orElse(DynamicValues.recordGet(rec, ReActKeys.arguments))
-        Right(ToolCallRequest(name.trim, parseToolArgs(argsDv)))
-      case Some(other) =>
-        Left(RuntimeError("react", s"Tool call name must be non-empty string, found: $other"))
-      case None =>
-        Left(RuntimeError("react", "Tool call payload is missing 'name'"))
-
-  /** Normalize the raw `args` DynamicValue into the `Record` a tool receives. A record passes through verbatim (no
-    * lossy `toAny` projection); a bare string is wrapped as `{input: ...}`; anything else as `{value: ...}`;
-    * absent/null becomes the empty record.
-    */
-  private def parseToolArgs(raw: Option[DynamicValue]): DynamicValue.Record =
-    raw match
-      case Some(rec: DynamicValue.Record) =>
-        rec
-      case Some(prim @ DynamicValue.Primitive(PrimitiveValue.String(value))) if value.trim.nonEmpty =>
-        DynamicValues.recordFromEntries(Seq(ReActKeys.input -> prim))
-      case Some(_: DynamicValue.Null.type) | None =>
-        DynamicValue.Record.empty
-      case Some(other) =>
-        DynamicValues.recordFromEntries(Seq(ReActKeys.value -> other))
-
-  /** Wrap a vector of already-lifted `DynamicValue`s into a `DynamicValue.Sequence` for the tool-history and
-    * tool-results fields.
-    */
-  private def sequenceOf(items: Vector[DynamicValue]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(items))
-
-/** Result of processing one ReAct model step: a final prediction, or the inputs/history to continue the loop with. */
-private enum StepOutcome:
-  case Done(prediction: DynamicPrediction)
-  case Continue(inputs: DynamicValue.Record, toolHistory: Vector[DynamicValue])
-
-/** One executed tool step recorded in ReAct's `tool_history` / `tool_results`. Modeled as a datatype and serialized
-  * through [[ReActKeys]] so the history record carries no literal string keys.
-  */
-private final case class ReActStep(toolName: String, toolArgs: DynamicValue, result: DynamicValue, index: Int):
-  def toRecord: DynamicValue.Record =
-    DynamicValues.record(
-      ReActKeys.toolName := toolName,
-      ReActKeys.toolArgs -> toolArgs,
-      ReActKeys.result   -> result,
-      ReActKeys.index    := index
+  /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. */
+  val extractorSignature: SignatureLayout =
+    baseSignature.append(
+      FieldSpec(
+        name = "trajectory",
+        role = FieldRole.Input,
+        typeRef = TypeRef.string,
+        description = Some("The completed sequence of thoughts, tool calls, and observations.")
+      )
     )
 
-/** Field-name keys for the prediction/tool-call structures ReAct reads and the records it builds, named rather than
-  * scattered as string literals. The I/O field names are also the defaults of `ReAct`'s `*Field` parameters.
-  */
-private object ReActKeys:
-  // Configurable I/O field names (also the ReAct constructor defaults)
-  val answer      = "answer"
-  val toolName    = "tool_name"
-  val toolArgs    = "tool_args"
-  val toolResult  = "tool_result"
-  val toolHistory = "tool_history"
-  val toolResults = "tool_results"
+  /** System-prompt instructions for the react step. Mirrors Python's shape: states the task I/O, explains the
+    * next_thought / next_tool_name / next_tool_args protocol, and lists the selectable tools (name + description). */
+  private def buildInstructions: String =
+    val inputs = baseSignature.inputFields.map(field => s"`${field.name}`").mkString(", ")
+    val outputs = baseSignature.outputFields.map(field => s"`${field.name}`").mkString(", ")
+    val taskPrelude = baseSignature.instructions.fold("")(_ + "\n")
+    val toolList = allTools.zipWithIndex.map { case (tool, idx) =>
+      val desc = if tool.description.nonEmpty then s": ${tool.description}" else ""
+      s"(${idx + 1}) `${tool.name}`$desc"
+    }.mkString("\n")
+    s"""${taskPrelude}You are an Agent. In each episode you receive the fields $inputs as input, along with your past trajectory.
+       |Your goal is to use one or more of the supplied tools to collect the information needed to produce $outputs.
+       |Each turn, emit next_thought (your reasoning), next_tool_name (the tool to call), and next_tool_args (its arguments as a JSON object).
+       |After each tool call you receive an observation, which is appended to your trajectory.
+       |Select `finish` as next_tool_name once you have everything needed to produce the outputs.
+       |next_tool_name must be one of:
+       |$toolList""".stripMargin
 
-  // Native tool-call payload keys read off a prediction
-  val toolCalls = "tool_calls"
-  val name      = "name"
-  val args      = "args"
-  val arguments = "arguments"
+  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    val reactPredict = DynamicPredict(layout = reactSignature, name = Some(reactProgramName))
+    for
+      extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
+      extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
+      trajectory <- runIterations(call, reactPredict, Vector.empty, iteration = 0)
+      rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
+      extracted <- extractor.run(call.copy(inputs = call.inputs.updated("trajectory", rendered)))
+    yield DynamicPrediction(
+      // Attach the trajectory to the extracted prediction so callers can inspect the agent's reasoning.
+      values = extracted.values.updated("trajectory", rendered),
+      completions = extracted.completions,
+      lmUsage = extracted.lmUsage
+    )
 
-  // Recorded tool-step keys
-  val result = "result"
-  val index  = "index"
+  @tailrec
+  private def runIterations(
+      call: ProgramCall,
+      reactPredict: DynamicPredict,
+      trajectory: Vector[ReAct.TrajectoryEntry],
+      iteration: Int
+  )(using RuntimeContext): Either[DspyError, Vector[ReAct.TrajectoryEntry]] =
+    if iteration >= maxIterations then Right(trajectory)
+    else
+      val rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
+      reactPredict.run(call.copy(inputs = call.inputs.updated("trajectory", rendered))) match
+        case Left(error) => Left(error)
+        case Right(prediction) =>
+          val thought = prediction.get("next_thought").map(DynamicValues.renderText).getOrElse("")
+          val toolName = prediction.get("next_tool_name").map(DynamicValues.renderText).getOrElse("").trim
+          val toolArgs = toolArgsRecord(prediction.get("next_tool_args"))
+          val observation = runTool(toolName, toolArgs)
+          val entry = ReAct.TrajectoryEntry(iteration, thought, toolName, toolArgs, observation)
+          // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
+          if toolName == ReAct.FinishToolName || toolName.isEmpty then Right(trajectory :+ entry)
+          else runIterations(call, reactPredict, trajectory :+ entry, iteration + 1)
 
-  // Synthetic keys used to wrap tool arguments that aren't a JSON object
-  val input = "input"
-  val value = "value"
+  /** Execute the named tool and render its result as an observation. Tool problems never fail the program: an
+    * unknown tool or an invocation error becomes an error observation the LM sees on the next turn (as in Python). */
+  private def runTool(name: String, args: DynamicValue.Record)(using RuntimeContext): String =
+    if name.isEmpty then "No tool was selected."
+    else if !toolsByName.contains(name) then s"Execution error: tool `$name` does not exist."
+    else
+      ToolExecutor.invoke(ToolCallRequest(name, args), allTools) match
+        case Right(callResult) =>
+          callResult.result match
+            case Right(value) => DynamicValues.renderText(value)
+            case Left(error)  => s"Execution error in `$name`: ${error.message}"
+        case Left(error) => s"Execution error in `$name`: ${error.message}"
+
+  /** Normalize the `next_tool_args` output into the `Record` a tool receives. JSONAdapter yields a `Record`
+    * directly; ChatAdapter yields the raw JSON text as a `String` (it has no `json` coercion), so parse that. */
+  private def toolArgsRecord(value: Option[DynamicValue]): DynamicValue.Record =
+    value match
+      case Some(rec: DynamicValue.Record)                        => rec
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => ReAct.parseJsonRecord(s)
+      case _                                                      => DynamicValue.Record.empty
+
+object ReAct:
+  val FinishToolName: String = "finish"
+
+  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
+
+  /** Parse a JSON-object string (as ChatAdapter surfaces a `json` field) into a `Record`; non-objects / blanks /
+    * parse failures yield the empty record. */
+  private def parseJsonRecord(text: String): DynamicValue.Record =
+    if text.trim.isEmpty then DynamicValue.Record.empty
+    else
+      dynamicJsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)) match
+        case Right(rec: DynamicValue.Record) => rec
+        case _                               => DynamicValue.Record.empty
+
+  /** The injected tool the model selects to end the loop. It does no work — selecting it signals "I have enough to
+    * produce the outputs"; the observation is a fixed marker and the extractor then produces the real outputs. */
+  private def finishTool(baseSignature: SignatureLayout): ToolFunction =
+    val outputs = baseSignature.outputFields.map(field => s"`${field.name}`").mkString(", ")
+    new ToolFunction:
+      override val name: String = FinishToolName
+      override val description: String =
+        s"Marks the task complete: signals that all information needed to produce $outputs is now available."
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
+        Right(ToolFunction.result("Completed."))
+
+  /** One step of the agent's trajectory: its thought, the tool it chose with arguments, and the observation. */
+  final case class TrajectoryEntry(
+      iteration: Int,
+      thought: String,
+      toolName: String,
+      toolArgs: DynamicValue.Record,
+      observation: String
+  )
+
+  private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry]): String =
+    if entries.isEmpty then "(empty)"
+    else
+      entries.iterator.map { entry =>
+        s"""## Step ${entry.iteration + 1}
+           |thought: ${entry.thought}
+           |tool_name: ${entry.toolName}
+           |tool_args: ${DynamicValues.renderText(entry.toolArgs)}
+           |observation: ${entry.observation}""".stripMargin
+      }.mkString("\n\n")

@@ -148,6 +148,11 @@ object Streamify:
       case p: DynamicPredict =>
         Vector((p.moduleName, p.layout))
       case react: ReAct =>
-        collectKnownSignatures(react.module)
+        // ReAct owns two DynamicPredicts: the per-step react predict and the final extractor (which produces the
+        // user-visible outputs). Both names/signatures are valid stream-listener targets.
+        Vector(
+          (react.reactProgramName, react.reactSignature),
+          (react.extractorProgramName, react.extractorSignature)
+        )
       case _ =>
         Vector.empty

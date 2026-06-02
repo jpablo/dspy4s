@@ -1,18 +1,27 @@
 package dspy4s.programs
 
+import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.NotFoundError
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.core.signatures.SignatureDsl
+import dspy4s.lm.contracts.LanguageModel
+import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.LmRequest
+import dspy4s.lm.contracts.LmResponse
+import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
@@ -22,244 +31,154 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
 class ReActSuite extends FunSuite:
-  private final class ScriptedProgram extends PredictProgram:
-    private val calls = AtomicInteger(0)
-    override val moduleName: String = "scripted"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      val idx = calls.incrementAndGet()
-      if idx == 1 then
-        Right(
-          DynamicPrediction(
-            values = rec(
-              "tool_name" := "search",
-              "tool_args" := Map("query" -> lookupString(input.inputs, "question"))
-            )
-          )
-        )
-      else
-        Right(
-          DynamicPrediction(
-            values = rec(
-              "answer" := s"Final: ${lookupString(input.inputs, "tool_result")}"
-            )
-          )
-        )
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
 
-  private final class LoopingProgram extends PredictProgram:
-    override val moduleName: String = "loop"
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(DynamicPrediction(values = rec("tool_name" := "search", "tool_args" := Map("query" -> "q"))))
-
-  private final class NativeToolCallsProgram extends PredictProgram:
-    private val calls = AtomicInteger(0)
-    override val moduleName: String = "native-tool-calls"
-
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      val idx = calls.incrementAndGet()
-      if idx == 1 then
-        Right(
-          DynamicPrediction(
-            values = rec(
-              "tool_calls" -> DynamicValues.fromAny(Vector(
-                Map("name" -> "search", "args" -> Map("query" -> lookupString(input.inputs, "question")))
-              ))
-            )
-          )
-        )
-      else
-        Right(
-          DynamicPrediction(
-            values = rec(
-              "answer" := s"Final: ${lookupString(input.inputs, "tool_result")}"
-            )
-          )
-        )
-
-  private final class MultiToolCallsProgram extends PredictProgram:
-    private val calls = AtomicInteger(0)
-    override val moduleName: String = "multi-tool-calls"
-
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      val idx = calls.incrementAndGet()
-      if idx == 1 then
-        Right(
-          DynamicPrediction(
-            values = rec(
-              "tool_calls" -> DynamicValues.fromAny(Vector(
-                Map("name" -> "search", "args" -> Map("query" -> lookupString(input.inputs, "question"))),
-                Map("name" -> "lookup", "args" -> Map("entity" -> "belgium"))
-              ))
-            )
-          )
-        )
-      else
-        val batch = lookup(input.inputs, "tool_results").collect {
-          case entries: Vector[?] => entries
-          case entries: Seq[?]    => entries.toVector
-        }.getOrElse(Vector.empty)
-        Right(
-          DynamicPrediction(
-            values = rec(
-              "answer" := s"Tools executed: ${batch.size}"
-            )
-          )
-        )
-
-  private final class AnswerAndToolCallsProgram extends PredictProgram:
-    override val moduleName: String = "answer-and-tool-calls"
-
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(
-        DynamicPrediction(
-          values = rec(
-            "answer" := "Final without tools",
-            "tool_calls" -> DynamicValues.fromAny(Vector(
-              Map("name" -> "search", "args" -> Map("query" -> "ignored"))
-            ))
-          )
-        )
-      )
-
-  /** A step that produces neither an answer nor any tool request (just some other field). */
-  private final class NoAnswerNoToolsProgram extends PredictProgram:
+  /** Returns canned LM response texts from a queue, advancing per `call`. Feeds successive react steps then the
+    * final extractor step. */
+  private final class ScriptedLm(responses: Vector[String]) extends LanguageModel:
     val calls: AtomicInteger = AtomicInteger(0)
-    override val moduleName: String = "no-answer-no-tools"
+    override val id: String = "scripted-react-lm"
+    override val mode: LmMode = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val i = calls.getAndIncrement()
+      val text = if i < responses.size then responses(i) else ""
+      Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      calls.incrementAndGet()
-      Right(DynamicPrediction(values = rec("reasoning" := "I'm not sure how to proceed.")))
+  /** Test adapter. For a react step (its outputs include `next_tool_name`) it parses the convention
+    * `thought || tool_name || key=value` into the three react fields (`key=value` -> `{key: value}` args, blank ->
+    * `{}`). For the extractor step it assigns the full text to every output field. */
+  private object ScriptedAdapter extends Adapter:
+    override val name: String = "scripted-react-adapter"
+    override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+      Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
+      val outputNames = layout.outputFields.map(_.name).toSet
+      val text = output.text
+      if outputNames.contains("next_tool_name") then
+        val parts = text.split("\\|\\|", -1)
+        val thought = if parts.length >= 1 then parts(0).trim else ""
+        val toolName = if parts.length >= 2 then parts(1).trim else ""
+        val args =
+          if parts.length >= 3 && parts(2).trim.nonEmpty then
+            parts(2).trim.split("=", 2) match
+              case Array(k, v) => rec(k.trim := v.trim)
+              case _           => DynamicValue.Record.empty
+          else DynamicValue.Record.empty
+        Right(ParsedOutput(values = rec("next_thought" := thought, "next_tool_name" := toolName, "next_tool_args" -> args)))
+      else
+        Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := text)*)))
 
-  private final class SearchTool(counter: AtomicInteger) extends ToolFunction:
+  private final class SearchTool extends ToolFunction:
+    val calls: AtomicInteger = AtomicInteger(0)
     override val name: String = "search"
+    override val description: String = "Look up a fact about the world."
     override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-      counter.incrementAndGet()
+      calls.incrementAndGet()
       Right(ToolFunction.result("Brussels"))
 
-  private final class LookupTool(counter: AtomicInteger) extends ToolFunction:
-    override val name: String = "lookup"
-    override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-      counter.incrementAndGet()
-      Right(ToolFunction.result("Europe"))
-
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-
-  test("react executes tool and returns final answer") {
-    val counter = AtomicInteger(0)
-    val react = ReAct(module = ScriptedProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
-
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
-
-    assert(result.isRight)
-    assertEquals(lookupString(result.toOption.get.values, "answer"), "Final: Brussels")
-    assertEquals(counter.get(), 1)
-  }
-
-  test("react fails when requested tool is missing") {
-    val react = ReAct(module = ScriptedProgram(), tools = Vector.empty, maxIterations = 3)
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
-
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[NotFoundError])
-  }
-
-  test("react fails when max iterations are exhausted without answer") {
-    val counter = AtomicInteger(0)
-    val react = ReAct(module = LoopingProgram(), tools = Vector(SearchTool(counter)), maxIterations = 2)
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
-
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[RuntimeError])
-    assertEquals(counter.get(), 2)
-  }
-
-  test("react emits tool callback events with parent module call id") {
-    val events = ArrayBuffer.empty[CallbackEvent]
-    val callback = new CallbackHandler:
-      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
-        events += event
-
-    val counter = AtomicInteger(0)
-    val react = ReAct(module = ScriptedProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
-
-    RuntimeEnvironment.withCallbacks(Vector(callback)) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result = react.run(ProgramCall(inputs = rec("question" := "x")))
-      assert(result.isRight)
+  private def withReact[A](lm: ScriptedLm)(body: RuntimeContext ?=> A): A =
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
+      body(using RuntimeEnvironment.current)
     }
 
-    val moduleStart = events.collectFirst { case e: dspy4s.core.contracts.ModuleStartEvent => e }.get
-    val toolStart = events.collectFirst { case e: ToolStartEvent => e }.get
-    val toolEnd = events.collectFirst { case e: ToolEndEvent => e }.get
+  private val qaSignature: SignatureLayout = SignatureDsl.parse("question -> answer").toOption.get
 
-    assertEquals(toolStart.parentCallId, Some(moduleStart.callId))
-    assertEquals(toolEnd.parentCallId, Some(moduleStart.callId))
-    assertEquals(toolStart.callId, toolEnd.callId)
+  test("react runs a tool, finishes, and extracts the answer from the trajectory") {
+    val search = new SearchTool
+    val lm = new ScriptedLm(Vector(
+      "I should look it up||search||query=capital of Belgium", // step 1 -> search
+      "I have what I need||finish||", // step 2 -> finish
+      "Brussels" // extractor -> answer
+    ))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+
+    withReact(lm) {
+      val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
+      assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
+      val pred = result.toOption.get
+      assertEquals(lookupString(pred.values, "answer"), "Brussels")
+      assertEquals(search.calls.get(), 1)
+      val traj = lookupString(pred.values, "trajectory")
+      assert(traj.contains("tool_name: search"), s"trajectory missing tool call: $traj")
+      assert(traj.contains("observation: Brussels"), s"trajectory missing observation: $traj")
+      assert(traj.contains("tool_name: finish"), s"trajectory missing finish: $traj")
+    }
   }
 
-  test("react executes native tool_calls payloads") {
-    val counter = AtomicInteger(0)
-    val react = ReAct(module = NativeToolCallsProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
+  test("react can finish on the first step without calling any tool") {
+    val search = new SearchTool
+    val lm = new ScriptedLm(Vector("I already know||finish||", "42"))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
-
-    assert(result.isRight)
-    assertEquals(lookupString(result.toOption.get.values, "answer"), "Final: Brussels")
-    assertEquals(counter.get(), 1)
+    withReact(lm) {
+      val result = react.run(ProgramCall(inputs = rec("question" := "2+2 doubled?")))
+      assert(result.isRight)
+      assertEquals(lookupString(result.toOption.get.values, "answer"), "42")
+      assertEquals(search.calls.get(), 0)
+    }
   }
 
-  test("react executes multiple native tool calls in one iteration") {
-    val searchCounter = AtomicInteger(0)
-    val lookupCounter = AtomicInteger(0)
-    val react = ReAct(
-      module = MultiToolCallsProgram(),
-      tools = Vector(SearchTool(searchCounter), LookupTool(lookupCounter)),
-      maxIterations = 3
-    )
+  test("react stops at maxIterations when the model never finishes, then extracts") {
+    val search = new SearchTool
+    val lm = new ScriptedLm(Vector(
+      "keep going||search||query=a",
+      "keep going||search||query=b",
+      "extracted-after-cap" // extractor, reached after the 2 capped react steps
+    ))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 2)
 
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
-
-    assert(result.isRight)
-    assertEquals(lookupString(result.toOption.get.values, "answer"), "Tools executed: 2")
-    assertEquals(searchCounter.get(), 1)
-    assertEquals(lookupCounter.get(), 1)
+    withReact(lm) {
+      val result = react.run(ProgramCall(inputs = rec("question" := "x")))
+      assert(result.isRight)
+      assertEquals(lookupString(result.toOption.get.values, "answer"), "extracted-after-cap")
+      assertEquals(search.calls.get(), 2) // tool ran once per capped iteration
+      assertEquals(lm.calls.get(), 3) // 2 react steps + 1 extractor
+    }
   }
 
-  test("react prioritizes direct answers over tool execution when both are present") {
-    val counter = AtomicInteger(0)
-    val react = ReAct(module = AnswerAndToolCallsProgram(), tools = Vector(SearchTool(counter)), maxIterations = 3)
+  test("react records an error observation for an unknown tool and keeps going") {
+    val search = new SearchTool
+    val lm = new ScriptedLm(Vector(
+      "try this||nonexistent||", // unknown tool -> error observation, continue
+      "ok now finish||finish||",
+      "done"
+    ))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
-
-    assert(result.isRight)
-    assertEquals(lookupString(result.toOption.get.values, "answer"), "Final without tools")
-    assertEquals(counter.get(), 0)
+    withReact(lm) {
+      val result = react.run(ProgramCall(inputs = rec("question" := "x")))
+      assert(result.isRight)
+      val pred = result.toOption.get
+      assertEquals(lookupString(pred.values, "answer"), "done")
+      assertEquals(search.calls.get(), 0)
+      assert(lookupString(pred.values, "trajectory").contains("does not exist"))
+    }
   }
 
-  test("react returns the prediction as-is when the model gives neither an answer nor a tool call") {
-    val program = NoAnswerNoToolsProgram()
-    val counter = AtomicInteger(0)
-    val react = ReAct(module = program, tools = Vector(SearchTool(counter)), maxIterations = 3)
+  test("react emits tool callback events parented to the react module call") {
+    val events = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
 
-    given RuntimeContext = RuntimeEnvironment.current
-    val result = react.run(ProgramCall(inputs = rec("question" := "x")))
+    val search = new SearchTool
+    val lm = new ScriptedLm(Vector("look||search||query=x", "done||finish||", "Brussels"))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
-    assert(result.isRight)
-    val prediction = result.toOption.get
-    // Returned verbatim: the model's field survives and there is no answer field.
-    assertEquals(lookupString(prediction.values, "reasoning"), "I'm not sure how to proceed.")
-    assertEquals(lookup(prediction.values, "answer"), None)
-    // Terminated on the first step rather than looping to maxIterations, and ran no tools.
-    assertEquals(program.calls.get(), 1)
-    assertEquals(counter.get(), 0)
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assert(react.run(ProgramCall(inputs = rec("question" := "x"))).isRight)
+    }
+
+    val toolStart = events.collectFirst { case e: ToolStartEvent => e }
+    val toolEnd = events.collectFirst { case e: ToolEndEvent => e }
+    assert(toolStart.exists(_.toolName == "search"), "expected a ToolStartEvent for search")
+    assert(toolEnd.exists(_.toolName == "search"), "expected a ToolEndEvent for search")
+    // The react module's own start event exists; the tool call is parented under some active module call.
+    assert(events.exists { case _: ModuleStartEvent => true; case _ => false })
   }

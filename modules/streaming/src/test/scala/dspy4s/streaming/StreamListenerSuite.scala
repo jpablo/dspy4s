@@ -5,8 +5,6 @@ import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.ReAct
-import dspy4s.programs.contracts.ToolFunction
-import zio.blocks.schema.DynamicValue
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
@@ -292,25 +290,26 @@ class StreamListenerSuite extends FunSuite:
     }
   }
 
-  test("ReAct: routes streamed tokens through the inner predict's signature") {
-    // Single-iteration scenario: the model emits all three signature fields
-    // with non-empty values, so ReAct's `hasAnswer` returns true after the
-    // first call and we exercise the signature/predictName resolution path
-    // through the ReAct wrapper.
-    val chunks = Vector(
-      LmChunk(
-        text = "[[ ## answer ## ]]\n42\n[[ ## tool_name ## ]]\nnoop\n[[ ## tool_args ## ]]\n{}\n[[ ## completed ## ]]",
-        finishReason = Some("stop")
-      )
+  test("ReAct: streams the extractor's answer tokens under the react_extract predict name") {
+    // New ReAct architecture: it owns a `react` step predict and a `react_extract` extractor. The user-visible
+    // `answer` is produced by the extractor after the loop, so its streamed tokens surface under the extractor's
+    // predict name. Here the model finishes on the first step (no tool), then the extractor emits the answer.
+    val perCallOutputs = Vector(
+      "[[ ## next_thought ## ]]\nI already know\n[[ ## next_tool_name ## ]]\nfinish\n[[ ## next_tool_args ## ]]\n{}\n[[ ## completed ## ]]",
+      "[[ ## reasoning ## ]]\nrecall\n[[ ## answer ## ]]\n42\n[[ ## completed ## ]]"
     )
-    val lm = new ScriptedLm(chunks)
-    val noopTool = new ToolFunction:
-      override val name: String = "noop"
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
-        Right(ToolFunction.result("ok"))
+    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val lm = new StreamingLanguageModel:
+      override val id: String = "scripted-react-stream"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
+      override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+        val idx = callIdx.getAndIncrement() % perCallOutputs.size
+        Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
 
-    val signature = SignatureDsl.parse("q -> answer, tool_name, tool_args").toOption.get
-    val innerPredict = DynamicPredict(layout = signature)
+    val signature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -319,7 +318,7 @@ class StreamListenerSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val react = ReAct(module = innerPredict, tools = Vector(noopTool), maxIterations = 2)
+      val react = ReAct(baseSignature = signature, tools = Vector.empty, maxIterations = 2)
       val stream = Streamify.streamify(
         program = react,
         streamListeners = Vector(StreamListener("answer"))
@@ -327,9 +326,7 @@ class StreamListenerSuite extends FunSuite:
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.chunk).mkString, "42")
-      // predictName is the innermost active DynamicPredict's name. ReAct's inner
-      // module is a default-named DynamicPredict, so tokens surface as "predict".
-      assertEquals(tokens.map(_.predictName).toSet, Set("predict"))
+      assertEquals(tokens.map(_.predictName).toSet, Set("react_extract"))
     }
   }
 

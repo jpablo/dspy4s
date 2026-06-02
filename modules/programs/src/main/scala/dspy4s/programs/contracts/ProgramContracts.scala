@@ -44,6 +44,11 @@ trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
   * `DynamicValues.recordGet` / a `Schema`-backed decode; build the result with [[ToolFunction.result]]. */
 trait ToolFunction:
   def name: String
+
+  /** Human-readable description of what the tool does, surfaced in tool-using programs' prompts (e.g. ReAct lists
+    * each tool's name + description so the model knows when to call it). Defaults to empty. */
+  def description: String = ""
+
   def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue]
 
 object ToolFunction:
