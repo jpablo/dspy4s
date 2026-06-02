@@ -14,6 +14,19 @@ extension (key: String)
   infix def :=[A](value: A)(using schema: Schema[A]): (String, DynamicValue) =
     (key, schema.toDynamicValue(value))
 
+/** `record.updated(name, value)` updates or appends a field by name: if the record already has `name`, replace its
+  * value in place (preserving insertion order); otherwise append at the end. Import via
+  * `dspy4s.core.contracts.updated`. */
+extension (record: DynamicValue.Record)
+  def updated(name: String, value: DynamicValue): DynamicValue.Record =
+    if record.fields.iterator.exists(_._1 == name) then
+      DynamicValue.Record(Chunk.from(record.fields.iterator.map {
+        case (k, _) if k == name => k -> value
+        case kv                  => kv
+      }.toSeq))
+    else
+      DynamicValue.Record(Chunk.from(record.fields.iterator.toSeq :+ (name -> value)))
+
 /** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the
   * user-input boundary — `Example("q" -> "hello")`, `DynamicPredict.run("text" -> text)` — where
   * callers pass plain Scala values that need to be lifted into the spine type. The codec spine
@@ -57,18 +70,6 @@ object DynamicValues:
   /** Lookup by field name. Returns `None` if the record has no such field. */
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
     rec.fields.iterator.collectFirst { case (k, v) if k == name => v }
-
-  /** Update or append: if the record already has `name`, replace the value; otherwise append at the
-    * end (preserving insertion order). */
-  def recordUpdated(rec: DynamicValue.Record, name: String, value: DynamicValue): DynamicValue.Record =
-    val existing = rec.fields.iterator.exists(_._1 == name)
-    if existing then
-      DynamicValue.Record(Chunk.from(rec.fields.iterator.map {
-        case (k, _) if k == name => k -> value
-        case kv                  => kv
-      }.toSeq))
-    else
-      DynamicValue.Record(Chunk.from(rec.fields.iterator.toSeq :+ (name -> value)))
 
   /** Filter fields by name. Preserves order. */
   def recordFilterKeys(rec: DynamicValue.Record, pred: String => Boolean): DynamicValue.Record =

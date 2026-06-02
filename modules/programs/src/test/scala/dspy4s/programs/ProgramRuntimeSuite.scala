@@ -5,6 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.CallbackEvent
+import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
@@ -56,8 +57,7 @@ class ProgramRuntimeSuite extends FunSuite:
 
   private final class EchoProgram extends BasePredictProgram("echo"):
     override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(DynamicPrediction(values = dspy4s.core.contracts.DynamicValues.recordUpdated(
-        call.inputs,
+      Right(DynamicPrediction(values = call.inputs.updated(
         "answer",
         zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))
       )))

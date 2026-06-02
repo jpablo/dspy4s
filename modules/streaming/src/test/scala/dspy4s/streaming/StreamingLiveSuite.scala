@@ -3,6 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -83,8 +84,7 @@ class StreamingLiveSuite extends FunSuite:
         for
           answer    <- predict1.run(input)
           judgement <- predict2.run(input.copy(
-                          inputs = dspy4s.core.contracts.DynamicValues.recordUpdated(
-                            input.inputs,
+                          inputs = input.inputs.updated(
                             "answer",
                             answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
                           )

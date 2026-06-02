@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmChunk
 import zio.blocks.schema.DynamicValue
 
@@ -41,10 +42,9 @@ final case class OpenAiClient(
     val withStreaming = payload match
       case rec: DynamicValue.Record =>
         val streamOptions = DynamicValues.recordFromEntries(Seq(WireKeys.includeUsage := true))
-        DynamicValues.recordUpdated(
-          DynamicValues.recordUpdated(rec, WireKeys.stream, DynamicValues.fromAny(true)),
-          WireKeys.streamOptions, streamOptions
-        )
+        rec
+          .updated(WireKeys.stream, DynamicValues.fromAny(true))
+          .updated(WireKeys.streamOptions, streamOptions)
       case other => other
     transport.streamSse(url, defaultHeaders, outgoingJson(withStreaming)).flatMap { response =>
       if response.status < 200 || response.status >= 300 then

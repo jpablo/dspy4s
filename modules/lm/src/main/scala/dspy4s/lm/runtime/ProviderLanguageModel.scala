@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -41,20 +42,18 @@ object ProviderRequestNormalizer:
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
   ): DynamicValue.Record =
     var rec = mergeRecords(defaultOptions, request.options)
-    rec = DynamicValues.recordUpdated(rec, WireKeys.model, str(request.model))
-    rec = DynamicValues.recordUpdated(rec, WireKeys.mode, str(request.mode.toString.toLowerCase))
-    request.requestId.foreach(id => rec = DynamicValues.recordUpdated(rec, WireKeys.requestId, str(id)))
+    rec = rec.updated(WireKeys.model, str(request.model))
+    rec = rec.updated(WireKeys.mode, str(request.mode.toString.toLowerCase))
+    request.requestId.foreach(id => rec = rec.updated(WireKeys.requestId, str(id)))
     request.mode match
       case LmMode.Chat | LmMode.Responses =>
-        DynamicValues.recordUpdated(
-          rec, WireKeys.messages, DynamicValue.Sequence(Chunk.from(request.messages.map(encodeMessage)))
-        )
+        rec.updated(WireKeys.messages, DynamicValue.Sequence(Chunk.from(request.messages.map(encodeMessage))))
       case LmMode.Text =>
         val prompt = request.messages.map(messageText).mkString("\n").trim
-        DynamicValues.recordUpdated(rec, WireKeys.prompt, str(prompt))
+        rec.updated(WireKeys.prompt, str(prompt))
 
   private def mergeRecords(base: DynamicValue.Record, overlay: DynamicValue.Record): DynamicValue.Record =
-    overlay.fields.iterator.foldLeft(base)((acc, kv) => DynamicValues.recordUpdated(acc, kv._1, kv._2))
+    overlay.fields.iterator.foldLeft(base)((acc, kv) => acc.updated(kv._1, kv._2))
 
   private def encodeMessage(message: Message): DynamicValue =
     val role = message.role.toString.toLowerCase

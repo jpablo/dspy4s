@@ -10,6 +10,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.BasePredictProgram
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -143,11 +144,11 @@ final case class CodeAct(
       extracted <- runIterations(call, codeActPredict, trajectory = Vector.empty, iteration = 0).flatMap { trajectory =>
         val rendered      = trajectory.render
         val renderedDv    = DynamicValue.Primitive(PrimitiveValue.String(rendered))
-        val extractInputs = DynamicValues.recordUpdated(call.inputs, "trajectory", renderedDv)
+        val extractInputs = call.inputs.updated("trajectory", renderedDv)
         extractor.run(call.copy(inputs = extractInputs)).map { extracted =>
           // Attach the trajectory to the extracted prediction's values so callers can inspect it after the fact.
           DynamicPrediction(
-            values      = DynamicValues.recordUpdated(extracted.values, "trajectory", renderedDv),
+            values      = extracted.values.updated("trajectory", renderedDv),
             completions = extracted.completions,
             lmUsage     = extracted.lmUsage
           )
@@ -166,8 +167,7 @@ final case class CodeAct(
   )(using RuntimeContext): Either[DspyError, Vector[CodeAct.TrajectoryEntry]] =
     if iteration >= maxIterations then Right(trajectory)
     else
-      val stepInputs = DynamicValues.recordUpdated(
-        call.inputs,
+      val stepInputs = call.inputs.updated(
         "trajectory",
         DynamicValue.Primitive(PrimitiveValue.String(CodeAct.renderTrajectory(trajectory)))
       )

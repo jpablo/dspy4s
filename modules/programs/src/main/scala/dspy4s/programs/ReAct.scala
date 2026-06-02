@@ -6,6 +6,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.PredictProgram
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
@@ -41,7 +42,7 @@ final case class ReAct(
         Left(RuntimeError("react", s"Reached max iterations ($maxIterations) without producing an answer"))
       else
         val stepCall =
-          call.copy(inputs = DynamicValues.recordUpdated(currentInputs, toolHistoryField, sequenceOf(toolHistory)))
+          call.copy(inputs = currentInputs.updated(toolHistoryField, sequenceOf(toolHistory)))
         module
           .run(stepCall)
           .flatMap(prediction => processStep(prediction, currentInputs, toolHistory)) match
@@ -62,11 +63,14 @@ final case class ReAct(
     if hasAnswer(prediction) then
       Right(StepOutcome.Done(prediction))
     else
-      extractToolRequests(prediction).flatMap: requests =>
-        if requests.isEmpty then
-          Right(StepOutcome.Done(prediction))
-        else
-          runRequests(requests).map(steps => continueWith(steps, currentInputs, toolHistory))
+      for
+        requests <- extractToolRequests(prediction)
+        outcome <-
+          if requests.isEmpty then
+            Right(StepOutcome.Done(prediction))
+          else
+            runRequests(requests).map(steps => continueWith(steps, currentInputs, toolHistory))
+      yield outcome
 
   /** Run each requested tool in order, short-circuiting on the first tool-lookup or execution failure. */
   private def runRequests(
@@ -90,14 +94,12 @@ final case class ReAct(
   ): StepOutcome =
     val batch      = steps.map(_.toRecord)
     val newHistory = toolHistory ++ batch
-    val withResults = DynamicValues.recordUpdated(
-      DynamicValues.recordUpdated(currentInputs, toolHistoryField, sequenceOf(newHistory)),
-      toolResultsField,
-      sequenceOf(batch)
-    )
+    val withResults = currentInputs
+      .updated(toolHistoryField, sequenceOf(newHistory))
+      .updated(toolResultsField, sequenceOf(batch))
     val newInputs = steps.lastOption
       .map(_.result)
-      .fold(withResults)(result => DynamicValues.recordUpdated(withResults, toolResultField, result))
+      .fold(withResults)(result => withResults.updated(toolResultField, result))
     StepOutcome.Continue(newInputs, newHistory)
 
   private def hasAnswer(prediction: DynamicPrediction): Boolean =

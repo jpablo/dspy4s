@@ -8,6 +8,7 @@ import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.DynamicPrediction
@@ -363,8 +364,7 @@ class StreamListenerSuite extends FunSuite:
         for
           answer    <- predict1.run(input)
           judgement <- predict2.run(input.copy(
-                          inputs = dspy4s.core.contracts.DynamicValues.recordUpdated(
-                            input.inputs,
+                          inputs = input.inputs.updated(
                             "answer",
                             answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
                           )

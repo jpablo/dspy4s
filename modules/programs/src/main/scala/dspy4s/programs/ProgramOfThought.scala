@@ -10,6 +10,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.BasePredictProgram
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -151,11 +152,9 @@ final case class ProgramOfThought(
       regenerator = DynamicPredict(layout = regeneratorLayout, runtime = SignatureProgramRuntime)
       answerer = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
       result <- tryIteration(call, generator, regenerator, attempt = 1).flatMap { case (code, codeOutput) =>
-        val extractInputs = DynamicValues.recordUpdated(
-          DynamicValues.recordUpdated(call.inputs, "final_generated_code", stringDv(code)),
-          "code_output",
-          stringDv(codeOutput)
-        )
+        val extractInputs = call.inputs
+          .updated("final_generated_code", stringDv(code))
+          .updated("code_output", stringDv(codeOutput))
         answerer.run(call.copy(inputs = extractInputs))
       }
     yield result
@@ -174,11 +173,9 @@ final case class ProgramOfThought(
     val inputs = previous match
       case None                  => baseInputs
       case Some((code, error))   =>
-        DynamicValues.recordUpdated(
-          DynamicValues.recordUpdated(baseInputs, "previous_code", stringDv(code)),
-          "error",
-          stringDv(error)
-        )
+        baseInputs
+          .updated("previous_code", stringDv(code))
+          .updated("error", stringDv(error))
 
     predict.run(call.copy(inputs = inputs)).flatMap { prediction =>
       val rawCode = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")

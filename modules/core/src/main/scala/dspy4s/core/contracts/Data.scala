@@ -32,7 +32,7 @@ final case class Example(
     copy(inputKeys = keys.intersect(DynamicValues.recordKeys(values).toSet))
 
   def withValue(key: String, value: DynamicValue): Example =
-    copy(values = DynamicValues.recordUpdated(values, key, value))
+    copy(values = values.updated(key, value))
 
   /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. A value
     * type without a `Schema` is a compile error. */
@@ -130,7 +130,7 @@ final case class DynamicPrediction(
   def withUsage(usage: Map[String, Long]): DynamicPrediction = copy(lmUsage = Some(usage))
 
   def withValue(key: String, value: DynamicValue): DynamicPrediction =
-    copy(values = DynamicValues.recordUpdated(values, key, value))
+    copy(values = values.updated(key, value))
 
   /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. */
   def withRawValue[A](key: String, value: A)(using schema: Schema[A]): DynamicPrediction =
