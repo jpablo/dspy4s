@@ -43,9 +43,13 @@ final case class ReAct(
       else
         val stepCall =
           call.copy(inputs = currentInputs.updated(toolHistoryField, sequenceOf(toolHistory)))
-        module
-          .run(stepCall)
-          .flatMap(prediction => processStep(prediction, currentInputs, toolHistory)) match
+        val outcome =
+          for
+            prediction <- module.run(stepCall)
+            next       <- processStep(prediction, currentInputs, toolHistory)
+          yield next
+        // The match (not a further `flatMap`) keeps the recursive `loop` call in tail position for @tailrec.
+        outcome match
           case Left(error)                               => Left(error)
           case Right(StepOutcome.Done(prediction))       => Right(prediction)
           case Right(StepOutcome.Continue(ins, history)) => loop(iteration + 1, ins, history)
