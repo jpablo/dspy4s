@@ -16,6 +16,7 @@ import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.ToolCall
 import dspy4s.lm.providers.DynamicJson
 import dspy4s.lm.providers.OpenAiUsage
+import dspy4s.lm.providers.WireKeys
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -40,17 +41,17 @@ object ProviderRequestNormalizer:
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
   ): DynamicValue.Record =
     var rec = mergeRecords(defaultOptions, request.options)
-    rec = DynamicValues.recordUpdated(rec, "model", str(request.model))
-    rec = DynamicValues.recordUpdated(rec, "mode", str(request.mode.toString.toLowerCase))
-    request.requestId.foreach(id => rec = DynamicValues.recordUpdated(rec, "request_id", str(id)))
+    rec = DynamicValues.recordUpdated(rec, WireKeys.model, str(request.model))
+    rec = DynamicValues.recordUpdated(rec, WireKeys.mode, str(request.mode.toString.toLowerCase))
+    request.requestId.foreach(id => rec = DynamicValues.recordUpdated(rec, WireKeys.requestId, str(id)))
     request.mode match
       case LmMode.Chat | LmMode.Responses =>
         DynamicValues.recordUpdated(
-          rec, "messages", DynamicValue.Sequence(Chunk.from(request.messages.map(encodeMessage)))
+          rec, WireKeys.messages, DynamicValue.Sequence(Chunk.from(request.messages.map(encodeMessage)))
         )
       case LmMode.Text =>
         val prompt = request.messages.map(messageText).mkString("\n").trim
-        DynamicValues.recordUpdated(rec, "prompt", str(prompt))
+        DynamicValues.recordUpdated(rec, WireKeys.prompt, str(prompt))
 
   private def mergeRecords(base: DynamicValue.Record, overlay: DynamicValue.Record): DynamicValue.Record =
     overlay.fields.iterator.foldLeft(base)((acc, kv) => DynamicValues.recordUpdated(acc, kv._1, kv._2))
@@ -60,13 +61,13 @@ object ProviderRequestNormalizer:
     val content: DynamicValue =
       if message.parts.nonEmpty then DynamicValue.Sequence(Chunk.from(message.parts.map(encodePart)))
       else str(message.text.getOrElse(""))
-    DynamicValue.Record(Chunk("role" -> str(role), "content" -> content))
+    DynamicValue.Record(Chunk(WireKeys.role -> str(role), WireKeys.content -> content))
 
   private def encodePart(part: ContentPart): DynamicValue =
-    val base = Vector("type" -> str(part.kind), "text" -> str(part.payload))
+    val base = Vector(WireKeys.`type` -> str(part.kind), WireKeys.text -> str(part.payload))
     val fields =
       if part.metadata.nonEmpty then
-        base :+ ("metadata" -> DynamicValue.Record(
+        base :+ (WireKeys.metadata -> DynamicValue.Record(
           Chunk.from(part.metadata.iterator.map((k, v) => k -> str(v)).toSeq)
         ))
       else base
@@ -91,36 +92,36 @@ object ProviderResponseParser:
           LmResponse(
             outputs = entries,
             usage = parseUsage(raw),
-            modelName = field(raw, "model").flatMap(asString),
+            modelName = field(raw, WireKeys.model).flatMap(asString),
             cacheHit = false
           )
         )
     }
 
   private def parseChatOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    seqField(raw, "choices").map { choices =>
+    seqField(raw, WireKeys.choices).map { choices =>
       choices.flatMap { choice =>
         val rec = asRecord(choice)
-        val textFromMessage = rec.flatMap(r => field(r, "message")).flatMap(extractText)
-        val textFromChoice  = rec.flatMap(r => field(r, "text")).flatMap(asString)
+        val textFromMessage = rec.flatMap(r => field(r, WireKeys.message)).flatMap(extractText)
+        val textFromChoice  = rec.flatMap(r => field(r, WireKeys.text)).flatMap(asString)
         val text = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
         text.map { value =>
           val metadata = rec
-            .map(r => DynamicValues.recordFilterKeys(r, k => k != "message" && k != "text"))
+            .map(r => DynamicValues.recordFilterKeys(r, k => k != WireKeys.message && k != WireKeys.text))
             .getOrElse(DynamicValue.Record.empty)
-          val toolCalls = rec.flatMap(r => field(r, "message")).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
+          val toolCalls = rec.flatMap(r => field(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
           LmOutput(text = value, toolCalls = toolCalls, metadata = metadata)
         }
       }
     }
 
   private def parseTextOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    field(raw, "text").flatMap(asString).map(_.trim).filter(_.nonEmpty) match
+    field(raw, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty) match
       case Some(text) => Right(Vector(LmOutput(text = text)))
       case None       => parseChatOutputs(raw)
 
   private def parseResponsesOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    seqField(raw, "output").map { output =>
+    seqField(raw, WireKeys.output).map { output =>
       output.flatMap { item =>
         extractText(item).map { text =>
           val toolCalls = asRecord(item).map(parseToolCalls).getOrElse(Vector.empty)
@@ -131,16 +132,16 @@ object ProviderResponseParser:
     }
 
   private def parseUsage(raw: DynamicValue): Option[LmUsage] =
-    field(raw, "usage").flatMap(asRecord).map(usage => OpenAiUsage.fromDynamic(usage).toLmUsage)
+    field(raw, WireKeys.usage).flatMap(asRecord).map(usage => OpenAiUsage.fromDynamic(usage).toLmUsage)
 
   private def parseToolCalls(message: DynamicValue.Record): Vector[ToolCall] =
-    seqField(message, "tool_calls") match
+    seqField(message, WireKeys.toolCalls) match
       case Right(entries) =>
         entries.flatMap { call =>
           asRecord(call).flatMap { rec =>
-            val functionRec = field(rec, "function").flatMap(asRecord).getOrElse(rec)
-            field(functionRec, "name").flatMap(asString).map { name =>
-              ToolCall(name = name, args = parseArgs(field(functionRec, "arguments")))
+            val functionRec = field(rec, WireKeys.function).flatMap(asRecord).getOrElse(rec)
+            field(functionRec, WireKeys.name).flatMap(asString).map { name =>
+              ToolCall(name = name, args = parseArgs(field(functionRec, WireKeys.arguments)))
             }
           }
         }
@@ -151,26 +152,26 @@ object ProviderResponseParser:
       case Some(rec) => rec
       case None =>
         raw.flatMap(asString) match
-          case Some(value) if value.trim.nonEmpty => DynamicValues.recordFromEntries(Seq("input" := value))
+          case Some(value) if value.trim.nonEmpty => DynamicValues.recordFromEntries(Seq(WireKeys.input := value))
           case _ =>
             raw match
-              case Some(other) => DynamicValues.recordFromEntries(Seq("value" -> other))
+              case Some(other) => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
               case None        => DynamicValue.Record.empty
 
   private def extractText(node: DynamicValue): Option[String] =
-    field(node, "content") match
+    field(node, WireKeys.content) match
       case Some(content) =>
         asString(content) match
           case Some(text) => Some(text)
           case None =>
             val fromParts = DynamicJson.asSequence(content).iterator
-              .flatMap(item => asRecord(item).flatMap(r => field(r, "text")).flatMap(asString).map(_.trim))
+              .flatMap(item => asRecord(item).flatMap(r => field(r, WireKeys.text)).flatMap(asString).map(_.trim))
               .mkString("\n").trim
             Option
               .when(fromParts.nonEmpty)(fromParts)
-              .orElse(field(node, "text").flatMap(asString).map(_.trim).filter(_.nonEmpty))
+              .orElse(field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty))
       case None =>
-        field(node, "text").flatMap(asString).map(_.trim).filter(_.nonEmpty)
+        field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty)
 
   /** A response field treated as an array: absent or null -> empty; a sequence -> its elements; anything else
     * -> a parse error (mirrors the old `asVector`). */

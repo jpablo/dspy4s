@@ -18,7 +18,7 @@ final case class OpenAiClient(
     "Authorization" -> s"Bearer $apiKey"
   )
 
-  private val providerInternalKeys: Set[String] = Set("mode")
+  private val providerInternalKeys: Set[String] = Set(WireKeys.mode)
 
   /** Drop dspy4s-internal keys; `DynamicJson.encode` handles null-stripping. */
   private def outgoingJson(payload: DynamicValue): String =
@@ -40,10 +40,10 @@ final case class OpenAiClient(
     val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
     val withStreaming = payload match
       case rec: DynamicValue.Record =>
-        val streamOptions = DynamicValues.recordFromEntries(Seq("include_usage" := true))
+        val streamOptions = DynamicValues.recordFromEntries(Seq(WireKeys.includeUsage := true))
         DynamicValues.recordUpdated(
-          DynamicValues.recordUpdated(rec, "stream", DynamicValues.fromAny(true)),
-          "stream_options", streamOptions
+          DynamicValues.recordUpdated(rec, WireKeys.stream, DynamicValues.fromAny(true)),
+          WireKeys.streamOptions, streamOptions
         )
       case other => other
     transport.streamSse(url, defaultHeaders, outgoingJson(withStreaming)).flatMap { response =>
