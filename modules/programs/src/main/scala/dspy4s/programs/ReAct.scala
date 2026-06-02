@@ -36,9 +36,9 @@ final case class ReAct(
     baseSignature: SignatureLayout,
     tools: Vector[ToolFunction],
     maxIterations: Int = 5,
-    reactProgramName: String = "react",
-    extractorProgramName: String = "react_extract"
-) extends BasePredictProgram(moduleName = "react"):
+    reactProgramName: String = ReActKeys.reactModule,
+    extractorProgramName: String = ReActKeys.extractModule
+) extends BasePredictProgram(moduleName = ReActKeys.reactModule):
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
   /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */
@@ -52,25 +52,25 @@ final case class ReAct(
       .withFields(
         baseSignature.inputFields ++ Vector(
           FieldSpec(
-            name = "trajectory",
+            name = ReActKeys.trajectory,
             role = FieldRole.Input,
             typeRef = TypeRef.string,
             description = Some("The sequence of thoughts, tool calls, and observations so far.")
           ),
           FieldSpec(
-            name = "next_thought",
+            name = ReActKeys.nextThought,
             role = FieldRole.Output,
             typeRef = TypeRef.string,
             description = Some("Reasoning about the current situation and what to do next.")
           ),
           FieldSpec(
-            name = "next_tool_name",
+            name = ReActKeys.nextToolName,
             role = FieldRole.Output,
             typeRef = TypeRef.string,
             description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
           ),
           FieldSpec(
-            name = "next_tool_args",
+            name = ReActKeys.nextToolArgs,
             role = FieldRole.Output,
             typeRef = TypeRef.json,
             description = Some("Arguments for the next tool, as a JSON object.")
@@ -83,7 +83,7 @@ final case class ReAct(
   val extractorSignature: SignatureLayout =
     baseSignature.append(
       FieldSpec(
-        name = "trajectory",
+        name = ReActKeys.trajectory,
         role = FieldRole.Input,
         typeRef = TypeRef.string,
         description = Some("The completed sequence of thoughts, tool calls, and observations.")
@@ -115,10 +115,10 @@ final case class ReAct(
       extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
       trajectory <- runIterations(call, reactPredict, Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      extracted <- extractor.run(call.copy(inputs = call.inputs.updated("trajectory", rendered)))
+      extracted <- extractor.run(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered)))
     yield DynamicPrediction(
       // Attach the trajectory to the extracted prediction so callers can inspect the agent's reasoning.
-      values = extracted.values.updated("trajectory", rendered),
+      values = extracted.values.updated(ReActKeys.trajectory, rendered),
       completions = extracted.completions,
       lmUsage = extracted.lmUsage
     )
@@ -133,12 +133,12 @@ final case class ReAct(
     if iteration >= maxIterations then Right(trajectory)
     else
       val rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      reactPredict.run(call.copy(inputs = call.inputs.updated("trajectory", rendered))) match
+      reactPredict.run(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered))) match
         case Left(error) => Left(error)
         case Right(prediction) =>
-          val thought = prediction.get("next_thought").map(DynamicValues.renderText).getOrElse("")
-          val toolName = prediction.get("next_tool_name").map(DynamicValues.renderText).getOrElse("").trim
-          val toolArgs = toolArgsRecord(prediction.get("next_tool_args"))
+          val thought = prediction.get(ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse("")
+          val toolName = prediction.get(ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse("").trim
+          val toolArgs = toolArgsRecord(prediction.get(ReActKeys.nextToolArgs))
           val observation = runTool(toolName, toolArgs)
           val entry = ReAct.TrajectoryEntry(iteration, thought, toolName, toolArgs, observation)
           // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
@@ -210,3 +210,15 @@ object ReAct:
            |tool_args: ${DynamicValues.renderText(entry.toolArgs)}
            |observation: ${entry.observation}""".stripMargin
       }.mkString("\n\n")
+
+/** Names ReAct hard-codes: its module / sub-predict names, and the field-name keys it adds to the augmented
+  * signatures and reads back from predictions. Named rather than scattered as string literals. (Prose — field
+  * descriptions, instructions, observations — stays inline; only the keys/identifiers are constants.) */
+private object ReActKeys:
+  val reactModule: String   = "react"
+  val extractModule: String = "react_extract"
+
+  val trajectory: String   = "trajectory"
+  val nextThought: String  = "next_thought"
+  val nextToolName: String = "next_tool_name"
+  val nextToolArgs: String = "next_tool_args"
