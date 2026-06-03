@@ -106,3 +106,25 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    wrapping `forward`), so it's guaranteed only for that subtree;
    `Refine`/`BestOfN`/`MultiChainComparison` extend `PredictProgram` directly
    and override `apply`, bypassing it. See [PORT_GAPS.md G-2](PORT_GAPS.md).
+
+## Design principle: a module is pure; the runtime owns the bookkeeping
+
+The deeper reason dspy4s has no `ProgramMeta` / `_base_init` and no per-instance
+`callbacks` / `history` / `_compiled`: **callbacks, history, and tracing are the
+runtime/executor's responsibility, not the module's.** A dspy4s module is
+essentially a pure `apply: In => Either[DspyError, Out]` (with `forward` as the
+overridable hook); it doesn't carry or fire its own callback list or call log.
+
+- **History/trace** are owned by `RuntimeEnvironment` — `BasePredictProgram.apply`
+  calls `RuntimeEnvironment.appendTrace`/`appendHistory`, and the environment
+  enforces `maxHistorySize` / `disableHistory`.
+- **Callbacks** are dispatched by `CallbackDispatcher` off the ambient
+  `RuntimeContext.callbacks` (`withModule`/`withTool`/…), not off a list hanging
+  on each program.
+
+Python instead hangs `callbacks`/`history`/`_compiled` on every `Module`
+instance and merges them with global `settings.callbacks` / `GLOBAL_HISTORY` per
+call — which is what forces the `ProgramMeta` metaclass to exist (to guarantee
+that per-instance state is initialized even when a subclass forgets
+`super().__init__()`). Moving the responsibility to the runtime removes both the
+per-instance state and the machinery that babysits it.
