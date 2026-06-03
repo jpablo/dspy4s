@@ -18,7 +18,7 @@ class ParallelSuite extends FunSuite:
       override val moduleName: String = "stub",
       behavior: Int => Either[DspyError, DynamicPrediction]
   ) extends PredictProgram:
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val value = lookup(input.inputs, "value").get.asInstanceOf[Int]
       behavior(value)
 

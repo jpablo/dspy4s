@@ -56,7 +56,7 @@ class ProgramRuntimeSuite extends FunSuite:
   private object RuntimeResolver extends SettingsProgramRuntime
 
   private final class EchoProgram extends BasePredictProgram("echo"):
-    override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       Right(DynamicPrediction(values = call.inputs.updated(
         "answer",
         zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))
@@ -95,7 +95,7 @@ class ProgramRuntimeSuite extends FunSuite:
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = EchoProgram()
-      val output = program.run(ProgramCall(inputs = rec("question" := "hello")))
+      val output = program.apply(ProgramCall(inputs = rec("question" := "hello")))
 
       assert(output.isRight)
       assertEquals(lookupString(output.toOption.get.values, "answer"), "ok")
@@ -109,7 +109,7 @@ class ProgramRuntimeSuite extends FunSuite:
   test("base predict program respects traceEnabled=false") {
     given RuntimeContext = RuntimeEnvironment.current
     val program = EchoProgram()
-    val output = program.run(ProgramCall(inputs = rec("question" := "hello"), traceEnabled = false))
+    val output = program.apply(ProgramCall(inputs = rec("question" := "hello"), traceEnabled = false))
 
     assert(output.isRight)
     assertEquals(RuntimeEnvironment.current.trace.size, 0)

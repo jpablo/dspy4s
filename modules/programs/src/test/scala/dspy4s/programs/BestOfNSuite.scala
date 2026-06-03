@@ -31,7 +31,7 @@ class BestOfNSuite extends FunSuite:
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "stub"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       calls.incrementAndGet()
       val rollout = input.rolloutId.getOrElse(-1)
       rolloutIds += rollout
@@ -71,7 +71,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x"), rolloutId = Some(7)))
+    val result = bestOfN.apply(ProgramCall(inputs = rec("q" := "x"), rolloutId = Some(7)))
 
     assert(result.isRight)
     assertEquals(lookup(result.toOption.get.values, "answer"), Some("B": Any))
@@ -97,7 +97,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x")))
+    val result = bestOfN.apply(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 3)
     assertEquals(result.left.toOption.get.message, "f3")
@@ -120,7 +120,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x")))
+    val result = bestOfN.apply(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
@@ -157,7 +157,7 @@ class BestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = bestOfN.run(ProgramCall(inputs = rec("q" := "x")))
+    val result = bestOfN.apply(ProgramCall(inputs = rec("q" := "x")))
 
     assert(result.isRight)
     val prediction = result.toOption.get

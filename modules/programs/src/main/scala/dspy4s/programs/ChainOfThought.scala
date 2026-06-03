@@ -45,12 +45,12 @@ final case class ChainOfThought[I, O](
     * outputs leave this match type stuck. */
   type Out = ChainOfThought.WithReasoning[O]
 
-  def run(
+  def apply(
       input: I,
       config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    predictor.flatMap(_.run(input, config, traceEnabled))
+    predictor.flatMap(_.apply(input, config, traceEnabled))
 
   private lazy val predictor: Either[DspyError, Predict[I, Out]] =
     augmentedSignature.map { sig =>

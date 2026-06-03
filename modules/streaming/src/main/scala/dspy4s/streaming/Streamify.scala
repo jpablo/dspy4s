@@ -83,7 +83,7 @@ object Streamify:
                   given RuntimeContext = RuntimeEnvironment.current
                   try
                     val call = ProgramCall(inputs = inputs)
-                    program.run(call) match
+                    program.apply(call) match
                       case Right(prediction) =>
                         if includeFinalPrediction then { val _ = queue.offer(PredictionEvent(prediction)) }
                       case Left(error) =>

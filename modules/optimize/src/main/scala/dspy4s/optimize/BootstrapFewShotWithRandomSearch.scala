@@ -122,7 +122,7 @@ final class BootstrapFewShotWithRandomSearch[P <: Module[ProgramCall, DynamicPre
           maxErrors = Some(config.maxErrors)
         )
         val evalResult = evaluator()((ex: Example) =>
-          program.run(ProgramCall(inputs = ex.inputs))
+          program.apply(ProgramCall(inputs = ex.inputs))
         )
         val (score, perExample) = evalResult match
           case Right(r) =>
@@ -184,8 +184,8 @@ private final case class LabeledSampleProgram[P <: Module[ProgramCall, DynamicPr
     currentDemos: Vector[Example]
 ) extends Module[ProgramCall, DynamicPrediction]:
   override val moduleName: String = ops.name(wrapped)
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    ops.withDemos(wrapped, currentDemos).run(input)
+  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    ops.withDemos(wrapped, currentDemos).apply(input)
 
 private object LabeledSampleProgram:
   def apply[P <: Module[ProgramCall, DynamicPrediction]](wrapped: P, ops: PredictOps[P]): LabeledSampleProgram[P] =

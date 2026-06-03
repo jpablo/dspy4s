@@ -80,10 +80,10 @@ class StreamingLiveSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
-          answer    <- predict1.run(input)
-          judgement <- predict2.run(input.copy(
+          answer    <- predict1.apply(input)
+          judgement <- predict2.apply(input.copy(
                           inputs = input.inputs.updated(
                             "answer",
                             answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)

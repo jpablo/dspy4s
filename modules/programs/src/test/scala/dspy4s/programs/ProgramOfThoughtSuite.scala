@@ -95,7 +95,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("question" := "what is 6 * 7?")))
+      val result = program.apply(ProgramCall(inputs = rec("question" := "what is 6 * 7?")))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(lookupString(pred.values, "answer"), "42")
@@ -126,7 +126,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("question" := "?")))
+      val result = program.apply(ProgramCall(inputs = rec("question" := "?")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       assertEquals(interpreter.received.size, 2, "should have retried after error")
       assertEquals(lookupString(result.toOption.get.values, "answer"), "ok")
@@ -154,7 +154,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("question" := "?")))
+      val result = program.apply(ProgramCall(inputs = rec("question" := "?")))
       assert(result.isLeft, s"expected Left after maxIterations, got $result")
       val err = result.left.toOption.get.asInstanceOf[RuntimeError]
       assertEquals(err.component, "program_of_thought")
@@ -177,7 +177,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.run(ProgramCall(inputs = rec("q" := "?")))
+      val _ = program.apply(ProgramCall(inputs = rec("q" := "?")))
       assert(!interpreter.closed)
     }
   }
@@ -201,7 +201,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" := "sum 0..10")))
+      val result = program.apply(ProgramCall(inputs = rec("q" := "sum 0..10")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       assertEquals(lookupString(result.toOption.get.values, "answer"), "55")
     }

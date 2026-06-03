@@ -167,7 +167,7 @@ class StreamifySuite extends FunSuite:
   test("streamify emits error event when program fails") {
     val failing = new PredictProgram:
       override val moduleName: String = "failing"
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
     given RuntimeContext = RuntimeEnvironment.current

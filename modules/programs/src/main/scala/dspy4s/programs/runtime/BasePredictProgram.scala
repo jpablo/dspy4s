@@ -52,15 +52,15 @@ abstract class BasePredictProgram(
 ) extends PredictProgram
     with SettingsProgramRuntime:
 
-  protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction]
+  protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction]
 
   protected def tracePayload(prediction: DynamicPrediction): DynamicValue.Record =
     prediction.values
 
-  override final def run(input: ProgramCall)(using runtime: RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override final def apply(input: ProgramCall)(using runtime: RuntimeContext): Either[DspyError, DynamicPrediction] =
     val inputBag = input.inputs
     CallbackDispatcher.withModule(moduleName, inputBag) {
-      val result = execute(input)
+      val result = forward(input)
       if input.traceEnabled then
         result match
           case Right(prediction) =>
@@ -76,4 +76,4 @@ abstract class BasePredictProgram(
     }
 
   override def arun(input: ProgramCall)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, DynamicPrediction]] =
-    ContextPropagation.future(run(input))
+    ContextPropagation.future(apply(input))

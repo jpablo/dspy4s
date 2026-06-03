@@ -27,10 +27,10 @@ import scala.concurrent.Future
 trait Module[-In, +Out]:
   def moduleName: String
 
-  def run(input: In)(using RuntimeContext): Either[DspyError, Out]
+  def apply(input: In)(using RuntimeContext): Either[DspyError, Out]
 
   // The default body doesn't use the ExecutionContext, but it's part of the contract for
   // overrides that run real async work (e.g. BasePredictProgram.arun).
   @nowarn("msg=unused")
   def arun(input: In)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Out]] =
-    Future.successful(run(input))
+    Future.successful(apply(input))

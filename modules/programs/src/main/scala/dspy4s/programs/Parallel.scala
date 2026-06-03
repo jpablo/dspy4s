@@ -28,7 +28,7 @@ final case class Parallel(
       tasks: Vector[(PredictProgram, ProgramCall)]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[DynamicPrediction]] =
     resolvedExecutor.executeEither[(PredictProgram, ProgramCall), DynamicPrediction](
-      task = (pair: (PredictProgram, ProgramCall)) => pair._1.run(pair._2),
+      task = (pair: (PredictProgram, ProgramCall)) => pair._1.apply(pair._2),
       data = tasks
     )
 

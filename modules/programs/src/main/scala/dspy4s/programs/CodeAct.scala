@@ -136,7 +136,7 @@ final case class CodeAct(
        |When all information for producing the outputs ($outputs) are available to be extracted, mark `finished=true` besides the final Python code.
        |You have access to the Python Standard Library.""".stripMargin
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val codeActPredict = DynamicPredict(layout = codeActSignature, name = Some(codeActProgramName))
     for
       extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
@@ -145,7 +145,7 @@ final case class CodeAct(
         val rendered      = trajectory.render
         val renderedDv    = DynamicValue.Primitive(PrimitiveValue.String(rendered))
         val extractInputs = call.inputs.updated("trajectory", renderedDv)
-        extractor.run(call.copy(inputs = extractInputs)).map { extracted =>
+        extractor.apply(call.copy(inputs = extractInputs)).map { extracted =>
           // Attach the trajectory to the extracted prediction's values so callers can inspect it after the fact.
           DynamicPrediction(
             values      = extracted.values.updated("trajectory", renderedDv),
@@ -171,7 +171,7 @@ final case class CodeAct(
         "trajectory",
         DynamicValue.Primitive(PrimitiveValue.String(CodeAct.renderTrajectory(trajectory)))
       )
-      codeActPredict.run(call.copy(inputs = stepInputs)).flatMap { prediction =>
+      codeActPredict.apply(call.copy(inputs = stepInputs)).flatMap { prediction =>
         val rawCode  = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
         val finished = isFinished(prediction.get("finished"))
         val code     = extractCode(rawCode).getOrElse(rawCode.trim)

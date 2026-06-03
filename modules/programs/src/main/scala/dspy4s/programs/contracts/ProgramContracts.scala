@@ -28,15 +28,15 @@ trait ProgramRuntime:
   def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter]
 
 trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
-  /** Convenience overload of `run` so call sites can write:
+  /** Convenience overload of `apply` so call sites can write:
     *
-    *   predict.run("comment" := comment, "lang" := "en")
+    *   predict("comment" := comment, "lang" := "en")
     *
-    * instead of `run(ProgramCall(inputs = Map(...)))`. The inherited
-    * `run(input: ProgramCall)` remains available when `config` or
+    * instead of `apply(ProgramCall(inputs = Map(...)))`. The inherited
+    * `apply(input: ProgramCall)` remains available when `config` or
     * `traceEnabled` need to be customized. */
-  def run(inputs: (String, DynamicValue)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    run(ProgramCall(inputs = DynamicValues.recordFromEntries(inputs)))
+  def apply(inputs: (String, DynamicValue)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    apply(ProgramCall(inputs = DynamicValues.recordFromEntries(inputs)))
 
 /** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
   * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a

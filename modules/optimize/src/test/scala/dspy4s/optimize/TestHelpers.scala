@@ -24,7 +24,7 @@ final case class ScriptedPredictProgram(
     failsWith: Option[RuntimeException] = None
 ) extends PredictProgram:
   override val moduleName: String = "scripted"
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     failsWith match
       case Some(err) => throw err
       case None =>
@@ -37,7 +37,7 @@ final case class DemoAwarePredictProgram(
     answers: Map[String, String] = Map.empty
 ) extends PredictProgram:
   override val moduleName: String = "demo_aware"
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val q = lookupString(input.inputs, "question")
     // Use answers map first; then demos; else "unknown"
     val answer = answers.get(q)

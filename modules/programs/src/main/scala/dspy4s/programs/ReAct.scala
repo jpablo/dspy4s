@@ -108,14 +108,14 @@ final case class ReAct(
        |next_tool_name must be one of:
        |$toolList""".stripMargin
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val reactPredict = DynamicPredict(layout = reactSignature, name = Some(reactProgramName))
     for
       extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
       extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
       trajectory <- runIterations(call, reactPredict, Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      extracted <- extractor.run(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered)))
+      extracted <- extractor.apply(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered)))
     yield DynamicPrediction(
       // Attach the trajectory to the extracted prediction so callers can inspect the agent's reasoning.
       values = extracted.values.updated(ReActKeys.trajectory, rendered),
@@ -133,7 +133,7 @@ final case class ReAct(
     if iteration >= maxIterations then Right(trajectory)
     else
       val rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      reactPredict.run(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered))) match
+      reactPredict.apply(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered))) match
         case Left(error) => Left(error)
         case Right(prediction) =>
           val thought = prediction.get(ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse("")

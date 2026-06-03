@@ -47,5 +47,5 @@ final case class DynamicPredict(
 
   private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema)
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     engine.execute(call)

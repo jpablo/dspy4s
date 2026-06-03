@@ -26,7 +26,7 @@ final case class BestOfN(
 
   override val moduleName: String = "best_of_n"
 
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val baseContext = RuntimeEnvironment.current
     val rolloutStart = input.rolloutId.getOrElse(0)
     var remainingFailures = failCount.getOrElse(n)
@@ -49,7 +49,7 @@ final case class BestOfN(
 
       val (attemptResult, trace, history) = RuntimeEnvironment.withContext(isolated) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = module.run(attemptCall)
+        val result = module.apply(attemptCall)
         val current = RuntimeEnvironment.current
         (result, current.trace, current.history)
       }

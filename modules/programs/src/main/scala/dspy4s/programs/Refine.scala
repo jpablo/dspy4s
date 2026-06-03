@@ -24,5 +24,5 @@ final case class Refine(
 
   override val moduleName: String = "refine"
 
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    bestOfN.run(input)
+  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    bestOfN.apply(input)

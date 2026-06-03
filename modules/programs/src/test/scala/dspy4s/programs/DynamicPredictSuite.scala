@@ -108,7 +108,7 @@ class PredictSuite extends FunSuite:
     ) {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" := "Capital of France?")))
+        val result = DynamicPredict(signature).apply(ProgramCall(inputs = rec("question" := "Capital of France?")))
 
         assert(result.isRight)
         val prediction = result.toOption.get
@@ -147,7 +147,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" := "x")))
+      val result = DynamicPredict(signature).apply(ProgramCall(inputs = rec("question" := "x")))
 
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
@@ -164,7 +164,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).run(ProgramCall(inputs = rec("question" := "x")))
+      val result = DynamicPredict(signature).apply(ProgramCall(inputs = rec("question" := "x")))
 
       assert(result.isRight)
       val toolCalls = lookup(result.toOption.get.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]]

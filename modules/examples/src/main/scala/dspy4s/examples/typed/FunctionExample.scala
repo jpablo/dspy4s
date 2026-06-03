@@ -38,5 +38,5 @@ object FunctionExample:
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.Predict
     Predict(emotion)
-      .run((sentence = sentence))
+      .apply((sentence = sentence))
       .map(_.output.sentiment)

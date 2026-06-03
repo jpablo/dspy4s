@@ -296,7 +296,7 @@ class StreamingPortedSuite extends FunSuite:
 
     val program = new PredictProgram:
       override val moduleName: String = "my_program"
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>
           DynamicPrediction(values = rec("answer" := "blue"))
         }

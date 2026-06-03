@@ -28,7 +28,7 @@ extension (record: DynamicValue.Record)
       DynamicValue.Record(Chunk.from(record.fields.iterator.toSeq :+ (name -> value)))
 
 /** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the
-  * user-input boundary — `Example("q" -> "hello")`, `DynamicPredict.run("text" -> text)` — where
+  * user-input boundary — `Example("q" -> "hello")`, `DynamicPredict.apply("text" -> text)` — where
   * callers pass plain Scala values that need to be lifted into the spine type. The codec spine
   * (`Shape.encode` / `Shape.decode` backed by zio-blocks Schema) never goes through these helpers;
   * it produces and consumes `DynamicValue` directly.

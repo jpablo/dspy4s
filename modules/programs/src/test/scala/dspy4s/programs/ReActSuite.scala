@@ -97,7 +97,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
     withReact(lm) {
-      val result = react.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
+      val result = react.apply(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(lookupString(pred.values, "answer"), "Brussels")
@@ -115,7 +115,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
     withReact(lm) {
-      val result = react.run(ProgramCall(inputs = rec("question" := "2+2 doubled?")))
+      val result = react.apply(ProgramCall(inputs = rec("question" := "2+2 doubled?")))
       assert(result.isRight)
       assertEquals(lookupString(result.toOption.get.values, "answer"), "42")
       assertEquals(search.calls.get(), 0)
@@ -132,7 +132,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 2)
 
     withReact(lm) {
-      val result = react.run(ProgramCall(inputs = rec("question" := "x")))
+      val result = react.apply(ProgramCall(inputs = rec("question" := "x")))
       assert(result.isRight)
       assertEquals(lookupString(result.toOption.get.values, "answer"), "extracted-after-cap")
       assertEquals(search.calls.get(), 2) // tool ran once per capped iteration
@@ -150,7 +150,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
     withReact(lm) {
-      val result = react.run(ProgramCall(inputs = rec("question" := "x")))
+      val result = react.apply(ProgramCall(inputs = rec("question" := "x")))
       assert(result.isRight)
       val pred = result.toOption.get
       assertEquals(lookupString(pred.values, "answer"), "done")
@@ -172,7 +172,7 @@ class ReActSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      assert(react.run(ProgramCall(inputs = rec("question" := "x"))).isRight)
+      assert(react.apply(ProgramCall(inputs = rec("question" := "x"))).isRight)
     }
 
     val toolStart = events.collectFirst { case e: ToolStartEvent => e }

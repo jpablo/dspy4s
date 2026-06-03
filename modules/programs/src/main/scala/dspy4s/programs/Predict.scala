@@ -54,7 +54,7 @@ final case class Predict[I, O](
     * succeeds, before the typed decode runs. So if the model responds but the
     * reply can't be decoded into `O`, `run` returns `Left(DspyError)` even
     * though those events still show a successful call. */
-  def run(
+  def apply(
       input: I,
       config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
@@ -74,5 +74,5 @@ final case class Predict[I, O](
       ))
     else
       inner
-        .run(ProgramCall(inputs = inputRecord, config = config, traceEnabled = traceEnabled))
+        .apply(ProgramCall(inputs = inputRecord, config = config, traceEnabled = traceEnabled))
         .flatMap(raw => Prediction.from(raw, signature.outputShape))

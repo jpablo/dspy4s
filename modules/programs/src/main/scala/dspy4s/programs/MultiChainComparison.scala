@@ -73,7 +73,7 @@ final case class MultiChainComparison(
       )
     )
 
-  override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     // Candidate completions are program data, not provider config: they are supplied through the typed
     // `runWithAttempts` entry below. The generic `run` has none and surfaces the usual size error.
     runWithAttempts(input, Vector.empty)
@@ -99,7 +99,7 @@ final case class MultiChainComparison(
         input.inputs.fields.iterator.toSeq ++ appended
       ))
       DynamicPredict(layout = augmentedSignature)
-        .run(input.copy(inputs = augmentedInputs))
+        .apply(input.copy(inputs = augmentedInputs))
 
   /** Renders a single attempt as Python does:
     * `«I'm trying to {rationale}. I'm not sure but my prediction is {answer}»`.

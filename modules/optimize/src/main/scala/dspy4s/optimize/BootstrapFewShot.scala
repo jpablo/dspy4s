@@ -76,7 +76,7 @@ final class BootstrapFewShot[P <: Module[ProgramCall, DynamicPrediction]: Predic
               val runOutcome: Either[DspyError, DynamicPrediction] =
                 dspy4s.core.runtime.RuntimeEnvironment.withGeneratedAsyncTask(s"bootstrap-round-$round") {
                   given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
-                  teacherProgram.run(ProgramCall(inputs = example.inputs))
+                  teacherProgram.apply(ProgramCall(inputs = example.inputs))
                 }
               runOutcome match
                 case Left(_) => ()

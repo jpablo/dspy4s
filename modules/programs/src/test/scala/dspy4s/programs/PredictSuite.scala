@@ -83,7 +83,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(P4QAInput("Capital of France?"))
+      val result = Predict(sig).apply(P4QAInput("Capital of France?"))
       result match
         case Right(tp) =>
           assertEquals(tp.output, P4QAOutput("Paris", 0.95))
@@ -95,7 +95,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.of[P4QASpec]
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run((question = "Capital of France?"))
+      val result = Predict(sig).apply((question = "Capital of France?"))
       result match
         case Right(tp) =>
           val answer: String = tp.output.answer
@@ -110,7 +110,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.from(p4QaMethod)
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run((question = "Capital of France?"))
+      val result = Predict(sig).apply((question = "Capital of France?"))
       result match
         case Right(tp) =>
           val answer: String = tp.output.answer
@@ -148,7 +148,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(capturingAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = Predict(sig).run(P4QAInput("Capital of France?"))
+      val _ = Predict(sig).apply(P4QAInput("Capital of France?"))
     }
 
     assertEquals(capturedInputs.size, 1)
@@ -161,7 +161,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(P4QAInput("Capital of France?")).toOption.get
+      val result = Predict(sig).apply(P4QAInput("Capital of France?")).toOption.get
       assertEquals(result.raw.completions.map(_.size), Some(2))
       assertEquals(result.raw.lmUsage.flatMap(_.get("total_tokens")), Some(12L))
     }
@@ -174,7 +174,7 @@ class TypedPredictSuite extends FunSuite:
     // LM returns a Double for `score`; P4StrictOutput expects Int.
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(P4QAInput("Capital of France?"))
+      val result = Predict(sig).apply(P4QAInput("Capital of France?"))
       assert(result.isLeft, s"expected decode failure but got: $result")
     }
   }
@@ -199,7 +199,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(EchoQuestionAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = Predict(sig).run(
+      val _ = Predict(sig).apply(
         P4QAInput("hi"),
         config = DynamicValues.record("temperature" := 0.7, "max_tokens" := 50)
       )
@@ -214,7 +214,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = Predict(sig).run(P4QAInput("Capital of France?"), traceEnabled = false)
+      val _ = Predict(sig).apply(P4QAInput("Capital of France?"), traceEnabled = false)
       assertEquals(RuntimeEnvironment.current.trace.size, 0)
     }
   }
@@ -245,7 +245,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(EchoQuestionAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(rec("question" := "Capital of France?"))
+      val result = Predict(sig).apply(rec("question" := "Capital of France?"))
       // Missing 'context' input -> Left, LM never invoked.
       assert(result.isLeft, s"expected missing-input failure, got: $result")
       assert(!lmCalled, "expected LM not to be called when required inputs are missing")
@@ -264,7 +264,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig).run(P4QAInput("Capital of France?"))
+      val result = Predict(sig).apply(P4QAInput("Capital of France?"))
       assert(result.isLeft, s"expected decode failure but got: $result")
       // Inner DynamicPredict succeeded -> trace/history entries are present despite
       // the typed boundary reporting failure.
@@ -281,7 +281,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = SignatureDsl.parse("question -> answer, score").toOption.get
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(sig).run(ProgramCall(inputs = rec("question" := "x")))
+      val result = DynamicPredict(sig).apply(ProgramCall(inputs = rec("question" := "x")))
       assert(result.isRight)
       assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
     }

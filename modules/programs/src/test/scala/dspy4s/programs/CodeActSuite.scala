@@ -100,7 +100,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("question" := "what is 40 + 2?")))
+      val result = program.apply(ProgramCall(inputs = rec("question" := "what is 40 + 2?")))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(lookupString(pred.values, "answer"), "42")
@@ -135,7 +135,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" := "?")))
+      val result = program.apply(ProgramCall(inputs = rec("q" := "?")))
       assert(result.isRight)
       assertEquals(interpreter.received.size, 3, "should run exactly maxIterations times")
     }
@@ -160,7 +160,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" := "?")))
+      val result = program.apply(ProgramCall(inputs = rec("q" := "?")))
       assert(result.isRight, s"CodeAct should not propagate user-code errors as Left; got $result")
       val traj = lookupString(result.toOption.get.values, "trajectory")
       assert(traj.contains("Failed to execute"), s"trajectory missing error label: $traj")
@@ -183,7 +183,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.run(ProgramCall(inputs = rec("q" := "?")))
+      val _ = program.apply(ProgramCall(inputs = rec("q" := "?")))
       assert(!interpreter.closed, "CodeAct must not auto-close — that's the caller's job")
     }
   }
@@ -207,7 +207,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.run(ProgramCall(inputs = rec("q" := "sum 0..9")))
+      val result = program.apply(ProgramCall(inputs = rec("q" := "sum 0..9")))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       val traj = lookupString(result.toOption.get.values, "trajectory")
       assert(traj.contains("45"), s"expected '45' in trajectory: $traj")

@@ -40,7 +40,7 @@ class StatusStreamingParitySuite extends FunSuite:
   private def buildToolProgram(tool: ToolFunction, toolArgs: DynamicValue.Record): PredictProgram =
     new PredictProgram:
       override val moduleName: String = "tool_caller"
-      override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(name = tool.name, args = toolArgs), Vector(tool)).map { _ =>
           DynamicPrediction(values = rec("answer" := "ok"))
         }

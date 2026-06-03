@@ -60,4 +60,4 @@ object SpecExample:
     * typed named-tuple output with dot syntax. */
   def callEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.Predict
-    Predict(emotion).run((sentence = sentence)).map(_.output.sentiment)
+    Predict(emotion).apply((sentence = sentence)).map(_.output.sentiment)

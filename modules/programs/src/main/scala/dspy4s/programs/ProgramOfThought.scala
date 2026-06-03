@@ -143,7 +143,7 @@ final case class ProgramOfThought(
         s"Given the final Python code and its printed output, produce the final $outputs."
       }))
 
-  override protected def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     for
       generatorLayout   <- ChainOfThought.augmentLayout(generateSignature)
       regeneratorLayout <- ChainOfThought.augmentLayout(regenerateSignature)
@@ -155,7 +155,7 @@ final case class ProgramOfThought(
         val extractInputs = call.inputs
           .updated("final_generated_code", stringDv(code))
           .updated("code_output", stringDv(codeOutput))
-        answerer.run(call.copy(inputs = extractInputs))
+        answerer.apply(call.copy(inputs = extractInputs))
       }
     yield result
 
@@ -177,7 +177,7 @@ final case class ProgramOfThought(
           .updated("previous_code", stringDv(code))
           .updated("error", stringDv(error))
 
-    predict.run(call.copy(inputs = inputs)).flatMap { prediction =>
+    predict.apply(call.copy(inputs = inputs)).flatMap { prediction =>
       val rawCode = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
       val parsed = extractCode(rawCode)
 

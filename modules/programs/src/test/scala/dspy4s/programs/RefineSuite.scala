@@ -20,7 +20,7 @@ class RefineSuite extends FunSuite:
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "stub"
 
-    override def run(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       calls.incrementAndGet()
       val idx = counter.getAndIncrement()
       results(Math.min(idx, results.size - 1))
@@ -47,7 +47,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
+    val result = refine.apply(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
 
     assert(result.isRight)
     assertEquals(lookupString(result.toOption.get.values, "answer"), "Brussels")
@@ -70,7 +70,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = rec("q" := "x")))
+    val result = refine.apply(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 3)
     assertEquals(result.left.toOption.get.message, "f3")
@@ -93,7 +93,7 @@ class RefineSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = refine.run(ProgramCall(inputs = rec("q" := "x")))
+    val result = refine.apply(ProgramCall(inputs = rec("q" := "x")))
     assert(result.isLeft)
     assertEquals(module.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
