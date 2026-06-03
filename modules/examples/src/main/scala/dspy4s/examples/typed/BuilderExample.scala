@@ -4,7 +4,7 @@
  * The builder is the right choice when a case class per signature is
  * overkill (REPL exploration, dynamic shapes assembled from config,
  * tests). It produces a runtime `SignatureLayout` directly; users who want
- * typed `DynamicPredict.run` should use the trait-spec, method, or case-class
+ * typed `DynamicPredict.apply` should use the trait-spec, method, or case-class
  * APIs instead.
  *
  * Each `.input[T]` / `.output[T]` call summons a `Schema[T]` and derives the

@@ -354,7 +354,7 @@ A typed companion to `Predict`:
 final class Predict[I <: Tuple, O <: Tuple](sig: Signature[I, O]):
   def run(inputs: NamedTuple[Names[I], Types[I]])(using RuntimeContext)
       : Either[DspyError, Prediction[O]] = ???
-  // alternative varargs form for parity with PredictProgram.run:
+  // alternative varargs form (the untyped predict once had such a convenience overload, since removed):
   def run(inputs: (String, Any)*)(using RuntimeContext)
       : Either[DspyError, Prediction[O]] = ???
 ```
@@ -989,8 +989,8 @@ its weight in practice.
 
 4. **Input ergonomics.** Should `Predict.run` take a named tuple
    (`run((comment = "..."))`), varargs of pairs (`run("comment" -> "...")`),
-   or both? Named tuples are typed but more verbose; varargs match the
-   current `PredictProgram.run` overload.
+   or both? Named tuples are typed but more verbose. (The untyped predict once
+   had a varargs `apply` convenience for this; it was unused and removed.)
 
 5. **Surface migration policy.** Once the engine ships, do we
    re-translate existing example files to the typed layer immediately,

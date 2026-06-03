@@ -181,8 +181,8 @@ When `Predict[I, O].run(input)` fires:
    fields are present (catches `MapShape` callers from the string DSL
    missing a field).
 2. **Hand off** — wrap in `ProgramCall(inputs, config, traceEnabled)`,
-   call the memoized inner `DynamicPredict.run(call)`.
-3. **`BasePredictProgram.run` wraps** —
+   call the memoized inner `DynamicPredict.apply(call)`.
+3. **`BasePredictProgram.apply` wraps** —
    `CallbackDispatcher.withModule("predict", inputs)` scope; on success,
    conditionally records `TraceEntry` + `HistoryEntry`.
 4. **`PredictEngine.execute`** (the shared body):

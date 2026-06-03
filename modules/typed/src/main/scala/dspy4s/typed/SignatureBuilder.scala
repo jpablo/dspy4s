@@ -19,7 +19,7 @@ import zio.blocks.schema.Schema
   * here without writing a case class.
   *
   * Returns a plain `SignatureLayout` from `.build`; callers needing typed
-  * `DynamicPredict.run` should use `Signature.derived[I, O]` instead.
+  * `DynamicPredict.apply` should use `Signature.derived[I, O]` instead.
   */
 final class SignatureBuilder private[typed] (
     private val sigName: String,

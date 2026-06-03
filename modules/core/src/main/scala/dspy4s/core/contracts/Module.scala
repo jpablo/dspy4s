@@ -21,8 +21,8 @@ import scala.concurrent.Future
   *     [[dspy4s.core.runtime.ContextPropagation.future]] so the callback / trace / `ActivePredictContext` thread-
   *     locals propagate across the thread boundary correctly.
   *
-  * Notable extensions: [[dspy4s.programs.contracts.PredictProgram]] (the predict-shaped subtype every
-  * `DynamicPredict` / composite program ultimately extends).
+  * Notable specialization: `PredictProgram` — a `type` alias for `Module[ProgramCall, DynamicPrediction]` (just a
+  * name for the predict-shaped module that every `DynamicPredict` / composite program extends).
   */
 trait Module[-In, +Out]:
   def moduleName: String

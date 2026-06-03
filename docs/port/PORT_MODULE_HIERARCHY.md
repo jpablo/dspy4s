@@ -26,8 +26,8 @@ Parameter                        # empty marker class (`pass`) for named_paramet
 **dspy4s**:
 
 ```
-Module[-In, +Out]                       # callable contract: apply (+ arun)
-  └─ PredictProgram                     # = Module[ProgramCall, DynamicPrediction] + apply(inputs*) sugar
+Module[-In, +Out]                       # callable contract: apply (+ applyAsync)
+  └─ PredictProgram                     # type alias = Module[ProgramCall, DynamicPrediction] (just a name; no members)
        ├─ BasePredictProgram            # final apply (wraps callbacks/trace/history) -> abstract forward
        │    ├─ DynamicPredict           # implements forward (the leaf predict engine)
        │    ├─ ReAct                    # implements forward; builds react + extract DynamicPredicts
