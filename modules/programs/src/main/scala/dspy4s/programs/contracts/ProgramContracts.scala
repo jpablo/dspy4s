@@ -22,13 +22,17 @@ final case class ProgramCall(
 
 /** The typed-layer counterpart to [[ProgramCall]]: the single call argument for `Module[TypedCall[I], O]`
   * (`Predict[I, O]` / `ChainOfThought[I, O]`). It carries the typed input `I` alongside the same per-call knobs
-  * `ProgramCall` exposes (`config`, `traceEnabled`), so the typed and untyped layers share one uniform
-  * `apply(call)` entry on `Module`. Callers normally use the convenience `apply(input, config, traceEnabled)`
-  * overload, which builds a `TypedCall` and dispatches through the wrapped `apply`. */
+  * `ProgramCall` exposes (`config`, `traceEnabled`, `rolloutId`), so the typed and untyped layers share one
+  * uniform `apply(call)` entry on `Module`. Callers normally use the convenience `apply(input, config,
+  * traceEnabled)` overload, which builds a `TypedCall` and dispatches through the wrapped `apply`.
+  *
+  * `rolloutId` is the framework cache-busting selector (threaded into `ProgramCall.rolloutId` by `Predict`); it is
+  * how `BestOfN[I, O]` makes its repeated samples distinct. */
 final case class TypedCall[I](
     input: I,
     config: DynamicValue.Record = DynamicValue.Record.empty,
-    traceEnabled: Boolean = true
+    traceEnabled: Boolean = true,
+    rolloutId: Option[Int] = None
 )
 
 trait ProgramRuntime:

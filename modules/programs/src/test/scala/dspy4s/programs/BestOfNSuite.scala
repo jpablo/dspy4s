@@ -53,7 +53,7 @@ class BestOfNSuite extends FunSuite:
         Right(DynamicPrediction(values = rec("answer" := "C", "score" := 0.5)))
       )
     )
-    val bestOfN = BestOfN(
+    val bestOfN = DynamicBestOfN(
       module = module,
       n = 3,
       rewardFn = (_, pred) => pred.asDouble("score").toOption.getOrElse(0.0),
@@ -81,7 +81,7 @@ class BestOfNSuite extends FunSuite:
         Left(RuntimeError("stub", "f3"))
       )
     )
-    val bestOfN = BestOfN(
+    val bestOfN = DynamicBestOfN(
       module = module,
       n = 3,
       rewardFn = (_, _) => 1.0,
@@ -103,7 +103,7 @@ class BestOfNSuite extends FunSuite:
         Right(DynamicPrediction(values = rec("answer" := "ok", "score" := 1.0)))
       )
     )
-    val bestOfN = BestOfN(
+    val bestOfN = DynamicBestOfN(
       module = module,
       n = 3,
       rewardFn = (_, _) => 1.0,
@@ -141,7 +141,7 @@ class BestOfNSuite extends FunSuite:
         )
       )
     )
-    val bestOfN = BestOfN(
+    val bestOfN = DynamicBestOfN(
       module = module,
       n = 2,
       rewardFn = (_, pred) => pred.asDouble("score").toOption.getOrElse(0.0),

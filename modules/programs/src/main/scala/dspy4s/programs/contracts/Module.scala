@@ -79,8 +79,9 @@ trait Module[I, O]:
 
 /** The untyped program spine: `Module[ProgramCall, DynamicPrediction]` with the projection hooks defaulted to the
   * spine record shapes (`call.inputs` / `prediction.values`). Every engine program (`DynamicPredict`, `ReAct`,
-  * `CodeAct`, `ProgramOfThought`, `Refine`, `BestOfN`, `MultiChainComparison`) extends this and implements only
-  * `forward` + `moduleName`. `tracePayload` stays overridable for programs that record a projection. */
+  * `CodeAct`, `ProgramOfThought`, `DynamicRefine`, `DynamicBestOfN`, `MultiChainComparison`) extends this and
+  * implements only `forward` + `moduleName`. `tracePayload` stays overridable for programs that record a
+  * projection. (The typed `Refine[I, O]` / `BestOfN[I, O]` instead extend `Module[TypedCall[I], Prediction[O]]`.) */
 trait DynamicModule extends Module[ProgramCall, DynamicPrediction]:
   protected def callInputs(call: ProgramCall): DynamicValue.Record = call.inputs
   protected def callTraceEnabled(call: ProgramCall): Boolean      = call.traceEnabled

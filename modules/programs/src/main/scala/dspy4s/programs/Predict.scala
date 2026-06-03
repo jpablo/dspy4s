@@ -68,7 +68,12 @@ final case class Predict[I, O](
       ))
     else
       engine
-        .execute(ProgramCall(inputs = inputRecord, config = call.config, traceEnabled = call.traceEnabled))
+        .execute(ProgramCall(
+          inputs       = inputRecord,
+          config       = call.config,
+          traceEnabled = call.traceEnabled,
+          rolloutId    = call.rolloutId
+        ))
         .flatMap(raw => Prediction.from(raw, signature.outputShape))
 
   /** Convenience entry mirroring the prior caller signature. Encodes `input` into a [[TypedCall]] and dispatches

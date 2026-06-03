@@ -39,7 +39,7 @@ class RefineSuite extends FunSuite:
         Right(DynamicPrediction(values = rec("answer" := "Brussels", "score" := 0.9)))
       )
     )
-    val refine = Refine(
+    val refine = DynamicRefine(
       module = module,
       n = 3,
       rewardFn = (_, pred) => pred.asDouble("score").toOption.getOrElse(0.0),
@@ -62,7 +62,7 @@ class RefineSuite extends FunSuite:
         Left(RuntimeError("stub", "f3"))
       )
     )
-    val refine = Refine(
+    val refine = DynamicRefine(
       module = module,
       n = 3,
       rewardFn = (_, _) => 1.0,
@@ -84,7 +84,7 @@ class RefineSuite extends FunSuite:
         Right(DynamicPrediction(values = rec("answer" := "ok", "score" := 1.0)))
       )
     )
-    val refine = Refine(
+    val refine = DynamicRefine(
       module = module,
       n = 3,
       rewardFn = (_, _) => 1.0,
