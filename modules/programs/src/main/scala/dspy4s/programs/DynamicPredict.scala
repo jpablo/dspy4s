@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
@@ -43,7 +43,7 @@ final case class DynamicPredict(
       * `Predict[I, O]` path provides this from its `signature.outputShape.jsonSchemaString`; users who
       * construct `DynamicPredict` directly leave it `None` and adapters fall back to their default behavior. */
     outputJsonSchema: Option[String] = None
-) extends Module:
+) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
 

@@ -7,7 +7,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 
@@ -22,7 +22,7 @@ final case class ScriptedPredictProgram(
     layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     failsWith: Option[RuntimeException] = None
-) extends Module:
+) extends DynamicModule:
   override val moduleName: String = "scripted"
   override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     failsWith match
@@ -35,7 +35,7 @@ final case class DemoAwarePredictProgram(
     layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     answers: Map[String, String] = Map.empty
-) extends Module:
+) extends DynamicModule:
   override val moduleName: String = "demo_aware"
   override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val q = lookupString(input.inputs, "question")

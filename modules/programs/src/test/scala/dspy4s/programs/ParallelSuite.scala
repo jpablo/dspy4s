@@ -8,7 +8,7 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 
@@ -17,7 +17,7 @@ class ParallelSuite extends FunSuite:
   private final case class StubProgram(
       override val moduleName: String = "stub",
       behavior: Int => Either[DspyError, DynamicPrediction]
-  ) extends Module:
+  ) extends DynamicModule:
     override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val value = lookup(input.inputs, "value").get.asInstanceOf[Int]
       behavior(value)

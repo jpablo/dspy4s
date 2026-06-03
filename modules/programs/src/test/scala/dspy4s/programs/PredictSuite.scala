@@ -252,24 +252,21 @@ class TypedPredictSuite extends FunSuite:
     }
   }
 
-  // ── Decode-failure / trace divergence (Phase 4 known limitation) ────────
+  // ── Decode-failure / trace consistency ──────────────────────────────────
 
-  test("decode failures: inner DynamicPredict still records trace + history (known limitation)") {
-    // Characterizes current behavior so a future "wrap typed boundary in its
-    // own scope" change is intentional. Today: Predict.run returns
-    // Left(decode failure), but the inner DynamicPredict already emitted its
-    // module-end event and appended to trace/history. Asserted so a future
-    // Phase 5+ change that consolidates the typed boundary's tracing has
-    // to update this test deliberately.
+  test("decode failures: no trace/history is recorded (typed decode runs inside the wrapped forward)") {
+    // `Predict[I, O]` is now a `Module[TypedCall[I], Prediction[O]]` whose `forward` does the typed decode
+    // *inside* the lifecycle wrapping. So a decode failure makes `forward` return `Left`, and `Module.apply`
+    // appends neither a trace nor a history entry -- the observability layer and the return value agree.
+    // (This replaces the earlier "known limitation" where the inner DynamicPredict had already recorded a
+    // successful call before the typed decode failed.)
     val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = Predict(sig).apply(P4QAInput("Capital of France?"))
       assert(result.isLeft, s"expected decode failure but got: $result")
-      // Inner DynamicPredict succeeded -> trace/history entries are present despite
-      // the typed boundary reporting failure.
-      assertEquals(RuntimeEnvironment.current.trace.size, 1)
-      assertEquals(RuntimeEnvironment.current.history.size, 1)
+      assertEquals(RuntimeEnvironment.current.trace.size, 0)
+      assertEquals(RuntimeEnvironment.current.history.size, 0)
     }
   }
 

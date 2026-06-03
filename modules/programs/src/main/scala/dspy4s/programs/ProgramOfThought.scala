@@ -12,7 +12,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.matching.Regex
@@ -54,7 +54,7 @@ final case class ProgramOfThought(
     baseSignature: SignatureLayout,
     interpreter: CodeInterpreter,
     maxIterations: Int = 3
-) extends Module:
+) extends DynamicModule:
 
   override val moduleName: String = "program_of_thought"
   require(maxIterations > 0, "maxIterations must be greater than 0")

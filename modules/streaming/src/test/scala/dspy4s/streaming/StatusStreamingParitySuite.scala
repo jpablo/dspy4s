@@ -5,7 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
@@ -37,8 +37,8 @@ class StatusStreamingParitySuite extends FunSuite:
   /** A program that invokes a tool and then "predicts" a fixed answer. We
     * keep it minimal — no LM is configured because the test only inspects
     * status events. */
-  private def buildToolProgram(tool: ToolFunction, toolArgs: DynamicValue.Record): Module =
-    new Module:
+  private def buildToolProgram(tool: ToolFunction, toolArgs: DynamicValue.Record): DynamicModule =
+    new DynamicModule:
       override val moduleName: String = "tool_caller"
       override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(name = tool.name, args = toolArgs), Vector(tool)).map { _ =>

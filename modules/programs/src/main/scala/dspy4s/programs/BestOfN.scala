@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.updated
@@ -16,12 +16,12 @@ import zio.blocks.schema.DynamicValue
 import scala.util.control.NonFatal
 
 final case class BestOfN(
-    module: Module,
+    module: DynamicModule,
     n: Int,
     rewardFn: (DynamicValue.Record, DynamicPrediction) => Double,
     threshold: Double,
     failCount: Option[Int] = None
-) extends Module:
+) extends DynamicModule:
   require(n > 0, "n must be greater than 0")
 
   override val moduleName: String = "best_of_n"

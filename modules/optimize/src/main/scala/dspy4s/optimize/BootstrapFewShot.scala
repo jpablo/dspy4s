@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -30,7 +30,7 @@ final case class BootstrapFewShotConfig(
   require(maxRounds >= 1, "maxRounds must be at least 1")
   require(maxErrors > 0, "maxErrors must be > 0")
 
-final class BootstrapFewShot[P <: Module: PredictOps](
+final class BootstrapFewShot[P <: DynamicModule: PredictOps](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 

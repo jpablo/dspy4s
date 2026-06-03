@@ -7,7 +7,7 @@ import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -41,7 +41,7 @@ final case class MultiChainComparison(
     rationaleDescription: String = "${corrected reasoning}",
     attemptDescription: String = "${reasoning attempt}",
     answerFieldOverride: Option[String] = None
-) extends Module:
+) extends DynamicModule:
 
   override val moduleName: String = "multi_chain_comparison"
 

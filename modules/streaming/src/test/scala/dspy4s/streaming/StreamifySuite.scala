@@ -20,7 +20,7 @@ import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
@@ -165,7 +165,7 @@ class StreamifySuite extends FunSuite:
   }
 
   test("streamify emits error event when program fails") {
-    val failing = new Module:
+    val failing = new DynamicModule:
       override val moduleName: String = "failing"
       override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))

@@ -4,7 +4,7 @@ import dspy4s.core.contracts.{
   DspyError, DynamicValues, Example, FieldRole, FieldSpec, NotFoundError, RuntimeContext,
   SignatureLayout, TypeRef, ValidationError
 }
-import dspy4s.programs.contracts.ProgramRuntime
+import dspy4s.programs.contracts.{Module, ProgramRuntime, TypedCall}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{Prediction, Shape, Signature}
 import zio.blocks.chunk.Chunk
@@ -27,34 +27,53 @@ import scala.NamedTuple
   * synthesized case class at the call site; for those, define the reasoning
   * field in the output case class and use [[Predict]] directly.
   *
-  * **Known limitation** (inherited from `Predict`): when the inner
-  * `Predict` succeeds but the typed decode fails, the trace still records a
-  * successful module call while `run` returns `Left`. The underlying LM call
-  * really did succeed; consolidating the typed boundary's tracing is an open
-  * design decision.
+  * Like Python's `ChainOfThought` (which is `self.predict = Predict(extended_signature)` and a one-line
+  * `forward` that calls it), this is a `Module` that *contains* an inner [[Predict]] and delegates to it. So a
+  * call emits a `chain_of_thought` module event wrapping the inner `predict` event, mirroring Python's
+  * `CoT.__call__` → `forward` → `self.predict(**kwargs)` nesting. Because the typed decode now lives inside the
+  * inner `Predict`'s wrapped `forward`, a decode failure returns `Left` *and* records no trace entry — the
+  * earlier "trace says success while the call returns `Left`" divergence is gone.
   */
 final case class ChainOfThought[I, O](
     signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     runtime: ProgramRuntime = new SettingsProgramRuntime {},
     name: Option[String] = None
-):
+) extends Module[TypedCall[I], Prediction[ChainOfThought.WithReasoning[O]]]:
 
   /** The augmented output type: `reasoning: String` prepended to O's
     * named-tuple fields. Only reduces when O is a named tuple; case-class
     * outputs leave this match type stuck. */
   type Out = ChainOfThought.WithReasoning[O]
 
+  override val moduleName: String = name.getOrElse("chain_of_thought")
+
+  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
+    signature.inputShape.encode(call.input)
+
+  override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
+
+  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record =
+    prediction.raw.values
+
+  override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+    predictor.flatMap(_.apply(call))
+
+  /** Convenience entry mirroring the prior caller signature; builds a [[TypedCall]] and dispatches through the
+    * wrapped [[apply]]. */
   def apply(
       input: I,
       config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    predictor.flatMap(_.apply(input, config, traceEnabled))
+    apply(TypedCall(input, config, traceEnabled))
 
+  /** The inner predictor, built once (memoized) — the analog of Python's `self.predict =
+    * Predict(extended_signature)`. Left unnamed so it surfaces as a nested `predict` event under this
+    * program's `chain_of_thought` event. */
   private lazy val predictor: Either[DspyError, Predict[I, Out]] =
     augmentedSignature.map { sig =>
-      Predict(sig, demos, name.orElse(Some("chain_of_thought")), runtime)
+      Predict(sig, demos, None, runtime)
     }
 
   private def augmentedSignature: Either[DspyError, Signature[I, Out]] =

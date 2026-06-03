@@ -23,7 +23,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import munit.FunSuite
 
@@ -55,7 +55,7 @@ class ProgramRuntimeSuite extends FunSuite:
 
   private object RuntimeResolver extends SettingsProgramRuntime
 
-  private final class EchoProgram extends Module:
+  private final class EchoProgram extends DynamicModule:
     override val moduleName: String = "echo"
     override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       Right(DynamicPrediction(values = call.inputs.updated(

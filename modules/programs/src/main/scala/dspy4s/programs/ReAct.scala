@@ -12,7 +12,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.runtime.ToolExecutor
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -38,7 +38,7 @@ final case class ReAct(
     maxIterations: Int = 5,
     reactProgramName: String = ReActKeys.reactModule,
     extractorProgramName: String = ReActKeys.extractModule
-) extends Module:
+) extends DynamicModule:
 
   override val moduleName: String = ReActKeys.reactModule
   require(maxIterations > 0, "maxIterations must be greater than 0")
