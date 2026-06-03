@@ -14,6 +14,7 @@ import dspy4s.lm.contracts.{
   Message, MessageRole
 }
 import dspy4s.typed.{InputField, OutputField, Spec, Signature}
+import scala.NamedTuple
 import munit.FunSuite
 
 // Top-level spec traits (Mirror derivation requires top-level types).
@@ -25,6 +26,13 @@ trait TcotMultiOutputSpec extends Spec:
   def question: InputField[String]
   def answer:   OutputField[String]
   def score:    OutputField[Double]
+
+// Output that ALREADY declares `reasoning` -- exercises the idempotent path
+// (no second reasoning field added at the layout or the type level).
+trait TcotHasReasoningSpec extends Spec:
+  def question:  InputField[String]
+  def reasoning: OutputField[String]
+  def answer:    OutputField[String]
 
 // Case-class I/O fixtures for the negative-path test that exercises
 // the case-class-output rejection in ChainOfThought.
@@ -138,6 +146,27 @@ class ChainOfThoughtSuite extends FunSuite:
     }
   }
 
+  test("ChainOfThought is idempotent: an output that already declares `reasoning` gets no second one") {
+    val sig = Signature.of[TcotHasReasoningSpec]
+    // layout-level: reasoning is not duplicated
+    val layout = ChainOfThought.augmentLayout(sig.layout).toOption.get
+    assertEquals(layout.outputFields.map(_.name), Vector("reasoning", "answer"))
+
+    // type/value-level: the output named tuple has exactly the two declared fields (reasoning once),
+    // not (reasoning, reasoning, answer)
+    val adapter = new ScriptedAdapter(
+      reasoning  = "let us reason",
+      baseValues = Map("answer" -> "Paris")
+    )
+    RuntimeEnvironment.withSettings(settings(adapter)) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val tp = ChainOfThought(sig).apply((question = "Capital of France?")).toOption.get
+      assertEquals(NamedTuple.toTuple(tp.output).size, 2)
+      assertEquals(tp.output.reasoning, "let us reason")
+      assertEquals(tp.output.answer,    "Paris")
+    }
+  }
+
   // ── Raw prediction is preserved ─────────────────────────────────────────
 
   test("ChainOfThought preserves the raw DynamicPrediction (including lmUsage)") {
@@ -194,27 +223,25 @@ class ChainOfThoughtSuite extends FunSuite:
     }
   }
 
-  test("ChainOfThought rejects case-class-output signatures with a ValidationError") {
-    // Signature.derived produces a Schema-derived Shape that decodes into the
-    // case class -- not a Tuple -- so the augmented-tuple construction
-    // can't proceed. The boundary must surface a structured error, not
-    // a ClassCastException.
+  test("ChainOfThought supports case-class outputs, returning a named tuple with reasoning prepended") {
+    // `Signature.derived` produces a case-class output. CoT normalizes it to its named-tuple view
+    // (NamedTuple.From) and prepends `reasoning`, so the result is `(reasoning, summary)` -- a named tuple,
+    // not the original `TcotCaseOutput` nominal type (that type can't be synthesized with an extra field).
     val sig = Signature.derived[TcotCaseInput, TcotCaseOutput]("CaseClassCot")
     val adapter = new ScriptedAdapter(
-      reasoning  = "any reasoning",
-      baseValues = Map("summary" -> "any summary")
+      reasoning  = "the summary condenses the document",
+      baseValues = Map("summary" -> "a concise summary")
     )
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = ChainOfThought(sig).apply(TcotCaseInput("..."))
       result match
-        case Left(err: ValidationError) =>
-          assert(
-            err.message.contains("named-tuple output"),
-            s"error message should mention named-tuple requirement: ${err.message}"
-          )
-        case other =>
-          fail(s"expected ValidationError, got: $other")
+        case Right(tp) =>
+          val reasoning: String = tp.output.reasoning
+          val summary:   String = tp.output.summary
+          assertEquals(reasoning, "the summary condenses the document")
+          assertEquals(summary,   "a concise summary")
+        case Left(err) => fail(s"expected success, got: $err")
     }
   }
 

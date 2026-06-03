@@ -12,20 +12,22 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import scala.NamedTuple
 
 /** ChainOfThought, defined as a small signature transformation on top of
-  * [[Predict]]. Wraps a `Signature[I, O]` whose output is a named tuple
-  * (typically produced by `Signature.of[T <: Spec]` or
-  * `Signature.fromType[F]("...")`) and produces a `Prediction[Out]` whose
-  * output named tuple has `reasoning: String` prepended to O's fields.
+  * [[Predict]]. Wraps a `Signature[I, O]` and produces a `Prediction[Out]` whose output is the base output with
+  * a `reasoning: String` field — **always a named tuple** ([[ChainOfThought.WithReasoning]]).
   *
   * Inputs flow through `Predict` unchanged. CoT contributes only the augmented
   * signature: a leading `reasoning` output field in the runtime layout and an
   * output `Shape` that decodes the underlying prediction as
   * `(reasoning = ..., <base outputs...>)`.
   *
-  * **Scope**: named-tuple outputs only. Case-class outputs from
-  * `Signature.derived[I, O <: Product]` would need an augmented
-  * synthesized case class at the call site; for those, define the reasoning
-  * field in the output case class and use [[Predict]] directly.
+  * **Output type.** `O` is normalized to its named-tuple view (`NamedTuple.From`: identity for named tuples, the
+  * field tuple for case classes), then `reasoning` is prepended — *unless* the output already has a `reasoning`
+  * field, in which case it is kept as-is (idempotent: never a second `reasoning`). The result is therefore
+  * always a named tuple, even when `O` is a case class. A case-class output is **not** echoed back as the same
+  * nominal type — Scala can't synthesize "case class plus a field" — so you get the structural named tuple;
+  * convert it back yourself if you want the nominal type (`Mirror.fromProduct` for an exact-field match, or a
+  * name-based mapper like Chimney to project / drop `reasoning`). The only unsupported output is the
+  * `DynamicValue.Record` from `Signature.fromString`, which carries no static fields.
   *
   * Like Python's `ChainOfThought` (which is `self.predict = Predict(extended_signature)` and a one-line
   * `forward` that calls it), this is a `Module` that *contains* an inner [[Predict]] and delegates to it. So a
@@ -39,12 +41,10 @@ final case class ChainOfThought[I, O](
     demos: Vector[Example] = Vector.empty,
     runtime: ProgramRuntime = new SettingsProgramRuntime {},
     name: Option[String] = None
-)(using prepend: ChainOfThought.PrependReasoning[O])
+)(using prepend: ChainOfThought.PrependReasoning.Aux[O, ChainOfThought.WithReasoning[O]])
     extends Module[TypedCall[I], Prediction[ChainOfThought.WithReasoning[O]]]:
 
-  /** The augmented output type: `reasoning: String` prepended to O's
-    * named-tuple fields. Only reduces when O is a named tuple; case-class
-    * outputs leave this match type stuck. */
+  /** The augmented output type — always a named tuple. See [[ChainOfThought.WithReasoning]]. */
   type Out = ChainOfThought.WithReasoning[O]
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
@@ -112,20 +112,19 @@ final case class ChainOfThought[I, O](
       for
         reasoning <- extractReasoning(raw)
         baseOut   <- signature.outputShape.decode(raw)
-        // `prepend` builds the augmented named tuple via `NamedTuple.build` when `O` is a named tuple
-        // (no `asInstanceOf`); for any other `O` it yields `None`, surfaced here as a structured error.
+        // `prepend` builds the augmented named tuple via `NamedTuple.build` for products (named tuples and case
+        // classes) with no `asInstanceOf`; only the fieldless `DynamicValue.Record` output yields `None`.
         augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
       yield augmented
 
-  /** The structured error for an `O` that is not a named tuple (case-class outputs from
-    * `Signature.derived`, `DynamicValue.Record` from `Signature.fromString`). The `WithReasoning[O]` match type
-    * also fails to reduce for these, so this path is misuse of the public constructor. */
+  /** The structured error for an `O` that is neither a named tuple nor a case class — i.e. the
+    * `DynamicValue.Record` output of a `Signature.fromString`, which has no static fields to augment. The
+    * `WithReasoning[O]` match type also fails to reduce for it. */
   private def unsupportedOutputShape(baseOut: O): DspyError =
     ValidationError(
-      s"ChainOfThought requires a named-tuple output signature " +
-      s"(Signature.of[Spec] or Signature.fromType[F]); got " +
-      s"${baseOut.getClass.getSimpleName} from '${signature.name}'. " +
-      s"For case-class outputs, include reasoning in the output type and use Predict directly."
+      s"ChainOfThought requires a product output (named tuple or case class); the string-DSL signature " +
+      s"'${signature.name}' has a fieldless DynamicValue.Record output (got ${baseOut.getClass.getSimpleName}). " +
+      s"Use a typed signature (Signature.of / Signature.derived / Signature.fromType)."
     )
 
   private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
@@ -155,28 +154,66 @@ object ChainOfThought:
     if layout.outputFields.exists(_.name == reasoningField.name) then Right(layout)
     else layout.insert(index = 0, field = reasoningField)
 
-  /** Match type prepending `reasoning: String` to a named-tuple output. */
-  type WithReasoning[O] = O match
-    case NamedTuple.NamedTuple[n, v] =>
-      NamedTuple.NamedTuple["reasoning" *: n, String *: v]
+  /** Type-level membership: is `X` one of the names in tuple `T`? Drives the idempotence check. */
+  type Contains[T <: Tuple, X] <: Boolean = T match
+    case X *: _     => true
+    case _ *: rest  => Contains[rest, X]
+    case EmptyTuple => false
 
-  /** Type-directed prepend of `reasoning` onto the base output. The named-tuple instance builds the augmented
-    * named tuple through the supported whole-tuple constructor `NamedTuple.build` (no `asInstanceOf`); the
-    * low-priority fallback returns `None` for any non-named-tuple `O`, which `decode` turns into a
-    * `ValidationError`. The instance is resolved at the `ChainOfThought` call site (where `O` is concrete) — not
-    * inside the class body, where `O` is abstract and only the fallback would match. */
+  /** The augmented output type — **always a named tuple**. Normalizes `O` to its named-tuple view
+    * (`NamedTuple.From`: identity for named tuples, the field tuple for case classes), then prepends
+    * `reasoning: String` unless the output already has a `reasoning` field (idempotent). */
+  type WithReasoning[O] = NamedTuple.From[O] match
+    case NamedTuple.NamedTuple[n, v] =>
+      Contains[n, "reasoning"] match
+        case true  => NamedTuple.NamedTuple[n, v]
+        case false => NamedTuple.NamedTuple["reasoning" *: n, String *: v]
+
+  /** Type-directed construction of [[WithReasoning]] from a base output value, with no `asInstanceOf`. The
+    * abstract `Out` member lets each instance pin the exact type it builds, sidestepping match-type/`Mirror`
+    * alignment; `ChainOfThought` constrains it via `Aux[O, WithReasoning[O]]`. Instances resolve at the
+    * `ChainOfThought` call site, where `O` is concrete (inside the class body `O` is abstract and only the
+    * fallback would match). */
   trait PrependReasoning[O]:
-    def prepend(reasoning: String, base: O): Option[WithReasoning[O]]
+    type Out
+    def prepend(reasoning: String, base: O): Option[Out]
 
   trait LowPriorityPrependReasoning:
-    /** Fallback for any `O` that is not a named tuple (case-class / `Record` outputs). */
-    given fallback[O]: PrependReasoning[O] with
-      def prepend(reasoning: String, base: O): Option[WithReasoning[O]] = None
+    /** Fallback for an `O` that is neither a named tuple nor a product — i.e. the `DynamicValue.Record` output
+      * of `Signature.fromString`. Unsupported: `decode` turns the `None` into a `ValidationError`. */
+    given fallback[O]: (PrependReasoning[O] { type Out = WithReasoning[O] }) =
+      new PrependReasoning[O]:
+        type Out = WithReasoning[O]
+        def prepend(reasoning: String, base: O): Option[Out] = None
 
   object PrependReasoning extends LowPriorityPrependReasoning:
-    given namedTuple[N <: Tuple, V <: Tuple]: PrependReasoning[NamedTuple.NamedTuple[N, V]] with
-      def prepend(
-          reasoning: String,
-          base: NamedTuple.NamedTuple[N, V]
-      ): Option[WithReasoning[NamedTuple.NamedTuple[N, V]]] =
-        Some(NamedTuple.build["reasoning" *: N]()(reasoning *: NamedTuple.toTuple(base)))
+    type Aux[O, O2] = PrependReasoning[O] { type Out = O2 }
+
+    /** Named-tuple output without a `reasoning` field: prepend it via the supported whole-tuple constructor
+      * `NamedTuple.build`. */
+    given ntAbsent[N <: Tuple, V <: Tuple](using
+        Contains[N, "reasoning"] =:= false
+    ): Aux[NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple["reasoning" *: N, String *: V]] =
+      new PrependReasoning[NamedTuple.NamedTuple[N, V]]:
+        type Out = NamedTuple.NamedTuple["reasoning" *: N, String *: V]
+        def prepend(reasoning: String, base: NamedTuple.NamedTuple[N, V]): Option[Out] =
+          Some(NamedTuple.build["reasoning" *: N]()(reasoning *: NamedTuple.toTuple(base)))
+
+    /** Named-tuple output that already has a `reasoning` field: idempotent — kept unchanged. */
+    given ntPresent[N <: Tuple, V <: Tuple](using
+        Contains[N, "reasoning"] =:= true
+    ): Aux[NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[N, V]] =
+      new PrependReasoning[NamedTuple.NamedTuple[N, V]]:
+        type Out = NamedTuple.NamedTuple[N, V]
+        def prepend(reasoning: String, base: NamedTuple.NamedTuple[N, V]): Option[Out] = Some(base)
+
+    /** Any product (case class): normalize to its named-tuple view through the `Mirror` and delegate to the
+      * named-tuple instances, so case-class outputs are supported and the result is always a named tuple. */
+    given product[O <: Product, N <: Tuple, V <: Tuple](using
+        m: scala.deriving.Mirror.ProductOf[O] { type MirroredElemLabels = N; type MirroredElemTypes = V },
+        inner: PrependReasoning[NamedTuple.NamedTuple[N, V]]
+    ): Aux[O, inner.Out] =
+      new PrependReasoning[O]:
+        type Out = inner.Out
+        def prepend(reasoning: String, base: O): Option[Out] =
+          inner.prepend(reasoning, NamedTuple.build[N]()(Tuple.fromProductTyped(base)(using m)))
