@@ -3,7 +3,6 @@ package dspy4s.programs.contracts
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Module
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
@@ -27,16 +26,13 @@ trait ProgramRuntime:
   def resolveModel(using RuntimeContext): Either[DspyError, LanguageModel]
   def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter]
 
-trait PredictProgram extends Module[ProgramCall, DynamicPrediction]:
-  /** Convenience overload of `apply` so call sites can write:
-    *
-    *   predict("comment" := comment, "lang" := "en")
-    *
-    * instead of `apply(ProgramCall(inputs = Map(...)))`. The inherited
-    * `apply(input: ProgramCall)` remains available when `config` or
-    * `traceEnabled` need to be customized. */
-  def apply(inputs: (String, DynamicValue)*)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    apply(ProgramCall(inputs = DynamicValues.recordFromEntries(inputs)))
+/** A predict-shaped program: a [[dspy4s.core.contracts.Module]] from a `ProgramCall` to a `DynamicPrediction`.
+  *
+  * A `type` alias, not a trait: it only *names* the specialized `Module` that the predict programs share
+  * (`DynamicPredict`, `ReAct`, `CodeAct`, `Refine`, `BestOfN`, …) and that appears in signatures like
+  * `Refine`/`BestOfN`'s `module` parameter and the `Parallel` task type. There are no shared members to host, so a
+  * nominal trait would add nothing. */
+type PredictProgram = Module[ProgramCall, DynamicPrediction]
 
 /** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
   * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a
