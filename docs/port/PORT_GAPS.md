@@ -121,7 +121,7 @@ composite. Decide the shape before extending optimizer coverage.
 
 ## G-2 — Module-lifecycle wrapping was opt-in by base class
 
-**Status:** Resolved (commit 6896df3)
+**Status:** Resolved (commit 6896df3; `apply` stayed `final` through the 42671c2 re-genericization)
 
 **Summary.** The callback / trace / history wrapping lived on `BasePredictProgram` — an abstract *class* a program
 opted into by extending it. Programs that extended the program *type* directly (`Refine`, `BestOfN`,
@@ -137,3 +137,9 @@ lifecycle wrapping is **universal and non-bypassable** — every program emits i
 `Refine` / `BestOfN` / `MultiChainComparison` (and the streaming test composites) moved `apply` → `forward` and now
 get the wrapping; `BestOfN` accordingly records its own trace entry. See
 [PORT_MODULE_HIERARCHY.md](PORT_MODULE_HIERARCHY.md).
+
+**Note (commit 42671c2).** `Module` later became generic again — `Module[I, O]`, instantiated at the untyped spine
+`DynamicModule = Module[ProgramCall, DynamicPrediction]` and the typed surface `Module[TypedCall[I], Prediction[O]]`
+that `Predict` / `ChainOfThought` now extend. This reopened only the `[In,Out]` type params (whose earlier removal
+was justified by there being a single instantiation — no longer true once the typed layer joined). `apply` remains
+`final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.

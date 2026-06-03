@@ -100,14 +100,18 @@ graph TD
 
 5. **`programs`** — orchestration.
    - `runtime/PredictEngine` — the shared execute body (private)
-   - `contracts/Module` — the single program base; its `final apply` does the
-     module-level callback + trace wrapping over an abstract `forward`
-   - `DynamicPredict` — erased predict, extends `Module`
-   - `Predict[I, O]` — typed predict, wraps a memoized `DynamicPredict`
-   - Composite programs: `ChainOfThought`, `ReAct`, `CodeAct`,
-     `ProgramOfThought`, `MultiChainComparison`,
-     `Refine`, `BestOfN`, `Parallel`, `Aggregation`
-   - `contracts/ProgramContracts.scala` — `ProgramCall`,
+   - `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
+     does the module-level callback + trace wrapping over an abstract `forward`.
+     `DynamicModule` is the untyped-spine alias (`Module[ProgramCall, DynamicPrediction]`,
+     with the bag projection hooks defaulted)
+   - `DynamicPredict` — erased predict, extends `DynamicModule`
+   - `Predict[I, O]` — typed predict, a `Module[TypedCall[I], Prediction[O]]`; a *sibling*
+     of `DynamicPredict` over the shared `PredictEngine` (not a wrapper around it)
+   - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
+     (prepends `reasoning`; output is always a named tuple)
+   - Untyped composite programs (extend `DynamicModule`): `ReAct`, `CodeAct`,
+     `ProgramOfThought`, `MultiChainComparison`, `Refine`, `BestOfN`, `Parallel`, `Aggregation`
+   - `contracts/ProgramContracts.scala` — `ProgramCall`, `TypedCall`,
      `ProgramRuntime`, `ToolFunction`
 
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.

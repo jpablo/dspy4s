@@ -99,11 +99,14 @@ The `Shape[A]` typeclass has three implementations
 case-class I/O via `zio-blocks-schema`, `TupleShape` for named-tuple
 I/O from the macros, `MapShape` for the string DSL).
 The pair-of-types pattern (erased + typed) repeats: `Prediction`
-becomes `DynamicPrediction` + `Prediction[O]`, `Predict` becomes
-`DynamicPredict` + `Predict[I, O]`, and `ChainOfThought` is a typed
-signature augmentation over `Predict[I, O]`. Each typed wrapper
-holds a memoized instance of its erased counterpart, so the runtime
-stack only knows about the erased side.
+becomes `DynamicPrediction` + `Prediction[O]` (the typed one keeps the
+erased prediction on `.raw`), and `Predict` becomes `DynamicPredict` +
+`Predict[I, O]`. The two `Predict`s are **siblings** — thin `Module`s
+over the shared `PredictEngine`, not wrapper-and-wrapped. The typed
+programs are themselves `Module`s (`Module[TypedCall[I], Prediction[O]]`),
+so the runtime stack sees them like any other program; `ChainOfThought`
+is a typed signature augmentation that *composes* an inner `Predict[I, O]`
+(its `forward` delegates to it).
 
 This is "purely additive": existing dynamic code keeps working
 unchanged; adapter authors never see the typed layer; new code can
@@ -310,14 +313,15 @@ doesn't have:
 
 - `runtime/PredictEngine` — the shared execute body
   (`private[dspy4s]`).
-- `contracts/Module` — the single program base; its `final apply` does the
-  module-level callback + trace wrapping over an abstract `forward`.
-- `DynamicPredict` — erased predict, extends `Module`.
-- `Predict[I, O]` — typed predict, wraps a memoized
-  `DynamicPredict`.
+- `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
+  does the module-level callback + trace wrapping over an abstract `forward`.
+  `DynamicModule` is the untyped-spine alias (`Module[ProgramCall, DynamicPrediction]`).
+- `DynamicPredict` — erased predict, extends `DynamicModule`.
+- `Predict[I, O]` — typed predict, a `Module[TypedCall[I], Prediction[O]]`; a
+  *sibling* of `DynamicPredict` over `PredictEngine` (not a wrapper).
 
-`ChainOfThought` is now defined in terms of typed `Predict`. The
-typed wrappers are a Scala-native addition that doesn't change the
+`ChainOfThought` is itself a `Module` that composes an inner typed `Predict`.
+The typed programs are a Scala-native addition that doesn't change the
 underlying call flow; the engine is the single home for the
 adapter/LM/callback dance that Python has spread across
 `Predict.__call__` and its helpers.
