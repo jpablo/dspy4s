@@ -75,5 +75,5 @@ abstract class BasePredictProgram(
       result
     }
 
-  override def arun(input: ProgramCall)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, DynamicPrediction]] =
+  override def applyAsync(input: ProgramCall)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, DynamicPrediction]] =
     ContextPropagation.future(apply(input))

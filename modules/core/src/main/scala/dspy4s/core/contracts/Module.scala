@@ -14,9 +14,9 @@ import scala.concurrent.Future
   *   - [[moduleName]] is the public identity. Used by callbacks, trace entries, and stream-listener routing -- so
   *     end users can recognize a program by its module name in logs and traces. By convention: snake_case
   *     (`"predict"`, `"chain_of_thought"`, `"react"`).
-  *   - [[run]] is the synchronous entry. The required `using RuntimeContext` carries the active settings (LM,
+  *   - [[apply]] is the synchronous entry. The required `using RuntimeContext` carries the active settings (LM,
   *     adapter, callbacks, cache), so the caller never threads them by hand.
-  *   - [[arun]] is the async entry. The default wraps `run` in a `Future.successful` -- adequate for tests and
+  *   - [[applyAsync]] is the async entry. The default wraps `apply` in a `Future.successful` -- adequate for tests and
   *     simple cases. [[dspy4s.programs.runtime.BasePredictProgram]] overrides it with
   *     [[dspy4s.core.runtime.ContextPropagation.future]] so the callback / trace / `ActivePredictContext` thread-
   *     locals propagate across the thread boundary correctly.
@@ -30,7 +30,7 @@ trait Module[-In, +Out]:
   def apply(input: In)(using RuntimeContext): Either[DspyError, Out]
 
   // The default body doesn't use the ExecutionContext, but it's part of the contract for
-  // overrides that run real async work (e.g. BasePredictProgram.arun).
+  // overrides that run real async work (e.g. BasePredictProgram.applyAsync).
   @nowarn("msg=unused")
-  def arun(input: In)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Out]] =
+  def applyAsync(input: In)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Out]] =
     Future.successful(apply(input))
