@@ -100,6 +100,21 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(result.left.toOption.get.message, "f3")
   }
 
+  test("typed BestOfN with a custom fail count raises earlier") {
+    val stub = TypedStub(Vector(
+      Left(RuntimeError("typed_stub", "f1")),
+      Left(RuntimeError("typed_stub", "f2")),
+      Right(candidate("ok", 1.0))
+    ))
+    val bestOfN = BestOfN[Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = bestOfN.apply(TypedCall(Q("x")))
+    assert(result.isLeft)
+    assertEquals(stub.calls.get(), 2)
+    assertEquals(result.left.toOption.get.message, "f2")
+  }
+
   test("typed Refine delegates to BestOfN and returns the best typed prediction") {
     val stub = TypedStub(Vector(
       Right(candidate("A", 0.2)),

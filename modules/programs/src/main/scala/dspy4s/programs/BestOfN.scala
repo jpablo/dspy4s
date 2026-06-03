@@ -22,8 +22,8 @@ import scala.util.control.NonFatal
   * `failCount` bounds tolerated failures before giving up (defaults to `n`).
   *
   * `callInputs` is empty: a generic wrapper has no `Signature` to encode `I` for its own trace entry, so the
-  * meaningful inputs live on the nested inner program's event. The selection loop is shared with
-  * [[DynamicBestOfN]] via [[BestOfN.selectBest]]. */
+  * meaningful inputs live on the nested inner program's event. The best-of-`n` selection loop lives in
+  * [[BestOfN.selectBest]] (generic over the attempt result). */
 final case class BestOfN[I, O](
     module: Module[TypedCall[I], Prediction[O]],
     n: Int,
@@ -52,10 +52,10 @@ final case class BestOfN[I, O](
 
 object BestOfN:
 
-  /** The shared best-of-`n` selection loop, generic over the attempt result `A` (a `Prediction[O]` for the typed
-    * [[BestOfN]], a `DynamicPrediction` for [[DynamicBestOfN]]). Each attempt runs in an isolated trace/history
-    * context; the winning attempt's trace/history are propagated to the caller's context. Picks the
-    * highest-reward attempt, short-circuits at `threshold`, and tolerates up to `failCount` failures.
+  /** The best-of-`n` selection loop, generic over the attempt result `A` (a `Prediction[O]` for [[BestOfN]]).
+    * Each attempt runs in an isolated trace/history context; the winning attempt's trace/history are propagated
+    * to the caller's context. Picks the highest-reward attempt, short-circuits at `threshold`, and tolerates up
+    * to `failCount` failures.
     *
     * `runAttempt` builds and runs attempt `idx` (the caller varies `rolloutId` / `config` by index) under the
     * isolated `RuntimeContext` supplied here; `reward` scores a successful attempt. */
