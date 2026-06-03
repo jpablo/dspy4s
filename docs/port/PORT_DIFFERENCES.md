@@ -310,9 +310,9 @@ doesn't have:
 
 - `runtime/PredictEngine` — the shared execute body
   (`private[dspy4s]`).
-- `runtime/BasePredictProgram` — module-level callback + trace
-  wrapping.
-- `DynamicPredict` — erased predict, extends `PredictProgram`.
+- `contracts/Module` — the single program base; its `final apply` does the
+  module-level callback + trace wrapping over an abstract `forward`.
+- `DynamicPredict` — erased predict, extends `Module`.
 - `Predict[I, O]` — typed predict, wraps a memoized
   `DynamicPredict`.
 

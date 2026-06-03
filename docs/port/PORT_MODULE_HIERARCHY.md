@@ -26,19 +26,23 @@ Parameter                        # empty marker class (`pass`) for named_paramet
 **dspy4s**:
 
 ```
-Module[-In, +Out]                       # callable contract: apply (+ applyAsync)
-  └─ PredictProgram                     # type alias = Module[ProgramCall, DynamicPrediction] (just a name; no members)
-       ├─ BasePredictProgram            # final apply (wraps callbacks/trace/history) -> abstract forward
-       │    ├─ DynamicPredict           # implements forward (the leaf predict engine)
-       │    ├─ ReAct                    # implements forward; builds react + extract DynamicPredicts
-       │    ├─ CodeAct                  # implements forward
-       │    └─ ProgramOfThought         # implements forward
-       └─ Refine / BestOfN / MultiChainComparison   # override apply directly (bypass the wrapper — see G-2)
+Module                                  # ONE concrete base (ProgramCall => DynamicPrediction):
+  │                                     #   final apply (wraps callbacks/trace/history) -> abstract forward
+  ├─ DynamicPredict                     # implements forward (the leaf predict engine)
+  ├─ ReAct                              # implements forward; builds react + extract DynamicPredicts
+  ├─ CodeAct                            # implements forward
+  ├─ ProgramOfThought                   # implements forward
+  └─ Refine / BestOfN / MultiChainComparison   # implement forward (wrapped like everything else)
 
 # Typed layer (NOT Module subtypes — standalone case classes):
 Predict[I, O]          # typed apply; wraps a lazy inner DynamicPredict
 ChainOfThought[I, O]   # typed apply; wraps a Predict[I, O']
 ```
+
+dspy4s collapses Python's `BaseModule → Module(+Parameter)` stack into a single concrete `Module`: there is **no
+generic `Module[In,Out]`** (it was only ever `Module[ProgramCall, DynamicPrediction]`), **no `PredictProgram`
+alias**, and **no separate `BasePredictProgram`** — they all merged. Because `apply` is `final` on this one
+`Module`, the lifecycle wrapping is universal and non-bypassable.
 
 There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS.md G-1](PORT_GAPS.md#g-1--no-typed-predictor-introspection-layer-pythons-basemodulenamed_predictors).
 
@@ -47,45 +51,45 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | Concept | Python DSPy | dspy4s |
 |---|---|---|
 | Caller entry (sync) | `__call__` | `apply` |
-| Caller entry (async) | `acall` (coroutine) | `arun` (`Future`) |
+| Caller entry (async) | `acall` (coroutine) | `applyAsync` (`Future`) |
 | Overridable hook (sync) | `forward` | `forward` |
-| Overridable hook (async) | `aforward` (coroutine) | — *(no async hook; `arun` wraps the sync `apply` via `ContextPropagation.future`)* |
-| Universal callable base | `Module` | `Module[-In, +Out]` |
+| Overridable hook (async) | `aforward` (coroutine) | — *(no async hook; `applyAsync` wraps the sync `apply` via `ContextPropagation.future`)* |
+| Universal callable base | `Module` | `Module` *(one concrete base, not generic)* |
 | Container/persistence base | `BaseModule` | — *(absent; immutability + typeclasses, G-1)* |
 | Learnable-leaf marker | `Parameter` | — *(typeclass `PredictOps[P]`, G-1)* |
 | Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | — *(gap, G-1)* |
 | Attach demos | mutate `predictor.demos` | `PredictOps.withDemos` (returns a copy) |
 | Set the LM | `set_lm` / `get_lm` | ambient `RuntimeContext.lm` (no per-module LM) |
-| Where cross-cutting wrapping lives | `Module.__call__` (universal, non-bypassable) | `BasePredictProgram.apply` (opt-in by base class — [G-2](PORT_GAPS.md)) |
+| Where cross-cutting wrapping lives | `Module.__call__` (universal, non-bypassable) | `Module.apply` (`final`; universal, non-bypassable — [G-2 resolved](PORT_GAPS.md)) |
 
 ## Per-class side-by-side
 
 | Program | Python base(s) | Python entry → hook | dspy4s base | dspy4s entry → hook |
 |---|---|---|---|---|
 | **Predict** | `Module, Parameter` | overrides `__call__`/`acall` **and** `forward`/`aforward` | `Predict[I,O]` — *standalone case class* (wraps `DynamicPredict`) | typed `apply` → inner `DynamicPredict.apply` |
-| *(untyped predict)* | — *(Predict is the leaf)* | — | `DynamicPredict` ◂ `BasePredictProgram` | inherited `apply` → own `forward` |
+| *(untyped predict)* | — *(Predict is the leaf)* | — | `DynamicPredict` ◂ `Module` | inherited `apply` → own `forward` |
 | **ChainOfThought** | `Module` | `forward` → `self.predict(**kwargs)` | `ChainOfThought[I,O]` — *standalone case class* (wraps `Predict`) | typed `apply` → inner `Predict.apply` |
-| **ReAct** | `Module` | `forward`/`aforward`; `self.react` + `self.extract` | `BasePredictProgram` | inherited `apply` → own `forward` |
-| **CodeAct** | `Module` | `forward` | `BasePredictProgram` | inherited `apply` → own `forward` |
-| **ProgramOfThought** | `Module` | `forward` | `BasePredictProgram` | inherited `apply` → own `forward` |
-| **Refine / BestOfN / MultiChainComparison** | `Module` | `forward` | `PredictProgram` (direct) | override `apply` directly — *no `forward`, bypasses wrapping (G-2)* |
+| **ReAct** | `Module` | `forward`/`aforward`; `self.react` + `self.extract` | `Module` | inherited `apply` → own `forward` |
+| **CodeAct** | `Module` | `forward` | `Module` | inherited `apply` → own `forward` |
+| **ProgramOfThought** | `Module` | `forward` | `Module` | inherited `apply` → own `forward` |
+| **Refine / BestOfN / MultiChainComparison** | `Module` | `forward` | `Module` | inherited `apply` → own `forward` *(wrapped like all programs)* |
 
 ## Key structural differences (callouts)
 
-1. **`__call__` ⇒ `apply`, `acall` ⇒ `arun`, `forward` ⇒ `forward`.** Scala's
+1. **`__call__` ⇒ `apply`, `acall` ⇒ `applyAsync`, `forward` ⇒ `forward`.** Scala's
    `apply` is the idiomatic `__call__`, so `program(input)` works like Python's
    `program(input)`. The hook keeps the name `forward`.
 
 2. **No async hook.** Python has a full async path (`acall` → `aforward`).
-   dspy4s has only `arun` (a `Future` wrapper over the sync `apply` with
+   dspy4s has only `applyAsync` (a `Future` wrapper over the sync `apply` with
    thread-local context propagation); there is no `aforward`-equivalent
    override point.
 
 3. **Python `Predict` overrides the caller entry too.** It customizes
    `__call__`/`acall`, not just `forward`/`aforward`. In dspy4s the caller
-   entry (`apply`) is `final` on `BasePredictProgram` (you only override
-   `forward`) — and the typed `Predict[I,O]` is a *separate* standalone type
-   with its own `apply`, not a subclass of the untyped predict.
+   entry (`apply`) is `final` on `Module` (you only override `forward`) — and
+   the typed `Predict[I,O]` is a *separate* standalone type with its own
+   `apply`, not a subclass of the untyped predict.
 
 4. **`Predict` is a `Parameter`; dspy4s's leaf is `DynamicPredict`.** Python's
    `Predict` is simultaneously a `Module` and a learnable `Parameter`. dspy4s
@@ -100,12 +104,13 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    inner untyped `DynamicPredict`/`Predict`. The `Module` contract is the
    untyped spine; the typed layer sits beside it.
 
-6. **Where cross-cutting wrapping lives differs.** Python puts the
+6. **Cross-cutting wrapping is universal (matches Python).** Python puts the
    callback/trace/usage wrapping on `Module.__call__` — universal and
-   non-bypassable. dspy4s puts it on `BasePredictProgram.apply` (`final`,
-   wrapping `forward`), so it's guaranteed only for that subtree;
-   `Refine`/`BestOfN`/`MultiChainComparison` extend `PredictProgram` directly
-   and override `apply`, bypassing it. See [PORT_GAPS.md G-2](PORT_GAPS.md).
+   non-bypassable. dspy4s now does the same: `apply` is `final` on the single
+   `Module`, wrapping `forward`, so *every* program is observed identically and
+   nothing can bypass it. (Earlier the wrapping lived on a separate
+   `BasePredictProgram` you opted into, letting `Refine`/`BestOfN`/etc. skip it
+   — that was [G-2](PORT_GAPS.md), resolved by merging into one `Module`.)
 
 ## Design principle: a module is pure; the runtime owns the bookkeeping
 
@@ -115,7 +120,7 @@ runtime/executor's responsibility, not the module's.** A dspy4s module is
 essentially a pure `apply: In => Either[DspyError, Out]` (with `forward` as the
 overridable hook); it doesn't carry or fire its own callback list or call log.
 
-- **History/trace** are owned by `RuntimeEnvironment` — `BasePredictProgram.apply`
+- **History/trace** are owned by `RuntimeEnvironment` — `Module.apply`
   calls `RuntimeEnvironment.appendTrace`/`appendHistory`, and the environment
   enforces `maxHistorySize` / `disableHistory`.
 - **Callbacks** are dispatched by `CallbackDispatcher` off the ambient

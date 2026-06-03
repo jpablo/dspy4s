@@ -58,8 +58,8 @@ finds the predictors no matter how they were nested.
 We deliberately did **not** port `BaseModule` (see the rationale below — most
 of it is un-idiomatic in immutable, strictly-typed Scala). Instead:
 
-- [`Module[-In,+Out]`](../../modules/core/src/main/scala/dspy4s/core/contracts/Module.scala)
-  is just the callable contract (`moduleName` / `run` / `arun`).
+- [`Module`](../../modules/programs/src/main/scala/dspy4s/programs/contracts/Module.scala)
+  is just the callable program base (`moduleName` / `apply` / `applyAsync` / `forward`).
 - Optimizers use a [`PredictOps[P]`](../../modules/optimize/src/main/scala/dspy4s/optimize/PredictOps.scala)
   typeclass (`name` / `layout` / `demos` / `withDemos`) — immutable
   (`withDemos` returns a `.copy`), type-directed rather than reflective.
@@ -110,9 +110,30 @@ composite. Decide the shape before extending optimizer coverage.
   ([react.py](../../../dspy/dspy/predict/react.py) L88–89); dspy4s rebuilds
   the `DynamicPredict` instances (and re-runs `ChainOfThought.augmentLayout`)
   on every `execute`
-  ([ReAct.scala](../../modules/programs/src/main/scala/dspy4s/programs/ReAct.scala)).
+  ([ReAct.scala](../../modules/programs/src/main/scala/dspy4s/programs/ReAct.scala)) in `forward`.
   `CodeAct` has the same pattern. This is currently harmless *because* there
   is no predictor-introspection layer that would need those predicts to be
   stable, addressable fields — i.e. it is a **symptom of G-1**. When G-1 is
   closed, ReAct/CodeAct should hoist their sub-predicts to fields (built once,
   like `__init__`) so they are discoverable and tunable.
+
+---
+
+## G-2 — Module-lifecycle wrapping was opt-in by base class
+
+**Status:** Resolved (commit 6896df3)
+
+**Summary.** The callback / trace / history wrapping lived on `BasePredictProgram` — an abstract *class* a program
+opted into by extending it. Programs that extended the program *type* directly (`Refine`, `BestOfN`,
+`MultiChainComparison`) overrode the caller entry and silently **bypassed** the wrapping — unlike Python, where
+`Module.__call__` is universal and non-bypassable.
+
+### Resolution
+
+Merged the generic `Module[-In,+Out]` and `BasePredictProgram` into a single concrete `Module`
+([programs/contracts/Module.scala](../../modules/programs/src/main/scala/dspy4s/programs/contracts/Module.scala))
+whose `apply` is `final` (the wrapping) delegating to an abstract `forward`. With no bare layer left to extend, the
+lifecycle wrapping is **universal and non-bypassable** — every program emits identical module events / trace.
+`Refine` / `BestOfN` / `MultiChainComparison` (and the streaming test composites) moved `apply` → `forward` and now
+get the wrapping; `BestOfN` accordingly records its own trace entry. See
+[PORT_MODULE_HIERARCHY.md](PORT_MODULE_HIERARCHY.md).

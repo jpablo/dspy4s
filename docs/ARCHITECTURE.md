@@ -61,7 +61,7 @@ graph TD
      at user-input and observability boundaries to lift plain Scala values
      into the spine and back. The codec spine itself never goes through
      these helpers.
-   - `Module[I, O]` trait, `RuntimeContext`, `Settings`
+   - `RuntimeContext`, `Settings` (the `Module` program base lives in `programs`)
    - Error ADT (`DspyError`, `ValidationError`, `ParseError`, …)
    - Callbacks + thread-local context machinery
      (`CallbackDispatcher`, `ActivePredictContext`, `ContextPropagation`)
@@ -100,13 +100,14 @@ graph TD
 
 5. **`programs`** — orchestration.
    - `runtime/PredictEngine` — the shared execute body (private)
-   - `runtime/BasePredictProgram` — module-level callback + trace wrapping
-   - `DynamicPredict` — erased predict, extends `PredictProgram`
+   - `contracts/Module` — the single program base; its `final apply` does the
+     module-level callback + trace wrapping over an abstract `forward`
+   - `DynamicPredict` — erased predict, extends `Module`
    - `Predict[I, O]` — typed predict, wraps a memoized `DynamicPredict`
    - Composite programs: `ChainOfThought`, `ReAct`, `CodeAct`,
      `ProgramOfThought`, `MultiChainComparison`,
      `Refine`, `BestOfN`, `Parallel`, `Aggregation`
-   - `contracts/ProgramContracts.scala` — `PredictProgram`, `ProgramCall`,
+   - `contracts/ProgramContracts.scala` — `ProgramCall`,
      `ProgramRuntime`, `ToolFunction`
 
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
@@ -182,7 +183,7 @@ When `Predict[I, O].run(input)` fires:
    missing a field).
 2. **Hand off** — wrap in `ProgramCall(inputs, config, traceEnabled)`,
    call the memoized inner `DynamicPredict.apply(call)`.
-3. **`BasePredictProgram.apply` wraps** —
+3. **`Module.apply` wraps** —
    `CallbackDispatcher.withModule("predict", inputs)` scope; on success,
    conditionally records `TraceEntry` + `HistoryEntry`.
 4. **`PredictEngine.execute`** (the shared body):
@@ -202,7 +203,7 @@ When `Predict[I, O].run(input)` fires:
    `Either[DspyError, Prediction[O]]`.
 
 `PredictEngine` is `private[dspy4s]`. Composite programs that need the
-`PredictProgram` API construct a `DynamicPredict` (which holds an
+`Module` API construct a `DynamicPredict` (which holds an
 engine) rather than touching the engine directly.
 
 ## Context propagation
@@ -243,8 +244,8 @@ code:
   register via settings.
 - **New LM provider** — implement `LanguageModel`; place under
   `dspy4s.lm.providers`.
-- **New composite program** — extend `BasePredictProgram` for the
-  callback + trace wrapping, augment a base `SignatureLayout` with
+- **New composite program** — extend `Module` and implement `forward` (the
+  `final apply` gives you the callback + trace wrapping), augment a base `SignatureLayout` with
   extra fields via the `private[dspy4s]` mutation helpers, internally
   construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
   `MultiChainComparison` are the templates.
@@ -309,8 +310,8 @@ For comparison with the upstream Python DSPy architecture:
 - `typed/Spec.scala` — `InputField[+A]` / `OutputField[+A]` opaque
   types and the `Spec` trait.
 - `programs/runtime/PredictEngine.scala` — the shared execute body.
-- `programs/runtime/BasePredictProgram.scala` — module-level wrapping
-  (callbacks + trace). Converts `DynamicValue.Record` payloads to
+- `programs/contracts/Module.scala` — the single program base; `final apply`
+  does module-level wrapping (callbacks + trace). Converts `DynamicValue.Record` payloads to
   `Map[String, Any]` at the observability boundary (callback event
   bags, `TraceEntry`, `HistoryEntry` are free-form maps, not records).
 - `programs/Predict.scala` and `programs/DynamicPredict.scala` — the
