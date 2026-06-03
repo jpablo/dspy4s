@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.updated
@@ -16,17 +16,17 @@ import zio.blocks.schema.DynamicValue
 import scala.util.control.NonFatal
 
 final case class BestOfN(
-    module: PredictProgram,
+    module: Module,
     n: Int,
     rewardFn: (DynamicValue.Record, DynamicPrediction) => Double,
     threshold: Double,
     failCount: Option[Int] = None
-) extends PredictProgram:
+) extends Module:
   require(n > 0, "n must be greater than 0")
 
   override val moduleName: String = "best_of_n"
 
-  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val baseContext = RuntimeEnvironment.current
     val rolloutStart = input.rolloutId.getOrElse(0)
     var remainingFailures = failCount.getOrElse(n)

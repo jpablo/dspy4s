@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
-import dspy4s.programs.runtime.BasePredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
 
@@ -16,7 +16,7 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
   * [[dspy4s.core.contracts.DynamicPrediction DynamicPrediction]] (a `DynamicValue.Record` of output fields plus raw
   * completions and LM usage). The actual execution lives in [[dspy4s.programs.runtime.PredictEngine PredictEngine]];
-  * the surrounding [[dspy4s.programs.runtime.BasePredictProgram BasePredictProgram]] adds callbacks, tracing, and
+  * the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and
   * history. Mirrors DSPy's `dspy.Predict` at the dynamic boundary.
   *
   * Why it exists separately from [[Predict]]: `Predict[I, O]` is the user-facing, statically-typed surface, but it
@@ -43,7 +43,9 @@ final case class DynamicPredict(
       * `Predict[I, O]` path provides this from its `signature.outputShape.jsonSchemaString`; users who
       * construct `DynamicPredict` directly leave it `None` and adapters fall back to their default behavior. */
     outputJsonSchema: Option[String] = None
-) extends BasePredictProgram(moduleName = name.getOrElse("predict")):
+) extends Module:
+
+  override val moduleName: String = name.getOrElse("predict")
 
   private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema)
 

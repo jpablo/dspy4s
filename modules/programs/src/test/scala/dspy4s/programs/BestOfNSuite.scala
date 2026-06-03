@@ -6,9 +6,8 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -25,29 +24,20 @@ class BestOfNSuite extends FunSuite:
 
   private final class StubProgram(
       results: Vector[Either[DspyError, DynamicPrediction]]
-  ) extends PredictProgram:
+  ) extends Module:
     private val counter = AtomicInteger(0)
     val rolloutIds: ArrayBuffer[Int] = ArrayBuffer.empty
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "stub"
 
-    override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       calls.incrementAndGet()
       val rollout = input.rolloutId.getOrElse(-1)
       rolloutIds += rollout
 
       val idx = counter.getAndIncrement()
-      val result = results(Math.min(idx, results.size - 1))
-      result.foreach { prediction =>
-        RuntimeEnvironment.appendTrace(
-          TraceEntry(
-            component = moduleName,
-            inputs    = input.inputs,
-            outputs   = prediction.values
-          )
-        )
-      }
-      result
+      // The Module.apply wrapper records the trace/history; the stub just returns its scripted result.
+      results(Math.min(idx, results.size - 1))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -77,7 +67,9 @@ class BestOfNSuite extends FunSuite:
     assertEquals(lookup(result.toOption.get.values, "answer"), Some("B": Any))
     assertEquals(module.calls.get(), 3)
     assertEquals(module.rolloutIds.toVector, Vector(7, 8, 9))
-    assertEquals(RuntimeEnvironment.current.trace.size, 1)
+    // Two trace entries now: the winning attempt's (propagated from its isolated context) followed by BestOfN's
+    // own module-call entry (BestOfN is itself a wrapped Module). `head` is the winning attempt.
+    assertEquals(RuntimeEnvironment.current.trace.size, 2)
     assertEquals(DynamicValues.recordToMap(RuntimeEnvironment.current.trace.head.outputs).get("answer"), Some("B": Any))
   }
 

@@ -12,7 +12,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.runtime.BasePredictProgram
+import dspy4s.programs.contracts.Module
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.matching.Regex
@@ -58,7 +58,9 @@ final case class CodeAct(
     maxIterations: Int = 5,
     codeActProgramName: String = "codeact",
     extractorProgramName: String = "codeact_extract"
-) extends BasePredictProgram(moduleName = "code_act"):
+) extends Module:
+
+  override val moduleName: String = "code_act"
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
   /** SignatureLayout for the per-iteration code generator. Mirrors Python:

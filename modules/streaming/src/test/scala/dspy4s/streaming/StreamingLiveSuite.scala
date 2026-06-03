@@ -12,7 +12,7 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.providers.OpenAiClient
 import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
@@ -73,14 +73,14 @@ class StreamingLiveSuite extends FunSuite:
   /** Shared MyProgram scaffold used by both the Chat and JSON adapter ports.
     * Mirrors Python's `class MyProgram(dspy.Module)` in
     * tests/streaming/test_streaming.py. */
-  private def buildComposite(): PredictProgram =
+  private def buildComposite(): Module =
     val sig1 = SignatureDsl.parse("question -> answer").toOption.get
     val sig2 = SignatureDsl.parse("question, answer -> judgement").toOption.get
-    new PredictProgram:
+    new Module:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
-      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.apply(input)
           judgement <- predict2.apply(input.copy(

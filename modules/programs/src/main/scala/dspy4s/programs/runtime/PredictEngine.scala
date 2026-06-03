@@ -31,7 +31,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *
   * This is the raw engine -- module-level lifecycle (the `withModule`
   * callback scope and trace/history recording) is added by
-  * `BasePredictProgram.apply`, which `DynamicPredict` extends. Callers
+  * `Module.apply`, which `DynamicPredict` extends. Callers
   * that want the full lifecycle should go through `DynamicPredict`;
   * the typed `Predict[I, O]` is one such caller. */
 private[dspy4s] final case class PredictEngine(

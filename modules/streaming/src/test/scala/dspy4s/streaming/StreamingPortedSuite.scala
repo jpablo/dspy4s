@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
@@ -294,9 +294,9 @@ class StreamingPortedSuite extends FunSuite:
       override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
         Right(ToolFunction.result("What color is the sky?"))
 
-    val program = new PredictProgram:
+    val program = new Module:
       override val moduleName: String = "my_program"
-      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>
           DynamicPrediction(values = rec("answer" := "blue"))
         }

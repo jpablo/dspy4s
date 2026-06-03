@@ -3,17 +3,17 @@ package dspy4s.programs
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 
 final case class Refine(
-    module: PredictProgram,
+    module: Module,
     n: Int,
     rewardFn: (DynamicValue.Record, DynamicPrediction) => Double,
     threshold: Double,
     failCount: Option[Int] = None
-) extends PredictProgram:
+) extends Module:
   private val bestOfN = BestOfN(
     module = module,
     n = n,
@@ -24,5 +24,5 @@ final case class Refine(
 
   override val moduleName: String = "refine"
 
-  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     bestOfN.apply(input)

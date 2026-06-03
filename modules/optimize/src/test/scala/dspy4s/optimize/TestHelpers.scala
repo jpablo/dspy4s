@@ -7,7 +7,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 
@@ -22,9 +22,9 @@ final case class ScriptedPredictProgram(
     layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     failsWith: Option[RuntimeException] = None
-) extends PredictProgram:
+) extends Module:
   override val moduleName: String = "scripted"
-  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     failsWith match
       case Some(err) => throw err
       case None =>
@@ -35,9 +35,9 @@ final case class DemoAwarePredictProgram(
     layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
     answers: Map[String, String] = Map.empty
-) extends PredictProgram:
+) extends Module:
   override val moduleName: String = "demo_aware"
-  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     val q = lookupString(input.inputs, "question")
     // Use answers map first; then demos; else "unknown"
     val answer = answers.get(q)

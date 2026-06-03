@@ -7,7 +7,7 @@ import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -41,7 +41,7 @@ final case class MultiChainComparison(
     rationaleDescription: String = "${corrected reasoning}",
     attemptDescription: String = "${reasoning attempt}",
     answerFieldOverride: Option[String] = None
-) extends PredictProgram:
+) extends Module:
 
   override val moduleName: String = "multi_chain_comparison"
 
@@ -73,7 +73,7 @@ final case class MultiChainComparison(
       )
     )
 
-  override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     // Candidate completions are program data, not provider config: they are supplied through the typed
     // `runWithAttempts` entry below. The generic `run` has none and surfaces the usual size error.
     runWithAttempts(input, Vector.empty)

@@ -2,8 +2,7 @@ package dspy4s.streaming
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
-import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.Module
+import dspy4s.programs.contracts.Module
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
@@ -35,7 +34,7 @@ object Streamify:
     * predictor's own framing.
     */
   def streamify(
-      program: Module[ProgramCall, DynamicPrediction],
+      program: Module,
       statusMessageProvider: Option[StatusMessageProvider] = None,
       streamListeners: Vector[StreamListener] = Vector.empty,
       includeFinalPrediction: Boolean = true,
@@ -47,7 +46,7 @@ object Streamify:
     // `find_predictor_for_stream_listeners`: warn (don't fail) if a listener
     // is subscribed to a field name that no DynamicPredict in the program emits.
     // For composite programs whose internals we can't introspect (a user-
-    // defined `PredictProgram`), validation is silently skipped.
+    // defined `Module`), validation is silently skipped.
     validateListeners(program, streamListeners, warningSink)
 
     inputs =>
@@ -112,7 +111,7 @@ object Streamify:
     * the well-known shapes contribute nothing — for those, validation is
     * skipped (matches Python's behavior of "look as far as you can"). */
   private def validateListeners(
-      program: Module[?, ?],
+      program: Module,
       listeners: Vector[StreamListener],
       warningSink: String => Unit
   ): Unit =
@@ -143,7 +142,7 @@ object Streamify:
   /** Best-effort recursive collection of `(predictName, signature)` from
     * the well-known program types. Unknown composite types contribute
     * nothing. */
-  private def collectKnownSignatures(program: Module[?, ?]): Vector[(String, SignatureLayout)] =
+  private def collectKnownSignatures(program: Module): Vector[(String, SignatureLayout)] =
     program match
       case p: DynamicPredict =>
         Vector((p.moduleName, p.layout))

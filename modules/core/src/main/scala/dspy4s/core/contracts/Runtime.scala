@@ -16,7 +16,7 @@ trait LanguageModelRef
   * adapter without `core` depending on the adapters module. */
 trait AdapterRef
 
-/** A single observed module call -- one entry per `BasePredictProgram.apply` (or any other module that records
+/** A single observed module call -- one entry per `Module.apply` (or any other module that records
   * itself). `component` is the module's `moduleName` (`"predict"`, `"chain_of_thought"`, ...), `inputs` is the
   * `ProgramCall.inputs` map, `outputs` is the module's `tracePayload(prediction)` (defaults to
   * `prediction.values`).

@@ -6,7 +6,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 
@@ -15,12 +15,12 @@ import java.util.concurrent.atomic.AtomicInteger
 class RefineSuite extends FunSuite:
   private final class StubProgram(
       results: Vector[Either[DspyError, DynamicPrediction]]
-  ) extends PredictProgram:
+  ) extends Module:
     private val counter = AtomicInteger(0)
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "stub"
 
-    override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       calls.incrementAndGet()
       val idx = counter.getAndIncrement()
       results(Math.min(idx, results.size - 1))

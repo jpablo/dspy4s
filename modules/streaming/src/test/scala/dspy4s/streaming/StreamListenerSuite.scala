@@ -19,7 +19,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.contracts.PredictProgram
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
@@ -353,11 +353,11 @@ class StreamListenerSuite extends FunSuite:
     val sig1 = SignatureDsl.parse("question -> answer").toOption.get
     val sig2 = SignatureDsl.parse("question, answer -> judgement").toOption.get
 
-    val composite = new PredictProgram:
+    val composite = new Module:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
-      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.apply(input)
           judgement <- predict2.apply(input.copy(
@@ -446,11 +446,11 @@ class StreamListenerSuite extends FunSuite:
     // both LM calls; with allowReuse=false only the first call's chunks
     // should appear.
     val sig = SignatureDsl.parse("question -> answer").toOption.get
-    val composite = new PredictProgram:
+    val composite = new Module:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig, name = Some("predict2"))
-      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _      <- predict1.apply(input)
           second <- predict2.apply(input)
@@ -497,11 +497,11 @@ class StreamListenerSuite extends FunSuite:
         Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
 
     val sig = SignatureDsl.parse("question -> answer").toOption.get
-    val composite = new PredictProgram:
+    val composite = new Module:
       override val moduleName: String = "my_program"
       private val p1 = DynamicPredict(layout = sig, name = Some("p1"))
       private val p2 = DynamicPredict(layout = sig, name = Some("p2"))
-      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         for
           _ <- p1.apply(input)
           out <- p2.apply(input)
@@ -584,9 +584,9 @@ class StreamListenerSuite extends FunSuite:
     val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
     val sink: String => Unit = warnings.append
 
-    val opaqueProgram = new PredictProgram:
+    val opaqueProgram = new Module:
       override val moduleName: String = "opaque"
-      override def apply(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
         Right(dspy4s.core.contracts.DynamicPrediction(values = rec("answer" := "x")))
 
     given RuntimeContext = RuntimeEnvironment.current
