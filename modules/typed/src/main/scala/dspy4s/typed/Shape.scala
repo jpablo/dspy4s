@@ -24,13 +24,13 @@ trait Shape[A]:
 
   /** Render this shape as a JSON Schema string suitable for prompt instructions to LMs that follow
     * structured-output hints. Returns `None` for shapes that don't have a backing `zio.blocks.schema.Schema`
-    * (e.g. `MapShape` from `Signature.fromString`); adapters that use this fall back to their default
+    * (e.g. `MapShape` from `Signature.fromStringDynamic`); adapters that use this fall back to their default
     * natural-language instruction in that case. */
   def jsonSchemaString: Option[String] = None
 
 object Shape:
 
-  /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromString`), where the DSL carries no
+  /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
     * static schema so the "typed" value stays at the spine type. `encode` is the identity; `decode` only
     * validates that every field listed in `fieldSpecs` is present in the raw record (no per-field coercion --
     * that happens upstream in the adapter / `ZioSchemaCodec.normalize` for schema-backed shapes). */

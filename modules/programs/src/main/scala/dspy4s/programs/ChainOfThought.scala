@@ -26,7 +26,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * nominal type — Scala can't synthesize "case class plus a field" — so you get the structural named tuple;
   * convert it back yourself if you want the nominal type (`Mirror.fromProduct` for an exact-field match, or a
   * name-based mapper like Chimney to project / drop `reasoning`). The only unsupported output is the
-  * `DynamicValue.Record` from `Signature.fromString`, which carries no static fields.
+  * `DynamicValue.Record` from `Signature.fromStringDynamic`, which carries no static fields.
   *
   * Like Python's `ChainOfThought` (which is `self.predict = Predict(extended_signature)` and a one-line
   * `forward` that calls it), this is a `Module` that *contains* an inner [[Predict]] and delegates to it. So a
@@ -117,7 +117,7 @@ final case class ChainOfThought[I, O](
       yield augmented
 
   /** The structured error for an `O` that is neither a named tuple nor a case class — i.e. the
-    * `DynamicValue.Record` output of a `Signature.fromString`, which has no static fields to augment. The
+    * `DynamicValue.Record` output of a `Signature.fromStringDynamic`, which has no static fields to augment. The
     * `WithReasoning[O]` match type also fails to reduce for it. */
   private def unsupportedOutputShape(baseOut: O): DspyError =
     ValidationError(

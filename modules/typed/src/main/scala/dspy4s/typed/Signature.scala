@@ -79,17 +79,25 @@ object Signature:
     * signature. Returns a plain `SignatureLayout` — see `SignatureBuilder`. */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
-  /** Parse a DSPy-style string DSL (`"question -> answer"`) into a `Signature` whose input/output shapes are the
-    * raw spine type `DynamicValue.Record`.
+  /** Parse a DSPy-style string DSL **literal** (`"question -> answer"`) into a fully typed `Signature` at compile
+    * time. The string is parsed during macro expansion (reusing [[SignatureLayout.parse]]) and each field becomes
+    * a named-tuple element: untyped fields default to `String`; `int` / `float` / `bool` map to the matching
+    * scalar. So `Signature.fromString("question -> answer: bool")` is a
+    * `Signature[(question: String), (answer: Boolean)]` with typed dot-access on predictions.
     *
-    * This is the typed entry point for runtime-defined signatures: the resulting `Signature` flows through
-    * `Predict` and adapter pipelines exactly like a typed one, but inputs and outputs remain at the spine type
-    * because the DSL carries no static schema. Use `DynamicValues.recordFromEntries(...)` to build inputs from
-    * plain Scala values.
+    * The DSL must be a compile-time literal and is validated at compile time (an invalid string, or a field type
+    * outside `str` / `int` / `float` / `bool`, is a compile error). For a signature built from a **runtime**
+    * string (no static types, `DynamicValue.Record` I/O), use [[fromStringDynamic]]. */
+  transparent inline def fromString(inline dsl: String, inline instructions: String = "") =
+    ${ internal.FunctionMacro.fromStringImpl('dsl, 'instructions) }
+
+  /** Parse a DSPy-style string DSL into a `Signature` whose input/output shapes are the raw spine type
+    * `DynamicValue.Record`. Unlike [[fromString]], this accepts a **runtime** string (the DSL carries no static
+    * schema, so I/O stays at the spine type). Use `DynamicValues.recordFromEntries(...)` to build inputs.
     *
-    * For static type-safe inputs and outputs, prefer `Signature.fromType[F]`, `Signature.from(method)`, or
-    * `Signature.of[T <: Spec]`. */
-  def fromString(
+    * For static type-safe inputs and outputs, prefer the compile-time [[fromString]], `Signature.fromType[F]`,
+    * `Signature.from(method)`, or `Signature.of[T <: Spec]`. */
+  def fromStringDynamic(
       dsl: String,
       instructions: String = ""
   ): Either[DspyError, Signature[DynamicValue.Record, DynamicValue.Record]] =

@@ -11,7 +11,7 @@ import scala.deriving.Mirror
   * for case classes), so case-class outputs are supported and the result is always a named tuple. A case-class
   * output is therefore *not* echoed back as the same nominal type — that type can't be synthesized with an extra
   * field. The only unsupported `O` is one with no static fields (e.g. `DynamicValue.Record` from
-  * `Signature.fromString`), handled by the low-priority [[PrependField.fallback]] returning `None`.
+  * `Signature.fromStringDynamic`), handled by the low-priority [[PrependField.fallback]] returning `None`.
   *
   * Used by [[dspy4s.programs.ChainOfThought]] (`reasoning: String`) and available to any other program that adds
   * an output field (e.g. a future `MultiChainComparison` with `rationale: String`). */
@@ -41,7 +41,7 @@ object OutputAugmentation:
 
   trait LowPriorityPrependField:
     /** Fallback for an `O` that is neither a named tuple nor a product — e.g. the `DynamicValue.Record` output of
-      * `Signature.fromString`, which has no static fields. Unsupported: yields `None`. */
+      * `Signature.fromStringDynamic`, which has no static fields. Unsupported: yields `None`. */
     given fallback[Name <: String & Singleton, T, O]
         : (PrependField[Name, T, O] { type Out = WithField[O, Name, T] }) =
       new PrependField[Name, T, O]:

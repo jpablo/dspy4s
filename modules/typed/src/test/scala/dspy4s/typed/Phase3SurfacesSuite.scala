@@ -205,8 +205,8 @@ class Phase3SurfacesSuite extends FunSuite:
     )
   }
 
-  test("Signature.fromString produces a typed wrapper backed by MapShape") {
-    val sig = Signature.fromString("question -> answer").toOption.get
+  test("Signature.fromStringDynamic produces a Record-backed wrapper (MapShape)") {
+    val sig = Signature.fromStringDynamic("question -> answer").toOption.get
     assertEquals(sig.layout.inputFields.map(_.name),  Vector("question"))
     assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
 
@@ -221,4 +221,15 @@ class Phase3SurfacesSuite extends FunSuite:
     sig.outputShape.decode(zio.blocks.schema.DynamicValue.Record.empty) match
       case Left(_: NotFoundError) => () // expected
       case other                  => fail(s"expected NotFoundError, got: $other")
+  }
+
+  test("Signature.fromString (typed literal) is named-tuple-typed with scalar field types") {
+    // The literal is parsed at compile time into NamedTuple I/O: (question: String) -> (answer: Boolean).
+    val sig = Signature.fromString("question -> answer: bool")
+    assertEquals(sig.layout.inputFields.map(_.name),  Vector("question"))
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
+
+    // Output decodes to a typed named tuple -> `.answer` is a Boolean (typed dot-access).
+    val decoded = sig.outputShape.decode(rec("answer" := true))
+    assertEquals(decoded.map(_.answer), Right(true))
   }

@@ -425,3 +425,63 @@ private[typed] object FunctionMacro:
                 case None =>
                   scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
+
+  /** Implementation of the typed `Signature.fromString("a -> b")`. The DSL string must be a compile-time literal;
+    * it is parsed at compile time (reusing the runtime `SignatureLayout.parse`) and each field becomes a
+    * named-tuple element — untyped fields default to `String`; `int` / `float` / `bool` map to the matching
+    * scalar. An invalid DSL string, or a field type the typed surface doesn't support, is a compile error. */
+  def fromStringImpl(dsl: Expr[String], instructions: Expr[String])(using Quotes): Expr[Any] =
+    import quotes.reflect.*
+
+    val literal = dsl.value.getOrElse(
+      report.errorAndAbort(
+        "Signature.fromString requires a string literal known at compile time. For a signature built from a " +
+        "runtime string, use Signature.fromStringDynamic."
+      )
+    )
+
+    val layout = SignatureLayout.parse(literal) match
+      case Right(parsed) => parsed
+      case Left(err)     => report.errorAndAbort(s"""Invalid signature DSL "$literal": ${err.message}""")
+
+    def tupleType(parts: List[TypeRepr]): TypeRepr =
+      parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
+        TypeRepr.of[*:].appliedTo(List(head, tail))
+      }
+
+    def namedTupleType(items: List[(String, TypeRepr)]): TypeRepr =
+      val nameTypes  = items.map { (fieldName, _) => ConstantType(StringConstant(fieldName)) }
+      val valueTypes = items.map(_._2)
+      TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(tupleType(nameTypes), tupleType(valueTypes)))
+
+    def scalaType(field: dspy4s.core.contracts.FieldSpec): TypeRepr =
+      field.typeRef.repr match
+        case "string" => TypeRepr.of[String]
+        case "int"    => TypeRepr.of[Int]
+        case "double" => TypeRepr.of[Double]
+        case "bool"   => TypeRepr.of[Boolean]
+        case other    =>
+          report.errorAndAbort(
+            s"Signature.fromString: field '${field.name}' has type '$other', which the typed string DSL does " +
+            "not support (supported: str, int, float, bool). For richer field types use Signature.of[Spec], a " +
+            "case class, or Signature.fromStringDynamic."
+          )
+
+    val inputItems  = layout.inputFields.toList.map(field => field.name -> scalaType(field))
+    val outputItems = layout.outputFields.toList.map(field => field.name -> scalaType(field))
+    if inputItems.isEmpty then
+      report.errorAndAbort(s"""Signature.fromString "$literal" declares no input fields""")
+    if outputItems.isEmpty then
+      report.errorAndAbort(s"""Signature.fromString "$literal" declares no output fields""")
+
+    (namedTupleType(inputItems).asType, namedTupleType(outputItems).asType) match
+      case ('[i], '[o]) =>
+        materialize[i, o](
+          sigNameExpr      = Expr(layout.name),
+          instructionsExpr = instructions,
+          errorName        = layout.name,
+          inputShapeExpr   = '{ new Shape.SchemaTupleShape[i](FieldRole.Input,  Schema.derived[i]) },
+          outputShapeExpr  = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o]) }
+        )
+      case _ =>
+        report.errorAndAbort(s"""Internal error materializing Signature.fromString "$literal"""")
