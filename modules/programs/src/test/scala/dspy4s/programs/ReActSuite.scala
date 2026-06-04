@@ -14,7 +14,6 @@ import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -22,7 +21,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.programs.contracts.ProgramCall
+import dspy4s.typed.Signature
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
 import munit.FunSuite
@@ -85,7 +84,7 @@ class ReActSuite extends FunSuite:
       body(using RuntimeEnvironment.current)
     }
 
-  private val qaSignature: SignatureLayout = SignatureDsl.parse("question -> answer").toOption.get
+  private val qaSignature = Signature.fromString("question -> answer")
 
   test("react runs a tool, finishes, and extracts the answer from the trajectory") {
     val search = new SearchTool
@@ -97,12 +96,12 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
     withReact(lm) {
-      val result = react.apply(ProgramCall(inputs = rec("question" := "What is the capital of Belgium?")))
+      val result = react.apply((question = "What is the capital of Belgium?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      assertEquals(lookupString(pred.values, "answer"), "Brussels")
+      assertEquals(pred.output.answer, "Brussels")
       assertEquals(search.calls.get(), 1)
-      val traj = lookupString(pred.values, "trajectory")
+      val traj = lookupString(pred.raw.values, "trajectory")
       assert(traj.contains("tool_name: search"), s"trajectory missing tool call: $traj")
       assert(traj.contains("observation: Brussels"), s"trajectory missing observation: $traj")
       assert(traj.contains("tool_name: finish"), s"trajectory missing finish: $traj")
@@ -115,9 +114,9 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
     withReact(lm) {
-      val result = react.apply(ProgramCall(inputs = rec("question" := "2+2 doubled?")))
+      val result = react.apply((question = "2+2 doubled?"))
       assert(result.isRight)
-      assertEquals(lookupString(result.toOption.get.values, "answer"), "42")
+      assertEquals(result.toOption.get.output.answer, "42")
       assertEquals(search.calls.get(), 0)
     }
   }
@@ -132,9 +131,9 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 2)
 
     withReact(lm) {
-      val result = react.apply(ProgramCall(inputs = rec("question" := "x")))
+      val result = react.apply((question = "x"))
       assert(result.isRight)
-      assertEquals(lookupString(result.toOption.get.values, "answer"), "extracted-after-cap")
+      assertEquals(result.toOption.get.output.answer, "extracted-after-cap")
       assertEquals(search.calls.get(), 2) // tool ran once per capped iteration
       assertEquals(lm.calls.get(), 3) // 2 react steps + 1 extractor
     }
@@ -150,12 +149,12 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
 
     withReact(lm) {
-      val result = react.apply(ProgramCall(inputs = rec("question" := "x")))
+      val result = react.apply((question = "x"))
       assert(result.isRight)
       val pred = result.toOption.get
-      assertEquals(lookupString(pred.values, "answer"), "done")
+      assertEquals(pred.output.answer, "done")
       assertEquals(search.calls.get(), 0)
-      assert(lookupString(pred.values, "trajectory").contains("does not exist"))
+      assert(lookupString(pred.raw.values, "trajectory").contains("does not exist"))
     }
   }
 
@@ -172,7 +171,7 @@ class ReActSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      assert(react.apply(ProgramCall(inputs = rec("question" := "x"))).isRight)
+      assert(react.apply((question = "x")).isRight)
     }
 
     val toolStart = events.collectFirst { case e: ToolStartEvent => e }

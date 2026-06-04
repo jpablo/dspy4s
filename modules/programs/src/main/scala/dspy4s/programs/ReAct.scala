@@ -5,22 +5,26 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.contracts.DynamicModule
+import dspy4s.programs.contracts.TypedCall
 import dspy4s.programs.runtime.ToolExecutor
+import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
 import scala.annotation.tailrec
 
 /** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized
-  * over any signature.
+  * over any typed signature.
   *
   * Each iteration, the LM is shown the task inputs and the trajectory so far and emits three output fields —
   * `next_thought` (its reasoning), `next_tool_name` (the tool to call), and `next_tool_args` (the JSON arguments).
@@ -28,31 +32,43 @@ import scala.annotation.tailrec
   * injected `finish` tool (or `maxIterations` is reached). A separate reasoning-augmented extractor then reads the
   * full trajectory and produces the user-visible outputs declared in `baseSignature`.
   *
+  * `ReAct[I, O]` is a `Module[TypedCall[I], Prediction[WithReasoning[O]]]`: the input is encoded from `I`, and the
+  * extractor's reply is decoded into the base outputs `O` with a `reasoning: String` prepended (always a named
+  * tuple; see [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection. The loop's
+  * tool protocol runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
+  *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling.
   * Tool failures (unknown tool, invocation error) are recorded as trajectory observations rather than failing the
   * program, mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
   */
-final case class ReAct(
-    baseSignature: SignatureLayout,
+final case class ReAct[I, O](
+    baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
     maxIterations: Int = 5,
     reactProgramName: String = ReActKeys.reactModule,
     extractorProgramName: String = ReActKeys.extractModule
-) extends DynamicModule:
+)(using
+    prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ReAct.WithReasoning[O]]
+) extends Module[TypedCall[I], Prediction[ReAct.WithReasoning[O]]]:
+
+  /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
+  type Out = ReAct.WithReasoning[O]
 
   override val moduleName: String = ReActKeys.reactModule
   require(maxIterations > 0, "maxIterations must be greater than 0")
 
+  private val baseLayout: SignatureLayout = baseSignature.layout
+
   /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */
-  private val allTools: Vector[ToolFunction] = tools :+ ReAct.finishTool(baseSignature)
+  private val allTools: Vector[ToolFunction] = tools :+ ReAct.finishTool(baseLayout)
   private val toolsByName: Map[String, ToolFunction] = allTools.map(tool => tool.name -> tool).toMap
 
   /** Per-iteration signature: base inputs + `trajectory` -> `next_thought` / `next_tool_name` / `next_tool_args`.
     * The base output fields are intentionally dropped here — they are produced by the extractor, not the loop. */
   val reactSignature: SignatureLayout =
-    baseSignature
+    baseLayout
       .withFields(
-        baseSignature.inputFields ++ Vector(
+        baseLayout.inputFields ++ Vector(
           FieldSpec(
             name = ReActKeys.trajectory,
             role = FieldRole.Input,
@@ -83,7 +99,7 @@ final case class ReAct(
 
   /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. */
   val extractorSignature: SignatureLayout =
-    baseSignature.append(
+    baseLayout.append(
       FieldSpec(
         name = ReActKeys.trajectory,
         role = FieldRole.Input,
@@ -95,9 +111,9 @@ final case class ReAct(
   /** System-prompt instructions for the react step. Mirrors Python's shape: states the task I/O, explains the
     * next_thought / next_tool_name / next_tool_args protocol, and lists the selectable tools (name + description). */
   private def buildInstructions: String =
-    val inputs = baseSignature.inputFields.map(field => s"`${field.name}`").mkString(", ")
-    val outputs = baseSignature.outputFields.map(field => s"`${field.name}`").mkString(", ")
-    val taskPrelude = baseSignature.instructions.fold("")(_ + "\n")
+    val inputs = baseLayout.inputFields.map(field => s"`${field.name}`").mkString(", ")
+    val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
+    val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
     val toolList = allTools.zipWithIndex.map { case (tool, idx) =>
       val desc = if tool.description.nonEmpty then s": ${tool.description}" else ""
       s"(${idx + 1}) `${tool.name}`$desc"
@@ -110,20 +126,48 @@ final case class ReAct(
        |next_tool_name must be one of:
        |$toolList""".stripMargin
 
-  override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
+    baseSignature.inputShape.encode(call.input)
+  override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
+  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
+
+  override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+    val inputs = baseSignature.inputShape.encode(call.input)
+    val baseCall = ProgramCall(
+      inputs       = inputs,
+      config       = call.config,
+      traceEnabled = call.traceEnabled,
+      rolloutId    = call.rolloutId
+    )
     val reactPredict = DynamicPredict(layout = reactSignature, name = Some(reactProgramName))
     for
       extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
       extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
-      trajectory <- runIterations(call, reactPredict, Vector.empty, iteration = 0)
+      trajectory <- runIterations(baseCall, reactPredict, Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      extracted <- extractor.apply(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered)))
-    yield DynamicPrediction(
-      // Attach the trajectory to the extracted prediction so callers can inspect the agent's reasoning.
-      values = extracted.values.updated(ReActKeys.trajectory, rendered),
-      completions = extracted.completions,
-      lmUsage = extracted.lmUsage
+      extracted <- extractor.apply(baseCall.copy(inputs = inputs.updated(ReActKeys.trajectory, rendered)))
+      // Decode the extractor's reply into the typed output: base `O` with `reasoning` prepended.
+      reasoning <- extractReasoning(extracted.values)
+      baseOut   <- baseSignature.outputShape.decode(extracted.values)
+      augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
+    yield Prediction(
+      output = augmented,
+      // Attach the trajectory to the raw prediction so callers can inspect the agent's reasoning.
+      raw = DynamicPrediction(
+        values      = extracted.values.updated(ReActKeys.trajectory, rendered),
+        completions = extracted.completions,
+        lmUsage     = extracted.lmUsage
+      )
     )
+
+  /** Convenience entry mirroring the typed caller signature; builds a [[TypedCall]] and dispatches through the
+    * wrapped [[apply]]. */
+  def apply(
+      input: I,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean = true
+  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+    apply(TypedCall(input, config, traceEnabled))
 
   @tailrec
   private def runIterations(
@@ -164,12 +208,33 @@ final case class ReAct(
     * directly; ChatAdapter yields the raw JSON text as a `String` (it has no `json` coercion), so parse that. */
   private def toolArgsRecord(value: Option[DynamicValue]): DynamicValue.Record =
     value match
-      case Some(rec: DynamicValue.Record)                        => rec
+      case Some(rec: DynamicValue.Record)                         => rec
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => ReAct.parseJsonRecord(s)
       case _                                                      => DynamicValue.Record.empty
 
+  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
+    DynamicValues.recordGet(values, "reasoning") match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
+      case Some(other) =>
+        Left(ValidationError(s"ReAct reasoning field must be a String, got: $other"))
+      case None =>
+        Left(NotFoundError(
+          resource = "prediction_field",
+          message  = "Required field 'reasoning' is missing from the ReAct extractor prediction"
+        ))
+
+  private def unsupportedOutputShape(baseOut: O): DspyError =
+    ValidationError(
+      s"ReAct requires a product output (named tuple or case class); the signature '${baseSignature.name}' has " +
+      s"a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
+      s"(Signature.of / Signature.derived / Signature.fromType / a literal Signature.fromString)."
+    )
+
 object ReAct:
   val FinishToolName: String = "finish"
+
+  /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
+  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
 
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
@@ -184,8 +249,8 @@ object ReAct:
 
   /** The injected tool the model selects to end the loop. It does no work — selecting it signals "I have enough to
     * produce the outputs"; the observation is a fixed marker and the extractor then produces the real outputs. */
-  private def finishTool(baseSignature: SignatureLayout): ToolFunction =
-    val outputs = baseSignature.outputFields.map(field => s"`${field.name}`").mkString(", ")
+  private def finishTool(baseLayout: SignatureLayout): ToolFunction =
+    val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
     new ToolFunction:
       override val name: String = FinishToolName
       override val description: String =

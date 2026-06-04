@@ -12,6 +12,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
+import dspy4s.typed.Signature
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -309,7 +310,7 @@ class StreamListenerSuite extends FunSuite:
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
         Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
 
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(

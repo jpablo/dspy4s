@@ -8,6 +8,7 @@ import dspy4s.programs.DynamicPredict
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.programs.contracts.TypedCall
 import zio.blocks.schema.DynamicValue
 
 /** What [[Streamify]] needs of a program in order to stream it, captured as a typeclass so that both untyped
@@ -26,20 +27,24 @@ trait Streamable[P]:
 
 object Streamable:
 
-  /** Any untyped program: invoke via a `ProgramCall`; surface the well-known leaf signatures for validation. */
+  /** Any untyped program: invoke via a `ProgramCall`; surface a leaf `DynamicPredict`'s signature for validation. */
   given dynamicModule[P <: DynamicModule]: Streamable[P] with
     def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       program.apply(ProgramCall(inputs = inputs))
 
     def knownSignatures(program: P): Vector[(String, SignatureLayout)] =
       program match
-        case p: DynamicPredict =>
-          Vector((p.moduleName, p.layout))
-        case react: ReAct =>
-          // ReAct owns two DynamicPredicts: the per-step react predict and the final extractor.
-          Vector(
-            (react.reactProgramName, react.reactSignature),
-            (react.extractorProgramName, react.extractorSignature)
-          )
-        case _ =>
-          Vector.empty
+        case p: DynamicPredict => Vector((p.moduleName, p.layout))
+        case _                 => Vector.empty
+
+  /** Typed `ReAct`: decode the record into the typed input, run it, and emit the raw prediction. Its two
+    * sub-predicts (the per-step react predict and the final extractor) are the stream-listener targets. */
+  given reAct[I, O]: Streamable[ReAct[I, O]] with
+    def run(program: ReAct[I, O], inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      program.baseSignature.inputShape.decode(inputs).flatMap(i => program.apply(TypedCall(i)).map(_.raw))
+
+    def knownSignatures(program: ReAct[I, O]): Vector[(String, SignatureLayout)] =
+      Vector(
+        (program.reactProgramName, program.reactSignature),
+        (program.extractorProgramName, program.extractorSignature)
+      )
