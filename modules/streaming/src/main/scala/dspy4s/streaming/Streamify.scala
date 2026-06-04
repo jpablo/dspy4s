@@ -2,15 +2,11 @@ package dspy4s.streaming
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
-import dspy4s.programs.contracts.DynamicModule
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.programs.DynamicPredict
-import dspy4s.programs.ReAct
-import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
 import dspy4s.streaming.contracts.StreamEvent
@@ -33,21 +29,21 @@ object Streamify:
     * different signatures stream per-field tokens correctly under each
     * predictor's own framing.
     */
-  def streamify(
-      program: DynamicModule,
+  def streamify[P](
+      program: P,
       statusMessageProvider: Option[StatusMessageProvider] = None,
       streamListeners: Vector[StreamListener] = Vector.empty,
       includeFinalPrediction: Boolean = true,
       queueCapacity: Int = 64,
       warningSink: String => Unit = msg => System.err.println(s"[dspy4s.streamify] $msg")
-  )(using outerContext: RuntimeContext): DynamicValue.Record => ClosableIterator[StreamEvent] =
+  )(using outerContext: RuntimeContext, streamable: Streamable[P]): DynamicValue.Record => ClosableIterator[StreamEvent] =
     // Validate listener field names against the program structure as far as
     // we can statically see it. This is dspy4s's equivalent of Python's
     // `find_predictor_for_stream_listeners`: warn (don't fail) if a listener
     // is subscribed to a field name that no DynamicPredict in the program emits.
     // For composite programs whose internals we can't introspect (a user-
     // defined `Module`), validation is silently skipped.
-    validateListeners(program, streamListeners, warningSink)
+    validateListeners(streamable.knownSignatures(program), streamListeners, warningSink)
 
     inputs =>
       val queue = StreamingQueue[StreamEvent](queueCapacity)
@@ -81,8 +77,7 @@ object Streamify:
                 RuntimeEnvironment.withCallbacks(existingCallbacks :+ callback) {
                   given RuntimeContext = RuntimeEnvironment.current
                   try
-                    val call = ProgramCall(inputs = inputs)
-                    program.apply(call) match
+                    streamable.run(program, inputs) match
                       case Right(prediction) =>
                         if includeFinalPrediction then { val _ = queue.offer(PredictionEvent(prediction)) }
                       case Left(error) =>
@@ -111,12 +106,11 @@ object Streamify:
     * the well-known shapes contribute nothing — for those, validation is
     * skipped (matches Python's behavior of "look as far as you can"). */
   private def validateListeners(
-      program: DynamicModule,
+      knownSignatures: Vector[(String, SignatureLayout)],
       listeners: Vector[StreamListener],
       warningSink: String => Unit
   ): Unit =
     if listeners.isEmpty then return
-    val knownSignatures = collectKnownSignatures(program)
     if knownSignatures.isEmpty then return // opaque program; skip
     val knownFields: Set[String] = knownSignatures.flatMap(_._2.outputFields.map(_.name)).toSet
     val knownPredictNames: Set[String] = knownSignatures.map(_._1).toSet
@@ -138,20 +132,3 @@ object Streamify:
             )
         }
     }
-
-  /** Best-effort recursive collection of `(predictName, signature)` from
-    * the well-known program types. Unknown composite types contribute
-    * nothing. */
-  private def collectKnownSignatures(program: DynamicModule): Vector[(String, SignatureLayout)] =
-    program match
-      case p: DynamicPredict =>
-        Vector((p.moduleName, p.layout))
-      case react: ReAct =>
-        // ReAct owns two DynamicPredicts: the per-step react predict and the final extractor (which produces the
-        // user-visible outputs). Both names/signatures are valid stream-listener targets.
-        Vector(
-          (react.reactProgramName, react.reactSignature),
-          (react.extractorProgramName, react.extractorSignature)
-        )
-      case _ =>
-        Vector.empty
