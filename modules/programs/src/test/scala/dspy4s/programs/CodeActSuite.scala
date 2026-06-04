@@ -12,7 +12,6 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
-import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -20,7 +19,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.programs.contracts.ProgramCall
+import dspy4s.typed.Signature
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -83,7 +82,7 @@ class CodeActSuite extends FunSuite:
   // ── Wiring smoke test (scripted LM + scripted interpreter) ──────────────
 
   test("CodeAct: single iteration with finished=true runs code once and extracts the answer") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature = Signature.fromString("question -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "42\n", stderr = "", exitCode = 0))
     ))
@@ -100,11 +99,11 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("question" := "what is 40 + 2?")))
+      val result = program.apply((question = "what is 40 + 2?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      assertEquals(lookupString(pred.values, "answer"), "42")
-      val traj = lookupString(pred.values, "trajectory")
+      assertEquals(pred.output.answer, "42")
+      val traj = lookupString(pred.raw.values, "trajectory")
       assert(traj.contains("print(40 + 2)"), s"trajectory missing code: $traj")
       assert(traj.contains("42"), s"trajectory missing stdout: $traj")
       // Interpreter saw exactly one execute() call with the stripped code.
@@ -114,7 +113,7 @@ class CodeActSuite extends FunSuite:
   }
 
   test("CodeAct: stops at maxIterations even when finished is never true") {
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "step", stderr = "", exitCode = 0))
     ))
@@ -135,14 +134,14 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("q" := "?")))
+      val result = program.apply((q = "?"))
       assert(result.isRight)
       assertEquals(interpreter.received.size, 3, "should run exactly maxIterations times")
     }
   }
 
   test("CodeAct: interpreter execution failure surfaces as a trajectory observation, not a program error") {
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "", stderr = "NameError: x is undefined", exitCode = 1))
     ))
@@ -160,16 +159,16 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("q" := "?")))
+      val result = program.apply((q = "?"))
       assert(result.isRight, s"CodeAct should not propagate user-code errors as Left; got $result")
-      val traj = lookupString(result.toOption.get.values, "trajectory")
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
       assert(traj.contains("Failed to execute"), s"trajectory missing error label: $traj")
       assert(traj.contains("NameError"), traj)
     }
   }
 
   test("CodeAct does not call close() on the interpreter (caller-owned lifecycle)") {
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "ok", stderr = "", exitCode = 0))
     ))
@@ -183,7 +182,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.apply(ProgramCall(inputs = rec("q" := "?")))
+      val _ = program.apply((q = "?"))
       assert(!interpreter.closed, "CodeAct must not auto-close — that's the caller's job")
     }
   }
@@ -192,7 +191,7 @@ class CodeActSuite extends FunSuite:
 
   test("CodeAct + SubprocessPythonInterpreter: code actually runs end-to-end") {
     assume(SubprocessPythonInterpreter.isAvailable(), "python3 not on PATH — skipping")
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
     val interpreter = new SubprocessPythonInterpreter()
     val lm = new ScriptedLm(Vector(
       "```python\nprint(sum(range(10)))\n```||true",
@@ -207,9 +206,9 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("q" := "sum 0..9")))
+      val result = program.apply((q = "sum 0..9"))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
-      val traj = lookupString(result.toOption.get.values, "trajectory")
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
       assert(traj.contains("45"), s"expected '45' in trajectory: $traj")
     }
     interpreter.close()

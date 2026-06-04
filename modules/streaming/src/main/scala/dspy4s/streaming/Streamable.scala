@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.DynamicModule
@@ -46,5 +47,17 @@ object Streamable:
     def knownSignatures(program: ReAct[I, O]): Vector[(String, SignatureLayout)] =
       Vector(
         (program.reactProgramName, program.reactSignature),
+        (program.extractorProgramName, program.extractorSignature)
+      )
+
+  /** Typed `CodeAct`: decode the record into the typed input, run it, and emit the raw prediction. Its two
+    * sub-predicts (the per-iteration code generator and the final extractor) are the stream-listener targets. */
+  given codeAct[I, O]: Streamable[CodeAct[I, O]] with
+    def run(program: CodeAct[I, O], inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      program.baseSignature.inputShape.decode(inputs).flatMap(i => program.apply(TypedCall(i)).map(_.raw))
+
+    def knownSignatures(program: CodeAct[I, O]): Vector[(String, SignatureLayout)] =
+      Vector(
+        (program.codeActProgramName, program.codeActSignature),
         (program.extractorProgramName, program.extractorSignature)
       )
