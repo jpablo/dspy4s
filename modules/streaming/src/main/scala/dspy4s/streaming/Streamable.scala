@@ -6,6 +6,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.ProgramOfThought
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
@@ -61,3 +62,13 @@ object Streamable:
         (program.codeActProgramName, program.codeActSignature),
         (program.extractorProgramName, program.extractorSignature)
       )
+
+  /** Typed `ProgramOfThought`: decode the record into the typed input, run it, and emit the raw prediction. Its
+    * inner predicts use default names, so no distinct stream-listener targets are surfaced (validation skipped —
+    * matching the prior best-effort behavior). */
+  given programOfThought[I, O]: Streamable[ProgramOfThought[I, O]] with
+    def run(program: ProgramOfThought[I, O], inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      program.baseSignature.inputShape.decode(inputs).flatMap(i => program.apply(TypedCall(i)).map(_.raw))
+
+    def knownSignatures(program: ProgramOfThought[I, O]): Vector[(String, SignatureLayout)] =
+      Vector.empty

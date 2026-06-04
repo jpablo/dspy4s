@@ -13,7 +13,6 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
-import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -21,7 +20,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.programs.contracts.ProgramCall
+import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -78,7 +77,7 @@ class ProgramOfThoughtSuite extends FunSuite:
   // ── Single-shot success ────────────────────────────────────────────────
 
   test("ProgramOfThought: successful first attempt — code generates, runs, answer extracted") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature = Signature.fromString("question -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = """{"answer": "42"}""" + "\n", stderr = "", exitCode = 0))
     ))
@@ -95,10 +94,10 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("question" := "what is 6 * 7?")))
+      val result = program.apply((question = "what is 6 * 7?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      assertEquals(lookupString(pred.values, "answer"), "42")
+      assertEquals(pred.output.answer, "42")
       assertEquals(interpreter.received.size, 1)
       assert(interpreter.received.head.contains("import json"))
     }
@@ -107,7 +106,7 @@ class ProgramOfThoughtSuite extends FunSuite:
   // ── Retry on execution error ───────────────────────────────────────────
 
   test("ProgramOfThought: regenerate path runs on execution error, then succeeds") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature = Signature.fromString("question -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "", stderr = "NameError: x is undefined", exitCode = 1)),
       Right(CodeResult(stdout = "ok\n", stderr = "", exitCode = 0))
@@ -126,17 +125,17 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("question" := "?")))
+      val result = program.apply((question = "?"))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       assertEquals(interpreter.received.size, 2, "should have retried after error")
-      assertEquals(lookupString(result.toOption.get.values, "answer"), "ok")
+      assertEquals(result.toOption.get.output.answer, "ok")
     }
   }
 
   // ── Give up after maxIterations ────────────────────────────────────────
 
   test("ProgramOfThought: fails with RuntimeError after maxIterations consecutive errors") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature = Signature.fromString("question -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "", stderr = "Boom", exitCode = 1))
     ))
@@ -154,7 +153,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("question" := "?")))
+      val result = program.apply((question = "?"))
       assert(result.isLeft, s"expected Left after maxIterations, got $result")
       val err = result.left.toOption.get.asInstanceOf[RuntimeError]
       assertEquals(err.component, "program_of_thought")
@@ -163,7 +162,7 @@ class ProgramOfThoughtSuite extends FunSuite:
   }
 
   test("ProgramOfThought: does NOT close the interpreter (caller-owned lifecycle)") {
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
     val interpreter = new RecordingInterpreter(Vector(
       Right(CodeResult(stdout = "ok", stderr = "", exitCode = 0))
     ))
@@ -177,7 +176,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.apply(ProgramCall(inputs = rec("q" := "?")))
+      val _ = program.apply((q = "?"))
       assert(!interpreter.closed)
     }
   }
@@ -186,7 +185,7 @@ class ProgramOfThoughtSuite extends FunSuite:
 
   test("ProgramOfThought + SubprocessPythonInterpreter: runs end-to-end") {
     assume(SubprocessPythonInterpreter.isAvailable(), "python3 not on PATH — skipping")
-    val signature = SignatureDsl.parse("q -> answer").toOption.get
+    val signature = Signature.fromString("q -> answer")
     val interpreter = new SubprocessPythonInterpreter()
     val lm = new ScriptedLm(Vector(
       "```python\nimport json\nresult = sum(range(11))\nprint(json.dumps({'answer': result}))\n```",
@@ -201,9 +200,9 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply(ProgramCall(inputs = rec("q" := "sum 0..10")))
+      val result = program.apply((q = "sum 0..10"))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
-      assertEquals(lookupString(result.toOption.get.values, "answer"), "55")
+      assertEquals(result.toOption.get.output.answer, "55")
     }
     interpreter.close()
   }

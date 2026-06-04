@@ -2,17 +2,20 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.contracts.DynamicModule
+import dspy4s.programs.contracts.TypedCall
+import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.matching.Regex
@@ -32,32 +35,31 @@ private def stringDv(s: String): DynamicValue =
   *   3. **answer** — inputs + `final_generated_code` + `code_output` →
   *      original outputs declared in `baseSignature`.
   *
-  * Unlike [[CodeAct]], this is **not** iterative code-building: each
-  * iteration is a fresh attempt at the whole computation, retried only on
-  * failure. The LM produces one self-contained snippet that runs to
-  * completion (or raises), and we read its stdout once.
+  * `ProgramOfThought[I, O]` is a `Module[TypedCall[I], Prediction[WithReasoning[O]]]`: it encodes the typed input,
+  * runs the three passes internally over the data-bag layer, and decodes the final answer step into the base
+  * outputs `O` with `reasoning: String` prepended (see [[OutputAugmentation]]).
   *
-  * '''Behavioral delta from Python parity.''' Python's ProgramOfThought
-  * preloads a `SUBMIT(...)` function into the Pyodide environment so the
-  * LM's code can return a structured dict directly. dspy4s's
-  * [[CodeInterpreter]] contract is plain stdout-capture, so this port
-  * instructs the LM to **print** its result (typically as JSON) instead
-  * of calling SUBMIT. The downstream answer step parses the printed
-  * output. Functionally equivalent for the common case; explicit SUBMIT
-  * semantics will return when the Deno+Pyodide interpreter lands.
+  * '''Behavioral delta from Python parity.''' Python preloads a `SUBMIT(...)` function into Pyodide so the LM's
+  * code can return a structured dict; dspy4s's [[CodeInterpreter]] is plain stdout-capture, so this port instructs
+  * the LM to **print** its result (typically JSON), and the answer step parses the printed output.
   *
-  * Lifecycle: caller owns the interpreter — `ProgramOfThought.execute`
-  * does **not** call `interpreter.close()`. The same interpreter can be
-  * reused across multiple `run(...)` invocations.
+  * Lifecycle: caller owns the interpreter — this does **not** call `interpreter.close()`.
   */
-final case class ProgramOfThought(
-    baseSignature: SignatureLayout,
+final case class ProgramOfThought[I, O](
+    baseSignature: Signature[I, O],
     interpreter: CodeInterpreter,
     maxIterations: Int = 3
-) extends DynamicModule:
+)(using
+    prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ProgramOfThought.WithReasoning[O]]
+) extends Module[TypedCall[I], Prediction[ProgramOfThought.WithReasoning[O]]]:
+
+  /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
+  type Out = ProgramOfThought.WithReasoning[O]
 
   override val moduleName: String = "program_of_thought"
   require(maxIterations > 0, "maxIterations must be greater than 0")
+
+  private val baseLayout: SignatureLayout = baseSignature.layout
 
   // ── Helper field definitions (declared first so the signature vals below
   // can reference them without hitting an init-order NPE) ────────────────
@@ -99,7 +101,7 @@ final case class ProgramOfThought(
   )
 
   private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): SignatureLayout =
-    val withInputs = extraInputs.foldLeft(baseSignature)(_.append(_))
+    val withInputs = extraInputs.foldLeft(baseLayout)(_.append(_))
     // The generate / regenerate signatures discard the user's outputs —
     // generated_code is the only output of those steps.
     val withoutUserOutputs =
@@ -113,7 +115,7 @@ final case class ProgramOfThought(
       extraInputs = Vector.empty,
       extraOutputs = Vector(generatedCodeField)
     ).withInstructions(Some({
-      val outputs = baseSignature.outputFields.map(f => s"`${f.name}`").mkString(", ")
+      val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
       s"""You will be given the input fields and you will respond with `generated_code`.
          |Generate executable Python code that programmatically computes the correct $outputs.
          |Print the result as a JSON object whose keys are the output field names — for example
@@ -137,29 +139,51 @@ final case class ProgramOfThought(
     * original outputs plus `final_generated_code` + `code_output` as
     * inputs. */
   val answerSignature: SignatureLayout =
-    baseSignature
+    baseLayout
       .append(finalGeneratedCodeField)
       .append(codeOutputField)
       .withInstructions(Some({
-        val outputs = baseSignature.outputFields.map(f => s"`${f.name}`").mkString(", ")
+        val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
         s"Given the final Python code and its printed output, produce the final $outputs."
       }))
 
-  override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
+    baseSignature.inputShape.encode(call.input)
+  override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
+  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
+
+  override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+    val inputs = baseSignature.inputShape.encode(call.input)
+    val baseCall = ProgramCall(
+      inputs       = inputs,
+      config       = call.config,
+      traceEnabled = call.traceEnabled,
+      rolloutId    = call.rolloutId
+    )
     for
       generatorLayout   <- ChainOfThought.augmentLayout(generateSignature)
       regeneratorLayout <- ChainOfThought.augmentLayout(regenerateSignature)
       answerLayout      <- ChainOfThought.augmentLayout(answerSignature)
-      generator = DynamicPredict(layout = generatorLayout, runtime = SignatureProgramRuntime)
+      generator   = DynamicPredict(layout = generatorLayout, runtime = SignatureProgramRuntime)
       regenerator = DynamicPredict(layout = regeneratorLayout, runtime = SignatureProgramRuntime)
-      answerer = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
-      result <- tryIteration(call, generator, regenerator, attempt = 1).flatMap { case (code, codeOutput) =>
-        val extractInputs = call.inputs
-          .updated("final_generated_code", stringDv(code))
-          .updated("code_output", stringDv(codeOutput))
-        answerer.apply(call.copy(inputs = extractInputs))
-      }
-    yield result
+      answerer    = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
+      codeAndOutput <- tryIteration(baseCall, generator, regenerator, attempt = 1)
+      (code, codeOutput) = codeAndOutput
+      extractInputs = inputs.updated("final_generated_code", stringDv(code)).updated("code_output", stringDv(codeOutput))
+      result    <- answerer.apply(baseCall.copy(inputs = extractInputs))
+      reasoning <- extractReasoning(result.values)
+      baseOut   <- baseSignature.outputShape.decode(result.values)
+      augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
+    yield Prediction(output = augmented, raw = result)
+
+  /** Convenience entry mirroring the typed caller signature; builds a [[TypedCall]] and dispatches through the
+    * wrapped [[apply]]. */
+  def apply(
+      input: I,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean = true
+  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+    apply(TypedCall(input, config, traceEnabled))
 
   private def tryIteration(
       call: ProgramCall,
@@ -169,12 +193,12 @@ final case class ProgramOfThought(
       previous: Option[(String, String)] = None // (code, error) from last attempt
   )(using RuntimeContext): Either[DspyError, (String, String)] =
     val predict = previous match
-      case None        => generator
-      case Some(_)     => regenerator
+      case None    => generator
+      case Some(_) => regenerator
     val baseInputs = call.inputs
     val inputs = previous match
-      case None                  => baseInputs
-      case Some((code, error))   =>
+      case None                => baseInputs
+      case Some((code, error)) =>
         baseInputs
           .updated("previous_code", stringDv(code))
           .updated("error", stringDv(error))
@@ -223,11 +247,32 @@ final case class ProgramOfThought(
         case None =>
           Right(trimmed)
 
+  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
+    DynamicValues.recordGet(values, "reasoning") match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
+      case Some(other) =>
+        Left(ValidationError(s"ProgramOfThought reasoning field must be a String, got: $other"))
+      case None =>
+        Left(NotFoundError(
+          resource = "prediction_field",
+          message  = "Required field 'reasoning' is missing from the ProgramOfThought answer prediction"
+        ))
+
+  private def unsupportedOutputShape(baseOut: O): DspyError =
+    ValidationError(
+      s"ProgramOfThought requires a product output (named tuple or case class); the signature " +
+      s"'${baseSignature.name}' has a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed " +
+      s"signature (Signature.of / Signature.derived / Signature.fromType / a literal Signature.fromString)."
+    )
+
   /** Use the default settings-based runtime resolution for the inner
     * DynamicPredict programs. */
   private object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
 
 object ProgramOfThought:
+  /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
+  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+
   /** Matches a fenced code block, optionally tagged ```python. Captures the
     * snippet body in group 1. Multiline-aware. */
   private val FencedBlock: Regex = """(?s)```(?:python|py)?\s*\n?(.*?)```""".r
