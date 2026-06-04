@@ -78,10 +78,12 @@ trait Module[I, O]:
     ContextPropagation.future(apply(input))
 
 /** The untyped program spine: `Module[ProgramCall, DynamicPrediction]` with the projection hooks defaulted to the
-  * spine record shapes (`call.inputs` / `prediction.values`). Every engine program (`DynamicPredict`, `ReAct`,
-  * `CodeAct`, `ProgramOfThought`, `MultiChainComparison`) extends this and implements only `forward` +
-  * `moduleName`. `tracePayload` stays overridable for programs that record a projection. (The typed
-  * `Refine[I, O]` / `BestOfN[I, O]` instead extend `Module[TypedCall[I], Prediction[O]]`.) */
+  * spine record shapes (`call.inputs` / `prediction.values`). `DynamicPredict` is the engine program on this
+  * spine (it's the runtime substrate the typed programs build their inner predicts from); user-defined data-bag
+  * programs may extend it too. Subclasses implement only `forward` + `moduleName`; `tracePayload` stays
+  * overridable for programs that record a projection. (The typed programs — `Predict` / `ChainOfThought` /
+  * `ReAct` / `CodeAct` / `ProgramOfThought` / `MultiChainComparison` / `BestOfN` / `Refine` — instead extend
+  * `Module[TypedCall[I], Prediction[…]]`.) */
 trait DynamicModule extends Module[ProgramCall, DynamicPrediction]:
   protected def callInputs(call: ProgramCall): DynamicValue.Record = call.inputs
   protected def callTraceEnabled(call: ProgramCall): Boolean      = call.traceEnabled
