@@ -3,83 +3,93 @@
  *
  * Source:   docs/docs/learn/evaluation/metrics.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/metrics.md
- * Status:   scaffold (7 python snippets — TODO translate)
+ * Status:   translated (function metrics + Evaluate, snippets 1/3/4/5). Context-aware metrics (2),
+ *           LLM-as-judge metrics (6) and trace-over-retrieval-hops (7) are noted: dspy4s has no
+ *           retriever, and `Metric.score` carries no `RuntimeContext` so a metric can't call an LM.
+ *
+ * dspy4s metrics implement `Metric` (`score(example, prediction, trace) => Either[DspyError, Double]`).
+ * `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain function.
  */
 package dspy4s.examples.learn.evaluation
 
-object Metrics {
+import dspy4s.core.contracts.{DspyError, DynamicPrediction, DynamicValues, Example}
+import dspy4s.evaluate.{Evaluate, EvaluateConfig}
+import dspy4s.evaluate.contracts.Metric
+import dspy4s.evaluate.metrics.FunctionMetric
+import dspy4s.typed.{InputField, OutputField, Spec}
+
+// Snippet 5 (lines 89–97) — the LLM-judge signature, as a spec trait (must be top-level for Mirror).
+// | class Assess(dspy.Signature):
+// |     """Assess the quality of a tweet along the specified dimension."""
+// |     assessed_text = dspy.InputField()
+// |     assessment_question = dspy.InputField()
+// |     assessment_answer: bool = dspy.OutputField()
+trait Assess extends Spec:
+  def assessed_text:       InputField[String]
+  def assessment_question: InputField[String]
+  def assessment_answer:   OutputField[Boolean]
+
+object Metrics:
+
+  private def predField(pred: DynamicPrediction, key: String): String =
+    pred.get(key).map(DynamicValues.renderText).getOrElse("")
+  private def exField(example: Example, key: String): String =
+    example.get(key).map(DynamicValues.renderText).getOrElse("")
 
   // ── Snippet 1 (lines 29–32) ────────────────────
   // | def validate_answer(example, pred, trace=None):
   // |     return example.answer.lower() == pred.answer.lower()
-  // TODO translate snippet 1
+  val validateAnswer: FunctionMetric = FunctionMetric.bool("validate_answer") { (example, pred) =>
+    exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
+  }
 
-  // ── Snippet 2 (lines 41–53) ────────────────────
-  // | def validate_context_and_answer(example, pred, trace=None):
-  // |     # check the gold label and the predicted answer are the same
-  // |     answer_match = example.answer.lower() == pred.answer.lower()
-  // |
-  // |     # check the predicted answer comes from one of the retrieved contexts
-  // |     context_match = any((pred.answer.lower() in c) for c in pred.context)
-  // |
-  // |     if trace is None: # if we're doing evaluation or optimization
-  // |         return (answer_match + context_match) / 2.0
-  // |     else: # if we're doing bootstrapping, i.e. self-generating good demonstrations of each step
-  // |         return answer_match and context_match
-  // TODO translate snippet 2
+  // ── Snippet 2 (lines 41–53) — context-aware metric ──
+  // | answer_match = example.answer.lower() == pred.answer.lower()
+  // | context_match = any((pred.answer.lower() in c) for c in pred.context)  # needs a retriever
+  // | trace is None -> (answer_match + context_match) / 2.0  else answer_match and context_match
+  // The `context_match` half needs a retriever (`pred.context`), which dspy4s doesn't have; the answer
+  // half + the eval-vs-bootstrap branch (Python's `trace is None`) carry over to the 3-arg form
+  // (`trace.isEmpty` during evaluation/optimization; non-empty during bootstrapping):
+  val validateAnswerOnly: FunctionMetric =
+    new FunctionMetric("validate_answer_only", { (example, pred, _) =>
+      val answerMatch = exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
+      Right(if answerMatch then 1.0 else 0.0)
+    })
 
-  // ── Snippet 3 (lines 62–68) ────────────────────
+  // ── Snippet 3 (lines 62–68) — a manual evaluation loop ──
   // | scores = []
   // | for x in devset:
-  // |     pred = program(**x.inputs())
-  // |     score = metric(x, pred)
-  // |     scores.append(score)
-  // TODO translate snippet 3
+  // |     pred = program(**x.inputs()); score = metric(x, pred); scores.append(score)
+  def manualScores(
+      devset: Vector[Example],
+      metric: Metric,
+      program: Example => Either[DspyError, DynamicPrediction]
+  ): Vector[Either[DspyError, Double]] =
+    devset.map(x => program(x).flatMap(pred => metric.score(x, pred)))
 
-  // ── Snippet 4 (lines 72–80) ────────────────────
-  // | from dspy.evaluate import Evaluate
-  // |
-  // | # Set up the evaluator, which can be re-used in your code.
+  // ── Snippet 4 (lines 72–80) — the built-in Evaluate runner ──
   // | evaluator = Evaluate(devset=YOUR_DEVSET, num_threads=1, display_progress=True, display_table=5)
-  // |
-  // | # Launch evaluation.
   // | evaluator(YOUR_PROGRAM, metric=YOUR_METRIC)
-  // TODO translate snippet 4
+  def evaluator(devset: Vector[Example], metric: Metric): Evaluate =
+    new Evaluate(EvaluateConfig(
+      devset          = devset,
+      metric          = metric,
+      numThreads      = Some(1),
+      displayProgress = true,
+      displayTable    = Right(5)   // display_table=5 (table rendering itself is deferred in dspy4s)
+    ))
+  // Launch: `evaluator(devset, metric).apply()(program)(using RuntimeContext)` — the `using` is the
+  // ambient RuntimeContext; `program` is `Example => Either[DspyError, DynamicPrediction]`.
 
-  // ── Snippet 5 (lines 89–97) ────────────────────
-  // | # Define the signature for automatic assessments.
-  // | class Assess(dspy.Signature):
-  // |     """Assess the quality of a tweet along the specified dimension."""
-  // |
-  // |     assessed_text = dspy.InputField()
-  // |     assessment_question = dspy.InputField()
-  // |     assessment_answer: bool = dspy.OutputField()
-  // TODO translate snippet 5
+  // ── Snippet 6 (lines 101–116) — LLM-as-judge metric ──
+  // A metric that calls `dspy.Predict(Assess)` inside its body is not expressible: `Metric.score` takes
+  // no `RuntimeContext`, so a metric can't invoke an LM. (LLM-judged metrics — `SemanticF1` etc. — are
+  // tracked as deferred Phase-6 v2 work.) The `Assess` spec above is the signature it would use.
 
-  // ── Snippet 6 (lines 101–116) ────────────────────
-  // | def metric(gold, pred, trace=None):
-  // |     question, answer, tweet = gold.question, gold.answer, pred.output
-  // |
-  // |     engaging = "Does the assessed text make for a self-contained, engaging tweet?"
-  // |     correct = f"The text should answer `{question}` with `{answer}`. Does the assessed text contain this answer?"
-  // |
-  // |     correct =  dspy.Predict(Assess)(assessed_text=tweet, assessment_question=correct)
-  // |     engaging = dspy.Predict(Assess)(assessed_text=tweet, assessment_question=engaging)
-  // |
-  // |     correct, engaging = [m.assessment_answer for m in [correct, engaging]]
-  // |     score = (correct + engaging) if correct and (len(tweet) <= 280) else 0
-  // |
-  // |     if trace is not None: return score >= 2
-  // |     return score / 2.0
-  // TODO translate snippet 6
+  // ── Snippet 7 (lines 134–142) — validate_hops over the trace ──
+  // Needs retrieval (`outputs.query` hops) and `answer_exact_match_str`; neither is ported.
 
-  // ── Snippet 7 (lines 134–142) ────────────────────
-  // | def validate_hops(example, pred, trace=None):
-  // |     hops = [example.question] + [outputs.query for *_, outputs in trace if 'query' in outputs]
-  // |
-  // |     if max([len(h) for h in hops]) > 100: return False
-  // |     if any(dspy.evaluate.answer_exact_match_str(hops[idx], hops[:idx], frac=0.8) for idx in range(2, len(hops))): return False
-  // |
-  // |     return True
-  // TODO translate snippet 7
-}
+  /** A small devset row, for wiring the metrics/evaluator above. */
+  def example(question: String, answer: String): Example =
+    Example("question" -> DynamicValues.fromAny(question), "answer" -> DynamicValues.fromAny(answer))
+      .withInputs(Set("question"))

@@ -3,7 +3,7 @@
  *
  * Source:   docs/docs/learn/evaluation/overview.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/overview.md
- * Status:   scaffold (0 python snippets — TODO translate)
+ * Status:   complete (source doc has no python snippets to translate)
  */
 package dspy4s.examples.learn.evaluation
 

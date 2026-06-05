@@ -3,29 +3,41 @@
  *
  * Source:   docs/docs/learn/optimization/optimizers.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md
- * Status:   scaffold (3 python snippets — TODO translate)
+ * Status:   translated (BootstrapFewShotWithRandomSearch.compile, snippet 1). Program save/load
+ *           (snippets 2/3) is not ported — dspy4s programs have no `.save` / `.load`.
+ *
+ * dspy4s optimizers operate on the untyped `DynamicPredict` (which has a `PredictOps` instance);
+ * `compile(student, trainset)` returns an `OptimizationReport` whose `bestProgram` is the result.
  */
 package dspy4s.examples.learn.optimization
 
-object Optimizers {
+import dspy4s.core.contracts.{DspyError, Example, RuntimeContext}
+import dspy4s.evaluate.contracts.Metric
+import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, RandomSearchConfig}
+import dspy4s.programs.DynamicPredict
+
+object Optimizers:
 
   // ── Snippet 1 (lines 95–104) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShotWithRandomSearch
-  // |
-  // | # Set up the optimizer: we want to "bootstrap" (i.e., self-generate) 8-shot examples of your program's steps.
-  // | # The optimizer will repeat this 10 times (plus some initial attempts) before selecting its best attempt on the devset.
   // | config = dict(max_bootstrapped_demos=4, max_labeled_demos=4, num_candidate_programs=10, num_threads=4)
-  // |
   // | teleprompter = BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
   // | optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
-  // TODO translate snippet 1
+  def optimize(
+      metric: Metric,
+      program: DynamicPredict,
+      trainset: Vector[Example]
+  )(using RuntimeContext): Either[DspyError, DynamicPredict] =
+    val teleprompter = BootstrapFewShotWithRandomSearch[DynamicPredict](RandomSearchConfig(
+      metric               = metric,
+      maxBootstrappedDemos = 4,
+      maxLabeledDemos      = 4,
+      numCandidates        = 10,        // Python's num_candidate_programs
+      numThreads           = Some(4)
+    ))
+    teleprompter.compile(program, trainset).map(_.bestProgram)
 
-  // ── Snippet 2 (lines 213–215) ────────────────────
+  // ── Snippets 2 + 3 (lines 213–225) — save / load an optimized program ──
   // | optimized_program.save(YOUR_SAVE_PATH)
-  // TODO translate snippet 2
-
-  // ── Snippet 3 (lines 222–225) ────────────────────
-  // | loaded_program = YOUR_PROGRAM_CLASS()
-  // | loaded_program.load(path=YOUR_SAVE_PATH)
-  // TODO translate snippet 3
-}
+  // | loaded_program = YOUR_PROGRAM_CLASS(); loaded_program.load(path=YOUR_SAVE_PATH)
+  // Not portable: dspy4s programs have no `.save` / `.load`. Programs are immutable values; persist
+  // the tuned state (the predictor's demos) yourself if you need to round-trip it.
