@@ -59,5 +59,41 @@ object ToolFunction:
   def result[A](value: A)(using schema: Schema[A]): DynamicValue =
     schema.toDynamicValue(value)
 
+  /** Build a tool from a plain function over the call args, instead of an anonymous `new ToolFunction`.
+    * The body may use the ambient `RuntimeContext` (it's a context function, so it's available but not
+    * required) and returns the tool result `DynamicValue`, or a `Left` to surface a failure:
+    *
+    * {{{
+    * ToolFunction("get_weather", "Get the current weather for a city.") { args =>
+    *   Right(ToolFunction.result(s"The weather in ${args.asString("city")} is sunny"))
+    * }
+    * }}}
+    */
+  def apply(name: String, description: String = "")(
+      invoke: DynamicValue.Record => RuntimeContext ?=> Either[DspyError, DynamicValue]
+  ): ToolFunction =
+    val toolName = name
+    val toolDesc = description
+    val toolFn   = invoke // alias: avoid the method-name shadowing the param in the body below
+    new ToolFunction:
+      override val name: String        = toolName
+      override val description: String = toolDesc
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
+        toolFn(args)
+
+  /** Like [[apply]] but the body returns a `Schema`-typed value directly (lifted via [[result]]) — no
+    * `Right(ToolFunction.result(...))` wrapping. Use this for tools that never fail:
+    *
+    * {{{
+    * ToolFunction.of("get_weather", "Get the current weather for a city.") { args =>
+    *   s"The weather in ${args.asString("city")} is sunny"
+    * }
+    * }}}
+    */
+  def of[A](name: String, description: String = "")(
+      invoke: DynamicValue.Record => RuntimeContext ?=> A
+  )(using Schema[A]): ToolFunction =
+    apply(name, description)(args => Right(result(invoke(args))))
+
 final case class ToolCallRequest(name: String, args: DynamicValue.Record)
 final case class ToolCallResult(name: String, result: Either[DspyError, DynamicValue])

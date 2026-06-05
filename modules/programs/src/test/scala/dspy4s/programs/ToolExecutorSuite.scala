@@ -38,6 +38,26 @@ class ToolExecutorSuite extends FunSuite:
     }
   }
 
+  test("ToolFunction.of / apply build a tool from a function (no anonymous class)") {
+    val weather = ToolFunction.of("get_weather", "Get the current weather for a city.") { args =>
+      s"The weather in ${DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("?")} is sunny"
+    }
+    val failing = ToolFunction("always_fails", "demo") { _ => Left(RuntimeError("always_fails", "nope")) }
+
+    assertEquals(weather.name, "get_weather")
+    assertEquals(weather.description, "Get the current weather for a city.")
+    assertEquals(failing.name, "always_fails")
+
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(
+        weather.invoke(DynamicValues.recordFromEntries(Seq("city" := "Tokyo"))),
+        Right(ToolFunction.result("The weather in Tokyo is sunny"))
+      )
+      assert(failing.invoke(DynamicValue.Record.empty).isLeft)
+    }
+  }
+
   test("a tool's structured failure surfaces as a Left inside the ToolCallResult") {
     val picky = new ToolFunction:
       override val name: String = "picky"

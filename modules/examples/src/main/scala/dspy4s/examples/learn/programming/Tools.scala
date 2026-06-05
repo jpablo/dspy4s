@@ -31,23 +31,20 @@ object Tools:
   // | print("Tool calls made:", result.trajectory)
   //
   // dspy4s tools are `ToolFunction`s: a `name`, a `description` (surfaced in the agent's prompt),
-  // and `invoke(args)` over the data-bag spine. Args come in as a `DynamicValue.Record`; lift the
-  // result with `ToolFunction.result(...)`.
+  // and a body over the call args (a `DynamicValue.Record`). `ToolFunction.of(name, desc) { args => … }`
+  // builds one from a plain function returning the result value (lifted via its `Schema`); use
+  // `ToolFunction(name, desc) { args => Right/Left(...) }` when the tool can fail.
   object WeatherAgentExample:
     private def arg(args: DynamicValue.Record, key: String): String =
       DynamicValues.recordGet(args, key).map(DynamicValues.renderText).getOrElse("")
 
-    val getWeather: ToolFunction = new ToolFunction:
-      override val name: String        = "get_weather"
-      override val description: String  = "Get the current weather for a city."
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        Right(ToolFunction.result(s"The weather in ${arg(args, "city")} is sunny and 75°F"))
+    val getWeather: ToolFunction = ToolFunction.of("get_weather", "Get the current weather for a city.") { args =>
+      s"The weather in ${arg(args, "city")} is sunny and 75°F"
+    }
 
-    val searchWeb: ToolFunction = new ToolFunction:
-      override val name: String        = "search_web"
-      override val description: String  = "Search the web for information."
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        Right(ToolFunction.result(s"Search results for '${arg(args, "query")}': [relevant information...]"))
+    val searchWeb: ToolFunction = ToolFunction.of("search_web", "Search the web for information.") { args =>
+      s"Search results for '${arg(args, "query")}': [relevant information...]"
+    }
 
     // ── Snippet 2 (lines 57–63) — ReAct configuration ──
     // | react_agent = dspy.ReAct(signature="question -> answer", tools=[tool1, tool2, tool3], max_iters=10)
@@ -69,14 +66,13 @@ object Tools:
   // |     return f"Weather in {city}: 25°{units[0].upper()}, sunny"
   // A clear `name` + `description` and defensive arg handling carry over directly to `ToolFunction`:
   object GoodToolExample:
-    val goodTool: ToolFunction = new ToolFunction:
-      override val name: String       = "good_tool"
-      override val description: String = "Get weather information for a specific city (units: celsius | fahrenheit)."
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
+    val goodTool: ToolFunction =
+      ToolFunction.of("good_tool", "Get weather information for a specific city (units: celsius | fahrenheit).") { args =>
         val city  = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("").trim
         val units = DynamicValues.recordGet(args, "units").map(DynamicValues.renderText).getOrElse("celsius")
-        if city.isEmpty then Right(ToolFunction.result("Error: City name cannot be empty"))
-        else Right(ToolFunction.result(s"Weather in $city: 25°${units.take(1).toUpperCase}, sunny"))
+        if city.isEmpty then "Error: City name cannot be empty"
+        else s"Weather in $city: 25°${units.take(1).toUpperCase}, sunny"
+      }
 
   // ── Snippets 3 / 5 — manual `dspy.Tool` input field + `ToolCalls` output + `call.execute()` ──
   // Not portable: dspy4s selects tools via output fields inside an agent (ReAct), not by passing a
