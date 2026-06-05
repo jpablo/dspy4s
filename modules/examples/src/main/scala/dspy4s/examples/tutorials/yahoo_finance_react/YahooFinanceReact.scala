@@ -3,128 +3,81 @@
  *
  * Source:   docs/docs/tutorials/yahoo_finance_react/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/yahoo_finance_react/index.md
- * Status:   scaffold (4 python snippets — TODO translate)
+ * Status:   translated (the DSPy core: the typed tools + the ReAct agent, snippets 2/3/4). The live
+ *           market data is out of scope — there is no `yfinance` / LangChain bridge in dspy4s, so the
+ *           tools return illustrative static quotes instead of fetching, and the LangChain
+ *           `YahooFinanceNewsTool` → `Tool.from_langchain` conversion (snippet 1) is omitted.
+ *
+ * Python passes plain `def`s with docstrings as ReAct tools; the dspy4s analogue is
+ * `ToolFunction.fromMethod` over an `@description`-annotated typed method (the macro derives the name,
+ * description, and argument schema). A `dict`/`json.dumps` return becomes a `Schema`-deriving case class
+ * (or `List` of them), lifted to the tool result automatically.
  */
 package dspy4s.examples.tutorials.yahoo_finance_react
 
-object YahooFinanceReact {
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.examples.Demo
+import dspy4s.programs.ReAct
+import dspy4s.programs.contracts.{ToolFunction, description}
+import dspy4s.typed.Signature
+import zio.blocks.schema.Schema
 
-  // ── Snippet 1 (lines 17–31) ────────────────────
-  // | import dspy
-  // | from langchain_community.tools.yahoo_finance_news import YahooFinanceNewsTool
-  // | from dspy.adapters.types.tool import Tool
-  // | import json
-  // | import yfinance as yf
-  // |
-  // | # Configure DSPy
-  // | lm = dspy.LM(model='openai/gpt-4o-mini')
-  // | dspy.configure(lm=lm, allow_tool_async_sync_conversion=True)
-  // |
-  // | # Convert LangChain Yahoo Finance tool to DSPy
-  // | yahoo_finance_tool = YahooFinanceNewsTool()
-  // | finance_news_tool = Tool.from_langchain(yahoo_finance_tool)
-  // TODO translate snippet 1
+// ── Snippet 2 — the finance tools (typed methods; live data stubbed) ──
+// | def get_stock_price(ticker: str) -> str: """Get current stock price and basic info."""
+// | def compare_stocks(tickers: str) -> str: """Compare multiple stocks (comma-separated)."""
+case class StockQuote(ticker: String, price: Double, change_percent: Double, company: String) derives Schema
 
-  // ── Snippet 2 (lines 35–86) ────────────────────
-  // | def get_stock_price(ticker: str) -> str:
-  // |     """Get current stock price and basic info."""
-  // |     try:
-  // |         stock = yf.Ticker(ticker)
-  // |         info = stock.info
-  // |         hist = stock.history(period="1d")
-  // |
-  // |         if hist.empty:
-  // |             return f"Could not retrieve data for {ticker}"
-  // |
-  // |         current_price = hist['Close'].iloc[-1]
-  // |         prev_close = info.get('previousClose', current_price)
-  // |         change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close else 0
-  // |
-  // |         result = {
-  // |             "ticker": ticker,
-  // |             "price": round(current_price, 2),
-  // |             "change_percent": round(change_pct, 2),
-  // |             "company": info.get('longName', ticker)
-  // |         }
-  // |
-  // |         return json.dumps(result)
-  // |     except Exception as e:
-  // |         return f"Error: {str(e)}"
-  // |
-  // | def compare_stocks(tickers: str) -> str:
-  // |     """Compare multiple stocks (comma-separated)."""
-  // |     try:
-  // |         ticker_list = [t.strip().upper() for t in tickers.split(',')]
-  // |         comparison = []
-  // |
-  // |         for ticker in ticker_list:
-  // |             stock = yf.Ticker(ticker)
-  // |             info = stock.info
-  // |             hist = stock.history(period="1d")
-  // |
-  // |             if not hist.empty:
-  // |                 current_price = hist['Close'].iloc[-1]
-  // |                 prev_close = info.get('previousClose', current_price)
-  // |                 change_pct = ((current_price - prev_close) / prev_close * 100) if prev_close else 0
-  // |
-  // |                 comparison.append({
-  // |                     "ticker": ticker,
-  // |                     "price": round(current_price, 2),
-  // |                     "change_percent": round(change_pct, 2)
-  // |                 })
-  // |
-  // |         return json.dumps(comparison)
-  // |     except Exception as e:
-  // |         return f"Error: {str(e)}"
-  // TODO translate snippet 2
+object FinanceTools:
+  // Illustrative static quotes — a real implementation would call yfinance here.
+  private val quotes: Map[String, StockQuote] = Map(
+    "AAPL"  -> StockQuote("AAPL", 229.87, 1.24, "Apple Inc."),
+    "GOOGL" -> StockQuote("GOOGL", 178.12, -0.45, "Alphabet Inc."),
+    "MSFT"  -> StockQuote("MSFT", 442.57, 0.83, "Microsoft Corporation"),
+    "TSLA"  -> StockQuote("TSLA", 251.44, 3.10, "Tesla, Inc.")
+  )
 
-  // ── Snippet 3 (lines 90–113) ────────────────────
+  @description("Get current stock price and basic info.")
+  def get_stock_price(ticker: String): StockQuote =
+    quotes.getOrElse(ticker.trim.toUpperCase, StockQuote(ticker.toUpperCase, 0.0, 0.0, s"Unknown ($ticker)"))
+
+  @description("Compare multiple stocks (comma-separated).")
+  def compare_stocks(tickers: String): List[StockQuote] =
+    tickers.split(",").iterator.map(t => get_stock_price(t)).toList
+
+object YahooFinanceReact:
+
+  // ── Snippet 3 — the ReAct agent over the finance tools ──
   // | class FinancialAnalysisAgent(dspy.Module):
-  // |     """ReAct agent for financial analysis using Yahoo Finance data."""
-  // |
-  // |     def __init__(self):
-  // |         super().__init__()
-  // |
-  // |         # Combine all tools
-  // |         self.tools = [
-  // |             finance_news_tool,  # LangChain Yahoo Finance News
-  // |             get_stock_price,
-  // |             compare_stocks
-  // |         ]
-  // |
-  // |         # Initialize ReAct
-  // |         self.react = dspy.ReAct(
-  // |             signature="financial_query -> analysis_response",
-  // |             tools=self.tools,
-  // |             max_iters=6
-  // |         )
-  // |
-  // |     def forward(self, financial_query: str):
-  // |         return self.react(financial_query=financial_query)
-  // TODO translate snippet 3
+  // |     self.react = dspy.ReAct("financial_query -> analysis_response", tools=[...], max_iters=6)
+  // |     def forward(self, financial_query): return self.react(financial_query=financial_query)
+  final class FinancialAnalysisAgent:
+    private val react = ReAct(
+      baseSignature = Signature.fromString("financial_query -> analysis_response"),
+      tools = Vector(
+        ToolFunction.fromMethod(FinanceTools.get_stock_price),
+        ToolFunction.fromMethod(FinanceTools.compare_stocks)
+        // NOTE: the LangChain Yahoo Finance News tool has no dspy4s bridge and is omitted.
+      ),
+      maxIterations = 6
+    )
 
-  // ── Snippet 4 (lines 117–140) ────────────────────
-  // | def run_financial_demo():
-  // |     """Demo of the financial analysis agent."""
-  // |
-  // |     # Initialize agent
-  // |     agent = FinancialAnalysisAgent()
-  // |
-  // |     # Example queries
-  // |     queries = [
-  // |         "What's the latest news about Apple (AAPL) and how might it affect the stock price?",
-  // |         "Compare AAPL, GOOGL, and MSFT performance",
-  // |         "Find recent Tesla news and analyze sentiment"
-  // |     ]
-  // |
-  // |     for query in queries:
-  // |         print(f"Query: {query}")
-  // |         response = agent(financial_query=query)
-  // |         print(f"Analysis: {response.analysis_response}")
-  // |         print("-" * 50)
-  // |
-  // | # Run the demo
-  // | if __name__ == "__main__":
-  // |     run_financial_demo()
-  // TODO translate snippet 4
+    def forward(financialQuery: String)(using RuntimeContext): Either[DspyError, String] =
+      react.apply((financial_query = financialQuery)).map(_.output.analysis_response)
+
+  // ── Snippet 4 — the demo queries ──
+  // | queries = ["What's the latest news about Apple (AAPL)...", "Compare AAPL, GOOGL, and MSFT performance", ...]
+  val demoQueries: Vector[String] = Vector(
+    "What's the latest news about Apple (AAPL) and how might it affect the stock price?",
+    "Compare AAPL, GOOGL, and MSFT performance",
+    "Find recent Tesla news and analyze sentiment"
+  )
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.yahoo_finance_react.yahooFinanceReactMain"
+@main def yahooFinanceReactMain(): Unit = Demo.withLm {
+  val agent = new YahooFinanceReact.FinancialAnalysisAgent
+  YahooFinanceReact.demoQueries.foreach { query =>
+    println(s"Query: $query")
+    println(s"Analysis: ${agent.forward(query)}")
+    println("-" * 50)
+  }
 }

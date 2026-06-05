@@ -3,100 +3,101 @@
  *
  * Source:   docs/docs/learn/programming/adapters.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/adapters.md
- * Status:   scaffold (6 python snippets — TODO translate)
+ * Status:   translated (snippets 1–6). `dspy.inspect_history()` is not part of dspy4s (no global
+ *           history buffer), so the inspect calls at the end of snippets 5/6 are dropped — everything
+ *           else (the Predict calls, the explicit ChatAdapter/JSONAdapter selection, and the
+ *           `adapter.format(...)` / system-message inspection) ports directly.
+ *
+ * Python's `adapter.format(signature, demos, inputs)` becomes `adapter.format(AdapterInvocation(layout,
+ * demos, inputs, request))`, which returns a `FormattedPrompt`; the "system message" is just its first
+ * message. The adapter is selected via the ambient `RuntimeContext` (here swapped with `withAdapter`),
+ * mirroring `dspy.configure(adapter=...)`. Pydantic `BaseModel` outputs become `Schema`-deriving case classes.
  */
 package dspy4s.examples.learn.programming
 
-object Adapters {
+import dspy4s.adapters.{ChatAdapter, JSONAdapter}
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation}
+import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, :=}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.examples.Demo
+import dspy4s.lm.contracts.{LmMode, LmRequest}
+import dspy4s.programs.Predict
+import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import zio.blocks.schema.{DynamicValue, Schema}
 
-  // ── Snippet 1 (lines 24–31) ────────────────────
-  // | import dspy
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
-  // |
-  // | predict = dspy.Predict("question -> answer")
-  // | result = predict(question="What is the capital of France?")
-  // TODO translate snippet 1
+// ── Snippet 5/6 — a Pydantic model + a multi-field signature with a structured-list output ──
+// | class ScienceNews(pydantic.BaseModel): text: str; scientists_involved: list[str]
+case class ScienceNews(text: String, scientists_involved: List[String]) derives Schema
 
-  // ── Snippet 2 (lines 33–43) ────────────────────
-  // | import dspy
-  // |
-  // | dspy.configure(
-  // |     lm=dspy.LM("openai/gpt-4o-mini"),
-  // |     adapter=dspy.ChatAdapter(),  # This is the default value
-  // | )
-  // |
-  // | predict = dspy.Predict("question -> answer")
-  // | result = predict(question="What is the capital of France?")
-  // TODO translate snippet 2
+// | class NewsQA(dspy.Signature): """Get news about the given science field"""
+trait NewsQA extends Spec:
+  def science_field:  InputField[String]
+  def year:           InputField[Int]
+  def num_of_outputs: InputField[Int]
+  def news: OutputField[List[ScienceNews]]
 
-  // ── Snippet 3 (lines 58–66) ────────────────────
-  // | # Simplified flow example
-  // | signature = dspy.Signature("question -> answer")
-  // | inputs = {"question": "What is 2+2?"}
-  // | demos = [{"question": "What is 1+1?", "answer": "2"}]
-  // |
-  // | adapter = dspy.ChatAdapter()
-  // | print(adapter.format(signature, demos, inputs))
-  // TODO translate snippet 3
+object Adapters:
 
-  // ── Snippet 4 (lines 79–85) ────────────────────
-  // | import dspy
-  // |
-  // | signature = dspy.Signature("question -> answer")
-  // | system_message = dspy.ChatAdapter().format_system_message(signature)
-  // | print(system_message)
-  // TODO translate snippet 4
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
+    DynamicValues.recordFromEntries(entries)
 
-  // ── Snippet 5 (lines 117–141) ────────────────────
-  // | import dspy
-  // | import pydantic
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"), adapter=dspy.ChatAdapter())
-  // |
-  // |
-  // | class ScienceNews(pydantic.BaseModel):
-  // |     text: str
-  // |     scientists_involved: list[str]
-  // |
-  // |
-  // | class NewsQA(dspy.Signature):
-  // |     """Get news about the given science field"""
-  // |
-  // |     science_field: str = dspy.InputField()
-  // |     year: int = dspy.InputField()
-  // |     num_of_outputs: int = dspy.InputField()
-  // |     news: list[ScienceNews] = dspy.OutputField(desc="science news")
-  // |
-  // |
-  // | predict = dspy.Predict(NewsQA)
-  // | predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
-  // | dspy.inspect_history()
-  // TODO translate snippet 5
+  // ── Snippets 1 & 2 — a basic Predict (default adapter, then an explicit ChatAdapter) ──
+  // | predict = dspy.Predict("question -> answer"); result = predict(question="What is the capital of France?")
+  // The adapter is the one in the ambient RuntimeContext; `dspy.ChatAdapter()` is the default (Demo installs it).
+  def ask(question: String)(using RuntimeContext): Either[DspyError, String] =
+    Predict(Signature.fromString("question -> answer")).apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 6 (lines 232–256) ────────────────────
-  // | import dspy
-  // | import pydantic
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"), adapter=dspy.JSONAdapter())
-  // |
-  // |
-  // | class ScienceNews(pydantic.BaseModel):
-  // |     text: str
-  // |     scientists_involved: list[str]
-  // |
-  // |
-  // | class NewsQA(dspy.Signature):
-  // |     """Get news about the given science field"""
-  // |
-  // |     science_field: str = dspy.InputField()
-  // |     year: int = dspy.InputField()
-  // |     num_of_outputs: int = dspy.InputField()
-  // |     news: list[ScienceNews] = dspy.OutputField(desc="science news")
-  // |
-  // |
-  // | predict = dspy.Predict(NewsQA)
-  // | predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
-  // | dspy.inspect_history()
-  // TODO translate snippet 6
+  // ── Snippet 3 — inspect what an adapter sends to the LM ──
+  // | signature = dspy.Signature("question -> answer"); inputs = {...}; demos = [{...}]
+  // | adapter = dspy.ChatAdapter(); print(adapter.format(signature, demos, inputs))
+  def formattedPrompt(using RuntimeContext): Either[DspyError, String] =
+    val invocation = AdapterInvocation(
+      layout = Signature.fromString("question -> answer").layout,
+      demos  = Vector(Example(values = rec("question" := "What is 1+1?", "answer" := "2"), inputKeys = Set("question"))),
+      inputs = Example(values = rec("question" := "What is 2+2?"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
+    )
+    ChatAdapter().format(invocation).map { prompt =>
+      prompt.messages.map(m => s"[${m.role}] ${m.text.getOrElse("")}").mkString("\n\n")
+    }
+
+  // ── Snippet 4 — the system message an adapter builds for a signature ──
+  // | system_message = dspy.ChatAdapter().format_system_message(signature); print(system_message)
+  // dspy4s has no separate `format_system_message`; the system message is the formatted prompt's first message.
+  def systemMessage(using RuntimeContext): Either[DspyError, String] =
+    val invocation = AdapterInvocation(
+      layout  = Signature.fromString("question -> answer").layout,
+      demos   = Vector.empty,
+      inputs  = Example(values = rec("question" := ""), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
+    )
+    ChatAdapter().format(invocation).map(_.messages.headOption.flatMap(_.text).getOrElse(""))
+
+  /** Run `body` with `adapter` installed in the RuntimeContext — the dspy4s analogue of swapping
+    * `dspy.configure(adapter=...)` for snippets 5 (ChatAdapter) and 6 (JSONAdapter). */
+  private def withAdapter[A](adapter: Adapter)(body: RuntimeContext ?=> A)(using ctx: RuntimeContext): A =
+    RuntimeEnvironment.withSettings(ctx.copy(adapter = Some(adapter))) {
+      body(using RuntimeEnvironment.current)
+    }
+
+  // ── Snippets 5 & 6 — a structured-output Predict under ChatAdapter, then JSONAdapter ──
+  // | predict = dspy.Predict(NewsQA); predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
+  // | dspy.inspect_history()   # ← dropped: no global history buffer in dspy4s
+  private def runNews(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
+    Predict(Signature.of[NewsQA])
+      .apply((science_field = "Computer Theory", year = 2022, num_of_outputs = 1))
+      .map(_.output.news)
+
+  def newsWithChatAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
+    withAdapter(ChatAdapter())(runNews)
+
+  def newsWithJsonAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
+    withAdapter(JSONAdapter())(runNews)
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.adaptersMain"
+@main def adaptersMain(): Unit = Demo.withLm {
+  println("=== ChatAdapter system message ===")
+  println(Adapters.systemMessage)
+  println("\n=== ask ===")
+  println(Adapters.ask("What is the capital of France?"))
 }
