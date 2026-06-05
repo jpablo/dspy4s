@@ -3,305 +3,184 @@
  *
  * Source:   docs/docs/tutorials/streaming/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/streaming/index.md
- * Status:   scaffold (9 python snippets — TODO translate)
+ * Status:   translated (the streamify surface + listeners + status provider, snippets 1–9).
+ *
+ * The big shape difference: dspy4s `streamify` is *synchronous*. It returns a
+ * `DynamicValue.Record => ClosableIterator[StreamEvent]`, so there is no `asyncio` / `async for`
+ * and no `async_streaming` flag — every snippet's "consume the stream" loop is the same `while
+ * iterator.hasNext` over a sealed `StreamEvent` ADT (`TokenEvent` / `StatusEvent` / `PredictionEvent`
+ * / `ErrorEvent`) rather than Python's `isinstance(chunk, StreamResponse | Prediction | StatusMessage)`.
+ * Snippets 1/2/3/9 therefore collapse onto one example, as do the async/sync variants.
+ *
+ * `dspy.streaming.StreamListener(signature_field_name=..., predict=..., predict_name=..., allow_reuse=...)`
+ * becomes `StreamListener(signatureFieldName, predictName, allowReuse)` (the predictor is selected by name,
+ * not by object identity). A composite `dspy.Module` becomes a `DynamicModule` whose `forward` threads
+ * named `DynamicPredict`s. The LM must be a `StreamingLanguageModel` (the OpenAI provider is one).
  */
 package dspy4s.examples.tutorials.streaming
 
-object Streaming {
+import dspy4s.core.contracts.{
+  ClosableIterator, DspyError, DynamicPrediction, DynamicValues, RuntimeContext, :=
+}
+import dspy4s.examples.Demo
+import dspy4s.programs.{DynamicPredict, ReAct}
+import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
+import dspy4s.streaming.{StatusMessageProvider, Streamify}
+import dspy4s.streaming.contracts.{ErrorEvent, PredictionEvent, StatusEvent, StreamEvent, StreamListener, TokenEvent}
+import dspy4s.typed.Signature
+import zio.blocks.schema.{DynamicValue, Schema}
 
-  // ── Snippet 1 (lines 18–34) ────────────────────
-  // | import os
-  // |
-  // | import dspy
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "your_api_key"
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
-  // |
+object Streaming:
+
+  // ── Shared consumer — the dspy4s analogue of every snippet's `async for chunk in output` loop ──
+  // dspy4s streams synchronously, so this one sync loop replaces Python's asyncio variants. It prints
+  // each token + status message and returns the final prediction (the lone `PredictionEvent`).
+  def consume(stream: ClosableIterator[StreamEvent]): Option[DynamicPrediction] =
+    var finalPrediction: Option[DynamicPrediction] = None
+    while stream.hasNext do
+      stream.next() match
+        case t: TokenEvent      => println(s"Output token of field ${t.fieldName}: ${t.chunk}")
+        case s: StatusEvent     => println(s.message)
+        case p: PredictionEvent => finalPrediction = Some(p.prediction)
+        case e: ErrorEvent      => println(s"Error: ${e.error.message}")
+    finalPrediction
+
+  private def textField(rec: DynamicValue.Record, field: String): String =
+    DynamicValues.recordGet(rec, field).map(DynamicValues.renderText).getOrElse("")
+
+  // ── Snippets 1/2/3/9 — stream a single `Predict`'s `answer` field ──
   // | predict = dspy.Predict("question->answer")
-  // |
-  // | # Enable streaming for the 'answer' field
-  // | stream_predict = dspy.streamify(
-  // |     predict,
-  // |     stream_listeners=[dspy.streaming.StreamListener(signature_field_name="answer")],
-  // | )
-  // TODO translate snippet 1
+  // | stream_predict = dspy.streamify(predict, stream_listeners=[StreamListener(signature_field_name="answer")])
+  // | output = stream_predict(question="why did a chicken cross the kitchen?")  # async or sync — same here
+  def streamAnswer(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+    val predict = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
+    val streamPredict = Streamify.streamify(
+      program         = predict,
+      streamListeners = Vector(StreamListener("answer"))
+    )
+    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
 
-  // ── Snippet 2 (lines 38–48) ────────────────────
-  // | import asyncio
-  // |
-  // | async def read_output_stream():
-  // |     output_stream = stream_predict(question="Why did a chicken cross the kitchen?")
-  // |
-  // |     async for chunk in output_stream:
-  // |         print(chunk)
-  // |
-  // | asyncio.run(read_output_stream())
-  // TODO translate snippet 2
-
-  // ── Snippet 3 (lines 81–97) ────────────────────
-  // | import asyncio
-  // |
-  // | async def read_output_stream():
-  // |   output_stream = stream_predict(question="Why did a chicken cross the kitchen?")
-  // |
-  // |   async for chunk in output_stream:
-  // |     return_value = None
-  // |     if isinstance(chunk, dspy.streaming.StreamResponse):
-  // |       print(f"Output token of field {chunk.signature_field_name}: {chunk.chunk}")
-  // |     elif isinstance(chunk, dspy.Prediction):
-  // |       return_value = chunk
-  // |
-  // |
-  // | program_output = asyncio.run(read_output_stream())
-  // | print("Final output: ", program_output)
-  // TODO translate snippet 3
-
-  // ── Snippet 4 (lines 127–172) ────────────────────
-  // | import asyncio
-  // |
-  // | import dspy
-  // |
-  // | lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-  // | dspy.configure(lm=lm)
-  // |
-  // |
+  // ── Snippet 4 — a composite module, listeners on two different fields ──
   // | class MyModule(dspy.Module):
-  // |     def __init__(self):
-  // |         super().__init__()
-  // |
-  // |         self.predict1 = dspy.Predict("question->answer")
-  // |         self.predict2 = dspy.Predict("answer->simplified_answer")
-  // |
-  // |     def forward(self, question: str, **kwargs):
-  // |         answer = self.predict1(question=question)
-  // |         simplified_answer = self.predict2(answer=answer)
-  // |         return simplified_answer
-  // |
-  // |
-  // | predict = MyModule()
-  // | stream_listeners = [
-  // |     dspy.streaming.StreamListener(signature_field_name="answer"),
-  // |     dspy.streaming.StreamListener(signature_field_name="simplified_answer"),
-  // | ]
-  // | stream_predict = dspy.streamify(
-  // |     predict,
-  // |     stream_listeners=stream_listeners,
-  // | )
-  // |
-  // | async def read_output_stream():
-  // |     output = stream_predict(question="why did a chicken cross the kitchen?")
-  // |
-  // |     return_value = None
-  // |     async for chunk in output:
-  // |         if isinstance(chunk, dspy.streaming.StreamResponse):
-  // |             print(chunk)
-  // |         elif isinstance(chunk, dspy.Prediction):
-  // |             return_value = chunk
-  // |     return return_value
-  // |
-  // | program_output = asyncio.run(read_output_stream())
-  // | print("Final output: ", program_output)
-  // TODO translate snippet 4
+  // |     self.predict1 = dspy.Predict("question->answer")
+  // |     self.predict2 = dspy.Predict("answer->simplified_answer")
+  // |     def forward(self, question): return self.predict2(answer=self.predict1(question=question))
+  final class SimplifyModule extends DynamicModule:
+    override val moduleName: String = "simplify_module"
+    private val predict1 = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
+    private val predict2 =
+      DynamicPredict(Signature.fromString("answer -> simplified_answer").layout, name = Some("predict2"))
 
-  // ── Snippet 5 (lines 201–246) ────────────────────
-  // | import asyncio
-  // |
-  // | import dspy
-  // |
-  // | lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-  // | dspy.configure(lm=lm)
-  // |
-  // |
-  // | def fetch_user_info(user_name: str):
-  // |     """Get user information like name, birthday, etc."""
-  // |     return {
-  // |         "name": user_name,
-  // |         "birthday": "2009-05-16",
-  // |     }
-  // |
-  // |
-  // | def get_sports_news(year: int):
-  // |     """Get sports news for a given year."""
-  // |     if year == 2009:
-  // |         return "Usane Bolt broke the world record in the 100m race."
-  // |     return None
-  // |
-  // |
+    override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      for
+        step1 <- predict1.apply(call)
+        answer = textField(step1.values, "answer")
+        step2 <- predict2.apply(ProgramCall(inputs = DynamicValues.recordFromEntries(Vector("answer" := answer))))
+      yield step2
+
+  def streamSimplify(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+    val streamPredict = Streamify.streamify(
+      program         = new SimplifyModule,
+      streamListeners = Vector(StreamListener("answer"), StreamListener("simplified_answer"))
+    )
+    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+
+  // ── Snippet 5 — stream a ReAct agent's built-in `next_thought` field ──
+  // | def fetch_user_info(user_name): """Get user information like name, birthday, etc."""
+  // | def get_sports_news(year): """Get sports news for a given year."""
   // | react = dspy.ReAct("question->answer", tools=[fetch_user_info, get_sports_news])
-  // |
-  // | stream_listeners = [
-  // |     # dspy.ReAct has a built-in output field called "next_thought".
-  // |     dspy.streaming.StreamListener(signature_field_name="next_thought", allow_reuse=True),
-  // | ]
-  // | stream_react = dspy.streamify(react, stream_listeners=stream_listeners)
-  // |
-  // |
-  // | async def read_output_stream():
-  // |     output = stream_react(question="What sports news happened in the year Adam was born?")
-  // |     return_value = None
-  // |     async for chunk in output:
-  // |         if isinstance(chunk, dspy.streaming.StreamResponse):
-  // |             print(chunk)
-  // |         elif isinstance(chunk, dspy.Prediction):
-  // |             return_value = chunk
-  // |     return return_value
-  // |
-  // |
-  // | print(asyncio.run(read_output_stream()))
-  // TODO translate snippet 5
+  // | stream_react = dspy.streamify(react, stream_listeners=[StreamListener("next_thought", allow_reuse=True)])
+  final case class UserInfo(name: String, birthday: String) derives Schema
 
-  // ── Snippet 6 (lines 256–311) ────────────────────
-  // | import asyncio
-  // |
-  // | import dspy
-  // |
-  // | lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-  // | dspy.configure(lm=lm)
-  // |
-  // |
-  // | class MyModule(dspy.Module):
-  // |     def __init__(self):
-  // |         super().__init__()
-  // |
-  // |         self.predict1 = dspy.Predict("question->answer")
-  // |         self.predict2 = dspy.Predict("question, answer->answer, score")
-  // |
-  // |     def forward(self, question: str, **kwargs):
-  // |         answer = self.predict1(question=question)
-  // |         simplified_answer = self.predict2(answer=answer)
-  // |         return simplified_answer
-  // |
-  // |
-  // | predict = MyModule()
-  // | stream_listeners = [
-  // |     dspy.streaming.StreamListener(
-  // |         signature_field_name="answer",
-  // |         predict=predict.predict1,
-  // |         predict_name="predict1"
-  // |     ),
-  // |     dspy.streaming.StreamListener(
-  // |         signature_field_name="answer",
-  // |         predict=predict.predict2,
-  // |         predict_name="predict2"
-  // |     ),
-  // | ]
-  // | stream_predict = dspy.streamify(
-  // |     predict,
-  // |     stream_listeners=stream_listeners,
-  // | )
-  // |
-  // |
-  // | async def read_output_stream():
-  // |     output = stream_predict(question="why did a chicken cross the kitchen?")
-  // |
-  // |     return_value = None
-  // |     async for chunk in output:
-  // |         if isinstance(chunk, dspy.streaming.StreamResponse):
-  // |             print(chunk)
-  // |         elif isinstance(chunk, dspy.Prediction):
-  // |             return_value = chunk
-  // |     return return_value
-  // |
-  // |
-  // | program_output = asyncio.run(read_output_stream())
-  // | print("Final output: ", program_output)
-  // TODO translate snippet 6
+  @description("Get user information like name, birthday, etc.")
+  def fetch_user_info(user_name: String): UserInfo = UserInfo(name = user_name, birthday = "2009-05-16")
 
-  // ── Snippet 7 (lines 343–350) ────────────────────
+  @description("Get sports news for a given year.")
+  def get_sports_news(year: Int): String =
+    if year == 2009 then "Usain Bolt broke the world record in the 100m race." else "No news found."
+
+  def streamReactThoughts(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+    val react = ReAct(
+      baseSignature = Signature.fromString("question -> answer"),
+      tools         = Vector(ToolFunction.fromMethod(fetch_user_info), ToolFunction.fromMethod(get_sports_news))
+    )
+    // ReAct's per-step predictor emits `next_thought`; allowReuse=true keeps the listener firing each iteration.
+    val streamReact = Streamify.streamify(
+      program         = react,
+      streamListeners = Vector(StreamListener("next_thought", allowReuse = true))
+    )
+    consume(streamReact(DynamicValues.recordFromEntries(Vector("question" := question))))
+
+  // ── Snippet 6 — two predictors emitting the SAME field name, disambiguated by predict_name ──
+  // | self.predict1 = dspy.Predict("question->answer"); self.predict2 = dspy.Predict("question, answer->answer, score")
+  // | stream_listeners = [StreamListener("answer", predict_name="predict1"), StreamListener("answer", predict_name="predict2")]
+  // dspy4s requires unique field names across a layout, so predict2's input is renamed `draft` (it can't also
+  // be named `answer` like its output); both predictors still emit an `answer` field, the point of the snippet.
+  final class ScoringModule extends DynamicModule:
+    override val moduleName: String = "scoring_module"
+    private val predict1 = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
+    private val predict2 =
+      DynamicPredict(Signature.fromString("question, draft -> answer, score").layout, name = Some("predict2"))
+
+    override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      for
+        step1 <- predict1.apply(call)
+        question = textField(call.inputs, "question")
+        answer   = textField(step1.values, "answer")
+        step2 <- predict2.apply(ProgramCall(inputs =
+                   DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
+                 ))
+      yield step2
+
+  def streamScoring(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+    val streamPredict = Streamify.streamify(
+      program = new ScoringModule,
+      streamListeners = Vector(
+        StreamListener("answer", predictName = Some("predict1")),
+        StreamListener("answer", predictName = Some("predict2"))
+      )
+    )
+    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+
+  // ── Snippets 7/8 — a custom status-message provider + a tool + a reasoning field ──
   // | class MyStatusMessageProvider(dspy.streaming.StatusMessageProvider):
-  // |     def lm_start_status_message(self, instance, inputs):
-  // |         return f"Calling LM with inputs {inputs}..."
-  // |
-  // |     def lm_end_status_message(self, outputs):
-  // |         return f"Tool finished with output: {outputs}!"
-  // TODO translate snippet 7
+  // |     def tool_start_status_message(self, instance, inputs): return f"Calling Tool {instance.name} ..."
+  // |     def tool_end_status_message(self, outputs): return f"Tool finished with output: {outputs}!"
+  final class MyStatusMessageProvider extends StatusMessageProvider:
+    override def toolStart(toolName: String, args: DynamicValue.Record): Option[String] =
+      Some(s"Calling Tool $toolName with inputs ${DynamicValues.recordKeys(args).mkString(", ")}...")
+    override def toolEnd(toolName: String, output: Either[DspyError, DynamicValue]): Option[String] =
+      Some(s"Tool finished with output: ${output.fold(_.message, DynamicValues.renderText)}!")
 
-  // ── Snippet 8 (lines 368–425) ────────────────────
-  // | import asyncio
-  // |
-  // | import dspy
-  // |
-  // | lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-  // | dspy.configure(lm=lm)
-  // |
-  // |
-  // | class MyModule(dspy.Module):
-  // |     def __init__(self):
-  // |         super().__init__()
-  // |
-  // |         self.tool = dspy.Tool(lambda x: 2 * x, name="double_the_number")
-  // |         self.predict = dspy.ChainOfThought("num1, num2->sum")
-  // |
-  // |     def forward(self, num, **kwargs):
-  // |         num2 = self.tool(x=num)
-  // |         return self.predict(num1=num, num2=num2)
-  // |
-  // |
-  // | class MyStatusMessageProvider(dspy.streaming.StatusMessageProvider):
-  // |     def tool_start_status_message(self, instance, inputs):
-  // |         return f"Calling Tool {instance.name} with inputs {inputs}..."
-  // |
-  // |     def tool_end_status_message(self, outputs):
-  // |         return f"Tool finished with output: {outputs}!"
-  // |
-  // |
-  // | predict = MyModule()
-  // | stream_listeners = [
-  // |     # dspy.ChainOfThought has a built-in output field called "reasoning".
-  // |     dspy.streaming.StreamListener(signature_field_name="reasoning"),
-  // | ]
-  // | stream_predict = dspy.streamify(
-  // |     predict,
-  // |     stream_listeners=stream_listeners,
-  // |     status_message_provider=MyStatusMessageProvider(),
-  // | )
-  // |
-  // |
-  // | async def read_output_stream():
-  // |     output = stream_predict(num=3)
-  // |
-  // |     return_value = None
-  // |     async for chunk in output:
-  // |         if isinstance(chunk, dspy.streaming.StreamResponse):
-  // |             print(chunk)
-  // |         elif isinstance(chunk, dspy.Prediction):
-  // |             return_value = chunk
-  // |         elif isinstance(chunk, dspy.streaming.StatusMessage):
-  // |             print(chunk)
-  // |     return return_value
-  // |
-  // |
-  // | program_output = asyncio.run(read_output_stream())
-  // | print("Final output: ", program_output)
-  // TODO translate snippet 8
+  @description("Double the number.")
+  def double_the_number(x: Int): Int = 2 * x
 
-  // ── Snippet 9 (lines 465–492) ────────────────────
-  // | import os
-  // |
-  // | import dspy
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "your_api_key"
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
-  // |
-  // | predict = dspy.Predict("question->answer")
-  // |
-  // | # Enable streaming for the 'answer' field
-  // | stream_predict = dspy.streamify(
-  // |     predict,
-  // |     stream_listeners=[dspy.streaming.StreamListener(signature_field_name="answer")],
-  // |     async_streaming=False,
-  // | )
-  // |
-  // | output = stream_predict(question="why did a chicken cross the kitchen?")
-  // |
-  // | program_output = None
-  // | for chunk in output:
-  // |     if isinstance(chunk, dspy.streaming.StreamResponse):
-  // |         print(chunk)
-  // |     elif isinstance(chunk, dspy.Prediction):
-  // |         program_output = chunk
-  // | print(f"Program output: {program_output}")
-  // TODO translate snippet 9
+  def streamReasoningWithTool(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+    // ChainOfThought's built-in `reasoning` field is modelled by naming it in the layout; the tool runs in
+    // `forward`, so its start/end status messages flow through the custom provider.
+    val tool = ToolFunction.fromMethod(double_the_number)
+    val program = new DynamicModule:
+      override val moduleName: String = "reasoning_module"
+      private val predict =
+        DynamicPredict(Signature.fromString("question, doubled -> reasoning, answer").layout, name = Some("predict"))
+      override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+        for
+          doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
+          out <- predict.apply(ProgramCall(inputs = DynamicValues.recordFromEntries(
+                   Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
+                 )))
+        yield out
+
+    val streamPredict = Streamify.streamify(
+      program               = program,
+      statusMessageProvider = Some(new MyStatusMessageProvider),
+      streamListeners       = Vector(StreamListener("reasoning"))
+    )
+    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.streaming.streamingMain"
+@main def streamingMain(): Unit = Demo.withLm {
+  println("=== single Predict, streaming `answer` ===")
+  val out = Streaming.streamAnswer("Why did a chicken cross the kitchen?")
+  println("Final output: " + out)
 }
