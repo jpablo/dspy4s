@@ -109,10 +109,15 @@ graph TD
      of `DynamicPredict` over the shared `PredictEngine` (not a wrapper around it)
    - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
-   - Untyped composite programs (extend `DynamicModule`): `ReAct`, `CodeAct`,
-     `ProgramOfThought`, `MultiChainComparison`, `Refine`, `BestOfN`, `Parallel`, `Aggregation`
-   - `contracts/ProgramContracts.scala` — `ProgramCall`, `TypedCall`,
-     `ProgramRuntime`, `ToolFunction`
+   - All other programs are typed `Module[TypedCall[I], Prediction[…]]` too:
+     `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
+     data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
+     (`MultiChainCall[I]`; `WithField[O,"rationale",String]`), and `BestOfN[I,O]` / `Refine[I,O]`
+     (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
+     `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the only program on the untyped spine.
+   - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
+   - `contracts/ProgramContracts.scala` — `ProgramCall`, `TypedCall` (typed call object: input +
+     `config` / `traceEnabled` / `rolloutId`), `ProgramRuntime`, `ToolFunction`
 
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
@@ -122,12 +127,14 @@ graph TD
 
 8. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
    `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
-   off `ActivePredictContext`.
+   off `ActivePredictContext`. `Streamify` accepts any program via a
+   `Streamable[P]` typeclass (run-from-record + best-effort sub-signatures),
+   so typed programs stream without an untyped form.
 
 9. **`examples`** — Python DSPy doc translations (tutorials, deep dives,
    cheatsheet, learn/, production/). Translation rule: string-based
-   Python signatures become `Signature.fromType[F]`; class-based ones
-   become a `trait T extends Spec`.
+   Python signatures become `Signature.fromString("…")` (a typed compile-time
+   macro) or `Signature.fromType[F]`; class-based ones become a `trait T extends Spec`.
 
 ## The two stacks
 
@@ -162,7 +169,7 @@ resulting `DynamicPrediction` through `signature.outputShape`. Decode
 failures surface as `Left(DspyError)` at this boundary, never via lazy
 field access.
 
-## Six ways to make a `Signature`
+## Ways to make a `Signature`
 
 | Surface | Use case | I/O types |
 |---|---|---|
@@ -170,12 +177,13 @@ field access.
 | `Signature.from(someMethod _)` | method reference | inferred from method |
 | `Signature.fromType[F]` | function type only, no impl | inferred from `F` |
 | `Signature.of[T <: Spec]` | abstract trait with `InputField` / `OutputField` members | named tuples |
+| `Signature.fromString("q -> a")` | string DSL **literal** | `NamedTuple` both sides (parsed at compile time) |
 | `Signature.builder("X").input[A]("a").output[B]("b").build` | programmatic, no class needed | returns a `SignatureLayout` |
-| `Signature.fromString("q -> a")` | runtime-defined string DSL | `DynamicValue.Record` both sides |
+| `Signature.fromStringDynamic("q -> a")` | string DSL from a **runtime** string | `DynamicValue.Record` both sides |
 
-The first four are the static-typed surfaces. `fromString` is the
-typed wrapper over `SignatureLayout.parse` for cases where the DSL is
-discovered at runtime.
+All but the last are static-typed surfaces — including `fromString`, whose `transparent inline` macro parses the
+literal DSL at compile time into `NamedTuple` I/O (untyped fields default to `String`; `int`/`float`/`bool` map
+to scalars). `fromStringDynamic` is the runtime escape hatch for a DSL string only known at runtime.
 
 ## Canonical `Predict` call flow
 

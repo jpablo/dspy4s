@@ -30,24 +30,35 @@ Module[I, O]                            # ONE generic base (port of dspy.Module)
   │                                     #   final apply (wraps callbacks/trace/history) -> abstract forward
   │
   ├─ DynamicModule = Module[ProgramCall, DynamicPrediction]   # untyped spine (bag projection hooks defaulted)
-  │    ├─ DynamicPredict                # forward = the leaf predict engine
-  │    ├─ ReAct                         # forward; builds react + extract DynamicPredicts
-  │    ├─ CodeAct                       # forward
-  │    ├─ ProgramOfThought              # forward
-  │    └─ Refine / BestOfN / MultiChainComparison   # forward (wrapped like everything else)
+  │    └─ DynamicPredict                # the leaf predict engine — the runtime substrate the typed programs use
   │
-  └─ typed layer = Module[TypedCall[I], Prediction[O]]        # typed programs ARE Modules
+  └─ typed layer = Module[TypedCall[I], Prediction[O]]        # EVERY user-facing program is here
        ├─ Predict[I, O]                 # forward = encode -> PredictEngine -> decode (sibling of DynamicPredict)
-       └─ ChainOfThought[I, O]          # forward delegates to an inner Predict[I, Out]
+       ├─ ChainOfThought[I, O]          # forward delegates to an inner Predict[I, Out]
+       ├─ ReAct[I,O] / CodeAct[I,O] / ProgramOfThought[I,O]   # run loop/extractor internally; decode -> WithField[O,"reasoning",String]
+       ├─ MultiChainComparison[I, O]    # Module[MultiChainCall[I], …]; decode -> WithField[O,"rationale",String]
+       └─ BestOfN[I, O] / Refine[I, O]  # best-of-n over an inner typed program (output-preserving)
 ```
 
 dspy4s has **one generic base `Module[I, O]`** — the port of `dspy.Module` — with `apply` `final` (the lifecycle
 wrapping) over an abstract `forward`. It is instantiated at two layers: the untyped spine
 `Module[ProgramCall, DynamicPrediction]` (aliased **`DynamicModule`**, with the callback/trace projection hooks
-defaulted to the bag shapes) that every engine program extends, and the typed surface
-`Module[TypedCall[I], Prediction[O]]` that `Predict[I,O]` and `ChainOfThought[I,O]` extend — matching Python,
-where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s. `TypedCall[I]` is the typed-layer call object
-(the typed counterpart of `ProgramCall`: a typed `input` plus `config` / `traceEnabled`).
+defaulted to the bag shapes), and the typed surface `Module[TypedCall[I], Prediction[O]]` that **every
+user-facing program extends** — `Predict` / `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` /
+`MultiChainComparison` / `BestOfN` / `Refine`. Only **`DynamicPredict`** lives on the untyped spine, where it
+belongs: it's the runtime substrate the agents and CoT build their inner predicts from. `TypedCall[I]` is the
+typed-layer call object (the typed counterpart of `ProgramCall`: a typed `input` plus `config` / `traceEnabled`
+/ `rolloutId`). The agents run their loop/extractor over the data-bag layer internally and decode the result
+back to the typed output; `MultiChainComparison` uses a bespoke `MultiChainCall[I]` (base input + candidate
+completions, mirroring Python's `forward(completions, **kwargs)`).
+
+Output-augmenting programs (`ChainOfThought`, `ReAct`, `CodeAct`, `ProgramOfThought`, `MultiChainComparison`)
+prepend a field to the output via the shared
+[`OutputAugmentation`](../../modules/typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala) helper
+(`WithField[O, Name, T]` + the `PrependField` typeclass — idempotent, cast-free, always a named tuple). Every
+typed signature surface (`of` / `fromType` / `from` / a **literal** `fromString`) yields a product type, so these
+programs are uniformly typed; only the genuinely-runtime `Signature.fromStringDynamic` (Record I/O) is outside
+the typed surface.
 
 Because `apply` is `final` on the single common base, the lifecycle wrapping is universal and non-bypassable —
 typed **and** untyped — so [G-2](PORT_GAPS.md) stays resolved even though `Module` is generic. (`Module` was
@@ -80,10 +91,11 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | **Predict** | `Module, Parameter` | overrides `__call__`/`acall` **and** `forward`/`aforward` | `Predict[I,O]` ◂ `Module[TypedCall[I], Prediction[O]]` | inherited `apply` → own `forward` (encode → engine → decode) |
 | *(untyped predict)* | — *(Predict is the leaf)* | — | `DynamicPredict` ◂ `DynamicModule` | inherited `apply` → own `forward` |
 | **ChainOfThought** | `Module` | `forward` → `self.predict(**kwargs)` | `ChainOfThought[I,O]` ◂ `Module[TypedCall[I], Prediction[Out]]` | inherited `apply` → `forward` delegates to inner `Predict` |
-| **ReAct** | `Module` | `forward`/`aforward`; `self.react` + `self.extract` | `DynamicModule` | inherited `apply` → own `forward` |
-| **CodeAct** | `Module` | `forward` | `DynamicModule` | inherited `apply` → own `forward` |
-| **ProgramOfThought** | `Module` | `forward` | `DynamicModule` | inherited `apply` → own `forward` |
-| **Refine / BestOfN / MultiChainComparison** | `Module` | `forward` | `DynamicModule` | inherited `apply` → own `forward` *(wrapped like all programs)* |
+| **ReAct** | `Module` | `forward`/`aforward`; `self.react` + `self.extract` | `ReAct[I,O]` ◂ `Module[TypedCall[I], Prediction[WithReasoning[O]]]` | inherited `apply` → `forward`: run loop+extractor internally → decode |
+| **CodeAct** | `Module` | `forward` | `CodeAct[I,O]` ◂ `Module[TypedCall[I], Prediction[WithReasoning[O]]]` | inherited `apply` → `forward`: run loop+extractor → decode |
+| **ProgramOfThought** | `Module` | `forward` | `ProgramOfThought[I,O]` ◂ `Module[TypedCall[I], Prediction[WithReasoning[O]]]` | inherited `apply` → `forward`: generate/regenerate/answer → decode |
+| **MultiChainComparison** | `Module` | `forward(completions, **kwargs)` | `MultiChainComparison[I,O]` ◂ `Module[MultiChainCall[I], Prediction[WithField[O,"rationale",String]]]` | inherited `apply` → `forward` (the call carries the completions) |
+| **BestOfN / Refine** | `Module` | `forward` | `BestOfN[I,O]` / `Refine[I,O]` ◂ `Module[TypedCall[I], Prediction[O]]` | inherited `apply` → `forward`: best-of-n over inner typed program *(output-preserving)* |
 
 ## Key structural differences (callouts)
 
@@ -125,6 +137,24 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    `BasePredictProgram` you opted into, letting `Refine`/`BestOfN`/etc. skip it
    — that was [G-2](PORT_GAPS.md), resolved by merging into one `Module` base; re-genericizing `Module` for the
    typed layer kept `apply` `final`, so it stays resolved.)
+
+7. **The agents are typed-only, and stream via a typeclass.** `ReAct` / `CodeAct` / `ProgramOfThought` are
+   `Module[TypedCall[I], …]` with no untyped `Dynamic*` twin. They were the one place that *seemed* to need an
+   untyped form: `Streamify` only accepted a `DynamicModule`. Rather than keep untyped twins, `Streamify` was
+   generalized to take **any** program through a
+   [`Streamable[P]`](../../modules/streaming/src/main/scala/dspy4s/streaming/Streamable.scala) typeclass that
+   captures its two real requirements — *run from a record → `DynamicPrediction`* and *best-effort sub-signatures
+   for listener validation*. Each typed agent provides a `Streamable` instance (decode the record → typed input →
+   run → `.raw`), so it streams with no `DynamicModule` form and emits a single module event (no
+   wrapper-over-untyped double event). Only `DynamicPredict` keeps the `dynamicModule` `Streamable` instance.
+
+8. **The string DSL is a *typed*, compile-time surface.** `Signature.fromString("q -> a: bool")` is a
+   `transparent inline` macro: it parses the **literal** at compile time (reusing the runtime `SignatureLayout.parse`)
+   and synthesizes `NamedTuple` I/O — `Signature[(q: String), (a: Boolean)]` — so the string DSL gives typed
+   dot-access like `Signature.of[Spec]` / `fromType[F]`. An invalid DSL or an unsupported field type is a compile
+   error. The previous runtime, `Record`-returning version is `Signature.fromStringDynamic` (for genuinely
+   runtime-built strings). This is what lets the augmenting programs be uniformly typed: every static signature
+   surface produces a product type, never a bare `Record`.
 
 ## Design principle: a module is pure; the runtime owns the bookkeeping
 

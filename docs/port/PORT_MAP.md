@@ -64,7 +64,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `refine.py` | `Refine.scala` | ✅ ported |
 | `parallel.py` | `Parallel.scala` | ✅ ported |
 | `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
-| `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported. Run via `runWithAttempts(call, attempts)` rather than Python's `__call__(attempts, **inputs)` shape — the explicit method takes the attempts off the kwargs path. |
+| `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, typed `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is a bespoke `MultiChainCall[I]` (base input + candidate completions); `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
 | `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s optimizers use the `PredictOps[P]` typeclass instead (Scala typeclass dispatch reads `demos` / `layout` directly), so the generic walk has no consumer. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed once `PredictOps` landed in Phase 7. |
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
 | `knn.py` | — | Deferred — depends on retrievers / embedders, neither of which is ported. |

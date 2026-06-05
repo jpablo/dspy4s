@@ -54,7 +54,8 @@ factory entry points** that all produce the same immutable
 | `Signature.fromType[F]` | a Scala function type |
 | `Signature.of[T <: Spec]` | the trait-as-spec macro, the closest analogue to Python's class form |
 | `Signature.builder(name).input[A](...).output[B](...).build` | programmatic |
-| `Signature.fromString("q -> a")` | the runtime string DSL |
+| `Signature.fromString("q -> a")` | the string DSL — a **compile-time macro** that parses the literal into typed `NamedTuple` I/O |
+| `Signature.fromStringDynamic("q -> a")` | the string DSL from a **runtime** string (no static types; `Record` I/O) |
 
 The trait-spec macro is what most Python class signatures translate
 to:
@@ -299,10 +300,11 @@ parity. Documented in [PORT_MAP §2a](PORT_MAP.md#2a-programs-per-file-port-stat
 
 **Convention.**
 
-Python's `MultiChainComparison.__call__(attempts, **inputs)` mixes
-the `attempts` parameter with input kwargs. dspy4s exposes
-`runWithAttempts(call, attempts)` as a separate method to keep
-attempts off the input map. Behaviorally equivalent.
+Python's `MultiChainComparison.__call__(attempts, **inputs)` mixes the `attempts` parameter with input kwargs.
+dspy4s models the dual input faithfully as a bespoke call object, `MultiChainCall[I]` (the typed base input `I`
+plus the candidate `attempts`), so `MultiChainComparison[I, O]` is a `Module[MultiChainCall[I], …]` and the real
+work flows through the wrapped `apply` (callbacks/trace), not a side method. The `compare(input, attempts)`
+convenience builds the call. (Earlier this was an untyped `runWithAttempts` that side-stepped the wrapping.)
 
 ## 13. Recent: typed/dynamic split inside `programs/`
 
@@ -325,6 +327,17 @@ The typed programs are a Scala-native addition that doesn't change the
 underlying call flow; the engine is the single home for the
 adapter/LM/callback dance that Python has spread across
 `Predict.__call__` and its helpers.
+
+**Every program is now typed.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
+`ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[TypedCall[I], …]` —
+`DynamicPredict` is the only program left on the untyped spine (it's the substrate the others build inner
+predicts from). Three pieces made this clean:
+- **`OutputAugmentation`** (`dspy4s.typed`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
+  output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
+- **Typed `Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
+  `NamedTuple` I/O, so the string DSL is a *typed* surface; `fromStringDynamic` is the runtime (`Record`) version.
+- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so the typed
+  agents stream without needing an untyped `DynamicModule` twin.
 
 The mutation helpers on `SignatureLayout` (`append`, `prepend`,
 `insert`, `delete`, `withFields`, `withUpdatedField*`,
