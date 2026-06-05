@@ -3,11 +3,19 @@
  *
  * Source:   docs/docs/learn/programming/modules.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/modules.md
- * Status:   scaffold (4 python snippets — TODO translate)
+ * Status:   translated (portable snippets; multi-completion `n=5` access noted as unsupported)
+ *
+ * Translation rule (see Signatures.scala): string-DSL Python signatures become typed
+ * `Signature.fromString("…")` (parsed to a NamedTuple at compile time); each snippet is a
+ * self-contained example object exposing a `call(...)` that wires the program.
  */
 package dspy4s.examples.learn.programming
 
-object Modules {
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.programs.{ChainOfThought, Predict}
+import dspy4s.typed.Signature
+
+object Modules:
 
   // ── Snippet 1 (lines 22–33) ────────────────────
   // | sentence = "it's a charming and often affecting journey."  # example from the SST-2 dataset.
@@ -20,9 +28,13 @@ object Modules {
   // |
   // | # 3) Access the output.
   // | print(response.sentiment)
-  // TODO translate snippet 1
+  object SentimentExample:
+    val classify = Predict(Signature.fromString("sentence -> sentiment: bool"))
 
-  // ── Snippet 2 (lines 45–56) ────────────────────
+    def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
+      classify.apply((sentence = sentence)).map(_.output.sentiment)
+
+  // ── Snippets 2 + 3 (lines 45–73) ────────────────
   // | question = "What's something great about the ColBERT retrieval model?"
   // |
   // | # 1) Declare with a signature, and pass some config.
@@ -33,14 +45,21 @@ object Modules {
   // |
   // | # 3) Access the outputs.
   // | response.completions.answer
-  // TODO translate snippet 2
-
-  // ── Snippet 3 (lines 70–73) ────────────────────
   // | print(f"Reasoning: {response.reasoning}")
   // | print(f"Answer: {response.answer}")
-  // TODO translate snippet 3
+  //
+  // Note: Python's `n=5` samples multiple completions and exposes them via
+  // `response.completions.answer` / `response.completions[3]`. dspy4s's typed
+  // ChainOfThought returns a single prediction; multi-completion access (snippet 4) is
+  // not part of the typed surface. The single-completion shape is shown here.
+  object QaReasoningExample:
+    val classify = ChainOfThought(Signature.fromString("question -> answer"))
+
+    /** Returns the corrected reasoning and the answer (ChainOfThought prepends `reasoning`). */
+    def call(question: String)(using RuntimeContext): Either[DspyError, (String, String)] =
+      classify.apply((question = question)).map(p => (p.output.reasoning, p.output.answer))
 
   // ── Snippet 4 (lines 84–86) ────────────────────
   // | response.completions[3].reasoning == response.completions.reasoning[3]
-  // TODO translate snippet 4
-}
+  // Not portable: dspy4s has no typed multi-completion (`n`) surface — a typed prediction
+  // carries a single decoded output. The raw completions remain on `prediction.raw.completions`.
