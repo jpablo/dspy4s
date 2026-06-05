@@ -50,6 +50,15 @@ final case class BestOfN[I, O](
       reward = prediction => BestOfN.guardedReward(moduleName)(rewardFn(call.input, prediction))
     )
 
+  /** Convenience entry mirroring the typed caller signature; builds a [[TypedCall]] and dispatches through the
+    * wrapped [[apply]]. */
+  def apply(
+      input: I,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean = true
+  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    apply(TypedCall(input, config, traceEnabled))
+
 object BestOfN:
 
   /** The best-of-`n` selection loop, generic over the attempt result `A` (a `Prediction[O]` for [[BestOfN]]).

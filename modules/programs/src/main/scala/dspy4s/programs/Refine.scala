@@ -32,3 +32,12 @@ final case class Refine[I, O](
 
   override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     bestOfN.apply(call)
+
+  /** Convenience entry mirroring the typed caller signature; builds a [[TypedCall]] and dispatches through the
+    * wrapped [[apply]]. */
+  def apply(
+      input: I,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean = true
+  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    apply(TypedCall(input, config, traceEnabled))
