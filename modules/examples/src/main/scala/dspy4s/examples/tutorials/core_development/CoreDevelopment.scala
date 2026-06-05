@@ -3,7 +3,7 @@
  *
  * Source:   docs/docs/tutorials/core_development/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/core_development/index.md
- * Status:   scaffold (0 python snippets — TODO translate)
+ * Status:   complete (source doc has no python snippets to translate)
  */
 package dspy4s.examples.tutorials.core_development
 

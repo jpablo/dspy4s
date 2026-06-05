@@ -3,7 +3,7 @@
  *
  * Source:   docs/docs/tutorials/conversation_history/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/conversation_history/index.md
- * Status:   scaffold (2 python snippets — TODO translate)
+ * Status:   blocked — needs `dspy.History` input type, `inspect_history`, and mutable `predict.demos` (none ported)
  */
 package dspy4s.examples.tutorials.conversation_history
 

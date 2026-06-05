@@ -3,7 +3,7 @@
  *
  * Source:   docs/docs/tutorials/optimizer_tracking/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/optimizer_tracking/index.md
- * Status:   scaffold (3 python snippets — TODO translate)
+ * Status:   blocked — MLflow autolog, MIPROv2, and datasets are not ported
  */
 package dspy4s.examples.tutorials.optimizer_tracking
 

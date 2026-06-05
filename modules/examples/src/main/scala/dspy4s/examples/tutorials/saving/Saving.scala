@@ -3,7 +3,7 @@
  *
  * Source:   docs/docs/tutorials/saving/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md
- * Status:   scaffold (8 python snippets — TODO translate)
+ * Status:   blocked — program `.save`/`.load` and the GSM8K dataset are not ported
  */
 package dspy4s.examples.tutorials.saving
 

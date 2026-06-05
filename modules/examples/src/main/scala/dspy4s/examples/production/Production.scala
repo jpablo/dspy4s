@@ -3,7 +3,7 @@
  *
  * Source:   docs/docs/production/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/production/index.md
- * Status:   scaffold (0 python snippets — TODO translate)
+ * Status:   complete (source doc has no python snippets to translate)
  */
 package dspy4s.examples.production
 
