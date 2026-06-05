@@ -15,6 +15,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.examples.Demo
 import dspy4s.typed.Signature
 
 object FunctionExample:
@@ -40,3 +41,8 @@ object FunctionExample:
     Predict(emotion)
       .apply((sentence = sentence))
       .map(_.output.sentiment)
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.functionMain"
+@main def functionMain(): Unit = Demo.withLm {
+  println("Function: " + FunctionExample.classify("i started feeling a little vulnerable"))
+}

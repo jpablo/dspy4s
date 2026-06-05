@@ -13,6 +13,7 @@
 package dspy4s.examples.tutorials.llms_txt_generation
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.examples.Demo
 import dspy4s.programs.ChainOfThought
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
@@ -94,3 +95,14 @@ object LlmsTxtGeneration:
       packageFiles: String
   )(using RuntimeContext): Either[DspyError, String] =
     new RepositoryAnalyzer().forward(repoUrl, fileTree, readmeContent, packageFiles)
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.llms_txt_generation.llmsTxtMain"
+@main def llmsTxtMain(): Unit = Demo.withLm {
+  val result = LlmsTxtGeneration.generateLlmsTxt(
+    repoUrl       = "https://github.com/example/project",
+    fileTree      = "src/main.py\nsrc/util.py\nREADME.md\npyproject.toml",
+    readmeContent = "# Project\nA small example project.",
+    packageFiles  = "=== pyproject.toml ===\n[project]\nname = \"project\""
+  )
+  println("llms.txt: " + result)
+}

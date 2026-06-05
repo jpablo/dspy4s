@@ -12,6 +12,7 @@
 package dspy4s.examples.tutorials.output_refinement
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.examples.Demo
 import dspy4s.programs.{BestOfN, ChainOfThought, Refine}
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
@@ -93,3 +94,12 @@ object BestOfNAndRefine:
 
     def call(text: String)(using RuntimeContext): Either[DspyError, String] =
       optimizedSummarizer.apply((text = text)).map(_.output.summary)
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.output_refinement.bestOfNAndRefineMain"
+@main def bestOfNAndRefineMain(): Unit = Demo.withLm {
+  val q = "What is the capital of Belgium?"
+  println("BestOfN: " + BestOfNAndRefine.OneWordBestOfN.call(q))
+  println("Refine:  " + BestOfNAndRefine.OneWordRefine.call(q))
+  println("Judge:   " + BestOfNAndRefine.FactualityRefine.call("Tell me about Belgium's capital city."))
+  println("Summary: " + BestOfNAndRefine.IdealLengthSummarizer.call("[Long text to summarize...]"))
+}

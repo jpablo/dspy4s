@@ -10,6 +10,7 @@
 package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
+import dspy4s.examples.Demo
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.typed.Signature
@@ -86,3 +87,8 @@ object Tools:
   //
   // ── Snippets 7 / 8 — async tools (`tool.acall`, async→sync conversion) ──
   // Not portable: `ToolFunction.invoke` is synchronous; there is no async tool path.
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.toolsMain"
+@main def toolsMain(): Unit = Demo.withLm {
+  println("ReAct: " + Tools.WeatherAgentExample.call("What's the weather like in Tokyo?"))
+}

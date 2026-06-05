@@ -42,3 +42,8 @@ object BuilderExample:
       .output[Emotion]("sentiment")
       .instructions("Classify emotion in the given sentence.")
       .build
+
+// Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.typed.builderMain"
+@main def builderMain(): Unit =
+  println("toxicity outputs:  " + BuilderExample.toxicity.outputFields.map(_.name))
+  println("emotion outputs:   " + BuilderExample.classifyEmotion.outputFields.map(_.name))

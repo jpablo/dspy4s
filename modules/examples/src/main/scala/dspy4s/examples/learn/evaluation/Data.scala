@@ -49,3 +49,11 @@ object Data:
   // Not portable: dspy4s has no `datasets` / `DataLoader` (`from_csv`, `from_json`, `from_parquet`,
   // `from_pandas`, `from_huggingface`) and no built-in split helpers. Construct `Vector[Example]`
   // directly (as in snippet 2) and slice with ordinary Scala (`xs.take(75)` / `xs.drop(75)`).
+
+// Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.learn.evaluation.dataMain"
+@main def dataMain(): Unit =
+  println(s"qa_pair: question='${Data.question}', answer='${Data.answer}'")
+  println(s"with_inputs('question','answer') keys: ${Data.multipleInputs.inputKeys}")
+  println(s"article inputs: ${Data.inputKeyOnly}")
+  println(s"article labels: ${Data.nonInputOnly}")
+  println(s"trainset size: ${Data.trainset.size}")

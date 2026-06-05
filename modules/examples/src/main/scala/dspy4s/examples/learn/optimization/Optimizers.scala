@@ -11,10 +11,13 @@
  */
 package dspy4s.examples.learn.optimization
 
-import dspy4s.core.contracts.{DspyError, Example, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, Example, RuntimeContext}
 import dspy4s.evaluate.contracts.Metric
+import dspy4s.evaluate.metrics.ExactMatch
+import dspy4s.examples.Demo
 import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, RandomSearchConfig}
 import dspy4s.programs.DynamicPredict
+import dspy4s.typed.Signature
 
 object Optimizers:
 
@@ -41,3 +44,14 @@ object Optimizers:
   // | loaded_program = YOUR_PROGRAM_CLASS(); loaded_program.load(path=YOUR_SAVE_PATH)
   // Not portable: dspy4s programs have no `.save` / `.load`. Programs are immutable values; persist
   // the tuned state (the predictor's demos) yourself if you need to round-trip it.
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.optimization.optimizersMain"
+// (Runs a small bootstrap+random-search over an LM — makes several LM calls.)
+@main def optimizersMain(): Unit = Demo.withLm {
+  val program  = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
+  val trainset = Vector(
+    Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question")),
+    Example("question" := "What is 2+2?", "answer" := "4").withInputs(Set("question"))
+  )
+  println("Optimized program: " + Optimizers.optimize(new ExactMatch(), program, trainset).map(_.moduleName))
+}

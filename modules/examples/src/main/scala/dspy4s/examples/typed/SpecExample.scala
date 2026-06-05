@@ -18,6 +18,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.examples.Demo
 import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
 
@@ -61,3 +62,8 @@ object SpecExample:
   def callEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.Predict
     Predict(emotion).apply((sentence = sentence)).map(_.output.sentiment)
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.specMain"
+@main def specMain(): Unit = Demo.withLm {
+  println("Spec: " + SpecExample.callEmotion("i started feeling a little vulnerable"))
+}

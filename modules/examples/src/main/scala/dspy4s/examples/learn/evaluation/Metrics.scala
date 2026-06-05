@@ -93,3 +93,11 @@ object Metrics:
   def example(question: String, answer: String): Example =
     Example("question" -> DynamicValues.fromAny(question), "answer" -> DynamicValues.fromAny(answer))
       .withInputs(Set("question"))
+
+// Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.learn.evaluation.metricsMain"
+@main def metricsMain(): Unit =
+  val ex      = Metrics.example("What is the capital of France?", "Paris")
+  def pred(answer: String): DynamicPrediction =
+    DynamicPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))
+  println("validate_answer('paris'): " + Metrics.validateAnswer.score(ex, pred("paris")))
+  println("validate_answer('Lyon'):  " + Metrics.validateAnswer.score(ex, pred("Lyon")))

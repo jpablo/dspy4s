@@ -12,6 +12,7 @@ package dspy4s.examples.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{DspyError, DynamicPrediction, RuntimeContext, :=}
+import dspy4s.examples.Demo
 import dspy4s.typed.{Prediction, Signature}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
@@ -60,3 +61,8 @@ object CaseClassExample:
       dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" := rawSentiment))
     )
     Prediction.from(raw, signature.outputShape)
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.caseClassMain"
+@main def caseClassMain(): Unit = Demo.withLm {
+  println("CaseClass: " + CaseClassExample.classify("i started feeling a little vulnerable"))
+}

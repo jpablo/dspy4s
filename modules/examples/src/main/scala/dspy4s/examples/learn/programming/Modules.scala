@@ -12,6 +12,7 @@
 package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.examples.Demo
 import dspy4s.programs.{ChainOfThought, Predict}
 import dspy4s.typed.Signature
 
@@ -63,3 +64,9 @@ object Modules:
   // | response.completions[3].reasoning == response.completions.reasoning[3]
   // Not portable: dspy4s has no typed multi-completion (`n`) surface — a typed prediction
   // carries a single decoded output. The raw completions remain on `prediction.raw.completions`.
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.modulesMain"
+@main def modulesMain(): Unit = Demo.withLm {
+  println("Sentiment: " + Modules.SentimentExample.call("it's a charming and often affecting journey."))
+  println("QA:        " + Modules.QaReasoningExample.call("What's something great about the ColBERT retrieval model?"))
+}
