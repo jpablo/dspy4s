@@ -3,154 +3,88 @@
  *
  * Source:   docs/docs/tutorials/cache/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/cache/index.md
- * Status:   scaffold (9 python snippets — TODO translate)
+ * Status:   translated (the caching + usage-tracking model, snippets 1/3/4/5/6/7/9). The key shape
+ *           difference: dspy4s has no global `dspy.configure_cache(...)` / `dspy.cache` — caching is a
+ *           *per-LM composition*. You wrap a `LanguageModel` in `ManagedLanguageModel(delegate, cache =
+ *           Some(...))`, choosing the cache implementation: `NoopLmCache` (disable), `InMemoryLmCache`
+ *           (memory), `DiskLmCache(dir)` (disk), or your own `LmCache`. Usage tracking (snippet 1's
+ *           `track_usage=True`) is `RuntimeContext(trackUsage = Some(true))` read inside a
+ *           `UsageTracking.withNewTracker`. The Anthropic `cache_control_injection_points` (snippet 2)
+ *           is a provider-specific prompt-caching hint with no dspy4s surface and is out of scope.
  */
 package dspy4s.examples.tutorials.cache
 
-object Cache {
+import dspy4s.adapters.ChatAdapter
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.examples.Demo
+import dspy4s.lm.contracts.{LanguageModel, LmCache, LmRequest, LmResponse, LmUsage}
+import dspy4s.lm.runtime.{DiskLmCache, InMemoryLmCache, ManagedLanguageModel, NoopLmCache, RequestHash, UsageTracking}
+import dspy4s.programs.Predict
+import dspy4s.typed.Signature
 
-  // ── Snippet 1 (lines 21–39) ────────────────────
-  // | import dspy
-  // | import os
-  // | import time
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "{your_openai_key}"
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"), track_usage=True)
-  // |
-  // | predict = dspy.Predict("question->answer")
-  // |
-  // | start = time.time()
-  // | result1 = predict(question="Who is the GOAT of basketball?")
-  // | print(f"Time elapse: {time.time() - start: 2f}\n\nTotal usage: {result1.get_lm_usage()}")
-  // |
-  // | start = time.time()
-  // | result2 = predict(question="Who is the GOAT of basketball?")
-  // | print(f"Time elapse: {time.time() - start: 2f}\n\nTotal usage: {result2.get_lm_usage()}")
-  // TODO translate snippet 1
+import java.nio.file.Path
+import scala.collection.concurrent.TrieMap
 
-  // ── Snippet 2 (lines 57–76) ────────────────────
-  // | import dspy
-  // | import os
-  // |
-  // | os.environ["ANTHROPIC_API_KEY"] = "{your_anthropic_key}"
-  // | lm = dspy.LM(
-  // |     "anthropic/claude-sonnet-4-5-20250929",
-  // |     cache_control_injection_points=[
-  // |         {
-  // |             "location": "message",
-  // |             "role": "system",
-  // |         }
-  // |     ],
-  // | )
-  // | dspy.configure(lm=lm)
-  // |
-  // | # Use with any DSPy module
-  // | predict = dspy.Predict("question->answer")
-  // | result = predict(question="What is the capital of France?")
-  // TODO translate snippet 2
+object Cache:
 
-  // ── Snippet 3 (lines 94–99) ────────────────────
-  // | dspy.configure_cache(
-  // |     enable_disk_cache=False,
-  // |     enable_memory_cache=False,
-  // | )
-  // TODO translate snippet 3
+  private val qa = Signature.fromString("question -> answer")
 
-  // ── Snippet 4 (lines 103–110) ────────────────────
-  // | dspy.configure_cache(
-  // |     enable_disk_cache=True,
-  // |     enable_memory_cache=True,
-  // |     disk_size_limit_bytes=YOUR_DESIRED_VALUE,
-  // |     memory_max_entries=YOUR_DESIRED_VALUE,
-  // | )
-  // TODO translate snippet 4
+  /** Install `lm` (+ a ChatAdapter) as the active context and answer one question. */
+  def ask(lm: LanguageModel, question: String)(using RuntimeContext): Either[DspyError, String] =
+    RuntimeEnvironment.withSettings(summon[RuntimeContext].copy(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      Predict(qa).apply((question = question)).map(_.output.answer)
+    }
 
-  // ── Snippet 5 (lines 120–139) ────────────────────
+  // ── Snippets 3/4 — disable vs enable caching (≈ dspy.configure_cache) ──
+  // | dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)   # → NoopLmCache (or no cache)
+  // | dspy.configure_cache(enable_disk_cache=True,  enable_memory_cache=True)    # → InMemory / Disk caches
+  def uncached(lm: LanguageModel): LanguageModel  = ManagedLanguageModel(lm, cache = Some(NoopLmCache))
+  def memoryCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()))
+  def diskCached(lm: LanguageModel, dir: Path): LanguageModel =
+    ManagedLanguageModel(lm, cache = Some(new DiskLmCache(dir)))
+
+  // ── Snippet 1 — track token usage across calls; a cache hit reports no new usage ──
+  // | dspy.configure(lm=..., track_usage=True); result.get_lm_usage()
+  // The second call hits the memory cache, so it's fast and contributes no usage — exactly the snippet's point.
+  def usageAcrossCachedCalls(lm: LanguageModel, question: String)(using RuntimeContext)
+      : Either[DspyError, Map[String, LmUsage]] =
+    val managed = memoryCached(lm)
+    UsageTracking.withNewTracker { tracker =>
+      RuntimeEnvironment.withSettings(
+        summon[RuntimeContext].copy(lm = Some(managed), adapter = Some(ChatAdapter()), trackUsage = Some(true))
+      ) {
+        given RuntimeContext = RuntimeEnvironment.current
+        for
+          _ <- Predict(qa).apply((question = question)) // miss: records usage
+          _ <- Predict(qa).apply((question = question)) // hit: fast, no new usage
+        yield tracker.totalUsage
+      }
+    }
+
+  // ── Snippets 5/6/7/9 — a custom cache: subclass `dspy.clients.Cache`, override the cache key ──
   // | class CustomCache(dspy.clients.Cache):
-  // |     def __init__(self, **kwargs):
-  // |         {write your own constructor}
-  // |
-  // |     def cache_key(self, request: dict[str, Any], ignored_args_for_cache_key: Optional[list[str]] = None) -> str:
-  // |         {write your logic of computing cache key}
-  // |
-  // |     def get(self, request: dict[str, Any], ignored_args_for_cache_key: Optional[list[str]] = None) -> Any:
-  // |         {write your cache read logic}
-  // |
-  // |     def put(
-  // |         self,
-  // |         request: dict[str, Any],
-  // |         value: Any,
-  // |         ignored_args_for_cache_key: Optional[list[str]] = None,
-  // |         enable_memory_cache: bool = True,
-  // |     ) -> None:
-  // |         {write your cache write logic}
-  // TODO translate snippet 5
+  // |     def cache_key(self, request, ...): return sha256(orjson.dumps(request["messages"], sort_keys)).hexdigest()
+  // | dspy.cache = CustomCache(...)
+  // The dspy4s analogue is implementing `LmCache`. This one keys *only on the messages* (ignoring model and
+  // sampling options), so the same prompt to a different model still hits the cache.
+  final class MessagesOnlyCache extends LmCache:
+    private val store = TrieMap.empty[String, LmResponse]
+    private def key(request: LmRequest): String = RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
+    override def get(request: LmRequest): Option[LmResponse] = store.get(key(request))
+    override def put(request: LmRequest, response: LmResponse): Unit = { store.update(key(request), response); () }
 
-  // ── Snippet 6 (lines 145–147) ────────────────────
-  // | dspy.cache = CustomCache()
-  // TODO translate snippet 6
+  def customCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new MessagesOnlyCache))
 
-  // ── Snippet 7 (lines 151–159) ────────────────────
-  // | class CustomCache(dspy.clients.Cache):
-  // |
-  // |     def cache_key(self, request: dict[str, Any], ignored_args_for_cache_key: Optional[list[str]] = None) -> str:
-  // |         messages = request.get("messages", [])
-  // |         return sha256(orjson.dumps(messages, option=orjson.OPT_SORT_KEYS)).hexdigest()
-  // |
-  // | dspy.cache = CustomCache(enable_disk_cache=True, enable_memory_cache=True, disk_cache_dir=dspy.clients.DISK_CACHE_DIR)
-  // TODO translate snippet 7
-
-  // ── Snippet 8 (lines 163–182) ────────────────────
-  // | import dspy
-  // | import os
-  // | import time
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "{your_openai_key}"
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
-  // |
-  // | predict = dspy.Predict("question->answer")
-  // |
-  // | start = time.time()
-  // | result1 = predict(question="Who is the GOAT of soccer?")
-  // | print(f"Time elapse: {time.time() - start: 2f}")
-  // |
-  // | start = time.time()
-  // | with dspy.context(lm=dspy.LM("openai/gpt-4.1-mini")):
-  // |     result2 = predict(question="Who is the GOAT of soccer?")
-  // | print(f"Time elapse: {time.time() - start: 2f}")
-  // TODO translate snippet 8
-
-  // ── Snippet 9 (lines 186–216) ────────────────────
-  // | import dspy
-  // | import os
-  // | import time
-  // | from typing import Dict, Any, Optional
-  // | import orjson
-  // | from hashlib import sha256
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "{your_openai_key}"
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
-  // |
-  // | class CustomCache(dspy.clients.Cache):
-  // |
-  // |     def cache_key(self, request: dict[str, Any], ignored_args_for_cache_key: Optional[list[str]] = None) -> str:
-  // |         messages = request.get("messages", [])
-  // |         return sha256(orjson.dumps(messages, option=orjson.OPT_SORT_KEYS)).hexdigest()
-  // |
-  // | dspy.cache = CustomCache(enable_disk_cache=True, enable_memory_cache=True, disk_cache_dir=dspy.clients.DISK_CACHE_DIR)
-  // |
-  // | predict = dspy.Predict("question->answer")
-  // |
-  // | start = time.time()
-  // | result1 = predict(question="Who is the GOAT of volleyball?")
-  // | print(f"Time elapse: {time.time() - start: 2f}")
-  // |
-  // | start = time.time()
-  // | with dspy.context(lm=dspy.LM("openai/gpt-4.1-mini")):
-  // |     result2 = predict(question="Who is the GOAT of volleyball?")
-  // | print(f"Time elapse: {time.time() - start: 2f}")
-  // TODO translate snippet 9
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.cache.cacheMain"
+@main def cacheMain(): Unit = Demo.withLm {
+  // Demo installs a base LM in the context; rewrap it with a memory cache and ask twice.
+  // Demo installs a base LM in the context; rewrap it with each cache and ask.
+  RuntimeEnvironment.current.lm match
+    case Some(base: LanguageModel) =>
+      println("Memory-cached: " + Cache.ask(Cache.memoryCached(base), "Who is the GOAT of basketball?"))
+      println("Custom-cached: " + Cache.ask(Cache.customCached(base), "Who is the GOAT of basketball?"))
+      println("Usage:         " + Cache.usageAcrossCachedCalls(base, "Who is the GOAT of basketball?"))
+    case _ => println("No LanguageModel in context.")
 }
