@@ -281,7 +281,10 @@ code:
    reliability tests for malformed outputs; structured `ParseError`s
    with field-level context.
 4. **Tool introspection differences.** Mitigation: explicit Scala
-   `ToolFunction` API first; reflective derivation deferred.
+   `ToolFunction` API, plus `ToolFunction.fromMethod` (the analogue of
+   `dspy.Tool(fn)`) — a macro that derives a tool's name, `@description`,
+   and typed argument schema from a plain method and decodes each call
+   argument by name/type.
 5. **Python save / pickle compatibility.** Mitigation: a dspy4s-native
    artifact format (`SignatureLayout.dumpState` / `fromState`);
    explicit non-compat note.

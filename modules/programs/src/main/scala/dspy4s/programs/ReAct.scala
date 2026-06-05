@@ -115,8 +115,11 @@ final case class ReAct[I, O](
     val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
     val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
     val toolList = allTools.zipWithIndex.map { case (tool, idx) =>
+      val args = if tool.argSchema.nonEmpty then
+        tool.argSchema.map((argName, typeRef) => s"$argName: ${typeRef.repr}").mkString("(", ", ", ")")
+      else ""
       val desc = if tool.description.nonEmpty then s": ${tool.description}" else ""
-      s"(${idx + 1}) `${tool.name}`$desc"
+      s"(${idx + 1}) `${tool.name}`$args$desc"
     }.mkString("\n")
     s"""${taskPrelude}You are an Agent. In each episode you receive the fields $inputs as input, along with your past trajectory.
        |Your goal is to use one or more of the supplied tools to collect the information needed to produce $outputs.

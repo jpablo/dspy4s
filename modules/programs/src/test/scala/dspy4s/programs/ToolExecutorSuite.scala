@@ -1,13 +1,23 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, TypeRef, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.{ToolCallRequest, ToolFunction}
+import dspy4s.programs.contracts.{ToolCallRequest, ToolFunction, description}
 import dspy4s.programs.runtime.ToolExecutor
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import munit.FunSuite
 
+object ToolExecutorSuite:
+  /** A plain typed method, the dspy4s analogue of Python's `def get_weather(city: str) -> str`. */
+  @description("Get the current weather for a city.")
+  def getWeather(city: String): String = s"The weather in $city is sunny and 75°F"
+
+  /** Two typed params, one numeric — exercises arg-schema reporting and LM-shaped coercion ("3" → Int). */
+  @description("Repeat a phrase N times.")
+  def repeat(phrase: String, times: Int): String = Vector.fill(times)(phrase).mkString(" ")
+
 class ToolExecutorSuite extends FunSuite:
+  import ToolExecutorSuite.{getWeather, repeat}
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
@@ -55,6 +65,33 @@ class ToolExecutorSuite extends FunSuite:
         Right(ToolFunction.result("The weather in Tokyo is sunny"))
       )
       assert(failing.invoke(DynamicValue.Record.empty).isLeft)
+    }
+  }
+
+  test("ToolFunction.fromMethod derives name, description, argSchema, and decodes args from the call record") {
+    val weather = ToolFunction.fromMethod(getWeather)
+    val rep     = ToolFunction.fromMethod(repeat)
+
+    assertEquals(weather.name, "getWeather")
+    assertEquals(weather.description, "Get the current weather for a city.")
+    assertEquals(weather.argSchema, Vector("city" -> TypeRef.string))
+
+    assertEquals(rep.name, "repeat")
+    assertEquals(rep.argSchema, Vector("phrase" -> TypeRef.string, "times" -> TypeRef.int))
+
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(
+        weather.invoke(DynamicValues.recordFromEntries(Seq("city" := "Tokyo"))),
+        Right(ToolFunction.result("The weather in Tokyo is sunny and 75°F"))
+      )
+      // The numeric arg arrives LM-shaped as the string "3" and is coerced to Int before applying the method.
+      assertEquals(
+        rep.invoke(DynamicValues.recordFromEntries(Seq("phrase" := "hi", "times" := "3"))),
+        Right(ToolFunction.result("hi hi hi"))
+      )
+      // A missing required argument surfaces as a Left rather than throwing.
+      assert(weather.invoke(DynamicValue.Record.empty).isLeft)
     }
   }
 

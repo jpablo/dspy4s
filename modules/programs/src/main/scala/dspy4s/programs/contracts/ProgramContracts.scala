@@ -50,7 +50,16 @@ trait ToolFunction:
     * each tool's name + description so the model knows when to call it). Defaults to empty. */
   def description: String = ""
 
+  /** The tool's parameters as `(name, wire type)` pairs, surfaced to the model by tool-using programs so it knows
+    * what arguments to supply. Empty for hand-written tools and the function factories; populated by
+    * [[ToolFunction.fromMethod]] from the method's typed signature. */
+  def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
+
   def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue]
+
+/** Supplies a tool's description for [[ToolFunction.fromMethod]], co-located with the method definition:
+  * `@description("Get the current weather for a city.") def getWeather(city: String): String = …`. */
+final class description(val value: String) extends scala.annotation.StaticAnnotation
 
 object ToolFunction:
   /** Lift a `Schema`-typed return value into the `DynamicValue` a tool yields, so authors can write
@@ -94,6 +103,24 @@ object ToolFunction:
       invoke: DynamicValue.Record => RuntimeContext ?=> A
   )(using Schema[A]): ToolFunction =
     apply(name, description)(args => Right(result(invoke(args))))
+
+  /** Build a tool from a **typed method** — the dspy4s analogue of Python's `dspy.Tool(fn)`. The macro reads the
+    * method's name, its `@description` annotation, and its typed parameters, and produces a `ToolFunction` that
+    * (1) decodes each argument from the call `Record` by name/type, (2) calls the method, lifting its result via
+    * its `Schema`, and (3) carries an [[argSchema]] so tool-using programs can tell the model what arguments the
+    * tool takes:
+    *
+    * {{{
+    * @description("Get the current weather for a city.")
+    * def getWeather(city: String): String = s"The weather in $city is sunny"
+    *
+    * val tool = ToolFunction.fromMethod(getWeather)   // name "getWeather", desc, argSchema {city: string}
+    * }}}
+    *
+    * The method's parameter types and return type must each have a `zio.blocks.schema.Schema`. (Tools that need
+    * the ambient `RuntimeContext`, or full `Left`/`Right` control, use the [[apply]] / [[of]] factories instead.) */
+  inline def fromMethod[F](inline method: F): ToolFunction =
+    ${ dspy4s.programs.internal.ToolMacro.fromMethodImpl[F]('method) }
 
 final case class ToolCallRequest(name: String, args: DynamicValue.Record)
 final case class ToolCallResult(name: String, result: Either[DspyError, DynamicValue])

@@ -12,9 +12,8 @@ package dspy4s.examples.learn.programming
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.examples.Demo
 import dspy4s.programs.ReAct
-import dspy4s.programs.contracts.ToolFunction
+import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
-import zio.blocks.schema.DynamicValue
 
 object Tools:
 
@@ -30,21 +29,19 @@ object Tools:
   // | print(result.answer)
   // | print("Tool calls made:", result.trajectory)
   //
-  // dspy4s tools are `ToolFunction`s: a `name`, a `description` (surfaced in the agent's prompt),
-  // and a body over the call args (a `DynamicValue.Record`). `ToolFunction.of(name, desc) { args => … }`
-  // builds one from a plain function returning the result value (lifted via its `Schema`); use
-  // `ToolFunction(name, desc) { args => Right/Left(...) }` when the tool can fail.
+  // The closest analogue to Python's "pass a plain function as a tool" is `ToolFunction.fromMethod`,
+  // the dspy4s counterpart of `dspy.Tool(fn)`: annotate a typed method with `@description` and the
+  // macro derives the tool's name, description, and argument schema (`{city: string}`, surfaced in the
+  // agent's prompt) and decodes each argument from the call record by name/type.
   object WeatherAgentExample:
-    private def arg(args: DynamicValue.Record, key: String): String =
-      DynamicValues.recordGet(args, key).map(DynamicValues.renderText).getOrElse("")
+    @description("Get the current weather for a city.")
+    def get_weather(city: String): String = s"The weather in $city is sunny and 75°F"
 
-    val getWeather: ToolFunction = ToolFunction.of("get_weather", "Get the current weather for a city.") { args =>
-      s"The weather in ${arg(args, "city")} is sunny and 75°F"
-    }
+    @description("Search the web for information.")
+    def search_web(query: String): String = s"Search results for '$query': [relevant information...]"
 
-    val searchWeb: ToolFunction = ToolFunction.of("search_web", "Search the web for information.") { args =>
-      s"Search results for '${arg(args, "query")}': [relevant information...]"
-    }
+    val getWeather: ToolFunction = ToolFunction.fromMethod(get_weather)
+    val searchWeb: ToolFunction  = ToolFunction.fromMethod(search_web)
 
     // ── Snippet 2 (lines 57–63) — ReAct configuration ──
     // | react_agent = dspy.ReAct(signature="question -> answer", tools=[tool1, tool2, tool3], max_iters=10)
