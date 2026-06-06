@@ -3,411 +3,183 @@
  *
  * Source:   docs/docs/cheatsheet.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/cheatsheet.md
- * Status:   scaffold (35 python snippets — TODO translate)
+ * Status:   translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, optimizers 12/13/18,
+ *           tools 27, streaming 28, usage 30, cache 31, refinement 32–35). The rest depend on subsystems
+ *           dspy4s doesn't have and are marked "not portable" inline:
+ *             - retrieval: ColBERTv2 / `dspy.Retrieve` (6)
+ *             - LLM-as-judge metric: `Metric.score` takes no RuntimeContext, so it can't call an LM (10)
+ *             - save / load (16, 17); async `asyncify` (29)
+ *             - optimizers not ported: Ensemble (19), BootstrapFinetune/HFModel (20), COPRO (21),
+ *               MIPROv2 (22, 23), KNNFewShot (24), Optuna (25), SIMBA (26)
+ *           These same constructs are demonstrated more fully in the dedicated tutorial examples
+ *           (output_refinement, streaming, cache, learn/evaluation, learn/optimization).
  */
 package dspy4s.examples
 
-object Cheatsheet {
+import dspy4s.core.contracts.{:=, DspyError, DynamicPrediction, DynamicValues, Example, RuntimeContext}
+import dspy4s.core.runtime.SubprocessPythonInterpreter
+import dspy4s.evaluate.{Evaluate, EvaluateConfig}
+import dspy4s.evaluate.contracts.Metric
+import dspy4s.evaluate.metrics.FunctionMetric
+import dspy4s.lm.runtime.UsageTracking
+import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, BootstrapFewShotWithRandomSearch,
+  LabeledFewShot, LabeledFewShotConfig, RandomSearchConfig}
+import dspy4s.programs.{BestOfN, ChainOfThought, CodeAct, DynamicPredict, Parallel, Predict, ProgramOfThought, ReAct, Refine}
+import dspy4s.programs.contracts.{ProgramCall, ToolFunction, TypedCall, description}
+import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import zio.blocks.schema.DynamicValue
 
-  // ── Snippet 1 (lines 17–20) ────────────────────
-  // | predict = dspy.Predict("question -> answer")
-  // | predict(question="1+1", config={"rollout_id": 1, "temperature": 1.0})
-  // TODO translate snippet 1
+// ── Snippet 2 (lines 24–30) — a class-based signature ──
+// | class BasicQA(dspy.Signature): """Answer questions with short factoid answers."""
+// |     question: str = dspy.InputField(); answer: str = dspy.OutputField(desc="often between 1 and 5 words")
+// (dspy4s `Spec` carries no per-field `desc`; the hint is dropped.)
+trait BasicQA extends Spec:
+  def question: InputField[String]
+  def answer:   OutputField[String]
 
-  // ── Snippet 2 (lines 24–30) ────────────────────
-  // | class BasicQA(dspy.Signature):
-  // |     """Answer questions with short factoid answers."""
-  // |
-  // |     question: str = dspy.InputField()
-  // |     answer: str = dspy.OutputField(desc="often between 1 and 5 words")
-  // TODO translate snippet 2
+object Cheatsheet:
 
-  // ── Snippet 3 (lines 34–40) ────────────────────
-  // | generate_answer = dspy.ChainOfThought(BasicQA)
-  // |
-  // | # Call the predictor on a particular input alongside a hint.
-  // | question='What is the color of the sky?'
-  // | pred = generate_answer(question=question)
-  // TODO translate snippet 3
+  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
 
-  // ── Snippet 4 (lines 44–52) ────────────────────
-  // | pot = dspy.ProgramOfThought(BasicQA)
-  // |
-  // | question = 'Sarah has 5 apples. She buys 7 more apples from the store. How many apples does Sarah have now?'
-  // | result = pot(question=question)
-  // |
-  // | print(f"Question: {question}")
-  // | print(f"Final Predicted Answer (after ProgramOfThought process): {result.answer}")
-  // TODO translate snippet 4
+  // ── Snippet 1 (lines 17–20) — Predict with per-call config ──
+  // | predict = dspy.Predict("question -> answer"); predict(question="1+1", config={"rollout_id": 1, "temperature": 1.0})
+  // `rollout_id` is a framework control → the typed `rolloutId`; `temperature` is a provider knob → `config`.
+  def predictWithConfig(using RuntimeContext): Either[DspyError, String] =
+    Predict(Signature.fromString("question -> answer"))
+      .apply(TypedCall((question = "1+1"), config = rec("temperature" := 1.0), rolloutId = Some(1)))
+      .map(_.output.answer)
 
-  // ── Snippet 5 (lines 56–64) ────────────────────
-  // | react_module = dspy.ReAct(BasicQA)
-  // |
-  // | question = 'Sarah has 5 apples. She buys 7 more apples from the store. How many apples does Sarah have now?'
-  // | result = react_module(question=question)
-  // |
-  // | print(f"Question: {question}")
-  // | print(f"Final Predicted Answer (after ReAct process): {result.answer}")
-  // TODO translate snippet 5
+  // ── Snippet 3 (lines 34–40) — ChainOfThought ──
+  // | generate_answer = dspy.ChainOfThought(BasicQA); generate_answer(question="What is the color of the sky?")
+  def chainOfThought(question: String)(using RuntimeContext): Either[DspyError, String] =
+    ChainOfThought(Signature.of[BasicQA]).apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 6 (lines 68–82) ────────────────────
-  // | colbertv2_wiki17_abstracts = dspy.ColBERTv2(url='http://20.102.90.50:2017/wiki17_abstracts')
-  // | dspy.configure(rm=colbertv2_wiki17_abstracts)
-  // |
-  // | #Define Retrieve Module
-  // | retriever = dspy.Retrieve(k=3)
-  // |
-  // | query='When was the first FIFA World Cup held?'
-  // |
-  // | # Call the retriever on a particular query.
-  // | topK_passages = retriever(query).passages
-  // |
-  // | for idx, passage in enumerate(topK_passages):
-  // |     print(f'{idx+1}]', passage, '\n')
-  // TODO translate snippet 6
+  // ── Snippet 4 (lines 44–52) — ProgramOfThought ──
+  // | pot = dspy.ProgramOfThought(BasicQA); pot(question="Sarah has 5 apples...")
+  // dspy4s PoT executes generated Python via a `CodeInterpreter` (here a python3 subprocess).
+  def programOfThought(question: String)(using RuntimeContext): Either[DspyError, String] =
+    ProgramOfThought(Signature.of[BasicQA], interpreter = new SubprocessPythonInterpreter())
+      .apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 7 (lines 86–98) ────────────────────
-  // | from dspy import CodeAct
-  // |
-  // | def factorial(n):
-  // |     """Calculate factorial of n"""
-  // |     if n == 1:
-  // |         return 1
-  // |     return n * factorial(n-1)
-  // |
-  // | act = CodeAct("n->factorial", tools=[factorial])
-  // | result = act(n=5)
-  // | result # Returns 120
-  // TODO translate snippet 7
+  // ── Snippet 5 (lines 56–64) — ReAct ──
+  // | react_module = dspy.ReAct(BasicQA); react_module(question="Sarah has 5 apples...")
+  // ReAct needs a tool set; Python's `dspy.ReAct(BasicQA)` with no tools is degenerate (finish-only) — so is this.
+  def react(question: String)(using RuntimeContext): Either[DspyError, String] =
+    ReAct(baseSignature = Signature.of[BasicQA], tools = Vector.empty).apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 8 (lines 102–114) ────────────────────
-  // | import dspy
-  // |
-  // | parallel = dspy.Parallel(num_threads=2)
-  // | predict = dspy.Predict("question -> answer")
-  // | result = parallel(
-  // |     [
-  // |         (predict, dspy.Example(question="1+1").with_inputs("question")),
-  // |         (predict, dspy.Example(question="2+2").with_inputs("question"))
-  // |     ]
-  // | )
-  // | result
-  // TODO translate snippet 8
+  // ── Snippet 6 (lines 68–82) — ColBERTv2 retriever + dspy.Retrieve ──
+  // Not portable: dspy4s has no retrieval subsystem (`dspy.ColBERTv2` / `dspy.Retrieve`).
 
-  // ── Snippet 9 (lines 122–143) ────────────────────
-  // | def parse_integer_answer(answer, only_first_line=True):
-  // |     try:
-  // |         if only_first_line:
-  // |             answer = answer.strip().split('\n')[0]
-  // |
-  // |         # find the last token that has a number in it
-  // |         answer = [token for token in answer.split() if any(c.isdigit() for c in token)][-1]
-  // |         answer = answer.split('.')[0]
-  // |         answer = ''.join([c for c in answer if c.isdigit()])
-  // |         answer = int(answer)
-  // |
-  // |     except (ValueError, IndexError):
-  // |         # print(answer)
-  // |         answer = 0
-  // |
-  // |     return answer
-  // |
-  // | # Metric Function
-  // | def gsm8k_metric(gold, pred, trace=None) -> int:
-  // |     return int(parse_integer_answer(str(gold.answer))) == int(parse_integer_answer(str(pred.answer)))
-  // TODO translate snippet 9
+  // ── Snippet 7 (lines 86–98) — CodeAct ──
+  // | def factorial(n): ...; act = CodeAct("n -> factorial", tools=[factorial]); act(n=5)  # 120
+  // dspy4s CodeAct generates+runs Python through a `CodeInterpreter`; it has no user-`tools` parameter
+  // (the model writes the factorial itself), so the `tools=[factorial]` argument has no analogue.
+  def codeAct(n: Int)(using RuntimeContext): Either[DspyError, String] =
+    CodeAct(Signature.fromString("n: int -> factorial"), interpreter = new SubprocessPythonInterpreter())
+      .apply((n = n)).map(_.output.factorial)
 
-  // ── Snippet 10 (lines 147–161) ────────────────────
-  // | class FactJudge(dspy.Signature):
-  // |     """Judge if the answer is factually correct based on the context."""
-  // |
-  // |     context = dspy.InputField(desc="Context for the prediction")
-  // |     question = dspy.InputField(desc="Question to be answered")
-  // |     answer = dspy.InputField(desc="Answer for the question")
-  // |     factually_correct: bool = dspy.OutputField(desc="Is the answer factually correct based on the context?")
-  // |
-  // | judge = dspy.ChainOfThought(FactJudge)
-  // |
-  // | def factuality_metric(example, pred):
-  // |     factual = judge(context=example.context, question=example.question, answer=pred.answer)
-  // |     return factual.factually_correct
-  // TODO translate snippet 10
+  // ── Snippet 8 (lines 102–114) — Parallel ──
+  // | parallel = dspy.Parallel(num_threads=2); parallel([(predict, ex1), (predict, ex2)])
+  def parallel(using RuntimeContext): Either[DspyError, Vector[Option[DynamicPrediction]]] =
+    val predict = DynamicPredict(Signature.fromString("question -> answer").layout)
+    Parallel(numThreads = Some(2)).apply(Vector(
+      predict -> ProgramCall(inputs = rec("question" := "1+1")),
+      predict -> ProgramCall(inputs = rec("question" := "2+2"))
+    )).map(_.results)
 
-  // ── Snippet 11 (lines 165–171) ────────────────────
-  // | from dspy.evaluate import Evaluate
-  // |
-  // | evaluate_program = Evaluate(devset=devset, metric=your_defined_metric, num_threads=NUM_THREADS, display_progress=True, display_table=num_rows_to_display)
-  // |
-  // | evaluate_program(your_dspy_program)
-  // TODO translate snippet 11
+  // ── Snippet 9 (lines 122–143) — a function metric (gsm8k) ──
+  // | def gsm8k_metric(gold, pred, trace=None): return parse_integer_answer(gold.answer) == parse_integer_answer(pred.answer)
+  private def parseIntegerAnswer(answer: String): Int =
+    answer.trim.split("\n").headOption.getOrElse("")
+      .split("\\s+").reverse.find(_.exists(_.isDigit))                 // last token containing a digit
+      .map(_.takeWhile(_ != '.').filter(_.isDigit))                    // up to a '.', digits only
+      .flatMap(_.toIntOption).getOrElse(0)
 
-  // ── Snippet 12 (lines 177–182) ────────────────────
-  // | from dspy.teleprompt import LabeledFewShot
-  // |
-  // | labeled_fewshot_optimizer = LabeledFewShot(k=8)
-  // | your_dspy_program_compiled = labeled_fewshot_optimizer.compile(student = your_dspy_program, trainset=trainset)
-  // TODO translate snippet 12
+  val gsm8kMetric: FunctionMetric = FunctionMetric.bool("gsm8k_metric") { (gold, pred) =>
+    parseIntegerAnswer(gold.get("answer").map(DynamicValues.renderText).getOrElse("")) ==
+      parseIntegerAnswer(pred.get("answer").map(DynamicValues.renderText).getOrElse(""))
+  }
 
-  // ── Snippet 13 (lines 186–192) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShot
-  // |
-  // | fewshot_optimizer = BootstrapFewShot(metric=your_defined_metric, max_bootstrapped_demos=4, max_labeled_demos=16, max_rounds=1, max_errors=10)
-  // |
-  // | your_dspy_program_compiled = fewshot_optimizer.compile(student = your_dspy_program, trainset=trainset)
-  // TODO translate snippet 13
+  // ── Snippet 10 (lines 147–161) — LLM-as-judge metric ──
+  // Not portable: the metric body calls `dspy.ChainOfThought(FactJudge)`, but `Metric.score` takes no
+  // RuntimeContext, so a dspy4s metric can't invoke an LM (same limitation as learn/evaluation/Metrics §6).
 
-  // ── Snippet 14 (lines 196–202) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShot
-  // |
-  // | fewshot_optimizer = BootstrapFewShot(metric=your_defined_metric, max_bootstrapped_demos=4, max_labeled_demos=16, max_rounds=1, max_errors=10, teacher_settings=dict(lm=gpt4))
-  // |
-  // | your_dspy_program_compiled = fewshot_optimizer.compile(student = your_dspy_program, trainset=trainset)
-  // TODO translate snippet 14
+  // ── Snippet 11 (lines 165–171) — Evaluate ──
+  // | evaluate_program = Evaluate(devset=devset, metric=..., num_threads=..., display_progress=True, display_table=n)
+  def evaluator(devset: Vector[Example], metric: Metric): Evaluate =
+    new Evaluate(EvaluateConfig(devset = devset, metric = metric, numThreads = Some(4),
+      displayProgress = true, displayTable = Right(5)))
 
-  // ── Snippet 15 (lines 206–212) ────────────────────
-  // | your_dspy_program_compiledx2 = teleprompter.compile(
-  // |     your_dspy_program,
-  // |     teacher=your_dspy_program_compiled,
-  // |     trainset=trainset,
-  // | )
-  // TODO translate snippet 15
+  // ── Snippets 12/13/18 — few-shot optimizers (operate on the untyped DynamicPredict) ──
+  // | LabeledFewShot(k=8).compile(student, trainset)
+  def labeledFewShot(student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
+      : Either[DspyError, DynamicPredict] =
+    new LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 8)).compile(student, trainset).map(_.bestProgram)
 
-  // ── Snippet 16 (lines 216–219) ────────────────────
-  // | save_path = './v1.json'
-  // | your_dspy_program_compiledx2.save(save_path)
-  // TODO translate snippet 16
+  // | BootstrapFewShot(metric=..., max_bootstrapped_demos=4, max_labeled_demos=16, max_rounds=1, max_errors=10).compile(...)
+  def bootstrapFewShot(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
+      : Either[DspyError, DynamicPredict] =
+    new BootstrapFewShot[DynamicPredict](BootstrapFewShotConfig(
+      metric = Some(metric), maxBootstrappedDemos = 4, maxLabeledDemos = 16, maxRounds = 1, maxErrors = 10
+    )).compile(student, trainset).map(_.bestProgram)
 
-  // ── Snippet 17 (lines 221–224) ────────────────────
-  // | loaded_program = YourProgramClass()
-  // | loaded_program.load(path=save_path)
-  // TODO translate snippet 17
+  // | BootstrapFewShotWithRandomSearch(metric=..., max_bootstrapped_demos=2, num_candidate_programs=8).compile(student, trainset, valset=devset)
+  def bootstrapRandomSearch(metric: Metric, student: DynamicPredict, trainset: Vector[Example], devset: Vector[Example])(
+      using RuntimeContext): Either[DspyError, DynamicPredict] =
+    new BootstrapFewShotWithRandomSearch[DynamicPredict](RandomSearchConfig(
+      metric = metric, maxBootstrappedDemos = 2, numCandidates = 8
+    )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 
-  // ── Snippet 18 (lines 230–237) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShotWithRandomSearch
-  // |
-  // | fewshot_optimizer = BootstrapFewShotWithRandomSearch(metric=your_defined_metric, max_bootstrapped_demos=2, num_candidate_programs=8, num_threads=NUM_THREADS)
-  // |
-  // | your_dspy_program_compiled = fewshot_optimizer.compile(student = your_dspy_program, trainset=trainset, valset=devset)
-  // TODO translate snippet 18
+  // ── Snippets 16/17 — save / load ──
+  // Not portable: dspy4s programs have no `.save` / `.load`; persist the tuned demos yourself.
 
-  // ── Snippet 19 (lines 243–253) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShotWithRandomSearch
-  // | from dspy.teleprompt.ensemble import Ensemble
-  // |
-  // | fewshot_optimizer = BootstrapFewShotWithRandomSearch(metric=your_defined_metric, max_bootstrapped_demos=2, num_candidate_programs=8, num_threads=NUM_THREADS)
-  // | your_dspy_program_compiled = fewshot_optimizer.compile(student = your_dspy_program, trainset=trainset, valset=devset)
-  // |
-  // | ensemble_optimizer = Ensemble(reduce_fn=dspy.majority)
-  // | programs = [x[-1] for x in your_dspy_program_compiled.candidate_programs]
-  // | your_dspy_program_compiled_ensemble = ensemble_optimizer.compile(programs[:3])
-  // TODO translate snippet 19
+  // ── Snippets 19–26 — optimizers not ported ──
+  // Not portable: Ensemble (19), BootstrapFinetune/HFModel (20), COPRO (21), MIPROv2 (22, 23),
+  // KNNFewShot (24), BootstrapFewShotWithOptuna (25), SIMBA (26) have no dspy4s equivalent.
 
-  // ── Snippet 20 (lines 257–280) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShotWithRandomSearch, BootstrapFinetune
-  // |
-  // | #Compile program on current dspy.settings.lm
-  // | fewshot_optimizer = BootstrapFewShotWithRandomSearch(metric=your_defined_metric, max_bootstrapped_demos=2, num_threads=NUM_THREADS)
-  // | your_dspy_program_compiled = tp.compile(your_dspy_program, trainset=trainset[:some_num], valset=trainset[some_num:])
-  // |
-  // | #Configure model to finetune
-  // | config = dict(target=model_to_finetune, epochs=2, bf16=True, bsize=6, accumsteps=2, lr=5e-5)
-  // |
-  // | #Compile program on BootstrapFinetune
-  // | finetune_optimizer = BootstrapFinetune(metric=your_defined_metric)
-  // | finetune_program = finetune_optimizer.compile(your_dspy_program, trainset=some_new_dataset_for_finetuning_model, **config)
-  // |
-  // | finetune_program = your_dspy_program
-  // |
-  // | #Load program and activate model's parameters in program before evaluation
-  // | ckpt_path = "saved_checkpoint_path_from_finetuning"
-  // | LM = dspy.HFModel(checkpoint=ckpt_path, model=model_to_finetune)
-  // |
-  // | for p in finetune_program.predictors():
-  // |     p.lm = LM
-  // |     p.activated = False
-  // TODO translate snippet 20
+  // ── Snippet 27 (lines 403–412) — dspy.Tool ──
+  // | def search_web(query: str) -> str: """Search the web for information"""
+  // | tool = dspy.Tool(search_web); tool(query="Python programming")
+  @description("Search the web for information")
+  def search_web(query: String): String = s"Search results for: $query"
 
-  // ── Snippet 21 (lines 286–294) ────────────────────
-  // | from dspy.teleprompt import COPRO
-  // |
-  // | eval_kwargs = dict(num_threads=16, display_progress=True, display_table=0)
-  // |
-  // | copro_teleprompter = COPRO(prompt_model=model_to_generate_prompts, metric=your_defined_metric, breadth=num_new_prompts_generated, depth=times_to_generate_prompts, init_temperature=prompt_generation_temperature, verbose=False)
-  // |
-  // | compiled_program_optimized_signature = copro_teleprompter.compile(your_dspy_program, trainset=trainset, eval_kwargs=eval_kwargs)
-  // TODO translate snippet 21
+  def tool(query: String)(using RuntimeContext): Either[DspyError, DynamicValue] =
+    ToolFunction.fromMethod(search_web).invoke(rec("query" := query))
 
-  // ── Snippet 22 (lines 304–329) ────────────────────
-  // | # Import the optimizer
-  // | from dspy.teleprompt import MIPROv2
-  // |
-  // | # Initialize optimizer
-  // | teleprompter = MIPROv2(
-  // |     metric=gsm8k_metric,
-  // |     auto="light", # Can choose between light, medium, and heavy optimization runs
-  // | )
-  // |
-  // | # Optimize program
-  // | print(f"Optimizing program with MIPRO...")
-  // | optimized_program = teleprompter.compile(
-  // |     program.deepcopy(),
-  // |     trainset=trainset,
-  // |     max_bootstrapped_demos=3,
-  // |     max_labeled_demos=4,
-  // | )
-  // |
-  // | # Save optimize program for future use
-  // | optimized_program.save(f"mipro_optimized")
-  // |
-  // | # Evaluate optimized program
-  // | print(f"Evaluate optimized program...")
-  // | evaluate(optimized_program, devset=devset[:])
-  // TODO translate snippet 22
+  // ── Snippet 28 (lines 416–434) — streamify ──
+  // dspy4s streamify is synchronous; see tutorials/streaming for the full treatment. Sketch:
+  //   Streamify.streamify(DynamicPredict(Signature.fromString("question -> answer").layout),
+  //     streamListeners = Vector(StreamListener("answer")))(rec("question" := "...")) // -> ClosableIterator[StreamEvent]
 
-  // ── Snippet 23 (lines 333–358) ────────────────────
-  // | # Import the optimizer
-  // | from dspy.teleprompt import MIPROv2
-  // |
-  // | # Initialize optimizer
-  // | teleprompter = MIPROv2(
-  // |     metric=gsm8k_metric,
-  // |     auto="light", # Can choose between light, medium, and heavy optimization runs
-  // | )
-  // |
-  // | # Optimize program
-  // | print(f"Optimizing program with MIPRO...")
-  // | optimized_program = teleprompter.compile(
-  // |     program.deepcopy(),
-  // |     trainset=trainset,
-  // |     max_bootstrapped_demos=0,
-  // |     max_labeled_demos=0,
-  // | )
-  // |
-  // | # Save optimize program for future use
-  // | optimized_program.save(f"mipro_optimized")
-  // |
-  // | # Evaluate optimized program
-  // | print(f"Evaluate optimized program...")
-  // | evaluate(optimized_program, devset=devset[:])
-  // TODO translate snippet 23
+  // ── Snippet 29 — asyncify ──
+  // Not portable: dspy4s has no async program path.
 
-  // ── Snippet 24 (lines 362–371) ────────────────────
-  // | from sentence_transformers import SentenceTransformer
-  // | from dspy import Embedder
-  // | from dspy.teleprompt import KNNFewShot
-  // | from dspy import ChainOfThought
-  // |
-  // | knn_optimizer = KNNFewShot(k=3, trainset=trainset, vectorizer=Embedder(SentenceTransformer("all-MiniLM-L6-v2").encode))
-  // |
-  // | qa_compiled = knn_optimizer.compile(student=ChainOfThought("question -> answer"))
-  // TODO translate snippet 24
+  // ── Snippet 30 (lines 451–457) — usage tracking ──
+  // | dspy.configure(track_usage=True); result = dspy.ChainOfThought(BasicQA)(question="..."); result.get_lm_usage()
+  def withUsageTracking(question: String)(using RuntimeContext): Either[DspyError, Map[String, dspy4s.lm.contracts.LmUsage]] =
+    UsageTracking.withNewTracker { tracker =>
+      ChainOfThought(Signature.of[BasicQA]).apply((question = question)).map(_ => tracker.totalUsage)
+    }
 
-  // ── Snippet 25 (lines 375–381) ────────────────────
-  // | from dspy.teleprompt import BootstrapFewShotWithOptuna
-  // |
-  // | fewshot_optuna_optimizer = BootstrapFewShotWithOptuna(metric=your_defined_metric, max_bootstrapped_demos=2, num_candidate_programs=8, num_threads=NUM_THREADS)
-  // |
-  // | your_dspy_program_compiled = fewshot_optuna_optimizer.compile(student=your_dspy_program, trainset=trainset, valset=devset)
-  // TODO translate snippet 25
+  // ── Snippet 31 (lines 461–469) — cache configuration ──
+  // dspy4s has no global `dspy.configure_cache`; wrap the LM in `ManagedLanguageModel(lm, cache = ...)`.
+  // See tutorials/cache for NoopLmCache / InMemoryLmCache / DiskLmCache and a custom LmCache.
 
-  // ── Snippet 26 (lines 390–396) ────────────────────
-  // | from dspy.teleprompt import SIMBA
-  // |
-  // | simba = SIMBA(metric=your_defined_metric, max_steps=12, max_demos=10)
-  // |
-  // | optimized_program = simba.compile(student=your_dspy_program, trainset=trainset)
-  // TODO translate snippet 26
+  // ── Snippets 32/33 (lines 479–503) — BestOfN / Refine ──
+  // | best_of_3 = dspy.BestOfN(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0); best_of_3(question=...).answer
+  // The reward `one_word_answer(args, pred)` becomes the typed `(input, prediction) => Double` below.
+  def bestOfN(question: String)(using RuntimeContext): Either[DspyError, String] =
+    val qa = ChainOfThought(Signature.of[BasicQA])
+    BestOfN(module = qa, n = 3, rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
+      threshold = 1.0).apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 27 (lines 403–412) ────────────────────
-  // | import dspy
-  // |
-  // | def search_web(query: str) -> str:
-  // |     """Search the web for information"""
-  // |     return f"Search results for: {query}"
-  // |
-  // | tool = dspy.Tool(search_web)
-  // | result = tool(query="Python programming")
-  // TODO translate snippet 27
+  // ── Snippets 34/35 (lines 509–522) — Refine with fail_count ──
+  // | refine = dspy.Refine(module=qa, N=3, reward_fn=..., threshold=1.0, fail_count=1)  # raise after 1 failure
+  def refine(question: String, failCount: Int)(using RuntimeContext): Either[DspyError, String] =
+    val qa = ChainOfThought(Signature.of[BasicQA])
+    Refine(module = qa, n = 3, rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
+      threshold = 1.0, failCount = Some(failCount)).apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 28 (lines 416–434) ────────────────────
-  // | import dspy
-  // | import asyncio
-  // |
-  // | predict = dspy.Predict("question->answer")
-  // |
-  // | stream_predict = dspy.streamify(
-  // |     predict,
-  // |     stream_listeners=[dspy.streaming.StreamListener(signature_field_name="answer")],
-  // | )
-  // |
-  // | async def read_output_stream():
-  // |     output_stream = stream_predict(question="Why did a chicken cross the kitchen?")
-  // |
-  // |     async for chunk in output_stream:
-  // |         print(chunk)
-  // |
-  // | asyncio.run(read_output_stream())
-  // TODO translate snippet 28
-
-  // ── Snippet 29 (lines 439–446) ────────────────────
-  // | import dspy
-  // |
-  // | dspy_program = dspy.ChainOfThought("question -> answer")
-  // | dspy_program = dspy.asyncify(dspy_program)
-  // |
-  // | asyncio.run(dspy_program(question="What is DSPy"))
-  // TODO translate snippet 29
-
-  // ── Snippet 30 (lines 451–457) ────────────────────
-  // | import dspy
-  // | dspy.configure(track_usage=True)
-  // |
-  // | result = dspy.ChainOfThought(BasicQA)(question="What is 2+2?")
-  // | print(f"Token usage: {result.get_lm_usage()}")
-  // TODO translate snippet 30
-
-  // ── Snippet 31 (lines 461–469) ────────────────────
-  // | import dspy
-  // |
-  // | # Configure cache settings
-  // | dspy.configure_cache(
-  // |     enable_disk_cache=False,
-  // |     enable_memory_cache=False,
-  // | )
-  // TODO translate snippet 31
-
-  // ── Snippet 32 (lines 479–488) ────────────────────
-  // | import dspy
-  // |
-  // | qa = dspy.ChainOfThought("question -> answer")
-  // | def one_word_answer(args, pred):
-  // |     return 1.0 if len(pred.answer) == 1 else 0.0
-  // | best_of_3 = dspy.BestOfN(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0)
-  // | best_of_3(question="What is the capital of Belgium?").answer
-  // | # Brussels
-  // TODO translate snippet 32
-
-  // ── Snippet 33 (lines 494–503) ────────────────────
-  // | import dspy
-  // |
-  // | qa = dspy.ChainOfThought("question -> answer")
-  // | def one_word_answer(args, pred):
-  // |     return 1.0 if len(pred.answer) == 1 else 0.0
-  // | best_of_3 = dspy.Refine(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0)
-  // | best_of_3(question="What is the capital of Belgium?").answer
-  // | # Brussels
-  // TODO translate snippet 33
-
-  // ── Snippet 34 (lines 509–514) ────────────────────
-  // | refine = dspy.Refine(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0, fail_count=1)
-  // | ...
-  // | refine(question="What is the capital of Belgium?")
-  // | # If we encounter just one failed attempt, the module will raise an error.
-  // TODO translate snippet 34
-
-  // ── Snippet 35 (lines 518–522) ────────────────────
-  // | refine = dspy.Refine(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0, fail_count=3)
-  // | ...
-  // | refine(question="What is the capital of Belgium?")
-  // TODO translate snippet 35
-}
+// Pure surface check (no LM). Run with: sbt "examples/runMain dspy4s.examples.cheatsheetMain"
+@main def cheatsheetMain(): Unit =
+  println("gsm8k_metric is a FunctionMetric named: " + Cheatsheet.gsm8kMetric.name)
