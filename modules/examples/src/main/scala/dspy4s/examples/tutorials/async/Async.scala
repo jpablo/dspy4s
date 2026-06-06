@@ -3,99 +3,65 @@
  *
  * Source:   docs/docs/tutorials/async/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/async/index.md
- * Status:   scaffold (4 python snippets — TODO translate)
+ * Status:   translated (the async program path, snippets 1/4). Python's `await predict.acall(...)` becomes
+ *           dspy4s's `Module.applyAsync` / `ContextPropagation.future`, which run the (synchronous) program on
+ *           a context-propagating `ExecutionContext` and return a `scala.concurrent.Future`. The async-TOOL
+ *           snippets (2/3 — `dspy.Tool(async_fn)`, `tool.acall`, `allow_tool_async_sync_conversion`) are not
+ *           portable: `ToolFunction.invoke` is synchronous and dspy4s has no async tool path.
+ *
+ * Note `ContextPropagation.future` (not a bare `Future`): it captures the active `RuntimeContext` (LM, adapter,
+ * callbacks) so the program still resolves its model off-thread — a plain `Future { ... }` would lose it.
  */
 package dspy4s.examples.tutorials.async
 
-object Async {
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.runtime.ContextPropagation
+import dspy4s.examples.Demo
+import dspy4s.programs.{ChainOfThought, Predict}
+import dspy4s.typed.Signature
 
-  // ── Snippet 1 (lines 55–72) ────────────────────
-  // | import dspy
-  // | import asyncio
-  // | import os
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "your_api_key"
-  // |
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration.DurationInt
+
+object Async:
+
+  // ── Snippet 1 (lines 55–72) — run a single Predict asynchronously ──
   // | predict = dspy.Predict("question->answer")
-  // |
-  // | async def main():
-  // |     # Use acall() for async execution
-  // |     output = await predict.acall(question="why did a chicken cross the kitchen?")
-  // |     print(output)
-  // |
-  // |
-  // | asyncio.run(main())
-  // TODO translate snippet 1
+  // | output = await predict.acall(question="why did a chicken cross the kitchen?")
+  def askAsync(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
+    ContextPropagation.future(
+      Predict(Signature.fromString("question -> answer")).apply((question = question)).map(_.output.answer)
+    )
 
-  // ── Snippet 2 (lines 80–100) ────────────────────
-  // | import asyncio
-  // | import dspy
-  // | import os
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "your_api_key"
-  // |
-  // | async def foo(x):
-  // |     # Simulate an async operation
-  // |     await asyncio.sleep(0.1)
-  // |     print(f"I get: {x}")
-  // |
-  // | # Create a tool from the async function
-  // | tool = dspy.Tool(foo)
-  // |
-  // | async def main():
-  // |     # Execute the tool asynchronously
-  // |     await tool.acall(x=2)
-  // |
-  // | asyncio.run(main())
-  // TODO translate snippet 2
-
-  // ── Snippet 3 (lines 106–125) ────────────────────
-  // | import dspy
-  // |
-  // | async def async_tool(x: int) -> int:
-  // |     """An async tool that doubles a number."""
-  // |     await asyncio.sleep(0.1)
-  // |     return x * 2
-  // |
-  // | tool = dspy.Tool(async_tool)
-  // |
-  // | # Option 1: Use context manager for temporary conversion
-  // | with dspy.context(allow_tool_async_sync_conversion=True):
-  // |     result = tool(x=5)  # Works in sync context
-  // |     print(result)  # 10
-  // |
-  // | # Option 2: Configure globally
-  // | dspy.configure(allow_tool_async_sync_conversion=True)
-  // | result = tool(x=5)  # Now works everywhere
-  // | print(result)  # 10
-  // TODO translate snippet 3
-
-  // ── Snippet 4 (lines 137–163) ────────────────────
-  // | import dspy
-  // | import asyncio
-  // | import os
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "your_api_key"
-  // | dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
-  // |
+  // ── Snippet 4 (lines 137–163) — a module whose `aforward` chains two predictors asynchronously ──
   // | class MyModule(dspy.Module):
-  // |     def __init__(self):
-  // |         self.predict1 = dspy.ChainOfThought("question->answer")
-  // |         self.predict2 = dspy.ChainOfThought("answer->simplified_answer")
-  // |
-  // |     async def aforward(self, question, **kwargs):
-  // |         # Execute predictions sequentially but asynchronously
+  // |     self.predict1 = dspy.ChainOfThought("question->answer")
+  // |     self.predict2 = dspy.ChainOfThought("answer->simplified_answer")
+  // |     async def aforward(self, question):
   // |         answer = await self.predict1.acall(question=question)
   // |         return await self.predict2.acall(answer=answer)
-  // |
-  // |
-  // | async def main():
-  // |     mod = MyModule()
-  // |     result = await mod.acall(question="Why did a chicken cross the kitchen?")
-  // |     print(result)
-  // |
-  // |
-  // | asyncio.run(main())
-  // TODO translate snippet 4
+  final class SimplifierModule:
+    private val predict1 = ChainOfThought(Signature.fromString("question -> answer"))
+    private val predict2 = ChainOfThought(Signature.fromString("answer -> simplified_answer"))
+
+    /** Sequential-but-asynchronous, like Python's `aforward`: the two predicts run in order inside one
+      * off-thread computation (the for-comprehension threads the `Either`), returned as a `Future`. */
+    def aforward(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
+      ContextPropagation.future {
+        for
+          step1 <- predict1.apply((question = question))
+          step2 <- predict2.apply((answer = step1.output.answer))
+        yield step2.output.simplified_answer
+      }
+
+  // ── Snippets 2 / 3 — async tools (`dspy.Tool(async_fn)`, `tool.acall`, async→sync conversion) ──
+  // Not portable: `ToolFunction.invoke` is synchronous; dspy4s has no async tool path (so there is also no
+  // `allow_tool_async_sync_conversion` knob). Tools run synchronously inside the (optionally async) program.
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.async.asyncMain"
+@main def asyncMain(): Unit = Demo.withLm {
+  given ExecutionContext = ExecutionContext.global
+  val q = "Why did a chicken cross the kitchen?"
+  println("Async predict: " + Await.result(Async.askAsync(q), 60.seconds))
+  println("Async module:  " + Await.result(new Async.SimplifierModule().aforward(q), 60.seconds))
 }
