@@ -15,7 +15,6 @@
 package dspy4s.examples.deep_dive.data_handling
 
 import dspy4s.core.contracts.{Example, :=}
-import dspy4s.examples.Demo
 
 object LoadingCustomData:
 
@@ -51,8 +50,8 @@ object LoadingCustomData:
   // `toExamples` / `CustomDataset.fromRows`.
 
 // Run with: sbt "examples/runMain dspy4s.examples.deep_dive.data_handling.loadingCustomDataMain"
-// (No LM calls — pure data construction — but kept under Demo.withLm for a uniform entry point.)
-@main def loadingCustomDataMain(): Unit = Demo.withLm {
+// Pure data construction — no LM, no API key needed.
+@main def loadingCustomDataMain(): Unit =
   val rows = Vector(
     LoadingCustomData.Row("", "Which is a species of fish? Tope or Rope", "Tope"),
     LoadingCustomData.Row("", "Why can camels survive for long without water?",
@@ -63,4 +62,3 @@ object LoadingCustomData:
   val dataset = LoadingCustomData.CustomDataset.fromRows(rows, trainSize = 2)
   println(s"train=${dataset.train.size}, dev=${dataset.dev.size}")
   dataset.train.foreach(ex => println("  " + ex.inputs))
-}
