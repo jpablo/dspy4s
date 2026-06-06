@@ -76,6 +76,27 @@ class ZioSchemaCodecSuite extends FunSuite:
     )
   }
 
+  test("normalize coerces currency- and comma-formatted numbers into Int/Double") {
+    case class Money(amount: Double, count: Int)
+    object Money { given Schema[Money] = Schema.derived }
+    import Money.given
+    val shape = ZioSchemaCodec.derivedFromZioSchema[Money](FieldRole.Output)
+    assertEquals(
+      shape.decode(DynamicValues.recordFromEntries(Seq("amount" := "$2,399.00", "count" := "1,234"))),
+      Right(Money(amount = 2399.0, count = 1234)),
+      "LM-shaped numbers carry currency symbols / thousands separators; they must coerce to the numeric type"
+    )
+  }
+
+  test("normalize coerces a currency-formatted number inside an Option[Double]") {
+    import ZsOptionProbe.given
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsOptionProbe](FieldRole.Output)
+    assertEquals(
+      shape.decode(DynamicValues.recordFromEntries(Seq("amount" := "$2,399.00", "note" := "x"))),
+      Right(ZsOptionProbe(Some(2399.0), "x"))
+    )
+  }
+
   test("Variant-typed fields surface as TypeRef.string at the wire boundary") {
     import ZsClassifyOutput.given
     val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect, FieldRole.Output)

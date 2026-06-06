@@ -1,7 +1,8 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.typed.Signature
@@ -57,6 +58,25 @@ class StructuredOutputSuite extends FunSuite:
       assertEquals(out.map(_.items),  Right(List(TagItem("MacBook Pro", 0.92))))
       assertEquals(out.map(_.amount), Right(Some(2399.0)))
     }
+  }
+
+  test("ChatAdapter conveys the nested object structure of a List[record] output field") {
+    // Without the nested schema, the LM doesn't know `items` is a list of {name, score} objects and emits
+    // a list of strings → "Expected a record at: .items.each". The prompt must surface the nested field names.
+    val invocation = AdapterInvocation(
+      layout           = signature.layout,
+      demos            = Vector.empty,
+      inputs           = Example(values = DynamicValues.recordFromEntries(Seq("text" := "x")), inputKeys = Set("text")),
+      request          = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      outputJsonSchema = signature.outputShape.jsonSchemaString
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    assert(
+      system.contains("score"),
+      s"expected the nested field name 'score' (from items: List[TagItem]) in the ChatAdapter system prompt " +
+        s"so the LM emits objects, not strings. System prompt was:\n$system"
+    )
   }
 
   test("ChatAdapter decodes an absent Option output field as None") {

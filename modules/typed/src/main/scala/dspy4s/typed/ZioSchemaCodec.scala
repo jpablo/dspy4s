@@ -93,13 +93,13 @@ private[typed] object ZioSchemaCodec:
               case "false" => DynamicValue.Primitive(PrimitiveValue.Boolean(false))
               case _       => dv
           case _: PrimitiveType.Int =>
-            s.trim.toIntOption.fold(dv)(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
+            cleanNumeric(s).toIntOption.fold(dv)(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
           case _: PrimitiveType.Long =>
-            s.trim.toLongOption.fold(dv)(l => DynamicValue.Primitive(PrimitiveValue.Long(l)))
+            cleanNumeric(s).toLongOption.fold(dv)(l => DynamicValue.Primitive(PrimitiveValue.Long(l)))
           case _: PrimitiveType.Double =>
-            s.trim.toDoubleOption.fold(dv)(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
+            cleanNumeric(s).toDoubleOption.fold(dv)(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
           case _: PrimitiveType.Float =>
-            s.trim.toFloatOption.fold(dv)(f => DynamicValue.Primitive(PrimitiveValue.Float(f)))
+            cleanNumeric(s).toFloatOption.fold(dv)(f => DynamicValue.Primitive(PrimitiveValue.Float(f)))
           case _ => dv
       case DynamicValue.Primitive(PrimitiveValue.Int(i)) =>
         prim match
@@ -114,6 +114,17 @@ private[typed] object ZioSchemaCodec:
       case _ => dv
 
   private def isInt(l: Long): Boolean = l >= Int.MinValue && l <= Int.MaxValue
+
+  /** Strip LM-shaped numeric noise so `toIntOption` / `toDoubleOption` etc. can parse the value: trim
+    * surrounding whitespace, drop a leading currency symbol (`$ € £ ¥`) and a leading `+`, and remove
+    * thousands-separator commas. The decimal point and a leading `-` are preserved. If the result still
+    * doesn't parse, the caller keeps the original `DynamicValue` (graceful fallback). */
+  private def cleanNumeric(s: String): String =
+    val trimmed = s.trim
+    val noSymbol =
+      if trimmed.nonEmpty && "$€£¥".contains(trimmed.head) then trimmed.tail.trim else trimmed
+    val noSign = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
+    noSign.filter(_ != ',')
 
   /** Walk a `Reflect.Record` and produce the FieldSpec list with role applied. */
   def fieldSpecsFromReflect(reflect: Reflect[?, ?], role: FieldRole): Vector[FieldSpec] = reflect match

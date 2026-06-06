@@ -38,7 +38,7 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
 
     val systemMessage = Message(
       role = MessageRole.System,
-      text = Some(buildSystemPrompt(layout))
+      text = Some(buildSystemPrompt(layout, invocation.outputJsonSchema))
     )
 
     val demoMessages = invocation.demos.flatMap { demo =>
@@ -126,15 +126,22 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     }
     out.iterator.map { (k, v) => k -> v.toString.stripTrailing }.toMap
 
-  private def buildSystemPrompt(layout: SignatureLayout): String =
+  private def buildSystemPrompt(layout: SignatureLayout, outputJsonSchema: Option[String]): String =
     val inputBlock = fieldDescriptionBlock(layout.inputFields, role = "input")
     val outputBlock = fieldDescriptionBlock(layout.outputFields, role = "output")
+    // When the typed Predict path supplies the output Shape's JSON schema, surface it so the LM knows the
+    // nested structure of record/list output fields (which the flat field list cannot convey). Absent (e.g.
+    // DynamicPredict), the prompt is byte-for-byte unchanged.
+    val schemaBlock = outputJsonSchema match
+      case Some(schema) =>
+        s"\n\nYour output fields must conform to this JSON schema:\n$schema"
+      case None => ""
     val structureExample = exampleStructure(layout)
     val instructions =
       layout.instructions.getOrElse(defaultInstructions(layout))
     s"""$inputBlock
        |
-       |$outputBlock
+       |$outputBlock$schemaBlock
        |
        |All interactions will be structured in the following way, with the appropriate values filled in.
        |
