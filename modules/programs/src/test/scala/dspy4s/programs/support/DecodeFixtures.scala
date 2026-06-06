@@ -20,6 +20,37 @@ object DecodeFixtures:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = completion))))
 
+  /** A `LanguageModel` that records every message text it is asked to send, then returns an empty completion. */
+  private final class CapturingLm(sink: String => Unit) extends LanguageModel:
+    override val id: String   = "capturing"
+    override val mode: LmMode = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      request.messages.foreach(m => m.text.foreach(sink))
+      Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
+
+  /** Install a scripted LM (returning `completion`) plus `adapter` as the active context and run `body` — which
+    * invokes whatever program you're testing (`Predict`, `ChainOfThought`, `ReAct`, …). Returns the body's
+    * result. This is the program-agnostic core: it doesn't constrain the output type, so it works for
+    * `ChainOfThought`'s augmented named-tuple output as readily as a plain `Predict`. */
+  def runWith[A](adapter: Adapter, completion: String)(body: RuntimeContext ?=> A): A =
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(new ScriptedLm(completion)), adapter = Some(adapter))
+    ) {
+      body(using RuntimeEnvironment.current)
+    }
+
+  /** Run `body` (which invokes some program) under a capturing LM + `adapter`, discard its result, and return
+    * the concatenated text of every message the program sent to the LM. Use it to assert *what a program asks
+    * the model* — e.g. that enum values or a nested output schema reached the prompt — with no live LM. */
+  def capturePrompt(adapter: Adapter)(body: RuntimeContext ?=> Any): String =
+    val buf = scala.collection.mutable.ArrayBuffer.empty[String]
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(new CapturingLm(buf.append)), adapter = Some(adapter))
+    ) {
+      val _ = body(using RuntimeEnvironment.current)
+    }
+    buf.mkString("\n")
+
   /** Feed a canned LM completion (the exact text a model would emit) through the REAL adapter + typed decode,
     * with no live LM. Returns the decoded typed output. */
   def decodeCompletion[I, O](
@@ -28,10 +59,7 @@ object DecodeFixtures:
       input: I,
       completion: String
   ): Either[DspyError, O] =
-    RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(new ScriptedLm(completion)), adapter = Some(adapter))
-    ) {
-      given RuntimeContext = RuntimeEnvironment.current
+    runWith(adapter, completion) {
       Predict(signature).apply(input).map(_.output)
     }
 
