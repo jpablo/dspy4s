@@ -3,111 +3,74 @@
  *
  * Source:   docs/docs/tutorials/observability/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/observability/index.md
- * Status:   scaffold (6 python snippets — TODO translate)
+ * Status:   translated (the ReAct agent + the custom-callback observability hook, snippets 1/2/6). Blocked
+ *           bits: `dspy.inspect_history` (snippet 3 — no global history buffer), MLflow autolog (snippets
+ *           4/5 — no MLflow integration), and the retrieval backends (ColBERTv2 / Tavily) which have no
+ *           dspy4s equivalent, so the `retrieve` tool returns a static stub.
+ *
+ * Python's `from dspy.utils.callback import BaseCallback` + `on_module_end(call_id, outputs, exception)`
+ * maps onto dspy4s's `CallbackHandler.onEvent`, which receives a sealed `CallbackEvent` stream;
+ * `on_module_end` is the `ModuleEndEvent` case. Install handlers with `RuntimeEnvironment.withCallbacks`
+ * (the analogue of `dspy.configure(callbacks=[...])`).
  */
 package dspy4s.examples.tutorials.observability
 
-object Observability {
+import dspy4s.core.contracts.{DspyError, ModuleEndEvent, RuntimeContext}
+import dspy4s.core.contracts.{CallbackEvent, CallbackHandler}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.examples.Demo
+import dspy4s.programs.ReAct
+import dspy4s.programs.contracts.{ToolFunction, description}
+import dspy4s.typed.Signature
 
-  // ── Snippet 1 (lines 15–33) ────────────────────
-  // | import dspy
-  // | import os
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "{your_openai_api_key}"
-  // |
-  // | lm = dspy.LM("openai/gpt-4o-mini")
-  // | colbert = dspy.ColBERTv2(url="http://20.102.90.50:2017/wiki17_abstracts")
-  // | dspy.configure(lm=lm)
-  // |
-  // |
-  // | def retrieve(query: str):
-  // |     """Retrieve top 3 relevant information from ColBert"""
-  // |     results = colbert(query, k=3)
-  // |     return [x["text"] for x in results]
-  // |
-  // |
+object Observability:
+
+  // ── Snippet 1 (lines 15–33) — a ReAct agent over a retrieval tool ──
+  // | def retrieve(query: str): """Retrieve top 3 relevant information from ColBert""" ...
   // | agent = dspy.ReAct("question -> answer", tools=[retrieve], max_iters=3)
-  // TODO translate snippet 1
+  // ColBERTv2 (and Tavily, snippet 5) have no dspy4s equivalent, so `retrieve` returns a static stub.
+  @description("Retrieve the top relevant passages for a query.")
+  def retrieve(query: String): List[String] =
+    List(s"(stubbed retrieval result for: $query)")
 
-  // ── Snippet 2 (lines 37–40) ────────────────────
-  // | prediction = agent(question="Which baseball team does Shohei Ohtani play for in June 2025?")
-  // | print(prediction.answer)
-  // TODO translate snippet 2
+  def agent = ReAct(
+    baseSignature = Signature.fromString("question -> answer"),
+    tools         = Vector(ToolFunction.fromMethod(retrieve)),
+    maxIterations = 3
+  )
 
-  // ── Snippet 3 (lines 52–55) ────────────────────
-  // | # Print out 5 LLM calls
-  // | dspy.inspect_history(n=5)
-  // TODO translate snippet 3
-
-  // ── Snippet 4 (lines 112–137) ────────────────────
-  // | import dspy
-  // | import os
-  // | import mlflow
-  // |
-  // | os.environ["OPENAI_API_KEY"] = "{your_openai_api_key}"
-  // |
-  // | # Tell MLflow about the server URI.
-  // | mlflow.set_tracking_uri("http://127.0.0.1:5000")
-  // | # Create a unique name for your experiment.
-  // | mlflow.set_experiment("DSPy")
-  // |
-  // | lm = dspy.LM("openai/gpt-4o-mini")
-  // | colbert = dspy.ColBERTv2(url="http://20.102.90.50:2017/wiki17_abstracts")
-  // | dspy.configure(lm=lm)
-  // |
-  // |
-  // | def retrieve(query: str):
-  // |     """Retrieve top 3 relevant information from ColBert"""
-  // |     results = colbert(query, k=3)
-  // |     return [x["text"] for x in results]
-  // |
-  // |
-  // | agent = dspy.ReAct("question -> answer", tools=[retrieve], max_iters=3)
-  // | print(agent(question="Which baseball team does Shohei Ohtani play for?"))
-  // TODO translate snippet 4
-
-  // ── Snippet 5 (lines 154–175) ────────────────────
-  // | from tavily import TavilyClient
-  // | import dspy
-  // | import mlflow
-  // |
-  // | # Tell MLflow about the server URI.
-  // | mlflow.set_tracking_uri("http://127.0.0.1:5000")
-  // | # Create a unique name for your experiment.
-  // | mlflow.set_experiment("DSPy")
-  // |
-  // | search_client = TavilyClient(api_key="<YOUR_TAVILY_API_KEY>")
-  // |
-  // | def web_search(query: str) -> list[str]:
-  // |     """Run a web search and return the content from the top 5 search results"""
-  // |     response = search_client.search(query)
-  // |     return [r["content"] for r in response["results"]]
-  // |
-  // | agent = dspy.ReAct("question -> answer", tools=[web_search])
-  // |
-  // | prediction = agent(question="Which baseball team does Shohei Ohtani play for?")
-  // | print(agent.answer)
-  // TODO translate snippet 5
-
-  // ── Snippet 6 (lines 211–231) ────────────────────
-  // | import dspy
-  // | from dspy.utils.callback import BaseCallback
-  // |
-  // | # 1. Define a custom callback class that extends BaseCallback class
+  // ── Snippet 6 (lines 211–231) — a custom logging callback ──
   // | class AgentLoggingCallback(BaseCallback):
-  // |
-  // |     # 2. Implement on_module_end handler to run a custom logging code.
   // |     def on_module_end(self, call_id, outputs, exception):
   // |         step = "Reasoning" if self._is_reasoning_output(outputs) else "Acting"
-  // |         print(f"== {step} Step ===")
-  // |         for k, v in outputs.items():
-  // |             print(f"  {k}: {v}")
-  // |         print("\n")
-  // |
-  // |     def _is_reasoning_output(self, outputs):
-  // |         return any(k.startswith("Thought") for k in outputs.keys())
-  // |
-  // | # 3. Set the callback to DSPy setting so it will be applied to program execution
-  // | dspy.configure(callbacks=[AgentLoggingCallback()])
-  // TODO translate snippet 6
+  // |         print(f"== {step} Step ==="); for k, v in outputs.items(): print(f"  {k}: {v}")
+  // dspy4s delivers one typed `CallbackEvent` stream; `on_module_end` is the `ModuleEndEvent` case. (dspy4s's
+  // output is the program's typed result rather than a string-keyed dict, so the Reasoning/Acting key-prefix
+  // heuristic isn't 1:1 — we log the module name + outcome instead.)
+  final class AgentLoggingCallback extends CallbackHandler:
+    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+      event match
+        case e: ModuleEndEvent =>
+          val outcome = e.output.fold(err => s"error: ${err.message}", out => out.toString)
+          println(s"== ${e.moduleName} step ended ==\n  $outcome\n")
+        case _ => () // other scopes (LM / adapter / tool start+end) are ignored by this handler
+
+  /** Run the agent with the logging callback installed — the analogue of
+    * `dspy.configure(callbacks=[AgentLoggingCallback()])` followed by `agent(question=...)`. */
+  def runWithLogging(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
+    RuntimeEnvironment.withCallbacks(ctx.callbacks :+ new AgentLoggingCallback) {
+      given RuntimeContext = RuntimeEnvironment.current
+      agent.apply((question = question)).map(_.output.answer)
+    }
+
+  // ── Snippet 3 — `dspy.inspect_history(n=5)` ──
+  // Not portable: dspy4s has no global history buffer / `inspect_history`. Per-call history is on the
+  // RuntimeContext (`ctx.history`); a CallbackHandler (above) is the idiomatic way to observe calls.
+  //
+  // ── Snippets 4 / 5 — MLflow autolog (`mlflow.dspy.autolog()`, tracking server, Tavily search) ──
+  // Not portable: dspy4s has no MLflow integration. The callback stream is the observability seam.
+
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.observability.observabilityMain"
+@main def observabilityMain(): Unit = Demo.withLm {
+  println("Answer: " + Observability.runWithLogging("Which baseball team does Shohei Ohtani play for?"))
 }
