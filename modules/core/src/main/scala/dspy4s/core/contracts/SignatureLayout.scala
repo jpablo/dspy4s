@@ -61,7 +61,8 @@ final case class FieldSpec(
     typeRef: TypeRef = TypeRef.string,
     description: Option[String] = None,
     prefix: Option[String] = None,
-    defaultValue: Option[Any] = None
+    defaultValue: Option[Any] = None,
+    enumValues: Vector[String] = Vector.empty
 ) derives CanEqual
 
 /** Partial update DTO for the field-mutation surface on [[SignatureLayout]]. Each `Option` field that's `Some`

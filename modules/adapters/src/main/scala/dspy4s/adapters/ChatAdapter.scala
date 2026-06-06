@@ -157,7 +157,10 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
           case Some(desc) if desc != s"$${${field.name}}" && desc.nonEmpty =>
             s": $desc"
           case _ => ""
-        s"${idx + 1}. `${field.name}` ($typeName)$descPart"
+        val enumPart =
+          if field.enumValues.nonEmpty then s" (must be one of: ${field.enumValues.mkString(", ")})"
+          else ""
+        s"${idx + 1}. `${field.name}` ($typeName)$descPart$enumPart"
       }
       (header +: lines).mkString("\n")
 

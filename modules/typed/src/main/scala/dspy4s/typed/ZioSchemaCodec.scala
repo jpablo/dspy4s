@@ -97,8 +97,22 @@ private[typed] object ZioSchemaCodec:
   /** Walk a `Reflect.Record` and produce the FieldSpec list with role applied. */
   def fieldSpecsFromReflect(reflect: Reflect[?, ?], role: FieldRole): Vector[FieldSpec] = reflect match
     case rec: Reflect.Record[?, ?] =>
-      rec.fields.toVector.map(term => FieldSpec(name = term.name, role = role, typeRef = typeRefFor(term.value)))
+      rec.fields.toVector.map(term =>
+        FieldSpec(
+          name       = term.name,
+          role       = role,
+          typeRef    = typeRefFor(term.value),
+          enumValues = enumValuesOf(term.value)
+        )
+      )
     case _ => Vector.empty
+
+  /** Allowed case names for an enum field, i.e. a `Reflect.Variant`'s cases. Empty for any non-variant reflect.
+    * The wire `typeRef` for a variant stays `TypeRef.string` (the LM sees a flat label); these values ride
+    * alongside so adapters can tell the LM which labels are valid. */
+  private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] = reflect match
+    case variant: Reflect.Variant[?, ?] => variant.cases.map(_.name).toVector
+    case _                               => Vector.empty
 
   /** Derive the wire `TypeRef` for a single value type from its `Schema`. This is the same mapping
     * `fieldSpecsFromReflect` applies to each record field, exposed for the programmatic [[SignatureBuilder]]
