@@ -18,20 +18,20 @@ class BuilderTypeRefPinSuite extends FunSuite:
   private def builderTypeRef(build: SignatureBuilder => SignatureBuilder): TypeRef =
     build(Signature.builder("Pin")).build.fields.find(_.name == "f").get.typeRef
 
-  test("List field -> json") {
-    assertEquals(builderTypeRef(_.output[List[String]]("f")), TypeRef.json)
+  test("List field -> list") {
+    assertEquals(builderTypeRef(_.output[List[String]]("f")), TypeRef.list)
   }
 
-  test("Vector field -> json") {
-    assertEquals(builderTypeRef(_.output[Vector[Int]]("f")), TypeRef.json)
+  test("Vector field -> list") {
+    assertEquals(builderTypeRef(_.output[Vector[Int]]("f")), TypeRef.list)
   }
 
-  test("Seq field -> json") {
-    assertEquals(builderTypeRef(_.output[Seq[Double]]("f")), TypeRef.json)
+  test("Seq field -> list") {
+    assertEquals(builderTypeRef(_.output[Seq[Double]]("f")), TypeRef.list)
   }
 
-  test("Set field -> json") {
-    assertEquals(builderTypeRef(_.output[Set[String]]("f")), TypeRef.json)
+  test("Set field -> list") {
+    assertEquals(builderTypeRef(_.output[Set[String]]("f")), TypeRef.list)
   }
 
   test("Map field -> json") {

@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
@@ -165,28 +166,10 @@ final case class JSONAdapter(
       case TypeRef.bool =>
         value.boolOpt.toRight(ValidationError(s"Expected boolean value, found: $value"))
           .map(b => DynamicValue.Primitive(PrimitiveValue.Boolean(b)))
-      case TypeRef.json =>
-        Right(fromJson(value))
+      case TypeRef.json | TypeRef.list =>
+        Right(JsonDynamic.fromUjson(value))
       case _ =>
         Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
-
-  private def fromJson(value: Value): DynamicValue =
-    value match
-      case ujson.Str(v)  => DynamicValue.Primitive(PrimitiveValue.String(v))
-      case ujson.Num(v)  =>
-        if v.isWhole && v >= Int.MinValue && v <= Int.MaxValue then
-          DynamicValue.Primitive(PrimitiveValue.Int(v.toInt))
-        else if v.isWhole && v >= Long.MinValue && v <= Long.MaxValue then
-          DynamicValue.Primitive(PrimitiveValue.Long(v.toLong))
-        else DynamicValue.Primitive(PrimitiveValue.Double(v))
-      case ujson.Bool(v) => DynamicValue.Primitive(PrimitiveValue.Boolean(v))
-      case _: ujson.Null.type => DynamicValue.Null
-      case obj: ujson.Obj =>
-        DynamicValue.Record(Chunk.from(
-          obj.value.iterator.map { case (k, v) => k -> fromJson(v) }.toSeq
-        ))
-      case arr: ujson.Arr =>
-        DynamicValue.Sequence(Chunk.from(arr.value.toVector.map(fromJson)))
 
   private def renderJson(value: Value): String =
     value match

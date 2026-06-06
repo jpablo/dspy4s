@@ -18,6 +18,20 @@ case class ZsCommentInput(comment: String, lang: String)
 object ZsCommentInput:
   given Schema[ZsCommentInput] = Schema.derived
 
+// A plain (parameterless-case) enum vs. an Option field, both of which are `Reflect.Variant` under the hood.
+enum ZsKind:
+  case alpha, beta
+object ZsKind:
+  given Schema[ZsKind] = Schema.derived
+
+case class ZsMixed(kind: ZsKind, amount: Option[Double])
+object ZsMixed:
+  given Schema[ZsMixed] = Schema.derived
+
+case class ZsOptionProbe(amount: Option[Double], note: String)
+object ZsOptionProbe:
+  given Schema[ZsOptionProbe] = Schema.derived
+
 /** The spine is now `DynamicValue.Record` end-to-end -- there is no
   * `Map[String, Any]` intermediate -- so the historical tests that exercised
   * the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers were
@@ -31,6 +45,35 @@ class ZioSchemaCodecSuite extends FunSuite:
     assertEquals(specs.map(_.name), Vector("comment", "lang"))
     assertEquals(specs.map(_.role), Vector(FieldRole.Input, FieldRole.Input))
     assertEquals(specs.map(_.typeRef), Vector(TypeRef.string, TypeRef.string))
+  }
+
+  test("enumValuesOf surfaces a plain enum's cases but not an Option's Some/None") {
+    import ZsMixed.given
+    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsMixed]].reflect, FieldRole.Output)
+    assertEquals(specs.find(_.name == "kind").get.enumValues, Vector("alpha", "beta"))
+    assertEquals(
+      specs.find(_.name == "amount").get.enumValues,
+      Vector.empty,
+      "Option is a Reflect.Variant but not an enum; its Some/None cases must not leak as allowed values"
+    )
+  }
+
+  test("normalize wraps a bare value into Some and Null into None for an Option field") {
+    import ZsOptionProbe.given
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsOptionProbe](FieldRole.Output)
+    assertEquals(
+      shape.decode(DynamicValues.recordFromEntries(Seq("amount" := 2399.0, "note" := "x"))),
+      Right(ZsOptionProbe(Some(2399.0), "x"))
+    )
+    // LM-shaped string coerces through the Some payload too.
+    assertEquals(
+      shape.decode(DynamicValues.recordFromEntries(Seq("amount" := "2399.0", "note" := "x"))),
+      Right(ZsOptionProbe(Some(2399.0), "x"))
+    )
+    assertEquals(
+      shape.decode(DynamicValues.recordFromEntries(Seq("amount" -> DynamicValue.Null, "note" := "y"))),
+      Right(ZsOptionProbe(None, "y"))
+    )
   }
 
   test("Variant-typed fields surface as TypeRef.string at the wire boundary") {

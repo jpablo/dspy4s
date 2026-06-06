@@ -32,9 +32,12 @@ private[typed] object ZioSchemaCodec:
     * dropped); sequences are walked element-wise. Everything else (and values whose target shape doesn't match
     * the dispatch above) passes through unchanged. */
   def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue = (dv, target) match
-    case (_: DynamicValue.Null.type, _)                          => DynamicValue.Null
     case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) =>
       coercePrimitive(prim, p.primitiveType)
+    // Option-shaped variant: wrap bare/Null/string values into Some/None before the generic rules below.
+    case (value, variant: Reflect.Variant[?, ?]) if optionSomeValueReflect(variant).isDefined =>
+      normalizeOption(value, optionSomeValueReflect(variant).get)
+    case (_: DynamicValue.Null.type, _)                          => DynamicValue.Null
     case (DynamicValue.Primitive(PrimitiveValue.String(s)), _: Reflect.Variant[?, ?]) =>
       DynamicValue.Variant(s, DynamicValue.Record.empty)
     case (rec: DynamicValue.Record, recTarget: Reflect.Record[?, ?]) =>
@@ -52,6 +55,24 @@ private[typed] object ZioSchemaCodec:
         normalize(DynamicValue.Primitive(PrimitiveValue.String(k)), mapTarget.key) -> normalize(v, mapTarget.value)
       }.toSeq))
     case _ => dv
+
+  /** Coerce an incoming value into the `Some`/`None` Variant shape zio-blocks expects for an `Option` field.
+    * `valueReflect` is the `Some` case's `value` field reflect, so a wrapped payload routes back through
+    * [[normalize]] and inherits the usual LM-shaped coercion (e.g. `"2399.0"` string → Double). */
+  private def normalizeOption(value: DynamicValue, valueReflect: Reflect[?, ?]): DynamicValue =
+    def none: DynamicValue = DynamicValue.Variant("None", DynamicValue.Record.empty)
+    def some(v: DynamicValue): DynamicValue =
+      DynamicValue.Variant("Some", DynamicValue.Record(Chunk.single("value" -> normalize(v, valueReflect))))
+    value match
+      case _: DynamicValue.Null.type => none
+      case variant: DynamicValue.Variant => variant
+      case DynamicValue.Primitive(PrimitiveValue.String(s))
+          if s.trim.isEmpty
+            || s.trim.equalsIgnoreCase("null")
+            || s.trim.equalsIgnoreCase("none")
+            || s.trim.equalsIgnoreCase("n/a") =>
+        none
+      case other => some(other)
 
   private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[?, ?]): DynamicValue.Record =
     val targetByName = target.fields.iterator.map(t => t.name -> t.value).toMap
@@ -111,8 +132,39 @@ private[typed] object ZioSchemaCodec:
     * The wire `typeRef` for a variant stays `TypeRef.string` (the LM sees a flat label); these values ride
     * alongside so adapters can tell the LM which labels are valid. */
   private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] = reflect match
-    case variant: Reflect.Variant[?, ?] => variant.cases.map(_.name).toVector
-    case _                               => Vector.empty
+    case variant: Reflect.Variant[?, ?] =>
+      val cases = variant.cases.toVector
+      val allParameterless = cases.forall { term =>
+        term.value match
+          case rec: Reflect.Record[?, ?] => rec.fields.isEmpty
+          case _                          => false
+      }
+      if allParameterless then cases.map(_.name) else Vector.empty
+    case _ => Vector.empty
+
+  /** Detect an `Option`-shaped `Reflect.Variant`: a `None` case (empty record) and a `Some` case whose record
+    * carries exactly one field named `value`. Returns the `Some` case's value-field reflect when matched, so
+    * [[normalize]] can route the wrapped payload through the existing coercion against the right target. */
+  private def optionSomeValueReflect(reflect: Reflect[?, ?]): Option[Reflect[?, ?]] = reflect match
+    case variant: Reflect.Variant[?, ?] =>
+      val cases = variant.cases.toVector
+      if cases.size != 2 then None
+      else
+        val noneCase = cases.find(_.name == "None").flatMap { term =>
+          term.value match
+            case rec: Reflect.Record[?, ?] if rec.fields.isEmpty => Some(rec)
+            case _                                                => None
+        }
+        val someValue = cases.find(_.name == "Some").flatMap { term =>
+          term.value match
+            case rec: Reflect.Record[?, ?] =>
+              rec.fields.toVector match
+                case Vector(field) if field.name == "value" => Some(field.value)
+                case _                                       => None
+            case _ => None
+        }
+        if noneCase.isDefined then someValue else None
+    case _ => None
 
   /** Derive the wire `TypeRef` for a single value type from its `Schema`. This is the same mapping
     * `fieldSpecsFromReflect` applies to each record field, exposed for the programmatic [[SignatureBuilder]]
@@ -123,7 +175,7 @@ private[typed] object ZioSchemaCodec:
     case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
     case _: Reflect.Variant[?, ?]      => TypeRef.string
     case _: Reflect.Record[?, ?]       => TypeRef.json
-    case _: Reflect.Sequence[?, ?, ?]  => TypeRef.json
+    case _: Reflect.Sequence[?, ?, ?]  => TypeRef.list
     case _: Reflect.Map[?, ?, ?, ?]    => TypeRef.json
     case _                              => TypeRef.json
 

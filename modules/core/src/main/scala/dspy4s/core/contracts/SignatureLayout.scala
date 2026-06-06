@@ -28,6 +28,7 @@ object TypeRef:
   val double: TypeRef = TypeRef("double")
   val bool: TypeRef   = TypeRef("bool")
   val json: TypeRef   = TypeRef("json")
+  val list: TypeRef   = TypeRef("list")
 
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`)

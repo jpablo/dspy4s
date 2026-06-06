@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -219,6 +220,10 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
           case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
           case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
           case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
+      case TypeRef.json | TypeRef.list =>
+        JsonDynamic.parse(raw).left.map(_ =>
+          ValidationError(s"Field could not be parsed as JSON from '$raw'")
+        )
       case _ =>
         Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
 
@@ -242,6 +247,7 @@ object ChatAdapter:
     case TypeRef.double => "float"
     case TypeRef.bool   => "bool"
     case TypeRef.json   => "dict"
+    case TypeRef.list   => "list"
     case other          => other.repr
 
   /** Hint phrasing for the final-user-message reminder
@@ -250,6 +256,7 @@ object ChatAdapter:
     * string otherwise. */
   def reminderHint(t: TypeRef): Option[String] = t match
     case TypeRef.string => None
+    case TypeRef.list   => Some("must be a valid JSON array")
     case _              => Some(s"must be formatted as a valid ${displayTypeName(t)}")
 
   /** Hint phrasing for the structure-example `# note: ...` comments.
@@ -261,4 +268,5 @@ object ChatAdapter:
     case TypeRef.double => Some("must be a single float value")
     case TypeRef.bool   => Some("must be true or false")
     case TypeRef.json   => Some("must be a valid JSON object")
+    case TypeRef.list   => Some("must be a valid JSON array")
     case other          => Some(s"must be a valid ${displayTypeName(other)}")
