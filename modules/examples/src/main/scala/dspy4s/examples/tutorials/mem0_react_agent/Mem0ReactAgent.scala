@@ -3,7 +3,9 @@
  *
  * Source:   docs/docs/tutorials/mem0_react_agent/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/mem0_react_agent/index.md
- * Status:   scaffold (4 python snippets — TODO translate)
+ * Status:   blocked (4 python snippets) — dspy4s has no mem0 integration (no long-term memory store).
+ *           The ReAct agent itself is portable (see learn/programming/Tools.scala); the mem0-backed
+ *           memory tools are not.
  */
 package dspy4s.examples.tutorials.mem0_react_agent
 

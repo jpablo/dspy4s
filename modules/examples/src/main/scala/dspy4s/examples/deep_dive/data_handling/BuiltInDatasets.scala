@@ -3,7 +3,9 @@
  *
  * Source:   docs/docs/deep-dive/data-handling/built-in-datasets.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/deep-dive/data-handling/built-in-datasets.md
- * Status:   scaffold (4 python snippets — TODO translate)
+ * Status:   blocked (4 python snippets) — dspy4s has no built-in dataset loaders (no `dspy.datasets`,
+ *           HotPotQA / GSM8K / Color / etc.). Bring your own data via `Example` (see
+ *           deep_dive/data_handling/LoadingCustomData.scala).
  */
 package dspy4s.examples.deep_dive.data_handling
 
