@@ -93,6 +93,12 @@ final case class ChainOfThought[I, O](
     val fieldSpecs: Vector[FieldSpec] =
       ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
 
+    // Reuse the base output's JSON schema so the structured (nested) field shapes still reach the adapter
+    // (and thus the LM). The prepended `reasoning` field is a plain String already covered by the adapter's
+    // field markers, so omitting it from the schema is harmless; the schema's only job here is to convey the
+    // nested shapes of the structured output fields.
+    override lazy val jsonSchemaString: Option[String] = signature.outputShape.jsonSchemaString
+
     def encode(value: Out): DynamicValue.Record =
       val product: Product = value match
         case p: Product => p

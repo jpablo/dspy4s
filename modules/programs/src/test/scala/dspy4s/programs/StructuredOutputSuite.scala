@@ -79,6 +79,33 @@ class StructuredOutputSuite extends FunSuite:
     )
   }
 
+  test("ChainOfThought conveys the nested output schema to the LM under ChatAdapter") {
+    // The email_extraction example builds every step with ChainOfThought. CoT's augmented output Shape must
+    // still carry the base output JSON schema, or the nested structure (items: List[TagItem]) never reaches
+    // the LM and it emits a list of strings → "Expected a record at: .items.each".
+    val captured = scala.collection.mutable.ArrayBuffer.empty[String]
+    val capturingLm = new LanguageModel:
+      override val id: String   = "capturing"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        request.messages.foreach(m => m.text.foreach(captured += _))
+        Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
+
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(capturingLm), adapter = Some(ChatAdapter()))
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val cot = ChainOfThought(signature)
+      val _   = cot.apply(TagInput("classify this")) // result ignored; we assert on the captured prompt
+    }
+    val prompt = captured.mkString("\n")
+    assert(
+      prompt.contains("score"),
+      s"ChainOfThought's inner predict must convey the nested schema (items: List[TagItem]) to the LM; " +
+        s"'score' is missing from the prompt:\n$prompt"
+    )
+  }
+
   test("ChatAdapter decodes an absent Option output field as None") {
     val noneCompletion =
       """[[ ## tags ## ]]
