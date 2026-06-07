@@ -19,6 +19,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -79,5 +80,25 @@ class NativeFunctionCallingSuite extends FunSuite:
         case DynamicValue.Sequence(els) => els.iterator.toVector
         case other                      => fail(s"expected a sequence for tool_calls, got $other")
       assertEquals(calls.size, 1)
+    }
+  }
+
+  test("typed Predict also threads tools to the adapter (tools field on the typed path)") {
+    val lm = new RecordingLm
+    // A lenient (Map-shaped) typed signature with a tool_calls output field.
+    val signature = Signature.fromStringDynamic("question -> answer, tool_calls: tool_calls").toOption.get
+    val predict   = Predict(signature = signature, tools = tools)
+
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = predict.apply(DynamicValues.record("question" := "capital of belgium?"))
+
+      assert(result.isRight, s"expected success, got: $result")
+      assert(
+        lm.lastOptions.exists(opts => DynamicValues.recordGet(opts, "tools").isDefined),
+        s"tools missing from request options on the typed path: ${lm.lastOptions}"
+      )
     }
   }

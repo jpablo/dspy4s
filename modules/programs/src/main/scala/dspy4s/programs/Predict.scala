@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{DspyError, DynamicValues, Example, NotFoundError, RuntimeContext}
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ProgramCall, ProgramRuntime, TypedCall}
@@ -39,7 +40,11 @@ final case class Predict[I, O](
     /** Optional per-module bound LM (the immutable analogue of Python's `set_lm`/`get_lm`). When set, this
       * predictor uses it in preference to the ambient `RuntimeContext` LM, so a program can pin different models
       * to different predictors. `None` (the default) falls back to ambient resolution. See PORT_GAPS G-3. */
-    lm: Option[LanguageModel] = None
+    lm: Option[LanguageModel] = None,
+    /** Tool schemas exposed to the model, passed through to the adapter. Acted on only by an adapter with native
+      * function-calling enabled and a `tool_calls` output field in the signature. Pure [[ToolSpec]] data; not
+      * serialized state. See PORT_GAPS G-7b. */
+    tools: Vector[ToolSpec] = Vector.empty
 ) extends Module[TypedCall[I], Prediction[O]]:
 
   override val moduleName: String = name.getOrElse("predict")
@@ -52,7 +57,8 @@ final case class Predict[I, O](
     runtime          = runtime,
     outputJsonSchema = signature.outputShape.jsonSchemaString,
     config           = config,
-    lm               = lm
+    lm               = lm,
+    tools            = tools
   )
 
   /** Pin a bound LM to this predictor (immutable `set_lm`): returns a copy that resolves to `model` instead of
