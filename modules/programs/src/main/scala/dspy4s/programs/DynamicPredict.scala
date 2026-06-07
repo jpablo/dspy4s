@@ -7,6 +7,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
@@ -57,12 +58,16 @@ final case class DynamicPredict(
       * to the ambient `RuntimeContext` LM, so different predictors in one program can pin different models.
       * `None` (the default) falls back to ambient resolution. Not part of the serialized learnable state (it's a
       * binding, like `runtime`). See PORT_GAPS G-3. */
-    lm: Option[LanguageModel] = None
+    lm: Option[LanguageModel] = None,
+    /** Tool schemas this predictor exposes to the model. Passed through to the adapter; only an adapter with
+      * native function-calling enabled and a `tool_calls` output field acts on them. Pure [[ToolSpec]] data (no
+      * invoke closures) — the executable bodies stay on the calling program. Not serialized state. See G-7b. */
+    tools: Vector[ToolSpec] = Vector.empty
 ) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
 
-  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm)
+  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools)
 
   override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     engine.execute(call)

@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
@@ -56,7 +57,11 @@ private[dspy4s] final case class PredictEngine(
     /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, it is used in preference to the
       * ambient `RuntimeContext` LM (`runtime.resolveModel`), so different predictors in one program can pin
       * different models. `None` (the default) falls back to ambient resolution. See PORT_GAPS G-3. */
-    lm: Option[LanguageModel] = None
+    lm: Option[LanguageModel] = None,
+    /** Tool schemas surfaced to the adapter via [[AdapterInvocation.tools]]. Only an adapter with native
+      * function-calling enabled (and a `tool_calls` output field in the layout) acts on them; others ignore them.
+      * Empty by default. See PORT_GAPS G-7b. */
+    tools: Vector[ToolSpec] = Vector.empty
 ):
 
   def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
@@ -93,6 +98,7 @@ private[dspy4s] final case class PredictEngine(
       demos = demos,
       inputs = Example(values = call.inputs, inputKeys = inputKeys),
       outputJsonSchema = outputJsonSchema,
+      tools = tools,
       request = LmRequest(
         model = model.id,
         mode = model.mode,
