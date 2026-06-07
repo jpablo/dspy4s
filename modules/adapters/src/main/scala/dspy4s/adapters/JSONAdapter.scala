@@ -31,7 +31,9 @@ final case class JSONAdapter(
     /** See [[ChatAdapter.useNativeFunctionCalling]] — same adapter-level native function-calling gate, shared via
       * [[NativeFunctionCalling]]. Off by default. */
     useNativeFunctionCalling: Boolean = false,
-    parallelToolCalls: Option[Boolean] = None
+    parallelToolCalls: Option[Boolean] = None,
+    /** See [[ChatAdapter.toolChoice]]. */
+    toolChoice: Option[String] = None
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     // NOTE (G-9): this adapter emits no prose field-description block (only a key list or a JSON Schema), so
@@ -83,7 +85,7 @@ final case class JSONAdapter(
         // `response_format` option; both ride the same requestOptions seam.
         requestOptions = FormattedPrompt.mergeOptions(
           responseFormatOptions(invocation),
-          NativeFunctionCalling.toolOptions(invocation.layout, invocation.tools, useNativeFunctionCalling, parallelToolCalls)
+          NativeFunctionCalling.toolOptions(invocation.layout, invocation.tools, useNativeFunctionCalling, parallelToolCalls, toolChoice)
         )
       )
     )

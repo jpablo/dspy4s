@@ -35,7 +35,8 @@ object NativeFunctionCalling:
       layout: SignatureLayout,
       tools: Vector[ToolSpec],
       useNative: Boolean,
-      parallelToolCalls: Option[Boolean]
+      parallelToolCalls: Option[Boolean],
+      toolChoice: Option[String] = None
   )(using RuntimeContext): DynamicValue.Record =
     val active =
       useNative && tools.nonEmpty && layout.outputFields.exists(isToolCallsField) && lmSupportsFunctionCalling
@@ -43,7 +44,8 @@ object NativeFunctionCalling:
     else
       val entries =
         Vector("tools" -> ToolSchemaBridge.toOpenAiToolsDynamic(tools)) ++
-          parallelToolCalls.map(b => "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))).toVector
+          parallelToolCalls.map(b => "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))).toVector ++
+          toolChoice.map(tc => "tool_choice" -> DynamicValue.Primitive(PrimitiveValue.String(tc))).toVector
       DynamicValues.recordFromEntries(entries)
 
   /** Encode native tool calls as the value of a `tool_calls` output field: a sequence of `{name, args}` records,

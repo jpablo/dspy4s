@@ -41,7 +41,10 @@ final case class ChatAdapter(
     useNativeFunctionCalling: Boolean = false,
     /** When native function-calling is active, request provider-side parallel tool-call generation. `None` leaves
       * the knob unset (provider default). */
-    parallelToolCalls: Option[Boolean] = None
+    parallelToolCalls: Option[Boolean] = None,
+    /** When native function-calling is active, set the provider `tool_choice` (e.g. `"auto"`, `"required"`,
+      * `"none"`). `None` leaves it unset (provider default). */
+    toolChoice: Option[String] = None
 ) extends Adapter:
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
@@ -73,7 +76,7 @@ final case class ChatAdapter(
 
     Right(FormattedPrompt(
       messages       = Vector(systemMessage) ++ demoMessages ++ Vector(inputMessage),
-      requestOptions = NativeFunctionCalling.toolOptions(layout, invocation.tools, useNativeFunctionCalling, parallelToolCalls)
+      requestOptions = NativeFunctionCalling.toolOptions(layout, invocation.tools, useNativeFunctionCalling, parallelToolCalls, toolChoice)
     ))
 
   override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =

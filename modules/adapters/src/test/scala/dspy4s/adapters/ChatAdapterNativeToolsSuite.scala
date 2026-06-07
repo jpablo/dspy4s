@@ -73,6 +73,21 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
     assert(!promptText.contains("tool_calls"), s"the tool_calls field must not be rendered as a text field:\n$promptText")
   }
 
+  test("native function-calling injects tool_choice when configured, and omits it otherwise") {
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
+
+    val withChoice = ChatAdapter(useNativeFunctionCalling = true, toolChoice = Some("required"))
+      .format(invocation()).toOption.get
+    assertEquals(
+      DynamicValues.recordGet(withChoice.requestOptions, "tool_choice").map(DynamicValues.renderText),
+      Some("required")
+    )
+
+    val withoutChoice = ChatAdapter(useNativeFunctionCalling = true).format(invocation()).toOption.get
+    assert(DynamicValues.recordGet(withoutChoice.requestOptions, "tool_choice").isEmpty,
+      "tool_choice must be absent when not configured")
+  }
+
   test("native function-calling is suppressed when the LM does not support function calling") {
     val adapter = ChatAdapter(useNativeFunctionCalling = true)
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = false)))
