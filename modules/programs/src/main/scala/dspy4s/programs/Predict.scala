@@ -30,7 +30,13 @@ final case class Predict[I, O](
     signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     name: Option[String] = None,
-    runtime: ProgramRuntime = new SettingsProgramRuntime {}
+    runtime: ProgramRuntime = new SettingsProgramRuntime {},
+    /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`.
+      * Merged *under* the per-call `config` (per-call keys win on collision), so it supplies defaults a call may
+      * override. Empty by default — then the merged options are exactly the per-call config. (Deferred: a
+      * per-module bound LM, Python's `set_lm`/`get_lm`; the LM is still resolved from the ambient
+      * `RuntimeContext`. See PORT_GAPS G-3.) */
+    config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends Module[TypedCall[I], Prediction[O]]:
 
   override val moduleName: String = name.getOrElse("predict")
@@ -41,7 +47,8 @@ final case class Predict[I, O](
     demos            = demos,
     moduleName       = moduleName,
     runtime          = runtime,
-    outputJsonSchema = signature.outputShape.jsonSchemaString
+    outputJsonSchema = signature.outputShape.jsonSchemaString,
+    config           = config
   )
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =

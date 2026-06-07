@@ -11,6 +11,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.updated
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.lm.contracts.LanguageModel
@@ -45,7 +46,12 @@ private[dspy4s] final case class PredictEngine(
       * path (which has a `Schema[O]` to render via `Shape.jsonSchemaString`); left `None` by
       * [[dspy4s.programs.DynamicPredict]]. Passed straight through to [[AdapterInvocation]]; adapters that
       * understand it inline the schema in their prompt instruction. */
-    outputJsonSchema: Option[String] = None
+    outputJsonSchema: Option[String] = None,
+    /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`.
+      * Merged *under* the per-call [[ProgramCall.config]] in [[buildInvocation]] (per-call keys win on
+      * collision), so it supplies defaults a call may override. Empty by default, in which case the merged
+      * options are exactly the per-call config. */
+    config: DynamicValue.Record = DynamicValue.Record.empty
 ):
 
   def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
@@ -82,10 +88,20 @@ private[dspy4s] final case class PredictEngine(
       request = LmRequest(
         model = model.id,
         mode = model.mode,
-        options = call.config,
+        options = mergeConfig(config, call.config),
         rolloutId = call.rolloutId
       )
     )
+
+  /** Merge the module-level `config` with the per-call config so that per-call keys win on collision: start
+    * from the module config and upsert each per-call field by name (later wins, preserving insertion order via
+    * the `updated` extension). Mirrors Python's `{**self.config, **call_kwargs}`. When module `config` is empty
+    * the result is exactly `callConfig`, so behavior is unchanged for callers that don't set a module config.
+    *
+    * (Deferred: a per-module bound LM — Python's `set_lm`/`get_lm` — is intentionally not handled here; the LM
+    * is resolved from the ambient `RuntimeContext` via `runtime.resolveModel`. See PORT_GAPS G-3.) */
+  private def mergeConfig(moduleConfig: DynamicValue.Record, callConfig: DynamicValue.Record): DynamicValue.Record =
+    callConfig.fields.iterator.foldLeft(moduleConfig)((acc, kv) => acc.updated(kv._1, kv._2))
 
   /** Mirror upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: input keys that are not declared input
     * fields are tolerated (the extras are dropped downstream, since [[AdapterInvocation]] is built with

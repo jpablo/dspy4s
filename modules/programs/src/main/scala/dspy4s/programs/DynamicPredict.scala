@@ -10,6 +10,7 @@ import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
+import zio.blocks.schema.DynamicValue
 
 /** The untyped prediction module: the data-bag counterpart to typed [[Predict]]. Given a
   * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (field names, roles, and wire types known only at
@@ -33,6 +34,7 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
   * @param name             module name used in callbacks/trace/history (defaults to `"predict"`)
   * @param runtime          resolves the model and adapter from the ambient [[dspy4s.core.contracts.RuntimeContext]]
   * @param outputJsonSchema see field comment below
+  * @param config           module-level LM option bag (see field comment below)
   */
 final case class DynamicPredict(
     layout: SignatureLayout,
@@ -42,12 +44,18 @@ final case class DynamicPredict(
     /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. The typed
       * `Predict[I, O]` path provides this from its `signature.outputShape.jsonSchemaString`; users who
       * construct `DynamicPredict` directly leave it `None` and adapters fall back to their default behavior. */
-    outputJsonSchema: Option[String] = None
+    outputJsonSchema: Option[String] = None,
+    /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`.
+      * Merged *under* the per-call `ProgramCall.config` (per-call keys win on collision), so it supplies
+      * defaults a call may override. Empty by default — then the merged options are exactly the per-call config.
+      * (Deferred: a per-module bound LM, Python's `set_lm`/`get_lm`; the LM is still resolved from the ambient
+      * `RuntimeContext`. See PORT_GAPS G-3.) */
+    config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
 
-  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema)
+  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config)
 
   override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     engine.execute(call)
