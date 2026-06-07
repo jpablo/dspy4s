@@ -2,14 +2,17 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
 /** The untyped prediction module: the data-bag counterpart to typed [[Predict]]. Given a
@@ -59,3 +62,54 @@ final case class DynamicPredict(
 
   override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     engine.execute(call)
+
+  /** Serialize this predictor's learnable state to a `DynamicValue.Record` -- the codec spine. The record has
+    * three fields: `signature` (the layout via [[SignatureLayout.dumpState]]), `demos` (a sequence of
+    * [[Example.dumpState]] records), and `config` (the module-level option bag verbatim). Round-trips with
+    * [[DynamicPredict.fromState]]. `name` and `runtime` are intentionally not serialized -- they are
+    * environment/identity concerns, restored to defaults on re-hydration. */
+  def dumpState: DynamicValue.Record =
+    val demoStates: Seq[DynamicValue] = demos.map(d => d.dumpState: DynamicValue)
+    DynamicValue.Record(Chunk.from(Seq(
+      "signature" -> (layout.dumpState: DynamicValue),
+      "demos"     -> DynamicValue.Sequence(Chunk.from(demoStates)),
+      "config"    -> (config: DynamicValue)
+    )))
+
+object DynamicPredict:
+
+  /** Re-hydrate a [[DynamicPredict]] from the `DynamicValue.Record` produced by [[DynamicPredict.dumpState]]. The
+    * `signature` is rebuilt via [[SignatureLayout.fromState]], `demos` via [[Example.fromState]], and `config`
+    * read verbatim (defaulting to an empty record when absent). `name` and `runtime` are restored to their
+    * defaults -- they are not part of the serialized state. */
+  def fromState(state: DynamicValue.Record): Either[DspyError, DynamicPredict] =
+    def readSignature: Either[DspyError, SignatureLayout] =
+      DynamicValues.recordGet(state, "signature") match
+        case Some(rec: DynamicValue.Record) => SignatureLayout.fromState(rec)
+        case _ => Left(ValidationError("DynamicPredict state is missing a record 'signature'"))
+
+    def readDemos: Either[DspyError, Vector[Example]] =
+      DynamicValues.recordGet(state, "demos") match
+        case None | Some(_: DynamicValue.Null.type) => Right(Vector.empty)
+        case Some(seq: DynamicValue.Sequence) =>
+          seq.elements.iterator.foldLeft[Either[DspyError, Vector[Example]]](Right(Vector.empty)) { (acc, raw) =>
+            for
+              demos <- acc
+              demo  <- raw match
+                         case rec: DynamicValue.Record => Example.fromState(rec)
+                         case _ => Left(ValidationError("DynamicPredict state 'demos' must be records"))
+            yield demos :+ demo
+          }
+        case Some(_) => Left(ValidationError("DynamicPredict state 'demos' must be a sequence"))
+
+    def readConfig: Either[DspyError, DynamicValue.Record] =
+      DynamicValues.recordGet(state, "config") match
+        case None | Some(_: DynamicValue.Null.type) => Right(DynamicValue.Record.empty)
+        case Some(rec: DynamicValue.Record)         => Right(rec)
+        case Some(_) => Left(ValidationError("DynamicPredict state 'config' must be a record"))
+
+    for
+      layout <- readSignature
+      demos  <- readDemos
+      config <- readConfig
+    yield DynamicPredict(layout = layout, demos = demos, config = config)

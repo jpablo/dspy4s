@@ -22,6 +22,35 @@ class DataSuite extends FunSuite:
     assertEquals(example.labels, DynamicValue.Record(Chunk("answer" -> str("2"))))
   }
 
+  test("example dumpState and fromState roundtrip (values, inputKeys, augmented)") {
+    val example = Example("question" := "What is 1+1?", "answer" := "2")
+      .withInputs(Set("question"))
+      .withAugmented(true)
+
+    val state   = example.dumpState
+    val rebuilt = Example.fromState(state)
+
+    assert(rebuilt.isRight, s"expected Right, got $rebuilt")
+    assertEquals(rebuilt.toOption.get, example)
+  }
+
+  test("example fromState defaults inputKeys to empty and augmented to false") {
+    val example = Example("question" := "q", "answer" := "a")
+    val rebuilt = Example.fromState(example.dumpState)
+    assert(rebuilt.isRight)
+    val got = rebuilt.toOption.get
+    assertEquals(got.inputKeys, Set.empty[String])
+    assertEquals(got.augmented, false)
+    assertEquals(got, example)
+  }
+
+  test("example fromState fails when 'values' is not a record") {
+    val state   = DynamicValue.Record(Chunk("values" -> str("not-a-record")))
+    val rebuilt = Example.fromState(state)
+    assert(rebuilt.isLeft)
+    assert(rebuilt.left.toOption.get.isInstanceOf[ValidationError])
+  }
+
   test("completion rows must have equal lengths") {
     intercept[IllegalArgumentException] {
       Completions(

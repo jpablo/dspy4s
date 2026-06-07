@@ -194,9 +194,35 @@ merged under the per-call override. Tier 0.
 
 ## G-4 — No program `save`/`load` + `dumpState`/`loadState`
 
-**Status:** Open
+**Status:** Resolved
 
-**Summary.** There is no JSON state save/load for a program. The serialization
+**Resolution.** Closed by wiring the `SignatureLayout` (de)serialization primitives
+up through the program tree, leveraging the `Predictors[P]` introspection layer
+(G-1) so a single `Predict` (a length-1 predictor list) and an arbitrary composite
+share one code path. New primitives:
+
+- `Example.dumpState` / `Example.fromState` (`modules/core/.../contracts/Data.scala`) —
+  `{ "values": <record>, "inputKeys": [..], "augmented": <bool> }`.
+- `DynamicPredict.dumpState` / `DynamicPredict.fromState`
+  (`modules/programs/.../DynamicPredict.scala`) —
+  `{ "signature": <SignatureLayout state>, "demos": [<Example state>..], "config": <record> }`
+  (`name` / `runtime` are environment/identity, restored to defaults on load).
+- `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
+  `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
+  `Predictors`-based: `{ "predictors": [<DynamicPredict state>..] }`. JSON via
+  `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO
+  wraps exceptions into `RuntimeError`.
+
+**Round-trip scope.** Demos round-trip for every program. Layout + config also
+round-trip fully for `DynamicPredict` leaves (and user composites whose leaves are
+`DynamicPredict`). For *typed* programs (`Predict`, `ChainOfThought`, the
+hand-written composite instances) `Predictor.set` is demos-only by design (the
+documented P4 limit — writing the layout back would desync `signature.outputShape`
+from `signature.layout`), so layout/config in the serialized state are ignored on
+load into a typed target. `loadState` requires the `predictors` array length to
+equal `Predictors.read(program).size` (mismatch → `Left(ValidationError)`).
+
+**Summary (original).** There is no JSON state save/load for a program. The serialization
 primitives exist on `SignatureLayout`, but nothing wires them up to a program,
 and the demos are never persisted.
 

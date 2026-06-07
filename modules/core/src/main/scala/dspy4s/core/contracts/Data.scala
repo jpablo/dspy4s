@@ -47,6 +47,19 @@ final case class Example(
 
   def withAugmented(flag: Boolean): Example = copy(augmented = flag)
 
+  /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]] -- the codec spine carried everywhere else in
+    * dspy4s. Round-trips with [[Example.fromState]] and serializes to clean JSON via the `DynamicValue` JSON
+    * codec. The record has three fields: `values` (the field-value record verbatim), `inputKeys` (a sequence of
+    * the input field-name strings), and `augmented` (a boolean). Mirrors `SignatureLayout.dumpState`. */
+  def dumpState: DynamicValue.Record =
+    val keyValues: Seq[DynamicValue] =
+      inputKeys.toVector.sorted.map(k => DynamicValue.Primitive(PrimitiveValue.String(k)))
+    DynamicValue.Record(Chunk.from(Seq(
+      "values"    -> (values: DynamicValue),
+      "inputKeys" -> DynamicValue.Sequence(Chunk.from(keyValues)),
+      "augmented" -> DynamicValue.Primitive(PrimitiveValue.Boolean(augmented))
+    )))
+
 object Example:
   /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input
     * keys; call `withInputs(...)` to mark a subset as inputs. Values are lifted into the spine via
@@ -56,6 +69,40 @@ object Example:
 
   /** An example with no fields. */
   def empty: Example = Example(values = DynamicValue.Record.empty)
+
+  /** Re-hydrate an [[Example]] from the `DynamicValue.Record` produced by [[Example.dumpState]]. The inverse of
+    * the serialization primitive: reads `values` (must be a record), `inputKeys` (a sequence of strings), and
+    * `augmented` (a boolean). */
+  def fromState(state: DynamicValue.Record): Either[DspyError, Example] =
+    def readValues: Either[DspyError, DynamicValue.Record] =
+      DynamicValues.recordGet(state, "values") match
+        case Some(rec: DynamicValue.Record) => Right(rec)
+        case _ => Left(ValidationError("Example state is missing a record 'values'"))
+
+    def readInputKeys: Either[DspyError, Set[String]] =
+      DynamicValues.recordGet(state, "inputKeys") match
+        case None | Some(_: DynamicValue.Null.type) => Right(Set.empty)
+        case Some(seq: DynamicValue.Sequence) =>
+          seq.elements.iterator.foldLeft[Either[DspyError, Set[String]]](Right(Set.empty)) { (acc, raw) =>
+            acc.flatMap { keys =>
+              raw match
+                case DynamicValue.Primitive(PrimitiveValue.String(s)) => Right(keys + s)
+                case _ => Left(ValidationError("Example state 'inputKeys' must be a sequence of strings"))
+            }
+          }
+        case Some(_) => Left(ValidationError("Example state 'inputKeys' must be a sequence"))
+
+    def readAugmented: Either[DspyError, Boolean] =
+      DynamicValues.recordGet(state, "augmented") match
+        case None | Some(_: DynamicValue.Null.type)            => Right(false)
+        case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(b))) => Right(b)
+        case Some(_) => Left(ValidationError("Example state 'augmented' must be a boolean"))
+
+    for
+      values    <- readValues
+      inputKeys <- readInputKeys
+      augmented <- readAugmented
+    yield Example(values = values, inputKeys = inputKeys, augmented = augmented)
 
 /** A column-oriented view of N candidate completions for one LM call. Each field name maps to a vector of N values
   * (one per candidate). All columns must have the same length, which defines [[size]]. [[at]] converts a single
