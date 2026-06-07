@@ -414,10 +414,20 @@ Port `TwoStepAdapter`. Tier 1.
 
 ## G-9 — No field-constraint rendering (`PYDANTIC_CONSTRAINT_MAP`)
 
-**Status:** Open
+**Status:** Resolved (v1, commit d8c80de)
 
-**Summary.** dspy4s has no constraint vocabulary in `FieldSpec`, so Python's
-constraint rendering (`gt`/`ge`/`lt`/`le`/`min_length`/…) has no equivalent.
+**Resolution.** `FieldSpec` gained `constraints: Vector[String]`, a `FieldConstraints`
+helper builds the exact upstream strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
+`multipleOf`, matching `PYDANTIC_CONSTRAINT_MAP`), `ChatAdapter` renders
+`Constraints: <joined>` after the field description (the `get_field_description_string`
+analog; unconstrained fields render byte-identically), and constraints round-trip through
+`SignatureLayout.dumpState`/`fromState`. **v1 follow-ups:** constraints are settable
+programmatically only (deriving them from the typed `zio-blocks Schema` surface needs a
+constraint-annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` emit no
+prose field block, so they carry a TODO to embed constraints in the tag / JSON schema.
+
+**Summary.** dspy4s had no constraint vocabulary in `FieldSpec`, so Python's
+constraint rendering (`gt`/`ge`/`lt`/`le`/`min_length`/…) had no equivalent.
 
 ### Python reference
 
