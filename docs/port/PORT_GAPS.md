@@ -163,7 +163,7 @@ was justified by there being a single instantiation — no longer true once the 
 
 ## G-3 — No per-module `config` / `set_lm` (only per-call config)
 
-**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM (commit pending)
+**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM `withLm`/`boundLm` (commit b2d0096)
 
 **Resolution (config).** `DynamicPredict` and `Predict[I, O]` now carry an immutable
 module-level `config: DynamicValue.Record`, threaded into `PredictEngine` and merged
