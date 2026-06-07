@@ -147,13 +147,15 @@ final case class ChainOfThought[I, O](
 
 object ChainOfThought:
 
-  private[programs] val reasoningField: FieldSpec = FieldSpec(
+  // dspy 3.2.1 alignment (item P3): no hardcoded prefix. `FieldSpec.normalize`
+  // derives the marker from the field name in the augment path -- inferPrefix
+  // yields "Reasoning:", identical to the old literal (a true no-op on the wire).
+  private[programs] val reasoningField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name        = "reasoning",
     role        = FieldRole.Output,
     typeRef     = TypeRef.string,
-    description = Some("${reasoning}"),
-    prefix      = Some("Reasoning:")
-  )
+    description = Some("${reasoning}")
+  ))
 
   private[dspy4s] def augmentLayout(layout: SignatureLayout): Either[DspyError, SignatureLayout] =
     if layout.outputFields.exists(_.name == reasoningField.name) then Right(layout)

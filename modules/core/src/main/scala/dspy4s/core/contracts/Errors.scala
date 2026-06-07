@@ -18,3 +18,7 @@ final case class ParseError(component: String, message: String, raw: Option[Stri
 
 final case class RuntimeError(component: String, message: String) extends DspyError:
   val code: String = "runtime_error"
+
+final case class ContextWindowExceededError(model: Option[String] = None, message: String = "Context window exceeded")
+    extends DspyError:
+  val code: String = "context_window_exceeded"

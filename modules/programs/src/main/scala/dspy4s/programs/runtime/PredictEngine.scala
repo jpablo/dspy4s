@@ -73,6 +73,7 @@ private[dspy4s] final case class PredictEngine(
 
   private def buildInvocation(call: ProgramCall, model: LanguageModel): AdapterInvocation =
     val inputKeys = layout.inputFields.map(_.name).toSet
+    warnOnExtraInputs(call, inputKeys)
     AdapterInvocation(
       layout = layout,
       demos = demos,
@@ -85,6 +86,23 @@ private[dspy4s] final case class PredictEngine(
         rolloutId = call.rolloutId
       )
     )
+
+  /** Mirror upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: input keys that are not declared input
+    * fields are tolerated (the extras are dropped downstream, since [[AdapterInvocation]] is built with
+    * `inputKeys` restricted to the layout), but their presence is surfaced as a warning naming the
+    * unexpected keys and the expected fields. The call still proceeds -- this is a diagnostic, not an error.
+    *
+    * dspy4s has no logging framework in `core`/`programs` (Python dspy uses `logger.warning`); the closest
+    * non-invasive equivalent is `System.err` via `Console.err`, which keeps the warning observable without
+    * introducing a new callback event type (that would require changing the shared `core` contracts). */
+  private def warnOnExtraInputs(call: ProgramCall, inputKeys: Set[String]): Unit =
+    val extra = DynamicValues.recordKeys(call.inputs).filterNot(inputKeys.contains)
+    if extra.nonEmpty then
+      val expected = layout.inputFields.map(_.name).mkString(", ")
+      Console.err.println(
+        s"WARN [dspy4s] Predict '${layout.name}': ignoring unexpected input field(s) " +
+          s"[${extra.sorted.mkString(", ")}] not declared in the signature; expected input fields: [$expected]"
+      )
 
   private def parseOutputs(adapter: Adapter, outputs: Vector[LmOutput])(using
       RuntimeContext

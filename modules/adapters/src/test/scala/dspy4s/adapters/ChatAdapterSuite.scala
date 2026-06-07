@@ -239,3 +239,57 @@ class ChatAdapterSuite extends FunSuite:
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
     assert(DynamicValues.recordGet(parsed.toOption.get.values, "thinking").isEmpty)
   }
+
+  // C1 — empty/null LM response must be a parse error (dspy 3.2.1 base.py raises
+  // AdapterParseError("The LM returned an empty or null response.") instead of
+  // null-filling output fields). dspy4s never null-fills; an empty completion
+  // yields no marker sections and the single-output text fallback only fires for
+  // non-empty text, so the required field is missing -> ParseError.
+  test("C1: parse of an empty response for a single-output signature is a ParseError") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    for blank <- Vector("", "   ", "\n\n") do
+      val parsed = ChatAdapter().parse(signature, LmOutput(text = blank))
+      assert(parsed.isLeft, s"expected Left for blank text '${blank.replace("\n", "\\n")}', got $parsed")
+      assert(
+        parsed.left.toOption.get.isInstanceOf[ParseError],
+        s"expected ParseError, got ${parsed.left.toOption.get}"
+      )
+  }
+
+  test("C1: parse of an empty response for a multi-output signature is a ParseError") {
+    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    for blank <- Vector("", "   ", "\n\n") do
+      val parsed = ChatAdapter().parse(signature, LmOutput(text = blank))
+      assert(parsed.isLeft, s"expected Left for blank text '${blank.replace("\n", "\\n")}', got $parsed")
+      assert(
+        parsed.left.toOption.get.isInstanceOf[ParseError],
+        s"expected ParseError, got ${parsed.left.toOption.get}"
+      )
+  }
+
+  // A1 — non-ASCII characters must be emitted literally (not \uXXXX escaped).
+  // ChatAdapter renders demo/field values as plain text (no JSON escaping), so
+  // diacritics and CJK must survive verbatim in the formatted prompt.
+  test("A1: format emits non-ASCII demo/input values literally (no \\uXXXX escaping)") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val invocation = AdapterInvocation(
+      layout = signature,
+      demos = Vector(
+        Example(
+          values = rec("question" := "Une boisson?", "answer" := "café"),
+          inputKeys = Set("question")
+        )
+      ),
+      inputs = Example(values = rec("question" := "naïve ou 日本語?"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val all = ChatAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")
+
+    assert(all.contains("café"), s"expected literal 'café' in prompt: $all")
+    assert(all.contains("naïve"), s"expected literal 'naïve' in prompt: $all")
+    assert(all.contains("日本語"), s"expected literal '日本語' in prompt: $all")
+    assert(!all.contains("\\u"), s"non-ASCII was \\u-escaped in prompt: $all")
+  }

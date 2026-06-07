@@ -160,3 +160,75 @@ class JSONAdapterSuite extends FunSuite:
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
     assertEquals(parsed.toOption.get.metadata("fallback"), "text")
   }
+
+  // C1 — empty/null LM response must be a parse error (dspy 3.2.1 base.py raises
+  // AdapterParseError("The LM returned an empty or null response.") instead of
+  // null-filling output fields). dspy4s never null-fills: structured parse fails
+  // (no JSON object), and the single-output text fallback explicitly refuses
+  // empty text -> ParseError. Multi-output skips the fallback entirely -> ParseError.
+  test("C1: parse of an empty response for a single-output signature is a ParseError") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    for blank <- Vector("", "   ", "\n\n") do
+      val parsed = JSONAdapter().parse(signature, LmOutput(text = blank))
+      assert(parsed.isLeft, s"expected Left for blank text '${blank.replace("\n", "\\n")}', got $parsed")
+      assert(
+        parsed.left.toOption.get.isInstanceOf[ParseError],
+        s"expected ParseError, got ${parsed.left.toOption.get}"
+      )
+  }
+
+  test("C1: parse of an empty response for a multi-output signature is a ParseError") {
+    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    for blank <- Vector("", "   ", "\n\n") do
+      val parsed = JSONAdapter().parse(signature, LmOutput(text = blank))
+      assert(parsed.isLeft, s"expected Left for blank text '${blank.replace("\n", "\\n")}', got $parsed")
+      assert(
+        parsed.left.toOption.get.isInstanceOf[ParseError],
+        s"expected ParseError, got ${parsed.left.toOption.get}"
+      )
+  }
+
+  // A1 — non-ASCII characters must be emitted literally (not \uXXXX escaped).
+  // dspy 3.2.1 json_adapter.py uses json.dumps(..., ensure_ascii=False); dspy4s
+  // formats demo assistant messages via ujson.write, which writes UTF-8 literally.
+  test("A1: format emits non-ASCII demo values literally in the assistant JSON (no \\uXXXX)") {
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val invocation = AdapterInvocation(
+      layout = signature,
+      demos = Vector(
+        Example(
+          values = rec("question" := "Une boisson?", "answer" := "café naïve 日本語"),
+          inputKeys = Set("question")
+        )
+      ),
+      inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val all = JSONAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")
+
+    assert(all.contains("café naïve 日本語"), s"expected literal non-ASCII in assistant JSON: $all")
+    assert(!all.contains("\\u"), s"non-ASCII was \\u-escaped in assistant JSON: $all")
+  }
+
+  // Companion of A1 on the parse/round-trip side: a json output field whose value
+  // is itself a nested JSON object containing non-ASCII must round-trip literally
+  // through value.render() (JSONAdapter coerce for TypeRef.json -> JsonDynamic).
+  test("A1: parse round-trips non-ASCII inside a nested json output field literally") {
+    val signature = SignatureDsl.parse("question -> payload: json").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    val parsed = JSONAdapter().parse(
+      signature,
+      LmOutput(text = """{"payload":{"drink":"café","note":"naïve 日本語"}}""")
+    )
+    assert(parsed.isRight, s"expected Right, got $parsed")
+    val rendered = DynamicValues.renderText(
+      DynamicValues.recordGet(parsed.toOption.get.values, "payload").get
+    )
+    assert(rendered.contains("café"), s"expected literal 'café' in rendered payload: $rendered")
+    assert(rendered.contains("naïve"), s"expected literal 'naïve' in rendered payload: $rendered")
+    assert(rendered.contains("日本語"), s"expected literal '日本語' in rendered payload: $rendered")
+    assert(!rendered.contains("\\u"), s"non-ASCII was \\u-escaped in rendered payload: $rendered")
+  }

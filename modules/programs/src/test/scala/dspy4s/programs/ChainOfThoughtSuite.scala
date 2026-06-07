@@ -247,3 +247,14 @@ class ChainOfThoughtSuite extends FunSuite:
 
   // Missing-input defensive check is shared with Predict and exercised
   // in TypedPredictSuite -- not duplicated here.
+
+  // Field-marker derivation (dspy 3.2.1 alignment, item P3): upstream dropped
+  // the hardcoded reasoning prefix. dspy4s mirrors this by deriving it via
+  // FieldSpec.normalize in the augment path, which yields the identical
+  // "Reasoning:" -- a true no-op on the wire, now with no hardcoded literal.
+  test("ChainOfThought: reasoning field prefix is derived as 'Reasoning:' (no hardcoded literal)") {
+    val sig       = Signature.of[TcotSummarizeSpec]
+    val layout    = ChainOfThought.augmentLayout(sig.layout).toOption.get
+    val reasoning = layout.outputFields.find(_.name == "reasoning").get
+    assertEquals(reasoning.prefix, Some("Reasoning:"))
+  }

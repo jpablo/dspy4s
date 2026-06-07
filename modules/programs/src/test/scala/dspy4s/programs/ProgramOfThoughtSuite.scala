@@ -206,3 +206,26 @@ class ProgramOfThoughtSuite extends FunSuite:
     }
     interpreter.close()
   }
+
+  // ── Field-marker derivation (dspy 3.2.1 alignment, item P3) ──────────────
+  // Upstream dropped the hardcoded `prefix=` kwargs from the PoT fields and
+  // relies on adapter defaults. dspy4s mirrors that by running
+  // `FieldSpec.normalize` over the auxiliary fields in the augment path, so the
+  // prefix is DERIVED (title-case) from the field name rather than hardcoded.
+  // Note the old code hardcoded "Code:" on BOTH generated_code and
+  // final_generated_code (a collision); derivation disambiguates them.
+  test("ProgramOfThought: auxiliary field prefixes are derived (title-case) from field names") {
+    val signature   = Signature.fromString("question -> answer")
+    val interpreter = new RecordingInterpreter(Vector(Right(CodeResult(stdout = "ok", stderr = "", exitCode = 0))))
+    val program     = ProgramOfThought(baseSignature = signature, interpreter = interpreter)
+
+    def prefixOf(layout: SignatureLayout, field: String): Option[String] =
+      layout.fields.find(_.name == field).flatMap(_.prefix)
+
+    assertEquals(prefixOf(program.generateSignature, "generated_code"),       Some("Generated Code:"))
+    assertEquals(prefixOf(program.regenerateSignature, "previous_code"),      Some("Previous Code:"))
+    assertEquals(prefixOf(program.regenerateSignature, "error"),             Some("Error:"))
+    assertEquals(prefixOf(program.answerSignature, "final_generated_code"),  Some("Final Generated Code:"))
+    assertEquals(prefixOf(program.answerSignature, "code_output"),           Some("Code Output:"))
+    interpreter.close()
+  }

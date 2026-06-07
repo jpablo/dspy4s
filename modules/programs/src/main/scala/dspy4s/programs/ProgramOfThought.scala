@@ -64,41 +64,45 @@ final case class ProgramOfThought[I, O](
   // ── Helper field definitions (declared first so the signature vals below
   // can reference them without hitting an init-order NPE) ────────────────
 
-  private val generatedCodeField = FieldSpec(
+  // dspy 3.2.1 alignment (item P3): the hardcoded `prefix =` markers were dropped.
+  // `FieldSpec.normalize` derives the marker from the field NAME in the augment
+  // path (title-case via inferPrefix). Derived markers:
+  //   generated_code       -> "Generated Code:"        (was "Code:")
+  //   previous_code        -> "Previous Code:"         (unchanged)
+  //   error                -> "Error:"                 (unchanged)
+  //   final_generated_code -> "Final Generated Code:"  (was "Code:")
+  //   code_output          -> "Code Output:"           (unchanged)
+  // The old code reused "Code:" on two distinct fields; derivation disambiguates.
+  private val generatedCodeField = FieldSpec.normalize(FieldSpec(
     name = "generated_code",
     role = FieldRole.Output,
     typeRef = TypeRef.string,
-    description = Some("Python code that, when executed, computes the answer and prints it as JSON."),
-    prefix = Some("Code:")
-  )
-  private val previousCodeField = FieldSpec(
+    description = Some("Python code that, when executed, computes the answer and prints it as JSON.")
+  ))
+  private val previousCodeField = FieldSpec.normalize(FieldSpec(
     name = "previous_code",
     role = FieldRole.Input,
     typeRef = TypeRef.string,
-    description = Some("The Python code from the previous attempt that errored."),
-    prefix = Some("Previous Code:")
-  )
-  private val errorField = FieldSpec(
+    description = Some("The Python code from the previous attempt that errored.")
+  ))
+  private val errorField = FieldSpec.normalize(FieldSpec(
     name = "error",
     role = FieldRole.Input,
     typeRef = TypeRef.string,
-    description = Some("Error message produced by the previous Python code."),
-    prefix = Some("Error:")
-  )
-  private val finalGeneratedCodeField = FieldSpec(
+    description = Some("Error message produced by the previous Python code.")
+  ))
+  private val finalGeneratedCodeField = FieldSpec.normalize(FieldSpec(
     name = "final_generated_code",
     role = FieldRole.Input,
     typeRef = TypeRef.string,
-    description = Some("The final Python code that produced the answer."),
-    prefix = Some("Code:")
-  )
-  private val codeOutputField = FieldSpec(
+    description = Some("The final Python code that produced the answer.")
+  ))
+  private val codeOutputField = FieldSpec.normalize(FieldSpec(
     name = "code_output",
     role = FieldRole.Input,
     typeRef = TypeRef.string,
-    description = Some("The printed output of the final Python code."),
-    prefix = Some("Code Output:")
-  )
+    description = Some("The printed output of the final Python code.")
+  ))
 
   private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): SignatureLayout =
     val withInputs = extraInputs.foldLeft(baseLayout)(_.append(_))
