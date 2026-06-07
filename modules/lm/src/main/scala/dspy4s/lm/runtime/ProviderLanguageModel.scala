@@ -104,12 +104,14 @@ object ProviderResponseParser:
         val textFromMessage = rec.flatMap(r => field(r, WireKeys.message)).flatMap(extractText)
         val textFromChoice  = rec.flatMap(r => field(r, WireKeys.text)).flatMap(asString)
         val text = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
-        text.map { value =>
+        val toolCalls = rec.flatMap(r => field(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
+        // Emit an output when there is EITHER text OR tool calls. A function-calling response typically has
+        // content:null and only a `tool_calls` array, so gating solely on text would drop the call entirely.
+        Option.when(text.nonEmpty || toolCalls.nonEmpty) {
           val metadata = rec
             .map(r => DynamicValues.recordFilterKeys(r, k => k != WireKeys.message && k != WireKeys.text))
             .getOrElse(DynamicValue.Record.empty)
-          val toolCalls = rec.flatMap(r => field(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
-          LmOutput(text = value, toolCalls = toolCalls, metadata = metadata)
+          LmOutput(text = text.getOrElse(""), toolCalls = toolCalls, metadata = metadata)
         }
       }
     }
@@ -122,10 +124,12 @@ object ProviderResponseParser:
   private def parseResponsesOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
     seqField(raw, WireKeys.output).map { output =>
       output.flatMap { item =>
-        extractText(item).map { text =>
-          val toolCalls = asRecord(item).map(parseToolCalls).getOrElse(Vector.empty)
-          val metadata  = asRecord(item).getOrElse(DynamicValue.Record.empty)
-          LmOutput(text = text.trim, toolCalls = toolCalls, metadata = metadata)
+        val text      = extractText(item).map(_.trim).filter(_.nonEmpty)
+        val toolCalls = asRecord(item).map(parseToolCalls).getOrElse(Vector.empty)
+        // Same EITHER-text-OR-tool-calls rule as the chat path: a function-call output item carries no text.
+        Option.when(text.nonEmpty || toolCalls.nonEmpty) {
+          val metadata = asRecord(item).getOrElse(DynamicValue.Record.empty)
+          LmOutput(text = text.getOrElse(""), toolCalls = toolCalls, metadata = metadata)
         }
       }
     }

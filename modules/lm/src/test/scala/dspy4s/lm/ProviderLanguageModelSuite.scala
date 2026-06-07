@@ -132,6 +132,45 @@ class ProviderLanguageModelSuite extends FunSuite:
     assertEquals(response.usage.get.totalTokens, 12L)
   }
 
+  test("provider language model emits a tool-only output when the model returns tool calls with no content") {
+    // The canonical function-calling response: the assistant message has content:null (here: absent) and a
+    // tool_calls array. The output and its toolCalls must be emitted even though there is no text content —
+    // dropping it would make native function-calling impossible (the tool call would be lost).
+    val rawResponse = DynamicValues.fromAny(Map(
+      "model" -> "openai/test",
+      "choices" -> Vector(
+        Map(
+          "message" -> Map(
+            "role" -> "assistant",
+            "tool_calls" -> Vector(
+              Map("function" -> Map("name" -> "search", "arguments" -> Map("query" -> "capital of belgium")))
+            )
+          )
+        )
+      )
+    ))
+
+    val lm = ProviderLanguageModel(
+      id = "openai/test",
+      mode = LmMode.Chat,
+      invoke = _ => Right(rawResponse)
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = lm.call(
+      LmRequest(
+        model = "openai/test",
+        mode = LmMode.Chat,
+        messages = Vector(Message(role = MessageRole.User, text = Some("Q?")))
+      )
+    )
+
+    assert(result.isRight, s"a tool-only output must not be dropped; got: $result")
+    val out = result.toOption.get.outputs.head
+    assertEquals(out.toolCalls.map(_.name), Vector("search"))
+    assertEquals(out.text, "")
+  }
+
   test("provider language model parses responses API output blocks") {
     val rawResponse = DynamicValues.fromAny(Map(
       "model" -> "openai/responses-test",
