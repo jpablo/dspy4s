@@ -1,6 +1,6 @@
 ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / scalaVersion := "3.8.1"
+ThisBuild / scalaVersion := "3.8.4"
 
 // Disable sbt's built-in BSP server: IntelliJ imports this project via its native sbt importer (not BSP),
 // and nothing else consumes BSP here, so the auto-generated `.bsp/sbt.json` is just noise. This stops sbt

@@ -9,7 +9,6 @@ import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 
-import scala.annotation.nowarn
 import scala.util.boundary
 import scala.util.boundary.break
 import scala.util.control.NonFatal
@@ -51,7 +50,6 @@ final class BootstrapFewShot[P: Predictors: Runnable](
     else
       compileInternal(student, trainset, teacher)
 
-  @nowarn("msg=unused")
   private def compileInternal(
       student: P,
       trainset: Vector[Example],
