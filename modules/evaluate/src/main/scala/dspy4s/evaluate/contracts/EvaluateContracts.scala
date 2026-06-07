@@ -12,7 +12,14 @@ object Evaluator:
 
 trait Metric:
   def name: String
-  def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry] = Vector.empty): Either[DspyError, Double]
+
+  /** Score a single prediction against its example. `trace` is the program's per-call trace (empty during
+    * evaluation; non-empty during bootstrapping, mirroring Python's `trace is None` branch). The ambient
+    * [[RuntimeContext]] lets LM-judged metrics (e.g. `SemanticF1`) invoke a language model during scoring;
+    * builtin string-comparison metrics ignore it. */
+  def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
+      RuntimeContext
+  ): Either[DspyError, Double]
 
 /** A single per-example evaluation outcome. `error` carries the captured failure message when the program
   * (or metric) failed on this example and traceback capture was enabled; it is `None` on success or when

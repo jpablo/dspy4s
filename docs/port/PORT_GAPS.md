@@ -292,7 +292,29 @@ introspect/rebuild the wrapped predictor across attempts).
 
 ## G-6 — `Metric.score` has no `RuntimeContext` (blocks LLM-judged metrics)
 
-**Status:** Open
+**Status:** Resolved
+
+**Resolution.** `Metric.score` now takes `(using RuntimeContext)`
+(`modules/evaluate/.../contracts/EvaluateContracts.scala`), so a metric can resolve
+the ambient LM/adapter and run a judge sub-program during scoring. The six builtin
+string-comparison metrics ignore the context (behavior unchanged); `FunctionMetric`'s
+wrapped `fn` stays pure. Call sites were threaded: `Evaluate` hands each metric
+`RuntimeEnvironment.current` from inside the parallel-executor worker (the captured
+context is restored into that thread's local); `BootstrapFewShot.compileInternal`
+already had `using ctx` in scope; the offline examples supply `RuntimeContext()`.
+
+On top of the contract change, the LLM-judged auto-evaluation metrics from
+`dspy/evaluate/auto_evaluation.py` are ported in
+`modules/evaluate/.../metrics/AutoEvaluation.scala`: an `f1Score(precision, recall)`
+helper (clamp `[0,1]`, harmonic mean, `0` if either is `0`), `SemanticF1`
+(`question, ground_truth, system_response -> recall, precision` judged via a
+`ChainOfThought`-augmented `DynamicPredict`, plus a `decompositional` variant with
+key-idea fields), and `CompleteAndGrounded` (completeness × groundedness). Deltas:
+the judge runs over a runtime `SignatureLayout`/`DynamicPredict` (no static typed
+`Module`), field names are configurable string keys (defaults follow upstream's
+`example.question`/`example.response`/`pred.response`), the `threshold` field is
+retained for parity but scoring always returns the raw `Double`, and groundedness
+reads `pred.context` by key (dspy4s has no retriever to populate it).
 
 **Summary.** A metric's scoring function cannot call an LM, because
 `Metric.score` is given no `RuntimeContext`. This blocks porting LLM-judged

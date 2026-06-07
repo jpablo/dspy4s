@@ -5,8 +5,10 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.NotFoundError
+import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.evaluate.contracts.Metric
+import zio.blocks.schema.DynamicValue
 
 object MetricHelpers:
   def extractString(example: Example, prediction: DynamicPrediction, fieldName: String): Either[DspyError, (String, Vector[String])] =
@@ -29,6 +31,16 @@ object MetricHelpers:
       pred <- predictionValue
     yield (pred, examples)
 
+  /** Render a single field value to text for an LM-judged metric: a string verbatim, an iterable joined by
+    * newlines (e.g. a retrieved-context passage list), any other scalar via `toString`. A missing field is a
+    * `NotFoundError`. Used by the auto-evaluation metrics to build the judge sub-program's inputs. */
+  def scoringText(value: Option[DynamicValue], fieldName: String, owner: String): Either[DspyError, String] =
+    value.map(DynamicValues.toAny) match
+      case Some(text: String)     => Right(text)
+      case Some(seq: Iterable[?]) => Right(seq.map(_.toString).mkString("\n"))
+      case Some(other)            => Right(other.toString)
+      case None => Left(NotFoundError(fieldName, s"$owner is missing field '$fieldName'"))
+
   def maxOverReferences[A](references: Vector[String], transform: String => A, score: (A, A) => Double): (Double, A) =
     if references.isEmpty then (0.0, transform(""))
     else
@@ -38,7 +50,9 @@ object MetricHelpers:
 class ExactMatch(answerField: String = "answer") extends Metric:
   val name: String = "exact_match"
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
+  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+      RuntimeContext
+  ): Either[DspyError, Double] =
     MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
       val refsNorm = refTexts.map(NormalizeText.apply)
@@ -48,7 +62,9 @@ class ExactMatch(answerField: String = "answer") extends Metric:
 class ContainsMatch(answerField: String = "answer") extends Metric:
   val name: String = "contains"
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
+  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+      RuntimeContext
+  ): Either[DspyError, Double] =
     MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
       val refsNorm = refTexts.map(NormalizeText.apply)
@@ -58,7 +74,9 @@ class ContainsMatch(answerField: String = "answer") extends Metric:
 class F1Score(answerField: String = "answer") extends Metric:
   val name: String = "f1"
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
+  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+      RuntimeContext
+  ): Either[DspyError, Double] =
     MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
       refTexts.map(r => f1Score(predNorm, NormalizeText(r))).max
@@ -82,14 +100,18 @@ class AnswerMatch(frac: Double = 1.0, answerField: String = "answer") extends Me
   private val emMetric = new ExactMatch(answerField)
   private val f1Metric = new F1Score(answerField)
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
+  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+      RuntimeContext
+  ): Either[DspyError, Double] =
     if frac >= 1.0 then emMetric.score(example, prediction, trace)
     else f1Metric.score(example, prediction, trace).map(f1 => if f1 >= frac then 1.0 else 0.0)
 
 class PassageMatch(contextField: String = "context", answerField: String = "answer") extends Metric:
   val name: String = "answer_passage_match"
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
+  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+      RuntimeContext
+  ): Either[DspyError, Double] =
     val contexts = prediction.get(contextField).map(DynamicValues.toAny) match
       case Some(texts: Iterable[?]) =>
         Right(texts.collect { case s: String => s }.toVector)
@@ -119,7 +141,11 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
       if passages.exists(p => answersNorm.exists(a => p.contains(a))) then 1.0 else 0.0
 
 class FunctionMetric(val name: String, fn: (Example, DynamicPrediction, Vector[TraceEntry]) => Either[DspyError, Double]) extends Metric:
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry]): Either[DspyError, Double] =
+  // The wrapped `fn` stays PURE (no RuntimeContext) — function metrics are plain `(example, prediction, trace)`
+  // callables; the ambient context is accepted to satisfy the trait and ignored here.
+  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+      RuntimeContext
+  ): Either[DspyError, Double] =
     fn(example, prediction, trace)
 
 object FunctionMetric:

@@ -3,16 +3,17 @@
  *
  * Source:   docs/docs/learn/evaluation/metrics.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/metrics.md
- * Status:   translated (function metrics + Evaluate, snippets 1/3/4/5). Context-aware metrics (2),
- *           LLM-as-judge metrics (6) and trace-over-retrieval-hops (7) are noted: dspy4s has no
- *           retriever, and `Metric.score` carries no `RuntimeContext` so a metric can't call an LM.
+ * Status:   translated (function metrics + Evaluate, snippets 1/3/4/5). Context-aware metrics (2) and
+ *           trace-over-retrieval-hops (7) remain noted (dspy4s has no retriever). LLM-as-judge metrics (6)
+ *           are now unblocked — `Metric.score` carries `(using RuntimeContext)` (PORT_GAPS G-6), and the
+ *           ported `SemanticF1` / `CompleteAndGrounded` live in `dspy4s.evaluate.metrics.AutoEvaluation`.
  *
  * dspy4s metrics implement `Metric` (`score(example, prediction, trace) => Either[DspyError, Double]`).
  * `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain function.
  */
 package dspy4s.examples.learn.evaluation
 
-import dspy4s.core.contracts.{DspyError, DynamicPrediction, DynamicValues, Example}
+import dspy4s.core.contracts.{DspyError, DynamicPrediction, DynamicValues, Example, RuntimeContext}
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.FunctionMetric
@@ -65,6 +66,9 @@ object Metrics:
       metric: Metric,
       program: Example => Either[DspyError, DynamicPrediction]
   ): Vector[Either[DspyError, Double]] =
+    // Offline example code: these metrics don't call an LM, so a default context suffices. A real
+    // LM-judged metric would thread `RuntimeEnvironment.current` here instead.
+    given RuntimeContext = RuntimeContext()
     devset.map(x => program(x).flatMap(pred => metric.score(x, pred)))
 
   // ── Snippet 4 (lines 72–80) — the built-in Evaluate runner ──
@@ -82,9 +86,10 @@ object Metrics:
   // ambient RuntimeContext; `program` is `Example => Either[DspyError, DynamicPrediction]`.
 
   // ── Snippet 6 (lines 101–116) — LLM-as-judge metric ──
-  // A metric that calls `dspy.Predict(Assess)` inside its body is not expressible: `Metric.score` takes
-  // no `RuntimeContext`, so a metric can't invoke an LM. (LLM-judged metrics — `SemanticF1` etc. — are
-  // tracked as deferred Phase-6 v2 work.) The `Assess` spec above is the signature it would use.
+  // Now expressible: `Metric.score` takes `(using RuntimeContext)` (PORT_GAPS G-6), so a metric can run a
+  // judge sub-program over an LM. The ported `SemanticF1` / `CompleteAndGrounded` (in
+  // `dspy4s.evaluate.metrics.AutoEvaluation`) are concrete examples; the `Assess` spec above is the
+  // signature a bespoke quality-judge metric would use.
 
   // ── Snippet 7 (lines 134–142) — validate_hops over the trace ──
   // Needs retrieval (`outputs.query` hops) and `answer_exact_match_str`; neither is ported.
@@ -96,6 +101,7 @@ object Metrics:
 
 // Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.learn.evaluation.metricsMain"
 @main def metricsMain(): Unit =
+  given RuntimeContext = RuntimeContext()
   val ex      = Metrics.example("What is the capital of France?", "Paris")
   def pred(answer: String): DynamicPrediction =
     DynamicPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))

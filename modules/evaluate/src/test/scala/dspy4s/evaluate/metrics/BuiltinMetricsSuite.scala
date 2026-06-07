@@ -4,10 +4,14 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.RuntimeContext
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class BuiltinMetricsSuite extends FunSuite:
+  // Builtin metrics ignore the ambient context (no LM needed); a default one lets the `.score` calls compile.
+  private given RuntimeContext = RuntimeContext()
+
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 

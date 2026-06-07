@@ -69,6 +69,10 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
     executor.executeEither[Example, (DynamicPrediction, Double)](
       task = (ex: Example) =>
+        // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
+        // there, so `RuntimeEnvironment.current` is the right `RuntimeContext` to hand the metric (so
+        // LM-judged metrics can reach the LM).
+        given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
         fn(ex).flatMap { prediction =>
           metric.score(ex, prediction).map(score => (prediction, score))
         },
