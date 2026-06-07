@@ -30,7 +30,7 @@ final case class BootstrapFewShotConfig(
   require(maxRounds >= 1, "maxRounds must be at least 1")
   require(maxErrors > 0, "maxErrors must be > 0")
 
-final class BootstrapFewShot[P <: DynamicModule: PredictOps](
+final class BootstrapFewShot[P <: DynamicModule: Predictors](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -117,7 +117,7 @@ final class BootstrapFewShot[P <: DynamicModule: PredictOps](
 
           if !success then failedIndices += idx
       }
-      val ops = summon[PredictOps[P]]
+      val ps = summon[Predictors[P]]
       val rng = new scala.util.Random(config.seed)
       val labeledPool = failedIndices.toVector.map(idx => trainset(idx))
       val labeledPoolShuffled = Vector.from(rng.shuffle(labeledPool))
@@ -128,7 +128,7 @@ final class BootstrapFewShot[P <: DynamicModule: PredictOps](
       val rawDemos = labeledPoolShuffled.take(labeledCount)
 
       val allDemos = bootstrapped.toVector.take(config.maxBootstrappedDemos) ++ rawDemos
-      val compiled = ops.withDemos(student, allDemos)
+      val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = allDemos)))
 
       Right(
         OptimizationReport(

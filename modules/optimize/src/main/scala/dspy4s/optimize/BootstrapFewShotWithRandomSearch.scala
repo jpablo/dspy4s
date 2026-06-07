@@ -3,7 +3,6 @@ package dspy4s.optimize
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.programs.contracts.DynamicModule
-import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
@@ -29,7 +28,7 @@ final case class RandomSearchConfig(
     seed: Long = 0L
 )
 
-final class BootstrapFewShotWithRandomSearch[P <: DynamicModule: PredictOps](
+final class BootstrapFewShotWithRandomSearch[P <: DynamicModule: Predictors](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 
@@ -41,24 +40,23 @@ final class BootstrapFewShotWithRandomSearch[P <: DynamicModule: PredictOps](
       teacher: Option[P] = None,
       valset: Option[Vector[Example]] = None
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ops = summon[PredictOps[P]]
+    val ps = summon[Predictors[P]]
     val effectiveValset: Vector[Example] =
       valset.getOrElse(trainset)
 
     val candidates = mutable.ArrayBuffer.empty[(Int, P)]
 
     // seed -3: zero-shot (no demos)
-    candidates += ((-3, ops.withDemos(student, Vector.empty)))
+    candidates += ((-3, ps.replace(student, ps.read(student).map(_.copy(demos = Vector.empty)))))
 
     // seed -2: labeled few shot
     if config.maxLabeledDemos > 0 then
-      val labelWrapper = LabeledSampleProgram(student, ops)
-      val labeled = new LabeledFewShot[LabeledSampleProgram[P]](
+      val labeled = new LabeledFewShot[P](
         LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed)
       )
-      labeled.compile(labelWrapper, trainset) match
+      labeled.compile(student, trainset) match
         case Right(report) =>
-          candidates += ((-2, report.bestProgram.wrapped))
+          candidates += ((-2, report.bestProgram))
         case Left(_) => ()
 
     // seed -1: bootstrap with unshuffled trainset
@@ -177,25 +175,3 @@ final class BootstrapFewShotWithRandomSearch[P <: DynamicModule: PredictOps](
             )
           )
     }
-
-private final case class LabeledSampleProgram[P <: DynamicModule] private (
-    wrapped: P,
-    ops: PredictOps[P],
-    currentDemos: Vector[Example]
-) extends DynamicModule:
-  override val moduleName: String = ops.name(wrapped)
-  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    ops.withDemos(wrapped, currentDemos).apply(input)
-
-private object LabeledSampleProgram:
-  def apply[P <: DynamicModule](wrapped: P, ops: PredictOps[P]): LabeledSampleProgram[P] =
-    new LabeledSampleProgram(wrapped, ops, ops.demos(wrapped))
-
-  given labeledOps[P <: DynamicModule]: PredictOps[LabeledSampleProgram[P]] with
-    def name(program: LabeledSampleProgram[P]): String = program.ops.name(program.wrapped)
-    def layout(program: LabeledSampleProgram[P]): dspy4s.core.contracts.SignatureLayout =
-      program.ops.layout(program.wrapped)
-    def demos(program: LabeledSampleProgram[P]): Vector[Example] =
-      program.currentDemos
-    def withDemos(program: LabeledSampleProgram[P], demos: Vector[Example]): LabeledSampleProgram[P] =
-      new LabeledSampleProgram(program.wrapped, program.ops, demos)

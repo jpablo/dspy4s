@@ -62,3 +62,47 @@ class PredictorsSuite extends FunSuite:
     assertEquals(empty.read(42), Vector.empty[DynamicPredict])
     assertEquals(empty.replace(42, Vector.empty), 42)
   }
+
+  test("given priority: leaf, PredictOps bridge, and structural derivation resolve distinctly") {
+    // A leaf type (DynamicPredict has Predictor AND PredictOps AND is a Product) -> fromPredictor.
+    assertEquals(
+      summon[Predictors[DynamicPredict]].getClass.getName,
+      "dspy4s.optimize.Predictors$fromPredictor"
+    )
+    // A PredictOps-bearing non-leaf program -> fromPredictOps (not torn into fields by derived).
+    assertEquals(
+      summon[Predictors[ScriptedPredictProgram]].getClass.getName,
+      "dspy4s.optimize.LowPriority1$fromPredictOps"
+    )
+    // A plain composite with neither -> structural derivation.
+    assertEquals(
+      summon[Predictors[Pipe]].getClass.getName,
+      "dspy4s.optimize.Predictors$DerivedPredictors"
+    )
+  }
+
+  test("fromPredictOps bridge is length-1 and round-trips demos through withDemos") {
+    val student = ScriptedPredictProgram(Map.empty, sigA)
+    val ps      = summon[Predictors[ScriptedPredictProgram]]
+    assertEquals(ps.read(student).size, 1)
+    assertEquals(ps.read(student).head.layout, sigA)
+
+    val demos    = Vector(Example(rec("question" := "q", "answer" := "x")))
+    val updated  = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
+    assertEquals(updated.demos, demos)
+    // round-trip identity when re-reading then replacing the same predictors
+    assertEquals(ps.replace(updated, ps.read(updated)), updated)
+  }
+
+  test("derived attaches demos to every contained predictor (multi-predictor)") {
+    val a    = DynamicPredict(layout = sigA, name = Some("a"))
+    val b    = DynamicPredict(layout = sigB, name = Some("b"))
+    val pipe = Pipe(a, b, 7)
+    val ps   = summon[Predictors[Pipe]]
+
+    val demos    = Vector(Example(rec("question" := "q", "answer" := "x")))
+    val attached = ps.replace(pipe, ps.read(pipe).map(_.copy(demos = demos)))
+    assertEquals(attached.a.demos, demos)
+    assertEquals(attached.b.demos, demos)
+    assertEquals(attached.n, 7)
+  }

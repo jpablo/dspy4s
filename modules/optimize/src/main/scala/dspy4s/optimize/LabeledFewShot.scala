@@ -15,7 +15,7 @@ final case class LabeledFewShotConfig(
 ):
   require(k >= 0, "k must be non-negative")
 
-final class LabeledFewShot[P <: DynamicModule: PredictOps](
+final class LabeledFewShot[P <: DynamicModule: Predictors](
     config: LabeledFewShotConfig = LabeledFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -27,7 +27,7 @@ final class LabeledFewShot[P <: DynamicModule: PredictOps](
       teacher: Option[P] = None,
       valset: Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ops = summon[PredictOps[P]]
+    val ps = summon[Predictors[P]]
 
     val demos: Vector[Example] =
       if trainset.isEmpty then Vector.empty
@@ -36,7 +36,7 @@ final class LabeledFewShot[P <: DynamicModule: PredictOps](
         val rng = new scala.util.Random(config.seed)
         Vector.from(rng.shuffle(trainset).take(config.k))
 
-    val compiled = ops.withDemos(student, demos)
+    val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
     Right(
       OptimizationReport(
         bestProgram = compiled,
