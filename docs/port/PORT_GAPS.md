@@ -265,10 +265,20 @@ programs need the predictor-traversal layer (depends on **G-1**).
 
 ## G-5 — `Refine` is a thin best-of-n alias (no `OfferFeedback` loop)
 
-**Status:** Open
+**Status:** Resolved (v1, commit ddecaf2)
 
-**Summary.** dspy4s's `Refine` is just a best-of-n wrapper. Python's `Refine`
-runs an `OfferFeedback` advice/feedback loop between attempts; that loop is
+**Resolution.** `Refine[I, O]` now implements the iterative-feedback loop (API
+unchanged; `BestOfN` untouched): on each sub-threshold non-final attempt it generates
+LM advice via an `OfferFeedback` sub-program grounded in that attempt's runtime trace
+(trajectory) + program I/O + reward + threshold, and injects it as a `hint_` input into
+every predictor of the next attempt via a `HintInjectingAdapter`. **v1 deltas / follow-up:**
+a single advice string is injected uniformly, vs Python's per-module advice `dict` —
+per-module advice needs the `Predictors`/named-predictors machinery (now available via
+G-1) and is the natural enhancement; grounding is the trace + I/O, not program/reward
+source code (dspy4s has no source introspection).
+
+**Summary.** dspy4s's `Refine` was just a best-of-n wrapper. Python's `Refine`
+runs an `OfferFeedback` advice/feedback loop between attempts; that loop was
 missing here.
 
 ### Python reference
