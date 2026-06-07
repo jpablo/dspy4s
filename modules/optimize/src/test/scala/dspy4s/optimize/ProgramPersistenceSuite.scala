@@ -9,7 +9,6 @@ import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
-import ProgramPredictors.given
 import ProgramPersistenceSuite.Pipe2
 
 import java.nio.file.Files

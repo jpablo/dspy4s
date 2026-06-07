@@ -7,7 +7,6 @@ import dspy4s.programs.Predict
 import dspy4s.typed.Signature
 import munit.FunSuite
 
-import ProgramPredictors.given
 import ProgramLeafPredictorsSuite.Pipe2
 
 /** P4: leaf [[Predictor]] instances for the typed single-predictor programs [[Predict]] and [[ChainOfThought]].

@@ -14,8 +14,6 @@ import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-import ProgramPredictors.given
-
 class ProgramPredictorsSuite extends FunSuite:
 
   /** Resolves the right [[Predictors]] instance from the program's *static* type, so the `[I, O]` of the given

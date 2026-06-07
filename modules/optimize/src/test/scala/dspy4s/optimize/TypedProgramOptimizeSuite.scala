@@ -10,8 +10,6 @@ import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.Schema
 
-import ProgramPredictors.given
-
 // Top-level fixtures (Mirror / Schema derivation requires top-level types).
 final case class QAInput(question: String) derives Schema
 final case class QAOutput(answer: String) derives Schema
