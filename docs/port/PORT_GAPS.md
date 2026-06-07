@@ -373,10 +373,13 @@ unchanged. `ChatAdapter`/`JSONAdapter` gained `useNativeFunctionCalling` (off by
 + `parallelToolCalls`); the shared `NativeFunctionCalling` helper injects `tools` (built by
 `ToolSchemaBridge.toOpenAiToolsDynamic`) into `requestOptions` and fills a `TypeRef.toolCalls`
 output field from the provider's `tool_calls`, gated on `supportsFunctionCalling`. Tools reach
-the adapter via `AdapterInvocation.tools` (pure `ToolSpec` data); `DynamicPredict`/`PredictEngine`
-thread them through. Also fixed a foundational bug: `ProviderLanguageModel` dropped a tool-only
-output (`content:null` + `tool_calls`). Commits 671a37f, 1f50818, 09fa2b5, 221b404, 22c36de.
-Minor follow-ups: `tool_choice` knob; typed `Predict[I,O]` tools field; constraint embedding.
+the adapter via `AdapterInvocation.tools` (pure `ToolSpec` data); `DynamicPredict`/`Predict`/`PredictEngine`
+thread them through (both the dynamic and typed paths). The `tool_choice` and `parallel_tool_calls`
+knobs are supported. Also fixed a foundational bug: `ProviderLanguageModel` dropped a tool-only
+output (`content:null` + `tool_calls`). Commits 671a37f, 1f50818, 09fa2b5, 221b404, 22c36de,
+7838fb0, 460accf. All G-7b follow-ups closed; remaining tool-call refinements (forcing a specific
+function via the object `tool_choice` form, a typed `ToolCalls` output shape) are net-new features,
+not gaps. (JSON-Schema constraint embedding is tracked under G-9, not here.)
 
 **Summary.** Adapters did not use native provider function-calling preprocessing,
 and `JSONAdapter` did not emit `response_format` structured outputs. The
