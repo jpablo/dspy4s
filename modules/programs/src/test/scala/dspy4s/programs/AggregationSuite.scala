@@ -86,3 +86,13 @@ class AggregationSuite extends FunSuite:
     val result = Aggregation.majority(rows).toOption.get
     assertEquals(lookup(result.values, "answer"), Some("2": Any))
   }
+
+  test("majority breaks an N-way tie (>=5 distinct values) by FIRST occurrence, not hash order") {
+    // Regression for the review finding: with 5+ distinct tied keys the internal tally Map becomes a HashMap,
+    // and `maxBy` would return the hash-order-first key (arbitrary) instead of the first-occurring one. These
+    // 7 single-vote answers all tie at count 1; the first in declaration order ("zebra") must win.
+    val first = "zebra"
+    val rows = Vector("zebra", "mango", "kiwi21", "fig", "kiwi14", "kiwi19", "berry").map(a => rec("answer" := a))
+    val result = Aggregation.majority(rows).toOption.get
+    assertEquals(lookup(result.values, "answer"), Some(first: Any))
+  }

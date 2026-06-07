@@ -139,12 +139,17 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
         config    = DynamicValues.record("temperature" := config.initTemperature),
         rolloutId = Some(math.floorMod(config.seed.toInt, 1024))
       )
-      gen.apply(call).map { pred =>
-        DynamicValues.recordGet(pred.values, "observations")
-          .map(DynamicValues.renderText)
-          .map(_.trim)
-          .filter(_.nonEmpty)
-      }
+      // The dataset summary is best-effort grounding: a failed summary LM call degrades to "no grounding"
+      // (Right(None)) rather than aborting the whole proposeInstructions / MIPROv2 compile.
+      gen.apply(call) match
+        case Right(pred) =>
+          Right(
+            DynamicValues.recordGet(pred.values, "observations")
+              .map(DynamicValues.renderText)
+              .map(_.trim)
+              .filter(_.nonEmpty)
+          )
+        case Left(_) => Right(None)
 
   // ── Per-predictor instruction generation (GenerateModuleInstruction analogue) ──
 

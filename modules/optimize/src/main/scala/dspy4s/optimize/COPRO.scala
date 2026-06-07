@@ -104,7 +104,8 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       }
 
       // Score the final program (all predictors at their best) so the report's best reflects the applied state.
-      val finalScore = scoreProgram(current, evalset)
+      // A failed final eval reports as 0.0 in metadata (it's a summary number, not a selection input).
+      val finalScore = scoreProgram(current, evalset).getOrElse(0.0)
       val sorted     = allCandidates.toVector.sortBy(-_.score)
       Right(
         OptimizationReport(
@@ -135,23 +136,25 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
 
     def scoreCandidate(instruction: String): P =
       val applied = applyInstruction(program, idx, instruction)
-      val score   = scoreProgram(applied, evalset)
-      // Keep the best score per distinct instruction.
-      if evaluated.get(instruction).forall(score > _) then evaluated.update(instruction, score)
-      candidates += CandidateProgram(program = applied, score = score,
-        metadata = Map("predictor" -> idx, "instruction" -> instruction))
+      // A whole-eval failure (timeout / maxErrors) yields None — skip it entirely rather than recording a
+      // real 0.0 that would corrupt selection (a genuinely-0-scoring instruction could then look "as good").
+      scoreProgram(applied, evalset).foreach { score =>
+        if evaluated.get(instruction).forall(score > _) then evaluated.update(instruction, score)
+        candidates += CandidateProgram(program = applied, score = score,
+          metadata = Map("predictor" -> idx, "instruction" -> instruction))
+      }
       applied
 
     // ── Round 0: seed breadth-1 fresh candidates + the predictor's own current instruction ──
     val seedProposals =
-      generateInstructions(baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty)
+      generateInstructions(idx, baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty)
     val round0 = (seedProposals :+ baseInstruction).filter(_.nonEmpty).distinct
     round0.foreach(scoreCandidate)
 
     // ── Rounds 1..depth-1: refine using past (instruction, score) attempts ──
     (1 until config.depth).foreach { _ =>
       val attempts = evaluated.toVector.sortBy(_._2) // ascending score, as upstream presents them
-      val refined  = generateInstructions(baseInstruction, fieldNames, config.breadth, attempts)
+      val refined  = generateInstructions(idx, baseInstruction, fieldNames, config.breadth, attempts)
       refined.filter(_.nonEmpty).distinct.foreach(scoreCandidate)
     }
 
@@ -169,12 +172,14 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     val updated = leaf.copy(layout = leaf.layout.withInstructions(Some(instruction)))
     ps.replace(program, leaves.updated(idx, updated))
 
-  /** Run the whole program on the evalset and return the aggregate metric score (0..100), 0.0 on failure. */
-  private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Double =
+  /** Run the whole program on the evalset and return the aggregate metric score (0..100), or `None` when the
+    * whole evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call
+    * sites that select the best candidate — a failed eval is "unknown", not "scored zero". */
+  private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Option[Double] =
     val evaluator = Evaluate(devset = evalset, metric = config.metric)
     evaluator()((ex: Example) => runner.run(program, ex.inputs)) match
-      case Right(r) => r.score
-      case Left(_)  => 0.0
+      case Right(r) => Some(r.score)
+      case Left(_)  => None
 
   // ── Instruction generation sub-program ──────────────────────────────────
 
@@ -197,6 +202,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     * per candidate, varying `rolloutId` (and seeding temperature into the option bag) so the LM yields distinct
     * proposals. `attempts` (ascending by score) seed the refinement variant when non-empty. */
   private def generateInstructions(
+      predictorIdx: Int,
       baseInstruction: String,
       fieldNames: Vector[String],
       count: Int,
@@ -217,9 +223,11 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
 
       // Deterministic, contiguous rolloutId stream so candidate sampling is reproducible AND spans a
       // predictable window (a scripted/temperature-driven LM yields a distinct proposal per rolloutId). The
-      // round salt keeps refinement rounds from re-drawing the same window as the seed round.
+      // round salt keeps refinement rounds from re-drawing the same window as the seed round; the per-predictor
+      // offset keeps HOMOGENEOUS predictors (identical baseInstruction/fields) from drawing the SAME window and
+      // thus requesting byte-identical generations that hit the LM cache (yielding identical proposals).
       val roundSalt = if withAttempts then count * 7 else 0
-      val base      = math.floorMod(config.seed.toInt, 1024) + roundSalt
+      val base      = math.floorMod(config.seed.toInt, 1024) + predictorIdx * 10000 + roundSalt
       val results = (0 until count).iterator.flatMap { i =>
         val rolloutId = base + i
         val call = ProgramCall(

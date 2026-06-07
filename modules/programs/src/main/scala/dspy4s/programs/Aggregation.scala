@@ -65,9 +65,12 @@ object Aggregation:
         }
         if tally.isEmpty then Left(ValidationError("No countable values for majority"))
         else
-          val majorityKey = tally.maxBy(_._2)._1
+          val maxCount = tally.values.max
+          // First-occurrence tie-break (Python `Counter.most_common` parity): among keys tied at the max count,
+          // pick the row whose normalized value appears FIRST in declaration order. `tally` is an unordered Map,
+          // so `maxBy` would break ties in hash order (arbitrary for >=5 distinct values) -- scan `counted` instead.
           val winner = counted.iterator.collectFirst {
-            case (row, Some(k)) if k == majorityKey => row
+            case (row, Some(k)) if tally.getOrElse(k, 0) == maxCount => row
           }.getOrElse(rows.head)
           DynamicPrediction.fromRows(Vector(winner))
       }

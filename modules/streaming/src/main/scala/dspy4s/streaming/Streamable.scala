@@ -48,7 +48,9 @@ object Streamable:
     def knownSignatures(program: ReAct[I, O]): Vector[(String, SignatureLayout)] =
       Vector(
         (program.reactProgramName, program.reactSignature),
-        (program.extractorProgramName, program.extractorSignature)
+        // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
+        // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
+        (program.extractorProgramName, program.extractorPredict.layout)
       )
 
   /** Typed `CodeAct`: decode the record into the typed input, run it, and emit the raw prediction. Its two
@@ -60,7 +62,9 @@ object Streamable:
     def knownSignatures(program: CodeAct[I, O]): Vector[(String, SignatureLayout)] =
       Vector(
         (program.codeActProgramName, program.codeActSignature),
-        (program.extractorProgramName, program.extractorSignature)
+        // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
+        // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
+        (program.extractorProgramName, program.extractorPredict.layout)
       )
 
   /** Typed `ProgramOfThought`: decode the record into the typed input, run it, and emit the raw prediction. Its
