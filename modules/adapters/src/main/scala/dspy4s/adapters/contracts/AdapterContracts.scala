@@ -39,10 +39,10 @@ final case class AdapterInvocation(
   * the resolved LM declares `supportsResponseSchema`). The engine merges this map UNDER the existing per-call /
   * module options, so explicit user/module config wins on key collision.
   *
-  * Follow-up (documented, not implemented here): native FUNCTION CALLING reuses this same seam — an adapter would
-  * inject `tools` / `tool_choice` (from `ToolSchemaBridge`) into `requestOptions` when `supportsFunctionCalling`.
-  * That additionally needs response-side parsing of native `tool_calls` and ReAct rewiring, which `requestOptions`
-  * alone does not cover. */
+  * Native FUNCTION CALLING (G-7b) reuses this same seam: ChatAdapter/JSONAdapter inject `tools` into
+  * `requestOptions` (via [[NativeFunctionCalling.toolOptions]]) when native calling is enabled and the LM
+  * `supportsFunctionCalling`, and fill a `tool_calls` output field from the response. ReAct is NOT involved — it
+  * keeps the text protocol, matching upstream dspy. */
 final case class FormattedPrompt(
     messages: Vector[Message],
     metadata: Map[String, Any] = Map.empty,
