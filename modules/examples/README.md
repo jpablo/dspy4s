@@ -114,14 +114,22 @@ Hand-written demonstrations of the four ways to declare a typed `Signature` (not
 
 ---
 
-## 📄 Overview pages (no code to port)
+## 📄 Section docs (adapted prose pages)
 
-These upstream pages are prose only; the files are placeholders that record the mapping.
+The upstream DSPy pages that are prose only (overviews, landing/index pages, links to external tutorials)
+have no code to port. Instead of empty Scala placeholders, each is a `README.md` adapted for dspy4s — same
+topic, rewritten for the Scala port, with attribution to the MIT-licensed source and links to the relevant
+example files:
 
-`learn/Learn`, `learn/programming/Overview`, `learn/evaluation/Overview`,
-`learn/optimization/Overview`, `production/Production`, `tutorials/Tutorials`, `tutorials/build_ai_program`,
-`tutorials/classification`, `tutorials/core_development`, `tutorials/gepa_ai_program`,
-`tutorials/optimize_ai_program`, `tutorials/papillon`, `tutorials/real_world_examples`, `tutorials/rl_ai_program`.
+- [`learn/`](./src/main/scala/dspy4s/examples/learn/README.md) — learning dspy4s overview (the three stages)
+- [`learn/programming/`](./src/main/scala/dspy4s/examples/learn/programming/README.md) — programming in dspy4s
+- [`learn/evaluation/`](./src/main/scala/dspy4s/examples/learn/evaluation/README.md) — evaluation in dspy4s
+- [`learn/optimization/`](./src/main/scala/dspy4s/examples/learn/optimization/README.md) — optimization in dspy4s
+- [`production/`](./src/main/scala/dspy4s/examples/production/README.md) — dspy4s in production
+- [`tutorials/`](./src/main/scala/dspy4s/examples/tutorials/README.md) — tutorials index (ported / blocked / external)
+- tutorial landing pages: `build_ai_program`, `core_development`, `real_world_examples`,
+  `optimize_ai_program`, `gepa_ai_program`, `rl_ai_program`, `classification`, `papillon`
+  (each a `README.md` under `tutorials/<name>/`).
 
 ---
 
@@ -148,8 +156,8 @@ alternative where one exists.
 - **21** ported doc examples (✅) + **4** typed-surface demos (🔧) = **25** runnable `@main`s.
 - **6** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
   `loadingCustomDataMain`. The other 19 need `OPENAI_API_KEY` (🔑).
-- **14** overview placeholders (📄) and **9** blocked files (🚫) — shown as 8 rows above (the two MCP pages share one).
-- **49** source files in total (25 runnable + 14 overview + 9 blocked + the shared `Demo` runner).
+- **14** adapted prose docs (📄, now `README.md` per section) and **9** blocked files (🚫) — shown as 8 rows above (the two MCP pages share one).
+- **35** Scala source files (25 runnable + 9 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
 
 When a feature lands in dspy4s (datasets, MCP, save/load, …), the corresponding 🚫 file is the next thing to
 port — its header already records exactly what's missing.
