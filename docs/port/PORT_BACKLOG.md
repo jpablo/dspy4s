@@ -7,11 +7,17 @@ and behavioral-delta ledger. The backlog below is *phase plan*; the map is
 ## Upstream parity target
 
 - Upstream: [stanfordnlp/dspy](https://github.com/stanfordnlp/dspy)
-- Pinned version: **3.1.3** (released 2026-02-05)
-- Reference clone (local): `/Users/jpablo/GitHub/dspy`, branch `release-3.1.3`
-  at tag `3.1.3` (HEAD is one commit ahead, `ccae927` "Update versions" — a
-  routine post-release version bump in `pyproject.toml`/`uv.lock`, no source
-  changes).
+- Baseline version: **3.1.3** (released 2026-02-05). The port now also
+  incorporates the actionable **3.1.3 → 3.2.1** deltas (commits 360aa30 and
+  b01c627: `ContextWindowExceededError`, LM capability flags, CoT/PoT prefix
+  normalization, adapter empty-response/non-ASCII characterization, `Ensemble`,
+  Evaluate `display_table`/`provideTraceback`, `inspect_history`).
+- Reference clone (local): `/Users/jpablo/GitHub/dspy` has **drifted** off the
+  baseline — it now sits on `main` (`git describe` reports ~`3.3.0b1-…`), no
+  longer at tag `3.1.3`. **Auditors must not read the working tree for baseline
+  comparison.** Read baseline files with `git show 3.1.3:<path>` (or check out
+  the tag in a scratch worktree) so the comparison is against 3.1.3, not the
+  drifted `main`.
 
 When upstream tags a new release, bump this section, refresh the clone
 (`git fetch && git checkout release-X.Y.Z`), and audit the changelog for
@@ -75,6 +81,12 @@ Acceptance tests:
 - `tests/clients/test_lm.py` (Tier 0 subset)
 - `tests/utils/test_usage_tracker.py`
 
+Shipped (commit b01c627):
+- `ContextWindowExceededError` wiring in `OpenAiClient.statusError` (HTTP 400 +
+  context-window body marker).
+- LM capability flags (`supportsFunctionCalling` / `supportsResponseSchema` /
+  `supportsReasoning`) on `LanguageModel`; OpenAI overrides to true.
+
 Remaining OpenAI provider gaps (deferred):
 - Anthropic / Ollama / LiteLLM providers.
 - Live-API response-mode parity tests.
@@ -123,11 +135,16 @@ v1 covers:
 - `saveAsJson` / `saveAsCsv` with flat-row schema (example fields prefixed `example_`, collisions prefixed `pred_`)
 - 30 tests ported across NormalizeText, BuiltinMetrics, Evaluate, Persistence suites
 
+Shipped in Phase 6 v2 (commit b01c627):
+- `display_table` — `EvaluationResult.renderTable` (text table; no pandas)
+- `provideTraceback` — failing examples capture the `DspyError`
+
 Deferred to Phase 6 v2:
-- `display_table` / pandas-style rendering
 - Straggler retry mechanism
-- LLM-judged auto-evaluation metrics (`SemanticF1`, `CompleteAndGrounded`)
-- `provideTraceback` and `callback_metadata` options
+- LLM-judged auto-evaluation metrics (`SemanticF1`, `CompleteAndGrounded`) —
+  blocked on the `Metric.score`/`RuntimeContext` gap (see
+  [PORT_GAPS.md](PORT_GAPS.md) G-6)
+- `callback_metadata` option
 
 ## Phase 7: First Optimizers (`optimize`)
 Goal: practical compile loops.
@@ -142,8 +159,11 @@ v1 covers:
 - 13 tests (5 LabeledFewShot + 5 Bootstrap + 3 RandomSearch)
 - `Example` extended with `augmented: Boolean` flag for bootstrap parity
 
+Shipped in Phase 7 v2 (commit b01c627):
+- `Ensemble` (per-input voting/majority) — `modules/optimize/.../Ensemble.scala`,
+  majority-vote default
+
 Deferred to Phase 7 v2:
-- `Ensemble` (per-input voting/majority)
 - `KNNFewShot` (k-NN retriever over `Embedder`)
 - Composite multi-predictor program support in bootstrap
 - LLM-judged metrics for bootstrap scoring
@@ -162,9 +182,13 @@ v1 covers:
 - Status/prediction/error events for both streaming and non-streaming LMs
 - 16 tests across `StreamingQueueSuite`, `StatusStreamingCallbackSuite`, `StreamifySuite`
 
-v2 deferred (tracked in `../STREAMING_POSTPONED.md`):
+Shipped after v1 (see `../STREAMING_POSTPONED.md` "Shipped" section):
 - Per-field `StreamListener` with Chat/JSON/XML chunk state machines
-- Real LM provider streaming clients (OpenAI SSE, Anthropic, Ollama)
+- Real OpenAI streaming client (`OpenAiLanguageModel.stream` + `OpenAiClient.stream`
+  SSE, `JdkHttpTransport.streamSse`, `OpenAiStreamChunk`)
+
+v2 deferred (tracked in `../STREAMING_POSTPONED.md`):
+- Anthropic / Ollama streaming clients
 - Structured concurrency (fs2 / ZIO streams)
 - `streaming_response` OpenAI-compatible SSE output
 - Async program streaming path
@@ -173,7 +197,9 @@ v2 deferred (tracked in `../STREAMING_POSTPONED.md`):
 Goal: close major feature gaps after v1.
 
 Tracks:
-- Advanced optimizers (`GEPA`, `MIPROv2`, `SIMBA`, `GRPO`, `AvatarOptimizer`)
+- Advanced optimizers (`GEPA`, `MIPROv2`, `SIMBA`, `GRPO`, `AvatarOptimizer`,
+  `COPRO`, `BetterTogether`, `BootstrapFewShotWithOptuna`, `InferRules`, and the
+  `propose` package incl. `grounded_proposer`)
 - **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM`.
   ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
   with a plain `python3 -c "..."` subprocess interpreter; the sandboxed

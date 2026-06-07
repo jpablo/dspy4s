@@ -8,6 +8,11 @@
 > typed wrapper carries that name).
 
 
+> **Update 2026-06-06 (commit b01c627).** `display_table`
+> (`EvaluationResult.renderTable`) and `provideTraceback` are now implemented, so
+> the "Remaining gaps" list at the bottom is partially superseded. The absolute
+> paths below are left unchanged as a historical snapshot.
+
 Phase 6 focuses on the evaluation runtime (metrics, threaded evaluator, result persistence).
 
 ## Implemented in this step

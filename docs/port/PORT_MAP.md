@@ -61,7 +61,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `chain_of_thought.py` | `ChainOfThought.scala` | ✅ ported |
 | `react.py` | `ReAct.scala` | ✅ ported |
 | `best_of_n.py` | `BestOfN.scala` | ✅ ported |
-| `refine.py` | `Refine.scala` | ✅ ported |
+| `refine.py` | `Refine.scala` | ⚠️ partial (best-of-n only; the `OfferFeedback` advice/feedback loop is missing). Gated on G-1 / the `Refine` gap — see [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop). |
 | `parallel.py` | `Parallel.scala` | ✅ ported |
 | `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
 | `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, typed `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is a bespoke `MultiChainCall[I]` (base input + candidate completions); `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
@@ -72,6 +72,16 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `program_of_thought.py` | `ProgramOfThought.scala` | ✅ ported. Three `ChainOfThought` passes: `generate` → `regenerate` (on execution error, up to `maxIterations`) → `answer`. Caller-owned interpreter lifecycle. Behavioral delta: Python preloads a `SUBMIT(...)` function via Pyodide; dspy4s instructs the LM to **print** its JSON result instead, since the default subprocess interpreter doesn't have a SUBMIT mechanism. Functionally equivalent for the common case; explicit `SUBMIT` returns when Deno+Pyodide lands. |
 | `rlm.py` | — | Deferred — uses Deno+Pyodide JSON-RPC + tool-callback bridge; that infrastructure isn't built yet. The `CodeInterpreter` trait is the contract it'll plug into. |
 | `avatar/` | — | Deferred — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat. Separate session. |
+
+---
+
+## 2b. Other ported symbols (notes)
+
+- **`Ensemble` (optimize).** ✅ ported — `modules/optimize/src/main/scala/dspy4s/optimize/Ensemble.scala`
+  (majority-vote default; per-input voting).
+- **`ContextWindowExceededError`.** Added to the `DspyError` hierarchy
+  (`modules/core/.../contracts/Errors.scala`) and now **produced by**
+  `OpenAiClient.statusError` (HTTP 400 + context-window body marker).
 
 ---
 

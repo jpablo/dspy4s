@@ -2,6 +2,28 @@
 
 This document tracks streaming features deferred from the v1 implementation to later phases.
 
+## Shipped (correction 2026-06-06)
+
+Two features documented below as "Postponed" have in fact **shipped**. The
+"Postponed — Real LM provider streaming client" and any claim that per-field
+`StreamListener` is unimplemented are **superseded** by this section:
+
+- **Real LM provider streaming client.** The earlier claim that "dspy4s has no
+  real LM provider implementation at all" is false. `OpenAiLanguageModel.stream`
+  + `OpenAiClient.stream` perform real SSE `data:` parsing; `JdkHttpTransport.streamSse`
+  drives the transport and `OpenAiStreamChunk` models the frames.
+- **Per-field `StreamListener` with Chat/JSON/XML chunk state machines.** Shipped:
+  `StreamListener` is a case class in `StreamingContracts.scala`; `Json`/`Xml`/`Chat`
+  `StreamingState` are wired via `Adapter.streamingState`. (See the v1.2–v1.4
+  "Shipped" slices below.)
+
+Note: the test inventory in this doc is partly stale — the "Python parity tests
+to port" list under v1.7 overlaps the tests already shipped in v1.8 (e.g.
+`test_streaming_handles_space_correctly`,
+`test_stream_listener_missing_completion_marker_chat_adapter`, and the
+`*_returns_correct_chunk_*` matrix). Treat the v1.8 / per-token-refactor sections
+as authoritative for current status.
+
 ## Shipped in v1 (Phase 8 — minimal slice)
 
 - `LmChunk` + `StreamingLanguageModel` trait (in `lm.contracts`)
@@ -227,9 +249,14 @@ animations).
 
 ## Postponed — Real LM provider streaming client
 
-dspy4s has no real LM provider implementation at all. Streaming requires one that produces chunked responses. Candidates:
+> **SUPERSEDED (see "Shipped (correction 2026-06-06)" at the top).** The OpenAI
+> SSE client has shipped (`OpenAiLanguageModel.stream` / `OpenAiClient.stream` /
+> `JdkHttpTransport.streamSse` / `OpenAiStreamChunk`). Only the Anthropic / Ollama
+> / LiteLLM clients below remain postponed.
 
-- OpenAI HTTP SSE client (chat completions `stream=True`)
+~~dspy4s has no real LM provider implementation at all.~~ Streaming requires a provider that produces chunked responses. Remaining candidates:
+
+- ~~OpenAI HTTP SSE client (chat completions `stream=True`)~~ — **shipped**
 - Anthropic Messages streaming
 - Ollama streaming
 - LiteLLM bridge (if a JVM LiteLLM wrapper emerges)

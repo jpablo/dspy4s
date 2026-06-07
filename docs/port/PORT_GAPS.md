@@ -143,3 +143,283 @@ get the wrapping; `BestOfN` accordingly records its own trace entry. See
 that `Predict` / `ChainOfThought` now extend. This reopened only the `[In,Out]` type params (whose earlier removal
 was justified by there being a single instantiation — no longer true once the typed layer joined). `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.
+
+---
+
+## G-3 — No per-module `config` / `set_lm` (only per-call config)
+
+**Status:** Open
+
+**Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
+binding. dspy4s only supports per-*call* config; there is no place to attach a
+module-scoped config or a module-bound LM.
+
+### Python reference
+
+`dspy.Predict(signature, **config)` stores `self.config` and `self.lm`
+(`set_lm`/`get_lm`), so a predictor can carry its own generation params and a
+pinned LM independent of the ambient settings.
+
+### dspy4s current state
+
+Config is supplied per call; the LM lives in `RuntimeContext` (ambient `using`),
+so there is no per-module `config` field and no `set_lm`/`get_lm`.
+
+### Why it matters
+
+Optimizers and user code that pin different LMs / sampling params to different
+predictors in one program can't express that today.
+
+### Proposed direction
+
+Add an immutable module-level `config` (and optional bound LM) to `DynamicPredict`,
+merged under the per-call override. Tier 0.
+
+---
+
+## G-4 — No program `save`/`load` + `dumpState`/`loadState`
+
+**Status:** Open
+
+**Summary.** There is no JSON state save/load for a program. The serialization
+primitives exist on `SignatureLayout`, but nothing wires them up to a program,
+and the demos are never persisted.
+
+### Python reference
+
+`BaseModule.dump_state`/`load_state` and `save`/`load` serialize a whole program
+(signatures + demos + config) to/from JSON.
+
+### dspy4s current state
+
+`SignatureLayout` has the layout (de)serialization primitives, but no program
+exposes `save`/`load`/`dumpState`/`loadState`; demos and config are never written
+out. The demos in the example programs are never serialized.
+
+### Why it matters
+
+Compiled programs can't be persisted and reloaded — the standard
+"optimize once, deploy the artifact" workflow is unavailable.
+
+### Proposed direction
+
+Wire the `SignatureLayout` primitives into a program-level `dumpState`/`loadState`
+(JSON) and `save`/`load`. Tier 0. A single `Predict` is doable now; composite
+programs need the predictor-traversal layer (depends on **G-1**).
+
+---
+
+## G-5 — `Refine` is a thin best-of-n alias (no `OfferFeedback` loop)
+
+**Status:** Open
+
+**Summary.** dspy4s's `Refine` is just a best-of-n wrapper. Python's `Refine`
+runs an `OfferFeedback` advice/feedback loop between attempts; that loop is
+missing here.
+
+### Python reference
+
+`dspy.Refine` uses an `OfferFeedback` signature to generate advice from a failed
+attempt and feed it into the next attempt, not merely pick the best of N
+independent samples.
+
+### dspy4s current state
+
+`Refine.scala` is a best-of-n alias only; there is no feedback/advice loop.
+(Note: `PORT_MAP.md` overstates `Refine` as "✅ ported" — see the downgrade
+to "⚠️ partial" there.)
+
+### Why it matters
+
+Without the feedback loop, `Refine` is not behaviorally equivalent to Python's;
+it can't iteratively improve a single sample.
+
+### Proposed direction
+
+Port the `OfferFeedback` advice/feedback loop. Depends on **G-1** (needs to
+introspect/rebuild the wrapped predictor across attempts).
+
+---
+
+## G-6 — `Metric.score` has no `RuntimeContext` (blocks LLM-judged metrics)
+
+**Status:** Open
+
+**Summary.** A metric's scoring function cannot call an LM, because
+`Metric.score` is given no `RuntimeContext`. This blocks porting LLM-judged
+metrics like `SemanticF1` / `CompleteAndGrounded`.
+
+### Python reference
+
+Python metrics are plain callables that can freely invoke an LM, so judged
+metrics (`SemanticF1`, `CompleteAndGrounded`) run an LM during scoring.
+
+### dspy4s current state
+
+`Metric.score` has no `RuntimeContext` in scope, so it cannot reach an LM.
+
+### Why it matters
+
+LLM-judged auto-evaluation metrics are impossible to port until scoring can
+access the runtime/LM.
+
+### Proposed direction
+
+Thread `RuntimeContext` (or an LM handle) into the metric scoring path. Tier 1.
+
+---
+
+## G-7 — No native function-calling preprocessing / JSONAdapter `response_format`
+
+**Status:** Open
+
+**Summary.** Adapters do not use native provider function-calling preprocessing,
+and `JSONAdapter` does not emit `response_format` structured outputs. The
+capability flags that would gate these now exist, but the adapters don't consume
+them yet.
+
+### Python reference
+
+Python adapters branch on LM capabilities to use native function-calling and
+`response_format` (structured outputs) when available.
+
+### dspy4s current state
+
+`LanguageModel` now carries `supportsFunctionCalling` / `supportsResponseSchema`
+/ `supportsReasoning` (the enabler, shipped b01c627), but adapters do not yet
+branch on them: no native function-calling preprocessing, no `response_format`
+on `JSONAdapter`.
+
+### Why it matters
+
+Structured-output and native tool-calling paths are more robust than text
+parsing and match upstream behavior on capable providers.
+
+### Proposed direction
+
+Have the adapters branch on the capability flags. Tier 1.
+
+---
+
+## G-8 — `TwoStepAdapter` not ported
+
+**Status:** Open
+
+**Summary.** Python's `TwoStepAdapter` is not ported.
+
+### Python reference
+
+`dspy.TwoStepAdapter` runs a generation step with a smaller/cheaper model then a
+structured extraction step.
+
+### dspy4s current state
+
+Only `ChatAdapter` / `JSONAdapter` / `XMLAdapter` are ported.
+
+### Why it matters
+
+Two-step extraction is a supported adapter strategy upstream.
+
+### Proposed direction
+
+Port `TwoStepAdapter`. Tier 1.
+
+---
+
+## G-9 — No field-constraint rendering (`PYDANTIC_CONSTRAINT_MAP`)
+
+**Status:** Open
+
+**Summary.** dspy4s has no constraint vocabulary in `FieldSpec`, so Python's
+constraint rendering (`gt`/`ge`/`lt`/`le`/`min_length`/…) has no equivalent.
+
+### Python reference
+
+Python renders field constraints into the prompt via `PYDANTIC_CONSTRAINT_MAP`
+(`gt`, `ge`, `lt`, `le`, `min_length`, `max_length`, …).
+
+### dspy4s current state
+
+`FieldSpec` carries no constraint vocabulary; constraints can't be expressed or
+rendered.
+
+### Why it matters
+
+Constraint hints in the prompt improve adherence and match upstream output.
+
+### Proposed direction
+
+Add a constraint vocabulary to `FieldSpec` and render it. Tier 1.
+
+---
+
+## G-10 — No `Embedder` + retrievers track (gates `KNN`/`KNNFewShot`)
+
+**Status:** Open
+
+**Summary.** There is no `Embedder` or retriever abstraction, which gates `KNN`
+and `KNNFewShot`.
+
+### Python reference
+
+`dspy.Embedder` + the retrievers track back `KNN` / `KNNFewShot`.
+
+### dspy4s current state
+
+Neither embedders nor retrievers are ported.
+
+### Why it matters
+
+k-NN demo selection and retrieval-augmented programs are unavailable.
+
+### Proposed direction
+
+Port `Embedder` and the retrievers track. Tier 2.
+
+---
+
+## G-11 — `InferRules` optimizer is undocumented and unported
+
+**Status:** Open
+
+**Summary.** The `InferRules` optimizer is currently invisible in all docs and is
+not ported.
+
+### Python reference
+
+`dspy.teleprompt.InferRules` infers natural-language rules from the trainset to
+augment instructions.
+
+### dspy4s current state
+
+Not ported; not mentioned in any port doc until this entry.
+
+### Why it matters
+
+It's part of the upstream optimizer surface and was being silently dropped.
+
+### Proposed direction
+
+Track and port `InferRules`. Tier 2.
+
+---
+
+## Recently resolved (this session)
+
+The following gaps were closed in the 3.1.3 → 3.2.1 port batches. They never had
+their own `G-N` entries; recorded here for history.
+
+- **`ContextWindowExceededError` type + wiring** — added to the `DspyError`
+  hierarchy (`modules/core/.../contracts/Errors.scala`, 360aa30) and wired into
+  `OpenAiClient.statusError` (HTTP 400 + context-window body marker, b01c627).
+- **LM capability flags** — `supportsFunctionCalling` / `supportsResponseSchema`
+  / `supportsReasoning` on `LanguageModel` (default false; OpenAI overrides true)
+  (b01c627). Enabler for G-7.
+- **`inspect_history`** — `RuntimeEnvironment.inspectHistory(n)` + `HistoryRenderer`
+  (b01c627).
+- **`Ensemble` optimizer** — `modules/optimize/.../Ensemble.scala`, majority-vote
+  default (b01c627).
+- **Evaluate `display_table` + `provideTraceback`** — `EvaluationResult.renderTable`
+  (text table) and failing-example `DspyError` capture (b01c627).
+- **CoT/PoT prefix normalization** — field prefixes derived via `FieldSpec.normalize`
+  instead of hardcoded literals (360aa30).

@@ -1,5 +1,8 @@
 # dspy4s Port Scope (Baseline: DSPy 3.1.3)
 
+> The actionable **3.2.1** deltas have been ported on top of the 3.1.3 baseline
+> (see [PORT_BACKLOG.md](PORT_BACKLOG.md#upstream-parity-target)).
+
 See [`PORT_MAP.md`](PORT_MAP.md) for the full dspy4s ⇄ Python name mapping
 and the running ledger of deliberate behavioral deltas.
 
@@ -28,13 +31,18 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 2. Core primitives and runtime
 - `Example`, `DynamicPrediction` (erased) / `Prediction[O]` (typed),
   `Completions`
-- `Module[I, O]` trait (including nested parameter traversal)
+- `Module[I, O]` trait. (No nested parameter/predictor traversal — that's the
+  open **G-1** gap; the current mechanism is the `PredictOps[P]` typeclass over a
+  single predictor, and composite traversal is tracked as G-1 in
+  [PORT_GAPS.md](PORT_GAPS.md).)
 - Settings/context model (global + scoped overrides)
 - Trace, history, usage tracking, callback hooks
 
 3. LM and adapter path
 - `LanguageModel` (was Python's `BaseLM` + `LM`)
-- OpenAI-compatible chat + responses mode path
+- OpenAI-compatible chat path. (Responses-mode *parsing* is scaffolded, but the
+  request path is identical to chat — there is no distinct `/responses` request
+  wiring.)
 - Caching (memory + disk), retries, rollout behavior, history updates
 - `ChatAdapter`, `JSONAdapter`, `XMLAdapter` (TwoStepAdapter not yet ported)
 - Tool-calling bridge (`ToolFunction`, `ToolCallRequest` / `ToolCallResult`)
