@@ -58,7 +58,14 @@ final case class CodeAct[I, O](
     interpreter: CodeInterpreter,
     maxIterations: Int = 5,
     codeActProgramName: String = "codeact",
-    extractorProgramName: String = "codeact_extract"
+    extractorProgramName: String = "codeact_extract",
+    /** Optional override for the per-iteration code-generator predict. When `None` (the default), it is built from
+      * [[codeActSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable sub-predict
+      * addressable + immutably replaceable (see the `Predictors[CodeAct]` instance). */
+    codeActPredictOverride: Option[DynamicPredict] = None,
+    /** Optional override for the final extractor predict (CoT-augmented). When `None` (the default), it is built
+      * fail-fast from [[extractorSignature]] at construction; see [[extractorPredict]]. */
+    extractorPredictOverride: Option[DynamicPredict] = None
 )(using
     prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, CodeAct.WithReasoning[O]]
 ) extends Module[TypedCall[I], Prediction[CodeAct.WithReasoning[O]]]:
@@ -114,6 +121,25 @@ final case class CodeAct[I, O](
       description = Some("History of generated code and observations.")
     ))
 
+  /** The per-iteration code-generator predict, built once from [[codeActSignature]] (mirrors Python's
+    * `self.code = Predict(...)` in `__init__`). Addressable + tunable via [[codeActPredictOverride]]; `forward`
+    * uses this member rather than rebuilding a local each call. */
+  val codeActPredict: DynamicPredict =
+    codeActPredictOverride.getOrElse(DynamicPredict(layout = codeActSignature, name = Some(codeActProgramName)))
+
+  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]]. Built fail-fast at
+    * construction (mirroring `require`): if the augmentation fails the error surfaces deterministically here, so
+    * both sub-predicts are always present and addressable. Tunable via [[extractorPredictOverride]]. */
+  val extractorPredict: DynamicPredict =
+    extractorPredictOverride.getOrElse(
+      DynamicPredict(
+        layout = ChainOfThought
+          .augmentLayout(extractorSignature)
+          .fold(error => throw new IllegalArgumentException(error.message), identity),
+        name = Some(extractorProgramName)
+      )
+    )
+
   /** System-prompt instructions handed to the codeact DynamicPredict. Mirrors
     * Python's `_build_instructions` shape verbatim. */
   private def buildInstructions: String =
@@ -140,13 +166,10 @@ final case class CodeAct[I, O](
       traceEnabled = call.traceEnabled,
       rolloutId    = call.rolloutId
     )
-    val codeActPredict = DynamicPredict(layout = codeActSignature, name = Some(codeActProgramName))
     for
-      extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
-      extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
       trajectory <- runIterations(baseCall, codeActPredict, trajectory = Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(trajectory.render))
-      extracted <- extractor.apply(baseCall.copy(inputs = inputs.updated("trajectory", rendered)))
+      extracted <- extractorPredict.apply(baseCall.copy(inputs = inputs.updated("trajectory", rendered)))
       reasoning <- extractReasoning(extracted.values)
       baseOut   <- baseSignature.outputShape.decode(extracted.values)
       augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))

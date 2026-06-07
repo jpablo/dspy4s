@@ -54,7 +54,11 @@ final case class MultiChainComparison[I, O](
     rationalePrefix: String = "Accurate Reasoning: Thank you everyone. Let's now holistically",
     rationaleDescription: String = "${corrected reasoning}",
     attemptDescription: String = "${reasoning attempt}",
-    answerFieldOverride: Option[String] = None
+    answerFieldOverride: Option[String] = None,
+    /** Optional override for the comparison predict. When `None` (the default), it is built from
+      * [[augmentedSignatureLayout]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable
+      * sub-predict addressable + immutably replaceable (see the `Predictors[MultiChainComparison]` instance). */
+    comparePredictOverride: Option[DynamicPredict] = None
 )(using
     prepend: OutputAugmentation.PrependField.Aux["rationale", String, O, MultiChainComparison.WithRationale[O]]
 ) extends Module[MultiChainCall[I], Prediction[MultiChainComparison.WithRationale[O]]]:
@@ -89,6 +93,12 @@ final case class MultiChainComparison[I, O](
         prefix      = Some(rationalePrefix)
       ))
 
+  /** The comparison predict, built once from [[augmentedSignatureLayout]] (mirrors Python's `self.compare =
+    * Predict(...)` in `__init__`). Addressable + tunable via [[comparePredictOverride]]; `forward` uses this
+    * member rather than rebuilding a local each call. Left unnamed to preserve the prior on-the-wire behaviour. */
+  val comparePredict: DynamicPredict =
+    comparePredictOverride.getOrElse(DynamicPredict(layout = augmentedSignatureLayout))
+
   override protected def callInputs(call: MultiChainCall[I]): DynamicValue.Record =
     baseSignature.inputShape.encode(call.input)
   override protected def callTraceEnabled(call: MultiChainCall[I]): Boolean = call.traceEnabled
@@ -107,7 +117,7 @@ final case class MultiChainComparison[I, O](
       }.toSeq
       val augmentedInputs = DynamicValue.Record(Chunk.from(baseInputs.fields.iterator.toSeq ++ appended))
       for
-        raw <- DynamicPredict(layout = augmentedSignatureLayout).apply(ProgramCall(
+        raw <- comparePredict.apply(ProgramCall(
                  inputs       = augmentedInputs,
                  config       = call.config.updated("temperature", DynamicValues.fromAny(temperature)),
                  traceEnabled = call.traceEnabled,

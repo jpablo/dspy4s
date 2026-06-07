@@ -46,7 +46,14 @@ final case class ReAct[I, O](
     tools: Vector[ToolFunction],
     maxIterations: Int = 5,
     reactProgramName: String = ReActKeys.reactModule,
-    extractorProgramName: String = ReActKeys.extractModule
+    extractorProgramName: String = ReActKeys.extractModule,
+    /** Optional override for the per-iteration react predict. When `None` (the default), the predict is built
+      * from [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable
+      * sub-predict addressable + immutably replaceable (see the `Predictors[ReAct]` instance). */
+    reactPredictOverride: Option[DynamicPredict] = None,
+    /** Optional override for the final extractor predict (CoT-augmented). When `None` (the default), it is built
+      * fail-fast from [[extractorSignature]] at construction; see [[extractorPredict]]. */
+    extractorPredictOverride: Option[DynamicPredict] = None
 )(using
     prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ReAct.WithReasoning[O]]
 ) extends Module[TypedCall[I], Prediction[ReAct.WithReasoning[O]]]:
@@ -108,6 +115,25 @@ final case class ReAct[I, O](
       )
     )
 
+  /** The per-iteration react predict, built once from [[reactSignature]] (mirrors Python's `self.react =
+    * Predict(...)` in `__init__`). Addressable + tunable via [[reactPredictOverride]]; `forward` uses this member
+    * rather than rebuilding a local each call. */
+  val reactPredict: DynamicPredict =
+    reactPredictOverride.getOrElse(DynamicPredict(layout = reactSignature, name = Some(reactProgramName)))
+
+  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]]. Built fail-fast at
+    * construction (mirroring `require`): if the augmentation fails the error surfaces deterministically here, so
+    * both sub-predicts are always present and addressable. Tunable via [[extractorPredictOverride]]. */
+  val extractorPredict: DynamicPredict =
+    extractorPredictOverride.getOrElse(
+      DynamicPredict(
+        layout = ChainOfThought
+          .augmentLayout(extractorSignature)
+          .fold(error => throw new IllegalArgumentException(error.message), identity),
+        name = Some(extractorProgramName)
+      )
+    )
+
   /** System-prompt instructions for the react step. Mirrors Python's shape: states the task I/O, explains the
     * next_thought / next_tool_name / next_tool_args protocol, and lists the selectable tools (name + description). */
   private def buildInstructions: String =
@@ -142,13 +168,10 @@ final case class ReAct[I, O](
       traceEnabled = call.traceEnabled,
       rolloutId    = call.rolloutId
     )
-    val reactPredict = DynamicPredict(layout = reactSignature, name = Some(reactProgramName))
     for
-      extractorLayout <- ChainOfThought.augmentLayout(extractorSignature)
-      extractor = DynamicPredict(layout = extractorLayout, name = Some(extractorProgramName))
       trajectory <- runIterations(baseCall, reactPredict, Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      extracted <- extractor.apply(baseCall.copy(inputs = inputs.updated(ReActKeys.trajectory, rendered)))
+      extracted <- extractorPredict.apply(baseCall.copy(inputs = inputs.updated(ReActKeys.trajectory, rendered)))
       // Decode the extractor's reply into the typed output: base `O` with `reasoning` prepended.
       reasoning <- extractReasoning(extracted.values)
       baseOut   <- baseSignature.outputShape.decode(extracted.values)
