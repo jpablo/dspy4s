@@ -1,9 +1,12 @@
 package dspy4s.optimize
 
+import dspy4s.programs.ChainOfThought
 import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.MultiChainComparison
+import dspy4s.programs.Predict
 import dspy4s.programs.ReAct
+import dspy4s.typed.OutputAugmentation
 
 /** Hand-written [[Predictors]] instances for the composite typed programs whose learnable sub-predicts are now
   * hoisted to stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[MultiChainComparison]]).
@@ -55,3 +58,55 @@ object ProgramPredictors:
       val nextCompare = if updates(0) eq program.comparePredict then program.comparePredictOverride
                         else Some(updates(0))
       program.copy(comparePredictOverride = nextCompare)
+
+  /** Leaf [[Predictor]] for the typed single-predictor program [[Predict]]. A `Predict` field inside a user
+    * composite resolves here (via [[Predictors.fromPredictor]], 1 element) rather than being structurally torn
+    * apart by [[Predictors.derived]], and a standalone `Predict` is introspectable/tunable.
+    *
+    * `get` projects the program's learnable state into the [[DynamicPredict]] the program actually runs on:
+    * the layout is `signature.layout` (the exact layout the inner [[dspy4s.programs.runtime.PredictEngine]]
+    * executes), with the program's `demos`, name, and output JSON schema.
+    *
+    * `set` is **demos-only** (v1): it returns `program.copy(demos = updated.demos)` and deliberately does NOT
+    * swap the layout back into the typed signature. Writing the layout back would desync `signature.outputShape`
+    * (which still decodes the original `O`) from `signature.layout`; instruction/layout editing is deferred to
+    * when instruction-optimizers land. Demos-only keeps the invariant `set(p, get(p)) == p`. */
+  given predictPredictor[I, O]: Predictor[Predict[I, O]] with
+    def get(program: Predict[I, O]): DynamicPredict =
+      DynamicPredict(
+        layout           = program.signature.layout,
+        demos            = program.demos,
+        name             = Some(program.moduleName),
+        outputJsonSchema = program.signature.outputShape.jsonSchemaString
+      )
+
+    def set(program: Predict[I, O], updated: DynamicPredict): Predict[I, O] =
+      // v1: demos only. See class comment on `predictPredictor` -- layout/instruction editing is deferred.
+      program.copy(demos = updated.demos)
+
+  /** Leaf [[Predictor]] for the typed single-predictor program [[ChainOfThought]]. Like [[predictPredictor]],
+    * but the exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field
+    * prepended). `ChainOfThought.augmentLayout` returns an `Either`; it is resolved fail-fast here (consistent
+    * with the P3 hand-written instances), and only fails for layouts that cannot be augmented.
+    *
+    * `set` is demos-only for the same reasons as [[predictPredictor]]. The `prepend` evidence is required to
+    * reconstruct the program via `copy` (it is part of `ChainOfThought`'s secondary parameter list). */
+  given chainOfThoughtPredictor[I, O](using
+      prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ChainOfThought.WithReasoning[O]]
+  ): Predictor[ChainOfThought[I, O]] with
+    def get(program: ChainOfThought[I, O]): DynamicPredict =
+      val augmented = ChainOfThought
+        .augmentLayout(program.signature.layout)
+        .fold(err => throw new IllegalStateException(
+          s"ChainOfThought '${program.moduleName}' has a non-augmentable layout: ${err.message}"
+        ), identity)
+      DynamicPredict(
+        layout           = augmented,
+        demos            = program.demos,
+        name             = Some(program.moduleName),
+        outputJsonSchema = program.signature.outputShape.jsonSchemaString
+      )
+
+    def set(program: ChainOfThought[I, O], updated: DynamicPredict): ChainOfThought[I, O] =
+      // v1: demos only. See class comment on `chainOfThoughtPredictor` -- layout/instruction editing is deferred.
+      program.copy(demos = updated.demos)
