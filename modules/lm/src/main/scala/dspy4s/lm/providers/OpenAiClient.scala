@@ -1,6 +1,7 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
+import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
@@ -32,7 +33,7 @@ final case class OpenAiClient(
     val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
     transport.sendJson(url, defaultHeaders, outgoingJson(payload)).flatMap { response =>
       if response.status < 200 || response.status >= 300 then
-        Left(statusError(response.status, response.body))
+        Left(statusError(response.status, response.body, modelOf(payload)))
       else
         DynamicJson.decode(response.body)
     }
@@ -53,7 +54,7 @@ final case class OpenAiClient(
         try
           while draining.hasNext do { val _ = buffered.append(draining.next()).append('\n') }
         finally draining.close()
-        Left(statusError(response.status, buffered.toString))
+        Left(statusError(response.status, buffered.toString, modelOf(payload)))
       else
         Right(parseSse(response.dataLines))
     }
@@ -104,17 +105,31 @@ final case class OpenAiClient(
           innerClosed = true
           lines.close()
 
-  private def statusError(status: Int, body: String): DspyError =
-    val code = status match
-      case 401 | 403     => "openai_auth"
-      case 404           => "openai_not_found"
-      case 429           => "openai_rate_limit"
-      case s if s >= 500 => "openai_server"
-      case _             => "openai_http"
-    RuntimeError(code, s"OpenAI HTTP $status: ${body.take(400)}")
+  private def modelOf(payload: DynamicValue): Option[String] =
+    DynamicJson.field(payload, WireKeys.model).flatMap(DynamicJson.asString)
+
+  private def statusError(status: Int, body: String, model: Option[String]): DspyError =
+    if status == 400 && OpenAiClient.isContextWindowError(body) then ContextWindowExceededError(model = model)
+    else
+      val code = status match
+        case 401 | 403     => "openai_auth"
+        case 404           => "openai_not_found"
+        case 429           => "openai_rate_limit"
+        case s if s >= 500 => "openai_server"
+        case _             => "openai_http"
+      RuntimeError(code, s"OpenAI HTTP $status: ${body.take(400)}")
 
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"
+
+  /** Context-window overflow markers, mirroring upstream dspy `clients/lm.py`
+    * (`is_litellm_context_window_error`). Matched case-insensitively against the HTTP 400 response body. */
+  private val contextWindowMarkers: Seq[String] =
+    Seq("context_length_exceeded", "maximum context length", "context window", "reduce the length")
+
+  private[providers] def isContextWindowError(body: String): Boolean =
+    val lowered = body.toLowerCase
+    contextWindowMarkers.exists(lowered.contains)
 
   def fromEnv(
       base: String = defaultBaseUrl,

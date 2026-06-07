@@ -1,6 +1,7 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
+import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
@@ -91,6 +92,40 @@ class OpenAiClientSuite extends FunSuite:
     val error = result.left.toOption.get.asInstanceOf[RuntimeError]
     assertEquals(error.component, "openai_rate_limit")
     assert(error.message.contains("429"))
+  }
+
+  test("invoke maps a 400 context-window overflow to ContextWindowExceededError carrying the model") {
+    val transport = new ScriptedTransport(
+      nonStreamingResponses = Vector(Right(HttpResponse(
+        400,
+        Map.empty,
+        """{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 8192 tokens"}}"""
+      )))
+    )
+    val client = OpenAiClient(apiKey = "x", transport = transport)
+
+    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini")))
+    assert(result.isLeft)
+    result.left.toOption.get match
+      case err: ContextWindowExceededError => assertEquals(err.model, Some("gpt-4o-mini"))
+      case other                           => fail(s"expected ContextWindowExceededError, got: $other")
+  }
+
+  test("invoke keeps a generic 400 (non context-window) as the existing runtime error") {
+    val transport = new ScriptedTransport(
+      nonStreamingResponses = Vector(Right(HttpResponse(
+        400,
+        Map.empty,
+        """{"error":{"code":"invalid_request_error","message":"Unknown parameter: 'foo'."}}"""
+      )))
+    )
+    val client = OpenAiClient(apiKey = "x", transport = transport)
+
+    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini")))
+    assert(result.isLeft)
+    val error = result.left.toOption.get.asInstanceOf[RuntimeError]
+    assertEquals(error.component, "openai_http")
+    assert(error.message.contains("400"))
   }
 
   test("invoke returns parse error for malformed JSON body") {

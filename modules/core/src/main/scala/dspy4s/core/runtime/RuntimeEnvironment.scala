@@ -5,6 +5,7 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.HistoryRenderer
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
 
@@ -164,6 +165,23 @@ object RuntimeEnvironment:
       val base = localContext
       val nextHistory = (base.history :+ entry).takeRight(cap)
       contextRef.set(base.withHistory(nextHistory))
+
+  /** Render the last `n` LM-call history entries on the active context as a human-readable string, in the spirit
+    * of upstream `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread
+    * accumulation on [[dspy4s.core.contracts.RuntimeContext.history]] (filled by [[appendHistory]]), so this reads
+    * `current.history`. `n <= 0` yields an empty render; `n` larger than the available history is clamped. The
+    * payload shape is caller-defined, so [[dspy4s.core.contracts.HistoryRenderer]] renders each field generically.
+    */
+  def inspectHistory(n: Int = 10): String =
+    val entries = if n <= 0 then Vector.empty else current.history.takeRight(n)
+    HistoryRenderer.render(entries)
+
+  /** Convenience: [[inspectHistory]] printed to stdout, matching upstream `dspy.inspect_history`'s print-only
+    * behavior. Returns the same string it printed so callers can also capture it. */
+  def printHistory(n: Int = 10): String =
+    val rendered = inspectHistory(n)
+    println(rendered)
+    rendered
 
   /** The callback handlers registered on the active context. */
   def activeCallbacks: Vector[CallbackHandler] = current.callbacks

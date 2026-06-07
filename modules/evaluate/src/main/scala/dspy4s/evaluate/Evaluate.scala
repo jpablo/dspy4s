@@ -79,7 +79,11 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
           case Some((prediction, score)) =>
             ExampleEvaluation(dataset(idx), prediction, score)
           case None =>
-            ExampleEvaluation(dataset(idx), DynamicPrediction.empty, cfg.failureScore)
+            val capturedError =
+              if cfg.provideTraceback then
+                execResult.errors.get(idx).map(err => s"[${err.code}] ${err.message}")
+              else None
+            ExampleEvaluation(dataset(idx), DynamicPrediction.empty, cfg.failureScore, error = capturedError)
       }.toVector
 
       val totalScore = evaluations.map(_.score).sum
@@ -101,6 +105,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       if cfg.displayProgress then
         println(f"[Evaluate] score=${aggregate}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")
 
+      tableLimit(cfg.displayTable).foreach(limit => println(result.renderTable(limit)))
+
       result
     }
 
@@ -113,6 +119,17 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       predict,
       config.copy(devset = dataset, metric = metric)
     )
+
+  /** Resolves the `displayTable` config into an optional row limit to pass to `renderTable`.
+    *   - `Left(false)` -> `None` (no table)
+    *   - `Left(true)`  -> `Some(None)` (render all rows)
+    *   - `Right(n)`    -> `Some(Some(n))` (render at most n rows)
+    */
+  private def tableLimit(spec: Either[Boolean, Int]): Option[Option[Int]] =
+    spec match
+      case Left(false) => None
+      case Left(true)  => Some(None)
+      case Right(n)    => Some(Some(n))
 
   private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]

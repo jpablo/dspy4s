@@ -6,6 +6,8 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.evaluate.contracts.EvaluationResult
+import dspy4s.evaluate.contracts.ExampleEvaluation
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.evaluate.metrics.FunctionMetric
 import munit.FunSuite
@@ -106,6 +108,74 @@ class EvaluateSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val result = evaluator()(program)
     assert(result.isRight)
+  }
+
+  test("Evaluate captures the DspyError on a failing example when provideTraceback is set") {
+    val failingPredict: Example => Either[dspy4s.core.contracts.DspyError, DynamicPrediction] =
+      _ => Left(dspy4s.core.contracts.RuntimeError("test", "boom: program exploded"))
+
+    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val evaluator = new Evaluate(
+      EvaluateConfig(
+        devset = dataset,
+        metric = new ExactMatch(),
+        failureScore = 0.0,
+        provideTraceback = true
+      )
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val result = evaluator()(failingPredict)
+    assert(result.isRight)
+    val eval = result.toOption.get
+    val failing = eval.results.head
+    assertEquals(failing.score, 0.0)
+    assert(failing.error.isDefined, "expected error to be captured on failing example")
+    assert(
+      failing.error.exists(_.contains("boom: program exploded")),
+      s"expected error to contain failure message, got ${failing.error}"
+    )
+  }
+
+  test("Evaluate does not capture errors when provideTraceback is not set") {
+    val failingPredict: Example => Either[dspy4s.core.contracts.DspyError, DynamicPrediction] =
+      _ => Left(dspy4s.core.contracts.RuntimeError("test", "boom"))
+
+    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch())
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val result = evaluator()(failingPredict)
+    assert(result.isRight)
+    assertEquals(result.toOption.get.results.head.error, None)
+  }
+
+  test("EvaluationResult.renderTable produces columns and rows") {
+    val results = Vector(
+      ExampleEvaluation(ex("question" := "q1", "answer" := "Paris"), pred("answer" := "Paris"), 1.0),
+      ExampleEvaluation(ex("question" := "q2", "answer" := "Rome"), pred("answer" := "Naples"), 0.0)
+    )
+    val evalResult = EvaluationResult(score = 50.0, results = results, metricName = "exact_match")
+    val table = evalResult.renderTable()
+
+    assert(table.contains("question"), s"expected 'question' column header, got:\n$table")
+    assert(table.contains("answer"), s"expected 'answer' column header, got:\n$table")
+    assert(table.contains("score"), s"expected 'score' column header, got:\n$table")
+    assert(table.contains("Paris"), s"expected 'Paris' row value, got:\n$table")
+    assert(table.contains("Naples"), s"expected prediction 'Naples', got:\n$table")
+    assert(table.contains("q2"), s"expected 'q2' row value, got:\n$table")
+  }
+
+  test("EvaluationResult.renderTable respects a row limit") {
+    val results = (1 to 5).map { i =>
+      ExampleEvaluation(ex("question" := s"q$i"), pred("answer" := s"a$i"), 1.0)
+    }.toVector
+    val evalResult = EvaluationResult(score = 100.0, results = results, metricName = "exact_match")
+    val table = evalResult.renderTable(Some(2))
+
+    assert(table.contains("q1"), s"expected 'q1' present, got:\n$table")
+    assert(table.contains("q2"), s"expected 'q2' present, got:\n$table")
+    assert(!table.contains("q3"), s"expected 'q3' to be omitted by limit, got:\n$table")
   }
 
   test("Evaluate accepts a FunctionMetric and runs it on each example") {

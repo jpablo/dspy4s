@@ -38,6 +38,12 @@ final case class OpenAiLanguageModel(
 
   override val id: String = model
 
+  // OpenAI-compatible chat completions support the tool/function-calling protocol and structured
+  // `response_format` (JSON schema). Reasoning output is model-specific and not assumed here, so it is
+  // left at the trait default of `false`.
+  override val supportsFunctionCalling: Boolean = true
+  override val supportsResponseSchema: Boolean  = true
+
   /** Normalize, POST to the chat-completions endpoint, and parse the JSON response into an `LmResponse`.
     * HTTP and decode failures arrive as a `Left[DspyError]` from the [[OpenAiClient]] (never an exception). */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
