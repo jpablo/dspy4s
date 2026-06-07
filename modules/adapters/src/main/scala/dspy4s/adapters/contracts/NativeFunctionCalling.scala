@@ -11,6 +11,14 @@ import dspy4s.lm.contracts.ToolCall
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+/** Provider `tool_choice` setting for native function-calling, mirroring OpenAI's string-or-object form:
+  * `"auto"` / `"required"` / `"none"`, or force a specific tool via `{type:"function", function:{name}}`. */
+enum ToolChoice derives CanEqual:
+  case Auto
+  case Required
+  case Off
+  case Function(name: String)
+
 /** Shared helpers for adapter-level native (provider) function-calling, used by [[dspy4s.adapters.ChatAdapter]] and
   * [[dspy4s.adapters.JSONAdapter]] so the gating, tool-schema injection, and `tool_calls` encoding stay identical.
   * Ported from dspy's `use_native_function_calling` (adapters/base.py). ReAct is intentionally unaffected — it keeps
@@ -36,7 +44,7 @@ object NativeFunctionCalling:
       tools: Vector[ToolSpec],
       useNative: Boolean,
       parallelToolCalls: Option[Boolean],
-      toolChoice: Option[String] = None
+      toolChoice: Option[ToolChoice] = None
   )(using RuntimeContext): DynamicValue.Record =
     val active =
       useNative && tools.nonEmpty && layout.outputFields.exists(isToolCallsField) && lmSupportsFunctionCalling
@@ -45,8 +53,23 @@ object NativeFunctionCalling:
       val entries =
         Vector("tools" -> ToolSchemaBridge.toOpenAiToolsDynamic(tools)) ++
           parallelToolCalls.map(b => "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))).toVector ++
-          toolChoice.map(tc => "tool_choice" -> DynamicValue.Primitive(PrimitiveValue.String(tc))).toVector
+          toolChoice.map(tc => "tool_choice" -> encodeToolChoice(tc)).toVector
       DynamicValues.recordFromEntries(entries)
+
+  /** Encode a [[ToolChoice]] as the provider `tool_choice` value: a string for the modes, an object for a forced
+    * function. */
+  private def encodeToolChoice(choice: ToolChoice): DynamicValue =
+    choice match
+      case ToolChoice.Auto        => str("auto")
+      case ToolChoice.Required    => str("required")
+      case ToolChoice.Off         => str("none")
+      case ToolChoice.Function(n) =>
+        DynamicValue.Record(Chunk(
+          "type"     -> str("function"),
+          "function" -> DynamicValue.Record(Chunk("name" -> str(n)))
+        ))
+
+  private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
   /** Encode native tool calls as the value of a `tool_calls` output field: a sequence of `{name, args}` records,
     * matching the shape `PredictEngine` attaches to predictions. */

@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
@@ -73,10 +74,10 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
     assert(!promptText.contains("tool_calls"), s"the tool_calls field must not be rendered as a text field:\n$promptText")
   }
 
-  test("native function-calling injects tool_choice when configured, and omits it otherwise") {
+  test("native function-calling injects a string tool_choice when configured, and omits it otherwise") {
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
-    val withChoice = ChatAdapter(useNativeFunctionCalling = true, toolChoice = Some("required"))
+    val withChoice = ChatAdapter(useNativeFunctionCalling = true, toolChoice = Some(ToolChoice.Required))
       .format(invocation()).toOption.get
     assertEquals(
       DynamicValues.recordGet(withChoice.requestOptions, "tool_choice").map(DynamicValues.renderText),
@@ -86,6 +87,16 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
     val withoutChoice = ChatAdapter(useNativeFunctionCalling = true).format(invocation()).toOption.get
     assert(DynamicValues.recordGet(withoutChoice.requestOptions, "tool_choice").isEmpty,
       "tool_choice must be absent when not configured")
+  }
+
+  test("native function-calling forces a specific function via the object tool_choice form") {
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
+
+    val prompt = ChatAdapter(useNativeFunctionCalling = true, toolChoice = Some(ToolChoice.Function("search")))
+      .format(invocation()).toOption.get
+    val choice = DynamicValues.recordGet(prompt.requestOptions, "tool_choice").getOrElse(fail("tool_choice missing"))
+    assertEquals(DynamicValues.renderText(field(choice, "type")), "function")
+    assertEquals(DynamicValues.renderText(field(field(choice, "function"), "name")), "search")
   }
 
   test("native function-calling is suppressed when the LM does not support function calling") {

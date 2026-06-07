@@ -7,6 +7,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -42,9 +43,10 @@ final case class ChatAdapter(
     /** When native function-calling is active, request provider-side parallel tool-call generation. `None` leaves
       * the knob unset (provider default). */
     parallelToolCalls: Option[Boolean] = None,
-    /** When native function-calling is active, set the provider `tool_choice` (e.g. `"auto"`, `"required"`,
-      * `"none"`). `None` leaves it unset (provider default). */
-    toolChoice: Option[String] = None
+    /** When native function-calling is active, set the provider `tool_choice` ([[ToolChoice.Auto]] /
+      * [[ToolChoice.Required]] / [[ToolChoice.Off]], or [[ToolChoice.Function]] to force a specific tool).
+      * `None` leaves it unset (provider default). */
+    toolChoice: Option[ToolChoice] = None
 ) extends Adapter:
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =

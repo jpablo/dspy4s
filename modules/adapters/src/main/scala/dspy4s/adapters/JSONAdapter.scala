@@ -7,6 +7,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -33,7 +34,7 @@ final case class JSONAdapter(
     useNativeFunctionCalling: Boolean = false,
     parallelToolCalls: Option[Boolean] = None,
     /** See [[ChatAdapter.toolChoice]]. */
-    toolChoice: Option[String] = None
+    toolChoice: Option[ToolChoice] = None
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     // NOTE (G-9): this adapter emits no prose field-description block (only a key list or a JSON Schema), so
