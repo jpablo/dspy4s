@@ -357,18 +357,26 @@ Thread `RuntimeContext` (or an LM handle) into the metric scoring path. Tier 1.
 
 ## G-7 — No native function-calling preprocessing / JSONAdapter `response_format`
 
-**Status:** Partially resolved — `response_format` done (v1, commit ed2c69f); native function-calling deferred (G-7b)
+**Status:** Resolved — `response_format` (v1, commit ed2c69f) and native function-calling (G-7b) both done
 
 **Resolution (response_format / structured outputs).** Added the request-influence seam
 `FormattedPrompt.requestOptions` (+ `FormattedPrompt.mergeOptions`); `PredictEngine` and
 `Adapter.execute` merge it under the per-call/module options. `JSONAdapter`, when the
 ambient LM `supportsResponseSchema` and an `outputJsonSchema` is present, emits
 `response_format: {type:"json_schema", json_schema:{name, schema, strict:false}}` (prose
-schema kept as fallback; malformed schema → prose only). **Still open (G-7b, follow-up):**
-native FUNCTION CALLING — inject `tools`/`tool_choice` from `ToolSchemaBridge` when
-`supportsFunctionCalling`, parse native `tool_calls` from the response, and rewire ReAct
-off its prose tool protocol. It reuses the same `requestOptions` seam but adds response-side
-parsing + ReAct changes.
+schema kept as fallback; malformed schema → prose only).
+
+**Resolution (G-7b, native function-calling).** Ported faithfully from dspy `adapters/base.py`
+(verified against upstream v3.3.0b1): native calling is an **adapter-level** feature, NOT a
+ReAct change — dspy keeps ReAct on the text protocol in every version, so dspy4s ReAct is
+unchanged. `ChatAdapter`/`JSONAdapter` gained `useNativeFunctionCalling` (off by default,
++ `parallelToolCalls`); the shared `NativeFunctionCalling` helper injects `tools` (built by
+`ToolSchemaBridge.toOpenAiToolsDynamic`) into `requestOptions` and fills a `TypeRef.toolCalls`
+output field from the provider's `tool_calls`, gated on `supportsFunctionCalling`. Tools reach
+the adapter via `AdapterInvocation.tools` (pure `ToolSpec` data); `DynamicPredict`/`PredictEngine`
+thread them through. Also fixed a foundational bug: `ProviderLanguageModel` dropped a tool-only
+output (`content:null` + `tool_calls`). Commits 671a37f, 1f50818, 09fa2b5, 221b404, 22c36de.
+Minor follow-ups: `tool_choice` knob; typed `Predict[I,O]` tools field; constraint embedding.
 
 **Summary.** Adapters did not use native provider function-calling preprocessing,
 and `JSONAdapter` did not emit `response_format` structured outputs. The
