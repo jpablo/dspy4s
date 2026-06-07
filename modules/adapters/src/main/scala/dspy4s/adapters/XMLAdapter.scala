@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.AdapterConstraints
 import dspy4s.adapters.contracts.AdapterErrors
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
@@ -28,15 +29,15 @@ final case class XMLAdapter(
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    // NOTE (G-9): this adapter renders no prose field-description block (only `<field>` tags and prefixed
-    // inputs), so there is no analog of Python's `get_field_description_string` to append `FieldSpec.constraints`
-    // to. TODO: surface constraints by embedding them in the per-field tag instruction (follow-up).
+    // G-9: this adapter renders no prose field-description block (only `<field>` tags), so field constraints are
+    // surfaced as a consolidated block appended to the system instruction (shared with JSONAdapter).
     val fieldTags = invocation.layout.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
     val xmlInstruction =
       s"Return XML only using this shape:\n<outputs>\n$fieldTags\n</outputs>"
-    val systemText = invocation.layout.instructions match
+    val baseSystemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$xmlInstruction"
       case None               => xmlInstruction
+    val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
 
     val demoMessages = invocation.demos.flatMap { demo =>
       val userText = renderFields(invocation.layout.inputFields, demo.values)

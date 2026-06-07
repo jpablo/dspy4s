@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.AdapterConstraints
 import dspy4s.adapters.contracts.AdapterErrors
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
@@ -37,9 +38,10 @@ final case class JSONAdapter(
     toolChoice: Option[ToolChoice] = None
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    // NOTE (G-9): this adapter emits no prose field-description block (only a key list or a JSON Schema), so
-    // there is no `get_field_description_string` analog to append `FieldSpec.constraints` to. TODO: embed
-    // constraints into the emitted JSON Schema (e.g. `exclusiveMinimum`, `maxLength`) as a follow-up.
+    // G-9: this adapter emits no prose field-description block (only a key list or a JSON Schema), so field
+    // constraints are surfaced as a consolidated block appended to the system instruction (shared with XMLAdapter).
+    // (Embedding them structurally into the emitted JSON Schema -- `exclusiveMinimum`/`maxLength` -- is a richer
+    // follow-up that needs schema-AST manipulation; the prose block is the v1.)
     // A `tool_calls`-typed output is filled from structured tool_calls, never requested as a JSON key.
     val textOutputFields = invocation.layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
     val fieldList = textOutputFields.map(_.name).mkString(", ")
@@ -54,9 +56,10 @@ final case class JSONAdapter(
            |$schema""".stripMargin
       case None =>
         s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
-    val systemText = invocation.layout.instructions match
+    val baseSystemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$jsonInstruction"
       case None               => jsonInstruction
+    val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
 
     val demoMessages = invocation.demos.flatMap { demo =>
       val userText = renderFields(invocation.layout.inputFields, demo.values)
