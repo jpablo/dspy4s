@@ -197,13 +197,16 @@ v2 deferred (tracked in `../STREAMING_POSTPONED.md`):
 Goal: close major feature gaps after v1.
 
 Tracks:
-- Advanced optimizers. **`COPRO` v1 shipped** (commit f2c24f7) — instruction
-  optimizer built on `Predictors` + `Runnable` + the instruction-editing enabler +
-  `Evaluate`; greedy/sequential multi-predictor, instruction-only (deltas documented
-  in `COPRO.scala`). Still deferred: `GEPA`, `MIPROv2`, `SIMBA`, `GRPO`,
-  `AvatarOptimizer`, `BetterTogether`, `BootstrapFewShotWithOptuna`, `InferRules`, and
-  the `propose` package incl. `grounded_proposer`. (`COPRO`/`MIPRO`-family enablers —
-  predictor introspection, typed-spine run, instruction editing — are now all in place.)
+- Advanced optimizers. **Shipped:** `COPRO` v1 (f2c24f7) — instruction optimizer
+  (coordinate-ascent); the `propose` package's **`GroundedProposer`** v1 (c27760c) —
+  LM instruction proposer grounded in a dataset summary + demos; **`MIPROv2`** v1
+  (9f51db8) — instruction+demo joint optimizer composing `BootstrapFewShot` +
+  `GroundedProposer` + random search (deltas, notably random-search-vs-Optuna, documented
+  in `MIPROv2.scala`). All built on the G-1 enablers (`Predictors` introspection,
+  `Runnable` typed spine, instruction editing) + `Evaluate`. **Still deferred:** `GEPA`,
+  `SIMBA`, `GRPO`, `AvatarOptimizer`, `BetterTogether`, `BootstrapFewShotWithOptuna`,
+  `InferRules`, and the remaining `propose` pieces (program-source `DescribeProgram`,
+  iterative dataset-summary refinement).
 - **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM`.
   ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
   with a plain `python3 -c "..."` subprocess interpreter; the sandboxed
