@@ -8,6 +8,7 @@ import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.Predictors
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
@@ -137,7 +138,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
       val call = ProgramCall(
         inputs    = DynamicValues.record("examples" := rendered),
         config    = DynamicValues.record("temperature" := config.initTemperature),
-        rolloutId = Some(math.floorMod(config.seed.toInt, 1024))
+        rolloutId = Some(OptimizerSupport.seedBase(config.seed))
       )
       // The dataset summary is best-effort grounding: a failed summary LM call degrades to "no grounding"
       // (Right(None)) rather than aborting the whole proposeInstructions / MIPROv2 compile.
@@ -189,7 +190,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
     // Deterministic, contiguous rolloutId stream per predictor so candidate sampling is reproducible AND each
     // predictor draws a distinct window (so distinct predictors need not collide). A scripted/temperature-driven
     // LM yields a distinct proposal per rolloutId.
-    val base = math.floorMod(config.seed.toInt, 1024) + (idx + 1) * 64
+    val base = OptimizerSupport.seedBase(config.seed) + (idx + 1) * 64
 
     traverse((0 until config.numInstructions).toVector) { i =>
       val withTip   = config.useTips

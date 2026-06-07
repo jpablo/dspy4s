@@ -118,7 +118,13 @@ private[dspy4s] final case class PredictEngine(
     *
     * dspy4s has no logging framework in `core`/`programs` (Python dspy uses `logger.warning`); the closest
     * non-invasive equivalent is `System.err` via `Console.err`, which keeps the warning observable without
-    * introducing a new callback event type (that would require changing the shared `core` contracts). */
+    * introducing a new callback event type (that would require changing the shared `core` contracts).
+    *
+    * Design note (intentional v1, not a TODO): the [[dspy4s.core.contracts.CallbackEvent]] system is strictly
+    * scope-based -- every event is a Start/End pair correlated by `callId`, and a one-off diagnostic is not a
+    * scope, so routing this warning through callbacks would break that invariant. A dedicated diagnostics/log
+    * seam on `RuntimeContext` is the "proper depth" fix, but it is new public API for a single current caller;
+    * `Console.err` is observable (stderr) and sufficient until a second warning site justifies the seam. */
   private def warnOnExtraInputs(call: ProgramCall, inputKeys: Set[String]): Unit =
     val extra = DynamicValues.recordKeys(call.inputs).filterNot(inputKeys.contains)
     if extra.nonEmpty then

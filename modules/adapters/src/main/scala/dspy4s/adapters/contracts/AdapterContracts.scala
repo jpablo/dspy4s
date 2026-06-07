@@ -47,7 +47,13 @@ final case class FormattedPrompt(
 object FormattedPrompt:
   /** Merge adapter-contributed `requestOptions` UNDER `requestOptions` already present on the request, so the
     * latter (per-call / module config) wins on key collision. Mirrors the engine's `mergeConfig` style: start
-    * from the adapter options and upsert each request option by name (later wins, preserving insertion order). */
+    * from the adapter options and upsert each request option by name (later wins, preserving insertion order).
+    *
+    * Scope (v1): exactly ONE adapter contributes options today -- `JSONAdapter`'s `response_format`. The merge is
+    * therefore a flat last-key-wins upsert; there is no cross-adapter composition to reconcile. When native
+    * function-calling lands (G-7b) and a second contributor injects e.g. a `tools` array, this seam will need
+    * explicit per-key semantics (arrays concatenate, scalars overwrite) -- deferred until then rather than built
+    * speculatively against a single contributor. */
   def mergeOptions(
       adapterOptions: zio.blocks.schema.DynamicValue.Record,
       requestOptions: zio.blocks.schema.DynamicValue.Record

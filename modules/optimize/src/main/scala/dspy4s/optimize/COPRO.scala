@@ -8,7 +8,6 @@ import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
@@ -51,7 +50,7 @@ final case class COPROConfig(
   *      varying the call's `rolloutId` (and temperature in `config`), mirroring upstream's `n = breadth`. The
   *      predictor's own current instruction is added as the `breadth`-th candidate (matches upstream).
   *   2. Evaluate the WHOLE program with each candidate instruction applied to THIS predictor (via
-  *      [[Predictors.replace]]) on the valset (falling back to the trainset) using [[Evaluate]] + the metric.
+  *      [[Predictors.replace]]) on the valset (falling back to the trainset) using [[dspy4s.evaluate.Evaluate]] + the metric.
   *   3. Keep the best-scoring instruction for this predictor, then run `depth - 1` further rounds that refine
   *      using the accumulated `(instruction, score)` attempts (the `GenerateInstructionGivenAttempts` analogue).
   *   4. Lock in the predictor's best instruction before moving to the next predictor (greedy coordinate ascent).
@@ -176,10 +175,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     * whole evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call
     * sites that select the best candidate — a failed eval is "unknown", not "scored zero". */
   private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Option[Double] =
-    val evaluator = Evaluate(devset = evalset, metric = config.metric)
-    evaluator()((ex: Example) => runner.run(program, ex.inputs)) match
-      case Right(r) => Some(r.score)
-      case Left(_)  => None
+    OptimizerSupport.evalScore(program, evalset, config.metric, runner)
 
   // ── Instruction generation sub-program ──────────────────────────────────
 
@@ -227,7 +223,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       // offset keeps HOMOGENEOUS predictors (identical baseInstruction/fields) from drawing the SAME window and
       // thus requesting byte-identical generations that hit the LM cache (yielding identical proposals).
       val roundSalt = if withAttempts then count * 7 else 0
-      val base      = math.floorMod(config.seed.toInt, 1024) + predictorIdx * 10000 + roundSalt
+      val base      = OptimizerSupport.seedBase(config.seed) + predictorIdx * 10000 + roundSalt
       val results = (0 until count).iterator.flatMap { i =>
         val rolloutId = base + i
         val call = ProgramCall(

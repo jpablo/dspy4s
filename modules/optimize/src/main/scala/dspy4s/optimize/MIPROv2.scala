@@ -3,7 +3,6 @@ package dspy4s.optimize
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
@@ -57,7 +56,7 @@ final case class MIPROv2Config(
   *      picks one demo-assignment index (applied whole-program) and, per predictor, one instruction-candidate
   *      index. The trial program is built with a single [[Predictors.replace]] applying each chosen instruction
   *      (`leaf.copy(layout = leaf.layout.withInstructions(Some(instr)))`) AND chosen demos (`.copy(demos = ...)`).
-  *      Each trial is scored on the valset (falling back to the trainset) via [[Evaluate]] + [[Runnable]] + the
+  *      Each trial is scored on the valset (falling back to the trainset) via [[dspy4s.evaluate.Evaluate]] + [[Runnable]] + the
   *      metric. A baseline candidate (the unmodified student) is always scored too. The best-scoring candidate is
   *      returned as `bestProgram`; all scored candidates (trials + baseline) are returned sorted descending.
   *
@@ -230,7 +229,4 @@ final class MIPROv2[P: Predictors: Runnable](config: MIPROv2Config) extends Tele
 
   /** Run the whole program on the evalset and return the aggregate metric score (0..100), 0.0 on failure. */
   private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Double =
-    val evaluator = Evaluate(devset = evalset, metric = config.metric)
-    evaluator()((ex: Example) => runner.run(program, ex.inputs)) match
-      case Right(r) => r.score
-      case Left(_)  => 0.0
+    OptimizerSupport.evalScore(program, evalset, config.metric, runner).getOrElse(0.0)
