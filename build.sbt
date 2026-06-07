@@ -2,6 +2,11 @@ ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.1"
 
+// Disable sbt's built-in BSP server: IntelliJ imports this project via its native sbt importer (not BSP),
+// and nothing else consumes BSP here, so the auto-generated `.bsp/sbt.json` is just noise. This stops sbt
+// from re-creating it on every run.
+Global / bspEnabled := false
+
 lazy val munitVersion     = "1.3.1"
 lazy val zioBlocksVersion = "0.0.41"
 lazy val ujsonVersion     = "4.4.3"
