@@ -411,7 +411,14 @@ Have the adapters branch on the capability flags. Tier 1.
 
 ## G-8 — `TwoStepAdapter` not ported
 
-**Status:** Open
+**Status:** Resolved
+
+**Resolution.** Ported as `modules/adapters/.../TwoStepAdapter.scala`. It fits the single-call `Adapter` shape:
+`format` builds a plain natural-language prompt for the MAIN LM (resolved from the ambient context), and `parse`
+— which receives the `RuntimeContext` — runs the second extraction call itself, using a `ChatAdapter` over an
+on-the-fly `text -> <output fields>` signature against the injected `extractionModel`. Carries upstream's
+documented limitation: the extractor signature is built fresh with no demos, so the extraction step can't be
+optimized. Test-first (format shape, extraction round-trip, extraction-failure propagation).
 
 **Summary.** Python's `TwoStepAdapter` is not ported.
 
