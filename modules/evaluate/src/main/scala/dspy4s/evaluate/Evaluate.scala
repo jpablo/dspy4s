@@ -4,11 +4,13 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
 import dspy4s.evaluate.contracts.ExampleEvaluation
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.programs.runtime.ParallelExecutor
+import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration.DurationInt
@@ -24,7 +26,10 @@ final case class EvaluateConfig(
     saveAsCsv: Option[String] = None,
     saveAsJson: Option[String] = None,
     provideTraceback: Boolean = false,
-    timeout: FiniteDuration = 120.seconds
+    timeout: FiniteDuration = 120.seconds,
+    /** Metadata carried into the evaluation scope's [[RuntimeContext.callbackMetadata]], so callbacks firing during
+      * the run can read it (Python's `Evaluate(callback_metadata=…)`). Empty default → scope unchanged. */
+    callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
 )
 
 final class Evaluate(config: EvaluateConfig) extends Evaluator:
@@ -36,7 +41,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       maxErrors: Option[Int] = None,
       failureScore: Option[Double] = None,
       saveAsCsv: Option[String] = None,
-      saveAsJson: Option[String] = None
+      saveAsJson: Option[String] = None,
+      callbackMetadata: Option[DynamicValue.Record] = None
   )(program: Example => Either[DspyError, DynamicPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val mergedConfig = EvaluateConfig(
       devset = devset.getOrElse(config.devset),
@@ -49,7 +55,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       saveAsCsv = saveAsCsv.orElse(config.saveAsCsv),
       saveAsJson = saveAsJson.orElse(config.saveAsJson),
       provideTraceback = config.provideTraceback,
-      timeout = config.timeout
+      timeout = config.timeout,
+      callbackMetadata = callbackMetadata.getOrElse(config.callbackMetadata)
     )
     applyInternal(program, mergedConfig)
 
@@ -65,19 +72,29 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
         EvaluationResult(score = 0.0, results = Vector.empty, metricName = metric.name)
       )
 
-    val executor = buildExecutor(cfg)
+    // Carry the configured callbackMetadata into the evaluation scope so callbacks firing during the run can read
+    // it (Python's `Evaluate(callback_metadata=…)`). Empty metadata leaves the ambient context untouched.
+    val baseCtx = summon[RuntimeContext]
+    val evalCtx =
+      if cfg.callbackMetadata.fields.isEmpty then baseCtx
+      else baseCtx.copy(callbackMetadata = cfg.callbackMetadata)
 
-    executor.executeEither[Example, (DynamicPrediction, Double)](
-      task = (ex: Example) =>
-        // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
-        // there, so `RuntimeEnvironment.current` is the right `RuntimeContext` to hand the metric (so
-        // LM-judged metrics can reach the LM).
-        given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
-        fn(ex).flatMap { prediction =>
-          metric.score(ex, prediction).map(score => (prediction, score))
-        },
-      data = dataset
-    ).map { execResult =>
+    val execResultE = RuntimeEnvironment.withContext(evalCtx) {
+      val executor = buildExecutor(cfg)(using evalCtx)
+      executor.executeEither[Example, (DynamicPrediction, Double)](
+        task = (ex: Example) =>
+          // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
+          // there, so `RuntimeEnvironment.current` is the right `RuntimeContext` to hand the metric (so
+          // LM-judged metrics can reach the LM).
+          given RuntimeContext = RuntimeEnvironment.current
+          fn(ex).flatMap { prediction =>
+            metric.score(ex, prediction).map(score => (prediction, score))
+          },
+        data = dataset
+      )
+    }
+
+    execResultE.map { execResult =>
       val evaluations = dataset.indices.map { idx =>
         execResult.results(idx) match
           case Some((prediction, score)) =>
@@ -156,7 +173,8 @@ object Evaluate:
       displayTable: Int = 0,
       saveAsCsv: Option[String] = None,
       saveAsJson: Option[String] = None,
-      timeout: FiniteDuration = 120.seconds
+      timeout: FiniteDuration = 120.seconds,
+      callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
   ): Evaluate =
     val displaySpec: Either[Boolean, Int] = if displayTable > 0 then Right(displayTable) else Left(false)
     new Evaluate(
@@ -170,6 +188,7 @@ object Evaluate:
         displayTable = displaySpec,
         saveAsCsv = saveAsCsv,
         saveAsJson = saveAsJson,
-        timeout = timeout
+        timeout = timeout,
+        callbackMetadata = callbackMetadata
       )
     )

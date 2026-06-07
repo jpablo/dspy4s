@@ -54,6 +54,22 @@ class EvaluateSuite extends FunSuite:
     assertEquals(eval.metricName, "exact_match")
   }
 
+  test("Evaluate threads callbackMetadata into the run scope so callbacks/programs can read it") {
+    val seen    = new java.util.concurrent.atomic.AtomicReference[DynamicValue.Record](DynamicValue.Record.empty)
+    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val meta    = rec("run_id" := "abc123")
+    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), callbackMetadata = meta)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val result = evaluator() { (_: Example) =>
+      // Runs on a worker thread; the eval scope's callbackMetadata must be visible here (as it is to callbacks).
+      seen.set(RuntimeEnvironment.current.callbackMetadata)
+      Right(pred("answer" := "Paris"))
+    }
+    assert(result.isRight, s"got: $result")
+    assertEquals(DynamicValues.recordGet(seen.get(), "run_id").map(DynamicValues.renderText), Some("abc123"))
+  }
+
   test("Evaluate with empty devset returns score 0") {
     val evaluator = Evaluate(devset = Vector.empty, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current

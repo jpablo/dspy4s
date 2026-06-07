@@ -80,6 +80,10 @@ final case class RuntimeContext(
     maxHistorySize: Option[Int]              = None,
     disableHistory: Option[Boolean]          = None,
     trackUsage:     Option[Boolean]          = None,
+    /** Free-form metadata for the current scope, surfaced to [[CallbackHandler]]s via the `using RuntimeContext`
+      * they receive in `onEvent`. Set e.g. by `Evaluate(callbackMetadata = …)` so handlers firing during an
+      * evaluation can tag their events (the analogue of Python's `Evaluate(callback_metadata=…)`). Empty default. */
+    callbackMetadata: DynamicValue.Record    = DynamicValue.Record.empty,
     // Accumulated
     asyncTaskId:    Option[String]           = None,
     activeCallId:   Option[String]           = None,
