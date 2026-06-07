@@ -2,6 +2,7 @@ package dspy4s.programs.runtime
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.Completions
 import dspy4s.core.contracts.DspyError
@@ -74,7 +75,10 @@ private[dspy4s] final case class PredictEngine(
           modelId = model.id,
           request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
         ) {
-          model.call(invocation.request.copy(messages = prompt.messages))
+          // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing
+          // request options, so explicit per-call/module config wins on key collision.
+          val mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
+          model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
         }
         parsed <- parseOutputs(adapter, response.outputs)
         prediction <- buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))

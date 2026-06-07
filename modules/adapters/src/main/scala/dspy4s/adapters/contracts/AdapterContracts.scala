@@ -6,6 +6,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -25,7 +26,33 @@ final case class AdapterInvocation(
     outputJsonSchema: Option[String] = None
 )
 
-final case class FormattedPrompt(messages: Vector[Message], metadata: Map[String, Any] = Map.empty)
+/** The rendered prompt an adapter produces from an [[AdapterInvocation]].
+  *
+  * `requestOptions` (G-7) is the seam by which an adapter contributes provider request fields — the option bag
+  * that gets merged into the outgoing [[dspy4s.lm.contracts.LmRequest.options]]. v1 carries native structured
+  * outputs (OpenAI's `response_format: {type:"json_schema", json_schema:{...}}`, emitted by [[JSONAdapter]] when
+  * the resolved LM declares `supportsResponseSchema`). The engine merges this map UNDER the existing per-call /
+  * module options, so explicit user/module config wins on key collision.
+  *
+  * Follow-up (documented, not implemented here): native FUNCTION CALLING reuses this same seam — an adapter would
+  * inject `tools` / `tool_choice` (from `ToolSchemaBridge`) into `requestOptions` when `supportsFunctionCalling`.
+  * That additionally needs response-side parsing of native `tool_calls` and ReAct rewiring, which `requestOptions`
+  * alone does not cover. */
+final case class FormattedPrompt(
+    messages: Vector[Message],
+    metadata: Map[String, Any] = Map.empty,
+    requestOptions: zio.blocks.schema.DynamicValue.Record = zio.blocks.schema.DynamicValue.Record.empty
+)
+
+object FormattedPrompt:
+  /** Merge adapter-contributed `requestOptions` UNDER `requestOptions` already present on the request, so the
+    * latter (per-call / module config) wins on key collision. Mirrors the engine's `mergeConfig` style: start
+    * from the adapter options and upsert each request option by name (later wins, preserving insertion order). */
+  def mergeOptions(
+      adapterOptions: zio.blocks.schema.DynamicValue.Record,
+      requestOptions: zio.blocks.schema.DynamicValue.Record
+  ): zio.blocks.schema.DynamicValue.Record =
+    requestOptions.fields.iterator.foldLeft(adapterOptions)((acc, kv) => acc.updated(kv._1, kv._2))
 
 /** Adapter parse result. `values` is the structured record of output field values produced from the LM completion;
   * `metadata` is a free-form bag of debug / adapter-specific annotations (e.g. `{"adapter" -> "json", "fallback"
@@ -75,7 +102,9 @@ trait Adapter extends AdapterRef:
   def execute(languageModel: LanguageModel, invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, Vector[ParsedOutput]] =
     for
       prompt <- format(invocation)
-      response <- languageModel.call(invocation.request.copy(messages = prompt.messages))
+      // Merge adapter-contributed requestOptions UNDER the request's existing options (per-call/module wins).
+      mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
+      response <- languageModel.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
       parsed <- parseOutputs(invocation.layout, response.outputs)
     yield parsed
 

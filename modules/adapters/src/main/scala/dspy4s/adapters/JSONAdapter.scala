@@ -14,6 +14,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
+import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
@@ -70,9 +71,54 @@ final case class JSONAdapter(
       FormattedPrompt(
         messages = Vector(Message(role = MessageRole.System, text = Some(systemText))) ++ demoMessages ++ Vector(
           inputMessage
-        )
+        ),
+        requestOptions = responseFormatOptions(invocation)
       )
     )
+
+  /** G-7 v1 (native structured outputs): when the ambient LM declares `supportsResponseSchema` and a JSON Schema
+    * is available, emit OpenAI's `response_format: {type:"json_schema", json_schema:{name, schema, strict}}` into
+    * `FormattedPrompt.requestOptions`, so the provider ENFORCES the output schema (not only the prose hint, which
+    * stays in the system message as a belt-and-suspenders fallback). The engine merges this under the per-call /
+    * module options.
+    *
+    * `strict: false` — dspy4s-rendered schemas may not satisfy OpenAI strict-mode requirements (e.g. every
+    * property must be `required`, `additionalProperties: false`). If the schema string fails to parse this returns
+    * an empty record (prose-only); `format` never fails over this.
+    *
+    * NOTE (follow-up): native FUNCTION CALLING (injecting `tools` / `tool_choice` from `ToolSchemaBridge` when
+    * `supportsFunctionCalling`, plus parsing native `tool_calls` from the response and ReAct rewiring) reuses this
+    * same `requestOptions` seam but is out of scope for v1. */
+  private def responseFormatOptions(invocation: AdapterInvocation)(using ctx: RuntimeContext): DynamicValue.Record =
+    val capable = ctx.lm match
+      case Some(lm: LanguageModel) => lm.supportsResponseSchema
+      case _                       => false
+    if !capable then DynamicValue.Record.empty
+    else
+      invocation.outputJsonSchema match
+        case Some(schemaString) =>
+          JsonDynamic.parse(schemaString) match
+            case Right(schema: DynamicValue.Record) =>
+              val jsonSchema = DynamicValue.Record(Chunk(
+                "name"   -> DynamicValue.Primitive(PrimitiveValue.String(sanitizeSchemaName(invocation.layout.name))),
+                "schema" -> schema,
+                "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false))
+              ))
+              DynamicValue.Record(Chunk.single(
+                "response_format" -> DynamicValue.Record(Chunk(
+                  "type"        -> DynamicValue.Primitive(PrimitiveValue.String("json_schema")),
+                  "json_schema" -> jsonSchema
+                ))
+              ))
+            // A non-object schema (or parse failure) → prose-only fallback, never fail.
+            case _ => DynamicValue.Record.empty
+        case None => DynamicValue.Record.empty
+
+  /** OpenAI requires the `json_schema.name` to match `^[a-zA-Z0-9_-]+$`. Replace any other character with `_`;
+    * fall back to a constant when the result would be empty. */
+  private def sanitizeSchemaName(name: String): String =
+    val cleaned = name.replaceAll("[^a-zA-Z0-9_-]", "_")
+    if cleaned.isEmpty then "response_schema" else cleaned
 
   override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
     Some(new JsonStreamingState(layout.outputFields))
