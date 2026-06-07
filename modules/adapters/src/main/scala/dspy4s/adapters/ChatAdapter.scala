@@ -6,17 +6,22 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.contracts.ToolSchemaBridge
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
+import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.contracts.ToolCall
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -31,19 +36,32 @@ import scala.util.matching.Regex
   *   - unambiguous parsing when a field value contains a colon-prefixed line,
   *   - reliable streaming detection of field boundaries.
   */
-final case class ChatAdapter(name: String = "chat") extends Adapter:
+final case class ChatAdapter(
+    name: String = "chat",
+    /** Enable provider-native function-calling. When on AND the signature declares a `tool_calls` output field AND
+      * tool specs are supplied AND the resolved LM advertises `supportsFunctionCalling`, the `tools` are injected
+      * into the request option bag and the tool-calls field is filled from the provider's structured `tool_calls`
+      * instead of being requested as text. Off by default (mirrors dspy's `use_native_function_calling`). */
+    useNativeFunctionCalling: Boolean = false,
+    /** When native function-calling is active, request provider-side parallel tool-call generation. `None` leaves
+      * the knob unset (provider default). */
+    parallelToolCalls: Option[Boolean] = None
+) extends Adapter:
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val layout = invocation.layout
+    // A `tool_calls`-typed output field is filled from the provider's structured tool_calls, never asked for as
+    // text, so it is excluded from the rendered prompt. No-op for ordinary signatures (byte-identical output).
+    val renderLayout = layout.withFields(layout.fields.filterNot(isToolCallsField))
 
     val systemMessage = Message(
       role = MessageRole.System,
-      text = Some(buildSystemPrompt(layout, invocation.outputJsonSchema))
+      text = Some(buildSystemPrompt(renderLayout, invocation.outputJsonSchema))
     )
 
     val demoMessages = invocation.demos.flatMap { demo =>
-      val userText = renderInputs(layout.inputFields, demo.values)
-      val assistantText = renderOutputs(layout.outputFields, demo.values) + "\n\n" + ChatAdapter.CompletedMarker + "\n"
+      val userText = renderInputs(renderLayout.inputFields, demo.values)
+      val assistantText = renderOutputs(renderLayout.outputFields, demo.values) + "\n\n" + ChatAdapter.CompletedMarker + "\n"
       Vector(
         Message(role = MessageRole.User, text = Some(userText)),
         Message(role = MessageRole.Assistant, text = Some(assistantText))
@@ -53,36 +71,49 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
     val inputMessage = Message(
       role = MessageRole.User,
       text = Some(
-        renderInputs(layout.inputFields, invocation.inputs.values) + "\n\n" + outputRequirements(layout)
+        renderInputs(renderLayout.inputFields, invocation.inputs.values) + "\n\n" + outputRequirements(renderLayout)
       )
     )
 
-    Right(FormattedPrompt(messages = Vector(systemMessage) ++ demoMessages ++ Vector(inputMessage)))
+    Right(FormattedPrompt(
+      messages       = Vector(systemMessage) ++ demoMessages ++ Vector(inputMessage),
+      requestOptions = nativeToolOptions(layout, invocation.tools)
+    ))
 
   override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
     Some(new ChatStreamingState(layout.outputFields))
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    val outputNames = layout.outputFields.map(_.name).toSet
-    val sections = extractSections(output.text, outputNames)
+    // A `tool_calls`-typed field is filled from the structured `output.toolCalls`, not from the text, so it is
+    // excluded from marker extraction and the single-output fallback.
+    val textFields  = layout.outputFields.filterNot(isToolCallsField)
+    val outputNames = textFields.map(_.name).toSet
+    val sections    = extractSections(output.text, outputNames)
 
     val values = sections.view.filterKeys(outputNames.contains).toMap
 
-    // Single-output fallback: when the model produced no markers and the
-    // layout has exactly one output, treat the whole text as that field.
+    // Single-output fallback: when the model produced no markers and there is exactly one TEXT output, treat the
+    // whole text as that field.
     val resolved =
-      if values.isEmpty && layout.outputFields.size == 1 && output.text.trim.nonEmpty then
-        Map(layout.outputFields.head.name -> output.text.trim)
+      if values.isEmpty && textFields.size == 1 && output.text.trim.nonEmpty then
+        Map(textFields.head.name -> output.text.trim)
       else values
 
     layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
       for
         soFar <- acc
-        raw <- resolved.get(field.name) match
-          case Some(v) => Right(v)
-          case None    => Left(AdapterErrors.missingField(field.name))
-        coerced <- coerce(field.typeRef, raw)
-      yield soFar :+ (field.name -> coerced)
+        entry <-
+          if isToolCallsField(field) then
+            Right(field.name -> encodeToolCalls(output.toolCalls))
+          else
+            resolved.get(field.name) match
+              case Some(v) => coerce(field.typeRef, v).map(coerced => field.name -> coerced)
+              case None =>
+                // On a tool-call turn (tool_calls present) the text output fields can legitimately be absent; default
+                // them to Null rather than erroring (mirrors dspy's `setdefault(field, None)`). Otherwise it's a miss.
+                if output.toolCalls.nonEmpty then Right(field.name -> DynamicValue.Null)
+                else Left(AdapterErrors.missingField(field.name))
+      yield soFar :+ entry
     }.map { entries =>
       ParsedOutput(
         values   = DynamicValue.Record(Chunk.from(entries)),
@@ -90,6 +121,43 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
         metadata = Map("adapter" -> name)
       )
     }
+
+  private def isToolCallsField(field: FieldSpec): Boolean =
+    field.role == FieldRole.Output && field.typeRef == TypeRef.toolCalls
+
+  /** Provider request options contributed when native function-calling is active: the `tools` array (and, if set,
+    * `parallel_tool_calls`). Active only when the flag is on AND the signature declares a `tool_calls` output field
+    * AND tool specs were supplied AND the resolved LM advertises `supportsFunctionCalling`; otherwise the tools are
+    * dropped (mirrors dspy's `use_native_function_calling` gate). */
+  private def nativeToolOptions(layout: SignatureLayout, tools: Vector[ToolSpec])(using
+      RuntimeContext
+  ): DynamicValue.Record =
+    val active =
+      useNativeFunctionCalling &&
+        tools.nonEmpty &&
+        layout.outputFields.exists(isToolCallsField) &&
+        lmSupportsFunctionCalling
+    if !active then DynamicValue.Record.empty
+    else
+      val entries =
+        Vector("tools" -> ToolSchemaBridge.toOpenAiToolsDynamic(tools)) ++
+          parallelToolCalls.map(b => "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))).toVector
+      DynamicValues.recordFromEntries(entries)
+
+  private def lmSupportsFunctionCalling(using ctx: RuntimeContext): Boolean =
+    ctx.lm match
+      case Some(lm: LanguageModel) => lm.supportsFunctionCalling
+      case _                       => false
+
+  /** Encode native tool calls as the value of a `tool_calls` output field: a sequence of `{name, args}` records,
+    * matching the shape `PredictEngine` attaches to predictions. */
+  private def encodeToolCalls(calls: Vector[ToolCall]): DynamicValue =
+    DynamicValue.Sequence(Chunk.from(calls.map { call =>
+      DynamicValue.Record(Chunk(
+        "name" -> DynamicValue.Primitive(PrimitiveValue.String(call.name)),
+        "args" -> call.args
+      ))
+    }))
 
   /** Walks the LM completion line by line, opening a new section every time a
     * line (after stripping) matches the `[[ ## name ## ]]` marker. Trailing

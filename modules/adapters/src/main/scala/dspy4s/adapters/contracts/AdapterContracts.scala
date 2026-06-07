@@ -23,7 +23,12 @@ final case class AdapterInvocation(
     demos: Vector[Example],
     inputs: Example,
     request: LmRequest,
-    outputJsonSchema: Option[String] = None
+    outputJsonSchema: Option[String] = None,
+    /** Tool definitions (pure [[ToolSpec]] data — name / description / parameter schema, no invoke closures) the
+      * caller makes available to the model. An adapter with native function-calling enabled renders these into the
+      * provider `tools` request option; adapters without it ignore them. Empty by default. The executable tool
+      * bodies stay on the program (e.g. ReAct's `ToolFunction`s); only the schema travels to the adapter. */
+    tools: Vector[ToolSpec] = Vector.empty
 )
 
 /** The rendered prompt an adapter produces from an [[AdapterInvocation]].

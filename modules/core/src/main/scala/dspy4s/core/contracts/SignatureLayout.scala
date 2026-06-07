@@ -29,6 +29,10 @@ object TypeRef:
   val bool: TypeRef   = TypeRef("bool")
   val json: TypeRef   = TypeRef("json")
   val list: TypeRef   = TypeRef("list")
+  /** Sentinel for the output field that receives native provider tool calls (the analogue of Python dspy's
+    * `ToolCalls` output annotation). An adapter with native function-calling enabled fills this field from the
+    * provider's `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b. */
+  val toolCalls: TypeRef = TypeRef("tool_calls")
 
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`)
@@ -41,6 +45,7 @@ object TypeRef:
       case "float" | "double" | "number" => double
       case "bool" | "boolean"            => bool
       case "json" | "dict" | "map"       => json
+      case "tool_calls" | "toolcalls"    => toolCalls
       case other                         => TypeRef(other)
 
 /** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses.
