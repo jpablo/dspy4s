@@ -1,28 +1,32 @@
 /*
- * Real-LM smoke test for the optimizer stack (COPRO + MIPROv2).
+ * Real-LM smoke / efficacy harness for the optimizer stack (COPRO + MIPROv2).
  *
- * Status:   verification harness — NOT a doc port. Confirms the G-1 -> spine -> optimizer
- *           tower runs end-to-end against a REAL language model without errors, and prints
- *           the baseline vs optimized metric score plus the instruction each optimizer chose.
+ * Status:   verification harness — NOT a doc port. Runs the G-1 -> spine -> optimizer tower
+ *           end-to-end against a REAL model and prints baseline vs optimized metric score,
+ *           the chosen instruction, and demo count.
  *
- * Purpose:  the optimizer unit suites all use scripted mock LMs (they prove the search/apply/
- *           score plumbing). This harness exercises the same code against a live model so a
- *           semantic divergence a mock can't surface shows up. On an easy task a capable model
- *           may already max out the baseline — the primary signal is "it runs cleanly and the
- *           outputs are sane", and ideally a visible lift from the format-sensitive task below.
+ * Task:     instruction-SENSITIVE classification — label whether the text contains a digit
+ *           ("HAS_NUM" / "NO_NUM"). The vague baseline instruction ("Answer the question.")
+ *           gives the model no idea what label scheme to emit, so the baseline genuinely
+ *           under-scores and a good instruction (COPRO) or few-shot demos (MIPROv2) help.
+ *
+ * Deterministic eval: the task program pins `temperature = 0` via the module-level config
+ *           (G-3), so the SAME program scores identically every run — the before/after
+ *           numbers are real, not sampling noise.
+ *
+ * Live progress: a CallbackHandler is registered in the RuntimeContext that prints a dot
+ *           per completed LM call ("x" on a failed call), so you can see the process working
+ *           during the otherwise-silent optimizer phases. This is the general dspy4s
+ *           mechanism for observability — register your own `CallbackHandler` to log/trace.
  *
  * Run:      OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.verify.optimizerSmokeMain"
- * Tune:     OPENAI_MODEL (default gpt-4o-mini), SMOKE_BREADTH (COPRO breadth, default 3),
- *           SMOKE_TRIALS (MIPROv2 trials, default 4). For an OpenAI-compatible server (Ollama,
- *           vLLM, ...) swap `OpenAiLanguageModel.fromEnv` for the baseUrl overload.
- *
- * Cost:     small but non-zero — on the defaults, roughly 50-90 LM calls total. Keep the knobs
- *           low. Nothing here is wired into CI (no API key in CI -> it just prints a notice).
+ * Tune:     OPENAI_MODEL (default gpt-4o-mini), SMOKE_BREADTH (default 3), SMOKE_TRIALS (default 4).
+ * Cost:     ~50-70 LM calls on the defaults; a few minutes; well under a cent on gpt-4o-mini.
  */
 package dspy4s.examples.verify
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{DynamicValues, Example, RuntimeContext}
+import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DynamicValues, Example, LmEndEvent, RuntimeContext}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -32,40 +36,78 @@ import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config, Predictors, Runnable}
 import dspy4s.programs.DynamicPredict
 
+import java.util.concurrent.atomic.AtomicInteger
+
 object OptimizerSmokeTest:
 
-  /** A deliberately format-sensitive task: extract the capital city, output ONLY the name. A vague
-    * baseline instruction tends to make the model answer in a full sentence (failing exact match);
-    * a better instruction / few-shot demos fix the format. That gives the optimizers room to lift. */
-  val signatureDsl = "sentence -> city"
+  val signatureDsl = "text -> label"
   val vagueBaselineInstruction = "Answer the question."
 
-  def example(sentence: String, city: String): Example =
-    Example(
-      values    = DynamicValues.record("sentence" := sentence, "city" := city),
-      inputKeys = Set("sentence")
-    )
+  def example(text: String, label: String): Example =
+    Example(values = DynamicValues.record("text" := text, "label" := label), inputKeys = Set("text"))
 
-  val trainset: Vector[Example] = Vector(
-    example("The capital of France is Paris.", "Paris"),
-    example("Tokyo is the capital of Japan.", "Tokyo"),
-    example("Germany's capital is Berlin.", "Berlin"),
-    example("The capital of Italy is Rome.", "Rome"),
-    example("Madrid is the capital of Spain.", "Madrid"),
-    example("The capital of Egypt is Cairo.", "Cairo")
+  /** Texts that contain a digit -> "HAS_NUM". */
+  private val withNum: Vector[String] = Vector(
+    "I bought 3 apples at the market",
+    "There are 12 months in a year",
+    "She ran 5 miles this morning",
+    "The recipe needs 2 cups of flour",
+    "We have 7 days until the trip",
+    "He scored 21 points in the game",
+    "The box weighs 9 kilograms",
+    "They planted 40 trees last spring",
+    "My phone has 64 gigabytes of storage",
+    "The train leaves at 6 in the evening",
+    "There were 100 people at the concert",
+    "The car drove 80 kilometers"
   )
 
-  val valset: Vector[Example] = Vector(
-    example("Canada's capital is Ottawa.", "Ottawa"),
-    example("Lisbon is the capital of Portugal.", "Lisbon"),
-    example("The capital of Norway is Oslo.", "Oslo"),
-    example("Seoul is the capital of South Korea.", "Seoul")
+  /** Texts with no digit -> "NO_NUM". */
+  private val noNum: Vector[String] = Vector(
+    "The sky is clear and blue today",
+    "Dogs love to play in the park",
+    "She enjoys reading mystery novels",
+    "The coffee smells wonderful this morning",
+    "Birds were singing in the trees",
+    "He painted the fence a bright color",
+    "We walked along the sandy beach",
+    "The soup tastes a little salty",
+    "They watched a film about the ocean",
+    "A gentle breeze moved the curtains",
+    "The library was quiet and calm",
+    "Children laughed on the playground"
   )
 
-  val metric = new ExactMatch(answerField = "city")
+  private def hasNum(s: String): Example = example(s, "HAS_NUM")
+  private def noNumEx(s: String): Example = example(s, "NO_NUM")
+
+  // Train: 7 of each, interleaved (so bootstrap demos are class-balanced). Val: the remaining 5 of each.
+  val trainset: Vector[Example] =
+    withNum.take(7).zip(noNum.take(7)).flatMap((a, b) => Vector(hasNum(a), noNumEx(b)))
+  val valset: Vector[Example] =
+    withNum.drop(7).map(hasNum) ++ noNum.drop(7).map(noNumEx)
+
+  val metric = new ExactMatch(answerField = "label")
 
   def envInt(name: String, default: Int): Int =
     sys.env.get(name).flatMap(_.toIntOption).filter(_ > 0).getOrElse(default)
+
+  /** A live-progress callback: prints one char per completed LM call (`.` ok, `x` failed) and tracks the count,
+    * so the otherwise-silent optimizer phases visibly make progress. Registering a `CallbackHandler` in the
+    * `RuntimeContext` is the general dspy4s observability hook — swap this for a logger/tracer as needed. */
+  final class ProgressLmCallback extends CallbackHandler:
+    private val calls  = new AtomicInteger(0)
+    private val errors = new AtomicInteger(0)
+    def count: Int     = calls.get()
+    def errorCount: Int = errors.get()
+    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
+      case e: LmEndEvent =>
+        val _ = calls.incrementAndGet()
+        e.response match
+          case Left(_) => val _ = errors.incrementAndGet(); System.out.print("x")
+          case _       => System.out.print(".")
+        System.out.flush()
+      case _ => ()
 
 @main def optimizerSmokeMain(): Unit =
   import OptimizerSmokeTest.*
@@ -82,41 +124,50 @@ object OptimizerSmokeTest:
 
     case Right(lm) =>
       val baseLayout = SignatureDsl.parse(signatureDsl).toOption.get.withInstructions(Some(vagueBaselineInstruction))
-      val student    = DynamicPredict(layout = baseLayout)
+      // Pin temperature=0 (module-level config, G-3) so the SAME program scores identically every eval —
+      // the before/after numbers are real, not sampling noise.
+      val student = DynamicPredict(layout = baseLayout, config = DynamicValues.record("temperature" := 0.0))
 
-      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      val progress = new ProgressLmCallback
+      RuntimeEnvironment.withSettings(
+        RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Vector(progress))
+      ) {
         given RuntimeContext = RuntimeEnvironment.current
 
-        // Score a program on the valset via the same Runnable + Evaluate path the optimizers use.
         def scoreOf(program: DynamicPredict): Double =
           val runner = summon[Runnable[DynamicPredict]]
           Evaluate(devset = valset, metric = metric)()((ex: Example) => runner.run(program, ex.inputs)) match
             case Right(result) => result.score
-            case Left(err)     => println(s"[smoke] eval failed: ${err.message}"); -1.0
+            case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0
 
         def instructionOf(program: DynamicPredict): String =
           summon[Predictors[DynamicPredict]].read(program).headOption.flatMap(_.layout.instructions).getOrElse("(none)")
 
-        println(s"[smoke] model=$model  breadth=$breadth  trials=$trials")
-        println(s"[smoke] task: '$signatureDsl'  (baseline instruction: \"$vagueBaselineInstruction\")")
-        println(s"[smoke] train=${trainset.size} examples, val=${valset.size} examples\n")
+        def checkpoint(label: String): Unit =
+          println(s"\n[smoke] $label  (${progress.count} LM calls so far${
+              if progress.errorCount > 0 then s", ${progress.errorCount} failed" else ""})")
+
+        println(s"[smoke] model=$model  breadth=$breadth  trials=$trials  (temperature=0, deterministic)")
+        println(s"[smoke] task: classify HAS_NUM/NO_NUM  (baseline instruction: \"$vagueBaselineInstruction\")")
+        println(s"[smoke] train=${trainset.size} examples, val=${valset.size} examples")
+        println("[smoke] live progress below — one '.' per LM call ('x' = a failed call):\n")
 
         val baseScore = scoreOf(student)
-        println(f"[smoke] BASELINE score: $baseScore%.1f%%\n")
+        checkpoint(f"BASELINE score: $baseScore%.1f%%")
 
         // ── COPRO ──
-        println("[smoke] running COPRO ...")
+        println("\n[smoke] running COPRO ...")
         val copro = new COPRO[DynamicPredict](COPROConfig(metric = metric, breadth = breadth, depth = 1))
         copro.compile(student, trainset, valset = Some(valset)) match
           case Right(report) =>
             val best  = report.bestProgram
             val score = report.metadata.get("best_score").collect { case d: Double => d }.getOrElse(scoreOf(best))
-            println(f"[smoke] COPRO    score: $score%.1f%%   (baseline $baseScore%.1f%%)")
-            println(s"""[smoke] COPRO    chose instruction: "${instructionOf(best)}"\n""")
-          case Left(err) => println(s"[smoke] COPRO failed: ${err.message}\n")
+            checkpoint(f"COPRO    score: $score%.1f%%   (baseline $baseScore%.1f%%)")
+            println(s"""[smoke] COPRO    chose instruction: "${instructionOf(best)}"""")
+          case Left(err) => println(s"\n[smoke] COPRO failed: ${err.message}")
 
         // ── MIPROv2 ──
-        println("[smoke] running MIPROv2 ...")
+        println("\n[smoke] running MIPROv2 ...")
         val mipro = new MIPROv2[DynamicPredict](
           MIPROv2Config(metric = metric, numCandidates = breadth, numTrials = trials,
             maxBootstrappedDemos = 2, maxLabeledDemos = 2)
@@ -126,10 +177,10 @@ object OptimizerSmokeTest:
             val best  = report.bestProgram
             val score = report.metadata.get("best_score").collect { case d: Double => d }.getOrElse(scoreOf(best))
             val demos = summon[Predictors[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
-            println(f"[smoke] MIPROv2  score: $score%.1f%%   (baseline $baseScore%.1f%%)")
-            println(s"""[smoke] MIPROv2  chose instruction: "${instructionOf(best)}"  (+ $demos demos)\n""")
-          case Left(err) => println(s"[smoke] MIPROv2 failed: ${err.message}\n")
+            checkpoint(f"MIPROv2  score: $score%.1f%%   (baseline $baseScore%.1f%%)")
+            println(s"""[smoke] MIPROv2  chose instruction: "${instructionOf(best)}"  (+ $demos demos)""")
+          case Left(err) => println(s"\n[smoke] MIPROv2 failed: ${err.message}")
 
-        println("[smoke] done — the stack ran end-to-end against a live model.")
+        println(s"\n[smoke] done — ${progress.count} LM calls total. The stack ran end-to-end against a live model.")
         val _ = baseScore
       }
