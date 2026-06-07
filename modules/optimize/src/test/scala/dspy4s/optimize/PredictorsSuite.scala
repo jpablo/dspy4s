@@ -63,25 +63,25 @@ class PredictorsSuite extends FunSuite:
     assertEquals(empty.replace(42, Vector.empty), 42)
   }
 
-  test("given priority: leaf, PredictOps bridge, and structural derivation resolve distinctly") {
-    // A leaf type (DynamicPredict has Predictor AND PredictOps AND is a Product) -> fromPredictor.
+  test("given priority: leaf vs structural derivation resolve distinctly") {
+    // A leaf type (DynamicPredict has Predictor and is a Product) -> fromPredictor.
     assertEquals(
       summon[Predictors[DynamicPredict]].getClass.getName,
       "dspy4s.optimize.Predictors$fromPredictor"
     )
-    // A PredictOps-bearing non-leaf program -> fromPredictOps (not torn into fields by derived).
+    // A single-predictor program with a Predictor leaf instance -> fromPredictor (not torn into fields).
     assertEquals(
       summon[Predictors[ScriptedPredictProgram]].getClass.getName,
-      "dspy4s.optimize.LowPriority1$fromPredictOps"
+      "dspy4s.optimize.Predictors$fromPredictor"
     )
-    // A plain composite with neither -> structural derivation.
+    // A plain composite with no leaf instance -> structural derivation.
     assertEquals(
       summon[Predictors[Pipe]].getClass.getName,
       "dspy4s.optimize.Predictors$DerivedPredictors"
     )
   }
 
-  test("fromPredictOps bridge is length-1 and round-trips demos through withDemos") {
+  test("Predictor leaf program is length-1 and round-trips demos through the leaf set") {
     val student = ScriptedPredictProgram(Map.empty, sigA)
     val ps      = summon[Predictors[ScriptedPredictProgram]]
     assertEquals(ps.read(student).size, 1)

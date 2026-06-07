@@ -7,6 +7,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
@@ -50,17 +51,15 @@ final case class DemoAwarePredictProgram(
     Right(DynamicPrediction(rec("answer" := answer)))
 
 object DemoAwarePredictProgram:
-  given demoAwareOps: PredictOps[DemoAwarePredictProgram] with
-    def name(program: DemoAwarePredictProgram): String = program.moduleName
-    def layout(program: DemoAwarePredictProgram): SignatureLayout = program.layout
-    def demos(program: DemoAwarePredictProgram): Vector[Example] = program.demos
-    def withDemos(program: DemoAwarePredictProgram, demos: Vector[Example]): DemoAwarePredictProgram =
-      program.copy(demos = demos)
+  given demoAwarePredictor: Predictor[DemoAwarePredictProgram] with
+    def get(program: DemoAwarePredictProgram): DynamicPredict =
+      DynamicPredict(layout = program.layout, demos = program.demos, name = Some(program.moduleName))
+    def set(program: DemoAwarePredictProgram, updated: DynamicPredict): DemoAwarePredictProgram =
+      program.copy(demos = updated.demos)
 
 object ScriptedPredictProgram:
-  given scriptedOps: PredictOps[ScriptedPredictProgram] with
-    def name(program: ScriptedPredictProgram): String = program.moduleName
-    def layout(program: ScriptedPredictProgram): SignatureLayout = program.layout
-    def demos(program: ScriptedPredictProgram): Vector[Example] = program.demos
-    def withDemos(program: ScriptedPredictProgram, demos: Vector[Example]): ScriptedPredictProgram =
-      program.copy(demos = demos)
+  given scriptedPredictor: Predictor[ScriptedPredictProgram] with
+    def get(program: ScriptedPredictProgram): DynamicPredict =
+      DynamicPredict(layout = program.layout, demos = program.demos, name = Some(program.moduleName))
+    def set(program: ScriptedPredictProgram, updated: DynamicPredict): ScriptedPredictProgram =
+      program.copy(demos = updated.demos)

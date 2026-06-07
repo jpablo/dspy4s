@@ -26,12 +26,12 @@ trait Predictors[P]:
   def read(program: P): Vector[DynamicPredict]
   def replace(program: P, updates: Vector[DynamicPredict]): P
 
-object Predictors extends LowPriority1:
+object Predictors extends LowPriority:
 
-  /** Lifts a single [[Predictor]] leaf to a 1-element [[Predictors]]. Highest priority: a type that is
-    * itself a leaf (e.g. [[DynamicPredict]], which also has a [[PredictOps]] and is a `Product`) must
-    * resolve here, not via the [[LowPriority1.fromPredictOps]] bridge or the [[LowPriority2.derived]]
-    * structural instance. */
+  /** Lifts a single [[Predictor]] leaf to a 1-element [[Predictors]]. Higher priority than the
+    * [[LowPriority.derived]] structural instance: a type that is itself a leaf (e.g.
+    * [[DynamicPredict]], which is also a `Product`) must resolve here, not be torn into its
+    * case-class fields by the structural derivation. */
   given fromPredictor[P](using leaf: Predictor[P]): Predictors[P] with
     def read(program: P): Vector[DynamicPredict] = Vector(leaf.get(program))
     def replace(program: P, updates: Vector[DynamicPredict]): P =
@@ -93,34 +93,8 @@ object Predictors extends LowPriority1:
   private[optimize] def widen[A](inst: Predictors[A]): Predictors[Any] =
     inst.asInstanceOf[Predictors[Any]]
 
-/** Middle priority: the back-compat bridge from the legacy single-predictor [[PredictOps]] typeclass.
-  * Lives one priority tier below [[Predictors.fromPredictor]] so a genuine leaf (which also has a
-  * `PredictOps`) resolves to the leaf, and one tier above [[LowPriority2.derived]] so a program that
-  * has a `PredictOps` but is NOT a leaf (e.g. the optimize test helpers) bridges through here rather
-  * than being torn into its case-class fields by the structural derivation. */
-trait LowPriority1 extends LowPriority2:
-
-  /** Treats any type carrying a [[PredictOps]] (but not a [[Predictor]] leaf) as a length-1
-    * [[Predictors]]. `read` packages the program's layout/demos/name into a single [[DynamicPredict]]
-    * vessel; `replace` writes the (single) update's demos back through `ops.withDemos`. */
-  given fromPredictOps[P](using
-      ops: PredictOps[P],
-      @annotation.unused notLeaf: NotGiven[Predictor[P]]
-  ): Predictors[P] with
-    def read(program: P): Vector[DynamicPredict] =
-      Vector(
-        DynamicPredict(
-          layout = ops.layout(program),
-          demos = ops.demos(program),
-          name = Some(ops.name(program))
-        )
-      )
-    def replace(program: P, updates: Vector[DynamicPredict]): P =
-      require(updates.size == 1, s"PredictOps bridge expects exactly 1 update, got ${updates.size}")
-      ops.withDemos(program, updates.head.demos)
-
 /** Lowest priority: the structural Mirror derivation over a case class. */
-trait LowPriority2:
+trait LowPriority:
 
   /** Mirror derivation over a case class: each field's `Predictors` instances are concatenated
     * (left -> right field order) for `read`, and `replace` slices the updates by per-field read-arity,
@@ -128,12 +102,9 @@ trait LowPriority2:
     *
     * The `NotGiven[Predictor[P]]` guard keeps the structural derivation from competing with
     * [[Predictors.fromPredictor]]: a type that is itself a leaf (e.g. [[DynamicPredict]]) must resolve
-    * to the 1-element leaf instance, not be torn apart into its case-class fields. The
-    * `NotGiven[PredictOps[P]]` guard likewise yields to [[LowPriority1.fromPredictOps]] so a
-    * `PredictOps`-bearing program bridges as length-1 rather than being structurally decomposed. */
+    * to the 1-element leaf instance, not be torn apart into its case-class fields. */
   inline given derived[P <: Product](using
       m: Mirror.ProductOf[P],
-      @annotation.unused notLeaf: NotGiven[Predictor[P]],
-      @annotation.unused notOps: NotGiven[PredictOps[P]]
+      @annotation.unused notLeaf: NotGiven[Predictor[P]]
   ): Predictors[P] =
     new Predictors.DerivedPredictors[P](m, Predictors.summonFieldInstances[m.MirroredElemTypes])

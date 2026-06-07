@@ -6,7 +6,7 @@
  * Status:   translated (BootstrapFewShotWithRandomSearch.compile, snippet 1). Program save/load
  *           (snippets 2/3) is not ported — dspy4s programs have no `.save` / `.load`.
  *
- * dspy4s optimizers operate on the untyped `DynamicPredict` (which has a `PredictOps` instance);
+ * dspy4s optimizers operate on the untyped `DynamicPredict` (which has a `Predictors` instance);
  * `compile(student, trainset)` returns an `OptimizationReport` whose `bestProgram` is the result.
  */
 package dspy4s.examples.learn.optimization

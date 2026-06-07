@@ -10,7 +10,7 @@ alongside the dev set you used for exploration. For prompt/demo optimizers, a fe
 already help; aim higher when you can. DSPy suggests an unusual split for prompt optimizers — roughly 20%
 train / 80% validation — because they overfit small training sets.
 
-In dspy4s, optimizers operate on the untyped `DynamicPredict` (which carries a `PredictOps` instance).
+In dspy4s, optimizers operate on the untyped `DynamicPredict` (which carries a `Predictors` instance).
 `compile(student, trainset)` returns an `OptimizationReport` whose `bestProgram` is the tuned result.
 
 ### Runnable example in this folder
