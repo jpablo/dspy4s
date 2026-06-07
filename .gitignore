@@ -13,3 +13,6 @@ modules/*/target/
 .idea/
 .claude/
 .agents/
+
+# Local scratch / generated call-graph artifacts (graphviz)
+predict-run-callgraph.*
