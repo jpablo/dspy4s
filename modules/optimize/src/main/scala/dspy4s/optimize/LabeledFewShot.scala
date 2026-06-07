@@ -2,7 +2,6 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.programs.contracts.DynamicModule
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
@@ -15,7 +14,7 @@ final case class LabeledFewShotConfig(
 ):
   require(k >= 0, "k must be non-negative")
 
-final class LabeledFewShot[P <: DynamicModule: Predictors](
+final class LabeledFewShot[P: Predictors](
     config: LabeledFewShotConfig = LabeledFewShotConfig()
 ) extends Teleprompter[P]:
 

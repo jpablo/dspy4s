@@ -2,14 +2,12 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.programs.contracts.DynamicModule
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
-import dspy4s.programs.contracts.ProgramCall
 
 import scala.annotation.nowarn
 import scala.util.boundary
@@ -30,7 +28,7 @@ final case class BootstrapFewShotConfig(
   require(maxRounds >= 1, "maxRounds must be at least 1")
   require(maxErrors > 0, "maxErrors must be > 0")
 
-final class BootstrapFewShot[P <: DynamicModule: Predictors](
+final class BootstrapFewShot[P: Predictors: Runnable](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -76,7 +74,7 @@ final class BootstrapFewShot[P <: DynamicModule: Predictors](
               val runOutcome: Either[DspyError, DynamicPrediction] =
                 dspy4s.core.runtime.RuntimeEnvironment.withGeneratedAsyncTask(s"bootstrap-round-$round") {
                   given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
-                  teacherProgram.apply(ProgramCall(inputs = example.inputs))
+                  summon[Runnable[P]].run(teacherProgram, example.inputs)
                 }
               runOutcome match
                 case Left(_) => ()

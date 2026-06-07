@@ -2,14 +2,12 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
-import dspy4s.programs.contracts.DynamicModule
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
-import dspy4s.programs.contracts.ProgramCall
 
 import scala.collection.mutable
 import scala.util.boundary
@@ -28,7 +26,7 @@ final case class RandomSearchConfig(
     seed: Long = 0L
 )
 
-final class BootstrapFewShotWithRandomSearch[P <: DynamicModule: Predictors](
+final class BootstrapFewShotWithRandomSearch[P: Predictors: Runnable](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 
@@ -120,7 +118,7 @@ final class BootstrapFewShotWithRandomSearch[P <: DynamicModule: Predictors](
           maxErrors = Some(config.maxErrors)
         )
         val evalResult = evaluator()((ex: Example) =>
-          program.apply(ProgramCall(inputs = ex.inputs))
+          summon[Runnable[P]].run(program, ex.inputs)
         )
         val (score, perExample) = evalResult match
           case Right(r) =>
