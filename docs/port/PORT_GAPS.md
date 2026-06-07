@@ -26,11 +26,26 @@
 
 ## G-1 — No typed predictor-introspection layer (Python's `BaseModule.named_predictors`)
 
-**Status:** Open
+**Status:** Resolved (P1–P5, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07)
 
-**Summary.** dspy4s has no way to enumerate (and transform) the `Predict`s
+**Resolution.** Closed by a typed `Predictors[P]` / `Predictor[P]` typeclass pair
+with Scala 3 Mirror derivation (`modules/optimize/.../Predictors.scala`): `read`
+enumerates the contained predictors of an arbitrary composite in stable order,
+`replace` rebuilds it immutably (`replace(p, read(p)) == p`). User composites derive
+it for free; framework composites (`ReAct`, `CodeAct`, `MultiChainComparison`) get
+hand-written instances and had their sub-predicts **hoisted to stable fields**
+(closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
+`PredictOps` assumption onto `Predictors` (the `LabeledSampleProgram` glue was deleted),
+and a `Runnable[P]` capability (`Runnable.scala`) dropped the `P <: DynamicModule` bound
+so **typed** programs and user composites are now optimizable end-to-end. `PredictOps`
+remains only as a back-compat bridge (`fromPredictOps`), to be removed in a follow-up (P6).
+Remaining v1 limits: predictor edits are demos-only (instruction editing deferred);
+`MultiChainComparison` has no `Runnable` (its `MultiChainCall` shape has no inputs-only
+run); arbitrary user composites supply their own `Runnable`.
+
+**Summary (original).** dspy4s had no way to enumerate (and transform) the `Predict`s
 inside an arbitrary composite program. Python's optimizers rely on exactly
-this; ours can only reach a single `DynamicPredict` via the `PredictOps`
+this; ours could only reach a single `DynamicPredict` via the `PredictOps`
 typeclass.
 
 ### Python reference
