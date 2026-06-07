@@ -26,7 +26,7 @@
 
 ## G-1 — No typed predictor-introspection layer (Python's `BaseModule.named_predictors`)
 
-**Status:** Resolved (P1–P5, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07)
+**Status:** Resolved (P1–P6, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07 / 1657f9c)
 
 **Resolution.** Closed by a typed `Predictors[P]` / `Predictor[P]` typeclass pair
 with Scala 3 Mirror derivation (`modules/optimize/.../Predictors.scala`): `read`
@@ -37,9 +37,9 @@ hand-written instances and had their sub-predicts **hoisted to stable fields**
 (closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
 `PredictOps` assumption onto `Predictors` (the `LabeledSampleProgram` glue was deleted),
 and a `Runnable[P]` capability (`Runnable.scala`) dropped the `P <: DynamicModule` bound
-so **typed** programs and user composites are now optimizable end-to-end. `PredictOps`
-remains only as a back-compat bridge (`fromPredictOps`), to be removed in a follow-up (P6).
-Remaining v1 limits: predictor edits are demos-only (instruction editing deferred);
+so **typed** programs and user composites are now optimizable end-to-end. The legacy
+`PredictOps` typeclass and its bridge were removed in P6 — `Predictors` is the sole
+introspection typeclass. Remaining v1 limits: predictor edits are demos-only (instruction editing deferred);
 `MultiChainComparison` has no `Runnable` (its `MultiChainCall` shape has no inputs-only
 run); arbitrary user composites supply their own `Runnable`.
 
