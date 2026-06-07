@@ -51,13 +51,17 @@ private[dspy4s] final case class PredictEngine(
       * Merged *under* the per-call [[ProgramCall.config]] in [[buildInvocation]] (per-call keys win on
       * collision), so it supplies defaults a call may override. Empty by default, in which case the merged
       * options are exactly the per-call config. */
-    config: DynamicValue.Record = DynamicValue.Record.empty
+    config: DynamicValue.Record = DynamicValue.Record.empty,
+    /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, it is used in preference to the
+      * ambient `RuntimeContext` LM (`runtime.resolveModel`), so different predictors in one program can pin
+      * different models. `None` (the default) falls back to ambient resolution. See PORT_GAPS G-3. */
+    lm: Option[LanguageModel] = None
 ):
 
   def execute(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
       for
-        model <- runtime.resolveModel
+        model <- lm.fold(runtime.resolveModel)(Right(_))
         adapter <- runtime.resolveAdapter
         invocation = buildInvocation(call, model)
         prompt <- CallbackDispatcher.withAdapter(

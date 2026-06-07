@@ -7,6 +7,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
+import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.contracts.DynamicModule
@@ -50,15 +51,18 @@ final case class DynamicPredict(
     outputJsonSchema: Option[String] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`.
       * Merged *under* the per-call `ProgramCall.config` (per-call keys win on collision), so it supplies
-      * defaults a call may override. Empty by default — then the merged options are exactly the per-call config.
-      * (Deferred: a per-module bound LM, Python's `set_lm`/`get_lm`; the LM is still resolved from the ambient
-      * `RuntimeContext`. See PORT_GAPS G-3.) */
-    config: DynamicValue.Record = DynamicValue.Record.empty
+      * defaults a call may override. Empty by default — then the merged options are exactly the per-call config. */
+    config: DynamicValue.Record = DynamicValue.Record.empty,
+    /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, this predictor uses it in preference
+      * to the ambient `RuntimeContext` LM, so different predictors in one program can pin different models.
+      * `None` (the default) falls back to ambient resolution. Not part of the serialized learnable state (it's a
+      * binding, like `runtime`). See PORT_GAPS G-3. */
+    lm: Option[LanguageModel] = None
 ) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
 
-  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config)
+  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm)
 
   override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
     engine.execute(call)

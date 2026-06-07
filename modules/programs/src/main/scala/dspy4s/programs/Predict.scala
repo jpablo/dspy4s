@@ -1,6 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, Example, NotFoundError, RuntimeContext}
+import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ProgramCall, ProgramRuntime, TypedCall}
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
 import dspy4s.typed.{Prediction, Signature}
@@ -33,10 +34,12 @@ final case class Predict[I, O](
     runtime: ProgramRuntime = new SettingsProgramRuntime {},
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`.
       * Merged *under* the per-call `config` (per-call keys win on collision), so it supplies defaults a call may
-      * override. Empty by default — then the merged options are exactly the per-call config. (Deferred: a
-      * per-module bound LM, Python's `set_lm`/`get_lm`; the LM is still resolved from the ambient
-      * `RuntimeContext`. See PORT_GAPS G-3.) */
-    config: DynamicValue.Record = DynamicValue.Record.empty
+      * override. Empty by default — then the merged options are exactly the per-call config. */
+    config: DynamicValue.Record = DynamicValue.Record.empty,
+    /** Optional per-module bound LM (the immutable analogue of Python's `set_lm`/`get_lm`). When set, this
+      * predictor uses it in preference to the ambient `RuntimeContext` LM, so a program can pin different models
+      * to different predictors. `None` (the default) falls back to ambient resolution. See PORT_GAPS G-3. */
+    lm: Option[LanguageModel] = None
 ) extends Module[TypedCall[I], Prediction[O]]:
 
   override val moduleName: String = name.getOrElse("predict")
@@ -48,8 +51,16 @@ final case class Predict[I, O](
     moduleName       = moduleName,
     runtime          = runtime,
     outputJsonSchema = signature.outputShape.jsonSchemaString,
-    config           = config
+    config           = config,
+    lm               = lm
   )
+
+  /** Pin a bound LM to this predictor (immutable `set_lm`): returns a copy that resolves to `model` instead of
+    * the ambient `RuntimeContext` LM. */
+  def withLm(model: LanguageModel): Predict[I, O] = copy(lm = Some(model))
+
+  /** The bound LM, if any (`get_lm`); `None` means the predictor uses the ambient `RuntimeContext` LM. */
+  def boundLm: Option[LanguageModel] = lm
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
     signature.inputShape.encode(call.input)

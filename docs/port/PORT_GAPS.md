@@ -163,14 +163,19 @@ was justified by there being a single instantiation — no longer true once the 
 
 ## G-3 — No per-module `config` / `set_lm` (only per-call config)
 
-**Status:** Partially resolved — module `config` done (commit b85fe27); per-module bound LM (`set_lm`/`get_lm`) deferred
+**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM (commit pending)
 
 **Resolution (config).** `DynamicPredict` and `Predict[I, O]` now carry an immutable
 module-level `config: DynamicValue.Record`, threaded into `PredictEngine` and merged
 *under* the per-call config (per-call keys win: `{**module, **call}`); empty module
-config is unchanged behavior. **Still open:** a per-module bound LM — the LM is still
-resolved from the ambient `RuntimeContext` via `runtime.resolveModel`; pinning a
-distinct LM per predictor needs `ProgramRuntime`/model-resolution changes.
+config is unchanged behavior.
+
+**Resolution (bound LM).** `DynamicPredict` and `Predict[I, O]` now also carry an optional
+`lm: Option[LanguageModel]`, threaded into `PredictEngine`, which resolves the model as
+`lm.fold(runtime.resolveModel)(Right(_))` — a bound LM wins over the ambient `RuntimeContext`
+LM, so a program can pin different models to different predictors. `Predict.withLm(model)`
+(immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the typed accessors. The bound LM is
+a binding, not serialized learnable state (like `runtime`), so it is excluded from `dumpState`.
 
 **Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
 binding. dspy4s only supported per-*call* config; there was no place to attach a
