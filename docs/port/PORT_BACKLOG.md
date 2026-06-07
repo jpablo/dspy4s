@@ -11,7 +11,8 @@ and behavioral-delta ledger. The backlog below is *phase plan*; the map is
   incorporates the actionable **3.1.3 → 3.2.1** deltas (commits 360aa30 and
   b01c627: `ContextWindowExceededError`, LM capability flags, CoT/PoT prefix
   normalization, adapter empty-response/non-ASCII characterization, `Ensemble`,
-  Evaluate `display_table`/`provideTraceback`, `inspect_history`).
+  Evaluate `display_table`/`provideTraceback`, `inspect_history`). The toolchain
+  was also bumped to **Scala 3.8.4** (commit 7300ced).
 - Reference clone (local): `/Users/jpablo/GitHub/dspy` has **drifted** off the
   baseline — it now sits on `main` (`git describe` reports ~`3.3.0b1-…`), no
   longer at tag `3.1.3`. **Auditors must not read the working tree for baseline
@@ -106,6 +107,15 @@ Acceptance tests:
 - `tests/adapters/test_xml_adapter.py`
 - `tests/adapters/test_tool.py`
 
+Shipped after v1:
+- `JSONAdapter` `response_format` structured outputs (v1, commit ed2c69f) via the
+  `FormattedPrompt.requestOptions` request-influence seam (G-7 resolved; native
+  function-calling = G-7b deferred).
+- Field-constraint rendering (v1, commit d8c80de): `FieldSpec.constraints` +
+  `FieldConstraints` (`PYDANTIC_CONSTRAINT_MAP` parity), rendered by `ChatAdapter`
+  (G-9 resolved; `XMLAdapter`/`JSONAdapter` embedding + typed-`Schema` derivation
+  deferred).
+
 ## Phase 5: Programs (`programs`)
 Goal: end-to-end runtime usability.
 
@@ -120,6 +130,11 @@ Acceptance tests:
 - `tests/predict/test_parallel.py`
 - `tests/predict/test_best_of_n.py`
 - `tests/predict/test_refine.py`
+
+Shipped after v1:
+- `Refine` full `OfferFeedback` advice/feedback loop (v1, commit ddecaf2) —
+  replaces the earlier best-of-N alias (G-5 resolved; per-module advice `dict`
+  deferred as the follow-up).
 
 ## Phase 6: Evaluation (`evaluate`)
 Goal: metric + threaded evaluation parity.
@@ -139,11 +154,15 @@ Shipped in Phase 6 v2 (commit b01c627):
 - `display_table` — `EvaluationResult.renderTable` (text table; no pandas)
 - `provideTraceback` — failing examples capture the `DspyError`
 
+Shipped in Phase 6 v2 (commit 95adeb5):
+- `Metric.score` now takes `(using RuntimeContext)` (G-6 resolved), unblocking
+  LLM-judged metrics.
+- LLM-judged auto-evaluation metrics `SemanticF1` / `CompleteAndGrounded`
+  (`modules/evaluate/.../metrics/AutoEvaluation.scala`), incl. the
+  `decompositional` `SemanticF1` variant. Deltas documented in PORT_GAPS G-6.
+
 Deferred to Phase 6 v2:
 - Straggler retry mechanism
-- LLM-judged auto-evaluation metrics (`SemanticF1`, `CompleteAndGrounded`) —
-  blocked on the `Metric.score`/`RuntimeContext` gap (see
-  [PORT_GAPS.md](PORT_GAPS.md) G-6)
 - `callback_metadata` option
 
 ## Phase 7: First Optimizers (`optimize`)
@@ -163,9 +182,19 @@ Shipped in Phase 7 v2 (commit b01c627):
 - `Ensemble` (per-input voting/majority) — `modules/optimize/.../Ensemble.scala`,
   majority-vote default
 
+Shipped after v1 (predictor-introspection + persistence track):
+- `Predictors[P]` / `Predictor[P]` typeclass pair (Scala 3 Mirror derivation),
+  replacing `PredictOps` (G-1 resolved, P1–P6; `PredictOps` removed in 1657f9c).
+  Composite multi-predictor programs are now introspectable/optimizable end-to-end.
+- Program `save`/`load` + `dumpState`/`loadState` via `ProgramPersistence`
+  (commit 9c5a6db; G-4 resolved).
+- Per-module `config` (commit b85fe27) + bound LM `withLm`/`boundLm`
+  (commit b2d0096; G-3 resolved).
+- Instruction-editing enabler: `Predictor.set` writes back demos + config +
+  instructions (commit 50dd00e), unblocking COPRO/MIPRO-style optimizers.
+
 Deferred to Phase 7 v2:
 - `KNNFewShot` (k-NN retriever over `Embedder`)
-- Composite multi-predictor program support in bootstrap
 - LLM-judged metrics for bootstrap scoring
 
 ## Phase 8: Streaming (`streaming`)

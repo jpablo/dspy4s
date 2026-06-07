@@ -31,7 +31,7 @@ dspy4s consolidates and renames Python's top-level packages. The rationale colum
 | `utils` | folded into the modules that use them | See [§3 Consolidations](#3-consolidations). dspy4s deliberately avoids a catch-all utility namespace. |
 | `retrievers` | — | Not ported yet (Tier 1+). |
 | `datasets` | — | Not ported yet (Tier 1+). |
-| `propose` | — | Not ported yet — gates on `optimize` advanced optimizers (MIPRO/COPRO). |
+| `propose` | folded into `optimize` | Partially ported: `GroundedProposer` (LM instruction proposer) lives in `modules/optimize/.../propose/`, backing COPRO/MIPROv2. Remaining pieces (program-source `DescribeProgram`, iterative dataset-summary refinement) deferred. |
 | `dsp` | — | Intentional skip. Legacy + ColBERTv2; upstream is deprecating. |
 | `experimental` | — | Empty in upstream; nothing to port. |
 
@@ -61,11 +61,11 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `chain_of_thought.py` | `ChainOfThought.scala` | ✅ ported |
 | `react.py` | `ReAct.scala` | ✅ ported |
 | `best_of_n.py` | `BestOfN.scala` | ✅ ported |
-| `refine.py` | `Refine.scala` | ⚠️ partial (best-of-n only; the `OfferFeedback` advice/feedback loop is missing). Gated on G-1 / the `Refine` gap — see [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop). |
+| `refine.py` | `Refine.scala` | ✅ ported (v1, commit `ddecaf2`). Full `OfferFeedback` advice/feedback loop: sub-threshold attempts generate LM advice grounded in the runtime trace + I/O + reward, injected as a `hint_` input into the next attempt via `HintInjectingAdapter`. v1 delta: a single advice string is injected uniformly vs Python's per-module advice `dict` — per-module advice (the natural follow-up) needs the `Predictors` named-predictor machinery. See [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop) (G-5 Resolved). |
 | `parallel.py` | `Parallel.scala` | ✅ ported |
 | `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
 | `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, typed `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is a bespoke `MultiChainCall[I]` (base input + candidate completions); `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
-| `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s optimizers use the `PredictOps[P]` typeclass instead (Scala typeclass dispatch reads `demos` / `layout` directly), so the generic walk has no consumer. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed once `PredictOps` landed in Phase 7. |
+| `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s optimizers use the `Predictors[P]` / `Predictor[P]` typeclass pair instead (Scala 3 Mirror derivation enumerates and immutably replaces the contained predictors; reads `demos` / `layout` / `config` / instructions directly), so the generic reflective walk has no consumer. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed; the interim `PredictOps` typeclass was itself superseded and removed in G-1 P6 (commit `1657f9c`), leaving `Predictors` as the sole introspection typeclass. |
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
 | `knn.py` | — | Deferred — depends on retrievers / embedders, neither of which is ported. |
 | `code_act.py` | `CodeAct.scala` | ✅ scaffolded. Iteration loop + fenced-code extraction + extractor wired up. Tools-inside-code (Scala↔Python RPC) is deferred — Python `CodeAct` lets users pass Python-callable Scala tools; that bridge needs the Deno+Pyodide infrastructure. v1 users either pre-load tools into their `CodeInterpreter` env, or use it without tools. |
@@ -77,11 +77,60 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 
 ## 2b. Other ported symbols (notes)
 
-- **`Ensemble` (optimize).** ✅ ported — `modules/optimize/src/main/scala/dspy4s/optimize/Ensemble.scala`
-  (majority-vote default; per-input voting).
+### Optimizers (`optimize`)
+
+- **`LabeledFewShot` / `BootstrapFewShot` / `BootstrapFewShotWithRandomSearch`.** ✅ ported (Phase 7 v1).
+- **`Ensemble`.** ✅ ported — `modules/optimize/.../Ensemble.scala` (majority-vote default; per-input voting).
+- **`COPRO`.** ✅ ported (v1, commit `f2c24f7`) — instruction optimizer (coordinate-ascent prompt optimization).
+- **`MIPROv2`.** ✅ ported (v1, commit `9f51db8`) — instruction+demo joint optimizer composing
+  `BootstrapFewShot` + `GroundedProposer` + random search. Delta vs upstream (notably random-search-vs-Optuna)
+  documented in `MIPROv2.scala`.
+- **`GroundedProposer` (Python `propose/`).** ✅ ported (v1, commit `c27760c`) — LM instruction proposer grounded
+  in a dataset summary + demos; backs COPRO/MIPROv2.
+- All of the above build on the **G-1** enablers (`Predictors`/`Predictor` introspection, `Runnable` typed spine,
+  instruction editing) + `Evaluate`. **Still deferred:** `GEPA`, `SIMBA`, `GRPO`, `AvatarOptimizer`,
+  `BetterTogether`, `BootstrapFewShotWithOptuna`, `InferRules`, and the remaining `propose` pieces.
+
+### Metrics (`evaluate`)
+
+- **`SemanticF1` / `CompleteAndGrounded`.** ✅ ported (commit `95adeb5`) — LLM-judged auto-evaluation metrics in
+  `modules/evaluate/.../metrics/AutoEvaluation.scala`, unblocked by the `Metric.score` → `RuntimeContext` change
+  (G-6). Deltas: the judge runs over a runtime `SignatureLayout`/`DynamicPredict`, field names are configurable
+  string keys, and groundedness reads `pred.context` by key (no retriever populates it). See PORT_GAPS G-6.
+
+### Adapters
+
+- **`JSONAdapter` `response_format`.** ✅ ported (v1, commit `ed2c69f`) — emits
+  `response_format: {type:"json_schema", …}` when the ambient LM `supportsResponseSchema` and an
+  `outputJsonSchema` is present (prose schema kept as fallback), via the new `FormattedPrompt.requestOptions`
+  request-influence seam. **Follow-up (G-7b):** native function-calling (`tools`/`tool_choice` + native
+  `tool_calls` parsing + ReAct rewire) is deferred. See PORT_GAPS G-7.
+- **Field constraints (`PYDANTIC_CONSTRAINT_MAP`).** ✅ ported (v1, commit `d8c80de`) — `FieldSpec.constraints`
+  + `FieldConstraints` build the upstream constraint strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
+  `multipleOf`); `ChatAdapter` renders `Constraints: <joined>`, and they round-trip through `SignatureLayout`
+  state. **v1 follow-ups:** constraints are settable programmatically only (deriving from the typed `Schema`
+  needs an annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` don't yet embed them.
+  See PORT_GAPS G-9.
+
+### Persistence & per-module bindings
+
+- **Program `save`/`load` + `dumpState`/`loadState`.** ✅ ported (commit `9c5a6db`) via `ProgramPersistence`
+  (`modules/optimize/.../ProgramPersistence.scala`), built on `Predictors`. JSON state of
+  `{ "predictors": [<DynamicPredict state>..] }`; demos/config/instructions round-trip (typed field *structure*
+  intentionally not written back). See PORT_GAPS G-4.
+- **Per-module `config` + bound LM.** ✅ ported — `DynamicPredict` / `Predict[I, O]` carry an immutable
+  module-level `config` (commit `b85fe27`, merged under per-call config) and an optional bound LM
+  (`Predict.withLm` / `Predict.boundLm`, commit `b2d0096`; a bound LM wins over the ambient `RuntimeContext` LM).
+  See PORT_GAPS G-3.
+
+### LM & runtime
+
 - **`ContextWindowExceededError`.** Added to the `DspyError` hierarchy
   (`modules/core/.../contracts/Errors.scala`) and now **produced by**
   `OpenAiClient.statusError` (HTTP 400 + context-window body marker).
+- **LM capability flags.** `supportsFunctionCalling` / `supportsResponseSchema` / `supportsReasoning` on
+  `LanguageModel` (default false; OpenAI overrides true).
+- **`inspect_history`.** `RuntimeEnvironment.inspectHistory(n)` + `HistoryRenderer`.
 
 ---
 
