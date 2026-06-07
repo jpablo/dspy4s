@@ -357,11 +357,22 @@ Thread `RuntimeContext` (or an LM handle) into the metric scoring path. Tier 1.
 
 ## G-7 — No native function-calling preprocessing / JSONAdapter `response_format`
 
-**Status:** Open
+**Status:** Partially resolved — `response_format` done (v1, commit ed2c69f); native function-calling deferred (G-7b)
 
-**Summary.** Adapters do not use native provider function-calling preprocessing,
-and `JSONAdapter` does not emit `response_format` structured outputs. The
-capability flags that would gate these now exist, but the adapters don't consume
+**Resolution (response_format / structured outputs).** Added the request-influence seam
+`FormattedPrompt.requestOptions` (+ `FormattedPrompt.mergeOptions`); `PredictEngine` and
+`Adapter.execute` merge it under the per-call/module options. `JSONAdapter`, when the
+ambient LM `supportsResponseSchema` and an `outputJsonSchema` is present, emits
+`response_format: {type:"json_schema", json_schema:{name, schema, strict:false}}` (prose
+schema kept as fallback; malformed schema → prose only). **Still open (G-7b, follow-up):**
+native FUNCTION CALLING — inject `tools`/`tool_choice` from `ToolSchemaBridge` when
+`supportsFunctionCalling`, parse native `tool_calls` from the response, and rewire ReAct
+off its prose tool protocol. It reuses the same `requestOptions` seam but adds response-side
+parsing + ReAct changes.
+
+**Summary.** Adapters did not use native provider function-calling preprocessing,
+and `JSONAdapter` did not emit `response_format` structured outputs. The
+capability flags that would gate these now exist, but the adapters didn't consume
 them yet.
 
 ### Python reference
