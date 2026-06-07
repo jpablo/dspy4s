@@ -197,9 +197,13 @@ v2 deferred (tracked in `../STREAMING_POSTPONED.md`):
 Goal: close major feature gaps after v1.
 
 Tracks:
-- Advanced optimizers (`GEPA`, `MIPROv2`, `SIMBA`, `GRPO`, `AvatarOptimizer`,
-  `COPRO`, `BetterTogether`, `BootstrapFewShotWithOptuna`, `InferRules`, and the
-  `propose` package incl. `grounded_proposer`)
+- Advanced optimizers. **`COPRO` v1 shipped** (commit f2c24f7) — instruction
+  optimizer built on `Predictors` + `Runnable` + the instruction-editing enabler +
+  `Evaluate`; greedy/sequential multi-predictor, instruction-only (deltas documented
+  in `COPRO.scala`). Still deferred: `GEPA`, `MIPROv2`, `SIMBA`, `GRPO`,
+  `AvatarOptimizer`, `BetterTogether`, `BootstrapFewShotWithOptuna`, `InferRules`, and
+  the `propose` package incl. `grounded_proposer`. (`COPRO`/`MIPRO`-family enablers —
+  predictor introspection, typed-spine run, instruction editing — are now all in place.)
 - **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM`.
   ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
   with a plain `python3 -c "..."` subprocess interpreter; the sandboxed
