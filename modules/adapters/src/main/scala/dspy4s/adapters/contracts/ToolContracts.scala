@@ -2,7 +2,8 @@ package dspy4s.adapters.contracts
 
 import dspy4s.core.contracts.TypeRef
 import dspy4s.lm.contracts.LmOutput
-import zio.blocks.schema.DynamicValue
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final case class ToolParameterSpec(
     name: String,
@@ -47,6 +48,36 @@ object ToolSchemaBridge:
         )
       )
     }
+
+  /** Build the OpenAI `tools` array as a [[DynamicValue]] so it can be injected into a request's option bag
+    * ([[dspy4s.adapters.contracts.FormattedPrompt.requestOptions]]) and spread verbatim into the provider body by
+    * `ProviderRequestNormalizer`. Each tool becomes `{type:"function", function:{name, description, parameters}}`
+    * where `parameters` is a JSON-schema object (`type:"object"`, `properties`, `required`). This is the
+    * DynamicValue-native counterpart of [[toOpenAiTools]] (which yields the `Any`-typed map form). */
+  def toOpenAiToolsDynamic(tools: Vector[ToolSpec]): DynamicValue =
+    DynamicValue.Sequence(Chunk.from(tools.map(toolToDynamic)))
+
+  private def toolToDynamic(tool: ToolSpec): DynamicValue =
+    val properties = DynamicValue.Record(Chunk.from(tool.parameters.map { parameter =>
+      parameter.name -> DynamicValue.Record(Chunk(
+        "type"        -> str(toJsonType(parameter.typeRef)),
+        "description" -> str(parameter.description.getOrElse(""))
+      ))
+    }))
+    val required = DynamicValue.Sequence(Chunk.from(tool.parameters.filter(_.required).map(p => str(p.name))))
+    val parameters = DynamicValue.Record(Chunk(
+      "type"       -> str("object"),
+      "properties" -> properties,
+      "required"   -> required
+    ))
+    val function = DynamicValue.Record(Chunk(
+      "name"        -> str(tool.name),
+      "description" -> str(tool.description.getOrElse("")),
+      "parameters"  -> parameters
+    ))
+    DynamicValue.Record(Chunk("type" -> str("function"), "function" -> function))
+
+  private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
   def fromOutput(output: LmOutput): Vector[ToolCallData] =
     output.toolCalls.map(call => ToolCallData(name = call.name, args = call.args))
