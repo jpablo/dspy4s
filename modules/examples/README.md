@@ -50,6 +50,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 | Example | Run (`examples/runMain …`) | Coverage / notes |
 |---|---|---|
 | **Signatures** | `…learn.programming.main` 🔑 | 8/8 snippets. String signatures → `Signature.fromType`/`fromString`; class signatures → `Spec` traits. |
+| **LanguageModels** | `…learn.programming.languageModelsMain` 🔑 | LM setup/config, direct `call`, multiple LMs (`configure`/scoped override), generation config, usage, error handling. LiteLLM-only providers, Responses API, custom-LM save/load out of scope. |
 | **Modules** | `…learn.programming.modulesMain` 🔑 | Portable snippets; multi-completion `n=5` access noted unsupported. |
 | **Tools** | `…learn.programming.toolsMain` 🔑 | ReAct + `ToolFunction.fromMethod`. Manual tool-call path / native function-calling / async tools out of scope. |
 | **Adapters** | `…learn.programming.adaptersMain` 🔑 | 1–6: Predict, `adapter.format(...)`, ChatAdapter/JSONAdapter selection. `inspect_history` dropped. |
@@ -117,7 +118,7 @@ Hand-written demonstrations of the four ways to declare a typed `Signature` (not
 
 These upstream pages are prose only; the files are placeholders that record the mapping.
 
-`learn/Learn`, `learn/programming/Overview`, `learn/programming/LanguageModels`, `learn/evaluation/Overview`,
+`learn/Learn`, `learn/programming/Overview`, `learn/evaluation/Overview`,
 `learn/optimization/Overview`, `production/Production`, `tutorials/Tutorials`, `tutorials/build_ai_program`,
 `tutorials/classification`, `tutorials/core_development`, `tutorials/gepa_ai_program`,
 `tutorials/optimize_ai_program`, `tutorials/papillon`, `tutorials/real_world_examples`, `tutorials/rl_ai_program`.
@@ -144,11 +145,11 @@ alternative where one exists.
 
 ## At a glance
 
-- **20** ported doc examples (✅) + **4** typed-surface demos (🔧) = **24** runnable `@main`s.
+- **21** ported doc examples (✅) + **4** typed-surface demos (🔧) = **25** runnable `@main`s.
 - **6** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
-  `loadingCustomDataMain`. The other 18 need `OPENAI_API_KEY` (🔑).
-- **15** overview placeholders (📄) and **9** blocked files (🚫) — shown as 8 rows above (the two MCP pages share one).
-- **49** source files in total (24 runnable + 15 overview + 9 blocked + the shared `Demo` runner).
+  `loadingCustomDataMain`. The other 19 need `OPENAI_API_KEY` (🔑).
+- **14** overview placeholders (📄) and **9** blocked files (🚫) — shown as 8 rows above (the two MCP pages share one).
+- **49** source files in total (25 runnable + 14 overview + 9 blocked + the shared `Demo` runner).
 
 When a feature lands in dspy4s (datasets, MCP, save/load, …), the corresponding 🚫 file is the next thing to
 port — its header already records exactly what's missing.
