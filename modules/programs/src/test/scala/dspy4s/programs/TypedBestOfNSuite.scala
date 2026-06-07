@@ -199,6 +199,27 @@ class TypedBestOfNSuite extends FunSuite:
           metadata = DynamicValues.record("answer" := answer, "score" := score)
         ))))
 
+  /** A scripted LM whose OfferFeedback (advice) call FAILS with a `Left`, while inner-`Cand` calls succeed with the
+    * BAD answer (score 0.2). Used to prove that an auxiliary advice-generation failure does NOT discard an
+    * already-successful sub-threshold `best`. */
+  private final class AdviceFailingLm extends LanguageModel:
+    val offerFeedbackCalls: AtomicInteger = AtomicInteger(0)
+    val innerCalls: AtomicInteger         = AtomicInteger(0)
+    override val id: String               = "advice-failing-lm"
+    override val mode: LmMode             = LmMode.Chat
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val promptText = request.messages.flatMap(_.text).mkString("\n")
+      if promptText.startsWith("OFFER_FEEDBACK") then
+        offerFeedbackCalls.incrementAndGet()
+        Left(RuntimeError("advice-failing-lm", "offer-feedback boom"))
+      else
+        innerCalls.incrementAndGet()
+        Right(LmResponse(outputs = Vector(LmOutput(
+          text     = "Antwerp",
+          metadata = DynamicValues.record("answer" := "Antwerp", "score" := 0.2d)
+        ))))
+
   /** Inner typed program that drives the AMBIENT adapter + LM (so an injected `hint_` actually reaches the prompt
     * the LM sees). Mirrors what a real `Predict[Q, Cand]` does, minus the static-Signature codec. */
   private final class InnerPredict extends Module[TypedCall[Q], Prediction[Cand]]:
@@ -265,6 +286,24 @@ class TypedBestOfNSuite extends FunSuite:
       assertEquals(result.toOption.map(_.output.answer), Some("Antwerp"))
       assertEquals(lm.offerFeedbackCalls.get(), 0)
       assertEquals(adapter.innerPrompts.size, 1)
+    }
+  }
+
+  test("Refine preserves the best-so-far when advice generation fails (does not discard a good result)") {
+    // attempt 1 scores 0.2 (< threshold 1.0) and becomes `best`; generating advice for attempt 2 then fails.
+    // The advice call is AUXILIARY, so its failure must NOT discard the already-successful prediction.
+    // Regression: the advice-failure branch used to `return Left(error)`, throwing away `best`.
+    val adapter = ScriptingAdapter()
+    val lm      = AdviceFailingLm()
+    val refine  = Refine[Q, Cand](InnerPredict(), n = 2, rewardFn = (_, p) => p.output.score, threshold = 1.0)
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = refine.apply(TypedCall(Q("Capital of Belgium?")))
+
+      assert(result.isRight, s"advice failure must not discard the best-so-far; got: $result")
+      assertEquals(result.toOption.map(_.output), Some(Cand("Antwerp", 0.2)))
+      assertEquals(lm.offerFeedbackCalls.get(), 1) // the advice call was attempted (and failed)
     }
   }
 

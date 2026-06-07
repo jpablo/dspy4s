@@ -111,9 +111,14 @@ final case class Refine[I, O](
                 idx += 1 // last attempt; no feedback to generate
               else
                 // Generate advice grounded in this attempt's trajectory + I/O + reward, for the next attempt.
+                // Advice is auxiliary: a failure here must not discard `best`. Mirror the module-failure path —
+                // record the error, charge the failure budget, and continue without new advice.
                 Refine.generateAdvice(call.input, prediction, trace, score, threshold)(using baseContext) match
                   case Right(text) => advice = Some(text)
-                  case Left(error) => return Left(error)
+                  case Left(error) =>
+                    lastError = Some(error)
+                    if idx > remainingFailures then return Left(error)
+                    remainingFailures -= 1
                 idx += 1
 
         case Left(error) =>
