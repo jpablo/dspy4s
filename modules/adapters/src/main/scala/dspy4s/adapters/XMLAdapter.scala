@@ -28,6 +28,9 @@ final case class XMLAdapter(
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+    // NOTE (G-9): this adapter renders no prose field-description block (only `<field>` tags and prefixed
+    // inputs), so there is no analog of Python's `get_field_description_string` to append `FieldSpec.constraints`
+    // to. TODO: surface constraints by embedding them in the per-field tag instruction (follow-up).
     val fieldTags = invocation.layout.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
     val xmlInstruction =
       s"Return XML only using this shape:\n<outputs>\n$fieldTags\n</outputs>"

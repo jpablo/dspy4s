@@ -28,6 +28,9 @@ final case class JSONAdapter(
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+    // NOTE (G-9): this adapter emits no prose field-description block (only a key list or a JSON Schema), so
+    // there is no `get_field_description_string` analog to append `FieldSpec.constraints` to. TODO: embed
+    // constraints into the emitted JSON Schema (e.g. `exclusiveMinimum`, `maxLength`) as a follow-up.
     val fieldList = invocation.layout.outputFields.map(_.name).mkString(", ")
     // When the typed Predict path supplies a JSON Schema (rendered from the output `Schema[O]` via
     // `Shape.jsonSchemaString`), inline it so the LM has the precise output contract -- field names, types,

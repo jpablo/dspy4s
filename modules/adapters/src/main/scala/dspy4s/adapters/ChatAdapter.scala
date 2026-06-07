@@ -165,10 +165,15 @@ final case class ChatAdapter(name: String = "chat") extends Adapter:
           case Some(desc) if desc != s"$${${field.name}}" && desc.nonEmpty =>
             s": $desc"
           case _ => ""
+        // Mirror Python's `get_field_description_string`: when the field carries constraints, append a
+        // "Constraints: <joined>" suffix after the description. Joined with ", " (single-line field list).
+        val constraintsPart =
+          if field.constraints.nonEmpty then s" Constraints: ${field.constraints.mkString(", ")}"
+          else ""
         val enumPart =
           if field.enumValues.nonEmpty then s" (must be one of: ${field.enumValues.mkString(", ")})"
           else ""
-        s"${idx + 1}. `${field.name}` ($typeName)$descPart$enumPart"
+        s"${idx + 1}. `${field.name}` ($typeName)$descPart$constraintsPart$enumPart"
       }
       (header +: lines).mkString("\n")
 

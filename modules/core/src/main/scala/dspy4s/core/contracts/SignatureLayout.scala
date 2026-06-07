@@ -55,6 +55,14 @@ object TypeRef:
   *     [[FieldSpec.inferPrefix]] when `None`.
   *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo
   *     example omits this field. (Not used for live-call inputs.)
+  *   - [[constraints]] are human-readable constraint hints (e.g. `"greater than: 0"`, `"maximum length: 10"`)
+  *     surfaced after the field description in prose adapters. Build them with [[FieldConstraints]] so the text
+  *     matches Python DSPy's `PYDANTIC_CONSTRAINT_MAP`. Empty by default; only emitted when non-empty.
+  *
+  * '''Constraint provenance (v1).''' Constraints are settable programmatically -- via this `FieldSpec` or
+  * [[SignatureLayout.create]]. Deriving them automatically from the typed (`zio-blocks Schema`) surface is a
+  * documented follow-up: the typed derivation has no constraint-annotation mechanism yet, so there is no path
+  * from `Schema[A]` to these strings today.
   */
 final case class FieldSpec(
     name: String,
@@ -63,8 +71,29 @@ final case class FieldSpec(
     description: Option[String] = None,
     prefix: Option[String] = None,
     defaultValue: Option[Any] = None,
-    enumValues: Vector[String] = Vector.empty
+    enumValues: Vector[String] = Vector.empty,
+    constraints: Vector[String] = Vector.empty
 ) derives CanEqual
+
+/** Builders for the human-readable field-constraint strings that prose adapters render after a field's
+  * description. Mirrors Python DSPy's `PYDANTIC_CONSTRAINT_MAP` (`dspy/signatures/field.py`) so dspy4s prompts
+  * match upstream byte-for-byte: `gt(0)` -> `"greater than: 0"`, `maxLength(10)` -> `"maximum length: 10"`, etc.
+  *
+  * Numeric helpers accept `Double` so callers can express either integral or fractional bounds; whole numbers
+  * render without a trailing `.0` (so `gt(0)` is `"greater than: 0"`, not `"greater than: 0.0"`), matching
+  * Python's rendering of integer constraints. Length helpers take `Int` (lengths are always integral). */
+object FieldConstraints:
+  /** Render a numeric bound: drop the `.0` for whole numbers, keep the fractional part otherwise. */
+  private def num(n: Double): String =
+    if n == Math.rint(n) && !n.isInfinite then n.toLong.toString else n.toString
+
+  def gt(n: Double): String          = s"greater than: ${num(n)}"
+  def ge(n: Double): String          = s"greater than or equal to: ${num(n)}"
+  def lt(n: Double): String          = s"less than: ${num(n)}"
+  def le(n: Double): String          = s"less than or equal to: ${num(n)}"
+  def minLength(n: Int): String      = s"minimum length: $n"
+  def maxLength(n: Int): String      = s"maximum length: $n"
+  def multipleOf(n: Double): String  = s"a multiple of the given number: ${num(n)}"
 
 /** Partial update DTO for the field-mutation surface on [[SignatureLayout]]. Each `Option` field that's `Some`
   * overwrites the corresponding [[FieldSpec]] property; metadata is merged additively.
@@ -292,6 +321,8 @@ final case class SignatureLayout(
   def dumpState: DynamicValue.Record =
     def str(s: String): DynamicValue        = DynamicValue.Primitive(PrimitiveValue.String(s))
     def opt(o: Option[Any]): DynamicValue   = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
+    def strSeq(xs: Vector[String]): DynamicValue =
+      DynamicValue.Sequence(Chunk.from(xs.map(str)))
     val fieldRecords: Seq[DynamicValue] = fields.map { field =>
       DynamicValue.Record(Chunk.from(Seq(
         "name"         -> str(field.name),
@@ -299,7 +330,8 @@ final case class SignatureLayout(
         "typeRef"      -> str(field.typeRef.repr),
         "description"  -> opt(field.description),
         "prefix"       -> opt(field.prefix),
-        "defaultValue" -> opt(field.defaultValue)
+        "defaultValue" -> opt(field.defaultValue),
+        "constraints"  -> strSeq(field.constraints)
       )))
     }
     DynamicValue.Record(Chunk.from(Seq(
@@ -388,13 +420,20 @@ object SignatureLayout:
             val defaultValue = DynamicValues.recordGet(rec, "defaultValue") match
               case None | Some(_: DynamicValue.Null.type) => None
               case Some(dv)                                => Some(DynamicValues.toAny(dv))
+            val constraints = DynamicValues.recordGet(rec, "constraints") match
+              case Some(seq: DynamicValue.Sequence) =>
+                seq.elements.iterator.collect {
+                  case DynamicValue.Primitive(PrimitiveValue.String(s)) => s
+                }.toVector
+              case _ => Vector.empty[String]
             FieldSpec(
               name         = name,
               role         = role,
               typeRef      = typeRef,
               description  = getString(rec, "description"),
               prefix       = getString(rec, "prefix"),
-              defaultValue = defaultValue
+              defaultValue = defaultValue,
+              constraints  = constraints
             )
         case _ => Left(ValidationError("Invalid field entry in signature state"))
 

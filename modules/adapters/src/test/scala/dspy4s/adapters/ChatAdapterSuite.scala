@@ -155,6 +155,71 @@ class ChatAdapterSuite extends FunSuite:
     assert(!system.contains("${answer}"), s"placeholder default leaked into system prompt: $system")
   }
 
+  test("format renders field constraints, and nothing extra for unconstrained fields") {
+    val signature = SignatureDsl.parse("q -> answer").toOption.get
+      .withFields(
+        Vector(
+          dspy4s.core.contracts.FieldSpec(
+            name = "q",
+            role = dspy4s.core.contracts.FieldRole.Input
+            // no constraints — must render identically to the unconstrained baseline
+          ),
+          dspy4s.core.contracts.FieldSpec(
+            name        = "answer",
+            role        = dspy4s.core.contracts.FieldRole.Output,
+            description = Some("The model's answer."),
+            constraints = Vector(
+              dspy4s.core.contracts.FieldConstraints.gt(0),
+              dspy4s.core.contracts.FieldConstraints.maxLength(10)
+            )
+          )
+        )
+      )
+    val invocation = AdapterInvocation(
+      layout = signature,
+      demos = Vector.empty,
+      inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
+      request = LmRequest(model = "x", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+
+    // Constraints render after the description, joined by ", ".
+    assert(
+      system.contains("Constraints: greater than: 0, maximum length: 10"),
+      s"missing constraints line in: $system"
+    )
+    // The unconstrained input field must NOT carry any "Constraints:" suffix.
+    val qLine = system.linesIterator.find(_.contains("`q`")).getOrElse("")
+    assert(!qLine.contains("Constraints:"), s"unconstrained field leaked constraints: $qLine")
+  }
+
+  test("format renders constraints even when the field has no description") {
+    val signature = SignatureDsl.parse("q -> answer").toOption.get
+      .withFields(
+        Vector(
+          dspy4s.core.contracts.FieldSpec(name = "q", role = dspy4s.core.contracts.FieldRole.Input),
+          dspy4s.core.contracts.FieldSpec(
+            name        = "answer",
+            role        = dspy4s.core.contracts.FieldRole.Output,
+            constraints = Vector(dspy4s.core.contracts.FieldConstraints.ge(1))
+          )
+        )
+      )
+    val invocation = AdapterInvocation(
+      layout = signature,
+      demos = Vector.empty,
+      inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
+      request = LmRequest(model = "x", mode = LmMode.Chat)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    assert(
+      system.contains("Constraints: greater than or equal to: 1"),
+      s"missing constraints (no-description case) in: $system"
+    )
+  }
+
   test("parse extracts marker-delimited fields and applies type coercion") {
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
