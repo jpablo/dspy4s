@@ -67,30 +67,38 @@ object ProgramPredictors:
     * the layout is `signature.layout` (the exact layout the inner [[dspy4s.programs.runtime.PredictEngine]]
     * executes), with the program's `demos`, name, and output JSON schema.
     *
-    * `set` is **demos-only** (v1): it returns `program.copy(demos = updated.demos)` and deliberately does NOT
-    * swap the layout back into the typed signature. Writing the layout back would desync `signature.outputShape`
-    * (which still decodes the original `O`) from `signature.layout`; instruction/layout editing is deferred to
-    * when instruction-optimizers land. Demos-only keeps the invariant `set(p, get(p)) == p`. */
+    * `set` writes back the editable learnable state: `demos`, the module-level `config`, and the layout's
+    * `instructions` (applied via `signature.withInstructions`, which touches only the instruction string).
+    * It deliberately does NOT swap the full layout back into the typed signature — that would desync
+    * `signature.outputShape` (which still decodes the original `O`) from `signature.layout`. Editing only the
+    * instructions string is shape-safe and is what instruction optimizers (COPRO/MIPRO) need. The invariant
+    * `set(p, get(p)) == p` holds (demos/config/instructions are projected by `get` and re-applied unchanged). */
   given predictPredictor[I, O]: Predictor[Predict[I, O]] with
     def get(program: Predict[I, O]): DynamicPredict =
       DynamicPredict(
         layout           = program.signature.layout,
         demos            = program.demos,
         name             = Some(program.moduleName),
-        outputJsonSchema = program.signature.outputShape.jsonSchemaString
+        outputJsonSchema = program.signature.outputShape.jsonSchemaString,
+        config           = program.config
       )
 
     def set(program: Predict[I, O], updated: DynamicPredict): Predict[I, O] =
-      // v1: demos only. See class comment on `predictPredictor` -- layout/instruction editing is deferred.
-      program.copy(demos = updated.demos)
+      program.copy(
+        demos     = updated.demos,
+        config    = updated.config,
+        signature = program.signature.withInstructions(updated.layout.instructions)
+      )
 
   /** Leaf [[Predictor]] for the typed single-predictor program [[ChainOfThought]]. Like [[predictPredictor]],
     * but the exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field
     * prepended). `ChainOfThought.augmentLayout` returns an `Either`; it is resolved fail-fast here (consistent
     * with the P3 hand-written instances), and only fails for layouts that cannot be augmented.
     *
-    * `set` is demos-only for the same reasons as [[predictPredictor]]. The `prepend` evidence is required to
-    * reconstruct the program via `copy` (it is part of `ChainOfThought`'s secondary parameter list). */
+    * `set` writes back `demos` and the layout's `instructions` (via `signature.withInstructions`, shape-safe).
+    * `ChainOfThought` has no module-level `config` field (G-3 added it only to `Predict`/`DynamicPredict`), so
+    * config is not round-tripped here — a minor follow-up. The `prepend` evidence is required to reconstruct the
+    * program via `copy`. The invariant `set(p, get(p)) == p` holds. */
   given chainOfThoughtPredictor[I, O](using
       prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ChainOfThought.WithReasoning[O]]
   ): Predictor[ChainOfThought[I, O]] with
@@ -108,5 +116,7 @@ object ProgramPredictors:
       )
 
     def set(program: ChainOfThought[I, O], updated: DynamicPredict): ChainOfThought[I, O] =
-      // v1: demos only. See class comment on `chainOfThoughtPredictor` -- layout/instruction editing is deferred.
-      program.copy(demos = updated.demos)
+      program.copy(
+        demos     = updated.demos,
+        signature = program.signature.withInstructions(updated.layout.instructions)
+      )

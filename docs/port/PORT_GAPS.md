@@ -220,14 +220,15 @@ share one code path. New primitives:
   `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO
   wraps exceptions into `RuntimeError`.
 
-**Round-trip scope.** Demos round-trip for every program. Layout + config also
-round-trip fully for `DynamicPredict` leaves (and user composites whose leaves are
-`DynamicPredict`). For *typed* programs (`Predict`, `ChainOfThought`, the
-hand-written composite instances) `Predictor.set` is demos-only by design (the
-documented P4 limit — writing the layout back would desync `signature.outputShape`
-from `signature.layout`), so layout/config in the serialized state are ignored on
-load into a typed target. `loadState` requires the `predictors` array length to
-equal `Predictors.read(program).size` (mismatch → `Left(ValidationError)`).
+**Round-trip scope.** Demos round-trip for every program. `DynamicPredict` leaves
+round-trip everything (signature/layout + demos + config). `Predict` restores demos,
+config, and layout **instructions**; `ChainOfThought` restores demos and instructions
+(no module config field). The field **structure** of the layout is not written back into
+a typed program (that would desync `signature.outputShape` from `signature.layout`), so
+typed targets keep their own field shape (the full layout still round-trips in the JSON).
+`loadState` requires the `predictors` array length to equal `Predictors.read(program).size`
+(mismatch → `Left(ValidationError)`). Instruction write-back was added with the
+instruction-editing enabler (commit pending), unblocking COPRO/MIPRO-style optimizers.
 
 **Summary (original).** There is no JSON state save/load for a program. The serialization
 primitives exist on `SignatureLayout`, but nothing wires them up to a program,

@@ -23,12 +23,12 @@ import java.nio.file.Paths
   * '''Round-trip scope.''' What survives a save/load depends on the target predictor's `Predictor.set`:
   *   - For a [[DynamicPredict]] leaf (and user composites whose leaves are `DynamicPredict`), `set` is the
   *     identity, so signature/layout, demos, and config all round-trip fully.
-  *   - For the typed programs ([[dspy4s.programs.Predict]], [[dspy4s.programs.ChainOfThought]], and the
-  *     hand-written composite instances) `Predictor.set` is '''demos-only''' by design (the documented P4 limit —
-  *     writing the layout back would desync `signature.outputShape` from `signature.layout`). So for typed
-  *     targets only the '''demos''' are restored; the layout and config in the serialized state are ignored on
-  *     load (they still round-trip in the JSON itself, just not back into the typed program). This matches the
-  *     "optimize once (demos), deploy the artifact" workflow that v1 optimizers support.
+  *   - For [[dspy4s.programs.Predict]], `set` restores '''demos, config, and the layout instructions''' (the
+  *     instruction string is shape-safe to write back); [[dspy4s.programs.ChainOfThought]] restores '''demos and
+  *     instructions''' (it has no module-level config field). What is NOT written back is the field '''structure'''
+  *     of the layout — that would desync `signature.outputShape` from `signature.layout`, so the typed program
+  *     keeps its own field shape. (The full layout still round-trips in the JSON itself.) This covers the
+  *     "optimize once (demos + instructions), deploy the artifact" workflow the optimizers produce.
   *
   * The JSON is produced by zio-blocks' `DynamicValue` JSON codec (the same codec
   * `SignatureLayout.dumpJson` uses) — clean, natural JSON with no ADT tags.

@@ -54,6 +54,25 @@ class ProgramLeafPredictorsSuite extends FunSuite:
     assertEquals(leaf.get(out).demos, demo)
   }
 
+  test("Predictor[Predict]: set writes back instructions (COPRO/MIPRO enabler)") {
+    val predict = Predict(qaSignature, name = Some("ask"))
+    val leaf    = predictorOf(predict)
+    val cur     = leaf.get(predict)
+    val out     = leaf.set(predict, cur.copy(layout = cur.layout.withInstructions(Some("Think carefully."))))
+    assertEquals(out.signature.instructions, Some("Think carefully."))
+    assertEquals(leaf.get(out).layout.instructions, Some("Think carefully."))
+  }
+
+  test("Predictor[Predict]: set writes back module config") {
+    val predict = Predict(qaSignature, name = Some("ask"))
+    val leaf    = predictorOf(predict)
+    val cfg     = rec("temperature" := 0.3)
+    val cur     = leaf.get(predict)
+    val out     = leaf.set(predict, cur.copy(config = cfg))
+    assertEquals(out.config, cfg)
+    assertEquals(leaf.get(out).config, cfg)
+  }
+
   // ── ChainOfThought ───────────────────────────────────────────────────────
 
   test("Predictor[ChainOfThought].get exposes the AUGMENTED layout (reasoning prepended) + demos") {
@@ -80,6 +99,14 @@ class ProgramLeafPredictorsSuite extends FunSuite:
     val out    = leaf.set(cot, edited)
     assertEquals(out.demos, demo)
     assertEquals(leaf.get(out).demos, demo)
+  }
+
+  test("Predictor[ChainOfThought]: set writes back instructions") {
+    val cot  = ChainOfThought(qaSignature, name = Some("think"))
+    val leaf = predictorOf(cot)
+    val cur  = leaf.get(cot)
+    val out  = leaf.set(cot, cur.copy(layout = cur.layout.withInstructions(Some("Reason step by step."))))
+    assertEquals(out.signature.instructions, Some("Reason step by step."))
   }
 
   // ── Resolution priority: leaf, not structural derivation ─────────────────
