@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout, TypeRef}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A signature with compile-time knowledge of its input (`I`) and output
@@ -36,6 +36,20 @@ final case class Signature[I, O](
   /** Replace or clear signature-level instructions. */
   def withInstructions(text: Option[String]): Signature[I, O] =
     copy(layout = layout.withInstructions(text))
+
+  /** Mark the named OUTPUT field as the native tool-calls sink: sets its wire [[TypeRef]] to
+    * [[TypeRef.toolCalls]]. An adapter with native function-calling enabled then fills that field from the
+    * provider's `tool_calls` rather than asking the model to produce it as text. The typed decode of the field
+    * (a `Vector[ToolCall]`) happens via `O`'s derived `Schema`, so this only adjusts the runtime layout — the
+    * shapes are untouched. No-op if no output field has the given name. See PORT_GAPS G-7b.
+    *
+    * Needed because the typed derivation maps field types structurally (a `Vector[ToolCall]` becomes
+    * `TypeRef.list`) and `zio-blocks` `Reflect` does not expose a type name to auto-detect the tool-calls type. */
+  def markToolCalls(fieldName: String): Signature[I, O] =
+    copy(layout = layout.withFields(layout.fields.map { field =>
+      if field.role == FieldRole.Output && field.name == fieldName then field.copy(typeRef = TypeRef.toolCalls)
+      else field
+    }))
 
 object Signature:
 
