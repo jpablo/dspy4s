@@ -15,6 +15,7 @@ final case class GepaConfig(
     candidateSelector: CandidateSelector = CandidateSelector.Pareto,
     skipPerfectScore: Boolean = true,
     perfectScore: Double = 1.0,
+    failureScore: Double = 0.0,
     seed: Long = 0L
 )
 

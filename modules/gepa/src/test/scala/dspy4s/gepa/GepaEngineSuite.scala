@@ -82,3 +82,13 @@ class GepaEngineSuite extends FunSuite:
       assertEquals(result.bestProgram.layout.instructions, Some(result.bestCandidate("0")))
     }
   }
+
+  test("Gepa facade compiles a student end-to-end") {
+    val gepa = new Gepa[DynamicPredict](metric, new ReflectionLm, GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L))
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = gepa.compile(program, trainset = dataset, valset = dataset)
+      assertEquals(result.bestScore, 1.0)
+      assert(result.bestCandidate("0").contains("CITY"), result.bestCandidate("0"))
+    }
+  }
