@@ -181,8 +181,8 @@ final case class JSONAdapter(
                 metadata = Map("adapter" -> name, "fallback" -> "text")
               )
             )
-          else Left(ParseError("adapter", "Cannot fallback from empty model output"))
-        else Left(ParseError("adapter", "JSON parse failed and no fallback was applied"))
+          else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
+        else Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
       }
 
   /** Native tool turn: the model returned `tool_calls` (typically with an empty or non-JSON body). Fill the
@@ -215,7 +215,7 @@ final case class JSONAdapter(
           soFar <- acc
           value <- root.obj.get(field.name) match
             case Some(raw) => coerce(field.typeRef, raw)
-            case None      => Left(AdapterErrors.missingField(field.name))
+            case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
         yield soFar :+ (field.name -> value)
       }
     yield ParsedOutput(

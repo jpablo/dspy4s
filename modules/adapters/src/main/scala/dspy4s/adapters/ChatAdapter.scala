@@ -113,7 +113,7 @@ final case class ChatAdapter(
                 // On a tool-call turn (tool_calls present) the text output fields can legitimately be absent; default
                 // them to Null rather than erroring (mirrors dspy's `setdefault(field, None)`). Otherwise it's a miss.
                 if output.toolCalls.nonEmpty then Right(field.name -> DynamicValue.Null)
-                else Left(AdapterErrors.missingField(field.name))
+                else Left(AdapterErrors.missingField(field.name, Some(output.text)))
       yield soFar :+ entry
     }.map { entries =>
       ParsedOutput(

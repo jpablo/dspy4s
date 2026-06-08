@@ -534,7 +534,10 @@ Track and port `InferRules`. Tier 2.
 
 ## G-12 — `GEPA` reflective prompt optimizer not ported
 
-**Status:** Open — in progress (new `gepa` sbt module: `modules/gepa`, `dspy4s-gepa`).
+**Status:** Open — in progress. Module `modules/gepa` (`dspy4s-gepa`) scaffolded. Foundations done:
+**P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureFailureTraces` → failure `TraceEntry` with
+`failure` + raw response), **P-b** (`ParseError.raw` populated by Chat/JSON/XML adapters). Remaining: **P-c**
+(named predictors), then the engine + adapter + teleprompter.
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
 fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).

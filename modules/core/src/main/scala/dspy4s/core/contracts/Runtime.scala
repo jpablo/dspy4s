@@ -21,12 +21,16 @@ trait AdapterRef
   * `ProgramCall.inputs` map, `outputs` is the module's `tracePayload(prediction)` (defaults to
   * `prediction.values`).
   *
-  * Appended to [[RuntimeContext.trace]] only when the underlying `ProgramCall.traceEnabled` is `true` AND the
-  * call succeeds. Failed calls produce no trace entry. */
+  * Appended to [[RuntimeContext.trace]] when the underlying `ProgramCall.traceEnabled` is `true`. A successful
+  * call records `failure = None` and `outputs = tracePayload(...)`. A FAILED call is recorded only when
+  * [[RuntimeContext.captureFailureTraces]] is set (e.g. by GEPA's reflective evaluation): `failure` carries the
+  * error message and `outputs` carries the raw model response (`raw_response`) when the error is a parse failure.
+  * See PORT_GAPS G-12 (P-a). */
 final case class TraceEntry(
     component: String,
     inputs: DynamicValue.Record,
     outputs: DynamicValue.Record,
+    failure: Option[String] = None,
     timestamp: Instant = Instant.now()
 )
 
@@ -84,6 +88,10 @@ final case class RuntimeContext(
       * they receive in `onEvent`. Set e.g. by `Evaluate(callbackMetadata = …)` so handlers firing during an
       * evaluation can tag their events (the analogue of Python's `Evaluate(callback_metadata=…)`). Empty default. */
     callbackMetadata: DynamicValue.Record    = DynamicValue.Record.empty,
+    /** When set, a failed `Module.apply` records a failure [[TraceEntry]] (instead of leaving none), surfacing the
+      * raw model response from a parse error. Used by GEPA's reflective evaluation so failed trajectories become a
+      * reflection signal; `false` (the default) leaves normal execution's trace untouched. See PORT_GAPS G-12. */
+    captureFailureTraces: Boolean            = false,
     // Accumulated
     asyncTaskId:    Option[String]           = None,
     activeCallId:   Option[String]           = None,

@@ -4,8 +4,10 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -70,7 +72,17 @@ trait Module[I, O]:
             RuntimeEnvironment.appendHistory(
               HistoryEntry(component = moduleName, payload = DynamicValues.record("inputs" -> inputBag, "outputs" -> outputs))
             )
-          case Left(_) => ()
+          case Left(error) =>
+            // P-a (G-12): normally a failure leaves no trace; under `captureFailureTraces` (GEPA's reflective
+            // evaluation) record a failure entry so the failed trajectory is visible — surfacing the raw model
+            // response from a parse error so reflection can see what the model actually produced.
+            if summon[RuntimeContext].captureFailureTraces then
+              val rawOutputs = error match
+                case ParseError(_, _, Some(raw)) => DynamicValues.record("raw_response" := raw)
+                case _                           => DynamicValue.Record.empty
+              RuntimeEnvironment.appendTrace(
+                TraceEntry(component = moduleName, inputs = inputBag, outputs = rawOutputs, failure = Some(error.message))
+              )
       result
     }
 

@@ -133,5 +133,7 @@ trait AdapterFallbackPolicy:
   def fallbackFor(error: DspyError, attemptedAdapter: String): Option[String]
 
 object AdapterErrors:
-  def missingField(fieldName: String): DspyError =
-    ParseError(component = "adapter", message = s"Missing required output field: $fieldName")
+  /** A parse failure for a missing output field. `raw` is the raw model response that couldn't be parsed — carry
+    * it so failure-trace capture (GEPA reflection, G-12 P-a/P-b) can show what the model actually produced. */
+  def missingField(fieldName: String, raw: Option[String] = None): DspyError =
+    ParseError(component = "adapter", message = s"Missing required output field: $fieldName", raw = raw)

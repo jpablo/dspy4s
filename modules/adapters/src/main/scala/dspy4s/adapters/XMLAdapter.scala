@@ -79,8 +79,8 @@ final case class XMLAdapter(
               metadata = Map("adapter" -> name, "fallback" -> "text")
             )
           )
-        else Left(ParseError("adapter", "Cannot fallback from empty model output"))
-      else Left(ParseError("adapter", "XML parse failed and no fallback was applied"))
+        else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
+      else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
     }
 
   private def parseStructured(layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
@@ -90,7 +90,7 @@ final case class XMLAdapter(
       entries <- layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc
-          raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name))
+          raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
           coerced <- coerce(field.typeRef, raw)
         yield soFar :+ (field.name -> coerced)
       }
