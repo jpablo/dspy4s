@@ -171,7 +171,7 @@ object Predictors extends LowPriority:
   /** Named (non-inline) carrier of the derived behaviour. Keeping it a top-level class -- rather than
     * an anonymous class inside `derived` -- avoids `-Werror` rejecting an inline-duplicated anonymous
     * class definition at each use site. */
-  private[optimize] final class DerivedPredictors[P <: Product](
+  private[dspy4s] final class DerivedPredictors[P <: Product](
       m: Mirror.ProductOf[P],
       fieldInstances: List[Predictors[Any]],
       labels: List[String]
@@ -209,14 +209,14 @@ object Predictors extends LowPriority:
     * instance is only ever applied to `program.productElement(i)`, whose runtime value the Mirror
     * guarantees to be of the corresponding element type. No `asInstanceOf` is used on program values;
     * the cast is confined to the instance witness, which never inspects more than its own field. */
-  private[optimize] inline def summonFieldInstances[Elems <: Tuple]: List[Predictors[Any]] =
+  private[dspy4s] inline def summonFieldInstances[Elems <: Tuple]: List[Predictors[Any]] =
     inline erasedValue[Elems] match
       case _: EmptyTuple => Nil
       case _: (head *: tail) =>
         val instance: Predictors[Any] = summonFieldInstance[head]
         instance :: summonFieldInstances[tail]
 
-  private[optimize] inline def summonFieldInstance[A]: Predictors[Any] =
+  private[dspy4s] inline def summonFieldInstance[A]: Predictors[Any] =
     summonFrom {
       case inst: Predictors[A] => widen(inst)
       case _                   => empty[Any]
@@ -226,7 +226,7 @@ object Predictors extends LowPriority:
     * private helper. Safe because the Mirror pairs this instance positionally with a value of type
     * `A` (see [[summonFieldInstances]]); `Predictors` is invariant so the compiler cannot prove the
     * subtype, but the runtime contract holds. */
-  private[optimize] def widen[A](inst: Predictors[A]): Predictors[Any] =
+  private[dspy4s] def widen[A](inst: Predictors[A]): Predictors[Any] =
     inst.asInstanceOf[Predictors[Any]]
 
 /** Lowest priority: the structural Mirror derivation over a case class. */

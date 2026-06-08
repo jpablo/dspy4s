@@ -543,8 +543,10 @@ instruction-sensitive test shows GEPA discovering a better instruction (score 0 
 **P-c done:** `Predictors.readNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
 field labels for a composite); GEPA now keys candidates by name and associates trace↔component by name→index.
 The `readNamed` capability is also what Refine per-module advice (G-5 follow-up) needs — wiring it there is now
-unblocked. Remaining: round-robin component selection, epoch-shuffled minibatch, multi-predictor engine run, and
-v2 (merge, multi-objective frontiers, eval cache, resume).
+unblocked. **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
+predictors must improve — GEPA evolves both (per-component reflective datasets + name→trace association), score
+0 → 1.0. Remaining: round-robin component selection, epoch-shuffled minibatch, and v2 (merge, multi-objective
+frontiers, eval cache, resume).
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
 fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).
