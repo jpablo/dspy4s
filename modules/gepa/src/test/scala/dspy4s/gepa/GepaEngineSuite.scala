@@ -74,12 +74,12 @@ class GepaEngineSuite extends FunSuite:
 
       // The seed instruction ("Answer.") scores 0 (no "CITY"); GEPA must find the improved one.
       assertEquals(result.bestScore, 1.0)
-      assert(result.bestCandidate("0").contains("CITY"), result.bestCandidate("0"))
+      assert(result.bestCandidate("self").contains("CITY"), result.bestCandidate("self"))
       assert(result.numCandidates >= 2, "expected at least one accepted mutation beyond the seed")
       assert(result.totalMetricCalls <= 40, s"respected the budget: ${result.totalMetricCalls}")
 
       // The returned program actually carries the improved instruction.
-      assertEquals(result.bestProgram.layout.instructions, Some(result.bestCandidate("0")))
+      assertEquals(result.bestProgram.layout.instructions, Some(result.bestCandidate("self")))
     }
   }
 
@@ -89,6 +89,6 @@ class GepaEngineSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result = gepa.compile(program, trainset = dataset, valset = dataset)
       assertEquals(result.bestScore, 1.0)
-      assert(result.bestCandidate("0").contains("CITY"), result.bestCandidate("0"))
+      assert(result.bestCandidate("self").contains("CITY"), result.bestCandidate("self"))
     }
   }

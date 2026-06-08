@@ -95,6 +95,14 @@ trait Predictors[P]:
   def read(program: P): Vector[DynamicPredict]
   def replace(program: P, updates: Vector[DynamicPredict]): P
 
+  /** Each predictor paired with a stable component NAME — the dspy4s analogue of Python's `named_predictors()`,
+    * and the key GEPA / Refine-per-module-advice need to associate a candidate, a trace, and a predictor. Names
+    * are dotted field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and
+    * `"field.sub"` when nested. `readNamed` is aligned with [[read]] order. The default uses positional index
+    * names; [[Predictors.DerivedPredictors]] overrides with the Mirror field labels (the latent names, G-12 P-c). */
+  def readNamed(program: P): Vector[(String, DynamicPredict)] =
+    read(program).zipWithIndex.map { case (predict, i) => i.toString -> predict }
+
 object Predictors extends LowPriority:
 
   /** Lifts a single [[Predictor]] leaf to a 1-element [[Predictors]]. Higher priority than the
@@ -106,6 +114,9 @@ object Predictors extends LowPriority:
     def replace(program: P, updates: Vector[DynamicPredict]): P =
       require(updates.size == 1, s"Predictor leaf expects exactly 1 update, got ${updates.size}")
       leaf.set(program, updates.head)
+    // A leaf contributes "self" to the name path (the dspy convention for a standalone predict); a composite
+    // collapses "self" into just its field label (see DerivedPredictors.readNamed).
+    override def readNamed(program: P): Vector[(String, DynamicPredict)] = Vector("self" -> leaf.get(program))
 
   /** Hand-written [[Predictors]] instances for the composite typed programs whose learnable sub-predicts are
     * hoisted to stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[MultiChainComparison]]). They live in
@@ -162,12 +173,22 @@ object Predictors extends LowPriority:
     * class definition at each use site. */
   private[optimize] final class DerivedPredictors[P <: Product](
       m: Mirror.ProductOf[P],
-      fieldInstances: List[Predictors[Any]]
+      fieldInstances: List[Predictors[Any]],
+      labels: List[String]
   ) extends Predictors[P]:
     def read(program: P): Vector[DynamicPredict] =
       fieldInstances.zipWithIndex.foldLeft(Vector.empty[DynamicPredict]) { case (acc, (inst, i)) =>
         acc ++ inst.read(program.productElement(i))
       }
+
+    /** Names each predictor by its case-class field path (P-c). A field whose value is a leaf predict gets just
+      * the field label (its leaf name "self" is collapsed); a nested composite field yields `"field.sub"`. */
+    override def readNamed(program: P): Vector[(String, DynamicPredict)] =
+      fieldInstances.zip(labels).zipWithIndex.flatMap { case ((inst, label), i) =>
+        inst.readNamed(program.productElement(i)).map { case (sub, predict) =>
+          (if sub == "self" then label else s"$label.$sub") -> predict
+        }
+      }.toVector
 
     def replace(program: P, updates: Vector[DynamicPredict]): P =
       var cursor      = 0
@@ -222,4 +243,8 @@ trait LowPriority:
       m: Mirror.ProductOf[P],
       @annotation.unused notLeaf: NotGiven[Predictor[P]]
   ): Predictors[P] =
-    new Predictors.DerivedPredictors[P](m, Predictors.summonFieldInstances[m.MirroredElemTypes])
+    new Predictors.DerivedPredictors[P](
+      m,
+      Predictors.summonFieldInstances[m.MirroredElemTypes],
+      scala.compiletime.constValueTuple[m.MirroredElemLabels].toList.map(_.toString)
+    )

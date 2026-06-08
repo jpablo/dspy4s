@@ -13,11 +13,11 @@ class CandidateSuite extends FunSuite:
     DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get.withInstructions(Some(instruction)))
 
   test("seed reads each predictor's current instruction keyed by component name") {
-    assertEquals(Candidate.seed(predict("Answer the question.")), Map("0" -> "Answer the question."))
+    assertEquals(Candidate.seed(predict("Answer the question.")), Map("self" -> "Answer the question."))
   }
 
   test("applyTo writes a candidate's instruction back onto the predictor") {
-    val applied = Candidate.applyTo(predict("Answer the question."), Map("0" -> "Be concise and precise."))
+    val applied = Candidate.applyTo(predict("Answer the question."), Map("self" -> "Be concise and precise."))
     assertEquals(applied.layout.instructions, Some("Be concise and precise."))
   }
 

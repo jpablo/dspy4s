@@ -91,7 +91,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     // but the prompt the LM sees must carry the candidate instruction).
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = adapter.evaluate(batch.take(1), Map("0" -> "Answer with the city name only."), captureTraces = true)
+      val result = adapter.evaluate(batch.take(1), Map("self" -> "Answer with the city name only."), captureTraces = true)
       assertEquals(result.scores, Vector(1.0))
     }
   }
@@ -100,10 +100,10 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val evalBatch = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
-      val dataset   = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector("0"))
+      val dataset   = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector("self"))
 
-      assertEquals(dataset.keySet, Set("0"))
-      val records = dataset("0")
+      assertEquals(dataset.keySet, Set("self"))
+      val records = dataset("self")
       assertEquals(records.size, 2)
       // inputs carry the question; generated outputs carry the model's answer; feedback explains the verdict.
       assert(records.head.inputs.contains("France"), records.head.inputs)

@@ -23,6 +23,9 @@ final class GepaAdapter[P](
     val failureScore: Double = 0.0
 )(using ps: Predictors[P], runner: Runnable[P]):
 
+  /** Component name → its index in `Predictors.readNamed` order, used to locate a component's trace entry. */
+  private val componentIndex: Map[String, Int] = ps.readNamed(program).map(_._1).zipWithIndex.toMap
+
   /** Apply `candidate` to the program and evaluate it over `batch`, returning per-example outputs + scores.
     *
     * When `captureTraces` is set (the reflective path), each example is run in an ISOLATED context — fresh trace
@@ -62,9 +65,9 @@ final class GepaAdapter[P](
     *
     * Requires `evalBatch` to carry trajectories (i.e. it came from [[evaluate]] with `captureTraces = true`).
     *
-    * v0 maps a component to its trace entry POSITIONALLY (component "i" → the i-th trace entry) — exact for a
-    * single-predictor program and for sequential composites whose execution order matches `Predictors.read`. P-c
-    * (named predictors) will match by name for the general case. */
+    * Locates a component's trace entry by name → `readNamed` index → trace position (P-c). Exact for a
+    * single-predictor program and for sequential composites; non-sequential execution (a predictor called multiple
+    * times, or reordered) is a documented refinement. */
   def makeReflectiveDataset(
       @scala.annotation.unused candidate: Candidate, // kept for engine-contract parity; P-c uses it to map names→predictors
       evalBatch: EvaluationBatch,
@@ -74,7 +77,9 @@ final class GepaAdapter[P](
     components.iterator.map(component => component -> trajectories.flatMap(traj => recordFor(component, traj))).toMap
 
   private def recordFor(component: String, traj: Trajectory)(using RuntimeContext): Option[ReflectiveRecord] =
-    component.toIntOption.flatMap(traj.trace.lift).map { entry =>
+    // Positionally locate the component's trace entry (component index in readNamed order). Exact for a
+    // single-predictor program and for sequential composites; non-sequential matching is a refinement.
+    componentIndex.get(component).flatMap(traj.trace.lift).map { entry =>
       val inputs = DynamicValues.renderText(entry.inputs)
       val generatedOutputs = entry.failure match
         case Some(_) =>
