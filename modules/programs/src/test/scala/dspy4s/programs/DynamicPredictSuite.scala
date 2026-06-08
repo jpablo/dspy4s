@@ -21,7 +21,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 

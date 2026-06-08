@@ -21,7 +21,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import zio.blocks.chunk.Chunk

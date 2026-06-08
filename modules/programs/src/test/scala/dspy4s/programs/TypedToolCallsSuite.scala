@@ -14,8 +14,8 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
+import dspy4s.core.contracts.ToolCall
 import dspy4s.typed.Signature
-import dspy4s.typed.ToolCall
 import munit.FunSuite
 import zio.blocks.schema.Schema
 
@@ -35,7 +35,7 @@ class TypedToolCallsSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(
         text      = "",
-        toolCalls = Vector(dspy4s.lm.contracts.ToolCall("search", DynamicValues.record("query" := "belgium")))
+        toolCalls = Vector(ToolCall("search", DynamicValues.record("query" := "belgium")))
       ))))
 
   test("typed Predict decodes native tool_calls into a Vector[ToolCall] output field") {

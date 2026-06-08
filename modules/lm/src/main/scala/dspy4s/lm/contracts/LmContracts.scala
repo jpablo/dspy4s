@@ -3,6 +3,7 @@ package dspy4s.lm.contracts
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LanguageModelRef
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ToolCall
 import zio.blocks.schema.DynamicValue
 
 import scala.annotation.nowarn
@@ -49,11 +50,6 @@ final case class LmUsage(
     completionTokens: Long = 0L,
     extras: Map[TokenCategory, Long] = Map.empty
 )
-
-/** A tool invocation requested by the model. `args` is the call's `arguments` object, decoded from the
-  * provider's JSON into a `DynamicValue.Record` at the parse boundary (see `ToolCallAssembler` /
-  * `ProviderLanguageModel`), so it travels the tool pipeline as `DynamicValue` without a lossy `Any` round-trip. */
-final case class ToolCall(name: String, args: DynamicValue.Record)
 
 final case class LmOutput(
     text: String,

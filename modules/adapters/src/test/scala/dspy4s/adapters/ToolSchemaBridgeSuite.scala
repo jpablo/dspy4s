@@ -7,7 +7,7 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

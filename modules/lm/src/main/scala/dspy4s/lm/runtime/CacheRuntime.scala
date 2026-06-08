@@ -8,7 +8,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.TokenCategory
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.io.ByteArrayInputStream

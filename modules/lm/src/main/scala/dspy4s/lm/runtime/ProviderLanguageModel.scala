@@ -14,7 +14,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.providers.DynamicJson
 import dspy4s.lm.providers.OpenAiUsage
 import dspy4s.lm.providers.WireKeys

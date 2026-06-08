@@ -12,7 +12,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.TokenCategory
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.lm.runtime.CompositeLmCache

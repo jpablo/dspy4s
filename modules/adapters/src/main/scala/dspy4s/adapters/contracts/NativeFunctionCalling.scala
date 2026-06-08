@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.lm.contracts.LanguageModel
-import dspy4s.lm.contracts.ToolCall
+import dspy4s.core.contracts.ToolCall
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 

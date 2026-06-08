@@ -7,7 +7,7 @@ import munit.FunSuite
 class ToolCallAssemblerSuite extends FunSuite:
 
   // Args are now a DynamicValue.Record; project back to a Map for value comparison.
-  private def argsMap(call: dspy4s.lm.contracts.ToolCall): Map[String, Any] =
+  private def argsMap(call: dspy4s.core.contracts.ToolCall): Map[String, Any] =
     DynamicValues.recordToMap(call.args)
 
   test("assembles a single tool call from openai-style frame sequence") {
