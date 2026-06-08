@@ -17,6 +17,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
@@ -118,7 +119,7 @@ final case class JSONAdapter(
             case Right(schema: DynamicValue.Record) =>
               val jsonSchema = DynamicValue.Record(Chunk(
                 "name"   -> DynamicValue.Primitive(PrimitiveValue.String(sanitizeSchemaName(invocation.layout.name))),
-                "schema" -> schema,
+                "schema" -> embedConstraints(schema, invocation.layout.outputFields),
                 "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false))
               ))
               DynamicValue.Record(Chunk.single(
@@ -130,6 +131,28 @@ final case class JSONAdapter(
             // A non-object schema (or parse failure) → prose-only fallback, never fail.
             case _ => DynamicValue.Record.empty
         case None => DynamicValue.Record.empty
+
+  /** G-9: structurally embed each constrained output field's constraints into the emitted JSON Schema, adding the
+    * JSON-Schema keyword (`exclusiveMinimum`, `maxLength`, ...) to the matching property record. No-op when no
+    * output field is constrained or the schema has no `properties` object. (The schema is emitted `strict:false`,
+    * so the provider treats these as advisory hints — they add structured signal, matching ChatAdapter's prose.) */
+  private def embedConstraints(
+      schema: DynamicValue.Record,
+      outputFields: Vector[dspy4s.core.contracts.FieldSpec]
+  ): DynamicValue.Record =
+    val constrained = outputFields.filter(_.constraints.nonEmpty)
+    if constrained.isEmpty then schema
+    else
+      DynamicValues.recordGet(schema, "properties") match
+        case Some(props: DynamicValue.Record) =>
+          val byName = constrained.map(f => f.name -> f.constraints).toMap
+          val updatedProps = props.fields.map {
+            case (propName, prop: DynamicValue.Record) if byName.contains(propName) =>
+              propName -> byName(propName).foldLeft(prop)((acc, c) => acc.updated(c.schemaKeyword, c.schemaValue))
+            case other => other
+          }
+          schema.updated("properties", DynamicValue.Record(Chunk.from(updatedProps)))
+        case _ => schema
 
   /** OpenAI requires the `json_schema.name` to match `^[a-zA-Z0-9_-]+$`. Replace any other character with `_`;
     * fall back to a constant when the result would be empty. */

@@ -5,7 +5,12 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
+import dspy4s.core.contracts.FieldConstraints
+import dspy4s.core.contracts.FieldRole
+import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.TypeRef
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LanguageModel
@@ -75,6 +80,43 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
       field(js.get, "strict").collect { case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => b },
       Some(false)
     )
+  }
+
+  test("response_format embeds field constraints as JSON-Schema keywords on the matching property") {
+    given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
+    val layout = SignatureLayout.create(
+      name = "Scored",
+      fields = Vector(
+        FieldSpec("question", FieldRole.Input),
+        FieldSpec(
+          name = "score", role = FieldRole.Output, typeRef = TypeRef.int,
+          constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
+        )
+      )
+    ).toOption.get
+    val schema = """{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}"""
+    val invocation = AdapterInvocation(
+      layout = layout, demos = Vector.empty,
+      inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      outputJsonSchema = Some(schema)
+    )
+
+    val opts = JSONAdapter().format(invocation).toOption.get.requestOptions
+    val scoreProp = DynamicValues.recordGet(opts, "response_format")
+      .flatMap(field(_, "json_schema")).flatMap(field(_, "schema"))
+      .flatMap(field(_, "properties")).flatMap(field(_, "score"))
+    assert(scoreProp.isDefined, s"expected a `score` property, got opts: $opts")
+    assertEquals(
+      field(scoreProp.get, "exclusiveMinimum").collect { case DynamicValue.Primitive(PrimitiveValue.Long(n)) => n },
+      Some(0L)
+    )
+    assertEquals(
+      field(scoreProp.get, "maxLength").collect { case DynamicValue.Primitive(PrimitiveValue.Int(n)) => n },
+      Some(10)
+    )
+    // The original property keyword is preserved alongside the injected constraints.
+    assertEquals(stringField(scoreProp.get, "type"), Some("integer"))
   }
 
   test("response_format embeds the sanitized signature name") {

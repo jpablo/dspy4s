@@ -452,8 +452,11 @@ helper builds the exact upstream strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLe
 analog; unconstrained fields render byte-identically), and constraints round-trip through
 `SignatureLayout.dumpState`/`fromState`. **v1 follow-ups:** constraints are settable
 programmatically only (deriving them from the typed `zio-blocks Schema` surface needs a
-constraint-annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` emit no
-prose field block, so they carry a TODO to embed constraints in the tag / JSON schema.
+constraint-annotation mechanism that doesn't exist yet). **Follow-ups now done:** constraints are a
+structured `Constraint` ADT (`.render` for prose + `.schemaKeyword`/`.schemaValue` for JSON Schema);
+`XMLAdapter`/`JSONAdapter` render the prose block (shared `AdapterConstraints`), and `JSONAdapter`
+also embeds them *structurally* into the emitted `response_format` JSON Schema (`exclusiveMinimum`,
+`maxLength`, …) — advisory under `strict:false`, but real structured signal.
 
 **Summary.** dspy4s had no constraint vocabulary in `FieldSpec`, so Python's
 constraint rendering (`gt`/`ge`/`lt`/`le`/`min_length`/…) had no equivalent.
