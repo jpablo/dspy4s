@@ -32,8 +32,11 @@ final class GepaAdapter[P](
   def evaluate(batch: Vector[Example], candidate: Candidate, captureTraces: Boolean)(using
       RuntimeContext
   ): EvaluationBatch =
-    val prog = Candidate.applyTo(program, candidate)
+    val prog = applyCandidate(candidate)
     if captureTraces then withTraces(prog, batch) else scoresOnly(prog, batch)
+
+  /** The program with `candidate`'s instructions applied — the engine uses this to materialize the final result. */
+  def applyCandidate(candidate: Candidate): P = Candidate.applyTo(program, candidate)
 
   private def scoresOnly(prog: P, batch: Vector[Example])(using RuntimeContext): EvaluationBatch =
     Evaluate(devset = batch, metric = metric, failureScore = failureScore)()((ex: Example) =>
