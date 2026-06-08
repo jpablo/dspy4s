@@ -1,6 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -51,6 +52,37 @@ final class GepaAdapter[P](
       scores = trajectories.map(_.score),
       trajectories = Some(trajectories)
     )
+
+  /** Build the reflective dataset for each component to update: per trajectory, that component's rendered I/O plus
+    * the predictor-level feedback (gepa's `make_reflective_dataset`). The reflection LM reads these to rewrite the
+    * component's instruction.
+    *
+    * Requires `evalBatch` to carry trajectories (i.e. it came from [[evaluate]] with `captureTraces = true`).
+    *
+    * v0 maps a component to its trace entry POSITIONALLY (component "i" → the i-th trace entry) — exact for a
+    * single-predictor program and for sequential composites whose execution order matches `Predictors.read`. P-c
+    * (named predictors) will match by name for the general case. */
+  def makeReflectiveDataset(
+      @scala.annotation.unused candidate: Candidate, // kept for engine-contract parity; P-c uses it to map names→predictors
+      evalBatch: EvaluationBatch,
+      components: Vector[String]
+  )(using RuntimeContext): Map[String, Vector[ReflectiveRecord]] =
+    val trajectories = evalBatch.trajectories.getOrElse(Vector.empty)
+    components.iterator.map(component => component -> trajectories.flatMap(traj => recordFor(component, traj))).toMap
+
+  private def recordFor(component: String, traj: Trajectory)(using RuntimeContext): Option[ReflectiveRecord] =
+    component.toIntOption.flatMap(traj.trace.lift).map { entry =>
+      val inputs = DynamicValues.renderText(entry.inputs)
+      val generatedOutputs = entry.failure match
+        case Some(_) =>
+          DynamicValues.recordGet(entry.outputs, "raw_response").map(DynamicValues.renderText).getOrElse("(no output)")
+        case None => DynamicValues.renderText(entry.outputs)
+      val feedback = metric
+        .feedback(traj.example, traj.prediction, traj.trace, component = Some(component), componentTrace = Vector(entry))
+        .map(_.feedback)
+        .getOrElse(FeedbackMetric.defaultFeedback(traj.score))
+      ReflectiveRecord(inputs, generatedOutputs, feedback)
+    }
 
   /** Run one example in an isolated, failure-capturing context and assemble its [[Trajectory]]. */
   private def runOne(prog: P, example: Example)(using RuntimeContext): Trajectory =

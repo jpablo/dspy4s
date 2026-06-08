@@ -95,3 +95,21 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       assertEquals(result.scores, Vector(1.0))
     }
   }
+
+  test("makeReflectiveDataset builds per-component {inputs, outputs, feedback} records from trajectories") {
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val evalBatch = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
+      val dataset   = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector("0"))
+
+      assertEquals(dataset.keySet, Set("0"))
+      val records = dataset("0")
+      assertEquals(records.size, 2)
+      // inputs carry the question; generated outputs carry the model's answer; feedback explains the verdict.
+      assert(records.head.inputs.contains("France"), records.head.inputs)
+      assert(records.head.generatedOutputs.contains("Paris"), records.head.generatedOutputs)
+      assert(records.head.feedback.contains("expected"), records.head.feedback)
+      // The wrong-answer example's feedback reflects the mismatch (gold Paris vs predicted Lyon).
+      assert(records(1).feedback.contains("Lyon"), records(1).feedback)
+    }
+  }
