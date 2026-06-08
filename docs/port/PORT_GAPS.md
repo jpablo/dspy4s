@@ -532,6 +532,67 @@ Track and port `InferRules`. Tier 2.
 
 ---
 
+## G-12 — `GEPA` reflective prompt optimizer not ported
+
+**Status:** Open — in progress (new `gepa` sbt module: `modules/gepa`, `dspy4s-gepa`).
+
+**Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
+fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).
+`dspy/teleprompt/gepa/` only implements a `DspyAdapter`; the optimization algorithm lives in the standalone `gepa`
+package. So porting GEPA = (1) port the engine algorithm + (2) write a dspy4s adapter. Critically, **the engine is
+pure Python stdlib (`random`/`json`/`hashlib`/`dataclasses`) — no numpy/scipy/Optuna** — so there are **no external
+dependencies to replace** (unlike SIMBA/GRPO/Optuna). The "dependency" is just that the engine itself must be ported.
+
+### Python reference
+
+- Engine (generic, task-agnostic): `gepa/core/{engine,state,adapter,result}.py`, `gepa/strategies/*`,
+  `gepa/proposer/{reflective_mutation,merge}.py`. Algorithm: select a parent from the **Pareto frontier** →
+  sample a train minibatch → evaluate-with-traces → pick a component (round-robin) → build a reflective dataset
+  `[{Inputs, Generated Outputs, Feedback}]` → reflection-LM proposes new instruction text (extracted from ``` blocks)
+  → accept iff `sum(new) > sum(old)` on the minibatch → full-eval on valset → update the Pareto frontier. Optional
+  `merge` crossover of two frontier descendants via a common ancestor. Budget via `max_metric_calls` / `auto`.
+- Bridge: `dspy/teleprompt/gepa/{gepa,gepa_utils,instruction_proposal}.py`. The `DspyAdapter` implements three
+  methods the engine calls: `evaluate(batch, candidate, capture_traces)`, `make_reflective_dataset(candidate,
+  eval_batch, components)`, optional `propose_new_texts(...)`. A candidate is `dict[componentName -> instruction]`.
+- Feedback metric (`GEPAFeedbackMetric`): `(gold, pred, trace, predName, predTrace) -> ScoreWithFeedback` — a score
+  **plus textual feedback**, at both program- and predictor-level. The feedback text is what the reflection LM learns
+  from; it is the conceptual heart of GEPA.
+
+### dspy4s current state — what we have, and the prerequisites the spike found
+
+Already shipped (enablers): `Predictors[P]`/`Predictor.set` (G-1 — the candidate↔program mapping, dspy's
+`named_predictors()` + `with_instructions()`), `Runnable[P]` + `Evaluate` (batch scoring), per-module trace
+(`TraceEntry`), bound/reflection LM (G-3). A **single-predictor** program already traces cleanly.
+
+A verification spike (trace + failure capture) surfaced four bounded prerequisites:
+
+- **P-a — failure-trace capture.** `Module.apply` records a `TraceEntry` only on `Right` (`case Left(_) => ()`),
+  so failed predictor calls leave no trace — but reflection's signal IS failures. Record a trace entry on failure
+  with the raw output.
+- **P-b — parse-failure-as-feedback.** `PredictEngine.parseOutputs` aborts on `adapter.parse → Left` and discards
+  the raw `LmOutput.text`. Need a `FailedPrediction`-style capture (raw completion + low score + format feedback),
+  not an aborting error (dspy's `add_format_failure_as_feedback`).
+- **P-c — named predictors.** `Predictors.read` is positional (`Vector[DynamicPredict]`); trace entries are keyed
+  by `component = moduleName` (a possibly-colliding string). GEPA's whole model is keyed by unique component names.
+  The names are **latent** — the Mirror derivation has `MirroredElemLabels` but only uses `MirroredElemTypes`;
+  surfacing a named `read` is bounded. **This is also the exact blocker for Refine per-module advice (G-5 follow-up)
+  — building it once unblocks both.** Needed only for *multi-predictor* programs.
+- **P-d — feedback metric** (`ScoreWithFeedback`, program- + predictor-level). New contract; the keystone.
+
+### Proposed direction (slicing)
+
+- **v0 (de-risk):** single-predictor GEPA — needs P-a, P-b, P-d only (P-c unnecessary when there's one predictor).
+  Proves the engine + reflective feedback loop end-to-end. Engine pieces: `GEPAState`, instance-type Pareto frontier,
+  pareto/current-best candidate selector, round-robin component selector, epoch-shuffled batch sampler, reflective-
+  mutation proposer, `max_metric_calls` budget, result.
+- **v1:** add P-c (named predictors) → multi-predictor programs; closes Refine per-module advice as a freebie.
+- **v2:** merge proposer (crossover), multi-objective frontier types, eval cache, run_dir resume, wandb/mlflow.
+
+Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `Predictors`/`Runnable`/`Teleprompter`
+spine). Tier 2.
+
+---
+
 ## Recently resolved (this session)
 
 The following gaps were closed in the 3.1.3 → 3.2.1 port batches. They never had
