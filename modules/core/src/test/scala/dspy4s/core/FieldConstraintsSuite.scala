@@ -9,20 +9,30 @@ import munit.FunSuite
 
 class FieldConstraintsSuite extends FunSuite:
 
-  test("FieldConstraints helpers produce the exact upstream strings") {
-    assertEquals(FieldConstraints.gt(0), "greater than: 0")
-    assertEquals(FieldConstraints.ge(1), "greater than or equal to: 1")
-    assertEquals(FieldConstraints.lt(100), "less than: 100")
-    assertEquals(FieldConstraints.le(10), "less than or equal to: 10")
-    assertEquals(FieldConstraints.minLength(3), "minimum length: 3")
-    assertEquals(FieldConstraints.maxLength(10), "maximum length: 10")
-    assertEquals(FieldConstraints.multipleOf(5), "a multiple of the given number: 5")
+  test("FieldConstraints helpers render the exact upstream strings") {
+    assertEquals(FieldConstraints.gt(0).render, "greater than: 0")
+    assertEquals(FieldConstraints.ge(1).render, "greater than or equal to: 1")
+    assertEquals(FieldConstraints.lt(100).render, "less than: 100")
+    assertEquals(FieldConstraints.le(10).render, "less than or equal to: 10")
+    assertEquals(FieldConstraints.minLength(3).render, "minimum length: 3")
+    assertEquals(FieldConstraints.maxLength(10).render, "maximum length: 10")
+    assertEquals(FieldConstraints.multipleOf(5).render, "a multiple of the given number: 5")
   }
 
   test("FieldConstraints renders whole numbers without trailing .0 noise") {
-    assertEquals(FieldConstraints.gt(0.0), "greater than: 0")
-    assertEquals(FieldConstraints.lt(2.5), "less than: 2.5")
-    assertEquals(FieldConstraints.multipleOf(0.25), "a multiple of the given number: 0.25")
+    assertEquals(FieldConstraints.gt(0.0).render, "greater than: 0")
+    assertEquals(FieldConstraints.lt(2.5).render, "less than: 2.5")
+    assertEquals(FieldConstraints.multipleOf(0.25).render, "a multiple of the given number: 0.25")
+  }
+
+  test("FieldConstraints map to JSON-Schema keywords") {
+    assertEquals(FieldConstraints.gt(0).schemaKeyword, "exclusiveMinimum")
+    assertEquals(FieldConstraints.ge(1).schemaKeyword, "minimum")
+    assertEquals(FieldConstraints.lt(100).schemaKeyword, "exclusiveMaximum")
+    assertEquals(FieldConstraints.le(10).schemaKeyword, "maximum")
+    assertEquals(FieldConstraints.minLength(3).schemaKeyword, "minLength")
+    assertEquals(FieldConstraints.maxLength(10).schemaKeyword, "maxLength")
+    assertEquals(FieldConstraints.multipleOf(5).schemaKeyword, "multipleOf")
   }
 
   test("FieldSpec carries constraints and normalize preserves them") {
@@ -32,9 +42,9 @@ class FieldConstraintsSuite extends FunSuite:
       typeRef     = TypeRef.int,
       constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
     )
-    assertEquals(field.constraints, Vector("greater than: 0", "maximum length: 10"))
+    assertEquals(field.constraints.map(_.render), Vector("greater than: 0", "maximum length: 10"))
     val normalized = FieldSpec.normalize(field)
-    assertEquals(normalized.constraints, Vector("greater than: 0", "maximum length: 10"))
+    assertEquals(normalized.constraints.map(_.render), Vector("greater than: 0", "maximum length: 10"))
   }
 
   test("SignatureLayout dumpState/fromState round-trips a field's constraints") {
@@ -56,11 +66,13 @@ class FieldConstraintsSuite extends FunSuite:
 
     val rebuilt = SignatureLayout.fromState(layout.dumpState).toOption.get
     val scoreField = rebuilt.outputFields.find(_.name == "score").get
-    assertEquals(scoreField.constraints, Vector("greater than: 0", "maximum length: 10"))
+    // Structured round-trip: the rebuilt constraints equal the originals (not just their rendering).
+    assertEquals(scoreField.constraints, Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10)))
+    assertEquals(scoreField.constraints.map(_.render), Vector("greater than: 0", "maximum length: 10"))
 
     // A field without constraints round-trips to an empty vector.
     val questionField = rebuilt.inputFields.find(_.name == "question").get
-    assertEquals(questionField.constraints, Vector.empty[String])
+    assertEquals(questionField.constraints, Vector.empty[dspy4s.core.contracts.Constraint])
   }
 
   test("SignatureLayout fromState defaults constraints to empty when absent") {

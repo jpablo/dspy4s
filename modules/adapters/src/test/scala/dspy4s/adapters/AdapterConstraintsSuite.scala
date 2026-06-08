@@ -24,7 +24,7 @@ class AdapterConstraintsSuite extends FunSuite:
           name = "age",
           role = FieldRole.Output,
           typeRef = TypeRef.int,
-          constraints = if constrained then Vector("greater than: 0") else Vector.empty
+          constraints = if constrained then Vector(dspy4s.core.contracts.FieldConstraints.gt(0)) else Vector.empty
         )
       )
     ).toOption.get

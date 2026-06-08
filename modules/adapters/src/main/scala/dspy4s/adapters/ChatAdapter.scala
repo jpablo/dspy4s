@@ -200,7 +200,7 @@ final case class ChatAdapter(
         // Mirror Python's `get_field_description_string`: when the field carries constraints, append a
         // "Constraints: <joined>" suffix after the description. Joined with ", " (single-line field list).
         val constraintsPart =
-          if field.constraints.nonEmpty then s" Constraints: ${field.constraints.mkString(", ")}"
+          if field.constraints.nonEmpty then s" Constraints: ${field.constraints.map(_.render).mkString(", ")}"
           else ""
         val enumPart =
           if field.enumValues.nonEmpty then s" (must be one of: ${field.enumValues.mkString(", ")})"

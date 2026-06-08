@@ -12,7 +12,7 @@ object AdapterConstraints:
     * no output field has constraints (so the prompt is unchanged for unconstrained signatures). */
   def block(outputFields: Vector[FieldSpec]): Option[String] =
     val lines = outputFields.collect {
-      case f if f.constraints.nonEmpty => s"- `${f.name}`: ${f.constraints.mkString(", ")}"
+      case f if f.constraints.nonEmpty => s"- `${f.name}`: ${f.constraints.map(_.render).mkString(", ")}"
     }
     if lines.isEmpty then None else Some("Field constraints:\n" + lines.mkString("\n"))
 
