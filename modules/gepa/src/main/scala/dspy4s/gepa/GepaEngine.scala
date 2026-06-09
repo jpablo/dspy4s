@@ -6,8 +6,8 @@ import dspy4s.lm.contracts.LanguageModel
 
 import scala.util.Random
 
-/** Configuration for a GEPA run. v0 covers the reflective-mutation loop; merge / multi-objective frontiers /
-  * eval cache / resume are deferred (PORT_GAPS G-12). */
+/** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, and the evaluation cache;
+  * multi-objective frontiers and run-dir resume are deferred (PORT_GAPS G-12). */
 final case class GepaConfig(
     /** Budget: total metric (evaluation) calls before stopping. Reflection-LM calls do NOT count, matching gepa. */
     maxMetricCalls: Int,
@@ -43,11 +43,13 @@ final case class GepaResult[P](
     totalMetricCalls: Int
 )
 
-/** The GEPA engine (v0): genetic-Pareto reflective prompt evolution. Each iteration selects a parent candidate from
-  * the Pareto frontier, reflects on its failures over a train minibatch to propose a better instruction, accepts
-  * the mutation iff it improves the minibatch, then full-evaluates the accepted candidate on the validation set and
-  * folds it into the Pareto frontier — until the metric-call budget is spent. A faithful port of the external
-  * `gepa` engine's reflective-mutation path (no merge yet). See PORT_GAPS G-12. */
+/** The GEPA engine: genetic-Pareto reflective prompt evolution. Each iteration selects a parent candidate from the
+  * Pareto frontier, reflects on its failures over a train minibatch to propose a better instruction, accepts the
+  * mutation iff it improves the minibatch, then full-evaluates the accepted candidate on the validation set and
+  * folds it into the Pareto frontier — until the metric-call budget is spent. After an accepted mutation it
+  * schedules a [[MergeProposer]] crossover, attempted first the next iteration. A [[GepaEvalCache]] memoizes
+  * scores-only evals so repeated `(candidate, example)` pairs are free. A faithful port of the external `gepa`
+  * engine. See PORT_GAPS G-12. */
 final class GepaEngine[P](
     adapter: GepaAdapter[P],
     reflectionLm: LanguageModel,
@@ -59,10 +61,12 @@ final class GepaEngine[P](
   ): GepaResult[P] =
     val rng     = new Random(config.seed)
     val sampler = MinibatchSampler.of(config.batchSampler, config.reflectionMinibatchSize, config.seed)
-    val merger  = Option.when(config.useMerge)(new MergeProposer(adapter, valset, config.maxMergeInvocations, rng))
+    val cache   = new GepaEvalCache(adapter)
+    val merger  = Option.when(config.useMerge)(new MergeProposer(valset, config.maxMergeInvocations, rng, cache))
 
     // Seed: full-evaluate the starting candidate on the validation set.
-    var state = GepaState.seed(seedCandidate, fullEval(seedCandidate, valset), metricCalls = valset.size)
+    val (seedScores, seedEvals) = fullEval(seedCandidate, valset, cache)
+    var state = GepaState.seed(seedCandidate, seedScores, metricCalls = seedEvals)
     // Per-candidate round-robin pointer (which component to evolve next), threaded across iterations.
     var pointers = Map.empty[Int, Int]
     var i        = 0 // iteration index, drives the epoch-shuffled batch sampler
@@ -80,8 +84,8 @@ final class GepaEngine[P](
         mp.lastIterFoundNewProgram = false
         proposalOpt.map { proposal =>
           if proposal.accepted then
-            val subscores = fullEval(proposal.candidate, valset)
-            state = state.add(proposal.candidate, subscores, proposal.parents, proposal.metricCalls + valset.size)
+            val (subscores, evals) = fullEval(proposal.candidate, valset, cache)
+            state = state.add(proposal.candidate, subscores, proposal.parents, proposal.metricCalls + evals)
             mp.onMergeAccepted()
           else
             state = state.copy(totalMetricCalls = state.totalMetricCalls + proposal.metricCalls)
@@ -92,7 +96,7 @@ final class GepaEngine[P](
       // 2) Otherwise, a reflective-mutation iteration; an acceptance schedules a future merge.
       if !mergeConsumedIteration then
         merger.foreach(_.lastIterFoundNewProgram = false)
-        val (nextState, nextPointers, accepted) = iterate(state, pointers, trainset, valset, rng, sampler, i)
+        val (nextState, nextPointers, accepted) = iterate(state, pointers, trainset, valset, rng, sampler, cache, i)
         state = nextState
         pointers = nextPointers
         if accepted then merger.foreach(_.onReflectiveAccepted())
@@ -117,6 +121,7 @@ final class GepaEngine[P](
       valset: Vector[Example],
       rng: Random,
       sampler: MinibatchSampler,
+      cache: GepaEvalCache[P],
       iteration: Int
   )(using RuntimeContext): (GepaState, Map[Int, Int], Boolean) =
     val parentIdx = config.candidateSelector.select(state, rng)
@@ -149,12 +154,16 @@ final class GepaEngine[P](
     val accepted = newEval.scores.sum > parentEval.scores.sum
     val nextState =
       if accepted then
-        val newSubscores = fullEval(newCandidate, valset)
-        calls += valset.size
+        val (newSubscores, evals) = fullEval(newCandidate, valset, cache)
+        calls += evals
         state.add(newCandidate, newSubscores, parents = Vector(parentIdx), metricCalls = calls)
       else
         state.copy(totalMetricCalls = state.totalMetricCalls + calls)
     (nextState, newPointers, accepted)
 
-  private def fullEval(candidate: Candidate, valset: Vector[Example])(using RuntimeContext): Vector[Double] =
-    adapter.evaluate(valset, candidate, captureTraces = false).scores
+  /** Full validation scores for a candidate, via the shared eval cache: returns the per-instance scores and the
+    * number of ACTUAL (uncached) evaluations to charge against the budget. */
+  private def fullEval(candidate: Candidate, valset: Vector[Example], cache: GepaEvalCache[P])(using
+      RuntimeContext
+  ): (Vector[Double], Int) =
+    cache.scores(candidate, valset)

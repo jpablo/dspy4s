@@ -24,10 +24,10 @@ final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accep
   * ([[onReflectiveAccepted]]) and attempts one when [[shouldAttempt]]; accepted merges are consumed via
   * [[onMergeAccepted]]. `performed*` track already-attempted triplets so the same merge is not retried. */
 final class MergeProposer[P](
-    adapter: GepaAdapter[P],
     valset: Vector[Example],
     maxMergeInvocations: Int,
     rng: Random,
+    cache: GepaEvalCache[P],
     maxAttempts: Int = 10,
     subsampleSize: Int = 5
 ):
@@ -70,10 +70,10 @@ final class MergeProposer[P](
         val subIdx = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), subsampleSize, rng)
         if subIdx.isEmpty then None
         else
-          val before1     = subIdx.iterator.map(state.valSubscores(id1)).sum
-          val before2     = subIdx.iterator.map(state.valSubscores(id2)).sum
-          val mergedScore = adapter.evaluate(subIdx.map(valset), merged, captureTraces = false).scores.sum
-          Some(MergeProposal(merged, Vector(id1, id2), accepted = mergedScore >= math.max(before1, before2), metricCalls = subIdx.size))
+          val before1            = subIdx.iterator.map(state.valSubscores(id1)).sum
+          val before2            = subIdx.iterator.map(state.valSubscores(id2)).sum
+          val (mergedScores, ev) = cache.scores(merged, subIdx.map(valset)) // cached so the later full-eval reuses these
+          Some(MergeProposal(merged, Vector(id1, id2), accepted = mergedScores.sum >= math.max(before1, before2), metricCalls = ev))
     }
 
   /** Up to `maxAttempts` times: sample two distinct dominators (neither an ancestor of the other) and look for a

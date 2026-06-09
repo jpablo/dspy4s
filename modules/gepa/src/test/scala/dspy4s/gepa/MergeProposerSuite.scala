@@ -107,7 +107,7 @@ class MergeProposerSuite extends FunSuite:
       parents      = Vector(Vector.empty, Vector(0), Vector(0)),
       totalMetricCalls = 0
     )
-    val merger = new MergeProposer[Pipeline](adapter, valset, maxMergeInvocations = 5, new Random(0))
+    val merger = new MergeProposer[Pipeline](valset, maxMergeInvocations = 5, new Random(0), new GepaEvalCache(adapter))
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -132,7 +132,7 @@ class MergeProposerSuite extends FunSuite:
       parents = Vector(Vector.empty, Vector(0)),
       totalMetricCalls = 0
     )
-    val merger = new MergeProposer[Pipeline](adapter, valset, maxMergeInvocations = 5, new Random(0))
+    val merger = new MergeProposer[Pipeline](valset, maxMergeInvocations = 5, new Random(0), new GepaEvalCache(adapter))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       assertEquals(merger.propose(state), None)
