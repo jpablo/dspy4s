@@ -39,26 +39,34 @@ import scala.util.matching.Regex
   * internally over the data-bag layer, and decodes the reply into the base outputs `O` with `reasoning: String`
   * prepended (see [[OutputAugmentation]]). The rendered `trajectory` is kept on `.raw`.
   *
-  * '''Scope of this scaffolding.''' The wiring + prompt are present and
-  * exercisable end-to-end against a real LM. What is **not** in this v1:
+  * '''Tools-inside-code.''' Python `CodeAct` lets the user pass functions the LM's generated Python can call.
+  * Pass them as [[tools]]: they are listed in the codeact instructions (so the LM knows they exist), and on a
+  * sandboxed [[dspy4s.core.runtime.DenoPyodideInterpreter]] the SAME vector is wired into the sandbox via
+  * [[sandboxTools]] so the calls execute (`new DenoPyodideInterpreter(tools = program.sandboxTools)`). The plain
+  * [[dspy4s.core.runtime.SubprocessPythonInterpreter]] has no bridge — there, pre-load tools into the
+  * environment or go without. (Upstream injects each tool's Python SOURCE into the interpreter, which is why it
+  * only accepts plain functions; the dspy4s bridge is RPC, so Scala-implemented tools work too.)
   *
-  *   - **Tools-inside-code.** Python `CodeAct` lets the user pass Scala
-  *     functions that the LM's generated Python can call. With the sandboxed
-  *     [[dspy4s.core.runtime.DenoPyodideInterpreter]] this now works: bridge the
-  *     program's [[dspy4s.programs.contracts.ToolFunction]]s via
-  *     [[CodeAct.sandboxTools]] and pass them as the interpreter's `tools`. The
-  *     plain [[dspy4s.core.runtime.SubprocessPythonInterpreter]] has no bridge —
-  *     there, pre-load tools into the environment or go without.
-  *   - **Persistent REPL state.** The default
-  *     [[dspy4s.core.runtime.SubprocessPythonInterpreter]] is stateless;
-  *     CodeAct compensates by carrying the accumulated code in the trajectory.
+  * '''Per-call iteration override.''' Python accepts `max_iters` as a call kwarg; the dspy4s idiom is the
+  * immutable copy — `program.copy(maxIterations = n).apply(...)` — rather than a magic key in the per-call
+  * config bag (which is reserved for provider options).
+  *
+  * '''Persistent REPL state.''' The default [[dspy4s.core.runtime.SubprocessPythonInterpreter]] is stateless
+  * across snippets; the trajectory carries earlier code/output as PROMPT context, so the LM regenerates what it
+  * needs. On the stateful Deno+Pyodide interpreter, variables genuinely persist between iterations (upstream
+  * behavior).
   *
   * '''Closing the interpreter.''' CodeAct does **not** call `interpreter.close()` itself — the caller owns
-  * lifecycle.
+  * lifecycle. (Upstream shuts the interpreter down at the end of every `forward`, even a caller-supplied one —
+  * a delta we deliberately do not copy.)
   */
 final case class CodeAct[I, O](
     baseSignature: Signature[I, O],
     interpreter: CodeInterpreter,
+    /** Tools the generated Python may call (Python `CodeAct(tools=...)`). They are listed in the codeact
+      * instructions (so the LM knows they exist) and should ALSO be wired into the sandbox via
+      * [[sandboxTools]] (so the calls actually execute) — same vector, both sides. */
+    tools: Vector[dspy4s.programs.contracts.ToolFunction] = Vector.empty,
     maxIterations: Int = 5,
     codeActProgramName: String = "codeact",
     extractorProgramName: String = "codeact_extract",
@@ -143,18 +151,25 @@ final case class CodeAct[I, O](
       )
     )
 
-  /** System-prompt instructions handed to the codeact DynamicPredict. Mirrors
-    * Python's `_build_instructions` shape verbatim. */
+  /** System-prompt instructions handed to the codeact DynamicPredict. Mirrors Python's `_build_instructions`
+    * shape verbatim, including the numbered tool list (upstream's `Tool.__str__` rendering: name, `<desc>`-wrapped
+    * description, argument schema). */
   private def buildInstructions: String =
     val inputs = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
     val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
     val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
-    s"""${taskPrelude}You are an intelligent agent. For each episode, you will receive the fields $inputs as input.
-       |Your goal is to generate executable Python code that collects any necessary information for producing $outputs.
-       |For each iteration, you will generate a code snippet that either solves the task or progresses towards the solution.
-       |Ensure any output you wish to extract from the code is printed to the console. The code should be enclosed in a fenced code block.
-       |When all information for producing the outputs ($outputs) are available to be extracted, mark `finished=true` besides the final Python code.
-       |You have access to the Python Standard Library.""".stripMargin
+    val library =
+      if tools.isEmpty then "You have access to the Python Standard Library."
+      else "You have access to the Python Standard Library and the following functions:"
+    val toolLines = tools.zipWithIndex.map { case (tool, idx) => s"(${idx + 1}) ${CodeAct.renderTool(tool)}" }
+    (Vector(
+      s"""${taskPrelude}You are an intelligent agent. For each episode, you will receive the fields $inputs as input.
+         |Your goal is to generate executable Python code that collects any necessary information for producing $outputs.
+         |For each iteration, you will generate a code snippet that either solves the task or progresses towards the solution.
+         |Ensure any output you wish to extract from the code is printed to the console. The code should be enclosed in a fenced code block.
+         |When all information for producing the outputs ($outputs) are available to be extracted, mark `finished=true` besides the final Python code.
+         |$library""".stripMargin
+    ) ++ toolLines).mkString("\n")
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
     baseSignature.inputShape.encode(call.input)
@@ -172,7 +187,7 @@ final case class CodeAct[I, O](
     for
       trajectory <- runIterations(baseCall, codeActPredict, trajectory = Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(trajectory.render))
-      extracted <- extractorPredict.apply(baseCall.copy(inputs = inputs.updated("trajectory", rendered)))
+      extracted <- extractWithTruncation(baseCall, inputs, trajectory)
       reasoning <- extractReasoning(extracted.values)
       baseOut   <- baseSignature.outputShape.decode(extracted.values)
       augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
@@ -194,6 +209,30 @@ final case class CodeAct[I, O](
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     apply(TypedCall(input, config, traceEnabled))
 
+  /** This program's [[tools]] bridged for a sandboxed interpreter — pass as
+    * `new DenoPyodideInterpreter(tools = program.sandboxTools)` so the prompt's tool list and the sandbox's
+    * callable surface come from the same vector. See [[CodeAct.sandboxTools]]. */
+  def sandboxTools(using RuntimeContext): Vector[dspy4s.core.contracts.SandboxTool] =
+    CodeAct.sandboxTools(tools)
+
+  /** Run the final extractor over the trajectory, truncating the OLDEST iteration and retrying (up to 3
+    * attempts) when the prompt overflows the model's context window — Python's
+    * `_call_with_potential_trajectory_truncation`. Only the extractor's view is truncated; the returned
+    * prediction's `trajectory` stays complete. */
+  private def extractWithTruncation(
+      baseCall: ProgramCall,
+      inputs: DynamicValue.Record,
+      trajectory: Vector[CodeAct.TrajectoryEntry]
+  )(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    @scala.annotation.tailrec
+    def attempt(view: Vector[CodeAct.TrajectoryEntry], remaining: Int): Either[DspyError, DynamicPrediction] =
+      val rendered = DynamicValue.Primitive(PrimitiveValue.String(CodeAct.renderTrajectory(view)))
+      extractorPredict.apply(baseCall.copy(inputs = inputs.updated("trajectory", rendered))) match
+        case Left(_: dspy4s.core.contracts.ContextWindowExceededError) if remaining > 1 && view.nonEmpty =>
+          attempt(view.drop(1), remaining - 1)
+        case other => other
+    attempt(trajectory, remaining = 3)
+
   /** Recursive iteration loop. `maxIterations` bounds depth. */
   private def runIterations(
       call: ProgramCall,
@@ -210,37 +249,38 @@ final case class CodeAct[I, O](
       codeActPredict.apply(call.copy(inputs = stepInputs)).flatMap { prediction =>
         val rawCode  = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
         val finished = isFinished(prediction.get("finished"))
-        val code     = extractCode(rawCode).getOrElse(rawCode.trim)
 
-        if code.isEmpty then
-          val entry = CodeAct.TrajectoryEntry(iteration, code = "", observation = "Failed to parse the generated code: empty code", isError = true)
-          if finished then Right(trajectory :+ entry)
-          else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
-        else
-          interpreter.execute(code) match
-            case Right(result) if result.exitCode == 0 =>
-              val entry = CodeAct.TrajectoryEntry(iteration, code = code, observation = result.stdout.stripTrailing, isError = false)
-              if finished then Right(trajectory :+ entry)
-              else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
-            case Right(result) =>
-              val entry = CodeAct.TrajectoryEntry(
-                iteration,
-                code = code,
-                observation = s"Failed to execute the generated code: ${result.stderr.stripTrailing}",
-                isError = true
-              )
-              if finished then Right(trajectory :+ entry)
-              else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
-            case Left(err: RuntimeError) =>
-              val entry = CodeAct.TrajectoryEntry(
-                iteration,
-                code = code,
-                observation = s"Interpreter failure (${err.component}): ${err.message}",
-                isError = true
-              )
-              if finished then Right(trajectory :+ entry)
-              else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
-            case Left(other) => Left(other)
+        CodeAct.parseCode(rawCode) match
+          case Left(parseError) =>
+            // Upstream `continue`s on a parse failure: the iteration is consumed, `finished` is IGNORED (an
+            // unparseable "final" snippet can't be final), and no code is recorded in the trajectory.
+            val entry = CodeAct.TrajectoryEntry(iteration, code = "", observation = s"Failed to parse the generated code: $parseError", isError = true)
+            runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+          case Right(code) =>
+            interpreter.execute(code) match
+              case Right(result) if result.exitCode == 0 =>
+                val entry = CodeAct.TrajectoryEntry(iteration, code = code, observation = result.stdout.stripTrailing, isError = false)
+                if finished then Right(trajectory :+ entry)
+                else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+              case Right(result) =>
+                val entry = CodeAct.TrajectoryEntry(
+                  iteration,
+                  code = code,
+                  observation = s"Failed to execute the generated code: ${result.stderr.stripTrailing}",
+                  isError = true
+                )
+                if finished then Right(trajectory :+ entry)
+                else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+              case Left(err: RuntimeError) =>
+                val entry = CodeAct.TrajectoryEntry(
+                  iteration,
+                  code = code,
+                  observation = s"Interpreter failure (${err.component}): ${err.message}",
+                  isError = true
+                )
+                if finished then Right(trajectory :+ entry)
+                else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+              case Left(other) => Left(other)
       }
 
   private def isFinished(value: Option[DynamicValue]): Boolean =
@@ -248,16 +288,6 @@ final case class CodeAct[I, O](
       case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(b))) => b
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s)))  => s.trim.equalsIgnoreCase("true")
       case _                                                       => false
-
-  /** Strip a fenced ```python / ``` block from the LM's `generated_code`
-    * field. The LM is instructed to emit fenced code, but it sometimes
-    * emits the raw snippet — both shapes are accepted. */
-  private def extractCode(raw: String): Option[String] =
-    val trimmed = raw.trim
-    CodeAct.FencedBlock.findFirstMatchIn(trimmed) match
-      case Some(m) => Some(m.group(1).trim)
-      case None    =>
-        if trimmed.nonEmpty then Some(trimmed) else None
 
   private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
     DynamicValues.recordGet(values, "reasoning") match
@@ -318,6 +348,35 @@ object CodeAct:
   /** Matches a fenced code block, optionally tagged ```python. Captures the
     * snippet body in group 1. Multiline-aware. */
   private val FencedBlock: Regex = """(?s)```(?:python|py)?\s*\n?(.*?)```""".r
+
+  private val LastLineAssignment: Regex = """^(\w+)\s*=""".r
+
+  /** Parse the LM's `generated_code` field — a port of upstream's `_parse_code` (shared by PoT/CodeAct):
+    * cut at `---` / triple-newline, strip the code fence, reject empty code and the single-line-multiple-`=`
+    * shape ("Code format is not correct."), and when the LAST line is a bare assignment append the assigned
+    * variable as a trailing expression (so REPL-style evaluation echoes it). Delta: our fence regex also
+    * accepts ```py and UNTAGGED fences (upstream only matches ```python and otherwise leaves the backticks
+    * in the code — a wart, not a behavior to reproduce). */
+  private[programs] def parseCode(raw: String): Either[String, String] =
+    val pre       = raw.split("---", 2)(0).split("\n\n\n", 2)(0).trim
+    val codeBlock = FencedBlock.findFirstMatchIn(pre).map(_.group(1).trim).getOrElse(pre)
+    if codeBlock.isEmpty then Left("Empty code after parsing.")
+    else if !codeBlock.contains("\n") && codeBlock.count(_ == '=') > 1 then Left("Code format is not correct.")
+    else
+      val lines = codeBlock.split("\n", -1)
+      LastLineAssignment.findPrefixMatchOf(lines.last.trim) match
+        case Some(m) if lines.length > 1 => Right(codeBlock + "\n" + m.group(1))
+        case _                           => Right(codeBlock)
+
+  /** Render one tool for the instruction list — upstream `Tool.__str__`: name, `<desc>`-wrapped description
+    * (newlines flattened), and the argument schema. Args render as `{name: wireType, …}` from
+    * [[dspy4s.programs.contracts.ToolFunction.argSchema]] (upstream renders its JSON-schema dict). */
+  private[programs] def renderTool(tool: dspy4s.programs.contracts.ToolFunction): String =
+    val desc =
+      if tool.description.nonEmpty then s", whose description is <desc>${tool.description.replace("\n", "  ")}</desc>."
+      else "."
+    val args = tool.argSchema.map { case (name, typeRef) => s"$name: ${typeRef.repr}" }.mkString("{", ", ", "}")
+    s"${tool.name}$desc It takes arguments $args."
 
   /** One step in the CodeAct trajectory. `code` is what we ran; `observation`
     * is either the captured stdout (success) or an explanation of what

@@ -246,3 +246,104 @@ class CodeActSuite extends FunSuite:
       assertEquals(result.map(dspy4s.core.contracts.DynamicValues.renderText), Right("sunny in Paris"))
     }
   }
+
+  // ── Parity fixes: tools-in-prompt, parse semantics, truncation ──────────
+
+  private def weatherTool: dspy4s.programs.contracts.ToolFunction = new dspy4s.programs.contracts.ToolFunction:
+    override val name: String        = "get_weather"
+    override val description: String = "Look up the weather\nfor a city"
+    override def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] =
+      Vector("city" -> dspy4s.core.contracts.TypeRef.string)
+    override def invoke(args: zio.blocks.schema.DynamicValue.Record)(using RuntimeContext) =
+      Right(dspy4s.core.contracts.DynamicValues.fromAny("sunny"))
+
+  test("CodeAct: tools are listed in the codeact instructions (numbered, desc-wrapped, with args)") {
+    val signature = Signature.fromString("question -> answer")
+    val program = CodeAct(
+      baseSignature = signature,
+      interpreter = new RecordingInterpreter(Vector(Right(CodeResult("", "", 0)))),
+      tools = Vector(weatherTool)
+    )
+    val instructions = program.codeActSignature.instructions.getOrElse("")
+    assert(instructions.contains("and the following functions:"), instructions)
+    assert(instructions.contains("(1) get_weather, whose description is <desc>Look up the weather  for a city</desc>."), instructions)
+    assert(instructions.contains("It takes arguments {city: string}."), instructions)
+
+    // Without tools, the library line stays bare (no dangling "following functions").
+    val bare = CodeAct(baseSignature = signature, interpreter = new RecordingInterpreter(Vector(Right(CodeResult("", "", 0)))))
+    assert(bare.codeActSignature.instructions.getOrElse("").endsWith("You have access to the Python Standard Library."))
+  }
+
+  test("CodeAct: a parse failure consumes the iteration and IGNORES finished (upstream `continue` semantics)") {
+    val signature = Signature.fromString("q -> answer")
+    val interpreter = new RecordingInterpreter(Vector(Right(CodeResult(stdout = "ok\n", stderr = "", exitCode = 0))))
+    // Iteration 1: empty code WITH finished=true — must NOT stop. Iteration 2: real code, finished=true.
+    val lm = new ScriptedLm(Vector("||true", "```python\nprint('ok')\n```||true", "done"))
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = program.apply((q = "x"))
+      assert(result.isRight, result.toString)
+      // Only iteration 2's snippet reached the interpreter — the loop continued past the "finished" parse failure.
+      assertEquals(interpreter.received.toList, List("print('ok')"))
+      val trajectory = result.toOption.get.raw.asString("trajectory").toOption.getOrElse("")
+      assert(trajectory.contains("Failed to parse the generated code"), trajectory)
+    }
+  }
+
+  test("CodeAct.parseCode ports upstream _parse_code: format checks, separators, trailing-assignment echo") {
+    // Empty.
+    assertEquals(CodeAct.parseCode("```python\n\n```"), Left("Empty code after parsing."))
+    // Single line with multiple '=' (upstream's "format is not correct").
+    assertEquals(CodeAct.parseCode("a=1; b=2"), Left("Code format is not correct."))
+    // Cut at --- and triple newline.
+    assertEquals(CodeAct.parseCode("print(1)\n---\ngarbage"), Right("print(1)"))
+    assertEquals(CodeAct.parseCode("print(1)\n\n\ngarbage"), Right("print(1)"))
+    // Trailing bare assignment gets the variable echoed (multi-line only).
+    assertEquals(CodeAct.parseCode("y = 2\nx = y + 1"), Right("y = 2\nx = y + 1\nx"))
+    assertEquals(CodeAct.parseCode("x = 1"), Right("x = 1")) // single-line: no echo
+    // Fences: tagged and untagged both accepted (delta from upstream, which only matches ```python).
+    assertEquals(CodeAct.parseCode("```py\nprint(2)\n```"), Right("print(2)"))
+    assertEquals(CodeAct.parseCode("```\nprint(3)\n```"), Right("print(3)"))
+  }
+
+  test("CodeAct: extractor truncates the oldest iteration and retries on a context-window overflow") {
+    val signature = Signature.fromString("q -> answer")
+    val interpreter = new RecordingInterpreter(Vector(Right(CodeResult(stdout = "ok\n", stderr = "", exitCode = 0))))
+
+    // LM: two codeact iterations, then the extractor — whose FIRST call overflows the context window.
+    val extractorCalls = ArrayBuffer.empty[String] // rendered trajectory per extractor call
+    object TruncationAdapter extends Adapter:
+      override val name: String = "truncation-probe"
+      override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+        if !invocation.layout.outputFields.exists(_.name == "generated_code") then
+          dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")
+            .map(dspy4s.core.contracts.DynamicValues.renderText).foreach(extractorCalls += _)
+        Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
+      override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+        ScriptedAdapter.parse(layout, output)
+
+    final class CwFailingLm extends LanguageModel:
+      private val idx = new AtomicInteger(0)
+      override val id: String = "cw-lm"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        idx.getAndIncrement() match
+          case 0 => Right(LmResponse(outputs = Vector(LmOutput(text = "```python\nprint('one')\n```||false"))))
+          case 1 => Right(LmResponse(outputs = Vector(LmOutput(text = "```python\nprint('two')\n```||true"))))
+          case 2 => Left(dspy4s.core.contracts.ContextWindowExceededError(model = Some("cw-lm")))
+          case _ => Right(LmResponse(outputs = Vector(LmOutput(text = "final"))))
+
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new CwFailingLm), adapter = Some(TruncationAdapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = program.apply((q = "x"))
+      assert(result.isRight, result.toString)
+
+      // Two extractor attempts: the full trajectory, then the truncated retry (oldest iteration dropped).
+      assertEquals(extractorCalls.size, 2)
+      assert(extractorCalls(0).contains("Iteration 1") && extractorCalls(0).contains("Iteration 2"), extractorCalls(0))
+      assert(!extractorCalls(1).contains("Iteration 1") && extractorCalls(1).contains("Iteration 2"), extractorCalls(1))
+    }
+  }

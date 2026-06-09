@@ -68,12 +68,15 @@ object Cheatsheet:
     ReAct(baseSignature = Signature.of[BasicQA], tools = Vector.empty).apply((question = question)).map(_.output.answer)
 
   // ── Snippet 6 (lines 68–82) — ColBERTv2 retriever + dspy.Retrieve ──
-  // Not portable: dspy4s has no retrieval subsystem (`dspy.ColBERTv2` / `dspy.Retrieve`).
+  // The legacy `dspy.ColBERTv2` / `dspy.Retrieve` global-RM path is deliberately not ported; the modern
+  // embedding retrieval track IS: `Embedder`/`OpenAiEmbedder` (lm), `KNN`/`EmbeddingsRetriever`
+  // (programs.retrievers), `KNNFewShot` (optimize). See PORT_GAPS G-10.
 
   // ── Snippet 7 (lines 86–98) — CodeAct ──
   // | def factorial(n): ...; act = CodeAct("n -> factorial", tools=[factorial]); act(n=5)  # 120
-  // dspy4s CodeAct generates+runs Python through a `CodeInterpreter`; it has no user-`tools` parameter
-  // (the model writes the factorial itself), so the `tools=[factorial]` argument has no analogue.
+  // dspy4s CodeAct generates+runs Python through a `CodeInterpreter`. `tools` exist too: pass ToolFunctions
+  // (listed in the prompt) and, on a sandboxed DenoPyodideInterpreter, wire `program.sandboxTools` into the
+  // interpreter so generated Python can call them. Here the model just writes the factorial itself.
   def codeAct(n: Int)(using RuntimeContext): Either[DspyError, String] =
     CodeAct(Signature.fromString("n: int -> factorial"), interpreter = new SubprocessPythonInterpreter())
       .apply((n = n)).map(_.output.factorial)
