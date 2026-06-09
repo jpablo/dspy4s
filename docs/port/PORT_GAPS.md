@@ -494,7 +494,26 @@ Add a constraint vocabulary to `FieldSpec` and render it. Tier 1.
 
 ## G-10 — No `Embedder` + retrievers track (gates `KNN`/`KNNFewShot`)
 
-**Status:** Open
+**Status:** Resolved — the track is ported across three layers:
+
+- **`Embedder`** (`lm/contracts`): one batched contract (texts in → one embedding row per text), the
+  vectorization counterpart of `LanguageModel`. `Embedder.fromFunction` lifts a custom batch function
+  (upstream's callable-model path); `Embedder.cached` memoizes per text. **`OpenAiEmbedder`**
+  (`lm/providers`): `POST /embeddings` over the existing `HttpTransport`/`DynamicJson` stack, with
+  `batchSize` splitting (upstream default 200), index-ordered rows, and the context-window 400 mapped to
+  `ContextWindowExceededError`.
+- **`KNN`** + **`EmbeddingsRetriever`** (`programs.retrievers`): KNN serializes INPUT fields as
+  `"key: value | …"`, embeds the trainset eagerly, scores queries by raw dot product (upstream's plain
+  `np.dot`). EmbeddingsRetriever is the in-memory corpus retriever (cosine by default). Documented deltas:
+  brute force only (no JVM FAISS; upstream brute-forces under its 20k threshold anyway) and synchronous
+  search (upstream's `Unbatchify` is a concurrency optimization).
+- **`KNNFewShot`** (`optimize`): per-call dynamic few-shot — retrieve the query's k nearest trainset
+  examples, `BootstrapFewShot` them onto the student as demos, run the result. Delta: upstream
+  monkey-patches `forward` on a student copy; dspy4s programs are immutable, so `compile` returns a
+  `KNNFewShotProgram` wrapper module (not a `Teleprompter`).
+
+Deliberately NOT ported: `dspy.retrievers.retrieve` (the legacy `dspy.Retrieve`/global-RM path) and the
+vendor RMs (`weaviate_rm`, `databricks_rm`) — vendor integrations out of scope.
 
 **Summary.** There is no `Embedder` or retriever abstraction, which gates `KNN`
 and `KNNFewShot`.
