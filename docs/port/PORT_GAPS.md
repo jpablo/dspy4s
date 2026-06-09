@@ -928,10 +928,14 @@ benchmark wrappers that parse the standard distribution files. Tier 3.
 
 ## G-22 — Single LM provider (OpenAI); no Anthropic / Ollama / router
 
-**Status:** Open
+**Status:** Open — **(1) the OpenAI-compatible route is done**; (2) the Anthropic provider remains.
 
-**Summary.** dspy4s ships one provider (`OpenAiLanguageModel` + `OpenAiEmbedder`). Upstream reaches
-every provider via LiteLLM.
+**Resolution (part 1).** The `baseUrl` route for OpenAI-compatible servers is now first-class and
+documented: `OpenAiLanguageModel.fromEnv` takes a `baseUrl` (env-keyed compatible servers — Azure,
+OpenRouter); `OpenAiLanguageModel.local` / `OpenAiEmbedder.local` are the no-environment, no-key
+constructors for local servers that don't check credentials (Ollama `:11434/v1`, vLLM `:8000/v1`,
+LM Studio `:1234/v1` — a placeholder bearer token is still sent, since the wire format requires the
+header). The `learn/programming/LanguageModels` example shows the Ollama route.
 
 ### Python reference
 
@@ -939,18 +943,16 @@ every provider via LiteLLM.
 
 ### dspy4s current state
 
-OpenAI-compatible HTTP only (which does cover OpenAI-compatible servers, including Ollama's
-`/v1` endpoint, by overriding `baseUrl` — undocumented). No Anthropic Messages-API provider; no
-provider router.
+OpenAI-compatible HTTP, with the compatible-server route documented and constructor-supported (part 1
+above). No Anthropic Messages-API provider; no provider router.
 
 ### Why it matters
 
-Provider lock-in for users; Anthropic models are unreachable except through OpenAI-compatible proxies.
+Anthropic models are unreachable except through OpenAI-compatible proxies.
 
 ### Proposed direction
 
-(1) Document the `baseUrl` route for OpenAI-compatible servers (Ollama, vLLM). (2) Add an
-`AnthropicLanguageModel` on the existing `HttpTransport`/`LanguageModel` seams (Messages API,
+Add an `AnthropicLanguageModel` on the existing `HttpTransport`/`LanguageModel` seams (Messages API,
 tool-use mapping). A LiteLLM-style universal router is a non-goal. Tier 2.
 
 ---

@@ -130,3 +130,24 @@ class OpenAiLanguageModelSuite extends FunSuite:
     val request = LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("hi"))))
     assert(lm.call(request).isRight)
   }
+
+  test("local builds a keyless provider against an OpenAI-compatible base URL (placeholder bearer token)") {
+    val lm = OpenAiLanguageModel.local("llama3.2", baseUrl = "http://localhost:11434/v1")
+    assertEquals(lm.id, "llama3.2")
+    assertEquals(lm.client.baseUrl, "http://localhost:11434/v1")
+    assertEquals(lm.client.apiKey, "local") // placeholder; the server doesn't check it
+
+    val embedder = OpenAiEmbedder.local("nomic-embed-text", baseUrl = "http://localhost:11434/v1")
+    assertEquals(embedder.baseUrl, "http://localhost:11434/v1")
+    assertEquals(embedder.apiKey, "local")
+  }
+
+  test("fromEnv threads a custom baseUrl and still fails fast on a missing env var") {
+    val result = OpenAiLanguageModel.fromEnv(
+      "llama3.2",
+      baseUrl = "http://localhost:11434/v1",
+      envVar = "DSPY4S_TEST_UNSET_KEY"
+    )
+    assert(result.isLeft, "missing env var must fail fast")
+    assert(result.left.toOption.get.message.contains("DSPY4S_TEST_UNSET_KEY"))
+  }

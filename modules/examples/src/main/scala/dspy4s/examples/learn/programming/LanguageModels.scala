@@ -57,8 +57,17 @@ object LanguageModels:
   def openAiCompatible(model: String, apiKey: String, baseUrl: String): LanguageModel =
     OpenAiLanguageModel(model, apiKey, baseUrl, new JdkHttpTransport(timeoutMillis = 60000))
 
+  // Local servers that don't check credentials get a dedicated no-key constructor (a placeholder bearer token is
+  // still sent — the wire format requires the header). Common base URLs: Ollama http://localhost:11434/v1, vLLM
+  // http://localhost:8000/v1, LM Studio http://localhost:1234/v1. `fromEnv` also takes a `baseUrl`, for env-keyed
+  // OpenAI-compatible servers (Azure, OpenRouter, …).
+  // | lm = dspy.LM("ollama_chat/llama3.2", api_base="http://localhost:11434", api_key="")
+  def ollama(model: String = "llama3.2"): LanguageModel =
+    OpenAiLanguageModel.local(model, baseUrl = "http://localhost:11434/v1")
+
   // Gemini / Anthropic / Vertex AI / Databricks (and the rest of the LiteLLM matrix) have no dspy4s provider
-  // and are out of scope — only OpenAI-compatible endpoints are supported.
+  // and are out of scope — only OpenAI-compatible endpoints are supported. (An Anthropic provider is tracked as
+  // PORT_GAPS G-22.)
 
   // ── Calling the LM directly (lines 148–155) ──
   // | lm("Say this is a test!", temperature=0.7)

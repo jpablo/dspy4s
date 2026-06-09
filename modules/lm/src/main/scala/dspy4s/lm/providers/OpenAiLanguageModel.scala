@@ -89,6 +89,23 @@ object OpenAiLanguageModel:
     )
 
   /** Construct a provider by reading the API key from the environment. Returns a `Left(RuntimeError("openai_config", ...))`
-    * when `envVar` is unset or empty, so callers fail fast with a clear message instead of a 401 at first call. */
-  def fromEnv(model: String, envVar: String = "OPENAI_API_KEY"): Either[DspyError, OpenAiLanguageModel] =
-    OpenAiClient.fromEnv(envVar = envVar).map(client => OpenAiLanguageModel(model = model, client = client))
+    * when `envVar` is unset or empty, so callers fail fast with a clear message instead of a 401 at first call.
+    *
+    * `baseUrl` points the provider at any OpenAI-compatible server (Azure, Ollama, vLLM, LM Studio, OpenRouter,
+    * …); the default is the real OpenAI API. For local servers that don't check credentials the env var still
+    * must be set to SOMETHING non-empty (e.g. `OPENAI_API_KEY=local`) — or skip the environment entirely with
+    * [[local]]. */
+  def fromEnv(
+      model: String,
+      baseUrl: String = OpenAiClient.defaultBaseUrl,
+      envVar: String = "OPENAI_API_KEY"
+  ): Either[DspyError, OpenAiLanguageModel] =
+    OpenAiClient.fromEnv(base = baseUrl, envVar = envVar).map(client => OpenAiLanguageModel(model = model, client = client))
+
+  /** Construct a provider for a LOCAL OpenAI-compatible server that does not check credentials — the
+    * no-environment, no-key route. Common base URLs: Ollama `http://localhost:11434/v1`, vLLM
+    * `http://localhost:8000/v1`, LM Studio `http://localhost:1234/v1`. A placeholder bearer token is still sent
+    * (the wire format requires the header); servers that DO check credentials need [[apply]] / [[fromEnv]] with
+    * a real key. */
+  def local(model: String, baseUrl: String, apiKey: String = "local"): OpenAiLanguageModel =
+    OpenAiLanguageModel(model = model, client = OpenAiClient(apiKey = apiKey, baseUrl = baseUrl))

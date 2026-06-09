@@ -97,7 +97,8 @@ final case class OpenAiEmbedder(
   private def asInt(dv: DynamicValue): Option[Int] = asFloat(dv).map(_.toInt)
 
 object OpenAiEmbedder:
-  /** Build from `OPENAI_API_KEY` (or `envVar`), mirroring [[OpenAiLanguageModel.fromEnv]]. */
+  /** Build from `OPENAI_API_KEY` (or `envVar`), mirroring [[OpenAiLanguageModel.fromEnv]]. `baseUrl` points at
+    * any OpenAI-compatible server's `/embeddings` endpoint. */
   def fromEnv(
       model: String,
       baseUrl: String = OpenAiClient.defaultBaseUrl,
@@ -106,3 +107,8 @@ object OpenAiEmbedder:
     sys.env.get(envVar) match
       case Some(value) if value.nonEmpty => Right(OpenAiEmbedder(model = model, apiKey = value, baseUrl = baseUrl))
       case _ => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
+
+  /** Embedder against a LOCAL OpenAI-compatible server that does not check credentials (e.g. Ollama's
+    * `http://localhost:11434/v1`), mirroring [[OpenAiLanguageModel.local]]. */
+  def local(model: String, baseUrl: String, apiKey: String = "local"): OpenAiEmbedder =
+    OpenAiEmbedder(model = model, apiKey = apiKey, baseUrl = baseUrl)
