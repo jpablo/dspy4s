@@ -29,9 +29,9 @@ dspy4s consolidates and renames Python's top-level packages. The rationale colum
 | `adapters` | `adapters` | 1:1. |
 | `streaming` | `streaming` | 1:1. |
 | `utils` | folded into the modules that use them | See [§3 Consolidations](#3-consolidations). dspy4s deliberately avoids a catch-all utility namespace. |
-| `retrievers` | — | Not ported yet (Tier 1+). |
-| `datasets` | — | Not ported yet (Tier 1+). |
-| `propose` | folded into `optimize` | Partially ported: `GroundedProposer` (LM instruction proposer) lives in `modules/optimize/.../propose/`, backing COPRO/MIPROv2. Remaining pieces (program-source `DescribeProgram`, iterative dataset-summary refinement) deferred. |
+| `retrievers` | `lm` (`Embedder`) + `programs.retrievers` | ✅ ported (G-10): `Embedder` contract + `OpenAiEmbedder` in `lm`; `KNN` + `EmbeddingsRetriever` in `programs.retrievers`; `KNNFewShot` in `optimize`. Deliberately skipped: the legacy `dspy.Retrieve`/global-RM path and the vendor RMs (`weaviate_rm`, `databricks_rm`). |
+| `datasets` | — | Not ported (PORT_GAPS G-21). |
+| `propose` | folded into `optimize` | Partially ported: `GroundedProposer` (LM instruction proposer) lives in `modules/optimize/.../propose/`, backing COPRO/MIPROv2. Remaining pieces (program-source `DescribeProgram`, iterative dataset-summary refinement) deferred (PORT_GAPS G-18). |
 | `dsp` | — | Intentional skip. Legacy + ColBERTv2; upstream is deprecating. |
 | `experimental` | — | Empty in upstream; nothing to port. |
 
@@ -61,17 +61,18 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `chain_of_thought.py` | `ChainOfThought.scala` | ✅ ported |
 | `react.py` | `ReAct.scala` | ✅ ported |
 | `best_of_n.py` | `BestOfN.scala` | ✅ ported |
-| `refine.py` | `Refine.scala` | ✅ ported (v1, commit `ddecaf2`). Full `OfferFeedback` advice/feedback loop: sub-threshold attempts generate LM advice grounded in the runtime trace + I/O + reward, injected as a `hint_` input into the next attempt via `HintInjectingAdapter`. v1 delta: a single advice string is injected uniformly vs Python's per-module advice `dict` — per-module advice (the natural follow-up) needs the `Predictors` named-predictor machinery. See [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop) (G-5 Resolved). |
+| `refine.py` | `Refine.scala` | ✅ ported. Full `OfferFeedback` advice/feedback loop (v1, commit `ddecaf2`) **with per-module advice** (G-5 v2, commit `24e89b2`): `OfferFeedback` emits a JSON advice dict keyed by named predictor (`Predictors.readNamed`), and `HintInjectingAdapter` routes each predictor's OWN advice to its `hint_` (matched by `SignatureLayout` — the stand-in for Python's `signature2name` object-identity routing). See [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop) (G-5 Resolved). |
 | `parallel.py` | `Parallel.scala` | ✅ ported |
 | `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
 | `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, typed `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is a bespoke `MultiChainCall[I]` (base input + candidate completions); `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
 | `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s optimizers use the `Predictors[P]` / `Predictor[P]` typeclass pair instead (Scala 3 Mirror derivation enumerates and immutably replaces the contained predictors; reads `demos` / `layout` / `config` / instructions directly), so the generic reflective walk has no consumer. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed; the interim `PredictOps` typeclass was itself superseded and removed in G-1 P6 (commit `1657f9c`), leaving `Predictors` as the sole introspection typeclass. |
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
-| `knn.py` | — | Deferred — depends on retrievers / embedders, neither of which is ported. |
+| `knn.py` | `programs/retrievers/KNN.scala` | ✅ ported (G-10, commit `086e937`) — input-fields-only serialization, eager trainset embedding, raw-dot-product top-k. |
 | `code_act.py` | `CodeAct.scala` | ✅ scaffolded. Iteration loop + fenced-code extraction + extractor wired up. Tools-inside-code (Scala↔Python RPC) is deferred — Python `CodeAct` lets users pass Python-callable Scala tools; that bridge needs the Deno+Pyodide infrastructure. v1 users either pre-load tools into their `CodeInterpreter` env, or use it without tools. |
 | `program_of_thought.py` | `ProgramOfThought.scala` | ✅ ported. Three `ChainOfThought` passes: `generate` → `regenerate` (on execution error, up to `maxIterations`) → `answer`. Caller-owned interpreter lifecycle. Behavioral delta: Python preloads a `SUBMIT(...)` function via Pyodide; dspy4s instructs the LM to **print** its JSON result instead, since the default subprocess interpreter doesn't have a SUBMIT mechanism. Functionally equivalent for the common case; explicit `SUBMIT` returns when Deno+Pyodide lands. |
-| `rlm.py` | — | Deferred — uses Deno+Pyodide JSON-RPC + tool-callback bridge; that infrastructure isn't built yet. The `CodeInterpreter` trait is the contract it'll plug into. |
-| `avatar/` | — | Deferred — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat. Separate session. |
+| `rlm.py` | — | Deferred (PORT_GAPS G-20) — uses Deno+Pyodide JSON-RPC + tool-callback bridge; that infrastructure isn't built yet. The `CodeInterpreter` trait is the contract it'll plug into. |
+| `react_v2.py` | — | Deferred (PORT_GAPS G-19) — upstream's `@experimental` native-tool-calling ReAct; wait for it to stabilize, then port over the G-7b adapter seams. The existing `ReAct` deliberately stays text-protocol. |
+| `avatar/` | — | Deferred (PORT_GAPS G-14, together with `AvatarOptimizer`) — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat; possibly `Won't fix` if upstream deprecates it. |
 
 ---
 
@@ -87,9 +88,19 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   documented in `MIPROv2.scala`.
 - **`GroundedProposer` (Python `propose/`).** ✅ ported (v1, commit `c27760c`) — LM instruction proposer grounded
   in a dataset summary + demos; backs COPRO/MIPROv2.
-- All of the above build on the **G-1** enablers (`Predictors`/`Predictor` introspection, `Runnable` typed spine,
-  instruction editing) + `Evaluate`. **Still deferred:** `GEPA`, `SIMBA`, `GRPO`, `AvatarOptimizer`,
-  `BetterTogether`, `BootstrapFewShotWithOptuna`, `InferRules`, and the remaining `propose` pieces.
+- **`GEPA`.** ✅ ported (G-12) — full Genetic-Pareto reflective prompt evolution in `modules/gepa`
+  (`dspy4s-gepa`): reflective mutation + instance-Pareto selection, round-robin/all component selection,
+  epoch-shuffled minibatch, merge crossover, eval cache, run-dir resume, opt-in perfect-score early stop;
+  live-model validated. Multi-objective frontiers deliberately not ported (dspy's metric is scalar).
+- **`InferRules`.** ✅ ported (G-11, commit `81ffec1`) — induces natural-language rules from the trainset and
+  appends them to each predictor's instructions; composes `BootstrapFewShot`.
+- **`KNNFewShot`.** ✅ ported (G-10, commit `20a829f`) — per-call dynamic few-shot via `KNN` retrieval +
+  `BootstrapFewShot`. Delta: returns a `KNNFewShotProgram` wrapper module (Python monkey-patches `forward`;
+  dspy4s programs are immutable), so it is not a `Teleprompter`.
+- All of the above build on the **G-1** enablers (`Predictors`/`Predictor` introspection — relocated to
+  `programs` for G-5 v2 — `Runnable` typed spine, instruction editing) + `Evaluate`. **Still deferred:**
+  `SIMBA` (G-13), `AvatarOptimizer` (G-14), `BetterTogether` (G-15), `GRPO`/`BootstrapFinetune` (G-16),
+  `BootstrapFewShotWithOptuna` (G-17), and the remaining `propose` pieces (G-18).
 
 ### Metrics (`evaluate`)
 

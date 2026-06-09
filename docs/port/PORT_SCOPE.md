@@ -69,13 +69,20 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
   `Teleprompter` parameter introspection (see PORT_LANGUAGE_NOTES)
 
 ## Explicitly Deferred (post-v1)
-- `Ensemble`, `KNNFewShot` (Phase 7 v2 — see PORT_BACKLOG)
-- `GEPA`, `MIPROv2`, `SIMBA`, `GRPO`, `AvatarOptimizer`, full optimizer surface
-- `Retrieve` abstraction and retrieval integration contract; embedders / `Embedder`
+
+> Post-v1 progress note: most of this list has since shipped — `Ensemble`,
+> `KNNFewShot`, `GEPA`, `MIPROv2`, `Embedder` + the retrievers track, `InferRules`,
+> `COPRO` are all ported (see PORT_GAPS G-10/G-11/G-12 and PORT_MAP). What genuinely
+> remains is tracked as PORT_GAPS **G-13..G-22**:
+
+- `SIMBA` (G-13), `AvatarOptimizer` (G-14), `BetterTogether` (G-15),
+  `BootstrapFewShotWithOptuna` (G-17), `propose` remainder (G-18)
+- `GRPO` / `BootstrapFinetune` and provider fine-tuning / local SFT stack (G-16)
+- `ReActV2` — upstream experimental native-tool-calling ReAct (G-19)
 - `RLM` and the sandboxed Deno + Pyodide interpreter behind
-  `ProgramOfThought` / `CodeAct` (the contract trait `CodeInterpreter`
+  `ProgramOfThought` / `CodeAct` (G-20; the contract trait `CodeInterpreter`
   exists; only a plain `python3 -c "..."` subprocess impl ships today)
-- Provider-specific fine-tuning implementations (`databricks`, local SFT stack)
+- `datasets` module (G-21); LM providers beyond OpenAI — Anthropic/Ollama (G-22)
 - Full multimodal reliability matrix and all generated reliability suites
 - Binary compatibility with Python `cloudpickle` artifacts
 

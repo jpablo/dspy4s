@@ -665,6 +665,296 @@ spine). Tier 2.
 
 ---
 
+## G-13 — `SIMBA` optimizer not ported
+
+**Status:** Open
+
+**Summary.** `dspy.SIMBA` (Stochastic Introspective Mini-Batch Ascent) is unported.
+
+### Python reference
+
+`dspy/teleprompt/simba.py` (+ `simba_utils.py`, ~450 lines, exported as `dspy.SIMBA`). Samples train
+mini-batches, runs candidate programs over them at varied temperatures, identifies challenging examples
+(high score variance across candidates), and applies one of two self-improvement strategies per round:
+`append_a_demo` (attach a successful trajectory as a demo) or `append_a_rule` (LM-introspect a
+failure→success pair into an instruction rule). Soft dependency on numpy (`require("numpy")` — softmax
+sampling, easily replaced).
+
+### dspy4s current state
+
+Not ported.
+
+### Why it matters
+
+Part of the exported optimizer surface; the demo+rule dual strategy is distinct from both COPRO/MIPRO
+(instruction search) and GEPA (reflective evolution).
+
+### Proposed direction
+
+Port on the existing spine (`Predictors`, `Runnable`, `Evaluate`, per-module trace). The trajectory
+capture GEPA added (failure traces, per-component association) covers SIMBA's introspection needs; the
+numpy softmax is a few lines of Scala. Tier 2.
+
+---
+
+## G-14 — `AvatarOptimizer` (and the `Avatar` actor program) not ported
+
+**Status:** Open
+
+**Summary.** `dspy.AvatarOptimizer` optimizes tool-using agents by contrasting positive/negative
+examples — but it operates on the `Avatar` actor program, which is also unported.
+
+### Python reference
+
+`dspy/teleprompt/avatar_optimizer.py` (~220 lines) + `dspy/predict/avatar/` (the `Avatar` tool-using
+actor module with its own `ActionOutput` types). The optimizer evaluates the actor on a trainset, splits
+results into positive/negative by score, and uses a `Comparator` signature to LM-generate instruction
+feedback (including tool-usage modifications).
+
+### dspy4s current state
+
+Neither `Avatar` nor `AvatarOptimizer` is ported. (ReAct/CodeAct cover the tool-agent space; `Avatar` is
+a distinct legacy actor design.)
+
+### Why it matters
+
+Exported optimizer surface. Low priority: `Avatar` is largely superseded by ReAct-style agents upstream.
+
+### Proposed direction
+
+Decide deliberately: either port `Avatar` + `AvatarOptimizer` together (the optimizer is meaningless
+without the actor), or mark `Won't fix (by design)` if upstream deprecates `Avatar`. Tier 3; revisit
+after observing upstream direction.
+
+---
+
+## G-15 — `BetterTogether` meta-optimizer not ported
+
+**Status:** Open
+
+**Summary.** `dspy.BetterTogether` alternates prompt optimization and weight optimization (fine-tuning)
+in a configurable sequence (e.g. "p -> w -> p").
+
+### Python reference
+
+`dspy/teleprompt/bettertogether.py` (~630 lines). Composes `BootstrapFewShotWithRandomSearch` (prompt
+arm) and `BootstrapFinetune` (weight arm).
+
+### dspy4s current state
+
+Not ported. The prompt arm exists (`BootstrapFewShotWithRandomSearch`); the weight arm is gated on the
+fine-tuning track (G-16).
+
+### Why it matters
+
+Exported optimizer surface; the headline "prompts + weights beat either alone" recipe.
+
+### Proposed direction
+
+Blocked on G-16 (fine-tuning). Once `BootstrapFinetune` exists, the composition itself is small. Tier 3.
+
+---
+
+## G-16 — Fine-tuning / RL track (`BootstrapFinetune`, `GRPO`, provider training APIs) not ported
+
+**Status:** Open
+
+**Summary.** The whole weight-optimization track is unported: `BootstrapFinetune` (SFT on bootstrapped
+traces), `GRPO` (RL policy optimization), `bootstrap_trace` data collection, and the provider-side
+fine-tuning/reinforcement APIs they call.
+
+### Python reference
+
+`dspy/teleprompt/bootstrap_finetune.py` (~320 lines), `dspy/teleprompt/grpo.py` (~640 lines),
+`dspy/teleprompt/bootstrap_trace.py`; provider training surfaces in `dspy/clients/` (OpenAI/Databricks
+fine-tune jobs, local training stack via `LocalProvider`).
+
+### dspy4s current state
+
+Nothing on this track. dspy4s optimizers are prompt-space only.
+
+### Why it matters
+
+It's the other half of program optimization (weights, not prompts), and gates G-15.
+
+### Proposed direction
+
+A major track, not a single gap: needs trace collection (partially exists via GEPA's failure-aware
+traces), a data-formatting layer, provider fine-tune job APIs, and job lifecycle management. Scope a
+spike before committing; OpenAI fine-tune jobs first if pursued. Tier 3.
+
+---
+
+## G-17 — `BootstrapFewShotWithOptuna` not ported
+
+**Status:** Open
+
+**Summary.** The Optuna-backed demo-subset search variant of random search is unported.
+
+### Python reference
+
+`dspy/teleprompt/teleprompt_optuna.py` (~90 lines) — `BootstrapFewShotWithRandomSearch` with Optuna TPE
+suggesting which bootstrapped-demo candidate each predictor uses.
+
+### dspy4s current state
+
+Not ported. `BootstrapFewShotWithRandomSearch` covers the same space with random search.
+
+### Why it matters
+
+Completeness only; the search-strategy delta is the same one already accepted for MIPROv2
+(random search instead of Optuna TPE, documented).
+
+### Proposed direction
+
+Either port with seeded random search over per-predictor demo choices (small), or fold into
+`BootstrapFewShotWithRandomSearch` as a config knob, or mark `Won't fix (by design)` citing the MIPROv2
+precedent. Tier 3.
+
+---
+
+## G-18 — `propose` remainder: `DescribeProgram` + iterative dataset-summary refinement
+
+**Status:** Open
+
+**Summary.** `GroundedProposer` shipped without two upstream grounding sources: program-source
+description (`DescribeProgram` — LM-summarize the program's code) and the iterative refinement loop for
+the dataset summary.
+
+### Python reference
+
+`dspy/propose/grounded_proposer.py` + `dspy/propose/dataset_summary_generator.py`.
+
+### dspy4s current state
+
+`GroundedProposer` v1 grounds in a dataset summary + demos. Program-source grounding is impossible
+as-is (no source introspection in Scala; the same delta documented for Refine's `OfferFeedback`); a
+structural program description (from `Predictors.readNamed` + layouts) is the feasible analogue.
+Summary refinement is just unimplemented.
+
+### Why it matters
+
+Proposal quality for COPRO/MIPROv2 on complex programs.
+
+### Proposed direction
+
+Add a layout-derived program description (signatures, field descriptions, instructions per named
+predictor) as the `DescribeProgram` analogue; add the summary-refinement rounds. Tier 3.
+
+---
+
+## G-19 — `ReActV2` (experimental native-tool-calling ReAct) not ported
+
+**Status:** Open
+
+**Summary.** Upstream added `dspy.ReActV2` (marked `@experimental`): a ReAct variant built on native
+function calling (`Tool`/`ToolCalls` adapter types) instead of the text protocol.
+
+### Python reference
+
+`dspy/predict/react_v2.py` (~250 lines).
+
+### dspy4s current state
+
+Not ported. dspy4s `ReAct` is the text-protocol port, per the G-7b decision (native function-calling is
+adapter-level; ReAct deliberately stays text — matching upstream `ReAct`). The adapter-level native
+tool-calling plumbing (G-7b: `ToolSchemaBridge`, `tool_calls` output, `ToolChoice`) already exists and
+is what ReActV2 builds on.
+
+### Why it matters
+
+Likely the future default agent loop upstream; the G-7b plumbing makes it a moderate port, not a
+foundational one.
+
+### Proposed direction
+
+Wait for it to stabilize upstream (it is explicitly experimental), then port over the G-7b seams. Do
+NOT rewire the existing `ReAct` (per the standing G-7b decision). Tier 2 once stable.
+
+---
+
+## G-20 — Sandboxed interpreter (Deno + Pyodide) and `RLM` not ported
+
+**Status:** Open
+
+**Summary.** `ProgramOfThought`/`CodeAct` run on a plain `python3 -c` subprocess; upstream's sandboxed
+Deno + Pyodide interpreter (JSON-RPC bridge, tool callbacks into the host) and `RLM` (which requires it)
+are unported.
+
+### Python reference
+
+`dspy/primitives/python_interpreter.py` (Deno/Pyodide), `dspy/predict/rlm.py` (~740 lines).
+
+### dspy4s current state
+
+`CodeInterpreter` contract exists with the subprocess impl only. `RLM` absent.
+
+### Why it matters
+
+Sandboxing (untrusted generated code) and the RLM program family.
+
+### Proposed direction
+
+The interpreter is a self-contained infra project (embed Deno+Pyodide or a GraalVM/JS sandbox
+alternative — decide deliberately which fits the JVM). RLM follows it. Tier 3.
+
+---
+
+## G-21 — `datasets` module not ported
+
+**Status:** Open
+
+**Summary.** No dataset loaders: upstream ships `DataLoader` (HF/CSV/JSON → `Example`s) plus benchmark
+wrappers (`HotPotQA`, `GSM8K`, `MATH`, `Colors`, `AlfWorld`).
+
+### Python reference
+
+`dspy/datasets/` (dataloader, dataset, gsm8k, hotpotqa, math, colors, alfworld).
+
+### dspy4s current state
+
+Nothing; tests/examples build `Example`s by hand.
+
+### Why it matters
+
+Benchmarking parity with upstream recipes (optimizer papers all report on these sets).
+
+### Proposed direction
+
+Port `DataLoader`'s CSV/JSON→`Example` core (no HF hub dependency; load from local files), then thin
+benchmark wrappers that parse the standard distribution files. Tier 3.
+
+---
+
+## G-22 — Single LM provider (OpenAI); no Anthropic / Ollama / router
+
+**Status:** Open
+
+**Summary.** dspy4s ships one provider (`OpenAiLanguageModel` + `OpenAiEmbedder`). Upstream reaches
+every provider via LiteLLM.
+
+### Python reference
+
+`dspy/clients/lm.py` (LiteLLM routing).
+
+### dspy4s current state
+
+OpenAI-compatible HTTP only (which does cover OpenAI-compatible servers, including Ollama's
+`/v1` endpoint, by overriding `baseUrl` — undocumented). No Anthropic Messages-API provider; no
+provider router.
+
+### Why it matters
+
+Provider lock-in for users; Anthropic models are unreachable except through OpenAI-compatible proxies.
+
+### Proposed direction
+
+(1) Document the `baseUrl` route for OpenAI-compatible servers (Ollama, vLLM). (2) Add an
+`AnthropicLanguageModel` on the existing `HttpTransport`/`LanguageModel` seams (Messages API,
+tool-use mapping). A LiteLLM-style universal router is a non-goal. Tier 2.
+
+---
+
 ## Recently resolved (this session)
 
 The following gaps were closed in the 3.1.3 → 3.2.1 port batches. They never had

@@ -231,18 +231,27 @@ Tracks:
   LM instruction proposer grounded in a dataset summary + demos; **`MIPROv2`** v1
   (9f51db8) — instruction+demo joint optimizer composing `BootstrapFewShot` +
   `GroundedProposer` + random search (deltas, notably random-search-vs-Optuna, documented
-  in `MIPROv2.scala`). All built on the G-1 enablers (`Predictors` introspection,
-  `Runnable` typed spine, instruction editing) + `Evaluate`. **Still deferred:** `GEPA`,
-  `SIMBA`, `GRPO`, `AvatarOptimizer`, `BetterTogether`, `BootstrapFewShotWithOptuna`,
-  `InferRules`, and the remaining `propose` pieces (program-source `DescribeProgram`,
-  iterative dataset-summary refinement).
-- **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM`.
+  in `MIPROv2.scala`); **`GEPA`** (G-12, `modules/gepa`) — full Genetic-Pareto reflective
+  prompt evolution (reflective mutation, Pareto frontier, merge crossover, eval cache,
+  resume; live-model validated); **`InferRules`** (G-11, 81ffec1) — trainset-derived
+  natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
+  per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
+  (`Predictors` introspection, `Runnable` typed spine, instruction editing) + `Evaluate`.
+  **Still deferred:** `SIMBA` (G-13), `AvatarOptimizer` (G-14), `BetterTogether` (G-15),
+  `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
+  remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative
+  dataset-summary refinement).
+- **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM` (G-20).
   ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
   with a plain `python3 -c "..."` subprocess interpreter; the sandboxed
   Deno + Pyodide bridge + JSON-RPC + tool-callback path is what's deferred.
   `RLM` itself depends on that bridge and is therefore also deferred.
-- Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)
-- Fine-tuning providers and local training stack
+- ~~Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)~~ **Shipped** (G-10):
+  `Embedder` + `OpenAiEmbedder` (lm), `KNN` + `EmbeddingsRetriever`
+  (programs.retrievers), `KNNFewShot` (optimize). Legacy `dspy.Retrieve`/vendor RMs
+  deliberately skipped.
+- Fine-tuning providers and local training stack (G-16)
+- Datasets module (G-21); additional LM providers — Anthropic/Ollama (G-22)
 - Broader multimodal/reliability suites
 
 ## Cross-Phase Engineering Rules
