@@ -75,14 +75,17 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 > `COPRO` are all ported (see PORT_GAPS G-10/G-11/G-12 and PORT_MAP). What genuinely
 > remains is tracked as PORT_GAPS **G-13..G-22**:
 
-- `SIMBA` (G-13), `AvatarOptimizer` (G-14), `BetterTogether` (G-15),
+- `SIMBA` (G-13), `BetterTogether` (G-15),
   `BootstrapFewShotWithOptuna` (G-17), `propose` remainder (G-18)
 - `GRPO` / `BootstrapFinetune` and provider fine-tuning / local SFT stack (G-16)
 - `ReActV2` — upstream experimental native-tool-calling ReAct (G-19)
 - `RLM` and the sandboxed Deno + Pyodide interpreter behind
   `ProgramOfThought` / `CodeAct` (G-20; the contract trait `CodeInterpreter`
   exists; only a plain `python3 -c "..."` subprocess impl ships today)
-- `datasets` module (G-21); LM providers beyond OpenAI — Anthropic/Ollama (G-22)
+- `datasets` module (G-21); the Anthropic LM provider (G-22 — the
+  OpenAI-compatible/Ollama route shipped as G-22 part 1)
+- `AvatarOptimizer` + `Avatar`: **Won't fix (by design)** (G-14 — not in
+  upstream's public API, undocumented, maintenance-only)
 - Full multimodal reliability matrix and all generated reliability suites
 - Binary compatibility with Python `cloudpickle` artifacts
 

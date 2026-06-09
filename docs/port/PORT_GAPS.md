@@ -699,10 +699,29 @@ numpy softmax is a few lines of Scala. Tier 2.
 
 ## G-14 — `AvatarOptimizer` (and the `Avatar` actor program) not ported
 
-**Status:** Open
+**Status:** Won't fix (by design)
 
 **Summary.** `dspy.AvatarOptimizer` optimizes tool-using agents by contrasting positive/negative
-examples — but it operates on the `Avatar` actor program, which is also unported.
+examples — but it operates only on the `Avatar` actor program, which upstream itself treats as
+vestigial.
+
+**Decision rationale (verified against the dspy 3.x checkout, 2026-06):**
+
+- **`Avatar` is not in the public API.** It is exported from neither `dspy/__init__.py` nor
+  `dspy/predict/__init__.py` — reachable only by deep import (`dspy.predict.avatar`). The optimizer is
+  exported while the only program it can optimize is not: a vestigial surface.
+- **No documentation.** `docs/docs/api/optimizers/` has a page for every other optimizer
+  (BetterTogether, SIMBA, InferRules, …) but none for `AvatarOptimizer`.
+- **No feature work.** The `avatar/` git history is purely mechanical maintenance (import style,
+  deprecated-arg cleanup); the tool-agent space upstream has moved to ReAct (and the experimental
+  `ReActV2`, G-19), both of which dspy4s ports.
+
+Porting would mean bringing over a legacy actor design (`Avatar` + `ActionOutput` types) solely to
+support an optimizer for it. dspy4s covers the same space with `ReAct`/`CodeAct` + the ported
+optimizer surface.
+
+**Revisit trigger:** if upstream re-exports/documents `Avatar` or ships an `AvatarOptimizer` that
+operates on ReAct-style agents, reopen.
 
 ### Python reference
 
@@ -713,18 +732,7 @@ feedback (including tool-usage modifications).
 
 ### dspy4s current state
 
-Neither `Avatar` nor `AvatarOptimizer` is ported. (ReAct/CodeAct cover the tool-agent space; `Avatar` is
-a distinct legacy actor design.)
-
-### Why it matters
-
-Exported optimizer surface. Low priority: `Avatar` is largely superseded by ReAct-style agents upstream.
-
-### Proposed direction
-
-Decide deliberately: either port `Avatar` + `AvatarOptimizer` together (the optimizer is meaningless
-without the actor), or mark `Won't fix (by design)` if upstream deprecates `Avatar`. Tier 3; revisit
-after observing upstream direction.
+Neither `Avatar` nor `AvatarOptimizer` is ported, by design (see decision rationale above).
 
 ---
 

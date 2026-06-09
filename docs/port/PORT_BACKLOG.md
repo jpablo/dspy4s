@@ -237,10 +237,11 @@ Tracks:
   natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
   per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
   (`Predictors` introspection, `Runnable` typed spine, instruction editing) + `Evaluate`.
-  **Still deferred:** `SIMBA` (G-13), `AvatarOptimizer` (G-14), `BetterTogether` (G-15),
+  **Still deferred:** `SIMBA` (G-13), `BetterTogether` (G-15),
   `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
   remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative
-  dataset-summary refinement).
+  dataset-summary refinement). `AvatarOptimizer` + `Avatar` are **Won't fix (by
+  design)** (G-14: not in upstream's public API, undocumented, maintenance-only).
 - **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM` (G-20).
   ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
   with a plain `python3 -c "..."` subprocess interpreter; the sandboxed

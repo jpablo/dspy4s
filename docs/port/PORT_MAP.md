@@ -72,7 +72,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `program_of_thought.py` | `ProgramOfThought.scala` | ✅ ported. Three `ChainOfThought` passes: `generate` → `regenerate` (on execution error, up to `maxIterations`) → `answer`. Caller-owned interpreter lifecycle. Behavioral delta: Python preloads a `SUBMIT(...)` function via Pyodide; dspy4s instructs the LM to **print** its JSON result instead, since the default subprocess interpreter doesn't have a SUBMIT mechanism. Functionally equivalent for the common case; explicit `SUBMIT` returns when Deno+Pyodide lands. |
 | `rlm.py` | — | Deferred (PORT_GAPS G-20) — uses Deno+Pyodide JSON-RPC + tool-callback bridge; that infrastructure isn't built yet. The `CodeInterpreter` trait is the contract it'll plug into. |
 | `react_v2.py` | — | Deferred (PORT_GAPS G-19) — upstream's `@experimental` native-tool-calling ReAct; wait for it to stabilize, then port over the G-7b adapter seams. The existing `ReAct` deliberately stays text-protocol. |
-| `avatar/` | — | Deferred (PORT_GAPS G-14, together with `AvatarOptimizer`) — agent-style program with tools and conversation history. Overlaps with `ReAct` somewhat; possibly `Won't fix` if upstream deprecates it. |
+| `avatar/` | — | **Won't fix (by design)** (PORT_GAPS G-14, together with `AvatarOptimizer`) — `Avatar` is not in upstream's public API (deep import only), has no docs page, and sees only mechanical maintenance; the tool-agent space is covered by `ReAct`/`CodeAct`. Reopen if upstream re-exports/documents it. |
 
 ---
 
@@ -99,8 +99,9 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   dspy4s programs are immutable), so it is not a `Teleprompter`.
 - All of the above build on the **G-1** enablers (`Predictors`/`Predictor` introspection — relocated to
   `programs` for G-5 v2 — `Runnable` typed spine, instruction editing) + `Evaluate`. **Still deferred:**
-  `SIMBA` (G-13), `AvatarOptimizer` (G-14), `BetterTogether` (G-15), `GRPO`/`BootstrapFinetune` (G-16),
+  `SIMBA` (G-13), `BetterTogether` (G-15), `GRPO`/`BootstrapFinetune` (G-16),
   `BootstrapFewShotWithOptuna` (G-17), and the remaining `propose` pieces (G-18).
+  `AvatarOptimizer` is **Won't fix (by design)** — see G-14.
 
 ### Metrics (`evaluate`)
 
