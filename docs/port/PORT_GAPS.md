@@ -560,9 +560,10 @@ predictors must improve — GEPA evolves both (per-component reflective datasets
 **Live-model validation done:** `gepaSmokeMain` (gpt-4o-mini) evolved the vague baseline "Answer the question."
 into a precise HAS_NUM/NO_NUM classifier, lifting the held-out validation score to 1.0 — the whole tower
 (`FeedbackMetric` → failure-aware traces → reflective dataset → reflection LM → Pareto loop) confirmed against a
-real LM. Remaining: epoch-shuffled minibatch, an early-stop once the frontier is perfect (the smoke run spent its
-post-convergence budget on `skipPerfectScore` minibatches), and v2 (merge, multi-objective frontiers, eval cache,
-resume).
+real LM. **Opt-in perfect-score early stop added** (`GepaConfig.stopOnPerfectScore`, default OFF to match
+upstream gepa's run-to-budget behavior; on, it halts once the best candidate is perfect on validation — the smoke
+harness enables it to avoid the post-convergence `skipPerfectScore` budget burn). Remaining: epoch-shuffled
+minibatch, and v2 (merge, multi-objective frontiers, eval cache, resume).
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
 fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).

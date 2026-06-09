@@ -83,6 +83,31 @@ class GepaEngineSuite extends FunSuite:
     }
   }
 
+  test("stopOnPerfectScore halts once the best candidate is perfect (opt-in; default runs to budget)") {
+    val adapter = new GepaAdapter(program, metric)
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val seedCandidate = Candidate.seed(program)
+
+      // Opt-in early stop: converges and halts well under the 40-call budget.
+      val stopping = new GepaEngine(adapter, new ReflectionLm,
+        GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, stopOnPerfectScore = true, seed = 1L))
+      val stopped = stopping.optimize(seedCandidate, trainset = dataset, valset = dataset)
+      assertEquals(stopped.bestScore, 1.0)
+      assert(stopped.totalMetricCalls < 40, s"early-stop should beat the budget; used ${stopped.totalMetricCalls}")
+
+      // Default (parity): no perfect-score stop, so it keeps spending the budget after convergence.
+      val running = new GepaEngine(adapter, new ReflectionLm,
+        GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L))
+      val ranToBudget = running.optimize(seedCandidate, trainset = dataset, valset = dataset)
+      assertEquals(ranToBudget.bestScore, 1.0)
+      assert(
+        ranToBudget.totalMetricCalls > stopped.totalMetricCalls,
+        s"default should run longer than early-stop: default=${ranToBudget.totalMetricCalls}, stop=${stopped.totalMetricCalls}"
+      )
+    }
+  }
+
   test("Gepa facade compiles a student end-to-end") {
     val gepa = new Gepa[DynamicPredict](metric, new ReflectionLm, GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {

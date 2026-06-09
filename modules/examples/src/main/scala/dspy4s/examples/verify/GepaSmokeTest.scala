@@ -101,7 +101,10 @@ object GepaSmokeTest:
 
         // GEPA uses the same model as both task LM (ambient) and reflection LM here; pass a stronger model as the
         // reflection LM in real use.
-        val gepa = new Gepa[DynamicPredict](metric, reflectionLm = lm, GepaConfig(maxMetricCalls = metricCalls, reflectionMinibatchSize = minibatchSize, seed = 0L))
+        // Opt in to the perfect-score early stop so the harness doesn't burn its post-convergence budget on
+        // skip-perfect minibatches (the library default is off, matching upstream gepa's run-to-budget behavior).
+        val gepa = new Gepa[DynamicPredict](metric, reflectionLm = lm,
+          GepaConfig(maxMetricCalls = metricCalls, reflectionMinibatchSize = minibatchSize, stopOnPerfectScore = true, seed = 0L))
 
         println(s"[gepa-smoke] model=$model  budget=$metricCalls metric calls  minibatch=$minibatchSize")
         println(s"""[gepa-smoke] task: HAS_NUM/NO_NUM   baseline instruction: "$vagueBaselineInstruction"""")

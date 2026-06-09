@@ -17,6 +17,11 @@ final case class GepaConfig(
     skipPerfectScore: Boolean = true,
     perfectScore: Double = 1.0,
     failureScore: Double = 0.0,
+    /** Opt-in efficiency stop: halt once the best candidate is perfect (mean validation score >= `perfectScore`),
+      * since nothing further can improve it. OFF by default to match upstream gepa, which has no perfect-score
+      * stopper and runs to the metric-call budget (its `perfect_score` only drives the per-minibatch
+      * `skipPerfectScore` skip). The budget (`maxMetricCalls`) is always an upper bound regardless. */
+    stopOnPerfectScore: Boolean = false,
     seed: Long = 0L
 )
 
@@ -50,7 +55,12 @@ final class GepaEngine[P](
     // Per-candidate round-robin pointer (which component to evolve next), threaded across iterations.
     var pointers = Map.empty[Int, Int]
 
-    while state.totalMetricCalls < config.maxMetricCalls do
+    // Opt-in: stop once the best candidate is already perfect on validation — further iterations can only re-discover
+    // it (and the budget would be spent on `skipPerfectScore` minibatches). Off by default for gepa parity.
+    def converged(s: GepaState): Boolean =
+      config.stopOnPerfectScore && s.aggregateScore(s.bestIndex) >= config.perfectScore
+
+    while state.totalMetricCalls < config.maxMetricCalls && !converged(state) do
       val (nextState, nextPointers) = iterate(state, pointers, trainset, valset, rng)
       state = nextState
       pointers = nextPointers
