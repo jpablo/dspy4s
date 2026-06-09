@@ -108,6 +108,45 @@ class GepaEngineSuite extends FunSuite:
     }
   }
 
+  /** A TaskLm that counts model calls, so we can prove a resumed run does NOT re-evaluate the seed. */
+  private final class CountingTaskLm extends LanguageModel:
+    val calls: java.util.concurrent.atomic.AtomicInteger = new java.util.concurrent.atomic.AtomicInteger(0)
+    override val id: String   = "task"
+    override val mode: LmMode = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val _      = calls.incrementAndGet()
+      val prompt = request.messages.flatMap(_.text).mkString("\n")
+      val answer = if prompt.contains("CITY") then "Paris" else "WRONG"
+      Right(LmResponse(outputs = Vector(LmOutput(text = s"[[ ## answer ## ]]\n$answer\n\n[[ ## completed ## ]]"))))
+
+  test("a run resumes from a saved run dir without re-evaluating the seed") {
+    val dir = java.nio.file.Files.createTempDirectory("gepa-resume")
+    // Budget == valset size: the seed full-eval (one LM call per val example) exactly exhausts it, so each run does
+    // its seed eval (or skips it on resume) and then zero iterations.
+    val cfg = GepaConfig(maxMetricCalls = dataset.size, reflectionMinibatchSize = 2, seed = 1L)
+    val seedCandidate = Candidate.seed(program)
+
+    val lm1 = new CountingTaskLm
+    val first = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm1), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
+        .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
+    }
+    assertEquals(lm1.calls.get(), dataset.size) // seed evaluated once (one call per val example)
+    assert(java.nio.file.Files.exists(dir.resolve(GepaStatePersistence.fileName)), "a checkpoint was written")
+
+    // Second run, same dir: it loads the saved state and must NOT re-evaluate the seed.
+    val lm2 = new CountingTaskLm
+    val second = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm2), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
+        .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
+    }
+    assertEquals(lm2.calls.get(), 0, "resumed run must not re-run the seed evaluation")
+    assertEquals(second.totalMetricCalls, first.totalMetricCalls) // continued from the saved meter
+    assertEquals(second.numCandidates, first.numCandidates)
+  }
+
   test("Gepa facade compiles a student end-to-end") {
     val gepa = new Gepa[DynamicPredict](metric, new ReflectionLm, GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {

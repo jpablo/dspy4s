@@ -4,6 +4,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
 
+import java.nio.file.Path
 import scala.util.Random
 
 /** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, and the evaluation cache;
@@ -56,7 +57,7 @@ final class GepaEngine[P](
     config: GepaConfig
 ):
 
-  def optimize(seedCandidate: Candidate, trainset: Vector[Example], valset: Vector[Example])(using
+  def optimize(seedCandidate: Candidate, trainset: Vector[Example], valset: Vector[Example], runDir: Option[Path] = None)(using
       RuntimeContext
   ): GepaResult[P] =
     val rng     = new Random(config.seed)
@@ -64,9 +65,12 @@ final class GepaEngine[P](
     val cache   = new GepaEvalCache(adapter)
     val merger  = Option.when(config.useMerge)(new MergeProposer(valset, config.maxMergeInvocations, rng, cache))
 
-    // Seed: full-evaluate the starting candidate on the validation set.
-    val (seedScores, seedEvals) = fullEval(seedCandidate, valset, cache)
-    var state = GepaState.seed(seedCandidate, seedScores, metricCalls = seedEvals)
+    // Resume from a saved run dir if present; otherwise seed by full-evaluating the starting candidate on the valset.
+    var state = runDir.flatMap(GepaStatePersistence.load).getOrElse {
+      val (seedScores, seedEvals) = fullEval(seedCandidate, valset, cache)
+      GepaState.seed(seedCandidate, seedScores, metricCalls = seedEvals)
+    }
+    runDir.foreach(GepaStatePersistence.save(_, state))
     // Per-candidate round-robin pointer (which component to evolve next), threaded across iterations.
     var pointers = Map.empty[Int, Int]
     var i        = 0 // iteration index, drives the epoch-shuffled batch sampler
@@ -101,6 +105,7 @@ final class GepaEngine[P](
         pointers = nextPointers
         if accepted then merger.foreach(_.onReflectiveAccepted())
       i += 1
+      runDir.foreach(GepaStatePersistence.save(_, state)) // checkpoint after each iteration for resume
 
     val best = state.bestIndex
     GepaResult(

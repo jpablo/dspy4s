@@ -545,7 +545,10 @@ Track and port `InferRules`. Tier 2.
 
 ## G-12 — `GEPA` reflective prompt optimizer not ported
 
-**Status:** Open — **v0 (single-predictor) working end-to-end** in `modules/gepa` (`dspy4s-gepa`). Done:
+**Status:** Resolved — GEPA is algorithmically complete for dspy parity in `modules/gepa` (`dspy4s-gepa`):
+reflective mutation + instance-Pareto selection, round-robin/all component selection, epoch-shuffled minibatch,
+merge crossover, eval cache, run-dir resume, opt-in perfect-score early stop; live-model validated. Multi-objective
+frontiers are deliberately not ported (dspy's scalar metric never uses them — see below). History:
 prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureFailureTraces` → failure
 `TraceEntry`), **P-b** (`ParseError.raw`); and the engine — `Candidate` mapping, `GepaAdapter`
 (`evaluate`/`makeReflectiveDataset`), `InstructionProposer` (reflective mutation), `GepaState` + Pareto
@@ -568,8 +571,14 @@ least-frequent padding; `GepaConfig.batchSampler`, `RandomDraw` retained as the 
 done** (`MergeProposer` — the "genetic" half: combine two Pareto descendants of a common ancestor, taking each
 component from whichever descendant improved it; multi-parent lineage + `ancestors`, dominator selection,
 desirable-predictor triplet filter, stratified subsample acceptance gate, merge scheduling. `GepaConfig.useMerge`
-default ON, matching dspy's wrapper; a no-op for single-component programs). Remaining v2: multi-objective
-frontiers, eval cache, run-dir resume.
+default ON, matching dspy's wrapper; a no-op for single-component programs). **Eval cache done**
+(`GepaEvalCache` — memoize scores-only `(candidate, example)` evals; only actual evals charge the budget; shared by
+full-eval and the merge subsample). **Run-dir resume done** (`GepaStatePersistence` — JSON checkpoint of the search
+state after each iteration; `optimize(..., runDir)` loads-or-seeds, so a resumed run keeps every discovered
+candidate and re-spends no budget). **Multi-objective frontiers: deliberately NOT ported** — dspy's GEPA metric is
+a scalar `ScoreWithFeedback` (`score: float`) and its adapter never passes objective vectors, so multi-objective is
+a gepa-library-only path unused by the dspy surface dspy4s mirrors. With that, GEPA is algorithmically complete for
+dspy parity; the remaining gap items are G-10/G-11 (unrelated tracks).
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
 fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).
