@@ -43,9 +43,12 @@ import scala.util.matching.Regex
   * exercisable end-to-end against a real LM. What is **not** in this v1:
   *
   *   - **Tools-inside-code.** Python `CodeAct` lets the user pass Scala
-  *     functions that the LM's generated Python can call. That requires a
-  *     Scala↔Python RPC bridge — deferred until the Deno+Pyodide interpreter
-  *     lands.
+  *     functions that the LM's generated Python can call. With the sandboxed
+  *     [[dspy4s.core.runtime.DenoPyodideInterpreter]] this now works: bridge the
+  *     program's [[dspy4s.programs.contracts.ToolFunction]]s via
+  *     [[CodeAct.sandboxTools]] and pass them as the interpreter's `tools`. The
+  *     plain [[dspy4s.core.runtime.SubprocessPythonInterpreter]] has no bridge —
+  *     there, pre-load tools into the environment or go without.
   *   - **Persistent REPL state.** The default
   *     [[dspy4s.core.runtime.SubprocessPythonInterpreter]] is stateless;
   *     CodeAct compensates by carrying the accumulated code in the trajectory.
@@ -277,6 +280,40 @@ final case class CodeAct[I, O](
 object CodeAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
   type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+
+  /** Bridge [[dspy4s.programs.contracts.ToolFunction]]s into [[dspy4s.core.contracts.SandboxTool]]s so the LM's
+    * generated Python can call them BY NAME from inside a sandboxed interpreter — Python `CodeAct`'s
+    * tools-inside-code, enabled by [[dspy4s.core.runtime.DenoPyodideInterpreter]]:
+    *
+    * {{{
+    * val interpreter = new DenoPyodideInterpreter(tools = CodeAct.sandboxTools(myTools))
+    * val program     = CodeAct(signature, interpreter)
+    * }}}
+    *
+    * The ambient [[RuntimeContext]] is captured NOW and used for every sandbox-initiated invocation (the bridge
+    * call arrives outside any dspy4s call stack). Wire-type `argSchema` entries map to Python type hints where
+    * a direct equivalent exists. */
+  def sandboxTools(tools: Vector[dspy4s.programs.contracts.ToolFunction])(using
+      ctx: dspy4s.core.contracts.RuntimeContext
+  ): Vector[dspy4s.core.contracts.SandboxTool] =
+    tools.map { tool =>
+      dspy4s.core.contracts.SandboxTool(
+        name = tool.name,
+        parameters = tool.argSchema.map { case (name, typeRef) =>
+          dspy4s.core.contracts.SandboxTool.Param(name, pythonTypeOf(typeRef))
+        },
+        invoke = kwargs => tool.invoke(kwargs)(using ctx)
+      )
+    }
+
+  private def pythonTypeOf(typeRef: dspy4s.core.contracts.TypeRef): Option[String] = typeRef.repr match
+    case "string" => Some("str")
+    case "int"    => Some("int")
+    case "double" => Some("float")
+    case "bool"   => Some("bool")
+    case "list"   => Some("list")
+    case "json"   => Some("dict")
+    case _        => None
 
   /** Matches a fenced code block, optionally tagged ```python. Captures the
     * snippet body in group 1. Multiline-aware. */

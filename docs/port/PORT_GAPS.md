@@ -883,28 +883,39 @@ NOT rewire the existing `ReAct` (per the standing G-7b decision). Tier 2 once st
 
 ## G-20 — Sandboxed interpreter (Deno + Pyodide) and `RLM` not ported
 
-**Status:** Open
+**Status:** Open — **(1) the sandboxed interpreter is done**; (2) `RLM` remains.
 
-**Summary.** `ProgramOfThought`/`CodeAct` run on a plain `python3 -c` subprocess; upstream's sandboxed
-Deno + Pyodide interpreter (JSON-RPC bridge, tool callbacks into the host) and `RLM` (which requires it)
-are unported.
+**Resolution (part 1, commit `a793e1b`+).** `DenoPyodideInterpreter` (core/runtime) ports upstream's
+`PythonInterpreter`: Python runs in a Pyodide (WASM) sandbox inside a Deno subprocess, with upstream's
+`runner.js` vendored VERBATIM as a resource and dspy4s implementing the JSON-RPC 2.0 stdio client —
+verified live against Deno 2.7.4 (protocol detail: `tool_call` ids are strings, echoed verbatim).
+Capabilities: sandboxing (allowlist-only fs/net/env via Deno flags), **stateful REPL** across executes,
+**variable injection** (`execute(code, variables)`), **host tools** (`SandboxTool` in contracts — sandboxed
+code calls host functions by name mid-execution, the seam RLM's `llm_query` needs), **`SUBMIT(...)`** →
+`CodeResult.finalOutput`, file mounting + write-back sync. Wired into the programs:
+`ProgramOfThought` now prefers a SUBMIT `finalOutput` over printed stdout (closing its documented delta),
+and `CodeAct.sandboxTools` bridges `ToolFunction`s into the sandbox (closing the tools-inside-code delta).
+Delta: variables inject uniformly as `json.loads(...)` rather than upstream's literal/file split.
 
 ### Python reference
 
-`dspy/primitives/python_interpreter.py` (Deno/Pyodide), `dspy/predict/rlm.py` (~740 lines).
+`dspy/primitives/python_interpreter.py` + `runner.js` (Deno/Pyodide), `dspy/predict/rlm.py` (~740 lines).
 
 ### dspy4s current state
 
-`CodeInterpreter` contract exists with the subprocess impl only. `RLM` absent.
+Interpreter done (see above). `RLM` absent — but everything it needs from the interpreter now exists
+(stateful REPL, variable injection, host tool callbacks, SUBMIT).
 
 ### Why it matters
 
-Sandboxing (untrusted generated code) and the RLM program family.
+The RLM program family (long contexts explored programmatically with recursive sub-LM calls).
 
 ### Proposed direction
 
-The interpreter is a self-contained infra project (embed Deno+Pyodide or a GraalVM/JS sandbox
-alternative — decide deliberately which fits the JVM). RLM follows it. Tier 3.
+Port `RLM` on the new interpreter: action/extract signatures over `SignatureLayout`, the iterate loop
+(matching the CodeAct pattern), `llm_query`/`llm_query_batched` as `SandboxTool`s over the ambient LM,
+REPL history rendering, extract-fallback. Note upstream marks RLM `@experimental` (like ReActV2, G-19) —
+consider letting it stabilize first. Tier 3.
 
 ---
 

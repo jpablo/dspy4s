@@ -39,9 +39,11 @@ private def stringDv(s: String): DynamicValue =
   * runs the three passes internally over the data-bag layer, and decodes the final answer step into the base
   * outputs `O` with `reasoning: String` prepended (see [[OutputAugmentation]]).
   *
-  * '''Behavioral delta from Python parity.''' Python preloads a `SUBMIT(...)` function into Pyodide so the LM's
-  * code can return a structured dict; dspy4s's [[CodeInterpreter]] is plain stdout-capture, so this port instructs
-  * the LM to **print** its result (typically JSON), and the answer step parses the printed output.
+  * '''SUBMIT vs print.''' This port instructs the LM to **print** its result (typically JSON) and the answer step
+  * parses the printed output — the convention every [[CodeInterpreter]] supports. When the interpreter is
+  * SUBMIT-capable ([[dspy4s.core.runtime.DenoPyodideInterpreter]], which preloads `SUBMIT(...)` like upstream's
+  * Pyodide setup), a structured early-exit in [[dspy4s.core.contracts.CodeResult.finalOutput]] is preferred over
+  * stdout, restoring full Python parity.
   *
   * Lifecycle: caller owns the interpreter — this does **not** call `interpreter.close()`.
   */
@@ -224,7 +226,10 @@ final case class ProgramOfThought[I, O](
         case Right(code) =>
           interpreter.execute(code) match
             case Right(result) if result.exitCode == 0 =>
-              Right(code -> result.stdout.stripTrailing)
+              // A SUBMIT-capable interpreter (DenoPyodideInterpreter) surfaces a structured early-exit in
+              // `finalOutput`; prefer it over printed stdout (Python-parity: upstream PoT reads SUBMIT).
+              // Print-based interpreters leave it None, so the print convention keeps working unchanged.
+              Right(code -> result.finalOutput.getOrElse(result.stdout.stripTrailing))
             case Right(result) =>
               if attempt >= maxIterations then
                 Left(RuntimeError(

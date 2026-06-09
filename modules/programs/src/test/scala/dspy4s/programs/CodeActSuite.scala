@@ -213,3 +213,36 @@ class CodeActSuite extends FunSuite:
     }
     interpreter.close()
   }
+
+  // ── sandboxTools bridge (G-20: tools-inside-code) ──────────────────────
+
+  test("CodeAct.sandboxTools bridges ToolFunctions into SandboxTools (name, python-typed params, captured context)") {
+    val tool = new dspy4s.programs.contracts.ToolFunction:
+      override val name: String        = "get_weather"
+      override val description: String = "weather lookup"
+      override def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] =
+        Vector("city" -> dspy4s.core.contracts.TypeRef.string, "days" -> dspy4s.core.contracts.TypeRef.int)
+      override def invoke(args: zio.blocks.schema.DynamicValue.Record)(using RuntimeContext) =
+        val city = dspy4s.core.contracts.DynamicValues.recordGet(args, "city")
+          .map(dspy4s.core.contracts.DynamicValues.renderText).getOrElse("?")
+        Right(dspy4s.core.contracts.DynamicValues.fromAny(s"sunny in $city"))
+
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val bridged = CodeAct.sandboxTools(Vector(tool))
+
+      assertEquals(bridged.size, 1)
+      assertEquals(bridged.head.name, "get_weather")
+      // Wire types map to Python type hints: string -> str, int -> int.
+      assertEquals(
+        bridged.head.parameters,
+        Vector(
+          dspy4s.core.contracts.SandboxTool.Param("city", Some("str")),
+          dspy4s.core.contracts.SandboxTool.Param("days", Some("int"))
+        )
+      )
+      // Invocation works OUTSIDE a dspy4s call stack (the bridge captured the context at construction).
+      val result = bridged.head.invoke(rec("city" := "Paris"))
+      assertEquals(result.map(dspy4s.core.contracts.DynamicValues.renderText), Right("sunny in Paris"))
+    }
+  }

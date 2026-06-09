@@ -243,10 +243,11 @@ Tracks:
   dataset-summary refinement). `AvatarOptimizer` + `Avatar` are **Won't fix (by
   design)** (G-14: not in upstream's public API, undocumented, maintenance-only).
 - **Interpreter-backed sandbox** for `ProgramOfThought` / `CodeAct` / `RLM` (G-20).
-  ProgramOfThought and CodeAct are scaffolded (see [`PORT_MAP.md`](PORT_MAP.md#2a-programs-per-file-port-status-vs-python-predict))
-  with a plain `python3 -c "..."` subprocess interpreter; the sandboxed
-  Deno + Pyodide bridge + JSON-RPC + tool-callback path is what's deferred.
-  `RLM` itself depends on that bridge and is therefore also deferred.
+  **Shipped (part 1):** `DenoPyodideInterpreter` — Pyodide-in-Deno sandbox with upstream's
+  `runner.js` vendored verbatim and a Scala JSON-RPC stdio client; stateful REPL, variable
+  injection, host tools (`SandboxTool`), `SUBMIT` → `CodeResult.finalOutput`. PoT now honors
+  SUBMIT; `CodeAct.sandboxTools` enables tools-inside-code. **Remaining:** the `RLM` driver
+  module (upstream-`@experimental`; everything it needs from the interpreter now exists).
 - ~~Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)~~ **Shipped** (G-10):
   `Embedder` + `OpenAiEmbedder` (lm), `KNN` + `EmbeddingsRetriever`
   (programs.retrievers), `KNNFewShot` (optimize). Legacy `dspy.Retrieve`/vendor RMs

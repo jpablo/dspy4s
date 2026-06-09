@@ -229,3 +229,40 @@ class ProgramOfThoughtSuite extends FunSuite:
     assertEquals(prefixOf(program.answerSignature, "code_output"),           Some("Code Output:"))
     interpreter.close()
   }
+
+  // ── SUBMIT-capable interpreter (G-20) ─────────────────────────────────
+
+  test("ProgramOfThought: prefers a SUBMIT finalOutput over printed stdout when the interpreter provides one") {
+    val signature = Signature.fromString("question -> answer")
+    // SUBMIT-capable result: stdout is noise; the structured early-exit carries the real output.
+    val interpreter = new RecordingInterpreter(Vector(
+      Right(CodeResult(stdout = "debug noise\n", stderr = "", exitCode = 0, finalOutput = Some("""{"answer": "42"}""")))
+    ))
+    val lm = new ScriptedLm(Vector("```python\nSUBMIT(answer='42')\n```", "42"))
+
+    // Adapter variant that also records the answer step's `code_output` input, so the test can assert WHAT
+    // reached the answer signature (the finalOutput, not the printed noise).
+    val codeOutputs = ArrayBuffer.empty[String]
+    object RecordingAnswerAdapter extends Adapter:
+      override val name: String = "recording-answer"
+      override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+        if invocation.layout.outputFields.exists(_.name == "answer") then
+          dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "code_output")
+            .map(dspy4s.core.contracts.DynamicValues.renderText).foreach(codeOutputs += _)
+        Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
+      override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+        val names = layout.outputFields.map(_.name)
+        if names.contains("generated_code") then
+          val entries: Seq[(String, DynamicValue)] = Seq("generated_code" := output.text)
+          Right(ParsedOutput(values = rec(entries*)))
+        else Right(ParsedOutput(values = rec(names.map(_ := output.text)*)))
+
+    val program = ProgramOfThought(baseSignature = signature, interpreter = interpreter)
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(RecordingAnswerAdapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = program.apply((question = "what is 6 * 7?"))
+      assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
+      // The answer step saw the SUBMIT payload, not the printed stdout noise.
+      assertEquals(codeOutputs.toList, List("""{"answer": "42"}"""))
+    }
+  }
