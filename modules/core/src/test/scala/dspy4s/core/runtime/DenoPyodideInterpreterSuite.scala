@@ -1,11 +1,17 @@
 package dspy4s.core.runtime
 
+import dspy4s.core.contracts.CallbackEvent
+import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SandboxTool
+import dspy4s.core.contracts.ToolEndEvent
+import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.contracts.:=
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
+import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
 /** Live-gated suite for the Deno+Pyodide sandbox: skips (assume) when `deno` is not on PATH. The first-ever run
@@ -96,5 +102,32 @@ class DenoPyodideInterpreterSuite extends FunSuite:
       assert(submitted.finalOutput.isDefined, submitted.toString)
       assert(submitted.finalOutput.get.contains("42"), submitted.finalOutput.get)
       assert(submitted.finalOutput.get.contains("answer"), submitted.finalOutput.get)
+    finally interp.close()
+  }
+
+  test("a sandbox-to-host tool call emits a ToolStartEvent/ToolEndEvent pair on the active callbacks") {
+    assumeDeno()
+    val events = ArrayBuffer.empty[CallbackEvent]
+    val recorder = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
+    val shout = SandboxTool(
+      name = "shout",
+      parameters = Vector(SandboxTool.Param("text", Some("str"))),
+      invoke = kwargs =>
+        Right(DynamicValues.fromAny(DynamicValues.recordGet(kwargs, "text").map(DynamicValues.renderText).getOrElse("?").toUpperCase))
+    )
+    val interp = new DenoPyodideInterpreter(tools = Vector(shout))
+    try
+      RuntimeEnvironment.withCallbacks(Vector(recorder)) {
+        val result = interp.execute("print(shout(text='quiet'))").toOption.get
+        assertEquals(result.stdout.trim, "QUIET")
+      }
+      val starts = events.collect { case e: ToolStartEvent => e }.toVector
+      val ends   = events.collect { case e: ToolEndEvent => e }.toVector
+      assertEquals(starts.map(_.toolName), Vector("shout"))
+      assertEquals(ends.map(_.toolName), Vector("shout"))
+      assertEquals(starts.head.callId, ends.head.callId)
+      assertEquals(DynamicValues.recordGet(starts.head.args, "text").map(DynamicValues.renderText), Some("quiet"))
+      assert(ends.head.output.exists(v => DynamicValues.renderText(v) == "QUIET"), ends.head.toString)
     finally interp.close()
   }

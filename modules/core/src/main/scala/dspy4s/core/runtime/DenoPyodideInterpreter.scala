@@ -273,7 +273,10 @@ final class DenoPyodideInterpreter(
     val reply = tools.find(_.name == name) match
       case None => encodeError(callId, ToolErrorCode, s"Unknown tool: $name")
       case Some(tool) =>
-        tool.invoke(kwargs) match
+        // Same observability as ReAct's ToolExecutor: callbacks on the active context see every host-tool
+        // invocation as a ToolStart/ToolEnd scope. handleToolCall runs on the thread that called `execute`,
+        // so the events land on (and nest under) the caller's scope.
+        CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs)) match
           case Left(err) => encodeError(callId, ToolErrorCode, err.message)
           case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
             encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
