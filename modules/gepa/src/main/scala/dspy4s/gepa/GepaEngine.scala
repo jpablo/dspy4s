@@ -17,6 +17,12 @@ final case class GepaConfig(
     /** Minibatch sampling strategy. Default `EpochShuffled` (gepa's default): walk a per-epoch shuffle so every
       * train example is used once per epoch before repeats. `RandomDraw` is GEPA v0's independent random draw. */
     batchSampler: BatchSamplerKind = BatchSamplerKind.EpochShuffled,
+    /** Whether to interleave merge (crossover) proposals with reflective mutation. Default ON, matching dspy's GEPA
+      * wrapper (`use_merge=True`); the standalone gepa engine defaults it off. A no-op for single-component
+      * programs (which can't satisfy the merge triplet's "desirable predictor" requirement). */
+    useMerge: Boolean = true,
+    /** Cap on accepted merge attempts over a run (gepa's `max_merge_invocations`). */
+    maxMergeInvocations: Int = 5,
     skipPerfectScore: Boolean = true,
     perfectScore: Double = 1.0,
     failureScore: Double = 0.0,
@@ -53,6 +59,7 @@ final class GepaEngine[P](
   ): GepaResult[P] =
     val rng     = new Random(config.seed)
     val sampler = MinibatchSampler.of(config.batchSampler, config.reflectionMinibatchSize, config.seed)
+    val merger  = Option.when(config.useMerge)(new MergeProposer(adapter, valset, config.maxMergeInvocations, rng))
 
     // Seed: full-evaluate the starting candidate on the validation set.
     var state = GepaState.seed(seedCandidate, fullEval(seedCandidate, valset), metricCalls = valset.size)
@@ -66,9 +73,29 @@ final class GepaEngine[P](
       config.stopOnPerfectScore && s.aggregateScore(s.bestIndex) >= config.perfectScore
 
     while state.totalMetricCalls < config.maxMetricCalls && !converged(state) do
-      val (nextState, nextPointers) = iterate(state, pointers, trainset, valset, rng, sampler, i)
-      state = nextState
-      pointers = nextPointers
+      // 1) Merge first if one is scheduled and the last iteration produced a new program (gepa's ordering). A merge
+      //    proposal (accepted or rejected) consumes the iteration; only a "no triplet found" falls through.
+      val mergeConsumedIteration = merger.filter(_.shouldAttempt).flatMap { mp =>
+        val proposalOpt = mp.propose(state)
+        mp.lastIterFoundNewProgram = false
+        proposalOpt.map { proposal =>
+          if proposal.accepted then
+            val subscores = fullEval(proposal.candidate, valset)
+            state = state.add(proposal.candidate, subscores, proposal.parents, proposal.metricCalls + valset.size)
+            mp.onMergeAccepted()
+          else
+            state = state.copy(totalMetricCalls = state.totalMetricCalls + proposal.metricCalls)
+          true
+        }
+      }.getOrElse(false)
+
+      // 2) Otherwise, a reflective-mutation iteration; an acceptance schedules a future merge.
+      if !mergeConsumedIteration then
+        merger.foreach(_.lastIterFoundNewProgram = false)
+        val (nextState, nextPointers, accepted) = iterate(state, pointers, trainset, valset, rng, sampler, i)
+        state = nextState
+        pointers = nextPointers
+        if accepted then merger.foreach(_.onReflectiveAccepted())
       i += 1
 
     val best = state.bestIndex
@@ -81,7 +108,8 @@ final class GepaEngine[P](
     )
 
   /** One reflective-mutation iteration: returns the new state (with the iteration's metric calls accrued, and the
-    * accepted candidate appended on success) plus the updated round-robin pointers. */
+    * accepted candidate appended on success), the updated round-robin pointers, and whether a new candidate was
+    * accepted (which schedules a merge). */
   private def iterate(
       state: GepaState,
       pointers: Map[Int, Int],
@@ -90,7 +118,7 @@ final class GepaEngine[P](
       rng: Random,
       sampler: MinibatchSampler,
       iteration: Int
-  )(using RuntimeContext): (GepaState, Map[Int, Int]) =
+  )(using RuntimeContext): (GepaState, Map[Int, Int], Boolean) =
     val parentIdx = config.candidateSelector.select(state, rng)
     val parent    = state.candidates(parentIdx)
 
@@ -105,7 +133,7 @@ final class GepaEngine[P](
 
     // Nothing to learn from a perfect minibatch.
     if config.skipPerfectScore && parentEval.scores.nonEmpty && parentEval.scores.forall(_ >= config.perfectScore) then
-      return (state.copy(totalMetricCalls = state.totalMetricCalls + calls), newPointers)
+      return (state.copy(totalMetricCalls = state.totalMetricCalls + calls), newPointers, false)
 
     val reflective   = adapter.makeReflectiveDataset(parent, parentEval, components)
     val newCandidate = components.foldLeft(parent) { (cand, component) =>
@@ -118,14 +146,15 @@ final class GepaEngine[P](
     val newEval = adapter.evaluate(minibatch, newCandidate, captureTraces = false)
     calls += minibatch.size
 
+    val accepted = newEval.scores.sum > parentEval.scores.sum
     val nextState =
-      if newEval.scores.sum > parentEval.scores.sum then
+      if accepted then
         val newSubscores = fullEval(newCandidate, valset)
         calls += valset.size
         state.add(newCandidate, newSubscores, parents = Vector(parentIdx), metricCalls = calls)
       else
         state.copy(totalMetricCalls = state.totalMetricCalls + calls)
-    (nextState, newPointers)
+    (nextState, newPointers, accepted)
 
   private def fullEval(candidate: Candidate, valset: Vector[Example])(using RuntimeContext): Vector[Double] =
     adapter.evaluate(valset, candidate, captureTraces = false).scores

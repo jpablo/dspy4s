@@ -562,8 +562,14 @@ into a precise HAS_NUM/NO_NUM classifier, lifting the held-out validation score 
 (`FeedbackMetric` → failure-aware traces → reflective dataset → reflection LM → Pareto loop) confirmed against a
 real LM. **Opt-in perfect-score early stop added** (`GepaConfig.stopOnPerfectScore`, default OFF to match
 upstream gepa's run-to-budget behavior; on, it halts once the best candidate is perfect on validation — the smoke
-harness enables it to avoid the post-convergence `skipPerfectScore` budget burn). Remaining: epoch-shuffled
-minibatch, and v2 (merge, multi-objective frontiers, eval cache, resume).
+harness enables it to avoid the post-convergence `skipPerfectScore` budget burn). **Epoch-shuffled minibatch
+sampler done** (gepa's default `EpochShuffledBatchSampler` — sample-without-replacement per epoch with
+least-frequent padding; `GepaConfig.batchSampler`, `RandomDraw` retained as the v0 option). **Merge crossover
+done** (`MergeProposer` — the "genetic" half: combine two Pareto descendants of a common ancestor, taking each
+component from whichever descendant improved it; multi-parent lineage + `ancestors`, dominator selection,
+desirable-predictor triplet filter, stratified subsample acceptance gate, merge scheduling. `GepaConfig.useMerge`
+default ON, matching dspy's wrapper; a no-op for single-component programs). Remaining v2: multi-objective
+frontiers, eval cache, run-dir resume.
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
 fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).
