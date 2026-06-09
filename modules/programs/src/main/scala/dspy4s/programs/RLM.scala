@@ -196,10 +196,12 @@ final case class RLM[I, O](
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     if iteration >= maxIterations then extractFallback(call, variablesMeta, history)
     else
-      val actionInputs = call.inputs
-        .updated("variables_info", DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")))
-        .updated("repl_history", DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)))
-        .updated("iteration", DynamicValues.fromAny(s"${iteration + 1}/$maxIterations"))
+      // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
+      val actionInputs = DynamicValues.recordFromEntries(Vector(
+        "variables_info" -> DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")),
+        "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)),
+        "iteration"      -> DynamicValues.fromAny(s"${iteration + 1}/$maxIterations")
+      ))
       actionPredict.apply(call.copy(inputs = actionInputs)) match
         case Left(error) => Left(error)
         case Right(action) =>
@@ -269,9 +271,11 @@ final case class RLM[I, O](
       variablesMeta: Vector[RLM.ReplVariable],
       history: Vector[RLM.ReplEntry]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val extractInputs = call.inputs
-      .updated("variables_info", DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")))
-      .updated("repl_history", DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)))
+    // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
+    val extractInputs = DynamicValues.recordFromEntries(Vector(
+      "variables_info" -> DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")),
+      "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars))
+    ))
     for
       extracted <- extractPredict.apply(call.copy(inputs = extractInputs))
       output    <- baseSignature.outputShape.decode(extracted.values)

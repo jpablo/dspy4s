@@ -231,3 +231,26 @@ class RLMSuite extends FunSuite:
     assert(formatted.contains("Description: the corpus"), formatted)
     assert(formatted.contains("Total length: 3,000 characters"), formatted)
   }
+
+  test("predict calls carry only their declared meta inputs — base fields stay in the REPL, no warnings") {
+    // One non-SUBMIT action with maxIterations = 1 exercises both predict sites (the action step and the
+    // extract fallback). The base inputs (context/query) must reach the sandbox as REPL variables only;
+    // leaking them into the predict calls makes PredictEngine warn on undeclared fields (dspy's RLM calls
+    // its programs with only variables_info/repl_history/iteration).
+    val repl = new ScriptedRepl(Vector(Right(CodeResult("looking\n", "", 0))))
+    val lm = new ScriptedLm(Vector(
+      "explore||```python\nprint(context[:10])\n```",
+      "FALLBACK"
+    ))
+    val program = rlm(repl, maxIterations = 1)
+    val captured = new java.io.ByteArrayOutputStream
+    withRlm(lm, new ProbeAdapter) {
+      Console.withErr(captured) {
+        val result = program.apply((context = "abc", query = "q"))
+        assert(result.isRight, result.toString)
+        assertEquals(result.toOption.get.output.answer, "FALLBACK")
+      }
+    }
+    val warnings = captured.toString.linesIterator.filter(_.contains("ignoring unexpected input field")).toVector
+    assertEquals(warnings, Vector.empty)
+  }
