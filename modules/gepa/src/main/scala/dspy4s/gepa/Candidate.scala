@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.optimize.Predictors
+import dspy4s.programs.Predictors
 
 /** A GEPA candidate program: a map from component name to that predictor's instruction text — the genome the
   * optimizer mutates (mirrors Python gepa's `dict[str, str]`). Instruction text is the only thing GEPA evolves;

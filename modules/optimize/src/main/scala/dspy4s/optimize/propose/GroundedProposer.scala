@@ -9,7 +9,7 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
-import dspy4s.optimize.Predictors
+import dspy4s.programs.Predictors
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
 

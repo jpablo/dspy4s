@@ -33,8 +33,9 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config, Predictors, Runnable}
+import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config, Runnable}
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.Predictors
 
 import java.util.concurrent.atomic.AtomicInteger
 

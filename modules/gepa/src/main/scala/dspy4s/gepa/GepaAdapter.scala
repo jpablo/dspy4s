@@ -7,7 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
-import dspy4s.optimize.Predictors
+import dspy4s.programs.Predictors
 import dspy4s.optimize.Runnable
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the

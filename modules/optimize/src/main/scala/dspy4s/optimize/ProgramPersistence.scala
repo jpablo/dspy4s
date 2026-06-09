@@ -1,5 +1,7 @@
 package dspy4s.optimize
 
+import dspy4s.programs.Predictors
+
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError

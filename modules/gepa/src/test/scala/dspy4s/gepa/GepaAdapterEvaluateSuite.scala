@@ -17,7 +17,7 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.optimize.Predictors
+import dspy4s.programs.Predictors
 import dspy4s.optimize.Runnable
 import dspy4s.programs.DynamicPredict
 import munit.FunSuite

@@ -4,7 +4,7 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LanguageModel
-import dspy4s.optimize.Predictors
+import dspy4s.programs.Predictors
 import dspy4s.optimize.Runnable
 
 /** User-facing GEPA optimizer — the dspy4s analogue of dspy's `GEPA` teleprompter. It wires the

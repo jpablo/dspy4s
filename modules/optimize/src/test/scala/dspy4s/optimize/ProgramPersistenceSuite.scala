@@ -1,5 +1,7 @@
 package dspy4s.optimize
 
+import dspy4s.programs.Predictors
+
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ValidationError

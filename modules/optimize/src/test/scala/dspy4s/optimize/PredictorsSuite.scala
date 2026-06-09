@@ -1,5 +1,7 @@
 package dspy4s.optimize
 
+import dspy4s.programs.Predictors
+
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.Example
 import dspy4s.core.signatures.SignatureDsl
@@ -67,17 +69,17 @@ class PredictorsSuite extends FunSuite:
     // A leaf type (DynamicPredict has Predictor and is a Product) -> fromPredictor.
     assertEquals(
       summon[Predictors[DynamicPredict]].getClass.getName,
-      "dspy4s.optimize.Predictors$fromPredictor"
+      "dspy4s.programs.Predictors$fromPredictor"
     )
     // A single-predictor program with a Predictor leaf instance -> fromPredictor (not torn into fields).
     assertEquals(
       summon[Predictors[ScriptedPredictProgram]].getClass.getName,
-      "dspy4s.optimize.Predictors$fromPredictor"
+      "dspy4s.programs.Predictors$fromPredictor"
     )
     // A plain composite with no leaf instance -> structural derivation.
     assertEquals(
       summon[Predictors[Pipe]].getClass.getName,
-      "dspy4s.optimize.Predictors$DerivedPredictors"
+      "dspy4s.programs.Predictors$DerivedPredictors"
     )
   }
 

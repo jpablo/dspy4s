@@ -1,11 +1,5 @@
-package dspy4s.optimize
+package dspy4s.programs
 
-import dspy4s.programs.ChainOfThought
-import dspy4s.programs.CodeAct
-import dspy4s.programs.DynamicPredict
-import dspy4s.programs.MultiChainComparison
-import dspy4s.programs.Predict
-import dspy4s.programs.ReAct
 import dspy4s.typed.OutputAugmentation
 import scala.compiletime.erasedValue
 import scala.compiletime.summonFrom
