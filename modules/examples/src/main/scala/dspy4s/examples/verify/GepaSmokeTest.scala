@@ -110,7 +110,7 @@ object GepaSmokeTest:
         val result = gepa.compile(student, trainset = trainset, valset = valset)
 
         println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
-        println(f"[gepa-smoke] best validation score: ${result.bestScore}%.1f%%-of-1.0")
+        println(f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)")
         println(s"""[gepa-smoke] discovered instruction:\n    "${result.bestCandidate.getOrElse("self", "(none)")}"""")
         println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
       }
