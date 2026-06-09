@@ -265,17 +265,28 @@ programs need the predictor-traversal layer (depends on **G-1**).
 
 ## G-5 — `Refine` is a thin best-of-n alias (no `OfferFeedback` loop)
 
-**Status:** Resolved (v1, commit ddecaf2)
+**Status:** Resolved (v1, commit ddecaf2; **v2 per-module advice** — see below)
 
-**Resolution.** `Refine[I, O]` now implements the iterative-feedback loop (API
-unchanged; `BestOfN` untouched): on each sub-threshold non-final attempt it generates
-LM advice via an `OfferFeedback` sub-program grounded in that attempt's runtime trace
-(trajectory) + program I/O + reward + threshold, and injects it as a `hint_` input into
-every predictor of the next attempt via a `HintInjectingAdapter`. **v1 deltas / follow-up:**
-a single advice string is injected uniformly, vs Python's per-module advice `dict` —
-per-module advice needs the `Predictors`/named-predictors machinery (now available via
-G-1) and is the natural enhancement; grounding is the trace + I/O, not program/reward
-source code (dspy4s has no source introspection).
+**Resolution.** `Refine` implements the iterative-feedback loop (`BestOfN` untouched):
+on each sub-threshold non-final attempt it generates LM advice via an `OfferFeedback`
+sub-program grounded in that attempt's runtime trace (trajectory) + program I/O + reward +
+threshold, and injects it as a `hint_` input into the next attempt via a
+`HintInjectingAdapter`.
+
+**v2 — per-module advice (parity).** `Refine[P, I, O]` now retains the inner program type
+`P` (an upper-bounded typed module, so `I`/`O` still infer at call sites — `BestOfN`-style
+ergonomics, no call-site type annotations) and requires `Predictors[P]`. `OfferFeedback`
+now takes a `module_names` input and emits `advice` as a JSON object `{component: advice}`
+keyed by the inner program's named predictors (`Predictors.readNamed`, G-12 P-c). Each
+predictor's call is matched to its advice by its `SignatureLayout` — the dspy4s stand-in
+for Python's `signature2name[signature]` object-identity routing — and only that predictor's
+`hint_` is injected (absent/`N/A` → no hint). A bare (non-JSON) advice string degrades to
+uniform advice across all components, preserving the v1 single-predictor behavior. This
+required relocating `Predictors`/`Predictor` from `optimize` to `programs` (they describe
+program structure, not optimization) to avoid a `programs`→`optimize` cycle. **Remaining
+delta:** grounding is the trace + I/O, not program/reward source code (dspy4s has no source
+introspection); routing is by layout value-equality, not object identity (structurally
+identical predictors collapse to one advice entry — they'd get identical advice anyway).
 
 **Summary.** dspy4s's `Refine` was just a best-of-n wrapper. Python's `Refine`
 runs an `OfferFeedback` advice/feedback loop between attempts; that loop was
@@ -542,8 +553,8 @@ candidate selection, `GepaEngine` (reflective-mutation loop), and the `Gepa` fac
 instruction-sensitive test shows GEPA discovering a better instruction (score 0 → 1.0 within budget).
 **P-c done:** `Predictors.readNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
 field labels for a composite); GEPA now keys candidates by name and associates trace↔component by name→index.
-The `readNamed` capability is also what Refine per-module advice (G-5 follow-up) needs — wiring it there is now
-unblocked. **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
+The `readNamed` capability is also what Refine per-module advice (G-5 follow-up) needs — now **done** (G-5 v2;
+`Predictors` relocated to `programs` to break the cycle). **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
 predictors must improve — GEPA evolves both (per-component reflective datasets + name→trace association), score
 0 → 1.0. Remaining: round-robin component selection, epoch-shuffled minibatch, and v2 (merge, multi-objective
 frontiers, eval cache, resume).

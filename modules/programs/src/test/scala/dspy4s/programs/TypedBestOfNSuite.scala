@@ -34,6 +34,12 @@ class TypedBestOfNSuite extends FunSuite:
   private case class Q(q: String)
   private case class Cand(answer: String, score: Double)
 
+  // The bespoke module stubs below have no introspectable predictors, so Refine's per-module advice machinery sees
+  // an empty named-predictor set for them (the faithful analogue of Python's `named_predictors() == []`). `InnerPredict`
+  // hand-rolls a single LM call on a fixed layout, so it exposes that layout as its one "self" predictor — enough for
+  // advice to route back to it (its advice degrades to uniform, matching the single-predictor case).
+  private given Predictors[TypedStub] = Predictors.empty
+
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
@@ -135,7 +141,7 @@ class TypedBestOfNSuite extends FunSuite:
       Right(candidate("A", 0.8)),
       Right(candidate("B", 0.2))
     ))
-    val refine = Refine[Q, Cand](stub, n = 2, rewardFn = (_, p) => p.output.score, threshold = 0.5)
+    val refine = Refine[TypedStub, Q, Cand](stub, n = 2, rewardFn = (_, p) => p.output.score, threshold = 0.5)
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = refine.apply(TypedCall(Q("x")))
@@ -223,7 +229,7 @@ class TypedBestOfNSuite extends FunSuite:
   /** Inner typed program that drives the AMBIENT adapter + LM (so an injected `hint_` actually reaches the prompt
     * the LM sees). Mirrors what a real `Predict[Q, Cand]` does, minus the static-Signature codec. */
   private final class InnerPredict extends Module[TypedCall[Q], Prediction[Cand]]:
-    private val layout = SignatureLayout.parse("q -> answer, score").toOption.get
+    val layout: SignatureLayout = SignatureLayout.parse("q -> answer, score").toOption.get
     override val moduleName: String = "inner_predict"
     override protected def callInputs(call: TypedCall[Q]): DynamicValue.Record = rec("q" := call.input.q)
     override protected def callTraceEnabled(call: TypedCall[Q]): Boolean       = call.traceEnabled
@@ -247,10 +253,18 @@ class TypedBestOfNSuite extends FunSuite:
         score    <- DynamicPrediction(values = parsed.values).asDouble("score")
       yield Prediction(output = Cand(answer, score), raw = DynamicPrediction(values = parsed.values))
 
+  /** `InnerPredict` runs one LM call on a fixed layout; expose that layout as its single "self" predictor so Refine's
+    * advice can route back to it. `replace` is identity (these tests never edit the program). */
+  private given Predictors[InnerPredict] with
+    def read(program: InnerPredict): Vector[DynamicPredict]                       = Vector(DynamicPredict(layout = program.layout))
+    def replace(program: InnerPredict, updates: Vector[DynamicPredict]): InnerPredict = program
+    override def readNamed(program: InnerPredict): Vector[(String, DynamicPredict)] =
+      Vector("self" -> DynamicPredict(layout = program.layout))
+
   test("Refine generates advice and injects it as a hint so a retry improves above threshold") {
     val adapter = ScriptingAdapter()
     val lm      = ScriptingLm()
-    val refine  = Refine[Q, Cand](
+    val refine  = Refine[InnerPredict, Q, Cand](
       module    = InnerPredict(),
       n         = 2,
       rewardFn  = (_, p) => p.output.score,
@@ -277,7 +291,7 @@ class TypedBestOfNSuite extends FunSuite:
     // Threshold 0.0 means even the BAD answer (0.2) clears it on attempt 1 -> no feedback, best-of-N parity.
     val adapter = ScriptingAdapter()
     val lm      = ScriptingLm()
-    val refine  = Refine[Q, Cand](InnerPredict(), n = 3, rewardFn = (_, p) => p.output.score, threshold = 0.0)
+    val refine  = Refine[InnerPredict, Q, Cand](InnerPredict(), n = 3, rewardFn = (_, p) => p.output.score, threshold = 0.0)
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -295,7 +309,7 @@ class TypedBestOfNSuite extends FunSuite:
     // Regression: the advice-failure branch used to `return Left(error)`, throwing away `best`.
     val adapter = ScriptingAdapter()
     val lm      = AdviceFailingLm()
-    val refine  = Refine[Q, Cand](InnerPredict(), n = 2, rewardFn = (_, p) => p.output.score, threshold = 1.0)
+    val refine  = Refine[InnerPredict, Q, Cand](InnerPredict(), n = 2, rewardFn = (_, p) => p.output.score, threshold = 1.0)
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -313,7 +327,7 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f2")),
       Right(candidate("ok", 1.0))
     ))
-    val refine = Refine[Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
+    val refine = Refine[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = refine.apply(TypedCall(Q("x")))
