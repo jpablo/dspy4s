@@ -556,8 +556,13 @@ field labels for a composite); GEPA now keys candidates by name and associates t
 The `readNamed` capability is also what Refine per-module advice (G-5 follow-up) needs — now **done** (G-5 v2;
 `Predictors` relocated to `programs` to break the cycle). **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
 predictors must improve — GEPA evolves both (per-component reflective datasets + name→trace association), score
-0 → 1.0. Remaining: round-robin component selection, epoch-shuffled minibatch, and v2 (merge, multi-objective
-frontiers, eval cache, resume).
+0 → 1.0. **Round-robin component selection done** (gepa's default; `ComponentSelector.RoundRobin`/`All`).
+**Live-model validation done:** `gepaSmokeMain` (gpt-4o-mini) evolved the vague baseline "Answer the question."
+into a precise HAS_NUM/NO_NUM classifier, lifting the held-out validation score to 1.0 — the whole tower
+(`FeedbackMetric` → failure-aware traces → reflective dataset → reflection LM → Pareto loop) confirmed against a
+real LM. Remaining: epoch-shuffled minibatch, an early-stop once the frontier is perfect (the smoke run spent its
+post-convergence budget on `skipPerfectScore` minibatches), and v2 (merge, multi-objective frontiers, eval cache,
+resume).
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
 fact: **in Python, GEPA is NOT native code — it's a thin wrapper around an external library** (`gepa[dspy]==0.1.1`).
