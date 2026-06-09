@@ -519,7 +519,16 @@ Port `Embedder` and the retrievers track. Tier 2.
 
 ## G-11 — `InferRules` optimizer is undocumented and unported
 
-**Status:** Open
+**Status:** Resolved — ported as `InferRules` in `modules/optimize`
+(`dspy4s.optimize.InferRules` + `InferRulesConfig`). Induces natural-language rules
+from the trainset (a rule-induction `DynamicPredict` run at `initTemperature` with a
+per-candidate `rolloutId`) and appends them to each predictor's original instruction;
+generates `numCandidates` rule-augmented programs, scores each on the valset (50/50
+trainset split when none given), and returns the best. Composes `BootstrapFewShot`
+for demos first. Deltas (documented in the class): composes rather than inherits
+`BootstrapFewShot`; rule induction is a `Predict`, not `ChainOfThought` (the reasoning
+field is omitted, as in COPRO); the context-window fallback narrows specifically on
+`ContextWindowExceededError`. Tested offline (rule-augmented program wins; 50/50 split).
 
 **Summary.** The `InferRules` optimizer is currently invisible in all docs and is
 not ported.
