@@ -59,7 +59,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 |---|---|---|
 | `predict.py` | `Predict.scala` | ✅ ported |
 | `chain_of_thought.py` | `ChainOfThought.scala` | ✅ ported |
-| `react.py` | `ReAct.scala` | ✅ ported |
+| `react.py` | `ReAct.scala` | ✅ ported, incl. trajectory truncation (`_call_with_potential_trajectory_truncation`) on BOTH the react and extract steps: on `ContextWindowExceededError`, drop the oldest step and retry (3 attempts). React-step truncation is durable (later iterations build on the truncated trajectory, as upstream's in-place pops); a persistent react-step overflow breaks the loop and the extractor still runs (upstream's caught `ValueError`); a persistent extract-step overflow fails the call. Delta: the returned prediction's `trajectory` stays complete (upstream's pops shrink it). |
 | `best_of_n.py` | `BestOfN.scala` | ✅ ported |
 | `refine.py` | `Refine.scala` | ✅ ported. Full `OfferFeedback` advice/feedback loop (v1, commit `ddecaf2`) **with per-module advice** (G-5 v2, commit `24e89b2`): `OfferFeedback` emits a JSON advice dict keyed by named predictor (`Predictors.readNamed`), and `HintInjectingAdapter` routes each predictor's OWN advice to its `hint_` (matched by `SignatureLayout` — the stand-in for Python's `signature2name` object-identity routing). See [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop) (G-5 Resolved). |
 | `parallel.py` | `Parallel.scala` | ✅ ported |

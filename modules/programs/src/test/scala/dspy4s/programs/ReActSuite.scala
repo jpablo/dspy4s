@@ -181,3 +181,98 @@ class ReActSuite extends FunSuite:
     // The react module's own start event exists; the tool call is parented under some active module call.
     assert(events.exists { case _: ModuleStartEvent => true; case _ => false })
   }
+
+  // ── Trajectory truncation on context-window overflow (upstream `_call_with_potential_trajectory_truncation`) ──
+
+  /** Scripted LM whose responses can be failures — used to inject ContextWindowExceededError mid-run. */
+  private final class EitherLm(responses: Vector[Either[DspyError, String]]) extends LanguageModel:
+    val calls: AtomicInteger = AtomicInteger(0)
+    override val id: String = "either-react-lm"
+    override val mode: LmMode = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val i = calls.getAndIncrement()
+      if i >= responses.size then Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
+      else responses(i).map(text => LmResponse(outputs = Vector(LmOutput(text = text))))
+
+  /** ScriptedAdapter variant that records the rendered trajectory of every EXTRACTOR call. */
+  private final class ExtractProbeAdapter extends Adapter:
+    val extractorTrajectories: ArrayBuffer[String] = ArrayBuffer.empty
+    override val name: String = "extract-probe"
+    override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+      if !invocation.layout.outputFields.exists(_.name == "next_tool_name") then
+        dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")
+          .map(dspy4s.core.contracts.DynamicValues.renderText).foreach(extractorTrajectories += _)
+      Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
+    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+      ScriptedAdapter.parse(layout, output)
+
+  private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError(model = Some("either-react-lm"))
+
+  private def withLmAndAdapter[A](lm: LanguageModel, adapter: Adapter)(body: RuntimeContext ?=> A): A =
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
+      body(using RuntimeEnvironment.current)
+    }
+
+  test("extract step truncates the oldest trajectory step and retries on context-window overflow") {
+    val search = new SearchTool
+    // 2 react steps (search, finish), then the extractor overflows once before succeeding.
+    val lm = new EitherLm(Vector(
+      Right("look it up||search||query=x"),
+      Right("done||finish||"),
+      Left(cwError),
+      Right("Brussels")
+    ))
+    val probe = new ExtractProbeAdapter
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+
+    withLmAndAdapter(lm, probe) {
+      val result = react.apply((question = "capital?"))
+      assert(result.isRight, result.toString)
+      assertEquals(result.toOption.get.output.answer, "Brussels")
+      // Two extractor attempts: full trajectory, then with the oldest step dropped.
+      assertEquals(probe.extractorTrajectories.size, 2)
+      assert(probe.extractorTrajectories(0).contains("Step 1") && probe.extractorTrajectories(0).contains("Step 2"))
+      assert(!probe.extractorTrajectories(1).contains("Step 1") && probe.extractorTrajectories(1).contains("Step 2"))
+      // The RETURNED trajectory stays complete (documented delta from upstream's in-place pops).
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
+      assert(traj.contains("Step 1"), traj)
+    }
+  }
+
+  test("react step truncation is durable: later iterations and the result build on the truncated trajectory") {
+    val search = new SearchTool
+    // Iteration 1: search (trajectory gains step 1). Iteration 2's react call overflows -> oldest step dropped ->
+    // retry succeeds with finish. The finish entry builds on the TRUNCATED view.
+    val lm = new EitherLm(Vector(
+      Right("look it up||search||query=x"),
+      Left(cwError),
+      Right("done||finish||"),
+      Right("42")
+    ))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+
+    withLmAndAdapter(lm, new ExtractProbeAdapter) {
+      val result = react.apply((question = "q?"))
+      assert(result.isRight, result.toString)
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
+      // Step 1 (the search) was truncated away; only the finish step (iteration 2 -> "Step 2") remains.
+      assert(!traj.contains("Step 1"), traj)
+      assert(traj.contains("Step 2") && traj.contains("tool_name: finish"), traj)
+    }
+  }
+
+  test("a persistent react-step overflow breaks the loop (no failure) and the extractor still runs") {
+    val search = new SearchTool
+    // The very first react call overflows with an EMPTY trajectory: nothing to truncate -> upstream's
+    // ValueError path -> break. The extractor then runs over the empty trajectory.
+    val lm = new EitherLm(Vector(Left(cwError), Right("best guess")))
+    val probe = new ExtractProbeAdapter
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+
+    withLmAndAdapter(lm, probe) {
+      val result = react.apply((question = "q?"))
+      assert(result.isRight, result.toString)
+      assertEquals(result.toOption.get.output.answer, "best guess")
+      assertEquals(probe.extractorTrajectories.toList, List("(empty)"))
+    }
+  }
