@@ -1,7 +1,7 @@
 package dspy4s.core.runtime
 
-import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeInterpreterErrors
+import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -68,7 +68,7 @@ final class DenoPyodideInterpreter(
     enableNetworkAccess: Vector[String] = Vector.empty,
     syncFiles: Boolean = true,
     denoCommand: Option[Vector[String]] = None
-) extends CodeInterpreter:
+) extends ReplCodeInterpreter:
   import DenoPyodideInterpreter.*
 
   private var process: Option[Process]       = None
@@ -83,7 +83,7 @@ final class DenoPyodideInterpreter(
 
   /** Like [[execute]], but first defines each of `variables` as a Python variable in the sandbox (JSON-compatible
     * values only). Variable names must be plain Python identifiers (and not `json`, which the injection uses). */
-  def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
+  override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
     for
       injected <- injectVariables(code, variables)
       _        <- ensureProcess()

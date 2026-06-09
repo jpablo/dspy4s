@@ -79,9 +79,10 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
   `BootstrapFewShotWithOptuna` (G-17), `propose` remainder (G-18)
 - `GRPO` / `BootstrapFinetune` and provider fine-tuning / local SFT stack (G-16)
 - `ReActV2` — upstream experimental native-tool-calling ReAct (G-19)
-- `RLM` and the sandboxed Deno + Pyodide interpreter behind
-  `ProgramOfThought` / `CodeAct` (G-20; the contract trait `CodeInterpreter`
-  exists; only a plain `python3 -c "..."` subprocess impl ships today)
+- ~~`RLM` and the sandboxed Deno + Pyodide interpreter~~ **Shipped** (G-20
+  resolved): `DenoPyodideInterpreter` (Pyodide-in-Deno sandbox, stateful REPL,
+  variable injection, host tools, SUBMIT) + the `RLM[I, O]` driver, both
+  live-validated; `ProgramOfThought`/`CodeAct` wired onto the sandbox
 - `datasets` module (G-21); the Anthropic LM provider (G-22 — the
   OpenAI-compatible/Ollama route shipped as G-22 part 1)
 - `AvatarOptimizer` + `Avatar`: **Won't fix (by design)** (G-14 — not in

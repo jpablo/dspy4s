@@ -883,7 +883,18 @@ NOT rewire the existing `ReAct` (per the standing G-7b decision). Tier 2 once st
 
 ## G-20 — Sandboxed interpreter (Deno + Pyodide) and `RLM` not ported
 
-**Status:** Open — **(1) the sandboxed interpreter is done**; (2) `RLM` remains.
+**Status:** Resolved — both halves done. **(1)** the sandboxed interpreter (below); **(2)** `RLM`
+(`programs/RLM.scala`): typed `RLM[I, O]` with the verbatim-ported action-instructions template, REPL
+prompt types (`ReplVariable` metadata with head+tail previews, `ReplEntry`/history rendering with
+upstream's `=== Step N ===` / `Output (N chars):` truncation), `llm_query`/`llm_query_batched` as
+`SandboxTool`s with a shared call counter capped at `maxLlmCalls`, user tools (reserved-name validated,
+documented in the prompt), fence stripping with non-Python-tag rejection, SUBMIT payload validation
+(missing fields / type errors become observations and the loop continues), and the max-iterations
+extract fallback. Deltas (documented): `llm_query_batched` is sequential (upstream thread-pools); output
+typing is the signature's Schema decode (not per-field pydantic); `SandboxSerializable` and verbose/async
+are omitted. Live-validated: a scripted action LM drove real Python through the default Deno interpreter —
+injected variable + REPL state + in-sandbox `llm_query` combined in the final SUBMIT. Note upstream marks
+RLM `@experimental`; revisit when it stabilizes.
 
 **Resolution (part 1, commit `a793e1b`+).** `DenoPyodideInterpreter` (core/runtime) ports upstream's
 `PythonInterpreter`: Python runs in a Pyodide (WASM) sandbox inside a Deno subprocess, with upstream's

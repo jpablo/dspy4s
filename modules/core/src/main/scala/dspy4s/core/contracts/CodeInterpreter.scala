@@ -48,6 +48,17 @@ trait CodeInterpreter extends AutoCloseable:
   def execute(code: String): Either[DspyError, CodeResult]
   def close(): Unit
 
+/** A [[CodeInterpreter]] with the REPL surface `RLM` drives: executing code with host VARIABLES defined first
+  * (long contexts enter the sandbox as variables, never the prompt). Implementations are expected to be stateful
+  * across `execute` calls and to support the `SUBMIT(...)` convention ([[CodeResult.finalOutput]]) plus host
+  * [[SandboxTool]]s — [[dspy4s.core.runtime.DenoPyodideInterpreter]] is the canonical one. */
+trait ReplCodeInterpreter extends CodeInterpreter:
+  /** Like `execute(code)`, but first defines each of `variables` as a variable in the sandbox. */
+  def execute(
+      code: String,
+      variables: Map[String, zio.blocks.schema.DynamicValue]
+  ): Either[DspyError, CodeResult]
+
 /** A host-side function callable BY NAME from inside a sandboxed interpreter (Python DSPy's
   * `PythonInterpreter(tools=...)`): sandboxed code calls `name(kwarg=...)`, the sandbox bridges the call back
   * to the host, [[invoke]] runs, and its result returns into the sandbox. This is the seam RLM's `llm_query` /

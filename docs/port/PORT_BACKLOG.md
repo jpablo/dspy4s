@@ -246,8 +246,8 @@ Tracks:
   **Shipped (part 1):** `DenoPyodideInterpreter` — Pyodide-in-Deno sandbox with upstream's
   `runner.js` vendored verbatim and a Scala JSON-RPC stdio client; stateful REPL, variable
   injection, host tools (`SandboxTool`), `SUBMIT` → `CodeResult.finalOutput`. PoT now honors
-  SUBMIT; `CodeAct.sandboxTools` enables tools-inside-code. **Remaining:** the `RLM` driver
-  module (upstream-`@experimental`; everything it needs from the interpreter now exists).
+  SUBMIT; `CodeAct.sandboxTools` enables tools-inside-code. **Shipped (part 2):** the `RLM`
+  driver module (`programs/RLM.scala`), live-validated through the real Deno sandbox. G-20 resolved.
 - ~~Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)~~ **Shipped** (G-10):
   `Embedder` + `OpenAiEmbedder` (lm), `KNN` + `EmbeddingsRetriever`
   (programs.retrievers), `KNNFewShot` (optimize). Legacy `dspy.Retrieve`/vendor RMs
