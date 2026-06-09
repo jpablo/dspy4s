@@ -11,7 +11,7 @@ import scala.util.Random
 final case class GepaState(
     candidates: Vector[Candidate],
     valSubscores: Vector[Vector[Double]],
-    parents: Vector[Option[Int]],
+    parents: Vector[Vector[Int]],
     totalMetricCalls: Int
 ):
   require(candidates.nonEmpty, "GepaState needs at least the seed candidate")
@@ -24,13 +24,24 @@ final case class GepaState(
   /** The best candidate by mean validation score — the program GEPA ultimately returns. */
   def bestIndex: Int = candidates.indices.maxBy(aggregateScore)
 
-  /** Append a newly-accepted candidate with its full-validation subscores, parent lineage, and the metric calls
-    * its discovery consumed. */
-  def add(candidate: Candidate, subscores: Vector[Double], parent: Option[Int], metricCalls: Int): GepaState =
+  /** The transitive ancestor set of candidate `i` (its parents, their parents, …), excluding `i` itself. Merge
+    * crossover needs full ancestor chains to find a common ancestor of two frontier descendants; with reflective
+    * mutation lineage is linear, but a merged candidate has two parents so chains can branch. */
+  def ancestors(i: Int): Set[Int] =
+    def walk(node: Int, found: Set[Int]): Set[Int] =
+      parents(node).foldLeft(found) { (acc, parent) =>
+        if acc.contains(parent) then acc else walk(parent, acc + parent)
+      }
+    walk(i, Set.empty)
+
+  /** Append a newly-accepted candidate with its full-validation subscores, parent lineage (one parent for a
+    * reflective mutation, two for a merge — empty only for the seed), and the metric calls its discovery
+    * consumed. */
+  def add(candidate: Candidate, subscores: Vector[Double], parents: Vector[Int], metricCalls: Int): GepaState =
     copy(
       candidates = candidates :+ candidate,
       valSubscores = valSubscores :+ subscores,
-      parents = parents :+ parent,
+      parents = this.parents :+ parents,
       totalMetricCalls = totalMetricCalls + metricCalls
     )
 
@@ -47,7 +58,7 @@ final case class GepaState(
 object GepaState:
   /** Initialize from the seed candidate's full-validation evaluation. */
   def seed(candidate: Candidate, subscores: Vector[Double], metricCalls: Int): GepaState =
-    GepaState(Vector(candidate), Vector(subscores), Vector(None), metricCalls)
+    GepaState(Vector(candidate), Vector(subscores), Vector(Vector.empty), metricCalls)
 
 /** Picks which existing candidate to mutate next (gepa's CandidateSelector). */
 trait CandidateSelector:

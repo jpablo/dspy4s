@@ -10,7 +10,7 @@ class GepaStateSuite extends FunSuite:
     GepaState(
       candidates = subscores.indices.map(i => Map("0" -> s"instr$i")).toVector,
       valSubscores = subscores.toVector,
-      parents = subscores.indices.map(_ => Option.empty[Int]).toVector,
+      parents = subscores.indices.map(_ => Vector.empty[Int]).toVector,
       totalMetricCalls = 0
     )
 
@@ -46,11 +46,24 @@ class GepaStateSuite extends FunSuite:
 
   test("add appends a candidate and accrues metric calls") {
     val s0 = GepaState.seed(Map("0" -> "seed"), Vector(0.5, 0.5), metricCalls = 2)
-    val s1 = s0.add(Map("0" -> "child"), Vector(1.0, 1.0), parent = Some(0), metricCalls = 2)
+    val s1 = s0.add(Map("0" -> "child"), Vector(1.0, 1.0), parents = Vector(0), metricCalls = 2)
     assertEquals(s1.candidates.size, 2)
     assertEquals(s1.bestIndex, 1)
-    assertEquals(s1.parents(1), Some(0))
+    assertEquals(s1.parents(1), Vector(0))
     assertEquals(s1.totalMetricCalls, 4)
+  }
+
+  test("ancestors walks the full lineage, including a merge's two branches up to a common ancestor") {
+    // Lineage: 0 (seed) -> 1, 0 -> 2; then 3 is a MERGE of 1 and 2 (two parents).
+    val s = GepaState(
+      candidates = Vector(Map("a" -> "0"), Map("a" -> "1"), Map("a" -> "2"), Map("a" -> "3")),
+      valSubscores = Vector.fill(4)(Vector(1.0)),
+      parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(1, 2)),
+      totalMetricCalls = 0
+    )
+    assertEquals(s.ancestors(0), Set.empty[Int])
+    assertEquals(s.ancestors(1), Set(0))
+    assertEquals(s.ancestors(3), Set(1, 2, 0)) // both branches converge on the common ancestor 0
   }
 
   test("RoundRobin picks one component per call and cycles through, wrapping the pointer") {

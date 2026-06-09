@@ -122,7 +122,7 @@ final class GepaEngine[P](
       if newEval.scores.sum > parentEval.scores.sum then
         val newSubscores = fullEval(newCandidate, valset)
         calls += valset.size
-        state.add(newCandidate, newSubscores, parent = Some(parentIdx), metricCalls = calls)
+        state.add(newCandidate, newSubscores, parents = Vector(parentIdx), metricCalls = calls)
       else
         state.copy(totalMetricCalls = state.totalMetricCalls + calls)
     (nextState, newPointers)
