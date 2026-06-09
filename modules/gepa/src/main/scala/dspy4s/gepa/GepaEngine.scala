@@ -13,6 +13,7 @@ final case class GepaConfig(
     maxMetricCalls: Int,
     reflectionMinibatchSize: Int = 3,
     candidateSelector: CandidateSelector = CandidateSelector.Pareto,
+    componentSelector: ComponentSelector = ComponentSelector.RoundRobin,
     skipPerfectScore: Boolean = true,
     perfectScore: Double = 1.0,
     failureScore: Double = 0.0,
@@ -46,9 +47,13 @@ final class GepaEngine[P](
 
     // Seed: full-evaluate the starting candidate on the validation set.
     var state = GepaState.seed(seedCandidate, fullEval(seedCandidate, valset), metricCalls = valset.size)
+    // Per-candidate round-robin pointer (which component to evolve next), threaded across iterations.
+    var pointers = Map.empty[Int, Int]
 
     while state.totalMetricCalls < config.maxMetricCalls do
-      state = iterate(state, trainset, valset, rng)
+      val (nextState, nextPointers) = iterate(state, pointers, trainset, valset, rng)
+      state = nextState
+      pointers = nextPointers
 
     val best = state.bestIndex
     GepaResult(
@@ -60,24 +65,31 @@ final class GepaEngine[P](
     )
 
   /** One reflective-mutation iteration: returns the new state (with the iteration's metric calls accrued, and the
-    * accepted candidate appended on success). */
-  private def iterate(state: GepaState, trainset: Vector[Example], valset: Vector[Example], rng: Random)(using
-      RuntimeContext
-  ): GepaState =
+    * accepted candidate appended on success) plus the updated round-robin pointers. */
+  private def iterate(
+      state: GepaState,
+      pointers: Map[Int, Int],
+      trainset: Vector[Example],
+      valset: Vector[Example],
+      rng: Random
+  )(using RuntimeContext): (GepaState, Map[Int, Int]) =
     val parentIdx = config.candidateSelector.select(state, rng)
     val parent    = state.candidates(parentIdx)
-    val minibatch = sampleMinibatch(trainset, rng)
 
+    // Pick which component(s) to evolve and advance this candidate's round-robin pointer.
+    val allComponents = parent.keys.toVector.sorted
+    val (components, nextPointer) = config.componentSelector.select(allComponents, pointers.getOrElse(parentIdx, 0))
+    val newPointers = pointers.updated(parentIdx, nextPointer)
+
+    val minibatch  = sampleMinibatch(trainset, rng)
     val parentEval = adapter.evaluate(minibatch, parent, captureTraces = true)
     var calls      = minibatch.size
 
     // Nothing to learn from a perfect minibatch.
     if config.skipPerfectScore && parentEval.scores.nonEmpty && parentEval.scores.forall(_ >= config.perfectScore) then
-      return state.copy(totalMetricCalls = state.totalMetricCalls + calls)
+      return (state.copy(totalMetricCalls = state.totalMetricCalls + calls), newPointers)
 
-    // v0: update ALL components (single-predictor → the one component; round-robin is a v1 refinement that needs P-c).
-    val components  = parent.keys.toVector.sorted
-    val reflective  = adapter.makeReflectiveDataset(parent, parentEval, components)
+    val reflective   = adapter.makeReflectiveDataset(parent, parentEval, components)
     val newCandidate = components.foldLeft(parent) { (cand, component) =>
       InstructionProposer.propose(parent.getOrElse(component, ""), reflective.getOrElse(component, Vector.empty), reflectionLm) match
         case Right(text) => cand.updated(component, text)
@@ -88,12 +100,14 @@ final class GepaEngine[P](
     val newEval = adapter.evaluate(minibatch, newCandidate, captureTraces = false)
     calls += minibatch.size
 
-    if newEval.scores.sum > parentEval.scores.sum then
-      val newSubscores = fullEval(newCandidate, valset)
-      calls += valset.size
-      state.add(newCandidate, newSubscores, parent = Some(parentIdx), metricCalls = calls)
-    else
-      state.copy(totalMetricCalls = state.totalMetricCalls + calls)
+    val nextState =
+      if newEval.scores.sum > parentEval.scores.sum then
+        val newSubscores = fullEval(newCandidate, valset)
+        calls += valset.size
+        state.add(newCandidate, newSubscores, parent = Some(parentIdx), metricCalls = calls)
+      else
+        state.copy(totalMetricCalls = state.totalMetricCalls + calls)
+    (nextState, newPointers)
 
   private def sampleMinibatch(trainset: Vector[Example], rng: Random): Vector[Example] =
     // v0: a random minibatch each iteration (gepa's epoch-shuffled-with-padding is a refinement).

@@ -52,3 +52,27 @@ class GepaStateSuite extends FunSuite:
     assertEquals(s1.parents(1), Some(0))
     assertEquals(s1.totalMetricCalls, 4)
   }
+
+  test("RoundRobin picks one component per call and cycles through, wrapping the pointer") {
+    val cs         = Vector("a", "b", "c")
+    // Thread the pointer through six calls; expect a, b, c, a, b, c.
+    val (picks, _) = (0 until 6).foldLeft((Vector.empty[String], 0)) { case ((acc, ptr), _) =>
+      val (chosen, next) = ComponentSelector.RoundRobin.select(cs, ptr)
+      (acc :+ chosen.head, next)
+    }
+    assertEquals(picks, Vector("a", "b", "c", "a", "b", "c"))
+  }
+
+  test("RoundRobin normalizes an out-of-range pointer") {
+    // A pointer past the end (e.g. after the component list shrank) wraps via modulo.
+    assertEquals(ComponentSelector.RoundRobin.select(Vector("a", "b"), 5), (Vector("b"), 0))
+  }
+
+  test("RoundRobin on no components is a no-op that preserves the pointer") {
+    assertEquals(ComponentSelector.RoundRobin.select(Vector.empty, 3), (Vector.empty[String], 3))
+  }
+
+  test("All returns every component and leaves the pointer untouched") {
+    val cs = Vector("a", "b", "c")
+    assertEquals(ComponentSelector.All.select(cs, 2), (cs, 2))
+  }

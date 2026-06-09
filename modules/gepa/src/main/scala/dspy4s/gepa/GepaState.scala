@@ -65,3 +65,24 @@ object CandidateSelector:
   /** Always the current best by mean validation score (greedy). */
   object CurrentBest extends CandidateSelector:
     def select(state: GepaState, rng: Random): Int = state.bestIndex
+
+/** Picks WHICH component(s) of the selected parent to evolve this iteration (gepa's ReflectionComponentSelector).
+  * Given the parent's component names (a stable, sorted list) and its current round-robin pointer, returns the
+  * components to update and the next pointer. */
+trait ComponentSelector:
+  def select(components: Vector[String], pointer: Int): (Vector[String], Int)
+
+object ComponentSelector:
+  /** Update ONE component per iteration, cycling through them (gepa's default). Cheaper in reflection-LM calls and
+    * lets each component's instruction settle independently; needs components that improve independently. */
+  object RoundRobin extends ComponentSelector:
+    def select(components: Vector[String], pointer: Int): (Vector[String], Int) =
+      if components.isEmpty then (Vector.empty, pointer)
+      else
+        val i = pointer % components.size
+        (Vector(components(i)), (i + 1) % components.size)
+
+  /** Update ALL components every iteration. Costs more reflection calls but can fix interdependent components in one
+    * accepted mutation (where round-robin would stall). */
+  object All extends ComponentSelector:
+    def select(components: Vector[String], pointer: Int): (Vector[String], Int) = (components, pointer)

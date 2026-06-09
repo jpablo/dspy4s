@@ -100,7 +100,12 @@ class GepaMultiPredictorSuite extends FunSuite:
   }
 
   test("GEPA evolves BOTH predictors of a two-stage program to lift the score") {
-    val gepa = new Gepa[Pipeline](metric, new ReflectionLm, GepaConfig(maxMetricCalls = 30, reflectionMinibatchSize = 2, seed = 1L))
+    // These two predictors are interdependent (the answer needs BOTH fixed), so update all components at once;
+    // round-robin (the default) would stall since fixing one alone never improves the minibatch.
+    val gepa = new Gepa[Pipeline](
+      metric, new ReflectionLm,
+      GepaConfig(maxMetricCalls = 30, reflectionMinibatchSize = 2, componentSelector = ComponentSelector.All, seed = 1L)
+    )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
