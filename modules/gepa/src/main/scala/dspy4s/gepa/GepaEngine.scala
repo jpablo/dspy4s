@@ -14,6 +14,9 @@ final case class GepaConfig(
     reflectionMinibatchSize: Int = 3,
     candidateSelector: CandidateSelector = CandidateSelector.Pareto,
     componentSelector: ComponentSelector = ComponentSelector.RoundRobin,
+    /** Minibatch sampling strategy. Default `EpochShuffled` (gepa's default): walk a per-epoch shuffle so every
+      * train example is used once per epoch before repeats. `RandomDraw` is GEPA v0's independent random draw. */
+    batchSampler: BatchSamplerKind = BatchSamplerKind.EpochShuffled,
     skipPerfectScore: Boolean = true,
     perfectScore: Double = 1.0,
     failureScore: Double = 0.0,
@@ -48,12 +51,14 @@ final class GepaEngine[P](
   def optimize(seedCandidate: Candidate, trainset: Vector[Example], valset: Vector[Example])(using
       RuntimeContext
   ): GepaResult[P] =
-    val rng = new Random(config.seed)
+    val rng     = new Random(config.seed)
+    val sampler = MinibatchSampler.of(config.batchSampler, config.reflectionMinibatchSize, config.seed)
 
     // Seed: full-evaluate the starting candidate on the validation set.
     var state = GepaState.seed(seedCandidate, fullEval(seedCandidate, valset), metricCalls = valset.size)
     // Per-candidate round-robin pointer (which component to evolve next), threaded across iterations.
     var pointers = Map.empty[Int, Int]
+    var i        = 0 // iteration index, drives the epoch-shuffled batch sampler
 
     // Opt-in: stop once the best candidate is already perfect on validation — further iterations can only re-discover
     // it (and the budget would be spent on `skipPerfectScore` minibatches). Off by default for gepa parity.
@@ -61,9 +66,10 @@ final class GepaEngine[P](
       config.stopOnPerfectScore && s.aggregateScore(s.bestIndex) >= config.perfectScore
 
     while state.totalMetricCalls < config.maxMetricCalls && !converged(state) do
-      val (nextState, nextPointers) = iterate(state, pointers, trainset, valset, rng)
+      val (nextState, nextPointers) = iterate(state, pointers, trainset, valset, rng, sampler, i)
       state = nextState
       pointers = nextPointers
+      i += 1
 
     val best = state.bestIndex
     GepaResult(
@@ -81,7 +87,9 @@ final class GepaEngine[P](
       pointers: Map[Int, Int],
       trainset: Vector[Example],
       valset: Vector[Example],
-      rng: Random
+      rng: Random,
+      sampler: MinibatchSampler,
+      iteration: Int
   )(using RuntimeContext): (GepaState, Map[Int, Int]) =
     val parentIdx = config.candidateSelector.select(state, rng)
     val parent    = state.candidates(parentIdx)
@@ -91,7 +99,7 @@ final class GepaEngine[P](
     val (components, nextPointer) = config.componentSelector.select(allComponents, pointers.getOrElse(parentIdx, 0))
     val newPointers = pointers.updated(parentIdx, nextPointer)
 
-    val minibatch  = sampleMinibatch(trainset, rng)
+    val minibatch  = sampler.sample(trainset.size, iteration).map(trainset)
     val parentEval = adapter.evaluate(minibatch, parent, captureTraces = true)
     var calls      = minibatch.size
 
@@ -118,10 +126,6 @@ final class GepaEngine[P](
       else
         state.copy(totalMetricCalls = state.totalMetricCalls + calls)
     (nextState, newPointers)
-
-  private def sampleMinibatch(trainset: Vector[Example], rng: Random): Vector[Example] =
-    // v0: a random minibatch each iteration (gepa's epoch-shuffled-with-padding is a refinement).
-    rng.shuffle(trainset.indices.toVector).take(config.reflectionMinibatchSize).map(trainset)
 
   private def fullEval(candidate: Candidate, valset: Vector[Example])(using RuntimeContext): Vector[Double] =
     adapter.evaluate(valset, candidate, captureTraces = false).scores
