@@ -47,3 +47,23 @@ object CodeInterpreterErrors:
 trait CodeInterpreter extends AutoCloseable:
   def execute(code: String): Either[DspyError, CodeResult]
   def close(): Unit
+
+/** A host-side function callable BY NAME from inside a sandboxed interpreter (Python DSPy's
+  * `PythonInterpreter(tools=...)`): sandboxed code calls `name(kwarg=...)`, the sandbox bridges the call back
+  * to the host, [[invoke]] runs, and its result returns into the sandbox. This is the seam RLM's `llm_query` /
+  * `llm_query_batched` use — sub-LM calls made from inside generated code.
+  *
+  * @param name       the Python identifier the sandbox exposes
+  * @param parameters declared parameters (name + optional Python type like `"str"`/`"list"`), used by the
+  *                   sandbox to generate a typed wrapper signature
+  * @param invoke     the host implementation, given the call's keyword arguments. A string result crosses into
+  *                   the sandbox as a Python `str`; any other value crosses as JSON.
+  */
+final case class SandboxTool(
+    name: String,
+    parameters: Vector[SandboxTool.Param],
+    invoke: zio.blocks.schema.DynamicValue.Record => Either[DspyError, zio.blocks.schema.DynamicValue]
+)
+
+object SandboxTool:
+  final case class Param(name: String, pythonType: Option[String] = None)
