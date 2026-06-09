@@ -53,6 +53,9 @@ import java.util.concurrent.atomic.AtomicInteger
   * @param maxIterations      REPL interaction budget before the extract fallback
   * @param maxLlmCalls        total `llm_query`(+batched) sub-LM calls allowed per forward
   * @param maxOutputChars     head+tail cap on each REPL output shown in the prompt
+  * @param verbose            log each iteration's reasoning/code and step output to stderr as it happens
+  *                           (upstream's `verbose` flag; `logger.info` there, `Console.err` here per the
+  *                           PredictEngine diagnostics precedent). The surviving record when a run fails mid-loop.
   * @param tools              extra [[ToolFunction]]s callable from generated code (documented in the prompt);
   *                           names must not collide with the built-ins (`llm_query`, `llm_query_batched`,
   *                           `SUBMIT`, `print`)
@@ -65,6 +68,7 @@ final case class RLM[I, O](
     maxIterations: Int = 20,
     maxLlmCalls: Int = 50,
     maxOutputChars: Int = 10_000,
+    verbose: Boolean = false,
     tools: Vector[ToolFunction] = Vector.empty,
     subLm: Option[LanguageModel] = None,
     interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
@@ -207,9 +211,14 @@ final case class RLM[I, O](
         case Right(action) =>
           val reasoning = action.get("reasoning").map(DynamicValues.renderText).getOrElse("")
           val rawCode   = action.get("code").map(DynamicValues.renderText).getOrElse("")
+          if verbose then
+            Console.err.println(
+              s"RLM iteration ${iteration + 1}/$maxIterations\nReasoning: $reasoning\nCode:\n$rawCode"
+            )
           stepOutcome(interpreter, inputVars, reasoning, rawCode) match
             case Left(error) => Left(error)
             case Right(Left(entry)) => // not final — record and continue
+              if verbose then Console.err.println(RLM.formatOutputBlock(entry.output, maxOutputChars))
               iterate(call, interpreter, inputVars, variablesMeta, history :+ entry, iteration + 1)
             case Right(Right((entry, outputsRecord))) => // SUBMIT accepted
               finishWith(outputsRecord, reasoning, history :+ entry)
@@ -271,6 +280,8 @@ final case class RLM[I, O](
       variablesMeta: Vector[RLM.ReplVariable],
       history: Vector[RLM.ReplEntry]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    // Unconditional like upstream's `logger.warning` — not gated on `verbose`.
+    Console.err.println("WARN [dspy4s] RLM reached max iterations, using extract to get final output")
     // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
     val extractInputs = DynamicValues.recordFromEntries(Vector(
       "variables_info" -> DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")),

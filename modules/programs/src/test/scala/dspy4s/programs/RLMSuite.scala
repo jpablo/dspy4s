@@ -254,3 +254,49 @@ class RLMSuite extends FunSuite:
     val warnings = captured.toString.linesIterator.filter(_.contains("ignoring unexpected input field")).toVector
     assertEquals(warnings, Vector.empty)
   }
+
+  test("verbose = true streams each iteration's reasoning/code and step output to stderr — surviving a mid-run failure") {
+    val repl = new ScriptedRepl(Vector(Right(CodeResult("looking around\n", "", 0))))
+    // First action succeeds; the second LM call fails hard, so the run returns Left and the trajectory
+    // never reaches a Prediction. The verbose stream is the surviving record of what happened.
+    val lm = new LanguageModel:
+      private val n = new AtomicInteger(0)
+      override val id: String = "fails-second"
+      override val mode: LmMode = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        if n.getAndIncrement() == 0 then
+          Right(LmResponse(outputs = Vector(LmOutput(text = "explore||```python\nprint(context)\n```"))))
+        else Left(RuntimeError("lm", "boom"))
+    val program = RLM(
+      baseSignature = qaSignature,
+      maxIterations = 5,
+      verbose = true,
+      interpreterFactory = (_, _) => repl
+    )
+    val captured = new java.io.ByteArrayOutputStream
+    withRlm(lm, new ProbeAdapter) {
+      Console.withErr(captured) {
+        assert(program.apply((context = "abc", query = "q")).isLeft)
+      }
+    }
+    val logged = captured.toString
+    assert(logged.contains("RLM iteration 1/5"), logged)
+    assert(logged.contains("Reasoning: explore"), logged)
+    assert(logged.contains("print(context)"), logged)
+    assert(logged.contains("looking around"), logged)
+  }
+
+  test("max-iterations fallback warns on stderr unconditionally; per-step logs only appear with verbose") {
+    val repl = new ScriptedRepl(Vector(Right(CodeResult("x\n", "", 0))))
+    val lm = new ScriptedLm(Vector("look||```python\nprint(1)\n```", "FALLBACK"))
+    val program = rlm(repl, maxIterations = 1)
+    val captured = new java.io.ByteArrayOutputStream
+    withRlm(lm, new ProbeAdapter) {
+      Console.withErr(captured) {
+        assert(program.apply((context = "abc", query = "q")).isRight)
+      }
+    }
+    val logged = captured.toString
+    assert(logged.contains("RLM reached max iterations, using extract to get final output"), logged)
+    assert(!logged.contains("RLM iteration"), logged)
+  }
