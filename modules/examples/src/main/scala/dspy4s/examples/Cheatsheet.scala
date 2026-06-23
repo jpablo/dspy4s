@@ -3,16 +3,14 @@
  *
  * Source:   docs/docs/cheatsheet.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/cheatsheet.md
- * Status:   translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, optimizers 12/13/18,
- *           tools 27, streaming 28, usage 30, cache 31, refinement 32–35). The rest depend on subsystems
- *           dspy4s doesn't have and are marked "not portable" inline:
- *             - retrieval: ColBERTv2 / `dspy.Retrieve` (6)
- *             - LLM-as-judge metric: `Metric.score` takes no RuntimeContext, so it can't call an LM (10)
- *             - save / load (16, 17); async `asyncify` (29)
- *             - optimizers not ported: Ensemble (19), BootstrapFinetune/HFModel (20), COPRO (21),
- *               MIPROv2 (22, 23), KNNFewShot (24), Optuna (25), SIMBA (26)
- *           These same constructs are demonstrated more fully in the dedicated tutorial examples
- *           (output_refinement, streaming, cache, learn/evaluation, learn/optimization).
+ * Status:   translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, retrieval 6, optimizers
+ *           12/13/18/19/21/22/23/24, save/load 16/17, tools 27, streaming 28, usage 30, cache 31, refinement
+ *           32–35). The few that remain depend on subsystems dspy4s doesn't have and are marked inline:
+ *             - LLM-as-judge metric (10): now expressible (G-6) — see learn/evaluation/Metrics + `SemanticF1`
+ *             - async `asyncify` (29): no async program path
+ *             - optimizers not ported: BootstrapFinetune/HFModel (20, G-16), Optuna (25, G-17), SIMBA (26, G-13)
+ *           These constructs are demonstrated more fully in the dedicated tutorial examples (output_refinement,
+ *           streaming, cache, learn/evaluation, learn/optimization, tutorials/saving).
  */
 package dspy4s.examples
 
@@ -22,10 +20,13 @@ import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.FunctionMetric
 import dspy4s.lm.runtime.UsageTracking
+import dspy4s.lm.contracts.Embedder
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, BootstrapFewShotWithRandomSearch,
-  LabeledFewShot, LabeledFewShotConfig, RandomSearchConfig}
+  COPRO, COPROConfig, Ensemble, KNNFewShot, LabeledFewShot, LabeledFewShotConfig, MIPROv2, MIPROv2Config,
+  ProgramPersistence, RandomSearchConfig}
 import dspy4s.programs.{BestOfN, ChainOfThought, CodeAct, DynamicPredict, Parallel, Predict, ProgramOfThought, ReAct, Refine}
-import dspy4s.programs.contracts.{ProgramCall, ToolFunction, TypedCall, description}
+import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, TypedCall, description}
+import dspy4s.programs.retrievers.KNN
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.DynamicValue
 
@@ -67,10 +68,12 @@ object Cheatsheet:
   def react(question: String)(using RuntimeContext): Either[DspyError, String] =
     ReAct(baseSignature = Signature.of[BasicQA], tools = Vector.empty).apply((question = question)).map(_.output.answer)
 
-  // ── Snippet 6 (lines 68–82) — ColBERTv2 retriever + dspy.Retrieve ──
+  // ── Snippet 6 (lines 68–82) — retrieval ──
   // The legacy `dspy.ColBERTv2` / `dspy.Retrieve` global-RM path is deliberately not ported; the modern
-  // embedding retrieval track IS: `Embedder`/`OpenAiEmbedder` (lm), `KNN`/`EmbeddingsRetriever`
-  // (programs.retrievers), `KNNFewShot` (optimize). See PORT_GAPS G-10.
+  // embedding-retrieval track IS (PORT_GAPS G-10): `Embedder`/`OpenAiEmbedder` (lm), `KNN`/`EmbeddingsRetriever`
+  // (programs.retrievers), `KNNFewShot` (optimize). A KNN retriever over a trainset, given an embedder:
+  def knnRetriever(trainset: Vector[Example], embedder: Embedder)(using RuntimeContext): Either[DspyError, KNN] =
+    KNN.create(k = 3, trainset = trainset, embedder = embedder)
 
   // ── Snippet 7 (lines 86–98) — CodeAct ──
   // | def factorial(n): ...; act = CodeAct("n -> factorial", tools=[factorial]); act(n=5)  # 120
@@ -104,8 +107,9 @@ object Cheatsheet:
   }
 
   // ── Snippet 10 (lines 147–161) — LLM-as-judge metric ──
-  // Not portable: the metric body calls `dspy.ChainOfThought(FactJudge)`, but `Metric.score` takes no
-  // RuntimeContext, so a dspy4s metric can't invoke an LM (same limitation as learn/evaluation/Metrics §6).
+  // Now expressible (PORT_GAPS G-6): `Metric.score` carries `(using RuntimeContext)`, so a metric can run a
+  // judge sub-program over an LM. See learn/evaluation/Metrics (snippet 6) and the ported `SemanticF1` /
+  // `CompleteAndGrounded` in `dspy4s.evaluate.metrics`.
 
   // ── Snippet 11 (lines 165–171) — Evaluate ──
   // | evaluate_program = Evaluate(devset=devset, metric=..., num_threads=..., display_progress=True, display_table=n)
@@ -134,11 +138,34 @@ object Cheatsheet:
     )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 
   // ── Snippets 16/17 — save / load ──
-  // Not portable: dspy4s programs have no `.save` / `.load`; persist the tuned demos yourself.
+  // Ported (PORT_GAPS G-4): persist a program's learnable state (per-predictor signature + demos + config) as
+  // JSON via `ProgramPersistence`. `load` takes a freshly-recreated program and writes the saved state back.
+  def save(program: DynamicPredict, path: String): Either[DspyError, Unit] = ProgramPersistence.save(program, path)
+  def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] = ProgramPersistence.load(fresh, path)
 
-  // ── Snippets 19–26 — optimizers not ported ──
-  // Not portable: Ensemble (19), BootstrapFinetune/HFModel (20), COPRO (21), MIPROv2 (22, 23),
-  // KNNFewShot (24), BootstrapFewShotWithOptuna (25), SIMBA (26) have no dspy4s equivalent.
+  // ── Snippets 19/21/22/23/24 — optimizers now ported ──
+  // | Ensemble(reduce_fn=dspy.majority).compile([prog1, prog2, prog3])
+  def ensemble(members: Vector[DynamicModule]): DynamicModule = Ensemble().compile(members)
+
+  // | COPRO(metric=..., breadth=10, depth=3).compile(student, trainset=trainset)
+  def copro(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
+      : Either[DspyError, DynamicPredict] =
+    new COPRO[DynamicPredict](COPROConfig(metric = metric)).compile(student, trainset).map(_.bestProgram)
+
+  // | MIPROv2(metric=..., auto="light").compile(student, trainset=trainset)   (dspy4s: explicit knobs, no `auto`)
+  def miprov2(metric: Metric, student: DynamicPredict, trainset: Vector[Example], devset: Vector[Example])(
+      using RuntimeContext): Either[DspyError, DynamicPredict] =
+    new MIPROv2[DynamicPredict](MIPROv2Config(metric = metric))
+      .compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
+
+  // | knn = KNN(k=3, trainset, embedder); KNNFewShot(KNN=knn).compile(student)
+  def knnFewShot(student: DynamicPredict, trainset: Vector[Example], embedder: Embedder)(using RuntimeContext)
+      : Either[DspyError, DynamicModule] =
+    new KNNFewShot[DynamicPredict](k = 3, trainset = trainset, embedder = embedder).compile(student)
+
+  // ── Snippets 20/25/26 — optimizers still not ported ──
+  // Not portable: BootstrapFinetune/HFModel (20, weight optimization — PORT_GAPS G-16),
+  // BootstrapFewShotWithOptuna (25, no JVM Optuna — G-17), SIMBA (26 — G-13).
 
   // ── Snippet 27 (lines 403–412) — dspy.Tool ──
   // | def search_web(query: str) -> str: """Search the web for information"""

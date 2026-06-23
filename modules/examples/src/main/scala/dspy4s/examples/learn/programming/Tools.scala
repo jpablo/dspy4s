@@ -3,12 +3,14 @@
  *
  * Source:   docs/docs/learn/programming/tools.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/tools.md
- * Status:   translated (ReAct + tools, snippets 1/2/9). The manual-tool-call path (snippets 3/5),
- *           native-function-calling toggles (6) and async tools (7/8) aren't part of dspy4s's
- *           surface — dspy4s selects tools via output fields and `ToolFunction` is synchronous.
+ * Status:   translated (ReAct + tools, snippets 1/2/9; native-function-calling toggle, snippet 6). The
+ *           manual-tool-call path (snippets 3/5) and async tools (7/8) aren't part of dspy4s's surface —
+ *           dspy4s's ReAct selects tools via output fields and `ToolFunction` is synchronous.
  */
 package dspy4s.examples.learn.programming
 
+import dspy4s.adapters.{ChatAdapter, JSONAdapter}
+import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.examples.Demo
 import dspy4s.programs.ReAct
@@ -76,8 +78,15 @@ object Tools:
   // `list[dspy.Tool]` input and reading a `ToolCalls` output, and it has no `call.execute()` surface.
   //
   // ── Snippet 6 — `ChatAdapter(use_native_function_calling=True)` / `JSONAdapter(...)` ──
-  // Not portable: dspy4s tool selection is via output fields, not provider-native function calling.
-  //
+  // Ported (PORT_GAPS G-7b): native function-calling is an adapter-level toggle, exactly as upstream. Set
+  // `useNativeFunctionCalling = true`; tools then reach the provider as a native `tools` array (built from the
+  // predictor's `ToolSpec`s, threaded via `AdapterInvocation.tools`) and the provider's `tool_calls` fill a
+  // `tool_calls` output field — gated on the LM's `supportsFunctionCalling`. Per the G-7b decision, ReAct
+  // itself stays on the text protocol (native calling is adapter-level, not a ReAct rewrite — matching upstream).
+  object NativeFunctionCallingExample:
+    val nativeChatAdapter: Adapter = ChatAdapter(useNativeFunctionCalling = true)
+    val nativeJsonAdapter: Adapter = JSONAdapter(useNativeFunctionCalling = true)
+
   // ── Snippets 7 / 8 — async tools (`tool.acall`, async→sync conversion) ──
   // Not portable: `ToolFunction.invoke` is synchronous; there is no async tool path.
 

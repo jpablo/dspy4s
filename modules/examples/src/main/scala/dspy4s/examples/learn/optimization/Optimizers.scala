@@ -3,11 +3,11 @@
  *
  * Source:   docs/docs/learn/optimization/optimizers.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md
- * Status:   translated (BootstrapFewShotWithRandomSearch.compile, snippet 1). Program save/load
- *           (snippets 2/3) is not ported — dspy4s programs have no `.save` / `.load`.
+ * Status:   translated (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
  *
  * dspy4s optimizers operate on the untyped `DynamicPredict` (which has a `Predictors` instance);
  * `compile(student, trainset)` returns an `OptimizationReport` whose `bestProgram` is the result.
+ * Program state is persisted with `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
  */
 package dspy4s.examples.learn.optimization
 
@@ -15,7 +15,7 @@ import dspy4s.core.contracts.{:=, DspyError, Example, RuntimeContext}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
-import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, RandomSearchConfig}
+import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, ProgramPersistence, RandomSearchConfig}
 import dspy4s.programs.DynamicPredict
 import dspy4s.typed.Signature
 
@@ -42,8 +42,14 @@ object Optimizers:
   // ── Snippets 2 + 3 (lines 213–225) — save / load an optimized program ──
   // | optimized_program.save(YOUR_SAVE_PATH)
   // | loaded_program = YOUR_PROGRAM_CLASS(); loaded_program.load(path=YOUR_SAVE_PATH)
-  // Not portable: dspy4s programs have no `.save` / `.load`. Programs are immutable values; persist
-  // the tuned state (the predictor's demos) yourself if you need to round-trip it.
+  // Ported (PORT_GAPS G-4): `ProgramPersistence` writes/reads a program's learnable state (per-predictor
+  // signature + demos + config) as JSON. Like Python, `load` takes a freshly-recreated program of the same
+  // shape and returns it with the saved state written back. See tutorials/saving for the full treatment.
+  def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
+    ProgramPersistence.save(program, path)
+
+  def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
+    ProgramPersistence.load(fresh, path)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.optimization.optimizersMain"
 // (Runs a small bootstrap+random-search over an LM — makes several LM calls.)

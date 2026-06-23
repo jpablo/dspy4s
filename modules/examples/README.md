@@ -52,21 +52,21 @@ Examples marked _offline_ below make no LM calls and need no key.
 | **Signatures** | `…learn.programming.main` 🔑 | 8/8 snippets. String signatures → `Signature.fromType`/`fromString`; class signatures → `Spec` traits. |
 | **LanguageModels** | `…learn.programming.languageModelsMain` 🔑 | LM setup/config, direct `call`, multiple LMs (`configure`/scoped override), generation config, usage, error handling. LiteLLM-only providers, Responses API, custom-LM save/load out of scope. |
 | **Modules** | `…learn.programming.modulesMain` 🔑 | Portable snippets; multi-completion `n=5` access noted unsupported. |
-| **Tools** | `…learn.programming.toolsMain` 🔑 | ReAct + `ToolFunction.fromMethod`. Manual tool-call path / native function-calling / async tools out of scope. |
-| **Adapters** | `…learn.programming.adaptersMain` 🔑 | 1–6: Predict, `adapter.format(...)`, ChatAdapter/JSONAdapter selection. `inspect_history` dropped. |
+| **Tools** | `…learn.programming.toolsMain` 🔑 | ReAct + `ToolFunction.fromMethod`; native function-calling toggle (`ChatAdapter(useNativeFunctionCalling=true)`, G-7b). Manual tool-call path / async tools out of scope. |
+| **Adapters** | `…learn.programming.adaptersMain` 🔑 | 1–6: Predict, `adapter.format(...)`, ChatAdapter/JSONAdapter selection, `inspect_history` (`RuntimeEnvironment.inspectHistory`, via a `ManagedLanguageModel`). |
 
 ### `learn/evaluation`
 
 | Example | Run | Coverage / notes |
 |---|---|---|
 | **Data** | `…learn.evaluation.dataMain` _(offline)_ | `Example` construction + inputs/labels. `DataLoader` (csv/json/parquet/HF) not ported. |
-| **Metrics** | `…learn.evaluation.metricsMain` _(offline)_ | `FunctionMetric` + `Evaluate`. LLM-as-judge / retrieval-trace metrics not supported (`Metric.score` has no `RuntimeContext`). |
+| **Metrics** | `…learn.evaluation.metricsMain` _(offline)_ · `…metricsJudgeMain` 🔑 | `FunctionMetric` + `Evaluate`; LLM-as-judge now runnable via `SemanticF1` (G-6, `metricsJudgeMain`). Retrieval-trace metrics still need a retriever. |
 
 ### `learn/optimization`
 
 | Example | Run | Coverage / notes |
 |---|---|---|
-| **Optimizers** | `…learn.optimization.optimizersMain` 🔑 | `BootstrapFewShotWithRandomSearch.compile`. Program `.save`/`.load` not ported. |
+| **Optimizers** | `…learn.optimization.optimizersMain` 🔑 | `BootstrapFewShotWithRandomSearch.compile`; program `.save`/`.load` via `ProgramPersistence` (G-4). |
 
 ### `deep_dive/data_handling`
 
@@ -89,12 +89,14 @@ Examples marked _offline_ below make no LM calls and need no key.
 | **ai_text_game** | `ai_text_game.aiTextGameMain` 🔑 | Three signatures + `GameAI` (`dict[str,int]`→`Map`). Save/load, console UI, game loop out of scope. |
 | **yahoo_finance_react** | `yahoo_finance_react.yahooFinanceReactMain` 🔑 | ReAct + finance tools via `ToolFunction.fromMethod`. Live yfinance/LangChain data stubbed. |
 | **llms_txt_generation** | `llms_txt_generation.llmsTxtMain` 🔑 | Signatures + composed pipeline. GitHub HTTP fetching out of scope. |
+| **saving** | `saving.savingMain` _(offline)_ | Program state `save`/`load` round-trip via `ProgramPersistence` (G-4). GSM8K swapped for a hand-built trainset; `save_program=True` code-pickling out of scope. |
+| **optimizer_tracking** | `optimizer_tracking.optimizerTrackingMain` 🔑 | MIPROv2 + a `CallbackHandler` tracking LM calls (the dspy4s observability seam). MLflow autolog out of scope; GSM8K swapped. |
 
 ### Top-level
 
 | Example | Run | Coverage / notes |
 |---|---|---|
-| **Cheatsheet** | `…examples.cheatsheetMain` _(offline)_ | Portable cheatsheet snippets (modules, metrics, optimizers, tools, streaming, cache, refinement). Retrieval / save-load / unported optimizers (MIPROv2, COPRO, SIMBA, …) marked inline. |
+| **Cheatsheet** | `…examples.cheatsheetMain` _(offline)_ | Portable cheatsheet snippets (modules, retrieval, metrics, optimizers incl. COPRO/MIPROv2/Ensemble/KNNFewShot, save/load, tools, streaming, cache, refinement). Still-unported optimizers (BootstrapFinetune, Optuna, SIMBA) marked inline. |
 
 > `Demo.scala` is not an example — it's the shared runner (`Demo.withLm`) that wires an OpenAI LM + `ChatAdapter`
 > into the ambient `RuntimeContext` for the 🔑 examples.
@@ -143,21 +145,20 @@ alternative where one exists.
 | `deep_dive/data_handling/BuiltInDatasets` | built-in dataset loaders (`dspy.datasets`, HotPotQA/GSM8K) | `LoadingCustomData` (build `Example`s yourself) |
 | `learn/programming/Assertions7` | `dspy.Assert` / `dspy.Suggest` backtracking | `output_refinement` (`Refine` / `BestOfN`) |
 | `learn/programming/Mcp` & `tutorials/mcp` | MCP client/tool bridge | plain `ToolFunction`s (`learn/programming/Tools`) |
-| `tutorials/conversation_history` | `dspy.History` input, `inspect_history`, mutable `predict.demos` | — |
+| `tutorials/conversation_history` | `dspy.History` input type + mutable `predict.demos` (`inspect_history` is now ported — see Adapters) | — |
 | `tutorials/deployment` | model serving (FastAPI app / MLflow serving) | wrap a program in your own HTTP layer |
 | `tutorials/mem0_react_agent` | mem0 long-term memory store | ReAct itself is portable (`Tools`) |
-| `tutorials/optimizer_tracking` | MLflow autolog, MIPROv2, datasets | — |
-| `tutorials/saving` | program `.save`/`.load`, GSM8K dataset | — |
 
 ---
 
 ## At a glance
 
-- **21** ported doc examples (✅) + **4** typed-surface demos (🔧) = **25** runnable `@main`s.
-- **6** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
-  `loadingCustomDataMain`. The other 19 need `OPENAI_API_KEY` (🔑).
-- **14** adapted prose docs (📄, now `README.md` per section) and **9** blocked files (🚫) — shown as 8 rows above (the two MCP pages share one).
-- **35** Scala source files (25 runnable + 9 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
+- **23** ported doc examples (✅) + **4** typed-surface demos (🔧) = **28** runnable `@main`s (the Metrics
+  example carries two: `metricsMain` + `metricsJudgeMain`).
+- **7** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
+  `loadingCustomDataMain`, `savingMain`. The other 21 need `OPENAI_API_KEY` (🔑).
+- **14** adapted prose docs (📄, now `README.md` per section) and **7** blocked files (🚫) — shown as 6 rows above (the two MCP pages share one).
+- **35** Scala source files (27 runnable + 7 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
 
-When a feature lands in dspy4s (datasets, MCP, save/load, …), the corresponding 🚫 file is the next thing to
-port — its header already records exactly what's missing.
+When a feature lands in dspy4s (datasets, MCP, the `dspy.History` input type, …), the corresponding 🚫 file is
+the next thing to port — its header already records exactly what's missing.

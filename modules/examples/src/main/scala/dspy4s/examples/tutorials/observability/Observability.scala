@@ -3,10 +3,11 @@
  *
  * Source:   docs/docs/tutorials/observability/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/observability/index.md
- * Status:   translated (the ReAct agent + the custom-callback observability hook, snippets 1/2/6). Blocked
- *           bits: `dspy.inspect_history` (snippet 3 — no global history buffer), MLflow autolog (snippets
- *           4/5 — no MLflow integration), and the retrieval backends (ColBERTv2 / Tavily) which have no
- *           dspy4s equivalent, so the `retrieve` tool returns a static stub.
+ * Status:   translated (the ReAct agent + the custom-callback observability hook, snippets 1/2/6). The
+ *           `inspect_history` snippet (3) is demonstrated in learn/programming/Adapters (dspy4s exposes
+ *           `RuntimeEnvironment.inspectHistory`); here the richer `CallbackHandler` stream is the focus.
+ *           Blocked bits: MLflow autolog (snippets 4/5 — no MLflow integration), and the retrieval backends
+ *           (ColBERTv2 / Tavily) which have no dspy4s equivalent, so the `retrieve` tool returns a static stub.
  *
  * Python's `from dspy.utils.callback import BaseCallback` + `on_module_end(call_id, outputs, exception)`
  * maps onto dspy4s's `CallbackHandler.onEvent`, which receives a sealed `CallbackEvent` stream;
@@ -64,8 +65,9 @@ object Observability:
     }
 
   // ── Snippet 3 — `dspy.inspect_history(n=5)` ──
-  // Not portable: dspy4s has no global history buffer / `inspect_history`. Per-call history is on the
-  // RuntimeContext (`ctx.history`); a CallbackHandler (above) is the idiomatic way to observe calls.
+  // dspy4s's analogue is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, reading the per-thread
+  // `RuntimeContext.history` (populated by a `ManagedLanguageModel`) — see learn/programming/Adapters. The
+  // `CallbackHandler` (above) is the richer observability seam, and the one this tutorial focuses on.
   //
   // ── Snippets 4 / 5 — MLflow autolog (`mlflow.dspy.autolog()`, tracking server, Tavily search) ──
   // Not portable: dspy4s has no MLflow integration. The callback stream is the observability seam.

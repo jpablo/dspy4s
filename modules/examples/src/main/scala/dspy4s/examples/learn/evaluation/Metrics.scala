@@ -3,20 +3,23 @@
  *
  * Source:   docs/docs/learn/evaluation/metrics.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/metrics.md
- * Status:   translated (function metrics + Evaluate, snippets 1/3/4/5). Context-aware metrics (2) and
- *           trace-over-retrieval-hops (7) remain noted (dspy4s has no retriever). LLM-as-judge metrics (6)
- *           are now unblocked — `Metric.score` carries `(using RuntimeContext)` (PORT_GAPS G-6), and the
- *           ported `SemanticF1` / `CompleteAndGrounded` live in `dspy4s.evaluate.metrics.AutoEvaluation`.
+ * Status:   translated (function metrics + Evaluate, snippets 1/3/4/5; LLM-as-judge, snippet 6). Context-aware
+ *           metrics (2) and trace-over-retrieval-hops (7) remain noted (dspy4s has no retriever). The
+ *           LLM-as-judge metric (6) is now runnable — `Metric.score` carries `(using RuntimeContext)`
+ *           (PORT_GAPS G-6), so a metric can run a judge over an LM; the ported `SemanticF1` /
+ *           `CompleteAndGrounded` (`dspy4s.evaluate.metrics`) are concrete examples, exercised by
+ *           `metricsJudgeMain` below.
  *
  * dspy4s metrics implement `Metric` (`score(example, prediction, trace) => Either[DspyError, Double]`).
  * `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain function.
  */
 package dspy4s.examples.learn.evaluation
 
-import dspy4s.core.contracts.{DspyError, DynamicPrediction, DynamicValues, Example, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicPrediction, DynamicValues, Example, RuntimeContext, :=}
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
-import dspy4s.evaluate.metrics.FunctionMetric
+import dspy4s.evaluate.metrics.{FunctionMetric, SemanticF1}
+import dspy4s.examples.Demo
 import dspy4s.typed.{InputField, OutputField, Spec}
 
 // Snippet 5 (lines 89–97) — the LLM-judge signature, as a spec trait (must be top-level for Mirror).
@@ -86,10 +89,12 @@ object Metrics:
   // ambient RuntimeContext; `program` is `Example => Either[DspyError, DynamicPrediction]`.
 
   // ── Snippet 6 (lines 101–116) — LLM-as-judge metric ──
-  // Now expressible: `Metric.score` takes `(using RuntimeContext)` (PORT_GAPS G-6), so a metric can run a
-  // judge sub-program over an LM. The ported `SemanticF1` / `CompleteAndGrounded` (in
-  // `dspy4s.evaluate.metrics.AutoEvaluation`) are concrete examples; the `Assess` spec above is the
-  // signature a bespoke quality-judge metric would use.
+  // Now runnable: `Metric.score` takes `(using RuntimeContext)` (PORT_GAPS G-6), so a metric can run a judge
+  // sub-program over an LM. The ported `SemanticF1` (in `dspy4s.evaluate.metrics`) is a concrete LLM-judged
+  // metric — it asks an LM to judge recall+precision of a response vs the ground truth, then returns their F1.
+  // The `Assess` spec above is the signature a bespoke quality-judge metric would use the same way.
+  // (Exercised by `metricsJudgeMain` below — it needs `OPENAI_API_KEY`.)
+  val semanticF1: Metric = SemanticF1()
 
   // ── Snippet 7 (lines 134–142) — validate_hops over the trace ──
   // Needs retrieval (`outputs.query` hops) and `answer_exact_match_str`; neither is ported.
@@ -107,3 +112,15 @@ object Metrics:
     DynamicPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))
   println("validate_answer('paris'): " + Metrics.validateAnswer.score(ex, pred("paris")))
   println("validate_answer('Lyon'):  " + Metrics.validateAnswer.score(ex, pred("Lyon")))
+
+// Snippet 6 — the LLM-judged `SemanticF1` metric, run against a live model.
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.evaluation.metricsJudgeMain"
+@main def metricsJudgeMain(): Unit = Demo.withLm {
+  // SemanticF1 defaults: question on the example, ground truth + system response in the `response` field.
+  val gold = Example("question" := "What is the capital of France?", "response" := "Paris is the capital of France.")
+    .withInputs(Set("question"))
+  val pred = DynamicPrediction(values = DynamicValues.recordFromEntries(Seq(
+    "response" -> DynamicValues.fromAny("The capital of France is Paris.")
+  )))
+  println("SemanticF1 score: " + Metrics.semanticF1.score(gold, pred))
+}

@@ -3,10 +3,12 @@
  *
  * Source:   docs/docs/learn/programming/adapters.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/adapters.md
- * Status:   translated (snippets 1–6). `dspy.inspect_history()` is not part of dspy4s (no global
- *           history buffer), so the inspect calls at the end of snippets 5/6 are dropped — everything
- *           else (the Predict calls, the explicit ChatAdapter/JSONAdapter selection, and the
- *           `adapter.format(...)` / system-message inspection) ports directly.
+ * Status:   translated (snippets 1–6, incl. `inspect_history`). dspy4s's analogue of
+ *           `dspy.inspect_history(n)` is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, which
+ *           renders the per-thread `RuntimeContext.history`. There is no global per-LM buffer: history is
+ *           populated by a `ManagedLanguageModel` (per-LM composition), so wrap the ambient LM in one to
+ *           record calls (see `askThenInspect`). Everything else (the Predict calls, the explicit
+ *           ChatAdapter/JSONAdapter selection, the `adapter.format(...)` / system-message inspection) ports directly.
  *
  * Python's `adapter.format(signature, demos, inputs)` becomes `adapter.format(AdapterInvocation(layout,
  * demos, inputs, request))`, which returns a `FormattedPrompt`; the "system message" is just its first
@@ -17,10 +19,11 @@ package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation}
-import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, :=}
+import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, RuntimeError, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.lm.contracts.{LmMode, LmRequest}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}
+import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.programs.Predict
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.{DynamicValue, Schema}
@@ -82,7 +85,6 @@ object Adapters:
 
   // ── Snippets 5 & 6 — a structured-output Predict under ChatAdapter, then JSONAdapter ──
   // | predict = dspy.Predict(NewsQA); predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
-  // | dspy.inspect_history()   # ← dropped: no global history buffer in dspy4s
   private def runNews(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
     Predict(Signature.of[NewsQA])
       .apply((science_field = "Computer Theory", year = 2022, num_of_outputs = 1))
@@ -94,10 +96,29 @@ object Adapters:
   def newsWithJsonAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
     withAdapter(JSONAdapter())(runNews)
 
+  // ── Snippets 5/6 tail — `dspy.inspect_history()` ──
+  // dspy4s's analogue is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, rendering the per-thread
+  // `RuntimeContext.history`. That history is recorded by a `ManagedLanguageModel` (per-LM composition), so we
+  // wrap the ambient LM in one for this call, then ask + render the last entry. Returns (answer, history-render).
+  def askThenInspect(question: String)(using ctx: RuntimeContext): Either[DspyError, (String, String)] =
+    ctx.lm match
+      case Some(lm: LanguageModel) =>
+        RuntimeEnvironment.withSettings(ctx.copy(lm = Some(ManagedLanguageModel(lm)))) {
+          given RuntimeContext = RuntimeEnvironment.current
+          Predict(Signature.fromString("question -> answer"))
+            .apply((question = question))
+            .map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1))) // dspy.inspect_history(n=1)
+        }
+      case _ => Left(RuntimeError("no_lm", "no ambient LanguageModel to record history"))
+
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.adaptersMain"
 @main def adaptersMain(): Unit = Demo.withLm {
   println("=== ChatAdapter system message ===")
   println(Adapters.systemMessage)
   println("\n=== ask ===")
   println(Adapters.ask("What is the capital of France?"))
+  println("\n=== ask + inspect_history ===")
+  Adapters.askThenInspect("What is the capital of France?") match
+    case Right((answer, history)) => println(s"answer: $answer\n$history")
+    case Left(err)                => println(s"error: ${err.message}")
 }
