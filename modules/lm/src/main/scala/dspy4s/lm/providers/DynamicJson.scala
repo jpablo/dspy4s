@@ -1,6 +1,6 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.{DspyError, ParseError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -38,9 +38,8 @@ private[lm] object DynamicJson:
 
   // ── Navigation (replacing Map's asMap / asVector / asLong / string extraction) ──────────────────
 
-  def field(value: DynamicValue, name: String): Option[DynamicValue] = value match
-    case rec: DynamicValue.Record => rec.fields.iterator.collectFirst { case (k, v) if k == name => v }
-    case _                        => None
+  def field(value: DynamicValue, name: String): Option[DynamicValue] =
+    asRecord(value).flatMap(rec => DynamicValues.recordGet(rec, name))
 
   def asRecord(value: DynamicValue): Option[DynamicValue.Record] = value match
     case rec: DynamicValue.Record => Some(rec)

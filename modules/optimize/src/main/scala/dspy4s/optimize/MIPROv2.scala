@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.Predictors
+import dspy4s.programs.{DynamicPredict, Predictors}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
@@ -185,13 +185,15 @@ final class MIPROv2[P: Predictors: Runnable](config: MIPROv2Config) extends Tele
     val baselineScore = scoreProgram(student, evalset)
     candidates += CandidateProgram(student, baselineScore, metadata = Map("trial" -> -1, "baseline" -> true))
 
+    // `student` is immutable, so its predictor leaves are the same every trial — read them once.
+    val leaves = ps.read(student)
     (0 until config.numTrials).foreach { trial =>
       val demoIdx       = rng.nextInt(demoCandidates.size)
       val demoAssignment = demoCandidates(demoIdx)
       val instrIndices  = (0 until predictorCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
       val chosenInstrs  = instrIndices.zipWithIndex.map { case (i, p) => instructionCandidates(p)(i) }
 
-      val applied = applyTrial(student, chosenInstrs, demoAssignment)
+      val applied = applyTrial(leaves, student, chosenInstrs, demoAssignment)
       val score   = scoreProgram(applied, evalset)
       candidates += CandidateProgram(
         program = applied,
@@ -217,11 +219,11 @@ final class MIPROv2[P: Predictors: Runnable](config: MIPROv2Config) extends Tele
   /** Build a trial program by applying, via a single [[Predictors.replace]], each predictor's chosen instruction
     * and chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[Predictors.read]] order. */
   private def applyTrial(
+      leaves: Vector[DynamicPredict],
       student: P,
       instructions: Vector[String],
       demoAssignment: Vector[Vector[Example]]
   ): P =
-    val leaves = ps.read(student)
     val updated = leaves.zipWithIndex.map { case (leaf, idx) =>
       val instr = instructions.lift(idx).getOrElse(leaf.layout.instructions.getOrElse(""))
       val demos = demoAssignment.lift(idx).getOrElse(leaf.demos)

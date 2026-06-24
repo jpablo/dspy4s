@@ -71,6 +71,13 @@ object DynamicValues:
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
     rec.fields.iterator.collectFirst { case (k, v) if k == name => v }
 
+  /** Merge `overlay` onto `base`: every field in `overlay` is upserted into `base` via [[updated]] — `overlay`
+    * wins on a key collision, `base`'s insertion order is preserved, and new keys append at the end. The record
+    * analogue of `base ++ overlay` for a `Map`. The single home for the "spread one option bag under another"
+    * semantics shared by adapter request-options, predictor config, and provider default-options merges. */
+  def mergeRecords(base: DynamicValue.Record, overlay: DynamicValue.Record): DynamicValue.Record =
+    overlay.fields.iterator.foldLeft(base)((acc, kv) => acc.updated(kv._1, kv._2))
+
   /** Filter fields by name. Preserves order. */
   def recordFilterKeys(rec: DynamicValue.Record, pred: String => Boolean): DynamicValue.Record =
     DynamicValue.Record(Chunk.from(rec.fields.iterator.filter((k, _) => pred(k)).toSeq))

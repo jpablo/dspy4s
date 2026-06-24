@@ -415,7 +415,7 @@ object RLM:
   private[programs] def parseSubmitted(finalJson: String, outputFieldNames: Vector[String]): Either[String, DynamicValue.Record] =
     dynamicJsonCodec.decode(finalJson.getBytes(StandardCharsets.UTF_8)) match
       case Right(record: DynamicValue.Record) =>
-        val present = record.fields.iterator.map(_._1).toSet
+        val present = DynamicValues.recordKeys(record).toSet
         val missing = outputFieldNames.filterNot(present.contains)
         if missing.isEmpty then Right(record)
         else Left(s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})")

@@ -14,6 +14,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 import java.util.concurrent.ThreadLocalRandom
 
@@ -135,26 +136,15 @@ final case class ManagedLanguageModel(
             Right(uncached)
 
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    var attempt = 0
-    var continue = true
-    var result: Either[DspyError, LmResponse] = Left(
-      dspy4s.core.contracts.RuntimeError("lm", "retry loop did not execute")
-    )
-
-    while continue do
+    @tailrec def loop(attempt: Int): Either[DspyError, LmResponse] =
       delegate.call(request) match
-        case ok @ Right(_) =>
-          result = ok
-          continue = false
+        case ok @ Right(_) => ok
         case Left(error) if retryPolicy.shouldRetry(attempt, error) =>
           val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
           if delay > 0L then sleep(delay)
-          attempt += 1
-        case failed @ Left(_) =>
-          result = failed
-          continue = false
-
-    result
+          loop(attempt + 1)
+        case failed @ Left(_) => failed
+    loop(0)
 
   private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean)(using RuntimeContext): Unit =
     if historyEnabled then

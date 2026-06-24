@@ -41,7 +41,7 @@ object ProviderRequestNormalizer:
       request: LmRequest,
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
   ): DynamicValue.Record =
-    var rec = mergeRecords(defaultOptions, request.options)
+    var rec = DynamicValues.mergeRecords(defaultOptions, request.options)
     rec = rec.updated(WireKeys.model, str(request.model))
     rec = rec.updated(WireKeys.mode, str(request.mode.toString.toLowerCase))
     request.requestId.foreach(id => rec = rec.updated(WireKeys.requestId, str(id)))
@@ -51,9 +51,6 @@ object ProviderRequestNormalizer:
       case LmMode.Text =>
         val prompt = request.messages.map(messageText).mkString("\n").trim
         rec.updated(WireKeys.prompt, str(prompt))
-
-  private def mergeRecords(base: DynamicValue.Record, overlay: DynamicValue.Record): DynamicValue.Record =
-    overlay.fields.iterator.foldLeft(base)((acc, kv) => acc.updated(kv._1, kv._2))
 
   private def encodeMessage(message: Message): DynamicValue =
     val role = message.role.toString.toLowerCase

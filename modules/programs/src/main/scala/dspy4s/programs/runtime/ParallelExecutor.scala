@@ -34,19 +34,9 @@ final class ParallelExecutor(
       task: A => B,
       data: Vector[A]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
-    executeInternal(
-      task = (item: A) =>
-        try Right(task(item))
-        catch
-          case NonFatal(error) =>
-            Left(
-              RuntimeError(
-                component = "parallel_executor",
-                message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
-              )
-            ),
-      data = data
-    )
+    // executeInternal already wraps each task call in a try/catch that turns a throw into the same
+    // `RuntimeError`, so a total `task` only needs lifting into `Right` — no second catch here.
+    executeInternal(task = (item: A) => Right(task(item)), data = data)
 
   def executeEither[A, B](
       task: A => Either[DspyError, B],

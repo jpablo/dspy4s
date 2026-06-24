@@ -108,7 +108,7 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
               case Some(rules) =>
                 val augmented = s"${originalInstructions(predIdx)}\n\n" +
                   s"Please adhere to the following rules when making your prediction:\n$rules"
-                applyInstruction(prog, predIdx, augmented)
+                OptimizerSupport.applyInstruction(prog, predIdx, augmented)
               case None => prog // induction failed for this predictor; leave its instruction unchanged
           }
           OptimizerSupport.evalScore(candidate, effVal, config.metric, runner).foreach { score =>
@@ -166,12 +166,6 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
         s"Output Fields:\n${render(predictor.layout.outputFields, ex)}\n"
     }.mkString("\n")
 
-  /** Apply `instruction` to the `idx`-th predictor of `program` via [[Predictors.replace]] (instruction-only edit). */
-  private def applyInstruction(program: P, idx: Int, instruction: String): P =
-    val leaves  = ps.read(program)
-    val leaf    = leaves(idx)
-    val updated = leaf.copy(layout = leaf.layout.withInstructions(Some(instruction)))
-    ps.replace(program, leaves.updated(idx, updated))
 
   /** The rule-induction signature: `examples_text -> natural_language_rules`, instructed to extract `numRules`
     * concise, non-redundant, actionable rules (a paraphrase of upstream's `CustomRulesInduction` docstring). */

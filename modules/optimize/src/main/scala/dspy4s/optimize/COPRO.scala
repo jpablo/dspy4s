@@ -136,7 +136,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     val candidates        = mutable.ArrayBuffer.empty[CandidateProgram[P]]
 
     def scoreCandidate(instruction: String): P =
-      val applied = applyInstruction(program, idx, instruction)
+      val applied = OptimizerSupport.applyInstruction(program, idx, instruction)
       // A whole-eval failure (timeout / maxErrors) yields None — skip it entirely rather than recording a
       // real 0.0 that would corrupt selection (a genuinely-0-scoring instruction could then look "as good").
       scoreProgram(applied, evalset).foreach { score =>
@@ -163,15 +163,8 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     val bestInstruction =
       if evaluated.isEmpty then baseInstruction
       else evaluated.maxBy(_._2)._1
-    val updated = applyInstruction(program, idx, bestInstruction)
+    val updated = OptimizerSupport.applyInstruction(program, idx, bestInstruction)
     (updated, candidates.toVector)
-
-  /** Apply `instruction` to the `idx`-th predictor of `program` via [[Predictors.replace]]. */
-  private def applyInstruction(program: P, idx: Int, instruction: String): P =
-    val leaves  = ps.read(program)
-    val leaf    = leaves(idx)
-    val updated = leaf.copy(layout = leaf.layout.withInstructions(Some(instruction)))
-    ps.replace(program, leaves.updated(idx, updated))
 
   /** Run the whole program on the evalset and return the aggregate metric score (0..100), or `None` when the
     * whole evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call

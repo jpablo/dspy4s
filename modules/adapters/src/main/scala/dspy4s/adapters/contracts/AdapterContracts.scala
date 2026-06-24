@@ -2,11 +2,11 @@ package dspy4s.adapters.contracts
 
 import dspy4s.core.contracts.AdapterRef
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -63,7 +63,7 @@ object FormattedPrompt:
       adapterOptions: zio.blocks.schema.DynamicValue.Record,
       requestOptions: zio.blocks.schema.DynamicValue.Record
   ): zio.blocks.schema.DynamicValue.Record =
-    requestOptions.fields.iterator.foldLeft(adapterOptions)((acc, kv) => acc.updated(kv._1, kv._2))
+    DynamicValues.mergeRecords(adapterOptions, requestOptions)
 
 /** Adapter parse result. `values` is the structured record of output field values produced from the LM completion;
   * `metadata` is a free-form bag of debug / adapter-specific annotations (e.g. `{"adapter" -> "json", "fallback"

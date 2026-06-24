@@ -13,7 +13,6 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.updated
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.lm.contracts.LanguageModel
@@ -115,7 +114,7 @@ private[dspy4s] final case class PredictEngine(
     * (Deferred: a per-module bound LM — Python's `set_lm`/`get_lm` — is intentionally not handled here; the LM
     * is resolved from the ambient `RuntimeContext` via `runtime.resolveModel`. See PORT_GAPS G-3.) */
   private def mergeConfig(moduleConfig: DynamicValue.Record, callConfig: DynamicValue.Record): DynamicValue.Record =
-    callConfig.fields.iterator.foldLeft(moduleConfig)((acc, kv) => acc.updated(kv._1, kv._2))
+    DynamicValues.mergeRecords(moduleConfig, callConfig)
 
   /** Mirror upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: input keys that are not declared input
     * fields are tolerated (the extras are dropped downstream, since [[AdapterInvocation]] is built with

@@ -4,10 +4,19 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
+import dspy4s.programs.Predictors
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place
   * so the seed→rolloutId mapping and the Evaluate+Runnable scoring wiring stay identical across optimizers. */
 private[optimize] object OptimizerSupport:
+
+  /** Apply `instruction` to the `idx`-th predictor of `program` (an instruction-only edit) via
+    * [[dspy4s.programs.Predictors.replace]]. The single home for the per-leaf instruction rewrite shared by the
+    * positional instruction optimizers (COPRO, InferRules). */
+  def applyInstruction[P](program: P, idx: Int, instruction: String)(using ps: Predictors[P]): P =
+    val leaves = ps.read(program)
+    val leaf   = leaves(idx)
+    ps.replace(program, leaves.updated(idx, leaf.copy(layout = leaf.layout.withInstructions(Some(instruction)))))
 
   /** Map an optimizer `seed` to a base `rolloutId` in `[0, 1024)`. Optimizers offset this base to carve out
     * deterministic, non-overlapping rolloutId windows per predictor / round / candidate, so candidate sampling is
