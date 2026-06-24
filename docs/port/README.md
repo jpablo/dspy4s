@@ -12,6 +12,7 @@ looking for.
 | [PORT_LANGUAGE_NOTES.md](PORT_LANGUAGE_NOTES.md) | Idiom-level mechanics with code | You're translating a Python pattern (async, decorators, metaclasses, etc.) and want to see the Scala equivalent |
 | [PORT_SCOPE.md](PORT_SCOPE.md) | v1 scope envelope | You want to know what's in scope and what's deferred at the feature level |
 | [PORT_BACKLOG.md](PORT_BACKLOG.md) | Phase plan + status | You want to know which phase a feature shipped in or what's still pending |
+| [EXAMPLE_PORT_CANDIDATES.md](EXAMPLE_PORT_CANDIDATES.md) | Sourcing — examples worth porting | You want a vetted, ranked list of external DSPy tutorials/examples to port as dspy4s showcases |
 
 ## Upstream pin
 
