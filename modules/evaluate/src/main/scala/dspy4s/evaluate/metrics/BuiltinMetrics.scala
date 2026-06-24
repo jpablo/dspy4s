@@ -12,14 +12,19 @@ import zio.blocks.schema.DynamicValue
 
 object MetricHelpers:
   def extractString(example: Example, prediction: DynamicPrediction, fieldName: String): Either[DspyError, (String, Vector[String])] =
-    val exampleValue = example.get(fieldName).map(DynamicValues.toAny) match
-      case Some(text: String) => Right(Vector(text))
-      case Some(seq: Iterable[?]) =>
-        val strings = seq.collect { case s: String => s }.toVector
-        if strings.isEmpty then Left(NotFoundError(fieldName, s"Example.$fieldName has no string values"))
-        else Right(strings)
-      case Some(other) => Right(Vector(other.toString))
+    val exampleValue: Either[DspyError, Vector[String]] = example.get(fieldName) match
       case None => Left(NotFoundError(fieldName, s"Example is missing field '$fieldName'"))
+      case Some(dv) =>
+        DynamicValues.toAny(dv) match
+          case text: String => Right(Vector(text))
+          // A record-valued field is a `Map` (hence `Iterable`); render it to text rather than collecting its
+          // tuple elements as strings (which yields none and would falsely report "no string values").
+          case _: scala.collection.Map[?, ?] => Right(Vector(DynamicValues.renderText(dv)))
+          case seq: Iterable[?] =>
+            val strings = seq.collect { case s: String => s }.toVector
+            if strings.isEmpty then Left(NotFoundError(fieldName, s"Example.$fieldName has no string values"))
+            else Right(strings)
+          case other => Right(Vector(other.toString))
 
     val predictionValue = prediction.get(fieldName).map(DynamicValues.toAny) match
       case Some(text: String) => Right(text)
@@ -40,12 +45,6 @@ object MetricHelpers:
       case Some(seq: Iterable[?]) => Right(seq.map(_.toString).mkString("\n"))
       case Some(other)            => Right(other.toString)
       case None => Left(NotFoundError(fieldName, s"$owner is missing field '$fieldName'"))
-
-  def maxOverReferences[A](references: Vector[String], transform: String => A, score: (A, A) => Double): (Double, A) =
-    if references.isEmpty then (0.0, transform(""))
-    else
-      val scores = references.map(r => (score(transform(""), transform(r)), transform(r)))
-      scores.maxBy(_._1)
 
 class ExactMatch(answerField: String = "answer") extends Metric:
   val name: String = "exact_match"

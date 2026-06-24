@@ -56,6 +56,16 @@ class RetrieversSuite extends FunSuite:
     }
   }
 
+  test("KNN.retrieve returns Left (not a NoSuchElementException) when the embedder yields no query row") {
+    // A misbehaving embedder returns proper rows for the eager trainset embed but no row for the single query.
+    val embedder = Embedder.fromFunction("empty-query") { texts =>
+      if texts.sizeIs == 1 then Vector.empty else texts.map(_ => Vector(1.0f, 0.0f))
+    }
+    val knn    = KNN.create(k = 1, Vector(ex("q1", "a1"), ex("q2", "a2")), embedder).toOption.get
+    val result = knn.retrieve(DynamicValues.record("question" := "q1"))
+    assert(result.isLeft, s"empty embedder rows must surface as Left, not throw: $result")
+  }
+
   // ── EmbeddingsRetriever ─────────────────────────────────────────────────────────────────────────────────────
 
   test("EmbeddingsRetriever returns top-k passages with indices and scores, best first") {
@@ -84,4 +94,12 @@ class RetrieversSuite extends FunSuite:
 
     val rawDot = EmbeddingsRetriever.create(Vector("big", "unit"), embedder, k = 1, normalize = false).toOption.get
     assertEquals(rawDot.search("query").toOption.get.passages, Vector("big")) // 10.0 > 1.0 unnormalized
+  }
+
+  test("EmbeddingsRetriever.search returns Left (not a NoSuchElementException) when the embedder yields no query row") {
+    val embedder = Embedder.fromFunction("empty-query") { texts =>
+      if texts.sizeIs == 1 then Vector.empty else texts.map(_ => Vector(1.0f, 0.0f))
+    }
+    val retriever = EmbeddingsRetriever.create(Vector("alpha", "beta"), embedder, k = 1).toOption.get
+    assert(retriever.search("query").isLeft, "empty embedder rows must surface as Left, not throw")
   }

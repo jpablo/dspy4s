@@ -28,8 +28,8 @@ object RetryPolicies:
       override def shouldRetry(attempt: Int, error: DspyError): Boolean =
         attempt < maxRetries && retryOn(error)
 
-  def maxRetriesOnCodes(maxAttempts: Int, retryableCodes: Set[String]): RetryPolicy =
-    maxRetries(maxAttempts, error => retryableCodes.contains(error.code))
+  def maxRetriesOnCodes(maxRetries: Int, retryableCodes: Set[String]): RetryPolicy =
+    this.maxRetries(maxRetries, error => retryableCodes.contains(error.code))
 
   def exponentialBackoff(
       maxRetries: Int,

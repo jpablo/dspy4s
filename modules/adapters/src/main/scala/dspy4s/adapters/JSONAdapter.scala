@@ -271,8 +271,12 @@ final case class JSONAdapter(
   private def coerce(typeRef: TypeRef, value: Value): Either[DspyError, DynamicValue] =
     typeRef match
       case TypeRef.int =>
-        value.numOpt.map(_.toInt).toRight(ValidationError(s"Expected integer value, found: $value"))
-          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
+        // Reject a fractional or out-of-Int-range number rather than silently truncating/overflowing via
+        // Double.toInt (12.9 -> 12, 1e10 -> Int.MaxValue) — matching Chat/XML's `toIntOption` and JsonDynamic.
+        value.numOpt
+          .filter(d => d.isWhole && d >= Int.MinValue.toDouble && d <= Int.MaxValue.toDouble)
+          .map(d => DynamicValue.Primitive(PrimitiveValue.Int(d.toInt)))
+          .toRight(ValidationError(s"Expected integer value, found: $value"))
       case TypeRef.double =>
         value.numOpt.toRight(ValidationError(s"Expected numeric value, found: $value"))
           .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))

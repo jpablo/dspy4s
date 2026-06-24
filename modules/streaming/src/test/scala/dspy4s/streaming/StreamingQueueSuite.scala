@@ -83,3 +83,23 @@ class StreamingQueueSuite extends FunSuite:
     val iter = queue.asIterator
     assertEquals(iter.hasNext, false)
   }
+
+  test("a producer parked on a full buffer is released when the consumer abandons the stream") {
+    // Regression: blocking put() + a consumer close() that didn't drain left the producer parked forever.
+    val queue   = StreamingQueue[Int](2) // tiny buffer so the producer blocks quickly
+    val stopped = new AtomicBoolean(false)
+    val producer = new Thread(() => {
+      var i = 0
+      while queue.offer(i) do i += 1 // keep producing until offer reports the consumer is gone
+      stopped.set(true)
+    })
+    producer.start()
+
+    val iter = queue.asIterator
+    assertEquals(iter.next(), 0) // read one, then abandon while the producer is blocked on the full buffer
+    iter.close()
+
+    producer.join(2000)
+    assert(!producer.isAlive, "producer thread must terminate after the consumer abandons the stream")
+    assert(stopped.get(), "offer must eventually return false once the consumer has abandoned the stream")
+  }

@@ -7,19 +7,25 @@ import java.util.concurrent.LinkedBlockingQueue
 final class StreamingQueue[A](capacity: Int):
   private val queue = new LinkedBlockingQueue[Option[A]](capacity)
   @volatile private var closed = false
+  // Set when the consumer abandons the stream (`asIterator.close()`), so the producer stops and a `put`
+  // parked on a full buffer is released (the consumer's close also `clear()`s the buffer to wake it).
+  @volatile private var consumerAbandoned = false
 
   def isClosed: Boolean = closed
 
+  /** Producer side. Returns false once the queue is closed OR the consumer has abandoned the stream, so a
+    * producer that checks the return value stops pushing. `put` still applies back-pressure on a full buffer,
+    * but a consumer abandoning via `asIterator.close()` clears the buffer, unblocking a parked `put`. */
   def offer(item: A): Boolean =
-    if closed then false
+    if closed || consumerAbandoned then false
     else
       queue.put(Some(item))
-      true
+      !consumerAbandoned
 
   def close(): Unit =
     if !closed then
       closed = true
-      queue.put(None)
+      if !consumerAbandoned then queue.put(None) // deliver end-of-stream only to a live consumer
     else ()
 
   def asIterator: ClosableIterator[A] = new ClosableIterator[A]:
@@ -53,7 +59,9 @@ final class StreamingQueue[A](capacity: Int):
 
     override def close(): Unit =
       consumerClosed = true
+      consumerAbandoned = true // signal the producer to stop
       pending = null
+      queue.clear()            // release a producer parked in put() on a full buffer
 
 object StreamingQueue:
   def apply[A](capacity: Int = 64): StreamingQueue[A] = new StreamingQueue[A](capacity)

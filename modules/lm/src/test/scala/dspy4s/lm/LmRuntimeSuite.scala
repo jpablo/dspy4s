@@ -173,7 +173,7 @@ class LmRuntimeSuite extends FunSuite:
       )
     )
     val retryPolicy = RetryPolicies.maxRetriesOnCodes(
-      maxAttempts = 3,
+      maxRetries = 3,
       retryableCodes = Set("runtime_error")
     )
     val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = retryPolicy)

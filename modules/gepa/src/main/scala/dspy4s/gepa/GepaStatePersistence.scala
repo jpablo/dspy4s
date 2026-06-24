@@ -29,8 +29,11 @@ object GepaStatePersistence:
     new String(codec.encode(Snapshot(state.candidates, state.valSubscores, state.parents, state.totalMetricCalls)), StandardCharsets.UTF_8)
 
   def fromJson(json: String): Either[String, GepaState] =
-    codec.decode(json.getBytes(StandardCharsets.UTF_8)).left.map(_.toString).map { s =>
-      GepaState(s.candidates, s.valSubscores, s.parents, s.totalMetricCalls)
+    codec.decode(json.getBytes(StandardCharsets.UTF_8)).left.map(_.toString).flatMap { s =>
+      // GepaState's invariants (aligned vectors, uniform subscore-row lengths) guard paretoFrontier's indexing;
+      // a malformed snapshot must surface as a clean Left here, not an IndexOutOfBounds deep in the search.
+      scala.util.Try(GepaState(s.candidates, s.valSubscores, s.parents, s.totalMetricCalls)).toEither.left
+        .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
     }
 
   /** Write `state` to `<dir>/gepa_state.json`, creating `dir` if needed. */

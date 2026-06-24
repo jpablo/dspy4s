@@ -138,8 +138,8 @@ final case class MultiChainComparison[I, O](
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     apply(MultiChainCall(input, attempts, config, traceEnabled))
 
-  /** Renders a single attempt as Python does:
-    * `«I'm trying to {rationale}. I'm not sure but my prediction is {answer}»`. */
+  /** Renders a single attempt verbatim as Python does (no period after the rationale, matching
+    * `multi_chain_comparison.py`): `«I'm trying to {rationale} I'm not sure but my prediction is {answer}»`. */
   private def formatAttempt(attempt: DynamicPrediction): String =
     val row       = attempt.values
     val rationale = firstNonEmpty(row, Seq("rationale", "reasoning"))

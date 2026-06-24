@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.Embedder
 import zio.blocks.schema.DynamicValue
 
@@ -22,10 +23,11 @@ final class KNN private (
   /** The `k` trainset examples nearest to `inputs` (the query's input fields), best first. Ties break by the
     * earlier trainset index, deterministically. */
   def retrieve(inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, Vector[Example]] =
-    embedder.embed(Vector(KNN.serialize(inputs))).map { queryRows =>
-      val query  = queryRows.head
-      val scored = trainVectors.zipWithIndex.map { case (row, i) => (Similarity.dot(query, row), i) }
-      scored.sortBy { case (score, i) => (-score, i) }.take(k).map { case (_, i) => trainset(i) }
+    embedder.embed(Vector(KNN.serialize(inputs))).flatMap { queryRows =>
+      queryRows.headOption.toRight(RuntimeError("knn", "embedder returned no rows for the query")).map { query =>
+        val scored = trainVectors.zipWithIndex.map { case (row, i) => (Similarity.dot(query, row), i) }
+        scored.sortBy { case (score, i) => (-score, i) }.take(k).map { case (_, i) => trainset(i) }
+      }
     }
 
 object KNN:

@@ -32,6 +32,17 @@ class GepaStateSuite extends FunSuite:
     assertEquals(s.paretoFrontier, Map(0 -> Set(1), 1 -> Set(1)))
   }
 
+  test("GepaState rejects ragged valSubscores up front (instead of an IndexOutOfBounds in paretoFrontier)") {
+    intercept[IllegalArgumentException] {
+      val _ = GepaState(
+        candidates = Vector(Map("0" -> "a"), Map("0" -> "b")),
+        valSubscores = Vector(Vector(1.0, 0.0), Vector(1.0)), // second row is shorter — would crash paretoFrontier
+        parents = Vector(Vector.empty[Int], Vector.empty[Int]),
+        totalMetricCalls = 0
+      )
+    }
+  }
+
   test("Pareto selection only ever returns a frontier candidate (never the dominated one)") {
     val s   = state(Vector(0.0, 0.0), Vector(1.0, 1.0)) // c1 dominates
     val rng = new Random(0)

@@ -148,14 +148,14 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
 
     // ── Round 0: seed breadth-1 fresh candidates + the predictor's own current instruction ──
     val seedProposals =
-      generateInstructions(idx, baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty)
+      generateInstructions(idx, baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty, round = 0)
     val round0 = (seedProposals :+ baseInstruction).filter(_.nonEmpty).distinct
     round0.foreach(scoreCandidate)
 
     // ── Rounds 1..depth-1: refine using past (instruction, score) attempts ──
-    (1 until config.depth).foreach { _ =>
+    (1 until config.depth).foreach { round =>
       val attempts = evaluated.toVector.sortBy(_._2) // ascending score, as upstream presents them
-      val refined  = generateInstructions(idx, baseInstruction, fieldNames, config.breadth, attempts)
+      val refined  = generateInstructions(idx, baseInstruction, fieldNames, config.breadth, attempts, round = round)
       refined.filter(_.nonEmpty).distinct.foreach(scoreCandidate)
     }
 
@@ -197,7 +197,8 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       baseInstruction: String,
       fieldNames: Vector[String],
       count: Int,
-      attempts: Vector[(String, Double)]
+      attempts: Vector[(String, Double)],
+      round: Int
   )(using RuntimeContext): Vector[String] =
     if count <= 0 then Vector.empty
     else
@@ -214,10 +215,11 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
 
       // Deterministic, contiguous rolloutId stream so candidate sampling is reproducible AND spans a
       // predictable window (a scripted/temperature-driven LM yields a distinct proposal per rolloutId). The
-      // round salt keeps refinement rounds from re-drawing the same window as the seed round; the per-predictor
-      // offset keeps HOMOGENEOUS predictors (identical baseInstruction/fields) from drawing the SAME window and
-      // thus requesting byte-identical generations that hit the LM cache (yielding identical proposals).
-      val roundSalt = if withAttempts then count * 7 else 0
+      // per-round salt gives EACH round (seed = round 0, plus every refinement round) its own non-overlapping
+      // window of `count` ids, so successive refinement rounds don't re-draw the same window (which would yield
+      // byte-identical generations via the LM cache); the per-predictor offset likewise keeps HOMOGENEOUS
+      // predictors (identical baseInstruction/fields) from drawing the SAME window.
+      val roundSalt = round * config.breadth
       val base      = OptimizerSupport.seedBase(config.seed) + predictorIdx * 10000 + roundSalt
       val results = (0 until count).iterator.flatMap { i =>
         val rolloutId = base + i

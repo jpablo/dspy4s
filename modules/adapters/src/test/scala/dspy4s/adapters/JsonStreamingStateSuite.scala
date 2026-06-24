@@ -68,6 +68,13 @@ class JsonStreamingStateSuite extends FunSuite:
     assertEquals(collect(out).get("v"), Some("éhi"))
   }
 
+  test("malformed \\uXXXX escape degrades to literal text instead of crashing the stream") {
+    // Regression: Integer.parseInt on non-hex digits threw NumberFormatException out of the consumer.
+    val state = new JsonStreamingState(Vector(output("v")))
+    val out = drive(state, """{"v": "x\uZZZZy"}""")
+    assertEquals(collect(out).get("v"), Some("""x\uZZZZy"""))
+  }
+
   test("fenced ```json preamble is tolerated (skips chars before the first '{')") {
     val state = new JsonStreamingState(Vector(output("answer")))
     val out = drive(state, "```json\n{\"answer\": \"42\"}\n```")

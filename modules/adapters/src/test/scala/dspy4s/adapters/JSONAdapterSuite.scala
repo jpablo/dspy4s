@@ -111,6 +111,19 @@ class JSONAdapterSuite extends FunSuite:
     assertEquals(lookup(values, "ok"), Some(true: Any))
   }
 
+  test("parse coerces a whole-number int but rejects a fractional value (no silent truncation)") {
+    // Two outputs so the JSON-object path (not the single-output raw-text fallback) drives coercion.
+    val signature = SignatureDsl.parse("question -> answer, count: int").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val ok = JSONAdapter().parse(signature, LmOutput(text = """{"answer":"x","count":42}"""))
+    assertEquals(ok.toOption.flatMap(p => lookup(p.values, "count")), Some(42: Any))
+
+    // Regression: `numOpt.map(_.toInt)` silently turned 12.9 into 12; it must now be a parse error.
+    val fractional = JSONAdapter().parse(signature, LmOutput(text = """{"answer":"x","count":12.9}"""))
+    assert(fractional.isLeft, s"a fractional value for an int field must be rejected, got: $fractional")
+  }
+
   test("parse supports fenced json payloads") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
     val text =

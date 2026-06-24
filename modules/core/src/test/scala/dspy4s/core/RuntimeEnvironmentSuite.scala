@@ -63,6 +63,14 @@ class RuntimeEnvironmentSuite extends FunSuite:
     assertEquals(RuntimeEnvironment.current.asyncTaskId, Some("global"))
   }
 
+  test("globally-configured captureFailureTraces and callbackMetadata reach the current context (fillFrom)") {
+    // Regression: fillFrom omitted these two fields, so a global `configure` of them was silently lost in `current`.
+    val meta = DynamicValues.record("run" := "abc")
+    val _ = RuntimeEnvironment.configure(RuntimeContext(captureFailureTraces = true, callbackMetadata = meta))
+    assertEquals(RuntimeEnvironment.current.captureFailureTraces, true)
+    assertEquals(RuntimeEnvironment.current.callbackMetadata, meta)
+  }
+
   test("withSettings overrides global setting only inside scope") {
     val _ = RuntimeEnvironment.configure(RuntimeContext(asyncTaskId = Some("global")))
 

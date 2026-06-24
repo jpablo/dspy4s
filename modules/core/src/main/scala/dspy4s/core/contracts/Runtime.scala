@@ -121,6 +121,8 @@ final case class RuntimeContext(
       maxHistorySize = maxHistorySize.orElse(defaults.maxHistorySize),
       disableHistory = disableHistory.orElse(defaults.disableHistory),
       trackUsage     = trackUsage.orElse(defaults.trackUsage),
+      callbackMetadata     = if callbackMetadata.fields.isEmpty then defaults.callbackMetadata else callbackMetadata,
+      captureFailureTraces = captureFailureTraces || defaults.captureFailureTraces,
       asyncTaskId    = asyncTaskId.orElse(defaults.asyncTaskId),
       activeCallId   = activeCallId.orElse(defaults.activeCallId),
       callStack      = if callStack.nonEmpty then callStack else defaults.callStack

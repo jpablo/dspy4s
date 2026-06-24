@@ -134,6 +134,43 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(result.left.toOption.get.message, "f2")
   }
 
+  test("typed BestOfN tolerates exactly failCount failures (budget, not loop index)") {
+    // Regression: the abort used `idx > remainingFailures`, conflating the loop index with the failure
+    // budget — so with failCount=3 it aborted on the 3rd failure instead of tolerating 3 and aborting on the 4th.
+    val stub = TypedStub(Vector(
+      Left(RuntimeError("typed_stub", "f1")),
+      Left(RuntimeError("typed_stub", "f2")),
+      Left(RuntimeError("typed_stub", "f3")),
+      Left(RuntimeError("typed_stub", "f4")),
+      Left(RuntimeError("typed_stub", "f5"))
+    ))
+    val bestOfN = BestOfN[Q, Cand](stub, n = 5, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(3))
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = bestOfN.apply(TypedCall(Q("x")))
+    assert(result.isLeft)
+    assertEquals(stub.calls.get(), 4)                       // tolerated 3 failures, aborted on the 4th
+    assertEquals(result.left.toOption.get.message, "f4")
+  }
+
+  test("typed BestOfN keeps a sub-threshold best when a late failure stays within budget") {
+    // Successes precede the failure, so the loop index is already high; with the index-based abort this
+    // discarded the best. With the budget-based abort, the single failure is within failCount and `best` survives.
+    val stub = TypedStub(Vector(
+      Right(candidate("A", 0.1)),
+      Right(candidate("B", 0.3)),
+      Right(candidate("C", 0.2)),
+      Left(RuntimeError("typed_stub", "boom")),            // first failure, at a high index
+      Right(candidate("D", 0.9))
+    ))
+    val bestOfN = BestOfN[Q, Cand](stub, n = 5, rewardFn = (_, p) => p.output.score, threshold = 1.0, failCount = Some(2))
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = bestOfN.apply(TypedCall(Q("x")))
+    assertEquals(result.toOption.map(_.output), Some(Cand("D", 0.9)))
+    assertEquals(stub.calls.get(), 5)
+  }
+
   test("typed Refine preserves best-of-N parity on the no-advice path (threshold met on the first attempt)") {
     // When attempt 1 already meets the threshold, Refine short-circuits with no feedback step — identical to
     // BestOfN. No LM/adapter is configured, proving the OfferFeedback sub-program is never reached here.
@@ -334,6 +371,24 @@ class TypedBestOfNSuite extends FunSuite:
     assert(result.isLeft)
     assertEquals(stub.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
+  }
+
+  test("typed Refine tolerates exactly failCount failures (budget, not loop index)") {
+    // Same regression as BestOfN, on Refine's module-failure path.
+    val stub = TypedStub(Vector(
+      Left(RuntimeError("typed_stub", "f1")),
+      Left(RuntimeError("typed_stub", "f2")),
+      Left(RuntimeError("typed_stub", "f3")),
+      Left(RuntimeError("typed_stub", "f4")),
+      Left(RuntimeError("typed_stub", "f5"))
+    ))
+    val refine = Refine[TypedStub, Q, Cand](stub, n = 5, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(3))
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val result = refine.apply(TypedCall(Q("x")))
+    assert(result.isLeft)
+    assertEquals(stub.calls.get(), 4)
+    assertEquals(result.left.toOption.get.message, "f4")
   }
 
 end TypedBestOfNSuite

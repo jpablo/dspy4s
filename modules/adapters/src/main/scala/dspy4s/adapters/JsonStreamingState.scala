@@ -5,6 +5,7 @@ import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.core.contracts.FieldSpec
 
 import scala.collection.mutable
+import scala.util.control.NonFatal
 
 /** Streaming state machine for [[JSONAdapter]] output.
   *
@@ -159,8 +160,12 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
       unicodeRemaining -= 1
       if unicodeRemaining == 0 then
         if isCurrentTracked then
-          val cp = Integer.parseInt(unicodeBuf.toString, 16)
-          contentBuffer.append(cp.toChar)
+          // A malformed `\u` escape (non-hex digits) must degrade to the literal text, not throw out of the
+          // stream — mirroring XmlStreamingState.decodeEntity's NonFatal guard.
+          try
+            val _ = contentBuffer.append(Integer.parseInt(unicodeBuf.toString, 16).toChar)
+          catch
+            case NonFatal(_) => val _ = contentBuffer.append("\\u").append(unicodeBuf)
         unicodeBuf.clear()
     else if stringEscape then
       stringEscape = false

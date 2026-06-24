@@ -109,7 +109,7 @@ object BestOfN:
 
         case Left(error) =>
           lastError = Some(error)
-          if idx > remainingFailures then return Left(error)
+          if remainingFailures <= 0 then return Left(error)
           remainingFailures -= 1
           idx += 1
 

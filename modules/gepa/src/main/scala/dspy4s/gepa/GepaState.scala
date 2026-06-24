@@ -15,6 +15,15 @@ final case class GepaState(
     totalMetricCalls: Int
 ):
   require(candidates.nonEmpty, "GepaState needs at least the seed candidate")
+  require(
+    valSubscores.length == candidates.length && parents.length == candidates.length,
+    "GepaState candidates, valSubscores, and parents must be aligned by index"
+  )
+  require(
+    valSubscores.map(_.length).distinct.sizeIs <= 1,
+    "GepaState valSubscores rows must all have the same length (one score per validation example) — " +
+      "[[paretoFrontier]] indexes every candidate at every instance"
+  )
 
   /** Mean validation score of candidate `i`. */
   def aggregateScore(i: Int): Double =
