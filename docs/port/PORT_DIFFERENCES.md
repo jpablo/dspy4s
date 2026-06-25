@@ -351,21 +351,18 @@ funnel users toward.
 ## 14. Deferred areas (parity gaps, not design choices)
 
 These are differences because work hasn't landed yet, tracked
-separately:
+separately. Several items previously listed here have since shipped —
+the **retriever stack** (embedders, `KNN`, `KNNFewShot` — G-10),
+**`GEPA`** (G-12) and **`MIPROv2`**, the **sandboxed `CodeInterpreter`**
+(Deno + Pyodide) and **`RLM`** (G-20), and **`TwoStepAdapter`** (G-8).
+What genuinely remains:
 
-- **Retriever stack** (`Retrieve`, embedders, `KNNFewShot`) — not
-  ported.
-- **Advanced optimizers** (`GEPA`, `MIPROv2`, `SIMBA`, `GRPO`,
-  `AvatarOptimizer`) — not ported.
-- **Non-OpenAI providers** (Anthropic, Ollama, LiteLLM) — only
-  OpenAI implemented; the `LanguageModel` trait is
-  provider-agnostic.
-- **Sandboxed `CodeInterpreter`** (Deno + Pyodide bridge) — the
-  contract trait exists; only a plain `python3 -c "..."` subprocess
-  implementation ships. `ProgramOfThought` and `CodeAct` are
-  scaffolded against the contract; `RLM` depends on the sandbox
-  and is therefore also deferred.
-- **`TwoStepAdapter`** — not yet ported.
+- **Advanced optimizers** (`SIMBA` — G-13, `GRPO` / `BootstrapFinetune`
+  — G-16, `BetterTogether` — G-15, `BootstrapFewShotWithOptuna` — G-17)
+  — not ported. (`AvatarOptimizer` is **won't-fix by design** — G-14.)
+- **Non-OpenAI providers** (Anthropic, LiteLLM router) — the
+  OpenAI-compatible / Ollama route shipped (G-22 part 1); the
+  `LanguageModel` trait is provider-agnostic.
 - **Multimodal reliability matrix** — out of scope for v1.
 - **Per-token streaming chunks** — see §5; tracked in
   [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).

@@ -17,7 +17,8 @@ dspy4s ports the *code-bearing* DSPy tutorials. The status legend and full inven
 - [Overview](./optimize_ai_program/README.md) — dspy4s ports `BootstrapFewShot*`; see [`learn/optimization`](../learn/optimization/README.md).
 
 ### Reflective prompt evolution (GEPA)
-- [Overview](./gepa_ai_program/README.md) — 🚫 GEPA optimizer not ported.
+- [Overview](./gepa_ai_program/README.md) — ✅ GEPA optimizer ported (`dspy4s-gepa`); see the live smoke harness
+  [`gepaSmokeMain`](../verify/GepaSmokeTest.scala). The upstream notebook tutorials (AIME, etc.) are not ported.
 
 ### Experimental RL optimization
 - [Overview](./rl_ai_program/README.md) — 🚫 RL optimization not ported.
