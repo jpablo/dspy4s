@@ -9,8 +9,8 @@ hide:
 # dspy4s { .hero__title }
 
 <p class="hero__tagline">
-Programming — not prompting — language models, in <strong>Scala 3</strong>.
-A faithful port of <a href="https://dspy.ai/">DSPy</a> with typed signatures the compiler checks for you.
+A Scala 3 library for building language model programs with typed signatures.
+Inputs and outputs are ordinary Scala types, so the compiler checks them for you.
 </p>
 
 <div class="hero__actions" markdown>
@@ -22,7 +22,7 @@ A faithful port of <a href="https://dspy.ai/">DSPy</a> with typed signatures the
 </div>
 
 ```scala
-// A signature is a typed input → output contract. The compiler knows the shape.
+// A signature declares typed inputs and outputs.
 val classify = Predict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
 classify.apply((sentence = "it's a charming and often affecting journey.")).map(_.output.sentiment)
@@ -33,38 +33,37 @@ classify.apply((sentence = "it's a charming and often affecting journey.")).map(
 
 <div class="grid cards" markdown>
 
--   :material-shield-check:{ .lg .middle } __Typed, not stringly__
+-   :material-shield-check:{ .lg .middle } __Typed signatures__
 
     ---
 
-    Signatures are real Scala types. Inputs and outputs are named tuples, so
-    you get dot-access (`_.output.sentiment`) and a compile error when a field
-    is wrong — no runtime `KeyError`.
+    Signatures are ordinary Scala types. Inputs and outputs are named tuples, so
+    you get dot-access (`_.output.sentiment`) and a compile error when a field is
+    wrong, instead of a runtime lookup failure.
 
     [:octicons-arrow-right-24: Signatures](learn/programming/signatures.md)
 
--   :material-language-python:{ .lg .middle } __Faithful to DSPy__
+-   :material-cube-outline:{ .lg .middle } __Composable modules__
 
     ---
 
-    The same building blocks — `Predict`, `ChainOfThought`, `ReAct`,
-    optimizers (COPRO / MIPROv2 / GEPA) — ported one-to-one from the Python
-    framework, with the original snippets kept inline for reference.
+    Build programs from `Predict`, `ChainOfThought`, and `ReAct`, then compose
+    them like any other Scala value.
 
 -   :material-check-decagram:{ .lg .middle } __Compiler-verified docs__
 
     ---
 
-    Every code sample on this site is extracted from a module that builds
-    under strict flags (`-Werror`, `-Wunused:all`). If a snippet wouldn't
-    compile, the site doesn't ship.
+    Every code sample on this site is extracted from a module that builds under
+    strict flags (`-Werror`, `-Wunused:all`). A snippet that would not compile
+    fails the build, so the docs stay correct.
 
--   :material-cog-sync:{ .lg .middle } __Optimizers included__
+-   :material-cog-sync:{ .lg .middle } __Optimizers__
 
     ---
 
-    Bootstrap few-shot, COPRO, MIPROv2, and a self-contained GEPA port —
-    the prompt-optimization engines that make DSPy DSPy.
+    Bootstrap few-shot, COPRO, MIPROv2, and a self-contained GEPA implementation
+    for optimizing prompts and few-shot demonstrations.
 
 </div>
 

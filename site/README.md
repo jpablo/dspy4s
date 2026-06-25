@@ -8,8 +8,8 @@ for the design.
 ## Prerequisites
 
 [`uv`](https://docs.astral.sh/uv/) (already used by `modules/examples/tools/scaffold.py`).
-It manages Python and the MkDocs dependencies declared in `pyproject.toml` — no
-manual `pip install` or virtualenv needed.
+It manages Python and the MkDocs dependencies declared in `pyproject.toml`, so no
+manual `pip install` or virtualenv is needed.
 
 ## Develop
 
@@ -38,7 +38,7 @@ object ToxicityExample:
 // --8<-- [end:toxicity]
 ```
 
-A doc page pulls a region by label — it never copies the code:
+A doc page pulls a region by label. It never copies the code:
 
 ````markdown
 ```scala

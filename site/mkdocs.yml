@@ -1,5 +1,5 @@
 site_name: dspy4s
-site_description: "DSPy for Scala 3 — typed signatures, compiler-checked."
+site_description: "A Scala 3 library for building language model programs with typed signatures."
 site_author: jpablo
 site_url: https://jpablo.github.io/dspy4s/
 
@@ -69,7 +69,7 @@ markdown_extensions:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   # The heart of the compiler-verified-snippet pipeline: pull labeled regions
-  # straight out of the strict-compiled examples module — never copy-paste.
+  # straight out of the strict-compiled examples module, never copy-paste.
   #   --8<-- "learn/programming/Signatures.scala:toxicity"
   # check_paths makes the build FAIL if a file or region is renamed/removed,
   # so docs can't silently drift from the code.
@@ -88,3 +88,4 @@ nav:
   - Learn:
       - Programming:
           - Signatures: learn/programming/signatures.md
+  - Coming from DSPy: coming-from-dspy.md
