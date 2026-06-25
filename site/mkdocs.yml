@@ -1,0 +1,90 @@
+site_name: dspy4s
+site_description: "DSPy for Scala 3 — typed signatures, compiler-checked."
+site_author: jpablo
+site_url: https://jpablo.github.io/dspy4s/
+
+repo_url: https://github.com/jpablo/dspy4s
+repo_name: jpablo/dspy4s
+edit_uri: edit/main/site/docs/
+
+# Build output goes into the repo's already-gitignored target/ dir.
+docs_dir: docs
+site_dir: ../target/site
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  # Material icon / emoji shortcodes (:material-shield-check:) → inline SVG.
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  # The heart of the compiler-verified-snippet pipeline: pull labeled regions
+  # straight out of the strict-compiled examples module — never copy-paste.
+  #   --8<-- "learn/programming/Signatures.scala:toxicity"
+  # check_paths makes the build FAIL if a file or region is renamed/removed,
+  # so docs can't silently drift from the code.
+  - pymdownx.snippets:
+      base_path:
+        - ..
+        - ../modules/examples/src/main/scala/dspy4s/examples
+      check_paths: true
+      dedent_subsections: true
+
+nav:
+  - Home: index.md
+  - Get Started:
+      - Installation: get-started/installation.md
+      - Quickstart: get-started/quickstart.md
+  - Learn:
+      - Programming:
+          - Signatures: learn/programming/signatures.md

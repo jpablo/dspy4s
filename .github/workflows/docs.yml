@@ -1,0 +1,70 @@
+name: docs
+
+# Builds the documentation site and deploys it to GitHub Pages.
+#
+# The compile gate is the whole point: `sbt examples/compile` must pass before
+# the site is built, so every snippet rendered on the site (extracted from
+# modules/examples via pymdownx.snippets) is guaranteed to compile under the
+# project's strict flags. `mkdocs build --strict` then fails on any broken link
+# or missing snippet region.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress Pages deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+
+      - name: Set up sbt
+        uses: sbt/setup-sbt@v1
+
+      # ── Compile gate: verifies every documented snippet compiles ──────────
+      - name: Compile examples (snippet gate)
+        run: sbt -batch -v examples/compile
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build site (strict)
+        working-directory: site
+        run: uv run mkdocs build --strict
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/site
+
+  deploy:
+    # Only publish from main; PRs still run the build job above as a check.
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

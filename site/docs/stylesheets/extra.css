@@ -1,0 +1,61 @@
+/* dspy4s docs — small brand tweaks on top of the Material theme. */
+
+:root {
+  --md-primary-fg-color: #5b3df5;
+  --md-primary-fg-color--light: #7c63f7;
+  --md-primary-fg-color--dark: #3f27c4;
+  --md-accent-fg-color: #6d4bff;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #8a73ff;
+  --md-accent-fg-color: #a48dff;
+}
+
+/* ── Minimal hero (homepage) ───────────────────────────────────────────── */
+.hero {
+  text-align: center;
+  padding: 3.5rem 1rem 2.5rem;
+}
+
+.hero__title {
+  font-size: 3.1rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0 0 0.6rem;
+  background: linear-gradient(110deg, var(--md-primary-fg-color), var(--md-accent-fg-color));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* The permalink anchor (¶) added by toc would inherit the transparent fill. */
+.hero__title .headerlink {
+  display: none;
+}
+
+.hero__tagline {
+  font-size: 1.25rem;
+  max-width: 40rem;
+  margin: 0 auto 1.8rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.hero__actions {
+  display: flex;
+  gap: 0.8rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.hero__actions .md-button {
+  font-weight: 600;
+}
+
+/* Grid-card icons inherit the brand color. */
+.md-typeset .grid.cards :is(.lg, .xl) {
+  color: var(--md-primary-fg-color);
+}

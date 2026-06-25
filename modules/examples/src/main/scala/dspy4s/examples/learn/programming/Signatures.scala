@@ -52,6 +52,7 @@ import zio.blocks.schema.Schema
 // | comment = "you are beautiful."
 // | toxicity(comment=comment).toxic
 
+// --8<-- [start:toxicity]
 object ToxicityExample:
   val signature =
     Signature.fromType[(comment: String) => (toxic: Boolean)](
@@ -63,6 +64,7 @@ object ToxicityExample:
 
   def call(comment: String)(using RuntimeContext): Either[DspyError, Boolean] =
     toxicity.apply((comment = comment)).map(_.output.toxic)
+// --8<-- [end:toxicity]
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 2 (lines 56–61) — Example A: Sentiment Classification
@@ -73,11 +75,13 @@ object ToxicityExample:
 // | classify = dspy.Predict('sentence -> sentiment: bool')  # we'll see an example with Literal[] later
 // | classify(sentence=sentence).sentiment
 
+// --8<-- [start:sentiment]
 object SentimentExample:
   val classify = Predict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
     classify.apply((sentence = sentence)).map(_.output.sentiment)
+// --8<-- [end:sentiment]
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippets 3 + 4 (lines 69–89) — Example B: Summarization with CoT + reasoning
@@ -98,6 +102,7 @@ object SentimentExample:
 // `reasoning: String`, so `tp.output.reasoning` and `tp.output.summary`
 // are both typed dot-accesses with no `.value(...)` indirection.
 
+// --8<-- [start:summarize]
 object SummarizeExample:
   val program = ChainOfThought(Signature.fromType[(document: String) => (summary: String)])
 
@@ -110,6 +115,7 @@ object SummarizeExample:
     program.apply((document = document)).map { tp =>
       (tp.output.reasoning, tp.output.summary)
     }
+// --8<-- [end:summarize]
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 5 (lines 107–119) — Example C: class-based Classification
@@ -131,6 +137,7 @@ object SummarizeExample:
 /** Python's `Literal[...]` becomes a top-level Scala enum. `derives Schema`
   * gives it a flat-string wire form (the enum case name) at both the
   * top-level OutputField boundary and inside nested products. */
+// --8<-- [start:emotion]
 enum Emotion derives Schema:
   case sadness, joy, love, anger, fear, surprise
 
@@ -143,6 +150,7 @@ object EmotionExample:
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     classify.apply((sentence = sentence)).map(_.output.sentiment)
+// --8<-- [end:emotion]
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 6 (lines 132–146) — Example D: faithfulness check
@@ -230,6 +238,7 @@ object DogPictureExample:
 // `Schema` drives both the field's wire `TypeRef` and its nested encode/decode
 // at the typed-signature boundary.
 
+// --8<-- [start:custom-types]
 case class QueryResult(text: String, score: Double) derives Schema
 
 object MyContainer:
@@ -244,6 +253,7 @@ object CustomTypesExample:
     Signature.fromType[
       (query: MyContainer.Query) => (score: MyContainer.Score)
     ]
+// --8<-- [end:custom-types]
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -256,6 +266,7 @@ object CustomTypesExample:
 // `call` methods require.
 //
 // Run with:  OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.main"
+// --8<-- [start:run]
 @main def main(): Unit =
   val model = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
 
@@ -273,3 +284,4 @@ object CustomTypesExample:
     println("Emotion:   " + EmotionExample.call("i started feeling a little vulnerable"))
     println("Summary:   " + SummarizeExample.call("The cat sat on the mat. The sun was warm."))
   }
+// --8<-- [end:run]

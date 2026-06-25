@@ -16,3 +16,8 @@ modules/*/target/
 
 # Local scratch / generated call-graph artifacts (graphviz)
 predict-run-callgraph.*
+
+# Docs site (MkDocs via uv) — build output lives in target/ (already ignored)
+site/.venv/
+.cache/
+__pycache__/

@@ -1,0 +1,12 @@
+[project]
+# Docs-site toolchain, managed by `uv` (same pattern as modules/examples/tools/scaffold.py).
+# This project builds the static site only; it has no Scala dependency at runtime.
+# Build:   cd site && uv run mkdocs build --strict
+# Serve:   cd site && uv run mkdocs serve
+name = "dspy4s-docs"
+version = "0"
+requires-python = ">=3.11"
+dependencies = [
+  # mkdocs-material pulls in mkdocs + pymdown-extensions (which provides pymdownx.snippets).
+  "mkdocs-material>=9.5,<10",
+]
