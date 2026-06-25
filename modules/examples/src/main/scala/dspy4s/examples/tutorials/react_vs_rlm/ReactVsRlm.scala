@@ -14,9 +14,16 @@
  *   - `RLM`    — inputs become variables in a sandboxed Python REPL; the model writes code that calls the
  *                SAME tools in a loop and `SUBMIT`s the result. Tools are exposed to the sandbox verbatim.
  *
- * Both agents share one base signature and one set of [[ToolFunction]]s. Every tool call is recorded by a
- * [[CallRecorder]], so after each run we can report the actual pairwise/contraindication COVERAGE each
- * approach achieved — the deterministic, symbolic metric from the original project.
+ * Both agents share one base signature and one set of [[ToolFunction]]s. The task instruction is deliberately
+ * NEUTRAL about strategy (it asks for a thorough report, not "check every pair"), so each approach picks its own
+ * method. We measure two things per run: COVERAGE (a [[CallRecorder]] over every tool call) and EFFORT (LM
+ * round-trips + wall time). The durable, model-independent result is the EFFORT gap: even when a capable model
+ * lets ReAct reach full coverage too, RLM gets there in a handful of LM calls (one code-gen step writes a loop
+ * that does all the checks) versus ReAct's one-LM-call-per-tool-call, trajectory-re-reading turns.
+ *
+ * Observed in a sample run: ReAct covered 5/21 pairs + 5/14 contraindications in 12 LM round-trips (90s), while
+ * RLM covered 21/21 + 14/14 in 3 round-trips (33s) — ReAct even reported "no issue identified" for drugs it
+ * never checked. Numbers vary by model/run; the gap's direction is the point.
  *
  * Deltas from the original:
  *   - The interaction / contraindication / drug-class tables are small ILLUSTRATIVE fixtures (the original
@@ -31,13 +38,15 @@
  */
 package dspy4s.examples.tutorials.react_vs_rlm
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, TypeRef}
+import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DspyError, DynamicValues, LmStartEvent, RuntimeContext, TypeRef}
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.programs.{ReAct, RLM}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
@@ -180,25 +189,53 @@ object DrugSafetyTools:
 
 object ReactVsRlm:
 
+  /** Deliberately NEUTRAL about strategy: asks for a thorough report, NOT "check every unique pair". That lets
+    * each approach choose how to be thorough — the whole point of the comparison. (An over-directive "enumerate
+    * every pair" instruction hands ReAct the answer and erases the difference.) */
   private val taskInstructions =
     """You are a clinical drug-safety checker. Given a medication list and the patient's conditions, produce a
-      |thorough risk_report. You MUST be exhaustive: check EVERY unique pair of drugs with check_drug_interaction
-      |(do not skip any pair), and check EVERY drug against EVERY condition with check_contraindication. Use
-      |get_drug_class when helpful. Summarize all findings, clearly flagging MAJOR and MODERATE risks and any
-      |contraindications.""".stripMargin
+      |thorough risk_report: identify the clinically significant drug-drug interactions and any drug-condition
+      |contraindications, then summarize the overall risk and flag the MAJOR and MODERATE concerns. Use the
+      |available tools to ground your findings.""".stripMargin
 
   /** One base signature, shared by both approaches. Inputs are comma-separated lists. */
   val signature = Signature.fromString("medications, conditions -> risk_report", taskInstructions)
 
-  /** ReAct gets enough iterations to check all 21 pairs + 14 contraindications, so any under-coverage reflects
-    * heuristic tool selection — not an artificial iteration cap. (Each turn re-reads the trajectory: O(N²) tokens.) */
+  /** A generous ceiling, not a target: ReAct *could* check all 21 pairs + 14 contraindications within this budget,
+    * so any under-coverage reflects its own heuristic tool selection — not an artificial cap. Each turn re-reads
+    * the growing trajectory (O(N²) tokens), which is exactly the cost the EFFORT metric below surfaces. */
   val ReActMaxIterations: Int = 40
 
-  final case class RunResult(label: String, report: String, recorder: CallRecorder, trajectory: Option[String])
+  final case class RunResult(
+      label: String,
+      report: String,
+      recorder: CallRecorder,
+      lmCalls: Int,
+      elapsedMs: Long,
+      trajectory: Option[String]
+  )
 
   private def coverageLine(label: String, covered: Int, total: Int): String =
     val pct = if total == 0 then 0 else math.round(covered.toDouble / total * 100).toInt
     f"$label%-34s $covered%2d / $total%-2d ($pct%3d%%)"
+
+  private def metricLine(label: String, value: String): String = f"$label%-34s $value"
+
+  /** Run `body` with a fresh LM-call counter installed on the context's callbacks, returning the body's result
+    * plus the effort it took: LM round-trips (counted via [[LmStartEvent]]) and wall time. */
+  private def measured[A](body: RuntimeContext ?=> A)(using base: RuntimeContext): (A, Int, Long) =
+    val counter = new AtomicInteger(0)
+    val countingCallback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
+        case _: LmStartEvent => val _ = counter.incrementAndGet()
+        case _               => ()
+    val started = System.nanoTime()
+    val result =
+      RuntimeEnvironment.withSettings(base.withCallbacks(base.callbacks :+ countingCallback)) {
+        body(using RuntimeEnvironment.current)
+      }
+    val elapsedMs = (System.nanoTime() - started) / 1_000_000L
+    (result, counter.get(), elapsedMs)
 
   def runReAct(medications: String, conditions: String)(using RuntimeContext): RunResult =
     val recorder = new CallRecorder
@@ -207,11 +244,13 @@ object ReactVsRlm:
       tools = DrugSafetyTools.build(recorder),
       maxIterations = ReActMaxIterations
     )
-    val report = agent
-      .apply((medications = medications, conditions = conditions))
-      .map(_.output.risk_report)
-      .fold(err => s"[error] ${err.message}", identity)
-    RunResult("ReAct", report, recorder, trajectory = None)
+    val (report, lmCalls, ms) = measured {
+      agent
+        .apply((medications = medications, conditions = conditions))
+        .map(_.output.risk_report)
+        .fold(err => s"[error] ${err.message}", identity)
+    }
+    RunResult("ReAct", report, recorder, lmCalls, ms, trajectory = None)
 
   def runRlm(medications: String, conditions: String)(using RuntimeContext): RunResult =
     val recorder = new CallRecorder
@@ -220,10 +259,12 @@ object ReactVsRlm:
       tools = DrugSafetyTools.build(recorder),
       maxIterations = 12
     )
-    val prediction = agent.apply((medications = medications, conditions = conditions))
+    val (prediction, lmCalls, ms) = measured {
+      agent.apply((medications = medications, conditions = conditions))
+    }
     val report     = prediction.map(_.output.risk_report).fold(err => s"[error] ${err.message}", identity)
     val trajectory = prediction.toOption.flatMap(_.raw.asString("trajectory").toOption)
-    RunResult("RLM (direct)", report, recorder, trajectory)
+    RunResult("RLM (direct)", report, recorder, lmCalls, ms, trajectory)
 
   def printResult(r: RunResult): Unit =
     val (ic, it) = r.recorder.interactionCoverage
@@ -232,10 +273,28 @@ object ReactVsRlm:
     println(s"risk_report:\n${r.report}\n")
     println(coverageLine("pairwise interaction coverage:", ic, it))
     println(coverageLine("drug-condition coverage:", cc, ct))
+    println(metricLine("LM round-trips:", r.lmCalls.toString))
+    println(metricLine("wall time:", f"${r.elapsedMs / 1000.0}%.1fs"))
     r.trajectory.foreach { t =>
       println("\n--- RLM generated and ran this code (trajectory excerpt) ---")
       println(if t.length > 1600 then t.take(1600) + "\n... (truncated)" else t)
     }
+    println("-" * 70)
+
+  /** Side-by-side summary — the model-independent point: similar coverage is reachable, but the EFFORT differs. */
+  def printComparison(react: RunResult, rlm: RunResult): Unit =
+    def inter(r: RunResult): String =
+      val (c, t) = r.recorder.interactionCoverage
+      s"$c/$t"
+    def contra(r: RunResult): String =
+      val (c, t) = r.recorder.contraindicationCoverage
+      s"$c/$t"
+    println("=== ReAct vs RLM — same task, same tools ===")
+    println(f"${""}%-26s ${react.label}%-14s ${rlm.label}%-14s")
+    println(f"${"LM round-trips"}%-26s ${react.lmCalls}%-14d ${rlm.lmCalls}%-14d")
+    println(f"${"wall time (s)"}%-26s ${react.elapsedMs / 1000.0}%-14.1f ${rlm.elapsedMs / 1000.0}%-14.1f")
+    println(f"${"pairwise coverage"}%-26s ${inter(react)}%-14s ${inter(rlm)}%-14s")
+    println(f"${"contraindication coverage"}%-26s ${contra(react)}%-14s ${contra(rlm)}%-14s")
     println("-" * 70)
 
   val demoMedications: String = DrugSafetyData.drugs.mkString(", ")
@@ -250,14 +309,18 @@ object ReactVsRlm:
 
   println(s"Medications: $demoMedications")
   println(s"Conditions:  $demoConditions")
-  println(s"Goal: check all ${DrugSafetyData.allInteractionPairs.size} drug pairs " +
-    s"and all ${DrugSafetyData.allContraindicationPairs.size} drug-condition contraindications.\n")
+  println(s"Goal: a thorough risk report. There are ${DrugSafetyData.allInteractionPairs.size} unique drug pairs " +
+    s"and ${DrugSafetyData.allContraindicationPairs.size} drug-condition combinations to consider.\n")
 
-  printResult(runReAct(demoMedications, demoConditions))
+  val react = runReAct(demoMedications, demoConditions)
+  printResult(react)
 
-  if denoAvailable then printResult(runRlm(demoMedications, demoConditions))
+  if denoAvailable then
+    val rlm = runRlm(demoMedications, demoConditions)
+    printResult(rlm)
+    printComparison(react, rlm)
   else
     println("=== RLM (direct) — SKIPPED ===")
     println("RLM needs Deno on the PATH for its Pyodide sandbox. Install from https://deno.com and re-run to")
-    println("see the RLM side write Python that enumerates every pair for full coverage.")
+    println("see the RLM side write Python that enumerates every pair — typically far fewer LM round-trips.")
 }
