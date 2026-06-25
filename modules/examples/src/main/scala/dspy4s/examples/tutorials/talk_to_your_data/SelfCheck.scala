@@ -1,5 +1,5 @@
 /**
- * Talk to Your Data — offline self-check (no LM, no Deno).
+ * Talk to Your Data: offline self-check (no LM, no Deno).
  *
  * Proves the dataset + Scala query engine are internally consistent before any model is involved: the parts that
  * the gold answer key and the GEPA metric depend on. Run it any time to sanity-check the foundation.
@@ -15,7 +15,7 @@ object SelfCheck:
   private val categories = Vector("Apparel", "Books", "Electronics", "Grocery", "Home", "Toys")
   private val regions    = Vector("North", "South", "East", "West")
 
-  /** Round-trip a value through its signature Shape — the exact decode path the planner output and the RLM
+  /** Round-trip a value through its signature Shape, the exact decode path the planner output and the RLM
     * SUBMIT rely on. If these fail, the structured outputs won't parse at runtime (so catch it offline). */
   private def roundTrips[A](shape: dspy4s.typed.Shape[A], value: A): Boolean =
     shape.decode(shape.encode(value)).toOption.map(_.toString).contains(value.toString)

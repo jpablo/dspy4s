@@ -1,11 +1,11 @@
 /**
- * Talk to Your Data — GEPA optimization of the planner.
+ * Talk to Your Data: GEPA optimization of the planner.
  *
  * The planner's job (English question -> typed [[QueryPlan]]) is the prompt-sensitive part: the types pin the
  * SHAPE of a plan, but not how to map "which region sold the most?" onto group-by + sort + top-1 + a category
  * answer. GEPA evolves the planner's INSTRUCTION to get that mapping right.
  *
- * The metric is grounded, not an LLM judge: run the planner's QueryPlan through the deterministic Scala
+ * The metric is computed in code rather than judged by an LLM: run the planner's QueryPlan through the Scala
  * [[QueryEngine]] and compare to the gold answer (which the engine also produced, so the answer key is correct by
  * construction). On a miss, the feedback hands GEPA the *correct* plan to reflect on. That clean signal is what
  * makes the before/after lift real and reproducible.
@@ -74,7 +74,7 @@ object Optimize:
   def planner(instructions: String): DynamicPredict =
     DynamicPredict(layout = Agent.plannerSignature(instructions).layout, config = DynamicValues.record("temperature" := 0.0))
 
-  /** Average metric score of a planner instruction over `examples` — our accuracy number (no LLM judge). */
+  /** Average metric score of a planner instruction over `examples`, our accuracy number (no LLM judge). */
   def accuracy(instructions: String, examples: Vector[Example])(using RuntimeContext): Double =
     if examples.isEmpty then 0.0
     else
@@ -94,7 +94,7 @@ object Optimize:
       numCandidates: Int
   )
 
-  /** Measure the baseline planner, evolve a better instruction with GEPA, measure again — all on the held-out val
+  /** Measure the baseline planner, evolve a better instruction with GEPA, measure again, all on the held-out val
     * split, with the grounded metric. */
   def run(reflectionLm: LanguageModel, budget: Int, minibatch: Int)(using RuntimeContext): OptimizationReport =
     val baseline = accuracy(Agent.plannerInstructionsBaseline, valset)

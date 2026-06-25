@@ -1,5 +1,5 @@
 /**
- * Talk to Your Data — the deterministic Scala query engine.
+ * Talk to Your Data: the deterministic Scala query engine.
  *
  * Pure JVM execution of a [[QueryPlan]] over the dataset. It plays two roles and never calls an LM:
  *   - the GEPA **oracle**: score a planner's QueryPlan by running it here and comparing to the gold answer;
@@ -18,7 +18,7 @@ object QueryEngine:
     * `value` when numeric, and the full result `table` for display. */
   final case class EvalResult(answer: String, value: Option[Double], columns: List[String], rows: List[List[String]])
 
-  /** Run a plan over the data. Total function — any plan yields a result (an empty selection aggregates to 0). */
+  /** Run a plan over the data. Total function: any plan yields a result (an empty selection aggregates to 0). */
   def run(plan: QueryPlan, data: Vector[Order]): EvalResult =
     val filtered = data.filter(o => plan.filters.forall(passes(o, _)) && inRange(o, plan.timeRange))
     if plan.groupBy.isEmpty then

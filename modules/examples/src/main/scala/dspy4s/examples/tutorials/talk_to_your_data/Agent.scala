@@ -1,17 +1,18 @@
 /**
- * Talk to Your Data — the plan → act → verify → refine agent.
+ * Talk to Your Data: the plan, act, verify, refine agent.
  *
- *   PLAN  (typed signatures)  English question -> a typed [[QueryPlan]]. The model's intent is a validated Scala
- *                             value, not a string; the rest of the program reasons about it directly.
- *   ACT   (RLM)               The dataset (10k rows of CSV — too big to prompt) is injected into a sandboxed
- *                             Python REPL; the model writes code to compute the answer honoring the plan. The LM
- *                             never does the arithmetic — the sandbox does — so the number is computed, not guessed.
- *   VERIFY                    The same plan is re-executed independently on the JVM by [[QueryEngine]]; the two
- *                             engines must agree. Two independent computations matching is a real trust signal.
+ *   PLAN  (typed signatures)  English question to a typed [[QueryPlan]]. The model's intent is a validated Scala
+ *                             value that the rest of the program reasons about directly.
+ *   ACT   (RLM)               The dataset (10k rows of CSV, too large to put in a prompt) is injected into a
+ *                             sandboxed Python REPL, and the model writes code to compute the answer honoring the
+ *                             plan. The arithmetic happens in the sandbox, so the number is computed in code.
+ *   VERIFY                    The same plan is re-executed independently on the JVM by [[QueryEngine]], and the
+ *                             two engines must agree. Two independent computations matching is a real trust signal.
  *   REFINE                    On a mismatch, the discrepancy is fed back and the ACT stage retries (bounded).
  *
  * The planner's INSTRUCTION is what GEPA later optimizes (Stage 3); everything else is fixed. The executor and
- * the JVM cross-check are deliberately NOT optimized — they're the ground the optimizer is measured against.
+ * the JVM cross-check are deliberately left unoptimized, since they are the ground the optimizer is measured
+ * against.
  */
 package dspy4s.examples.tutorials.talk_to_your_data
 
@@ -22,7 +23,7 @@ import zio.blocks.schema.Schema
 
 import scala.annotation.tailrec
 
-/** The ACT stage's inputs — each becomes a variable in the Python REPL. `data` is the whole CSV. */
+/** The ACT stage's inputs; each becomes a variable in the Python REPL. `data` is the whole CSV. */
 final case class ActInput(data: String, plan: String, question: String, feedback: String) derives Schema
 
 /** What the agent returns for one question: the typed plan, the computed result, the verifier's verdict, and how
@@ -31,18 +32,18 @@ final case class AgentAnswer(question: String, plan: QueryPlan, result: Analysis
 
 object Agent:
 
-  /** Deliberately THIN — types already pin the *shape* of a plan, but not how to map an English question onto the
+  /** Deliberately THIN: types already pin the *shape* of a plan, but not how to map an English question onto the
     * right aggregation/filters/grouping. That mapping is exactly what GEPA learns to spell out (Stage 3). */
   val plannerInstructionsBaseline: String =
     "Translate the user's question about the dataset into a query plan."
 
   /** The planner signature, parameterized by instruction so the agent can run the baseline or the GEPA-optimized
-    * planner. Output is the full [[QueryPlan]] — a rich typed structure (enums, nested lists) the model must fill. */
+    * planner. Output is the full [[QueryPlan]], a rich typed structure (enums, nested lists) the model must fill. */
   def plannerSignature(instructions: String): Signature[Question, QueryPlan] =
     Signature.derived[Question, QueryPlan](name = "AnalystPlanner", instructions = instructions)
 
   private val actInstructions: String =
-    """You answer a question about a dataset by WRITING AND RUNNING PYTHON over it — never by guessing numbers.
+    """You answer a question about a dataset by WRITING AND RUNNING PYTHON over it, never by guessing numbers.
       |
       |Variables in the REPL:
       |  data     - the full dataset as CSV text (parse it with the `csv` module: csv.DictReader(io.StringIO(data)))
@@ -60,7 +61,7 @@ object Agent:
       |Always print intermediate results to check your work before SUBMIT.""".stripMargin
 
   /** The ACT executor: an [[RLM]] producing a typed [[AnalysisResult]] from the SUBMIT payload. No host tools and
-    * no `llm_query` — it's pure deterministic computation in the sandbox. */
+    * no `llm_query`; it is pure deterministic computation in the sandbox. */
   val executor: RLM[ActInput, AnalysisResult] =
     RLM(
       baseSignature = Signature.derived[ActInput, AnalysisResult](name = "AnalystExecutor", instructions = actInstructions),
@@ -76,7 +77,7 @@ object Agent:
   def act(plan: QueryPlan, question: String, feedback: String)(using RuntimeContext): Either[DspyError, AnalysisResult] =
     executor.apply(ActInput(Dataset.csv, describePlan(plan), question, feedback)).map(_.output)
 
-  /** Independent JVM re-computation of the same plan; the sandbox's answer must match. Pure — no LM. */
+  /** Independent JVM re-computation of the same plan; the sandbox's answer must match. Pure, no LM. */
   def verify(plan: QueryPlan, result: AnalysisResult): Verdict =
     val oracle = QueryEngine.run(plan, Dataset.orders)
     val ok = plan.answerKind match

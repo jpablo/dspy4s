@@ -1,11 +1,11 @@
 /**
- * Talk to Your Data — the (synthetic, deterministic) dataset and the gold question set.
+ * Talk to Your Data: the (synthetic, deterministic) dataset and the gold question set.
  *
- * A seeded generator produces ~10k e-commerce orders, so the data — and therefore every gold answer — is
+ * A seeded generator produces ~10k e-commerce orders, so the data (and therefore every gold answer) is
  * reproducible and license-clean to ship. The agent only ever sees the data as CSV text (too big to put in a
  * prompt, which is exactly why the RLM stage writes code to crunch it). The gold answers are computed by the
  * Scala [[QueryEngine]] from a hand-written plan per question, so the answer key is correct *by construction*
- * (no LLM judge) — the foundation that makes the GEPA optimization measurable.
+ * (no LLM judge). That is the foundation that makes the GEPA optimization measurable.
  */
 package dspy4s.examples.tutorials.talk_to_your_data
 
@@ -30,7 +30,7 @@ object Dataset:
 
   private def roundCents(x: Double): Double = math.round(x * 100.0) / 100.0
 
-  /** Deterministic for a given seed — the order list (and thus every gold answer) is reproducible. */
+  /** Deterministic for a given seed: the order list (and thus every gold answer) is reproducible. */
   def generate(n: Int, seed: Long): Vector[Order] =
     val rng = new scala.util.Random(seed)
     Vector.tabulate(n) { i =>
