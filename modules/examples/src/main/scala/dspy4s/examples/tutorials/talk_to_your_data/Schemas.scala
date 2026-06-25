@@ -53,15 +53,14 @@ final case class QueryPlan(
 /** The planner's input: the question plus a description of the dataset's columns (so it knows what it can ask). */
 final case class Question(question: String, schema: String) derives Schema
 
-/** The computed answer. `value` is the headline number (when numeric); `columns`/`rows` carry the full table for
-  * display; `caveats` and `methodNote` make the computation auditable. */
+/** The computed answer. `answer` is the canonical one-line result; `value` is the headline number (when the
+  * question is numeric); `caveats` and `method` make the computation auditable. Single-word fields so the RLM
+  * stage's `SUBMIT(...)` is easy for the model to get right. */
 final case class AnalysisResult(
     answer: String,
     value: Option[Double],
-    columns: List[String],
-    rows: List[List[String]],
     caveats: List[String],
-    methodNote: String
+    method: String
 ) derives Schema
 
 /** The verifier's verdict over an [[AnalysisResult]]. */
