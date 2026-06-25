@@ -25,6 +25,7 @@ object Optimizers:
   // | config = dict(max_bootstrapped_demos=4, max_labeled_demos=4, num_candidate_programs=10, num_threads=4)
   // | teleprompter = BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
   // | optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
+  // --8<-- [start:optimize-bootstrap]
   def optimize(
       metric: Metric,
       program: DynamicPredict,
@@ -34,10 +35,11 @@ object Optimizers:
       metric               = metric,
       maxBootstrappedDemos = 4,
       maxLabeledDemos      = 4,
-      numCandidates        = 10,        // Python's num_candidate_programs
+      numCandidates        = 10,
       numThreads           = Some(4)
     ))
     teleprompter.compile(program, trainset).map(_.bestProgram)
+  // --8<-- [end:optimize-bootstrap]
 
   // ── Snippets 2 + 3 (lines 213–225) — save / load an optimized program ──
   // | optimized_program.save(YOUR_SAVE_PATH)
@@ -45,11 +47,13 @@ object Optimizers:
   // Ported (PORT_GAPS G-4): `ProgramPersistence` writes/reads a program's learnable state (per-predictor
   // signature + demos + config) as JSON. Like Python, `load` takes a freshly-recreated program of the same
   // shape and returns it with the saved state written back. See tutorials/saving for the full treatment.
+  // --8<-- [start:save-load]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)
 
   def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
     ProgramPersistence.load(fresh, path)
+  // --8<-- [end:save-load]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.optimization.optimizersMain"
 // (Runs a small bootstrap+random-search over an LM — makes several LM calls.)

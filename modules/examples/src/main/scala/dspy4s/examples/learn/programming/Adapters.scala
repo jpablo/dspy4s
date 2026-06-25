@@ -90,16 +90,19 @@ object Adapters:
       .apply((science_field = "Computer Theory", year = 2022, num_of_outputs = 1))
       .map(_.output.news)
 
+  // --8<-- [start:adapter-select]
   def newsWithChatAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
     withAdapter(ChatAdapter())(runNews)
 
   def newsWithJsonAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
     withAdapter(JSONAdapter())(runNews)
+  // --8<-- [end:adapter-select]
 
   // ── Snippets 5/6 tail — `dspy.inspect_history()` ──
   // dspy4s's analogue is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, rendering the per-thread
   // `RuntimeContext.history`. That history is recorded by a `ManagedLanguageModel` (per-LM composition), so we
   // wrap the ambient LM in one for this call, then ask + render the last entry. Returns (answer, history-render).
+  // --8<-- [start:inspect-history]
   def askThenInspect(question: String)(using ctx: RuntimeContext): Either[DspyError, (String, String)] =
     ctx.lm match
       case Some(lm: LanguageModel) =>
@@ -107,9 +110,10 @@ object Adapters:
           given RuntimeContext = RuntimeEnvironment.current
           Predict(Signature.fromString("question -> answer"))
             .apply((question = question))
-            .map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1))) // dspy.inspect_history(n=1)
+            .map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1)))
         }
       case _ => Left(RuntimeError("no_lm", "no ambient LanguageModel to record history"))
+  // --8<-- [end:inspect-history]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.adaptersMain"
 @main def adaptersMain(): Unit = Demo.withLm {

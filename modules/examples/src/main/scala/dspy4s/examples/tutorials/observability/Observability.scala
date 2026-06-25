@@ -48,6 +48,7 @@ object Observability:
   // dspy4s delivers one typed `CallbackEvent` stream; `on_module_end` is the `ModuleEndEvent` case. (dspy4s's
   // output is the program's typed result rather than a string-keyed dict, so the Reasoning/Acting key-prefix
   // heuristic isn't 1:1 — we log the module name + outcome instead.)
+  // --8<-- [start:callback]
   final class AgentLoggingCallback extends CallbackHandler:
     override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
       event match
@@ -55,14 +56,17 @@ object Observability:
           val outcome = e.output.fold(err => s"error: ${err.message}", out => out.toString)
           println(s"== ${e.moduleName} step ended ==\n  $outcome\n")
         case _ => () // other scopes (LM / adapter / tool start+end) are ignored by this handler
+  // --8<-- [end:callback]
 
   /** Run the agent with the logging callback installed — the analogue of
     * `dspy.configure(callbacks=[AgentLoggingCallback()])` followed by `agent(question=...)`. */
+  // --8<-- [start:callback-run]
   def runWithLogging(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
     RuntimeEnvironment.withCallbacks(ctx.callbacks :+ new AgentLoggingCallback) {
       given RuntimeContext = RuntimeEnvironment.current
       agent.apply((question = question)).map(_.output.answer)
     }
+  // --8<-- [end:callback-run]
 
   // ── Snippet 3 — `dspy.inspect_history(n=5)` ──
   // dspy4s's analogue is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, reading the per-thread

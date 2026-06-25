@@ -53,12 +53,14 @@ object Modules:
   // `response.completions.answer` / `response.completions[3]`. dspy4s's typed
   // ChainOfThought returns a single prediction; multi-completion access (snippet 4) is
   // not part of the typed surface. The single-completion shape is shown here.
+  // --8<-- [start:chain-of-thought]
   object QaReasoningExample:
     val classify = ChainOfThought(Signature.fromString("question -> answer"))
 
     /** Returns the corrected reasoning and the answer (ChainOfThought prepends `reasoning`). */
     def call(question: String)(using RuntimeContext): Either[DspyError, (String, String)] =
       classify.apply((question = question)).map(p => (p.output.reasoning, p.output.answer))
+  // --8<-- [end:chain-of-thought]
 
   // ── Snippet 4 (lines 84–86) ────────────────────
   // | response.completions[3].reasoning == response.completions.reasoning[3]

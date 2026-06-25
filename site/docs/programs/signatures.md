@@ -23,22 +23,16 @@ parameters and result are **named tuples**:
 `classify.apply((sentence = ...))` is checked at compile time, and
 `_.output.sentiment` is a typed `Boolean`.
 
+The same signature can also be written as a string with
+`Signature.fromString("sentence -> sentiment: bool")`. Both forms are parsed at
+compile time into the same typed signature, so pick whichever reads better.
+
 ### Adding instructions
 
 `fromType` takes an optional `instructions` string to steer the model:
 
 ```scala
 --8<-- "learn/programming/Signatures.scala:toxicity"
-```
-
-## ChainOfThought
-
-Any signature can run with `ChainOfThought` instead of `Predict`. It adds a
-`reasoning: String` field to the output named tuple, so both
-`_.output.reasoning` and `_.output.summary` are typed dot-accesses:
-
-```scala
---8<-- "learn/programming/Signatures.scala:summarize"
 ```
 
 ## Class-based signatures
@@ -73,5 +67,6 @@ shape and nested encode/decode:
 | Class-based | `Signature.of[T <: Spec]` | Named fields, enums, constrained outputs. |
 | Custom types | any `case class derives Schema` | Structured inputs/outputs. |
 
-Next: [Quickstart](../../get-started/quickstart.md) ties these together into a
-runnable program.
+A signature only declares the task. To run it, you wrap it in a **module**.
+
+Next: [Modules](modules.md).

@@ -36,6 +36,7 @@ object Tools:
   // macro derives the tool's name, description, and argument schema (`{city: string}`, surfaced in the
   // agent's prompt) and decodes each argument from the call record by name/type.
   object WeatherAgentExample:
+    // --8<-- [start:tools]
     @description("Get the current weather for a city.")
     def get_weather(city: String): String = s"The weather in $city is sunny and 75°F"
 
@@ -44,19 +45,20 @@ object Tools:
 
     val getWeather: ToolFunction = ToolFunction.fromMethod(get_weather)
     val searchWeb: ToolFunction  = ToolFunction.fromMethod(search_web)
+    // --8<-- [end:tools]
 
     // ── Snippet 2 (lines 57–63) — ReAct configuration ──
     // | react_agent = dspy.ReAct(signature="question -> answer", tools=[tool1, tool2, tool3], max_iters=10)
+    // --8<-- [start:react-agent]
     val reactAgent = ReAct(
       baseSignature = Signature.fromString("question -> answer"),
       tools         = Vector(getWeather, searchWeb),
       maxIterations = 5
     )
 
-    /** The agent's `answer` (ReAct prepends `reasoning`); the full trajectory is on `.raw`
-      * (`DynamicValues.renderText(prediction.raw.get("trajectory").getOrElse(...))`). */
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
       reactAgent.apply((question = question)).map(_.output.answer)
+    // --8<-- [end:react-agent]
 
   // ── Snippet 9 (lines 270–288) — what makes a good tool ──────────────────────
   // | def good_tool(city: str, units: str = "celsius") -> str:
@@ -84,8 +86,10 @@ object Tools:
   // `tool_calls` output field — gated on the LM's `supportsFunctionCalling`. Per the G-7b decision, ReAct
   // itself stays on the text protocol (native calling is adapter-level, not a ReAct rewrite — matching upstream).
   object NativeFunctionCallingExample:
+    // --8<-- [start:native-fc]
     val nativeChatAdapter: Adapter = ChatAdapter(useNativeFunctionCalling = true)
     val nativeJsonAdapter: Adapter = JSONAdapter(useNativeFunctionCalling = true)
+    // --8<-- [end:native-fc]
 
   // ── Snippets 7 / 8 — async tools (`tool.acall`, async→sync conversion) ──
   // Not portable: `ToolFunction.invoke` is synchronous; there is no async tool path.

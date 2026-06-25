@@ -80,12 +80,38 @@ markdown_extensions:
       check_paths: true
       dedent_subsections: true
 
+# The nav follows the library's dependency layering, presented in learning order.
+# It grows as pages land; sections appear once their pages exist (mkdocs --strict
+# rejects nav entries pointing at missing files).
 nav:
   - Home: index.md
   - Get Started:
       - Installation: get-started/installation.md
       - Quickstart: get-started/quickstart.md
-  - Learn:
-      - Programming:
-          - Signatures: learn/programming/signatures.md
+      - How it fits together: get-started/overview.md
+  - Programs:
+      - Signatures: programs/signatures.md
+      - Modules: programs/modules.md
+      - Tools & ReAct: programs/tools-and-react.md
+      - Composing programs: programs/composing.md
+  - Language models:
+      - Configuring an LM: language-models/configuring.md
+      - Adapters: language-models/adapters.md
+      - Caching & usage: language-models/caching-and-usage.md
+  - Evaluation:
+      - Examples & data: evaluation/examples-and-data.md
+      - Metrics: evaluation/metrics.md
+      - Running evaluations: evaluation/running-evaluations.md
+  - Optimization:
+      - optimization/index.md
+      - Few-shot demonstrations: optimization/few-shot.md
+      - Instruction optimization: optimization/instructions.md
+  - Runtime:
+      - Runtime context: runtime/runtime-context.md
+      - Observability: runtime/observability.md
+      - Saving & loading: runtime/saving-and-loading.md
+      - Streaming: runtime/streaming.md
   - Coming from DSPy: coming-from-dspy.md
+  - Reference:
+      - Cheatsheet: reference/cheatsheet.md
+      - API: reference/api.md

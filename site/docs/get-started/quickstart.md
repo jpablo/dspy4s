@@ -44,5 +44,7 @@ the output, with no signature changes required:
 
 ## Where to next
 
-- [Signatures](../learn/programming/signatures.md): the full set of ways to
-  declare inputs and outputs (inline, traits, enums, custom types).
+- [Signatures](../programs/signatures.md): the full set of ways to declare
+  inputs and outputs (inline, traits, enums, custom types).
+- [How it fits together](overview.md): the mental model behind signatures,
+  modules, programs, and optimizers.

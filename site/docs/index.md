@@ -15,7 +15,7 @@ Inputs and outputs are ordinary Scala types, so the compiler checks them for you
 
 <div class="hero__actions" markdown>
 [Get Started](get-started/installation.md){ .md-button .md-button--primary }
-[Signatures](learn/programming/signatures.md){ .md-button }
+[Signatures](programs/signatures.md){ .md-button }
 [GitHub](https://github.com/jpablo/dspy4s){ .md-button }
 </div>
 
@@ -41,7 +41,7 @@ classify.apply((sentence = "it's a charming and often affecting journey.")).map(
     you get dot-access (`_.output.sentiment`) and a compile error when a field is
     wrong, instead of a runtime lookup failure.
 
-    [:octicons-arrow-right-24: Signatures](learn/programming/signatures.md)
+    [:octicons-arrow-right-24: Signatures](programs/signatures.md)
 
 -   :material-cube-outline:{ .lg .middle } __Composable modules__
 

@@ -49,8 +49,10 @@ object LanguageModels:
   // | lm = dspy.LM('openai/your-model', api_key='…', api_base='YOUR_URL')    # any OpenAI-compatible endpoint
   // dspy4s has ONE provider type — OpenAiLanguageModel — that speaks the /chat/completions shape, so it covers
   // OpenAI and every OpenAI-compatible server (Azure, Ollama, vLLM, SGLang, LM Studio, OpenRouter, …):
+  // --8<-- [start:lm-openai]
   def openAi(model: String, apiKey: String): LanguageModel =
     OpenAiLanguageModel(model, apiKey)
+  // --8<-- [end:lm-openai]
 
   // | # Local (Ollama / vLLM / SGLang) and other OpenAI-compatible providers: point base_url elsewhere.
   // | lm = dspy.LM("openai/meta-llama/Meta-Llama-3-8B-Instruct", api_base="http://localhost:7501/v1", api_key="")
@@ -62,8 +64,10 @@ object LanguageModels:
   // http://localhost:8000/v1, LM Studio http://localhost:1234/v1. `fromEnv` also takes a `baseUrl`, for env-keyed
   // OpenAI-compatible servers (Azure, OpenRouter, …).
   // | lm = dspy.LM("ollama_chat/llama3.2", api_base="http://localhost:11434", api_key="")
+  // --8<-- [start:lm-local]
   def ollama(model: String = "llama3.2"): LanguageModel =
     OpenAiLanguageModel.local(model, baseUrl = "http://localhost:11434/v1")
+  // --8<-- [end:lm-local]
 
   // Gemini / Anthropic / Vertex AI / Databricks (and the rest of the LiteLLM matrix) have no dspy4s provider
   // and are out of scope — only OpenAI-compatible endpoints are supported. (An Anthropic provider is tracked as
@@ -75,6 +79,7 @@ object LanguageModels:
   // The unified entry point is `LanguageModel.call(LmRequest)`, returning `Either[DspyError, LmResponse]`; read
   // the text off `response.outputs`. Per-call generation params go in the `options` bag (provider-bound) — see
   // `askWithConfig` below; omitted here so the call works regardless of the model's accepted `temperature` range.
+  // --8<-- [start:lm-direct]
   def callDirect(prompt: String)(using ctx: RuntimeContext): Either[DspyError, String] =
     ctx.lm match
       case Some(lm: LanguageModel) =>
@@ -84,6 +89,7 @@ object LanguageModels:
         )
         lm.call(request).map(_.outputs.headOption.map(_.text).getOrElse(""))
       case _ => Left(dspy4s.core.contracts.ConfigurationError("no LanguageModel configured"))
+  // --8<-- [end:lm-direct]
 
   // ── Using the LM with DSPy modules (lines 157–168) ──
   // | qa = dspy.ChainOfThought('question -> answer')
@@ -100,6 +106,7 @@ object LanguageModels:
   // |     response = qa(question=…)
   // `dspy.context(lm=…)` is `RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) { … }`: it overrides the
   // active context just for the block. Returns the question answered under each model.
+  // --8<-- [start:scoped-override]
   def askWithOverride(question: String, overrideModel: String)(using ctx: RuntimeContext)
       : Either[DspyError, (String, String)] =
     for
@@ -110,6 +117,7 @@ object LanguageModels:
                   ask(question)
                 }
     yield (base, scoped)
+  // --8<-- [end:scoped-override]
 
   // ── Configuring LM generation (lines 197–235) ──
   // | gpt = dspy.LM('openai/gpt-4o-mini', temperature=0.9, max_tokens=3000, stop=None, cache=False)
@@ -123,6 +131,7 @@ object LanguageModels:
   // | predict(question="What is 1 + 52?", config={"rollout_id": 5, "temperature": 1.0})
   // Per-call: pass an `options`/config bag for provider params (`temperature`, …), and use the typed `rolloutId`
   // for cache-busting — in dspy4s `rollout_id` is a first-class field on `TypedCall`, not a magic config key.
+  // --8<-- [start:lm-config]
   def askWithConfig(question: String, temperature: Double, rolloutId: Int)(using RuntimeContext)
       : Either[DspyError, String] =
     qa.apply(TypedCall(
@@ -130,6 +139,7 @@ object LanguageModels:
       config    = DynamicValues.record("temperature" := temperature),
       rolloutId = Some(rolloutId)
     )).map(_.output.answer)
+  // --8<-- [end:lm-config]
 
   // ── Inspecting output and usage metadata (lines 238–251) ──
   // | len(lm.history); lm.history[-1].keys()  # global per-LM history with usage/cost/metadata
@@ -149,10 +159,12 @@ object LanguageModels:
   // dspy4s never throws for an LM failure — every call returns `Either[DspyError, …]`, and `DspyError` carries a
   // stable `code` + `message`. (There are no dedicated rate-limit / context-window subclasses yet; provider
   // failures surface as `RuntimeError`.) Handle by matching the `Left`:
+  // --8<-- [start:lm-errors]
   def askHandlingErrors(question: String)(using RuntimeContext): String =
     ask(question) match
       case Right(answer) => answer
       case Left(err)     => s"LM failed: code=${err.code}, message=${err.message}"
+  // --8<-- [end:lm-errors]
 
   // ── Responses API (lines 271–298) / Advanced custom LMs (lines 301–345) ──
   // Out of scope: dspy4s has only `LmMode.Chat` (no `model_type="responses"`). You can write a custom provider

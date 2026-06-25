@@ -43,9 +43,11 @@ object Metrics:
   // ── Snippet 1 (lines 29–32) ────────────────────
   // | def validate_answer(example, pred, trace=None):
   // |     return example.answer.lower() == pred.answer.lower()
+  // --8<-- [start:metric-function]
   val validateAnswer: FunctionMetric = FunctionMetric.bool("validate_answer") { (example, pred) =>
     exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
   }
+  // --8<-- [end:metric-function]
 
   // ── Snippet 2 (lines 41–53) — context-aware metric ──
   // | answer_match = example.answer.lower() == pred.answer.lower()
@@ -77,14 +79,16 @@ object Metrics:
   // ── Snippet 4 (lines 72–80) — the built-in Evaluate runner ──
   // | evaluator = Evaluate(devset=YOUR_DEVSET, num_threads=1, display_progress=True, display_table=5)
   // | evaluator(YOUR_PROGRAM, metric=YOUR_METRIC)
+  // --8<-- [start:metric-evaluate]
   def evaluator(devset: Vector[Example], metric: Metric): Evaluate =
     new Evaluate(EvaluateConfig(
       devset          = devset,
       metric          = metric,
       numThreads      = Some(1),
       displayProgress = true,
-      displayTable    = Right(5)   // display_table=5 (table rendering itself is deferred in dspy4s)
+      displayTable    = Right(5)
     ))
+  // --8<-- [end:metric-evaluate]
   // Launch: `evaluator(devset, metric).apply()(program)(using RuntimeContext)` — the `using` is the
   // ambient RuntimeContext; `program` is `Example => Either[DspyError, DynamicPrediction]`.
 
@@ -94,7 +98,9 @@ object Metrics:
   // metric — it asks an LM to judge recall+precision of a response vs the ground truth, then returns their F1.
   // The `Assess` spec above is the signature a bespoke quality-judge metric would use the same way.
   // (Exercised by `metricsJudgeMain` below — it needs `OPENAI_API_KEY`.)
+  // --8<-- [start:metric-judge]
   val semanticF1: Metric = SemanticF1()
+  // --8<-- [end:metric-judge]
 
   // ── Snippet 7 (lines 134–142) — validate_hops over the trace ──
   // Needs retrieval (`outputs.query` hops) and `answer_exact_match_str`; neither is ported.

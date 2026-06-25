@@ -40,14 +40,17 @@ object Cache:
   // ── Snippets 3/4 — disable vs enable caching (≈ dspy.configure_cache) ──
   // | dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)   # → NoopLmCache (or no cache)
   // | dspy.configure_cache(enable_disk_cache=True,  enable_memory_cache=True)    # → InMemory / Disk caches
+  // --8<-- [start:cache-variants]
   def uncached(lm: LanguageModel): LanguageModel  = ManagedLanguageModel(lm, cache = Some(NoopLmCache))
   def memoryCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()))
   def diskCached(lm: LanguageModel, dir: Path): LanguageModel =
     ManagedLanguageModel(lm, cache = Some(new DiskLmCache(dir)))
+  // --8<-- [end:cache-variants]
 
   // ── Snippet 1 — track token usage across calls; a cache hit reports no new usage ──
   // | dspy.configure(lm=..., track_usage=True); result.get_lm_usage()
   // The second call hits the memory cache, so it's fast and contributes no usage — exactly the snippet's point.
+  // --8<-- [start:cache-usage]
   def usageAcrossCachedCalls(lm: LanguageModel, question: String)(using RuntimeContext)
       : Either[DspyError, Map[String, LmUsage]] =
     val managed = memoryCached(lm)
@@ -62,6 +65,7 @@ object Cache:
         yield tracker.totalUsage
       }
     }
+  // --8<-- [end:cache-usage]
 
   // ── Snippets 5/6/7/9 — a custom cache: subclass `dspy.clients.Cache`, override the cache key ──
   // | class CustomCache(dspy.clients.Cache):

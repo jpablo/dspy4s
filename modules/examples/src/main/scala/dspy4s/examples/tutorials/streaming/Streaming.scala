@@ -35,6 +35,7 @@ object Streaming:
   // ── Shared consumer — the dspy4s analogue of every snippet's `async for chunk in output` loop ──
   // dspy4s streams synchronously, so this one sync loop replaces Python's asyncio variants. It prints
   // each token + status message and returns the final prediction (the lone `PredictionEvent`).
+  // --8<-- [start:stream-consume]
   def consume(stream: ClosableIterator[StreamEvent]): Option[DynamicPrediction] =
     var finalPrediction: Option[DynamicPrediction] = None
     while stream.hasNext do
@@ -44,6 +45,7 @@ object Streaming:
         case p: PredictionEvent => finalPrediction = Some(p.prediction)
         case e: ErrorEvent      => println(s"Error: ${e.error.message}")
     finalPrediction
+  // --8<-- [end:stream-consume]
 
   private def textField(rec: DynamicValue.Record, field: String): String =
     DynamicValues.recordGet(rec, field).map(DynamicValues.renderText).getOrElse("")
@@ -52,6 +54,7 @@ object Streaming:
   // | predict = dspy.Predict("question->answer")
   // | stream_predict = dspy.streamify(predict, stream_listeners=[StreamListener(signature_field_name="answer")])
   // | output = stream_predict(question="why did a chicken cross the kitchen?")  # async or sync — same here
+  // --8<-- [start:stream-basic]
   def streamAnswer(question: String)(using RuntimeContext): Option[DynamicPrediction] =
     val predict = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
     val streamPredict = Streamify.streamify(
@@ -59,12 +62,14 @@ object Streaming:
       streamListeners = Vector(StreamListener("answer"))
     )
     consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+  // --8<-- [end:stream-basic]
 
   // ── Snippet 4 — a composite module, listeners on two different fields ──
   // | class MyModule(dspy.Module):
   // |     self.predict1 = dspy.Predict("question->answer")
   // |     self.predict2 = dspy.Predict("answer->simplified_answer")
   // |     def forward(self, question): return self.predict2(answer=self.predict1(question=question))
+  // --8<-- [start:compose-module]
   final class SimplifyModule extends DynamicModule:
     override val moduleName: String = "simplify_module"
     private val predict1 = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
@@ -77,6 +82,7 @@ object Streaming:
         answer = textField(step1.values, "answer")
         step2 <- predict2.apply(ProgramCall(inputs = DynamicValues.recordFromEntries(Vector("answer" := answer))))
       yield step2
+  // --8<-- [end:compose-module]
 
   def streamSimplify(question: String)(using RuntimeContext): Option[DynamicPrediction] =
     val streamPredict = Streamify.streamify(
