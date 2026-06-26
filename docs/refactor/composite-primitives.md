@@ -18,7 +18,7 @@ This is deliberately the *pre-work* for the larger vision:
 Layer 0  Atom            PredictEngine                     (exists)
 Layer 1  Signature algebra  prependOutput / appendInput / replaceOutputs   ← step 1
 Layer 2  Policy           Predict over a transformed signature   (exists, will be lifted later)
-Layer 3  Environment      Effect.step(action) => observation     ← step 6 (NOT in this branch)
+Layer 3  Environment      Effect.step(action) => observation     ← step 6 (substrate: kyo-compat CIO; NOT in this branch)
 Layer 4  Combinators      augment | loop | selectBest | feedback ← step 6 (NOT in this branch)
 Layer 5  Runtime services requireString / decodePrepended / truncateOnOverflow / isolatedAttempt  ← steps 2–4
 ```
@@ -33,7 +33,9 @@ Two goals converge on the same seam:
 
 ### Effect-system forward-compatibility (Kyo / ZIO / Cats Effect)
 
-The effect systems plug in at Layer 3/4 (step 6), not here. The discipline for steps 1–5:
+The effect systems plug in at Layer 3/4 (step 6), not here. The substrate for that seam has been
+evaluated: **kyo-compat** (see [Step 6 substrate](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted)
+below). It does not change anything in steps 1–5. The discipline for steps 1–5:
 
 - **Keep everything in `Either[DspyError, A]`.** Do not introduce `F[_]` in this branch.
 - **The signature algebra (step 1) and `decodePrepended` (step 3) are pure** (`layout => layout` and
@@ -246,7 +248,8 @@ when the `F[_]` work lands.
 
 - **Step 6: the `Effect` interface + `loop`/`select`/`feedback` combinators.** This is where Kyo/ZIO/CE
   plug in and where ReAct/CodeAct/RLM/ProgramOfThought collapse to one loop. Designed separately, after
-  1–5 prove the seams.
+  1–5 prove the seams. The substrate candidate is now identified (kyo-compat); see the dedicated section
+  below for its evaluation and the de-risking spike.
 - **Full `Refine = selectBest + hint` unification.** `BestOfN.selectBest` currently has no inter-attempt
   hook (Refine generates advice between attempts and swaps the adapter per attempt). Forcing selectBest to
   serve both right before the combinator redesign would over-fit it to two callers. **Recommendation:** in
@@ -256,6 +259,102 @@ when the `F[_]` work lands.
 - **ProgramOfThought / RLM loop migration.** They share the loop+execute shape but have distinct
   result-classification (PoT regenerate-on-error; RLM continue/SUBMIT/llm_query). Unify under step 6 once
   the `Effect` model is validated against all four agentic loops; do not force them now.
+
+## Step 6 substrate: kyo-compat (evaluated, not yet adopted)
+
+The effect seam (Layer 3/4) needs a substrate that lets dspy4s ship one source tree to Kyo, ZIO, and
+Cats Effect. The leading candidate is **kyo-compat** (`io.getkyo` `kyo-compat-*`, github getkyo/kyo,
+`kyo-compat/` on `main`). This section records the evaluation so step 6 starts from a decision, not a
+blank page. It changes nothing in steps 1–5.
+
+### What it is
+
+A "write once, ship to 6 backends" layer. Library code is written against `kyo.compat.*` (`CIO[+A]`,
+`CStream[+A]`, `CFiber`, `CPromise`, `CChannel`, `CAtomic*`, `CLatch`, `CMeter`, `CLocal`, plus
+`CIO.zip/race/foreach/timeout/acquireReleaseWith/async`). Properties that matter here:
+
+- **Compile-time, not runtime, polymorphism.** `CIO[+A]` is a per-backend opaque alias
+  (`A < (Abort[Throwable] & Async)` on Kyo, `ZIO[Any, Throwable, A]` on ZIO, `cats.effect.IO[A]` on CE).
+  Every method is an `inline def` that lowers at the call site to the backend's primitive. No
+  typeclass/`F[_]` dispatch, no adapter, zero overhead. The backend is chosen by which jar is on the
+  classpath; cross-published via an sbt-projectmatrix plugin.
+- **One portable error lane: `Throwable`.** `CIO` carries no typed `E`. The library's own guidance:
+  keep domain errors as values in the success type (`CIO[Result[E, A]]`); reserve the failure lane for
+  genuine runtime/transport failures. Backend-specific typed recovery is reached via `.lower`.
+- **Effect/concurrency/stream layer only.** It is codec-agnostic (says nothing about `Schema`). `CStream`
+  gives a portable stream type but not an HTTP client or SSE parser.
+
+### Why it fits dspy4s
+
+The error model is the alignment, not the friction. dspy4s already treats errors as **values**
+(`Either[DspyError, A]`) and keeps modules pure with the runtime owning bookkeeping. That is exactly
+kyo-compat's recommended shape. So the marriage is literal:
+
+- Pure layer unchanged: `In => Either[DspyError, A]`.
+- Effectful layer: `CIO[Either[DspyError, A]]` — `CIO` carries real runtime failures (HTTP, timeout),
+  the `Either` carries domain errors as values.
+- `ContextWindowExceededError` matching (the `truncateOnOverflow` branch) stays pure `Either`, untouched.
+
+Codec stays **zio-blocks `Schema`**: kyo-compat is codec-agnostic, so adopting it does not pull in
+kyo-schema. This is why it beats building on kyo-ai for the cross-effect goal — kyo-ai is Kyo-only and
+forces kyo-schema, whereas kyo-compat gives ZIO + CE + Kyo while keeping the existing codec.
+
+Where things land:
+
+| dspy4s layer | substrate |
+|---|---|
+| signature algebra, decode, Predict logic, **optimizers** (Bootstrap/MIPRO/GEPA) | pure `Either` (no CIO) |
+| LM HTTP call, retry/timeout | `CIO` (lift an async client via `CIO.fromCompletionStage`/`fromScalaFuture`) |
+| agent loop / step-6 combinators (loop/select/feedback) | `CIO` |
+| parallel execution (`Parallel`, BestOfN fan-out) | `CIO.foreach`/`zip`/`CMeter` (bounded concurrency built in) |
+| async streaming (currently postponed) | `CStream` |
+| `RuntimeContext` propagation | `CLocal` (Kyo `Local` / ZIO `FiberRef` / CE `IOLocal`) |
+
+Consistency check with the purity principle: effects live in the runtime, not the modules. Adopting `CIO`
+at the runtime layer keeps every module a pure `In => Either[DspyError, A]`.
+
+### Relationship to kyo-ai
+
+kyo-ai (github getkyo/kyo, `kyo-ai/` on the `kyo-ai` branch) stays the **reference design** for the
+runtime/harness primitives (`Enablement`, `Thought`, `Mode`, `Tool`, the native-function-calling eval
+loop), to be reimplemented on `CIO` + zio-blocks. It is not a dependency. kyo-compat is the substrate;
+kyo-ai is the blueprint for what to build on it.
+
+### Costs and risks
+
+- **Young, single-vendor dependency** (`main`, may be pre-release). Mitigate by wrapping it behind a thin
+  internal alias (still inline, no overhead) and scoping the dependency to only the effectful modules.
+- **Build restructuring.** The effectful modules (`lm`, the runtime/agent-loop, `streaming`) become
+  projectMatrix rows × backend × platform. Pure modules (`core`, `typed`, optimizer logic) stay a normal
+  build. The matrix is contained to the seam but is real new machinery (sbt-projectmatrix + the plugin +
+  per-backend source roots).
+- **Compile-time backend selection → N artifacts** (`dspy4s-zio`, `dspy4s-ce`, …); no single all-backends
+  jar, no runtime switching. Fine for a library.
+- **HTTP layer must become `CIO`-based.** Today `LanguageModel.call` is sync/`Future`;
+  `CIO.fromCompletionStage`/`fromScalaFuture` bridge an existing async client, bounding the change to one
+  module.
+- **Future binding has no cancellation** (timeout leaves orphaned work). Acceptable: ZIO/CE/Kyo cancel
+  natively; Future is the deps-free dev anchor.
+
+### De-risking spike (do before committing the effectful layer)
+
+Settle the architecture with evidence, not the README. Scope:
+
+1. A throwaway module written against `kyo.compat.*` containing one thin slice: an LM-style call
+   (`CIO.fromCompletionStage` over a stub/echo HTTP client) plus a minimal `gen` + single-tool loop, all
+   returning `CIO[Either[DspyError, A]]`.
+2. Cross-compile it to **ce + zio + future** via the `compatLibrary` projectmatrix plugin.
+3. Run the same source on all three (`sbt <id>Ce/test <id>Zio/test <id>Future/test`).
+
+Success criteria:
+
+- The `CIO[Either[DspyError, A]]` ergonomics are acceptable in a real `for`-comprehension loop (no
+  pervasive `.lower`).
+- The projectmatrix build produces the per-backend cells and they share one source root.
+- `ContextWindowExceededError`-style domain branching reads cleanly as `Either` matching inside `CIO`.
+
+Estimated: a few hours. Outcome decides whether step 6 builds on kyo-compat or falls back to a hand-rolled
+seam.
 
 ## Sequencing & verification
 
