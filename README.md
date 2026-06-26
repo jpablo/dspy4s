@@ -42,7 +42,10 @@ the output, with no signature changes.
   boundary as `Either[DspyError, _]`, not via lazy field access.
 - **Composable programs.** `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`,
   `ProgramOfThought`, `BestOfN`, and `Refine` are plain values you compose like
-  any other Scala code.
+  any other Scala code. `RLM` (Recursive Language Model) is an experimental
+  program for reasoning over long contexts without placing them in the prompt:
+  inputs become variables in a sandboxed REPL that the model explores with
+  generated code.
 - **Compiler-verified docs.** Every code sample on the docs site is extracted
   from the `examples` module, which builds under strict flags (`-Werror`,
   `-Wunused:all`). A snippet that would not compile fails the build.
