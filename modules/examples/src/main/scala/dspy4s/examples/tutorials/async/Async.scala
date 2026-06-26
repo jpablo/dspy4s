@@ -28,10 +28,12 @@ object Async:
   // ── Snippet 1 (lines 55–72) — run a single Predict asynchronously ──
   // | predict = dspy.Predict("question->answer")
   // | output = await predict.acall(question="why did a chicken cross the kitchen?")
+  // --8<-- [start:ask-async]
   def askAsync(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
     ContextPropagation.future(
       Predict(Signature.fromString("question -> answer")).apply((question = question)).map(_.output.answer)
     )
+  // --8<-- [end:ask-async]
 
   // ── Snippet 4 (lines 137–163) — a module whose `aforward` chains two predictors asynchronously ──
   // | class MyModule(dspy.Module):
@@ -40,6 +42,7 @@ object Async:
   // |     async def aforward(self, question):
   // |         answer = await self.predict1.acall(question=question)
   // |         return await self.predict2.acall(answer=answer)
+  // --8<-- [start:simplifier-module]
   final class SimplifierModule:
     private val predict1 = ChainOfThought(Signature.fromString("question -> answer"))
     private val predict2 = ChainOfThought(Signature.fromString("answer -> simplified_answer"))
@@ -53,6 +56,7 @@ object Async:
           step2 <- predict2.apply((answer = step1.output.answer))
         yield step2.output.simplified_answer
       }
+  // --8<-- [end:simplifier-module]
 
   // ── Snippets 2 / 3 — async tools (`dspy.Tool(async_fn)`, `tool.acall`, async→sync conversion) ──
   // Not portable: `ToolFunction.invoke` is synchronous; dspy4s has no async tool path (so there is also no

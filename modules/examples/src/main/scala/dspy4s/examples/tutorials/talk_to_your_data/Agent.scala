@@ -71,11 +71,13 @@ object Agent:
 
   // ── stages ──────────────────────────────────────────────────────────────────────────────────────────────
 
+  // --8<-- [start:plan-act]
   def plan(question: String, instructions: String)(using RuntimeContext): Either[DspyError, QueryPlan] =
     Predict(plannerSignature(instructions)).apply(Question(question, Dataset.schemaDescription)).map(_.output)
 
   def act(plan: QueryPlan, question: String, feedback: String)(using RuntimeContext): Either[DspyError, AnalysisResult] =
     executor.apply(ActInput(Dataset.csv, describePlan(plan), question, feedback)).map(_.output)
+  // --8<-- [end:plan-act]
 
   /** Independent JVM re-computation of the same plan; the sandbox's answer must match. Pure, no LM. */
   def verify(plan: QueryPlan, result: AnalysisResult): Verdict =

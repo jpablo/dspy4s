@@ -22,6 +22,7 @@ import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 2 — the three generation signatures (top-level traits for Mirror derivation) ──
 // | class StoryGenerator(dspy.Signature): """..."""
+// --8<-- [start:signatures]
 trait StoryGenerator extends Spec:
   def location:       InputField[String]
   def player_info:    InputField[String]
@@ -31,6 +32,7 @@ trait StoryGenerator extends Spec:
   def available_actions: OutputField[List[String]]
   def npcs_present:       OutputField[List[String]]
   def items_available:    OutputField[List[String]]
+// --8<-- [end:signatures]
 
 // | class DialogueGenerator(dspy.Signature): """..."""
 trait DialogueGenerator extends Spec:
@@ -78,9 +80,11 @@ object AiTextGame:
   // |     self.dialogue_gen = dspy.ChainOfThought(DialogueGenerator)
   // |     self.action_resolver = dspy.ChainOfThought(ActionResolver)
   final class GameAI:
+    // --8<-- [start:module]
     private val storyGen       = ChainOfThought(Signature.of[StoryGenerator])
     private val dialogueGen    = ChainOfThought(Signature.of[DialogueGenerator])
     private val actionResolver = ChainOfThought(Signature.of[ActionResolver])
+    // --8<-- [end:module]
 
     /** NPC personality lookup Python builds inline in `handle_dialogue`. */
     private val personalityMap: Map[String, String] = Map(
@@ -91,6 +95,7 @@ object AiTextGame:
       "Wizard"        -> "Mysterious, powerful, speaks about magic and ancient forces"
     )
 
+    // --8<-- [start:generate-scene]
     def generateScene(player: Player, context: GameContext, recentActions: String = "")(using RuntimeContext)
         : Either[DspyError, Scene] =
       storyGen.apply((
@@ -104,6 +109,7 @@ object AiTextGame:
         npcs        = s.output.npcs_present,
         items       = s.output.items_available
       ))
+    // --8<-- [end:generate-scene]
 
     def handleDialogue(npcName: String, playerInput: String, context: GameContext)(using RuntimeContext)
         : Either[DspyError, Dialogue] =

@@ -38,16 +38,20 @@ object BestOfNAndRefine:
   // |                          reward_fn=one_word_answer, threshold=1.0)
   // | best_of_3(question="What is the capital of Belgium?").answer  # Brussels
   object OneWordBestOfN:
+    // --8<-- [start:best-of-n]
     val bestOf3 = BestOfN(module = qa, n = 3, rewardFn = (_, pred) => oneWord(pred.output.answer), threshold = 1.0)
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
       bestOf3.apply((question = question)).map(_.output.answer)
+    // --8<-- [end:best-of-n]
 
   // ── Snippet 2 (lines 34–45) — BestOfN with fail_count ──
   // | best_of_3 = dspy.BestOfN(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0, fail_count=1)
   object BestOfNWithFailCount:
+    // --8<-- [start:fail-count]
     val bestOf3 = BestOfN(module = qa, n = 3, rewardFn = (_, pred) => oneWord(pred.output.answer),
                           threshold = 1.0, failCount = Some(1))
+    // --8<-- [end:fail-count]
 
   // ── Snippets 3 + 4 (lines 53–83) — Refine (same shape; sequential refinement) ──
   // | refine = dspy.Refine(module=dspy.ChainOfThought("question -> answer"), N=3,
@@ -69,6 +73,7 @@ object BestOfNAndRefine:
   // The reward calls an LM, so it captures the ambient `RuntimeContext` from `call` (dspy4s reward
   // functions take `(I, Prediction[O])` only — no implicit context is threaded into them).
   object FactualityRefine:
+    // --8<-- [start:llm-judge]
     private val judge = ChainOfThought(Signature.of[FactualityJudge])
 
     def call(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
@@ -76,6 +81,7 @@ object BestOfNAndRefine:
         judge.apply((statement = answer)).map(r => if r.output.is_factual then 1.0 else 0.0).getOrElse(0.0)
       val refinedQa = Refine(module = qa, n = 3, rewardFn = (_, pred) => reward(pred.output.answer), threshold = 1.0)
       refinedQa.apply((question = question)).map(_.output.answer)
+    // --8<-- [end:llm-judge]
 
   // ── Snippet 6 (lines 124–146) — a tapering length reward ──
   // | def ideal_length_reward(args, pred): d = abs(len(pred.summary.split()) - 75); return max(0, 1 - d/125)

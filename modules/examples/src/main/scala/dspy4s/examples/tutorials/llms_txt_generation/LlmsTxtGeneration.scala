@@ -18,6 +18,7 @@ import dspy4s.programs.ChainOfThought
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 1 (lines 23–57) — the three analysis signatures (top-level for Mirror) ──
+// --8<-- [start:signatures]
 trait AnalyzeRepository extends Spec:
   def repo_url:       InputField[String]
   def file_tree:      InputField[String]
@@ -42,6 +43,7 @@ trait GenerateLLMsTxt extends Spec:
   def development_info:      InputField[String]
   def usage_examples:        InputField[String]
   def llms_txt_content: OutputField[String]
+// --8<-- [end:signatures]
 
 object LlmsTxtGeneration:
 
@@ -53,6 +55,7 @@ object LlmsTxtGeneration:
   // |         self.generate_examples = dspy.ChainOfThought("repo_info -> usage_examples")
   // |         self.generate_llms_txt = dspy.ChainOfThought(GenerateLLMsTxt)
   // |     def forward(self, repo_url, file_tree, readme_content, package_files): ...
+  // --8<-- [start:analyzer]
   final class RepositoryAnalyzer:
     private val analyzeRepo      = ChainOfThought(Signature.of[AnalyzeRepository])
     private val analyzeStructure = ChainOfThought(Signature.of[AnalyzeCodeStructure])
@@ -81,6 +84,7 @@ object LlmsTxtGeneration:
                   usage_examples        = examples.output.usage_examples
                 ))
       yield llms.output.llms_txt_content
+  // --8<-- [end:analyzer]
 
   // ── Snippet 3 (lines 95–153) — gather repo info over the GitHub API ──
   // Out of scope: plain HTTP (`requests` + base64) to fetch the file tree / README / package files.

@@ -34,12 +34,14 @@ object OptimizerTracking:
   // dspy4s has no MLflow integration; the observability seam is a `CallbackHandler` in the RuntimeContext (the
   // analogue of `dspy.configure(callbacks=[...])`). This one counts LM calls during the otherwise-silent
   // optimizer run — swap it for a logger / tracer / metrics exporter to "track" however you need.
+  // --8<-- [start:tracking-callback]
   final class CompileTrackingCallback extends CallbackHandler:
     private val lmCalls = new AtomicInteger(0)
     def calls: Int = lmCalls.get()
     override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
       case _: LmEndEvent => val _ = lmCalls.incrementAndGet()
       case _             => ()
+  // --8<-- [end:tracking-callback]
 
   val metric: Metric = new ExactMatch(answerField = "answer")
 
@@ -62,6 +64,7 @@ object OptimizerTracking:
   // | teleprompter = dspy.teleprompt.MIPROv2(metric=gsm8k_metric, auto="light")
   // | optimized_program = teleprompter.compile(program, trainset=trainset)
   // The tracking callback is installed in the RuntimeContext, so it observes every LM call the optimizer makes.
+  // --8<-- [start:optimize-with-tracking]
   def optimizeWithTracking(student: DynamicPredict)(using ctx: RuntimeContext)
       : Either[DspyError, (DynamicPredict, Int)] =
     val tracker = new CompileTrackingCallback
@@ -73,14 +76,17 @@ object OptimizerTracking:
         .compile(student, trainset, teacher = Some(student), valset = Some(trainset))
         .map(report => (report.bestProgram, tracker.calls))
     }
+  // --8<-- [end:optimize-with-tracking]
 
   // ── Snippet 3 — reload the optimized program ──
   // | model_path = mlflow.artifacts.download_artifacts("mlflow-artifacts:/path/to/best_model.json")
   // | program.load(model_path)
   // dspy4s has no artifact store; persist the optimized state with `ProgramPersistence.save` and reload it with
   // `ProgramPersistence.load` (PORT_GAPS G-4) — recreate the program, then load the state back into it.
+  // --8<-- [start:reload]
   def reload(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
     ProgramPersistence.load(fresh, path)
+  // --8<-- [end:reload]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.optimizer_tracking.optimizerTrackingMain"
 @main def optimizerTrackingMain(): Unit = Demo.withLm {

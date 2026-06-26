@@ -80,18 +80,22 @@ object Cheatsheet:
   // dspy4s CodeAct generates+runs Python through a `CodeInterpreter`. `tools` exist too: pass ToolFunctions
   // (listed in the prompt) and, on a sandboxed DenoPyodideInterpreter, wire `program.sandboxTools` into the
   // interpreter so generated Python can call them. Here the model just writes the factorial itself.
+  // --8<-- [start:code-act]
   def codeAct(n: Int)(using RuntimeContext): Either[DspyError, String] =
     CodeAct(Signature.fromString("n: int -> factorial"), interpreter = new SubprocessPythonInterpreter())
       .apply((n = n)).map(_.output.factorial)
+  // --8<-- [end:code-act]
 
   // ── Snippet 8 (lines 102–114) — Parallel ──
   // | parallel = dspy.Parallel(num_threads=2); parallel([(predict, ex1), (predict, ex2)])
+  // --8<-- [start:parallel]
   def parallel(using RuntimeContext): Either[DspyError, Vector[Option[DynamicPrediction]]] =
     val predict = DynamicPredict(Signature.fromString("question -> answer").layout)
     Parallel(numThreads = Some(2)).apply(Vector(
       predict -> ProgramCall(inputs = rec("question" := "1+1")),
       predict -> ProgramCall(inputs = rec("question" := "2+2"))
     )).map(_.results)
+  // --8<-- [end:parallel]
 
   // ── Snippet 9 (lines 122–143) — a function metric (gsm8k) ──
   // | def gsm8k_metric(gold, pred, trace=None): return parse_integer_answer(gold.answer) == parse_integer_answer(pred.answer)

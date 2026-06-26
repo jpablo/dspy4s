@@ -14,8 +14,10 @@ import zio.blocks.schema.Schema
 
 /** The aggregation to compute. A Scala 3 enum, so the model can only ever pick one of these, and the prompt
   * can't drift into "avg" vs "mean" vs "average". */
+// --8<-- [start:agg-enum]
 enum Agg derives Schema, CanEqual:
   case Count, Sum, Average, Min, Max, Median
+// --8<-- [end:agg-enum]
 
 /** Comparison operator for a [[Filter]]. */
 enum FilterOp derives Schema, CanEqual:
@@ -39,6 +41,7 @@ final case class Sort(by: String, descending: Boolean) derives Schema
 /** The typed intent of a natural-language question: the "plan" the agent commits to before computing anything.
   * This is the heart of the type-safety story. An English question becomes a structured, inspectable value that
   * the rest of the program (and the optimizer) can reason about. */
+// --8<-- [start:query-plan]
 final case class QueryPlan(
     agg: Agg,
     column: Option[String],
@@ -49,6 +52,7 @@ final case class QueryPlan(
     limit: Option[Int],
     answerKind: AnswerKind
 ) derives Schema
+// --8<-- [end:query-plan]
 
 /** The planner's input: the question plus a description of the dataset's columns (so it knows what it can ask). */
 final case class Question(question: String, schema: String) derives Schema

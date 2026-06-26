@@ -23,6 +23,7 @@ import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 1 — the two analysis/generation signatures (top-level traits for Mirror derivation) ──
 // | class LibraryAnalyzer(dspy.Signature): """Analyze library documentation ..."""
+// --8<-- [start:signatures]
 trait LibraryAnalyzer extends Spec:
   def library_name:          InputField[String]
   def documentation_content: InputField[String]
@@ -31,6 +32,7 @@ trait LibraryAnalyzer extends Spec:
   def key_methods:       OutputField[List[String]]
   def installation_info: OutputField[String]
   def code_examples:     OutputField[List[String]]
+// --8<-- [end:signatures]
 
 // | class CodeGenerator(dspy.Signature): """Generate code examples for specific use cases ..."""
 trait CodeGenerator extends Spec:
@@ -76,10 +78,12 @@ object SampleCodeGeneration:
   // |     self.analyze_docs = dspy.ChainOfThought(LibraryAnalyzer)
   // |     self.generate_code = dspy.ChainOfThought(CodeGenerator)
   // |     self.refine_code = dspy.ChainOfThought("code, feedback -> improved_code: str, changes_made: list[str]")
+  // --8<-- [start:agent-predictors]
   final class DocumentationLearningAgent:
     private val analyzeDocs  = ChainOfThought(Signature.of[LibraryAnalyzer])
     private val generateCode = ChainOfThought(Signature.of[CodeGenerator])
     private val refineCode   = ChainOfThought(Signature.of[RefineCode])
+    // --8<-- [end:agent-predictors]
 
     /** Python's `learn_from_urls`, minus the fetching: analyze already-combined documentation text. */
     def learnFromDocs(libraryName: String, combinedContent: String)(using RuntimeContext)
@@ -128,6 +132,7 @@ object SampleCodeGeneration:
     "Advanced usage with best practices"
   )
 
+  // --8<-- [start:learn-and-generate]
   def learnAndGenerate(
       libraryName: String,
       combinedContent: String,
@@ -145,6 +150,7 @@ object SampleCodeGeneration:
                       yield sofar :+ ex
                   }
     yield (info, examples)
+  // --8<-- [end:learn-and-generate]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.sample_code_generation.sampleCodeGenerationMain"
 @main def sampleCodeGenerationMain(): Unit = Demo.withLm {

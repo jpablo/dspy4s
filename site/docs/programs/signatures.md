@@ -48,6 +48,30 @@ is a Scala `enum`:
 `derives Schema` gives the enum a flat-string wire form (the case name) at the
 output boundary, so the model's answer decodes straight into a typed `Emotion`.
 
+## Case-class signatures
+
+When you already model inputs and outputs as case classes, `Signature.derived`
+builds a signature from an input type and an output type directly. The output is
+a typed value, so `_.output.sentiment` has type `Emotion` with no cast:
+
+```scala
+--8<-- "typed/CaseClassExample.scala:derived-types"
+```
+
+```scala
+--8<-- "typed/CaseClassExample.scala:derived-sig"
+```
+
+## Building a signature programmatically
+
+When a case class per signature is overkill (exploration, shapes assembled from
+config, tests), `Signature.builder` constructs one fluently. Each `input`/
+`output` call summons the field's `Schema`:
+
+```scala
+--8<-- "typed/BuilderExample.scala:builder-sig"
+```
+
 ## Custom types
 
 Inputs and outputs are not limited to primitives. Any `case class` (or nested
@@ -65,6 +89,8 @@ shape and nested encode/decode:
 | Inline | `Signature.fromType[(in: I) => (out: O)]` | Quick, primitive in/out. |
 | With instructions | `Signature.fromType[...](instructions = ...)` | You need to steer the model. |
 | Class-based | `Signature.of[T <: Spec]` | Named fields, enums, constrained outputs. |
+| Case classes | `Signature.derived[In, Out]` | Inputs and outputs are already case classes. |
+| Builder | `Signature.builder(...)` | Shapes built at runtime, or quick exploration. |
 | Custom types | any `case class derives Schema` | Structured inputs/outputs. |
 
 A signature only declares the task. To run it, you wrap it in a **module**.

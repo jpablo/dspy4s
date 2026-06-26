@@ -25,6 +25,7 @@ import zio.blocks.schema.Schema
 // ── Snippet 2 — the finance tools (typed methods; live data stubbed) ──
 // | def get_stock_price(ticker: str) -> str: """Get current stock price and basic info."""
 // | def compare_stocks(tickers: str) -> str: """Compare multiple stocks (comma-separated)."""
+// --8<-- [start:finance-tools]
 case class StockQuote(ticker: String, price: Double, change_percent: Double, company: String) derives Schema
 
 object FinanceTools:
@@ -43,6 +44,7 @@ object FinanceTools:
   @description("Compare multiple stocks (comma-separated).")
   def compare_stocks(tickers: String): List[StockQuote] =
     tickers.split(",").iterator.map(t => get_stock_price(t)).toList
+// --8<-- [end:finance-tools]
 
 object YahooFinanceReact:
 
@@ -50,6 +52,7 @@ object YahooFinanceReact:
   // | class FinancialAnalysisAgent(dspy.Module):
   // |     self.react = dspy.ReAct("financial_query -> analysis_response", tools=[...], max_iters=6)
   // |     def forward(self, financial_query): return self.react(financial_query=financial_query)
+  // --8<-- [start:react-agent]
   final class FinancialAnalysisAgent:
     private val react = ReAct(
       baseSignature = Signature.fromString("financial_query -> analysis_response"),
@@ -63,6 +66,7 @@ object YahooFinanceReact:
 
     def forward(financialQuery: String)(using RuntimeContext): Either[DspyError, String] =
       react.apply((financial_query = financialQuery)).map(_.output.analysis_response)
+  // --8<-- [end:react-agent]
 
   // ── Snippet 4 — the demo queries ──
   // | queries = ["What's the latest news about Apple (AAPL)...", "Compare AAPL, GOOGL, and MSFT performance", ...]

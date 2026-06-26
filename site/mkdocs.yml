@@ -111,6 +111,18 @@ nav:
       - Observability: runtime/observability.md
       - Saving & loading: runtime/saving-and-loading.md
       - Streaming: runtime/streaming.md
+  - Tutorials:
+      - Email extraction: tutorials/email-extraction.md
+      - Code generation: tutorials/code-generation.md
+      - llms.txt generation: tutorials/llms-txt-generation.md
+      - Finance ReAct agent: tutorials/finance-react-agent.md
+      - AI text game: tutorials/ai-text-game.md
+      - ReAct vs RLM: tutorials/react-vs-rlm.md
+      - Output refinement: tutorials/output-refinement.md
+      - Optimizer tracking: tutorials/optimizer-tracking.md
+      - Saving workflow: tutorials/saving-workflow.md
+      - Async execution: tutorials/async.md
+      - Talk to your data: tutorials/talk-to-your-data.md
   - Coming from DSPy: coming-from-dspy.md
   - Reference:
       - Cheatsheet: reference/cheatsheet.md

@@ -20,6 +20,7 @@ import dspy4s.typed.Signature
 object BuilderExample:
 
   /** A simple toxicity check signature, built fluently. */
+  // --8<-- [start:builder-sig]
   val toxicity: SignatureLayout =
     Signature
       .builder("Toxicity")
@@ -31,6 +32,7 @@ object BuilderExample:
         "or derogatory remarks. Report the confidence as a number in [0.0, 1.0]."
       )
       .build
+  // --8<-- [end:builder-sig]
 
   /** Reusing an enum that has a `Schema` (see CaseClassExample's `Emotion`) gives the builder a
     * `TypeRef.string` field; enum allowed-values reach the LM through the typed Predict path's

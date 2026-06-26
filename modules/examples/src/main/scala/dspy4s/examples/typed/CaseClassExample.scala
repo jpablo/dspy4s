@@ -17,12 +17,14 @@ import dspy4s.typed.{Prediction, Signature}
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
 // enum's Schema must come from outside any enclosing class.
+// --8<-- [start:derived-types]
 case class EmotionInput(sentence: String) derives Schema
 
 enum Emotion derives Schema:
   case sadness, joy, love, anger, fear, surprise
 
 case class EmotionOutput(sentiment: Emotion) derives Schema
+// --8<-- [end:derived-types]
 
 /**
  * Build a `Signature` from two case classes — one for inputs, one for
@@ -38,11 +40,13 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
  */
 object CaseClassExample:
 
+  // --8<-- [start:derived-sig]
   val signature: Signature[EmotionInput, EmotionOutput] =
     Signature.derived[EmotionInput, EmotionOutput](
       name         = "Emotion",
       instructions = "Classify emotion in the given sentence."
     )
+  // --8<-- [end:derived-sig]
 
   /** Illustrative call site. With an LM and adapter configured in
     * `RuntimeContext`, `Predict(signature).apply(...)` returns

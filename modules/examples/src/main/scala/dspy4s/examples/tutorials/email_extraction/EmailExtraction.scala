@@ -23,9 +23,11 @@ import zio.blocks.schema.Schema
 
 // ── Snippet 3 (lines 68–95) — the enums + the entity model (top-level for Schema derivation) ──
 // | class EmailType(str, Enum): ORDER_CONFIRMATION = "order_confirmation"; ...
+// --8<-- [start:email-type]
 enum EmailType derives Schema:
   case order_confirmation, support_request, meeting_invitation, newsletter,
        promotional, invoice, shipping_notification, other
+// --8<-- [end:email-type]
 
 // | class UrgencyLevel(str, Enum): LOW = "low"; MEDIUM = "medium"; HIGH = "high"; CRITICAL = "critical"
 enum UrgencyLevel derives Schema:
@@ -36,6 +38,7 @@ case class ExtractedEntity(entity_type: String, value: String, confidence: Doubl
 
 // ── Snippet 4 (lines 101–145) — the four signatures (top-level traits for Mirror derivation) ──
 // | class ClassifyEmail(dspy.Signature): """Classify the type and urgency of an email based on its content."""
+// --8<-- [start:signatures]
 trait ClassifyEmail extends Spec:
   def email_subject: InputField[String]
   def email_body:    InputField[String]
@@ -43,6 +46,7 @@ trait ClassifyEmail extends Spec:
   def email_type: OutputField[EmailType]
   def urgency:    OutputField[UrgencyLevel]
   def reasoning:  OutputField[String]
+// --8<-- [end:signatures]
 
 // | class ExtractEntities(dspy.Signature): """Extract key entities and information from email content."""
 trait ExtractEntities extends Spec:
@@ -98,6 +102,7 @@ object EmailExtraction:
   // |         self.action_generator = dspy.ChainOfThought(GenerateActionItems)
   // |         self.summarizer = dspy.ChainOfThought(SummarizeEmail)
   // |     def forward(self, email_subject, email_body, sender=""): ...
+  // --8<-- [start:processor]
   final class EmailProcessor:
     private val classifier      = ChainOfThought(Signature.of[ClassifyEmail])
     private val entityExtractor = ChainOfThought(Signature.of[ExtractEntities])
@@ -150,6 +155,7 @@ object EmailExtraction:
         reasoning        = classification.output.reasoning,
         contact_info     = entities.output.contact_info
       )
+  // --8<-- [end:processor]
 
   // ── Snippet 6 (lines 217–316) — the demo over sample emails ──
   // | def run_email_processing_demo(): ... processor = EmailProcessor(); for email in sample_emails: ...

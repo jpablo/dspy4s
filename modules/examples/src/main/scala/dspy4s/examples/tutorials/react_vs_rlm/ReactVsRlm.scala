@@ -199,7 +199,9 @@ object ReactVsRlm:
       |available tools to ground your findings.""".stripMargin
 
   /** One base signature, shared by both approaches. Inputs are comma-separated lists. */
+  // --8<-- [start:shared-signature]
   val signature = Signature.fromString("medications, conditions -> risk_report", taskInstructions)
+  // --8<-- [end:shared-signature]
 
   /** A generous ceiling, not a target: ReAct *could* check all 21 pairs + 14 contraindications within this budget,
     * so any under-coverage reflects its own heuristic tool selection — not an artificial cap. Each turn re-reads
@@ -239,11 +241,13 @@ object ReactVsRlm:
 
   def runReAct(medications: String, conditions: String)(using RuntimeContext): RunResult =
     val recorder = new CallRecorder
+    // --8<-- [start:react-agent]
     val agent = ReAct(
       baseSignature = signature,
       tools = DrugSafetyTools.build(recorder),
       maxIterations = ReActMaxIterations
     )
+    // --8<-- [end:react-agent]
     val (report, lmCalls, ms) = measured {
       agent
         .apply((medications = medications, conditions = conditions))
@@ -254,11 +258,13 @@ object ReactVsRlm:
 
   def runRlm(medications: String, conditions: String)(using RuntimeContext): RunResult =
     val recorder = new CallRecorder
+    // --8<-- [start:rlm-agent]
     val agent = RLM(
       baseSignature = signature,
       tools = DrugSafetyTools.build(recorder),
       maxIterations = 12
     )
+    // --8<-- [end:rlm-agent]
     val (prediction, lmCalls, ms) = measured {
       agent.apply((medications = medications, conditions = conditions))
     }

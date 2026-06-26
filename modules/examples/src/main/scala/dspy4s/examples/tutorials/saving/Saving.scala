@@ -30,8 +30,10 @@ object Saving:
   /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`.
     * We use the untyped `DynamicPredict` because it carries the `Predictors` instance the optimizers and
     * `ProgramPersistence` need; a typed `ChainOfThought` round-trips identically. */
+  // --8<-- [start:program]
   def program(): DynamicPredict =
     DynamicPredict(Signature.fromString("question -> answer").layout)
+  // --8<-- [end:program]
 
   // ── Snippet 1 — compile a program with BootstrapFewShot ──
   // | gsm8k = GSM8K(); gsm8k_trainset = gsm8k.train[:10]
@@ -40,18 +42,22 @@ object Saving:
   // | compiled_dspy_program = optimizer.compile(dspy_program, trainset=gsm8k_trainset)
   // GSM8K is not ported (PORT_GAPS G-21) — bring your own `Example`s (see deep_dive/data_handling/LoadingCustomData).
   // BootstrapFewShot runs the program over an LM to collect demo traces, so this step needs `OPENAI_API_KEY`.
+  // --8<-- [start:compile]
   def compile(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
       : Either[DspyError, DynamicPredict] =
     new BootstrapFewShot[DynamicPredict](BootstrapFewShotConfig(
       metric = Some(metric), maxBootstrappedDemos = 4, maxLabeledDemos = 4, maxRounds = 5
     )).compile(student, trainset).map(_.bestProgram)
+  // --8<-- [end:compile]
 
   // ── Snippets 2/3 — save the compiled program's state to disk ──
   // | compiled_dspy_program.save("./dspy_program/program.json", save_program=False)
   // | compiled_dspy_program.save("./dspy_program/program.pkl", save_program=False)   # .pkl variant: N/A in dspy4s
   // `ProgramPersistence.save` writes `{ "predictors": [ { signature, demos, config } ... ] }` as JSON.
+  // --8<-- [start:save]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)
+  // --8<-- [end:save]
 
   // ── Snippets 4/5 — recreate the same program, then load the state back into it ──
   // | loaded_dspy_program = dspy.ChainOfThought("question -> answer")   # recreate the architecture
@@ -59,8 +65,10 @@ object Saving:
   // | assert len(compiled_dspy_program.demos) == len(loaded_dspy_program.demos)
   // dspy4s `load` takes the freshly-recreated program (so it knows the predictor shape) and returns a NEW
   // immutable program with the saved demos/config/instructions written back.
+  // --8<-- [start:load]
   def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
     ProgramPersistence.load(fresh, path)
+  // --8<-- [end:load]
 
   // ── Snippets 6/7/8 — the "whole program" form (`save_program=True`) + `dspy.load(dir)` + custom modules ──
   // Out of scope: that form cloudpickles the program's architecture/code into a directory so it can be reloaded
