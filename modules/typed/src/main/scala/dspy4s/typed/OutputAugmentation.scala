@@ -1,5 +1,8 @@
 package dspy4s.typed
 
+import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
+import zio.blocks.schema.DynamicValue
+
 import scala.NamedTuple
 import scala.deriving.Mirror
 
@@ -79,3 +82,35 @@ object OutputAugmentation:
         type Out = inner.Out
         def prepend(value: T, base: O): Option[Out] =
           inner.prepend(value, NamedTuple.build[N]()(Tuple.fromProductTyped(base)(using m)))
+
+  /** The shared decode for an opening-`String` output augmentation: read `fieldName` as a `String`, decode
+    * the base output `O` via `shape`, then prepend the field, mapping the fieldless-output case (a string-DSL
+    * `Signature`, which has no static fields) to a structured error. The value-level body shared by
+    * `ChainOfThought` / `ReAct` / `CodeAct` / `MultiChainComparison`.
+    *
+    * This is the opening-position, `String`-typed, hook-less case of the more general `Thought`-shaped
+    * augmentation (position, arbitrary typed field, post-decode hook); that generalization is intended to be
+    * additive (see `docs/refactor/composite-primitives.md`). `label` names the producing component in errors.
+    */
+  def decodePrepended[O, Name <: String & Singleton, Out](
+      raw: DynamicValue.Record,
+      shape: Shape[O],
+      fieldName: Name,
+      label: String,
+      signatureName: String
+  )(using prepend: PrependField.Aux[Name, String, O, Out]): Either[DspyError, Out] =
+    for
+      value     <- DynamicValues.requireString(raw, fieldName, label)
+      baseOut   <- shape.decode(raw)
+      augmented <- prepend.prepend(value, baseOut).toRight(productOutputRequired(label, signatureName, baseOut))
+    yield augmented
+
+  /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no
+    * static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a
+    * prepended field, so the augmentation is unsupported. */
+  private def productOutputRequired(label: String, signatureName: String, baseOut: Any): DspyError =
+    ValidationError(
+      s"$label requires a product output (named tuple or case class); the signature '$signatureName' has a " +
+      s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
+      s"(Signature.of / Signature.derived / Signature.fromType)."
+    )

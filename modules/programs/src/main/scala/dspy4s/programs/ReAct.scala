@@ -9,7 +9,6 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
@@ -174,9 +173,9 @@ final case class ReAct[I, O](
       rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
       extracted <- extractWithTruncation(baseCall, inputs, trajectory)
       // Decode the extractor's reply into the typed output: base `O` with `reasoning` prepended.
-      reasoning <- extractReasoning(extracted.values)
-      baseOut   <- baseSignature.outputShape.decode(extracted.values)
-      augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
+      augmented <- OutputAugmentation.decodePrepended(
+                     extracted.values, baseSignature.outputShape, "reasoning", "ReAct extractor", baseSignature.name
+                   )
     yield Prediction(
       output = augmented,
       // Attach the trajectory to the raw prediction so callers can inspect the agent's reasoning.
@@ -281,16 +280,6 @@ final case class ReAct[I, O](
       case Some(rec: DynamicValue.Record)                         => rec
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => ReAct.parseJsonRecord(s)
       case _                                                      => DynamicValue.Record.empty
-
-  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.requireString(values, "reasoning", "ReAct extractor")
-
-  private def unsupportedOutputShape(baseOut: O): DspyError =
-    ValidationError(
-      s"ReAct requires a product output (named tuple or case class); the signature '${baseSignature.name}' has " +
-      s"a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
-      s"(Signature.of / Signature.derived / Signature.fromType / a literal Signature.fromString)."
-    )
 
 object ReAct:
   val FinishToolName: String = "finish"

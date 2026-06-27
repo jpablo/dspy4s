@@ -1,6 +1,9 @@
 package dspy4s.typed
 
 import dspy4s.typed.OutputAugmentation.{PrependField, WithField}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError, ValidationError}
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import scala.NamedTuple
 import munit.FunSuite
 
@@ -43,4 +46,43 @@ class OutputAugmentationSuite extends FunSuite:
     // No `Mirror.ProductOf[Int]` and not a named tuple -> only the low-priority fallback matches.
     val result = summon[PrependField["x", String, Int]].prepend("v", 5)
     assert(result.isEmpty)
+  }
+
+  // ── decodePrepended: the value-level decode shared by the composite programs ──────────────────────
+
+  private def str(s: String): DynamicValue                            = DynamicValue.Primitive(PrimitiveValue.String(s))
+  private def rec(pairs: (String, DynamicValue)*): DynamicValue.Record = DynamicValue.Record(Chunk.from(pairs))
+
+  // A minimal named-tuple Shape that decodes `{ answer }` into `(answer: String)`.
+  private def answerShape: Shape[(answer: String)] = new Shape[(answer: String)]:
+    val fieldSpecs: Vector[FieldSpec] = Vector(FieldSpec("answer", FieldRole.Output))
+    def encode(value: (answer: String)): DynamicValue.Record = rec("answer" -> str(value.answer))
+    def decode(raw: DynamicValue.Record): Either[DspyError, (answer: String)] =
+      DynamicValues.requireString(raw, "answer", "test").map(a => (answer = a))
+
+  // A non-product Shape: its decoded output hits the PrependField fallback (None) inside decodePrepended.
+  private def intShape: Shape[Int] = new Shape[Int]:
+    val fieldSpecs: Vector[FieldSpec]                              = Vector.empty
+    def encode(value: Int): DynamicValue.Record                   = rec()
+    def decode(raw: DynamicValue.Record): Either[DspyError, Int]  = Right(0)
+
+  test("decodePrepended: reads the field, decodes the base, prepends") {
+    val r = OutputAugmentation.decodePrepended(
+      rec("reasoning" -> str("because"), "answer" -> str("Paris")), answerShape, "reasoning", "test", "sig"
+    )
+    assertEquals(r.map(NamedTuple.toTuple), Right(("because", "Paris")): Either[DspyError, (String, String)])
+  }
+
+  test("decodePrepended: a missing field is a NotFoundError") {
+    val r = OutputAugmentation.decodePrepended(rec("answer" -> str("Paris")), answerShape, "reasoning", "test", "sig")
+    r match
+      case Left(_: NotFoundError) => ()
+      case other                  => fail(s"expected NotFoundError, got $other")
+  }
+
+  test("decodePrepended: a fieldless (non-product) output is a ValidationError") {
+    val r = OutputAugmentation.decodePrepended(rec("reasoning" -> str("x")), intShape, "reasoning", "test", "sig")
+    r match
+      case Left(_: ValidationError) => ()
+      case other                    => fail(s"expected ValidationError, got $other")
   }

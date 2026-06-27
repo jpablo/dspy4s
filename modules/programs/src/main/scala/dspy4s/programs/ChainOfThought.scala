@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.{
   DspyError, DynamicValues, Example, FieldRole, FieldSpec, RuntimeContext,
-  SignatureLayout, TypeRef, ValidationError
+  SignatureLayout, TypeRef
 }
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ProgramRuntime, TypedCall}
@@ -115,26 +115,9 @@ final case class ChainOfThought[I, O](
       DynamicValue.Record(Chunk.from(entries))
 
     def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
-      for
-        reasoning <- extractReasoning(raw)
-        baseOut   <- signature.outputShape.decode(raw)
-        // `prepend` builds the augmented named tuple via `NamedTuple.build` for products (named tuples and case
-        // classes) with no `asInstanceOf`; only the fieldless `DynamicValue.Record` output yields `None`.
-        augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
-      yield augmented
-
-  /** The structured error for an `O` that is neither a named tuple nor a case class — i.e. the
-    * `DynamicValue.Record` output of a `Signature.fromStringDynamic`, which has no static fields to augment. The
-    * `WithReasoning[O]` match type also fails to reduce for it. */
-  private def unsupportedOutputShape(baseOut: O): DspyError =
-    ValidationError(
-      s"ChainOfThought requires a product output (named tuple or case class); the string-DSL signature " +
-      s"'${signature.name}' has a fieldless DynamicValue.Record output (got ${baseOut.getClass.getSimpleName}). " +
-      s"Use a typed signature (Signature.of / Signature.derived / Signature.fromType)."
-    )
-
-  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.requireString(values, "reasoning", "ChainOfThought")
+      // `prepend` builds the augmented named tuple via `NamedTuple.build` for products (named tuples and
+      // case classes); only the fieldless `DynamicValue.Record` output yields a structured error.
+      OutputAugmentation.decodePrepended(raw, signature.outputShape, "reasoning", "ChainOfThought", signature.name)
 
 object ChainOfThought:
 

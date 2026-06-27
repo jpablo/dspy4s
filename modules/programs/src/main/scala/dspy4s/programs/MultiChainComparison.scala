@@ -121,9 +121,9 @@ final case class MultiChainComparison[I, O](
                  traceEnabled = call.traceEnabled,
                  rolloutId    = call.rolloutId
                ))
-        rationale <- extractRationale(raw.values)
-        baseOut   <- baseSignature.outputShape.decode(raw.values)
-        augmented <- prepend.prepend(rationale, baseOut).toRight(unsupportedOutputShape(baseOut))
+        augmented <- OutputAugmentation.decodePrepended(
+                       raw.values, baseSignature.outputShape, MultiChainComparison.rationaleName, "comparison", baseSignature.name
+                     )
       yield Prediction(augmented, raw)
 
   /** Convenience entry: supply the base input and the candidate completions directly. Mirrors Python's
@@ -153,16 +153,6 @@ final case class MultiChainComparison[I, O](
       .map(_.linesIterator.next().trim)
       .nextOption()
       .getOrElse("")
-
-  private def extractRationale(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.requireString(values, MultiChainComparison.rationaleName, "comparison")
-
-  private def unsupportedOutputShape(baseOut: O): DspyError =
-    ValidationError(
-      s"MultiChainComparison requires a product output (named tuple or case class); the signature " +
-      s"'${baseSignature.name}' has a fieldless output (got ${baseOut.getClass.getSimpleName}). " +
-      s"Use a typed signature (Signature.of / Signature.derived / Signature.fromType)."
-    )
 
 object MultiChainComparison:
   private[programs] val rationaleName: "rationale" = "rationale"

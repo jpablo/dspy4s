@@ -10,7 +10,6 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
@@ -187,9 +186,9 @@ final case class CodeAct[I, O](
       trajectory <- runIterations(baseCall, codeActPredict, trajectory = Vector.empty, iteration = 0)
       rendered = DynamicValue.Primitive(PrimitiveValue.String(trajectory.render))
       extracted <- extractWithTruncation(baseCall, inputs, trajectory)
-      reasoning <- extractReasoning(extracted.values)
-      baseOut   <- baseSignature.outputShape.decode(extracted.values)
-      augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
+      augmented <- OutputAugmentation.decodePrepended(
+                     extracted.values, baseSignature.outputShape, "reasoning", "CodeAct extractor", baseSignature.name
+                   )
     yield Prediction(
       output = augmented,
       raw = DynamicPrediction(
@@ -287,16 +286,6 @@ final case class CodeAct[I, O](
       case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(b))) => b
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s)))  => s.trim.equalsIgnoreCase("true")
       case _                                                       => false
-
-  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.requireString(values, "reasoning", "CodeAct extractor")
-
-  private def unsupportedOutputShape(baseOut: O): DspyError =
-    ValidationError(
-      s"CodeAct requires a product output (named tuple or case class); the signature '${baseSignature.name}' has " +
-      s"a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
-      s"(Signature.of / Signature.derived / Signature.fromType / a literal Signature.fromString)."
-    )
 
 object CodeAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
