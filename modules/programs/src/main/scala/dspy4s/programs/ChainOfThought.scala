@@ -4,6 +4,7 @@ import dspy4s.core.contracts.{
   DspyError, DynamicValues, Example, FieldRole, FieldSpec, NotFoundError, RuntimeContext,
   SignatureLayout, TypeRef, ValidationError
 }
+import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ProgramRuntime, TypedCall}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{OutputAugmentation, Prediction, Shape, Signature}
@@ -158,8 +159,7 @@ object ChainOfThought:
   ))
 
   private[dspy4s] def augmentLayout(layout: SignatureLayout): Either[DspyError, SignatureLayout] =
-    if layout.outputFields.exists(_.name == reasoningField.name) then Right(layout)
-    else layout.insert(index = 0, field = reasoningField)
+    Right(layout.prependOutput(reasoningField))
 
   /** The augmented output type — `reasoning: String` prepended to `O`'s named-tuple view, idempotently. A thin
     * alias over the shared [[dspy4s.typed.OutputAugmentation.WithField]]; see there for the full semantics. */

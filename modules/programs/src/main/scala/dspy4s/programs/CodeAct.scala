@@ -13,6 +13,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
+import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TypedCall
@@ -96,36 +97,35 @@ final case class CodeAct[I, O](
     baseLayout
       // Replace any user-supplied output fields on the codeact signature with just generated_code + finished.
       // The original outputs are produced by the extractor.
-      .withFields(
-        baseLayout.inputFields ++
-          Vector(
-            FieldSpec(
-              name = "trajectory",
-              role = FieldRole.Input,
-              typeRef = TypeRef.string,
-              description = Some("History of generated code and observations so far.")
-            ),
-            FieldSpec(
-              name = "generated_code",
-              role = FieldRole.Output,
-              typeRef = TypeRef.string,
-              description = Some("Python code that, when executed, produces output relevant to answering the question.")
-            ),
-            FieldSpec(
-              name = "finished",
-              role = FieldRole.Output,
-              typeRef = TypeRef.bool,
-              description = Some("Set to true once enough information has been collected to produce the final outputs.")
-            )
-          )
+      .appendInput(
+        FieldSpec(
+          name = "trajectory",
+          role = FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("History of generated code and observations so far.")
+        )
       )
+      .replaceOutputs(Vector(
+        FieldSpec(
+          name = "generated_code",
+          role = FieldRole.Output,
+          typeRef = TypeRef.string,
+          description = Some("Python code that, when executed, produces output relevant to answering the question.")
+        ),
+        FieldSpec(
+          name = "finished",
+          role = FieldRole.Output,
+          typeRef = TypeRef.bool,
+          description = Some("Set to true once enough information has been collected to produce the final outputs.")
+        )
+      ))
       .withInstructions(Some(buildInstructions))
 
   /** SignatureLayout for the final extractor. Mirrors Python:
     *   inputs:  baseSignature.inputs ∪ {trajectory}
     *   outputs: baseSignature.outputs */
   val extractorSignature: SignatureLayout =
-    baseLayout.append(FieldSpec(
+    baseLayout.appendInput(FieldSpec(
       name = "trajectory",
       role = FieldRole.Input,
       typeRef = TypeRef.string,

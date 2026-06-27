@@ -12,6 +12,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
+import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
@@ -75,39 +76,39 @@ final case class ReAct[I, O](
     * The base output fields are intentionally dropped here — they are produced by the extractor, not the loop. */
   val reactSignature: SignatureLayout =
     baseLayout
-      .withFields(
-        baseLayout.inputFields ++ Vector(
-          FieldSpec(
-            name = ReActKeys.trajectory,
-            role = FieldRole.Input,
-            typeRef = TypeRef.string,
-            description = Some("The sequence of thoughts, tool calls, and observations so far.")
-          ),
-          FieldSpec(
-            name = ReActKeys.nextThought,
-            role = FieldRole.Output,
-            typeRef = TypeRef.string,
-            description = Some("Reasoning about the current situation and what to do next.")
-          ),
-          FieldSpec(
-            name = ReActKeys.nextToolName,
-            role = FieldRole.Output,
-            typeRef = TypeRef.string,
-            description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
-          ),
-          FieldSpec(
-            name = ReActKeys.nextToolArgs,
-            role = FieldRole.Output,
-            typeRef = TypeRef.json,
-            description = Some("Arguments for the next tool, as a JSON object.")
-          )
+      .appendInput(
+        FieldSpec(
+          name = ReActKeys.trajectory,
+          role = FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("The sequence of thoughts, tool calls, and observations so far.")
         )
       )
+      .replaceOutputs(Vector(
+        FieldSpec(
+          name = ReActKeys.nextThought,
+          role = FieldRole.Output,
+          typeRef = TypeRef.string,
+          description = Some("Reasoning about the current situation and what to do next.")
+        ),
+        FieldSpec(
+          name = ReActKeys.nextToolName,
+          role = FieldRole.Output,
+          typeRef = TypeRef.string,
+          description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
+        ),
+        FieldSpec(
+          name = ReActKeys.nextToolArgs,
+          role = FieldRole.Output,
+          typeRef = TypeRef.json,
+          description = Some("Arguments for the next tool, as a JSON object.")
+        )
+      ))
       .withInstructions(Some(buildInstructions))
 
   /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. */
   val extractorSignature: SignatureLayout =
-    baseLayout.append(
+    baseLayout.appendInput(
       FieldSpec(
         name = ReActKeys.trajectory,
         role = FieldRole.Input,

@@ -10,6 +10,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
+import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
@@ -77,21 +78,19 @@ final case class MultiChainComparison[I, O](
     * field prepended (idempotent; matches Python field ordering). */
   val augmentedSignatureLayout: SignatureLayout =
     val withAttempts = (1 to m).foldLeft(baseSignature.layout) { (sig, idx) =>
-      sig.append(FieldSpec(
+      sig.appendInput(FieldSpec(
         name        = s"reasoning_attempt_$idx",
         role        = FieldRole.Input,
         description = Some(attemptDescription),
         prefix      = Some(s"Student Attempt #$idx:")
       ))
     }
-    if withAttempts.outputFields.exists(_.name == MultiChainComparison.rationaleName) then withAttempts
-    else
-      withAttempts.prepend(FieldSpec(
-        name        = MultiChainComparison.rationaleName,
-        role        = FieldRole.Output,
-        description = Some(rationaleDescription),
-        prefix      = Some(rationalePrefix)
-      ))
+    withAttempts.prependOutput(FieldSpec(
+      name        = MultiChainComparison.rationaleName,
+      role        = FieldRole.Output,
+      description = Some(rationaleDescription),
+      prefix      = Some(rationalePrefix)
+    ))
 
   /** The comparison predict, built once from [[augmentedSignatureLayout]] (mirrors Python's `self.compare =
     * Predict(...)` in `__init__`). Addressable + tunable via [[comparePredictOverride]]; `forward` uses this
