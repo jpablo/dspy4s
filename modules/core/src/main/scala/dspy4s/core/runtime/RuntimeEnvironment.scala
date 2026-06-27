@@ -1,5 +1,6 @@
 package dspy4s.core.runtime
 
+import dspy4s.core.contracts.AdapterRef
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
@@ -165,6 +166,27 @@ object RuntimeEnvironment:
       val base = localContext
       val nextHistory = (base.history :+ entry).takeRight(cap)
       contextRef.set(base.withHistory(nextHistory))
+
+  /** Run `body` under a fresh trace/history overlay derived from `base` (optionally swapping the adapter),
+    * returning the body's result paired with the trace and history it accumulated. Used by the BestOfN /
+    * Refine attempt loops, which isolate each attempt then propagate only the winner's observability via
+    * [[propagateAttempt]]. */
+  def isolatedAttempt[A](base: RuntimeContext, adapter: Option[AdapterRef] = None)(
+      body: RuntimeContext ?=> A
+  ): (A, Vector[TraceEntry], Vector[HistoryEntry]) =
+    val isolated = base.copy(trace = Vector.empty, history = Vector.empty, adapter = adapter.orElse(base.adapter))
+    withContext(isolated) {
+      given RuntimeContext = current
+      val result = body
+      val ctx    = current
+      (result, ctx.trace, ctx.history)
+    }
+
+  /** Replay a captured attempt's trace and history into the current overlay, in order. The propagate half of
+    * [[isolatedAttempt]]: the winning attempt's observability bubbles up to the enclosing scope. */
+  def propagateAttempt(trace: Vector[TraceEntry], history: Vector[HistoryEntry]): Unit =
+    trace.foreach(appendTrace)
+    history.foreach(appendHistory)
 
   /** Render the last `n` LM-call history entries on the active context as a human-readable string, in the spirit
     * of upstream `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread

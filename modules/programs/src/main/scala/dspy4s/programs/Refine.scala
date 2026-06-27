@@ -99,19 +99,11 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
         }.toMap
         Refine.HintInjectingAdapter(Refine.resolveBaseAdapter(baseContext), byLayout)
       }
-      val isolated = baseContext.copy(
-        trace   = Vector.empty,
-        history = Vector.empty,
-        adapter = attemptAdapter.orElse(baseContext.adapter)
-      )
-      val (attemptResult, trace, history) = RuntimeEnvironment.withContext(isolated) {
-        given RuntimeContext = RuntimeEnvironment.current
-        val result  = module.apply(call.copy(
+      val (attemptResult, trace, history) = RuntimeEnvironment.isolatedAttempt(baseContext, attemptAdapter) {
+        module.apply(call.copy(
           rolloutId = Some(rolloutStart + idx),                                          // cache-busting selector
           config    = call.config.updated("temperature", DynamicValues.fromAny(1.0d))    // provider knob
         ))
-        val current = RuntimeEnvironment.current
-        (result, current.trace, current.history)
       }
 
       attemptResult match
@@ -150,8 +142,7 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
 
     best match
       case Some(value) =>
-        bestTrace.foreach(RuntimeEnvironment.appendTrace)
-        bestHistory.foreach(RuntimeEnvironment.appendHistory)
+        RuntimeEnvironment.propagateAttempt(bestTrace, bestHistory)
         Right(value)
       case None =>
         Left(lastError.getOrElse(RuntimeError(moduleName, "No successful predictions were produced")))

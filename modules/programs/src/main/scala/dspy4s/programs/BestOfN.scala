@@ -87,13 +87,7 @@ object BestOfN:
 
     var idx = 0
     while idx < n do
-      val isolated = baseContext.copy(trace = Vector.empty, history = Vector.empty)
-      val (attemptResult, trace, history) = RuntimeEnvironment.withContext(isolated) {
-        given RuntimeContext = RuntimeEnvironment.current
-        val result  = runAttempt(idx)
-        val current = RuntimeEnvironment.current
-        (result, current.trace, current.history)
-      }
+      val (attemptResult, trace, history) = RuntimeEnvironment.isolatedAttempt(baseContext)(runAttempt(idx))
 
       attemptResult match
         case Right(value) =>
@@ -115,8 +109,7 @@ object BestOfN:
 
     best match
       case Some(value) =>
-        bestTrace.foreach(RuntimeEnvironment.appendTrace)
-        bestHistory.foreach(RuntimeEnvironment.appendHistory)
+        RuntimeEnvironment.propagateAttempt(bestTrace, bestHistory)
         Right(value)
       case None =>
         Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))
