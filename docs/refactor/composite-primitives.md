@@ -318,7 +318,8 @@ at the runtime layer keeps every module a pure `In => Either[DspyError, A]`.
 kyo-ai (github getkyo/kyo, `kyo-ai/` on the `kyo-ai` branch) stays the **reference design** for the
 runtime/harness primitives (`Enablement`, `Thought`, `Mode`, `Tool`, the native-function-calling eval
 loop), to be reimplemented on `CIO` + zio-blocks. It is not a dependency. kyo-compat is the substrate;
-kyo-ai is the blueprint for what to build on it.
+kyo-ai is the blueprint for what to build on it. Full feature-by-feature comparison:
+[kyo-ai-comparison.md](kyo-ai-comparison.md).
 
 ### Costs and risks
 
