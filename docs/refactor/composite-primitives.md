@@ -19,7 +19,7 @@ Layer 0  Atom            PredictEngine                     (exists)
 Layer 1  Signature algebra  prependOutput / appendInput / replaceOutputs   ← step 1
 Layer 2  Policy           Predict over a transformed signature   (exists, will be lifted later)
 Layer 3  Environment      Effect.step(action) => observation     ← step 6 (substrate: kyo-compat CIO; NOT in this branch)
-Layer 4  Combinators      augment | loop | selectBest | feedback ← step 6 (NOT in this branch)
+Layer 4  Combinators      augment (Thought-shaped) | loop | mode-middleware (subsumes select/feedback) ← step 6 (NOT in this branch)
 Layer 5  Runtime services requireString / decodePrepended / truncateOnOverflow / isolatedAttempt  ← steps 2–4
 ```
 
@@ -177,6 +177,31 @@ error; existing composite suites cover the migrations.
 **Risk:** low-medium (touches the typed decode path of four modules; the per-composite suites guard it).
 **Effect note:** pure validation — stays `Either` even under `F[_]`.
 
+### Design ceiling — `Thought`-shaped augmentation (from kyo-ai)
+
+`decodePrepended` above is the *behavior-preserving* dedup of what the four sites do today: prepend at the
+**output-cohort head**, a **String** field, with **no post-decode hook**. That is exactly the degenerate
+case of kyo-ai's [`Thought`](kyo-ai-comparison.md), whose general form is worth shaping toward so this
+helper is not a dead-end:
+
+- **Position.** `opening` (before the result; conditions the answer) or `closing` (after the result; a
+  self-check). Today's four sites are all opening. dspy4s cannot express a closing self-check at all; the
+  general shape unlocks it for free.
+- **Arbitrary typed field**, decoded via its own `Shape`, not pulled as a String by name. `requireString`
+  (step 2) exists only because the field is hard-coded to String; under a typed field it is just
+  `Shape.decode`, so step 2's helper is the degenerate case and is **retired over time**, not load-bearing.
+- **Optional post-decode hook** (kyo-ai's `process`): verify, record a metric, or drive a follow-up.
+
+**What this means for the implementation now (no scope creep):** ship only the opening-String path in this
+branch (it is the behavior-preserving dedup), but **name and structure the primitive as the general one**
+— position, field type, and hook as parameters with trivial defaults — so generalization is purely
+additive later. `MultiChainComparison`'s `rationale` is already a second opening-String instance; a closing
+self-check would be the first new case.
+
+**Where we must diverge from kyo-ai:** the augmentation field is learnable surface, so the primitive must
+stay introspectable/replaceable by `Predictors` (optimizer-addressable). kyo-ai's `Thought` has no
+optimizer dimension; ours does. See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai).
+
 ## Step 4 — `isolatedAttempt` + `propagateAttempt` (covers G)
 
 **Where:** `RuntimeEnvironment` (core) — it already owns `withContext`/`appendTrace`/`appendHistory`.
@@ -246,19 +271,71 @@ when the `F[_]` work lands.
 
 ## Out of scope for this branch (named so we don't drift)
 
-- **Step 6: the `Effect` interface + `loop`/`select`/`feedback` combinators.** This is where Kyo/ZIO/CE
-  plug in and where ReAct/CodeAct/RLM/ProgramOfThought collapse to one loop. Designed separately, after
-  1–5 prove the seams. The substrate candidate is now identified (kyo-compat); see the dedicated section
-  below for its evaluation and the de-risking spike.
-- **Full `Refine = selectBest + hint` unification.** `BestOfN.selectBest` currently has no inter-attempt
-  hook (Refine generates advice between attempts and swaps the adapter per attempt). Forcing selectBest to
-  serve both right before the combinator redesign would over-fit it to two callers. **Recommendation:** in
-  this branch, Refine and BestOfN share only `isolatedAttempt`/`propagateAttempt` (step 4); the deeper
-  unification waits for step 6's `feedback` combinator. (Step 5 here is `truncateOnOverflow`, not the Refine
-  unification — the original numbering folded these together; this is the honest split.)
+- **Step 6: the `Effect` interface + the agentic `loop` + the control middleware.** This is where
+  Kyo/ZIO/CE plug in and where ReAct/CodeAct/RLM/ProgramOfThought collapse to one loop. Designed
+  separately, after 1–5 prove the seams. The substrate candidate is identified (kyo-compat); the design
+  shape is informed by kyo-ai. See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai) and the
+  [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted) below.
+- **Full `Refine` ↔ `BestOfN` unification.** `BestOfN.selectBest` currently has no inter-attempt hook
+  (Refine generates advice between attempts and swaps the adapter per attempt). Forcing selectBest to serve
+  both right before the combinator redesign would over-fit it to two callers. **Recommendation:** in this
+  branch, Refine and BestOfN share only `isolatedAttempt`/`propagateAttempt` (step 4); the deeper
+  unification waits for step 6, where both become instances of one **mode-style middleware** (not a
+  `selectBest` + separate `feedback`). See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai).
+  (Step 5 here is `truncateOnOverflow`, not the Refine unification — the original numbering folded these
+  together; this is the honest split.)
 - **ProgramOfThought / RLM loop migration.** They share the loop+execute shape but have distinct
   result-classification (PoT regenerate-on-error; RLM continue/SUBMIT/llm_query). Unify under step 6 once
   the `Effect` model is validated against all four agentic loops; do not force them now.
+
+## Step 6 design lessons (from kyo-ai)
+
+Studying kyo-ai surfaced design wins recorded here so step 6 starts shaped right (full comparison:
+[kyo-ai-comparison.md](kyo-ai-comparison.md)). Our composites fall into three kyo-ai-shaped buckets, and
+for two of them kyo-ai's general abstraction is cleaner than treating each as a bespoke module:
+
+| our composites | kyo-ai general form | our step-6 target |
+|---|---|---|
+| ChainOfThought, MultiChainComparison, ReAct/CodeAct CoT-extractor | `Thought` (augment the output schema) | the `Thought`-shaped augmentation (see [step 3 ceiling](#design-ceiling--thought-shaped-augmentation-from-kyo-ai)) |
+| BestOfN, Refine | `Mode` (run the generation N times, synthesize) | one mode-style middleware |
+| ReAct, CodeAct, RLM, ProgramOfThought | the eval loop | the `Effect` + `loop` |
+
+**Lesson 1 — control layer is a `Mode`-style middleware over a generation *value*, not separate
+`select`/`feedback` combinators.** kyo-ai's `Mode` is `[A] => (gen) => gen'`, where the wrapped generation
+is a value run zero/one/many times; BestOfN ("run N, keep best"), Refine ("run N with advice between"),
+model-switching, and pre/post all collapse to that one shape, pipelined in registration order. Our
+`selectBest(runAttempt: Int => …)` is a lower-altitude API. **Design step 6's control layer as middleware
+over a re-runnable generation value**; `isolatedAttempt`, `propagateAttempt`, and `truncateOnOverflow`
+(steps 4–5) are the low-level pieces *beneath* it, not the user-facing surface. In the `Either` world the
+generation value is a `() => Either[…]` / `RuntimeContext ?=> Either[…]` thunk; it gets cleaner once the
+CIO substrate lands (a referentially-transparent `CIO` value is re-runnable for free).
+
+**Lesson 2 — a uniform `Enablement`-style binder, but optimizer-addressable.** kyo-ai's `Enablement` is one
+trait that tools, prompts, thoughts, and modes all implement, so `enable(tool, prompt, thought, mode)`
+attaches any mix uniformly; our composites hand-wire each capability. Adopt the uniform-binder shape as
+step 6's composition surface. **The dspy4s-specific requirement kyo-ai does not have:** attaching a
+capability can change what the optimizer tunes, so the binder must interplay with the `Predictors`
+typeclass (read/replace of learnable predicts). This is the one place copying kyo-ai directly would be
+wrong.
+
+**Lesson 3 — `Thought`-shaped augmentation.** Covered as the
+[step 3 ceiling](#design-ceiling--thought-shaped-augmentation-from-kyo-ai): position (opening/closing),
+typed field via `Shape`, optional post-decode hook; ship opening-String now, generalize additively.
+
+### Guardrails — what NOT to copy from kyo-ai
+
+- **Do not weld the effect system into the core.** kyo-ai is `LLM extends ArrowEffect`. Our bet (pure
+  `Either` core, effects only at the CIO seam) is deliberate and is what keeps the modules optimizable and
+  the multi-effect story open. Keep it.
+- **Do not move errors onto the effect channel.** kyo-ai uses `Abort[AIException]`; our errors-as-values
+  (`Either[DspyError, A]`) is exactly what makes `CIO[Either[DspyError, A]]` clean. Keep it.
+- **Must add beyond kyo-ai: optimizer-addressability.** Every borrowed abstraction (Thought-augmentation,
+  mode-middleware, enablement-binder) must remain introspectable/replaceable by `Predictors`. kyo-ai has
+  no optimizer, so its versions carry no such constraint; ours must.
+
+**Lesser (only if dspy4s grows stateful):** kyo-ai's `forget` / `fresh` / `snapshot` / `recover` are a more
+principled state-isolation vocabulary than a single `isolatedAttempt`. Not a steps-1–5 change; the model to
+reach for if the agent direction adds conversation state.
 
 ## Step 6 substrate: kyo-compat (evaluated, not yet adopted)
 
