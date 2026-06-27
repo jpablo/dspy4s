@@ -3,8 +3,8 @@
 **Status:** reference (not a plan)
 **Date:** 2026-06-26
 **Subjects:**
-- dspy4s — this repo (current `main` / `refactor/composite-primitives`).
-- kyo-ai — `getkyo/kyo`, `kyo-ai` branch (local clone `/Users/jpablo/GitHub/kyo`, paths
+- dspy4s: this repo (current `main` / `refactor/composite-primitives`).
+- kyo-ai: `getkyo/kyo`, `kyo-ai` branch (local clone `/Users/jpablo/GitHub/kyo`, paths
   `kyo-ai/shared/src/main/scala/kyo/*`). Grounded on the branch's README + full source
   (`AI`, `Agent`, `LLM`, `Tool`, `Thought`, `Mode`, `Prompt`, `AISession`, `AIEnv`, `ai/Config`,
   `ai/Context`, completion backends).
@@ -95,7 +95,7 @@ kyo-ai owns the **harness/runtime** layer. Consequences for dspy4s:
    [composite-primitives.md](composite-primitives.md#step-6-substrate-kyo-compat-evaluated-not-yet-adopted).
 3. **The conversation/agent layer is the real gap.** If dspy4s ever grows toward a general agent (the pi
    direction), kyo-ai's `AI` / `Agent` / `AISession` are the reference for memory, persistence, and
-   long-lived entities — the layer dspy4s does not have today.
+   long-lived entities, the layer dspy4s does not have today.
 
 The shortest statement: **the overlap is one typed generation; above it, dspy4s compiles and kyo-ai
 remembers.**
