@@ -71,6 +71,21 @@ object DynamicValues:
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
     rec.fields.iterator.collectFirst { case (k, v) if k == name => v }
 
+  /** Read a required `String` field from a record, with structured errors: a non-String value is a
+    * [[ValidationError]], a missing field a [[NotFoundError]] on the `prediction_field` resource. `label`
+    * names the producing component in both messages. The shared body of the `extractReasoning` /
+    * `extractRationale` helpers across the composite programs. */
+  def requireString(rec: DynamicValue.Record, field: String, label: String): Either[DspyError, String] =
+    recordGet(rec, field) match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
+      case Some(other) =>
+        Left(ValidationError(s"$label field '$field' must be a String, got: $other"))
+      case None =>
+        Left(NotFoundError(
+          resource = "prediction_field",
+          message  = s"Required field '$field' is missing from the $label prediction"
+        ))
+
   /** Merge `overlay` onto `base`: every field in `overlay` is upserted into `base` via [[updated]] — `overlay`
     * wins on a key collision, `base`'s insertion order is preserved, and new keys append at the end. The record
     * analogue of `base ++ overlay` for a `Map`. The single home for the "spread one option bag under another"

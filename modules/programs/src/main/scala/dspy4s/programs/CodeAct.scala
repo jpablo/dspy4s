@@ -6,7 +6,6 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
@@ -290,15 +289,7 @@ final case class CodeAct[I, O](
       case _                                                       => false
 
   private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.recordGet(values, "reasoning") match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other) =>
-        Left(ValidationError(s"CodeAct reasoning field must be a String, got: $other"))
-      case None =>
-        Left(NotFoundError(
-          resource = "prediction_field",
-          message  = "Required field 'reasoning' is missing from the CodeAct extractor prediction"
-        ))
+    DynamicValues.requireString(values, "reasoning", "CodeAct extractor")
 
   private def unsupportedOutputShape(baseOut: O): DspyError =
     ValidationError(

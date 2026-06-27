@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{
-  DspyError, DynamicValues, Example, FieldRole, FieldSpec, NotFoundError, RuntimeContext,
+  DspyError, DynamicValues, Example, FieldRole, FieldSpec, RuntimeContext,
   SignatureLayout, TypeRef, ValidationError
 }
 import dspy4s.core.contracts.SignatureOps.*
@@ -9,7 +9,7 @@ import dspy4s.programs.contracts.{Module, ProgramRuntime, TypedCall}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{OutputAugmentation, Prediction, Shape, Signature}
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 /** ChainOfThought, defined as a small signature transformation on top of
   * [[Predict]]. Wraps a `Signature[I, O]` and produces a `Prediction[Out]` whose output is the base output with
@@ -134,17 +134,7 @@ final case class ChainOfThought[I, O](
     )
 
   private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.recordGet(values, "reasoning") match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other) =>
-        Left(ValidationError(
-          s"CoT reasoning field must be a String, got: $other"
-        ))
-      case None =>
-        Left(NotFoundError(
-          resource = "prediction_field",
-          message  = "Required field 'reasoning' is missing from the ChainOfThought prediction"
-        ))
+    DynamicValues.requireString(values, "reasoning", "ChainOfThought")
 
 object ChainOfThought:
 

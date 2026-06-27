@@ -5,7 +5,6 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
@@ -156,15 +155,7 @@ final case class MultiChainComparison[I, O](
       .getOrElse("")
 
   private def extractRationale(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.recordGet(values, MultiChainComparison.rationaleName) match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other) =>
-        Left(ValidationError(s"MultiChainComparison rationale must be a String, got: $other"))
-      case None =>
-        Left(NotFoundError(
-          resource = "prediction_field",
-          message  = "Required field 'rationale' is missing from the comparison prediction"
-        ))
+    DynamicValues.requireString(values, MultiChainComparison.rationaleName, "comparison")
 
   private def unsupportedOutputShape(baseOut: O): DspyError =
     ValidationError(

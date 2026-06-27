@@ -6,7 +6,6 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
@@ -284,15 +283,7 @@ final case class ReAct[I, O](
       case _                                                      => DynamicValue.Record.empty
 
   private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.recordGet(values, "reasoning") match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other) =>
-        Left(ValidationError(s"ReAct reasoning field must be a String, got: $other"))
-      case None =>
-        Left(NotFoundError(
-          resource = "prediction_field",
-          message  = "Required field 'reasoning' is missing from the ReAct extractor prediction"
-        ))
+    DynamicValues.requireString(values, "reasoning", "ReAct extractor")
 
   private def unsupportedOutputShape(baseOut: O): DspyError =
     ValidationError(
