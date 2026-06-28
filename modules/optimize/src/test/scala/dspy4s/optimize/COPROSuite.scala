@@ -109,7 +109,7 @@ class COPROSuite extends FunSuite:
   override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
 
   private val taskLayout: SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = "QA",
       fields = Vector(
         FieldSpec(name = "question", role = FieldRole.Input),

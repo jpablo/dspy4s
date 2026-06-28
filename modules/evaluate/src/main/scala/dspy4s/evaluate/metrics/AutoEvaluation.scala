@@ -116,7 +116,7 @@ final case class SemanticF1(
       AutoEvaluation.output("precision", SemanticF1.precisionDesc)
     )
     val instructions = if decompositional then SemanticF1.decompositionalInstructions else SemanticF1.baseInstructions
-    SignatureLayout(name = "SemanticRecallPrecision", fields = inputs ++ outputs, instructions = Some(instructions))
+    SignatureLayout.of(name = "SemanticRecallPrecision", fields = inputs ++ outputs, instructions = Some(instructions))
 
   override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
@@ -162,7 +162,7 @@ final case class CompleteAndGrounded(
   val name: String = "complete_and_grounded"
 
   private val completenessLayout: SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = "AnswerCompleteness",
       fields = Vector(
         AutoEvaluation.input("question"),
@@ -177,7 +177,7 @@ final case class CompleteAndGrounded(
     )
 
   private val groundednessLayout: SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = "AnswerGroundedness",
       fields = Vector(
         AutoEvaluation.input("question"),

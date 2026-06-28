@@ -117,7 +117,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
   /** The dataset-summary signature: `examples -> observations`. `summaryMarker` is set as the signature
     * instructions so summary prompts are distinguishable from instruction-generation / task prompts. */
   private def summaryLayout: SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = "SummarizeDataset",
       fields = Vector(
         FieldSpec(name = "examples", role = FieldRole.Input),
@@ -167,7 +167,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
         ) ++
         (if withDemos then Vector(FieldSpec(name = "task_demos", role = FieldRole.Input)) else Vector.empty) ++
         (if withTip then Vector(FieldSpec(name = "tip", role = FieldRole.Input)) else Vector.empty)
-    SignatureLayout(
+    SignatureLayout.of(
       name = "GenerateModuleInstruction",
       fields = inputs :+ FieldSpec(name = "proposed_instruction", role = FieldRole.Output),
       instructions = Some(config.instructionMarker)

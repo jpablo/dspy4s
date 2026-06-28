@@ -183,7 +183,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       Vector(FieldSpec(name = "basic_instruction", role = FieldRole.Input)) ++
         (if withAttempts then Vector(FieldSpec(name = "attempted_instructions", role = FieldRole.Input))
          else Vector.empty)
-    SignatureLayout(
+    SignatureLayout.of(
       name = "GenerateInstruction",
       fields = inputs :+ FieldSpec(name = "proposed_instruction", role = FieldRole.Output),
       instructions = Some(config.instructionMarker)

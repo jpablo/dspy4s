@@ -264,8 +264,8 @@ object FieldSpec:
   *   - [[SignatureLayout.fromState]] -- re-hydrate from the `DynamicValue.Record` produced by [[dumpState]]
   *     (or from JSON via [[SignatureLayout.fromJson]]).
   *
-  * The case-class `apply(name, fields, instructions)` form is also available but skips normalization -- use only
-  * from internal code that builds the field list deliberately.
+  * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name
+  * uniqueness closed by construction (see Invariants) rather than relying on a runtime precondition.
   *
   * '''Field mutation.''' The `append` / `prepend` / `insert` / `delete` / `withFields` /
   * `withUpdatedField*` methods are `private[dspy4s]`. They exist because composite programs (`ChainOfThought`,
@@ -274,19 +274,18 @@ object FieldSpec:
   * typed `Signature` surface (use a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather
   * than reaching into the layout directly.
   *
-  * '''Invariants.''' The `require` block at construction guarantees that a built layout has a non-empty `name`,
-  * unique field names, and identifier-shaped field names. Adapters can rely on those without re-checking.
+  * '''Invariants.''' Name uniqueness is maintained by construction, not by a precondition: the primary
+  * constructor is `private`, so every layout comes from [[SignatureLayout.create]] (which rejects duplicate
+  * names) or from a mutator, and every mutator routes through [[withFields]], which dedups by name. A built
+  * layout therefore always has unique field names; adapters can rely on that without re-checking. The
+  * constructor still requires a non-empty `name` and identifier-shaped field names.
   */
-final case class SignatureLayout(
+final case class SignatureLayout private (
     name: String,
     fields: Vector[FieldSpec],
-    instructions: Option[String] = None
+    instructions: Option[String]
 ):
   require(name.nonEmpty, "SignatureLayout name cannot be empty")
-  require(
-    fields.map(_.name).distinct.size == fields.size,
-    "SignatureLayout fields must have unique names"
-  )
   require(
     fields.forall(f => FieldSpec.validateName(f.name)),
     "SignatureLayout fields must be valid identifiers"
@@ -316,7 +315,11 @@ final case class SignatureLayout(
   // typed `Signature` surface (`derived`, `fromType`, `of[Spec]`,
   // `builder`, `fromString`) instead of mutating layouts directly.
 
-  private[dspy4s] def withFields(updated: Vector[FieldSpec]): SignatureLayout = copy(fields = updated)
+  // The single chokepoint every field mutator routes through: dedup by name (keep first), so a duplicate is
+  // impossible to introduce, which is what lets the unique-name precondition be retired. In practice the
+  // callers never pass a duplicate, so this is a structural guarantee rather than an observable change.
+  private[dspy4s] def withFields(updated: Vector[FieldSpec]): SignatureLayout =
+    copy(fields = updated.distinctBy(_.name))
 
   private[dspy4s] def append(field: FieldSpec): SignatureLayout = withFields(fields :+ field)
 
@@ -478,6 +481,14 @@ object SignatureLayout:
     else
       val normalized = fields.map(FieldSpec.normalize)
       Right(SignatureLayout(name = name, fields = normalized, instructions = instructions))
+
+  /** Trusted internal construction WITHOUT normalization: framework code builds a signature from known-good,
+    * already-shaped fields and wants a `SignatureLayout` directly (not an `Either`). The (private) constructor
+    * still enforces a non-empty `name` and identifier-shaped field names; field-name uniqueness is the
+    * caller's responsibility here (pass already-distinct fields; use [[create]] to validate arbitrary input).
+    * Replaces the former public case-class apply for the framework's internal call sites. */
+  private[dspy4s] def of(name: String, fields: Vector[FieldSpec], instructions: Option[String]): SignatureLayout =
+    SignatureLayout(name, fields, instructions)
 
   /** Re-hydrate a layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]]. The inverse
     * of the save/load serialization primitive; no production code wires this into a save/load feature yet. */

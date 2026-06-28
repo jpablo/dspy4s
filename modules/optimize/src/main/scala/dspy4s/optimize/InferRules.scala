@@ -170,7 +170,7 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
   /** The rule-induction signature: `examples_text -> natural_language_rules`, instructed to extract `numRules`
     * concise, non-redundant, actionable rules (a paraphrase of upstream's `CustomRulesInduction` docstring). */
   private val ruleInductionLayout: SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = "RulesInduction",
       fields = Vector(
         FieldSpec(name = "examples_text", role = FieldRole.Input, description = Some("Text containing examples")),

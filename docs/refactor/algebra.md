@@ -55,10 +55,17 @@ and output-combinators are two **commuting submonoids**. Within a cohort the gen
 name but order-sensitive (two `prependOutput`s do not commute), which is the signature of an
 insertion-ordered, name-keyed map.
 
-**Open design critique.** `SignatureLayout` enforces uniqueness with a runtime `require(distinct names)`. In
-ADD terms an invariant is a feature of the implementation, not the design: the `require` is the tell that a
-cohort should *be* a `VectorMap[String, Field]`, making uniqueness structural and the algebra closed by
-construction (no precondition, no possible duplicate). Not yet done; recorded as a candidate.
+**Design critique, resolved.** `SignatureLayout` used to enforce uniqueness with a runtime
+`require(distinct names)`. In ADD terms an invariant is a feature of the implementation, not the design:
+the `require` is the tell that uniqueness should hold by construction. The first instinct was to model the
+cohort as a `VectorMap[String, Field]`, but scoping found that a poor fit: field **order is semantically
+significant** (adapters render fields top-to-bottom; opening vs closing reasoning depends on it), whereas
+`VectorMap`'s equality is order-insensitive (it is a `Map`), so a `VectorMap` representation would give the
+wrong default equality. The chosen fix keeps `fields: Vector[FieldSpec]` (order-sensitive equality, the
+public read API, and serialization all preserved) and makes uniqueness closed by construction instead: the
+primary constructor is `private`, every field mutator routes through `withFields` which dedups by name, and
+`create` validates arbitrary input. The unique-name `require` is retired; no operation can throw on a
+duplicate and no public path can introduce one.
 
 **Marks check.** Compositional, task-relevant, parsimonious (three combinators plus `withInstructions`;
 the mutators are implementation), orthogonal (input vs output cohorts), closed (the public combinators keep
@@ -149,7 +156,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
 
 ## Status and next
 
-- Algebra 1: specified, laws property-tested (`SignatureOpsLawSuite`, 9 properties). Candidate follow-up:
-  the `VectorMap` representation to retire the unique-name `require`.
+- Algebra 1: specified, laws property-tested (`SignatureOpsLawSuite`, 9 properties), and the unique-name
+  `require` retired (uniqueness now closed by construction; see the resolved critique above).
 - Algebra 2: sketched. Driving it to a complete operation + law set is the right way to specify step 6
   (write the laws as acceptance criteria before implementing the `Effect` / combinator layer).

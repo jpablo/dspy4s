@@ -61,7 +61,7 @@ class InferRulesSuite extends FunSuite:
   override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
 
   private val taskLayout: SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = "QA",
       fields = Vector(FieldSpec("question", FieldRole.Input), FieldSpec("answer", FieldRole.Output)),
       instructions = Some("BASELINE: answer the question.")

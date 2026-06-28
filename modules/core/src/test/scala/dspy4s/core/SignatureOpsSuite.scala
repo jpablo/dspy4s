@@ -52,3 +52,10 @@ class SignatureOpsSuite extends munit.FunSuite:
     val r = layout(in("q1"), in("q2"), out("a"), out("b")).prependOutput(out("reasoning"))
     assertEquals(r.fields.map(_.name), Vector("q1", "q2", "reasoning", "a", "b"))
   }
+
+  // Uniqueness moved off the (now-private) constructor's `require` to the `create` boundary; confirm the
+  // validation is preserved (the structural guarantee is that mutators dedup instead, exercised by the
+  // idempotence laws in SignatureOpsLawSuite).
+  test("create rejects duplicate field names at the boundary") {
+    assert(SignatureLayout.create("test", Vector(in("q"), out("q"))).isLeft)
+  }

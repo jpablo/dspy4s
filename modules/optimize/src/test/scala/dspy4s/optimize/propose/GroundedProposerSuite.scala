@@ -94,7 +94,7 @@ class GroundedProposerSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
 
   private def taskLayout(name: String, instruction: String): SignatureLayout =
-    SignatureLayout(
+    SignatureLayout.of(
       name = name,
       fields = Vector(
         FieldSpec(name = "question", role = FieldRole.Input),
