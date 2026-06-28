@@ -75,8 +75,12 @@ uniqueness; the raw mutators that can break it are private).
 
 ## Algebra 2: program composition (step-6 frontier)
 
-The algebra over programs (`Module[I, O]`, or a `Prog[I, O]`). This is the design target for step 6; it is
-sketched, not finalized.
+The algebra over programs (`Module[I, O]`, or a `Prog[I, O]`). This is the design target for step 6.
+
+> **Now specified.** The five open forks were resolved by a design grill, and the full operation + law set,
+> the per-module reduction recipes (acceptance criteria), and the implementation sequencing live in
+> [algebra-2-program-composition.md](algebra-2-program-composition.md). The sketch below is the overview;
+> that file is the contract step 6 implements against.
 
 **Purpose, as an observation.** A program exists to be run: `run : Prog[I, O] => I => M[O]`, a Kleisli arrow
 `I ⇝ O`. `M` involves the LLM, so `run` is not pure and laws do not hold pointwise on outputs. The
@@ -158,5 +162,6 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
 
 - Algebra 1: specified, laws property-tested (`SignatureOpsLawSuite`, 9 properties), and the unique-name
   `require` retired (uniqueness now closed by construction; see the resolved critique above).
-- Algebra 2: sketched. Driving it to a complete operation + law set is the right way to specify step 6
-  (write the laws as acceptance criteria before implementing the `Effect` / combinator layer).
+- Algebra 2: specified (grilled). Operation + law set, per-module reduction recipes, and sequencing in
+  [algebra-2-program-composition.md](algebra-2-program-composition.md). No pre-implementation spike required;
+  the kyo-compat CIO migration is a separate, non-blocking later phase. Ready to implement step 6 against it.
