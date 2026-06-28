@@ -17,6 +17,7 @@ import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.programs.runtime.ToolExecutor
+import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -226,20 +227,21 @@ final case class ReAct[I, O](
     * iterations and the extractor build on the truncated trajectory, as upstream mutates the shared dict.
     * `(None, view)` means the overflow persisted (attempts exhausted, or nothing left to drop) — upstream's
     * `ValueError` path, which the loop converts into a break rather than a failure. */
-  @tailrec
   private def reactWithTruncation(
       call: ProgramCall,
       reactPredict: DynamicPredict,
       view: Vector[ReAct.TrajectoryEntry],
       remaining: Int
   )(using RuntimeContext): Either[DspyError, (Option[DynamicPrediction], Vector[ReAct.TrajectoryEntry])] =
-    val rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(view)))
-    reactPredict.apply(call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, rendered))) match
-      case Left(_: ContextWindowExceededError) if remaining > 1 && view.nonEmpty =>
-        reactWithTruncation(call, reactPredict, view.drop(1), remaining - 1)
-      case Left(_: ContextWindowExceededError) => Right((None, view))
+    val (result, used) = truncateOnOverflow(view, remaining)(ReAct.renderTrajectory) { rendered =>
+      reactPredict.apply(
+        call.copy(inputs = call.inputs.updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))))
+      )
+    }
+    result match
+      case Right(prediction)                   => Right((Some(prediction), used))
+      case Left(_: ContextWindowExceededError) => Right((None, used))
       case Left(error)                         => Left(error)
-      case Right(prediction)                   => Right((Some(prediction), view))
 
   /** Run the final extractor over the trajectory, truncating the OLDEST step and retrying (up to 3 attempts) on
     * a context-window overflow — the extract-side `_call_with_potential_trajectory_truncation`. Unlike the react
@@ -251,14 +253,11 @@ final case class ReAct[I, O](
       inputs: DynamicValue.Record,
       trajectory: Vector[ReAct.TrajectoryEntry]
   )(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    @tailrec
-    def attempt(view: Vector[ReAct.TrajectoryEntry], remaining: Int): Either[DspyError, DynamicPrediction] =
-      val rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(view)))
-      extractorPredict.apply(baseCall.copy(inputs = inputs.updated(ReActKeys.trajectory, rendered))) match
-        case Left(_: ContextWindowExceededError) if remaining > 1 && view.nonEmpty =>
-          attempt(view.drop(1), remaining - 1)
-        case other => other
-    attempt(trajectory, remaining = 3)
+    truncateOnOverflow(trajectory, maxAttempts = 3)(ReAct.renderTrajectory) { rendered =>
+      extractorPredict.apply(
+        baseCall.copy(inputs = inputs.updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))))
+      )
+    }._1
 
   /** Execute the named tool and render its result as an observation. Tool problems never fail the program: an
     * unknown tool or an invocation error becomes an error observation the LM sees on the next turn (as in Python). */

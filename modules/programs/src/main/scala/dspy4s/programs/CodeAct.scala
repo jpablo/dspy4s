@@ -15,6 +15,7 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -222,14 +223,11 @@ final case class CodeAct[I, O](
       inputs: DynamicValue.Record,
       trajectory: Vector[CodeAct.TrajectoryEntry]
   )(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    @scala.annotation.tailrec
-    def attempt(view: Vector[CodeAct.TrajectoryEntry], remaining: Int): Either[DspyError, DynamicPrediction] =
-      val rendered = DynamicValue.Primitive(PrimitiveValue.String(CodeAct.renderTrajectory(view)))
-      extractorPredict.apply(baseCall.copy(inputs = inputs.updated("trajectory", rendered))) match
-        case Left(_: dspy4s.core.contracts.ContextWindowExceededError) if remaining > 1 && view.nonEmpty =>
-          attempt(view.drop(1), remaining - 1)
-        case other => other
-    attempt(trajectory, remaining = 3)
+    truncateOnOverflow(trajectory, maxAttempts = 3)(CodeAct.renderTrajectory) { rendered =>
+      extractorPredict.apply(
+        baseCall.copy(inputs = inputs.updated("trajectory", DynamicValue.Primitive(PrimitiveValue.String(rendered))))
+      )
+    }._1
 
   /** Recursive iteration loop. `maxIterations` bounds depth. */
   private def runIterations(
