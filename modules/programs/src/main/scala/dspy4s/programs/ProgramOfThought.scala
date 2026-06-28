@@ -15,6 +15,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.runtime.AgentLoop
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -173,7 +174,7 @@ final case class ProgramOfThought[I, O](
       generator   = DynamicPredict(layout = generatorLayout, runtime = SignatureProgramRuntime)
       regenerator = DynamicPredict(layout = regeneratorLayout, runtime = SignatureProgramRuntime)
       answerer    = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
-      codeAndOutput <- tryIteration(baseCall, generator, regenerator, attempt = 1)
+      codeAndOutput <- runCode(baseCall, generator, regenerator)
       (code, codeOutput) = codeAndOutput
       extractInputs = inputs.updated("final_generated_code", stringDv(code)).updated("code_output", stringDv(codeOutput))
       result    <- answerer.apply(baseCall.copy(inputs = extractInputs))
@@ -191,58 +192,61 @@ final case class ProgramOfThought[I, O](
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     apply(TypedCall(input, config, traceEnabled))
 
-  private def tryIteration(
+  /** The regenerate-until-execution-succeeds loop (the `retryUntil` shape of Algebra 2, on the shared
+    * [[AgentLoop]] skeleton): the first attempt runs `generator`; each failure (parse or non-zero exit) carries
+    * `(previous_code, error)` into `regenerator` for the next attempt; the first success wins; exhausting the
+    * budget surfaces the last failure. An interpreter-level failure aborts immediately (no LM fix). */
+  private def runCode(
       call: ProgramCall,
       generator: DynamicPredict,
-      regenerator: DynamicPredict,
-      attempt: Int,
-      previous: Option[(String, String)] = None // (code, error) from last attempt
+      regenerator: DynamicPredict
   )(using RuntimeContext): Either[DspyError, (String, String)] =
-    val predict = previous match
-      case None    => generator
-      case Some(_) => regenerator
-    val baseInputs = call.inputs
-    val inputs = previous match
-      case None                => baseInputs
-      case Some((code, error)) =>
-        baseInputs
-          .updated("previous_code", stringDv(code))
-          .updated("error", stringDv(error))
+    AgentLoop.run[Option[ProgramOfThought.Attempt], (String, String)](None, 0, maxIterations)(
+      onExhausted = {
+        case Some(attempt) => Left(RuntimeError("program_of_thought", attempt.exhaustionMessage))
+        case None          => Left(RuntimeError("program_of_thought", s"Max attempts ($maxIterations) reached."))
+      }
+    )(potStep(call, generator, regenerator))
 
-    predict.apply(call.copy(inputs = inputs)).flatMap { prediction =>
-      val rawCode = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
-      val parsed = extractCode(rawCode)
+  /** One code-generation attempt as an [[AgentLoop]] step: pick generator (first attempt) or regenerator
+    * (carrying the prior failure), generate + parse + execute, and either finish with `(code, output)` or carry
+    * the failure to the next attempt. */
+  private def potStep(
+      call: ProgramCall,
+      generator: DynamicPredict,
+      regenerator: DynamicPredict
+  )(using
+      RuntimeContext
+  ): (Option[ProgramOfThought.Attempt], Int) => Either[DspyError, AgentLoop.Step[Option[ProgramOfThought.Attempt], (String, String)]] =
+    (previous, _) =>
+      val predict = previous.fold(generator)(_ => regenerator)
+      val inputs = previous match
+        case None          => call.inputs
+        case Some(attempt) => call.inputs.updated("previous_code", stringDv(attempt.code)).updated("error", stringDv(attempt.error))
 
-      parsed match
-        case Left(parseErr) =>
-          if attempt >= maxIterations then
-            Left(RuntimeError(
-              "program_of_thought",
-              s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
-            ))
-          else
-            tryIteration(call, generator, regenerator, attempt + 1, Some(rawCode -> parseErr))
-
-        case Right(code) =>
-          interpreter.execute(code) match
-            case Right(result) if result.exitCode == 0 =>
-              // A SUBMIT-capable interpreter (DenoPyodideInterpreter) surfaces a structured early-exit in
-              // `finalOutput`; prefer it over printed stdout (Python-parity: upstream PoT reads SUBMIT).
-              // Print-based interpreters leave it None, so the print convention keeps working unchanged.
-              Right(code -> result.finalOutput.getOrElse(result.stdout.stripTrailing))
-            case Right(result) =>
-              if attempt >= maxIterations then
-                Left(RuntimeError(
-                  "program_of_thought",
-                  s"Max attempts ($maxIterations) reached. Last execution error: ${result.stderr.stripTrailing}"
-                ))
-              else
-                tryIteration(call, generator, regenerator, attempt + 1, Some(code -> result.stderr.stripTrailing))
-            case Left(interpreterErr) =>
-              // Interpreter itself failed (process couldn't start, timed out,
-              // …). Don't retry — there's no LM-level fix for that.
-              Left(interpreterErr)
-    }
+      predict.apply(call.copy(inputs = inputs)).flatMap { prediction =>
+        val rawCode = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
+        extractCode(rawCode) match
+          case Left(parseErr) =>
+            Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
+              rawCode, parseErr, s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
+            ))))
+          case Right(code) =>
+            interpreter.execute(code) match
+              case Right(result) if result.exitCode == 0 =>
+                // A SUBMIT-capable interpreter (DenoPyodideInterpreter) surfaces a structured early-exit in
+                // `finalOutput`; prefer it over printed stdout (Python-parity: upstream PoT reads SUBMIT).
+                // Print-based interpreters leave it None, so the print convention keeps working unchanged.
+                Right(AgentLoop.Step.Done(code -> result.finalOutput.getOrElse(result.stdout.stripTrailing)))
+              case Right(result) =>
+                val stderr = result.stderr.stripTrailing
+                Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
+                  code, stderr, s"Max attempts ($maxIterations) reached. Last execution error: $stderr"
+                ))))
+              case Left(interpreterErr) =>
+                // Interpreter itself failed (process couldn't start, timed out, …). Don't retry — no LM fix.
+                Left(interpreterErr)
+      }
 
   private def extractCode(raw: String): Either[String, String] =
     val trimmed = raw.trim
@@ -281,6 +285,10 @@ final case class ProgramOfThought[I, O](
 object ProgramOfThought:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
   type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+
+  /** A failed code attempt carried into the next regenerate step: the `code` that failed and its `error` (fed to
+    * the regenerator as `previous_code` / `error`), plus the pre-built message used if the budget is exhausted. */
+  private[programs] final case class Attempt(code: String, error: String, exhaustionMessage: String)
 
   /** Matches a fenced code block, optionally tagged ```python. Captures the
     * snippet body in group 1. Multiline-aware. */

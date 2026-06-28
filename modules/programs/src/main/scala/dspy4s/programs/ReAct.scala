@@ -16,13 +16,14 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.ToolExecutor
+import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
-import scala.annotation.tailrec
 
 /** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized
   * over any typed signature.
@@ -170,18 +171,22 @@ final case class ReAct[I, O](
       rolloutId    = call.rolloutId
     )
     for
-      trajectory <- runIterations(baseCall, reactPredict, Vector.empty, iteration = 0)
-      rendered = DynamicValue.Primitive(PrimitiveValue.String(ReAct.renderTrajectory(trajectory)))
-      extracted <- extractWithTruncation(baseCall, inputs, trajectory)
+      // Gather the trajectory (the react step truncates + may break on overflow) then run the extractor; the
+      // bounded loop + extractor truncation are the shared TrajectoryAgent flow (same as CodeAct).
+      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[ReAct.TrajectoryEntry](
+                                  baseCall, inputs, maxIterations, ReActKeys.trajectory,
+                                  ReAct.renderTrajectory, extractorPredict
+                                )(reactStep(baseCall))
+      (extracted, rendered) = extractedAndTrajectory
       // Decode the extractor's reply into the typed output: base `O` with `reasoning` prepended.
       augmented <- OutputAugmentation.decodePrepended(
                      extracted.values, baseSignature.outputShape, "reasoning", "ReAct extractor", baseSignature.name
                    )
     yield Prediction(
       output = augmented,
-      // Attach the trajectory to the raw prediction so callers can inspect the agent's reasoning.
+      // Attach the (complete) trajectory to the raw prediction so callers can inspect the agent's reasoning.
       raw = DynamicPrediction(
-        values      = extracted.values.updated(ReActKeys.trajectory, rendered),
+        values      = extracted.values.updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))),
         completions = extracted.completions,
         lmUsage     = extracted.lmUsage
       )
@@ -196,30 +201,28 @@ final case class ReAct[I, O](
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     apply(TypedCall(input, config, traceEnabled))
 
-  @tailrec
-  private def runIterations(
-      call: ProgramCall,
-      reactPredict: DynamicPredict,
-      trajectory: Vector[ReAct.TrajectoryEntry],
-      iteration: Int
-  )(using RuntimeContext): Either[DspyError, Vector[ReAct.TrajectoryEntry]] =
-    if iteration >= maxIterations then Right(trajectory)
-    else
-      reactWithTruncation(call, reactPredict, trajectory, remaining = 3) match
-        case Left(error) => Left(error)
-        case Right((None, view)) =>
+  /** One react iteration as a [[TrajectoryAgent]] step: run the react predict (truncating + possibly breaking on
+    * a persistent context-window overflow), then run the chosen tool and append the observation. `finish` (or a
+    * step that named no tool) ends the loop. The `AgentLoop` skeleton owns the iteration count + budget. */
+  private def reactStep(call: ProgramCall)(using
+      RuntimeContext
+  ): (Vector[ReAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[ReAct.TrajectoryEntry]] =
+    (view, iteration) =>
+      reactWithTruncation(call, reactPredict, view, remaining = 3).map {
+        case (None, truncated) =>
           // Persistent context-window overflow: upstream logs a warning and BREAKS the loop — the extractor
           // still runs over whatever (truncated) trajectory remains, rather than failing the call.
-          Right(view)
-        case Right((Some(prediction), view)) =>
-          val thought = prediction.get(ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse("")
-          val toolName = prediction.get(ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse("").trim
-          val toolArgs = toolArgsRecord(prediction.get(ReActKeys.nextToolArgs))
+          AgentLoop.Step.Done(truncated)
+        case (Some(prediction), used) =>
+          val thought     = prediction.get(ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse("")
+          val toolName    = prediction.get(ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse("").trim
+          val toolArgs    = toolArgsRecord(prediction.get(ReActKeys.nextToolArgs))
           val observation = runTool(toolName, toolArgs)
-          val entry = ReAct.TrajectoryEntry(iteration, thought, toolName, toolArgs, observation)
+          val entry       = ReAct.TrajectoryEntry(iteration, thought, toolName, toolArgs, observation)
           // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
-          if toolName == ReAct.FinishToolName || toolName.isEmpty then Right(view :+ entry)
-          else runIterations(call, reactPredict, view :+ entry, iteration + 1)
+          if toolName == ReAct.FinishToolName || toolName.isEmpty then AgentLoop.Step.Done(used :+ entry)
+          else AgentLoop.Step.Continue(used :+ entry)
+      }
 
   /** Run the react predict over the trajectory, truncating the OLDEST step and retrying (up to `remaining`
     * attempts total) on a context-window overflow — Python's `_call_with_potential_trajectory_truncation` around
@@ -242,22 +245,6 @@ final case class ReAct[I, O](
       case Right(prediction)                   => Right((Some(prediction), used))
       case Left(_: ContextWindowExceededError) => Right((None, used))
       case Left(error)                         => Left(error)
-
-  /** Run the final extractor over the trajectory, truncating the OLDEST step and retrying (up to 3 attempts) on
-    * a context-window overflow — the extract-side `_call_with_potential_trajectory_truncation`. Unlike the react
-    * step, a persistent overflow here FAILS the call (upstream's uncaught `ValueError`). Delta: only the
-    * extractor's view truncates; the returned prediction's `trajectory` stays complete (upstream's in-place pops
-    * shrink the returned trajectory too — ours is strictly more informative). */
-  private def extractWithTruncation(
-      baseCall: ProgramCall,
-      inputs: DynamicValue.Record,
-      trajectory: Vector[ReAct.TrajectoryEntry]
-  )(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    truncateOnOverflow(trajectory, maxAttempts = 3)(ReAct.renderTrajectory) { rendered =>
-      extractorPredict.apply(
-        baseCall.copy(inputs = inputs.updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))))
-      )
-    }._1
 
   /** Execute the named tool and render its result as an observation. Tool problems never fail the program: an
     * unknown tool or an invocation error becomes an error observation the LM sees on the next turn (as in Python). */

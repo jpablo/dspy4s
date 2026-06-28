@@ -21,6 +21,7 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.runtime.AgentLoop
 import dspy4s.typed.{Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -178,7 +179,7 @@ final case class RLM[I, O](
     val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ CodeAct.sandboxTools(tools)
     val outputFields = baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, RLM.pythonTypeOf(f.typeRef)))
     val interpreter  = interpreterFactory(sandboxTools, outputFields)
-    try iterate(baseCall, interpreter, inputVars, variablesMeta, history = Vector.empty, iteration = 0)
+    try iterate(baseCall, interpreter, inputVars, variablesMeta)
     finally interpreter.close()
 
   /** Convenience entry mirroring the typed caller signature. */
@@ -189,39 +190,50 @@ final case class RLM[I, O](
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     apply(TypedCall(input, config, traceEnabled))
 
-  @scala.annotation.tailrec
+  /** The REPL interaction loop on the shared [[AgentLoop]] skeleton: carry the [[RLM.ReplEntry]] history, each
+    * step writing+running code and either continuing or finishing on an accepted SUBMIT; on the iteration budget
+    * running out, [[extractFallback]] produces the outputs from the trajectory. */
   private def iterate(
       call: ProgramCall,
       interpreter: ReplCodeInterpreter,
       inputVars: Map[String, DynamicValue],
-      variablesMeta: Vector[RLM.ReplVariable],
-      history: Vector[RLM.ReplEntry],
-      iteration: Int
+      variablesMeta: Vector[RLM.ReplVariable]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    if iteration >= maxIterations then extractFallback(call, variablesMeta, history)
-    else
+    AgentLoop.run[Vector[RLM.ReplEntry], Prediction[O]](Vector.empty, 0, maxIterations)(
+      onExhausted = history => extractFallback(call, variablesMeta, history)
+    )(rlmStep(call, interpreter, inputVars, variablesMeta))
+
+  /** One REPL iteration as an [[AgentLoop]] step. */
+  private def rlmStep(
+      call: ProgramCall,
+      interpreter: ReplCodeInterpreter,
+      inputVars: Map[String, DynamicValue],
+      variablesMeta: Vector[RLM.ReplVariable]
+  )(using
+      RuntimeContext
+  ): (Vector[RLM.ReplEntry], Int) => Either[DspyError, AgentLoop.Step[Vector[RLM.ReplEntry], Prediction[O]]] =
+    (history, iteration) =>
       // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
       val actionInputs = DynamicValues.recordFromEntries(Vector(
         "variables_info" -> DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")),
         "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)),
         "iteration"      -> DynamicValues.fromAny(s"${iteration + 1}/$maxIterations")
       ))
-      actionPredict.apply(call.copy(inputs = actionInputs)) match
-        case Left(error) => Left(error)
-        case Right(action) =>
-          val reasoning = action.get("reasoning").map(DynamicValues.renderText).getOrElse("")
-          val rawCode   = action.get("code").map(DynamicValues.renderText).getOrElse("")
-          if verbose then
-            Console.err.println(
-              s"RLM iteration ${iteration + 1}/$maxIterations\nReasoning: $reasoning\nCode:\n$rawCode"
-            )
-          stepOutcome(interpreter, inputVars, reasoning, rawCode) match
-            case Left(error) => Left(error)
-            case Right(Left(entry)) => // not final — record and continue
-              if verbose then Console.err.println(RLM.formatOutputBlock(entry.output, maxOutputChars))
-              iterate(call, interpreter, inputVars, variablesMeta, history :+ entry, iteration + 1)
-            case Right(Right((entry, outputsRecord))) => // SUBMIT accepted
-              finishWith(outputsRecord, reasoning, history :+ entry)
+      actionPredict.apply(call.copy(inputs = actionInputs)).flatMap { action =>
+        val reasoning = action.get("reasoning").map(DynamicValues.renderText).getOrElse("")
+        val rawCode   = action.get("code").map(DynamicValues.renderText).getOrElse("")
+        if verbose then
+          Console.err.println(
+            s"RLM iteration ${iteration + 1}/$maxIterations\nReasoning: $reasoning\nCode:\n$rawCode"
+          )
+        stepOutcome(interpreter, inputVars, reasoning, rawCode).flatMap {
+          case Left(entry) => // not final — record and continue
+            if verbose then Console.err.println(RLM.formatOutputBlock(entry.output, maxOutputChars))
+            Right(AgentLoop.Step.Continue(history :+ entry))
+          case Right((entry, outputsRecord)) => // SUBMIT accepted
+            finishWith(outputsRecord, reasoning, history :+ entry).map(AgentLoop.Step.Done(_))
+        }
+      }
 
   /** One REPL step: strip fences, execute with the input variables, classify the result. Returns
     * `Right(Left(entry))` to continue the loop, `Right(Right((entry, outputs)))` on an accepted SUBMIT. */

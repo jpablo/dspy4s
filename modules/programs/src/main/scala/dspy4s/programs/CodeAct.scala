@@ -15,7 +15,8 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TypedCall
-import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
+import dspy4s.programs.runtime.AgentLoop
+import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -184,16 +185,20 @@ final case class CodeAct[I, O](
       rolloutId    = call.rolloutId
     )
     for
-      trajectory <- runIterations(baseCall, codeActPredict, trajectory = Vector.empty, iteration = 0)
-      rendered = DynamicValue.Primitive(PrimitiveValue.String(trajectory.render))
-      extracted <- extractWithTruncation(baseCall, inputs, trajectory)
+      // Bounded loop building the code/observation trajectory, then the extractor — the shared TrajectoryAgent
+      // flow (same as ReAct); only the per-iteration step (generate + execute) and the entry type differ.
+      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[CodeAct.TrajectoryEntry](
+                                  baseCall, inputs, maxIterations, "trajectory",
+                                  CodeAct.renderTrajectory, extractorPredict
+                                )(codeActStep(baseCall))
+      (extracted, rendered) = extractedAndTrajectory
       augmented <- OutputAugmentation.decodePrepended(
                      extracted.values, baseSignature.outputShape, "reasoning", "CodeAct extractor", baseSignature.name
                    )
     yield Prediction(
       output = augmented,
       raw = DynamicPrediction(
-        values      = extracted.values.updated("trajectory", rendered),
+        values      = extracted.values.updated("trajectory", DynamicValue.Primitive(PrimitiveValue.String(rendered))),
         completions = extracted.completions,
         lmUsage     = extracted.lmUsage
       )
@@ -214,30 +219,14 @@ final case class CodeAct[I, O](
   def sandboxTools(using RuntimeContext): Vector[dspy4s.core.contracts.SandboxTool] =
     CodeAct.sandboxTools(tools)
 
-  /** Run the final extractor over the trajectory, truncating the OLDEST iteration and retrying (up to 3
-    * attempts) when the prompt overflows the model's context window — Python's
-    * `_call_with_potential_trajectory_truncation`. Only the extractor's view is truncated; the returned
-    * prediction's `trajectory` stays complete. */
-  private def extractWithTruncation(
-      baseCall: ProgramCall,
-      inputs: DynamicValue.Record,
-      trajectory: Vector[CodeAct.TrajectoryEntry]
-  )(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    truncateOnOverflow(trajectory, maxAttempts = 3)(CodeAct.renderTrajectory) { rendered =>
-      extractorPredict.apply(
-        baseCall.copy(inputs = inputs.updated("trajectory", DynamicValue.Primitive(PrimitiveValue.String(rendered))))
-      )
-    }._1
-
-  /** Recursive iteration loop. `maxIterations` bounds depth. */
-  private def runIterations(
-      call: ProgramCall,
-      codeActPredict: DynamicPredict,
-      trajectory: Vector[CodeAct.TrajectoryEntry],
-      iteration: Int
-  )(using RuntimeContext): Either[DspyError, Vector[CodeAct.TrajectoryEntry]] =
-    if iteration >= maxIterations then Right(trajectory)
-    else
+  /** One codeact iteration as a [[TrajectoryAgent]] step: render the trajectory into the generator's inputs,
+    * generate + parse + execute a code snippet, append the (success or error) observation, and stop when the LM
+    * set `finished=true` (ignored on a parse failure — an unparseable "final" snippet can't be final). The
+    * `AgentLoop` skeleton owns the iteration count + budget. */
+  private def codeActStep(call: ProgramCall)(using
+      RuntimeContext
+  ): (Vector[CodeAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[CodeAct.TrajectoryEntry]] =
+    (trajectory, iteration) =>
       val stepInputs = call.inputs.updated(
         "trajectory",
         DynamicValue.Primitive(PrimitiveValue.String(CodeAct.renderTrajectory(trajectory)))
@@ -251,13 +240,12 @@ final case class CodeAct[I, O](
             // Upstream `continue`s on a parse failure: the iteration is consumed, `finished` is IGNORED (an
             // unparseable "final" snippet can't be final), and no code is recorded in the trajectory.
             val entry = CodeAct.TrajectoryEntry(iteration, code = "", observation = s"Failed to parse the generated code: $parseError", isError = true)
-            runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+            Right(AgentLoop.Step.Continue(trajectory :+ entry))
           case Right(code) =>
             interpreter.execute(code) match
               case Right(result) if result.exitCode == 0 =>
                 val entry = CodeAct.TrajectoryEntry(iteration, code = code, observation = result.stdout.stripTrailing, isError = false)
-                if finished then Right(trajectory :+ entry)
-                else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+                Right(stepFrom(finished, trajectory :+ entry))
               case Right(result) =>
                 val entry = CodeAct.TrajectoryEntry(
                   iteration,
@@ -265,8 +253,7 @@ final case class CodeAct[I, O](
                   observation = s"Failed to execute the generated code: ${result.stderr.stripTrailing}",
                   isError = true
                 )
-                if finished then Right(trajectory :+ entry)
-                else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+                Right(stepFrom(finished, trajectory :+ entry))
               case Left(err: RuntimeError) =>
                 val entry = CodeAct.TrajectoryEntry(
                   iteration,
@@ -274,10 +261,17 @@ final case class CodeAct[I, O](
                   observation = s"Interpreter failure (${err.component}): ${err.message}",
                   isError = true
                 )
-                if finished then Right(trajectory :+ entry)
-                else runIterations(call, codeActPredict, trajectory :+ entry, iteration + 1)
+                Right(stepFrom(finished, trajectory :+ entry))
               case Left(other) => Left(other)
       }
+
+  /** A successfully-executed (or error-but-recorded) iteration: stop when the LM declared `finished`, else keep
+    * gathering. */
+  private def stepFrom(
+      finished: Boolean,
+      trajectory: Vector[CodeAct.TrajectoryEntry]
+  ): TrajectoryAgent.Step[CodeAct.TrajectoryEntry] =
+    if finished then AgentLoop.Step.Done(trajectory) else AgentLoop.Step.Continue(trajectory)
 
   private def isFinished(value: Option[DynamicValue]): Boolean =
     value match
@@ -365,9 +359,6 @@ object CodeAct:
       observation: String,
       isError: Boolean
   )
-
-  extension (entries: Vector[TrajectoryEntry])
-    def render: String = CodeAct.renderTrajectory(entries)
 
   private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry]): String =
     if entries.isEmpty then "(empty)"
