@@ -86,3 +86,48 @@ class OutputAugmentationSuite extends FunSuite:
       case Left(_: ValidationError) => ()
       case other                    => fail(s"expected ValidationError, got $other")
   }
+
+  // ── decodeAugmented: the generalized (typed field + post-decode hook) augment ──────────────────────
+
+  private def int(i: Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Int(i))
+
+  /** Read an augment field as a typed `Int` (proving the augment is not String-only). */
+  private def readInt(record: DynamicValue.Record, field: String, label: String): Either[DspyError, Int] =
+    DynamicValues.recordGet(record, field).collect { case DynamicValue.Primitive(PrimitiveValue.Int(i)) => i }
+      .toRight(NotFoundError("field", s"$label: missing or non-Int field '$field'"))
+
+  test("decodeAugmented: a non-String (Int) field is read and prepended (typed-field generalization is live)") {
+    val r = OutputAugmentation.decodeAugmented[(answer: String), "confidence", Int, (confidence: Int, answer: String)](
+      rec("confidence" -> int(3), "answer" -> str("Paris")), answerShape, "confidence", "test", "sig",
+      readField = readInt
+    )
+    assertEquals(r.map(NamedTuple.toTuple), Right((3, "Paris")): Either[DspyError, (Int, String)])
+  }
+
+  test("decodeAugmented: augment round-trip — the base output is recoverable (the added field is extra)") {
+    // base(decodeAugmented(...)) == shape.decode(...): dropping the prepended field yields the base output.
+    val raw  = rec("confidence" -> int(7), "answer" -> str("Rome"))
+    val aug  = OutputAugmentation.decodeAugmented[(answer: String), "confidence", Int, (confidence: Int, answer: String)](
+      raw, answerShape, "confidence", "test", "sig", readField = readInt
+    )
+    val base = answerShape.decode(raw)
+    assertEquals(aug.map(o => NamedTuple.toTuple(o).tail), base.map(NamedTuple.toTuple))
+  }
+
+  test("decodeAugmented: the post-decode hook runs and can reject") {
+    val raw = rec("reasoning" -> str("because"), "answer" -> str("Paris"))
+    // A hook that rejects empty answers; here it passes through unchanged.
+    val pass = OutputAugmentation.decodeAugmented[(answer: String), "reasoning", String, (reasoning: String, answer: String)](
+      raw, answerShape, "reasoning", "test", "sig",
+      readField = (rrec, f, l) => DynamicValues.requireString(rrec, f, l),
+      hook = out => if out.answer.isEmpty then Left(ValidationError("empty answer")) else Right(out)
+    )
+    assertEquals(pass.map(NamedTuple.toTuple), Right(("because", "Paris")): Either[DspyError, (String, String)])
+
+    val rejected = OutputAugmentation.decodeAugmented[(answer: String), "reasoning", String, (reasoning: String, answer: String)](
+      rec("reasoning" -> str("because"), "answer" -> str("")), answerShape, "reasoning", "test", "sig",
+      readField = (rrec, f, l) => DynamicValues.requireString(rrec, f, l),
+      hook = out => if out.answer.isEmpty then Left(ValidationError("empty answer")) else Right(out)
+    )
+    assert(rejected.isLeft, s"hook should reject empty answer, got $rejected")
+  }

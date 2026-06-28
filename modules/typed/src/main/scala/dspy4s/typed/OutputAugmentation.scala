@@ -83,15 +83,34 @@ object OutputAugmentation:
         def prepend(value: T, base: O): Option[Out] =
           inner.prepend(value, NamedTuple.build[N]()(Tuple.fromProductTyped(base)(using m)))
 
-  /** The shared decode for an opening-`String` output augmentation: read `fieldName` as a `String`, decode
-    * the base output `O` via `shape`, then prepend the field, mapping the fieldless-output case (a string-DSL
-    * `Signature`, which has no static fields) to a structured error. The value-level body shared by
-    * `ChainOfThought` / `ReAct` / `CodeAct` / `MultiChainComparison`.
+  /** The general opening-position output augmentation decode (the realizable part of the `Thought`-shaped form):
+    * read the augment field `Name` as `T` via `readField`, decode the base output `O` via `shape`, prepend the
+    * field (idempotent, cast-free), mapping the fieldless-output case (a string-DSL `Signature`, no static
+    * fields) to a structured error, then run an optional post-decode `hook`.
     *
-    * This is the opening-position, `String`-typed, hook-less case of the more general `Thought`-shaped
-    * augmentation (position, arbitrary typed field, post-decode hook); that generalization is intended to be
-    * additive (see `docs/refactor/composite-primitives.md`). `label` names the producing component in errors.
-    */
+    * [[decodePrepended]] is the `T = String`, identity-hook instance every composite uses today. The one piece
+    * of the `Thought` ceiling left additive is the **closing position** (append a self-check field), which needs
+    * an `AppendField` dual and currently has no consumer (see `docs/refactor/algebra-2-program-composition.md`).
+    * `label` names the producing component in errors. */
+  def decodeAugmented[O, Name <: String & Singleton, T, Out](
+      raw: DynamicValue.Record,
+      shape: Shape[O],
+      fieldName: Name,
+      label: String,
+      signatureName: String,
+      readField: (DynamicValue.Record, Name, String) => Either[DspyError, T],
+      hook: Out => Either[DspyError, Out] = (out: Out) => Right(out)
+  )(using prepend: PrependField.Aux[Name, T, O, Out]): Either[DspyError, Out] =
+    for
+      value     <- readField(raw, fieldName, label)
+      baseOut   <- shape.decode(raw)
+      prepended <- prepend.prepend(value, baseOut).toRight(productOutputRequired(label, signatureName, baseOut))
+      augmented <- hook(prepended)
+    yield augmented
+
+  /** The shared decode for an opening-`String` output augmentation: the `T = String`, identity-hook instance of
+    * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `CodeAct` /
+    * `MultiChainComparison` / `ProgramOfThought`. */
   def decodePrepended[O, Name <: String & Singleton, Out](
       raw: DynamicValue.Record,
       shape: Shape[O],
@@ -99,11 +118,10 @@ object OutputAugmentation:
       label: String,
       signatureName: String
   )(using prepend: PrependField.Aux[Name, String, O, Out]): Either[DspyError, Out] =
-    for
-      value     <- DynamicValues.requireString(raw, fieldName, label)
-      baseOut   <- shape.decode(raw)
-      augmented <- prepend.prepend(value, baseOut).toRight(productOutputRequired(label, signatureName, baseOut))
-    yield augmented
+    decodeAugmented[O, Name, String, Out](
+      raw, shape, fieldName, label, signatureName,
+      readField = (record, field, lbl) => DynamicValues.requireString(record, field, lbl)
+    )
 
   /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no
     * static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a
