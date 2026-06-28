@@ -1,9 +1,9 @@
 # dspy4s algebras (algebra-driven design notes)
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
-algebra 2 (program composition) is specified and now under implementation (steps 6.1–6.3 landed: the `bestOf`
-reducer, the `id`/`>>>`/`parallel` combinators, and the `AgentLoop` agentic-iteration core; see the status
-section at the bottom).
+algebra 2 (program composition) is specified and fully implemented (steps 6.1–6.5 landed: `bestOf`, the
+`id`/`>>>`/`parallel` combinators, the `AgentLoop` agentic-iteration core, the typed `augment`, and the `mode`
+middleware monoid; see the status section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
 downstream. Related: [composite-primitives.md](composite-primitives.md), [kyo-ai-comparison.md](kyo-ai-comparison.md).
@@ -181,5 +181,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.3 done** (commit `6faa94e`): `AgentLoop.run` + `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT
     all reduced onto them; `AgentLoopLawSuite` pins the primitive. Code-truth correction recorded: the
     `env.step`/`classify`/`render` decomposition was rejected; each module keeps its own step closure.
-  - **Next:** `augment` generalization (the `Thought`-shaped form), then `mode` (the non-learnable middleware
-    monoid).
+  - **6.4 done** (commit `31aecbd`): `decodeAugmented` (typed field via a pluggable reader + post-decode hook);
+    `decodePrepended` is its String/identity instance. Closing position left additive (no consumer).
+  - **6.5 done** (commit `dca35e9`): `Mode` (the `Controls => Controls` monoid) + `Moded` + `Compose.mode`;
+    `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
+  - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
+    usage-merge on `>>>`, `augment` closing position, execution-wrapping modes.

@@ -58,12 +58,17 @@ parallel(a, b)                 : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)] // 
 //   `parallel(a, b)` runs two typed programs on the same input and tuples the outputs (sequential on Either;
 //   concurrency is the later CIO concern). The raw merges both sub-predictions' records (second wins on collision).
 
-augment[Name, T](field, position)(p) : Prog[I, O] => Prog[I, Out]           // Thought / CoT
-//   position = opening (prepend, conditions the answer) | closing (append, self-check); opening shipped today
-//   Out = OutputAugmentation.WithField[O, Name, T]; the String/opening/hook-less case is ChainOfThought
+augment[Name, T](field)(p) : Prog[I, O] => Prog[I, Out]                     // Thought / CoT  [IMPLEMENTED 6.4]
+//   IMPLEMENTED (opening position) as OutputAugmentation.decodeAugmented[O, Name, T, Out]: an arbitrary typed T
+//   read via a pluggable readField, plus an optional post-decode hook. decodePrepended (T=String, identity hook)
+//   is the instance ChainOfThought / MultiChainComparison / the agent extractors use. Out =
+//   OutputAugmentation.WithField[O, Name, T]. CLOSING position (append, self-check) stays additive (no consumer;
+//   needs an AppendField dual).
 
-mode(m: Mode)(p)               : Prog[I, O] => Prog[I, O]         // Monoid middleware, NON-learnable only
-//   model swap / temperature / retry / pre-post; m introduces no learnable predict of its own
+mode(m: Mode)(p)               : Prog[I, O] => Prog[I, O]         // Monoid middleware, NON-learnable  [IMPLEMENTED 6.5]
+//   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode: model swap /
+//   temperature / rolloutId / traceEnabled. m introduces no learnable predict (Predictors passes through);
+//   trace-transparent. Execution-wrapping modes (retry / pre-post) stay additive (no consumer yet).
 
 bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // shared reducer  [IMPLEMENTED 6.1]
 //   keep the argmax-reward attempt, short-circuit at threshold, tolerate failCount failures;
@@ -148,8 +153,8 @@ plus the new combinator law suites are green:
 
 | composite | recipe |
 |---|---|
-| `ChainOfThought` | `augment["reasoning", String, opening](predict)` |
-| `MultiChainComparison` | `augment["rationale", …]` over the attempt-folded signature (holds compare-predict) |
+| `ChainOfThought` | `augment["reasoning", String]` — DONE: `decodeAugmented` (the `decodePrepended` String instance) |
+| `MultiChainComparison` | `augment["rationale", String]` over the attempt-folded signature (holds compare-predict) — DONE: same shared decode |
 | `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
 | `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
 | `ProgramOfThought` | `retryUntil(...)` then answer-step — DONE (6.3): `AgentLoop.run` regenerate-on-error. NOT feedback (see below). |
@@ -233,15 +238,29 @@ suites as the regression net:
    (regenerate-on-error). `AgentLoopLawSuite` pins the primitive; the four module suites are green unchanged.
    **Code-truth correction:** the `env.step`/`classify`/`render` decomposition was NOT adopted (see above) —
    the shared core is the bounded loop, each module keeps its own step closure.
-4. **`augment` generalization.** Raise `decodePrepended` to the `Thought`-shaped form (position, typed field,
-   optional hook), with the current opening-String case as the trivial instance (the step-3 design ceiling).
-5. **`mode`.** Introduce the non-learnable middleware monoid as the home for model-swap / temperature /
-   retry, once a second consumer beyond the per-call config exists.
+4. **`augment` generalization. DONE (commit `31aecbd`).** Raised `decodePrepended` to `decodeAugmented`
+   (arbitrary typed field via a pluggable reader + optional post-decode hook); `decodePrepended` is its
+   String/identity instance, so the five call sites are unchanged. Closing position stays additive (no
+   consumer). `OutputAugmentationSuite` adds a typed-field test, the round-trip law, and a hook accept/reject.
+5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
+   `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, Predictors
+   pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay
+   additive until a consumer needs them.
 
-## Deferred items (recorded, not lost)
+## Status: all six steps landed
+
+Steps 1–5 (the behavior-preserving primitive extractions) and step 6.1–6.5 (this algebra) are implemented and
+law-tested on the branch; every composite reduces to a combinator expression and the full suite is green. The
+recurring discipline was to extract the genuinely shared core and correct the spec against code-truth where the
+grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `parallel` is new, not the batch
+`Parallel`; `agentLoop`'s env/classify/render seam does not fit).
+
+## Deferred items (recorded, not lost — additive, no consumer yet)
 
 - **Usage-merge on `>>>`** (monoidal accumulation of per-step `lmUsage` onto the composite result): deferred;
   non-breaking when wanted.
-- **`augment` closing position + arbitrary typed field + post-decode hook**: the full `Thought` form; opening
-  String ships first (step 4 above).
-- **CIO substrate migration**: the deferred kyo-compat phase described under fork 5.
+- **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
+  dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
+- **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
+- **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
+  the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.

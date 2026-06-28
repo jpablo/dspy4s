@@ -1,10 +1,11 @@
 # Refactor plan: composite primitives (steps 1–5)
 
 **Branch:** `refactor/composite-primitives`
-**Status:** steps 1–5 implemented on the branch (full `sbt test` green); step 6 started — 6.1 (`bestOf`
-reducer), 6.2 (`id`/`>>>`/`parallel`), and 6.3 (`AgentLoop`/`TrajectoryAgent` for ReAct/CodeAct/RLM/PoT)
-landed. The authoritative step-6 contract is [algebra-2-program-composition.md](algebra-2-program-composition.md);
-the pre-grill notes lower in this file are superseded where they disagree with that spec.
+**Status:** steps 1–5 and all of step 6 implemented on the branch (full `sbt test` green): 6.1 (`bestOf`),
+6.2 (`id`/`>>>`/`parallel`), 6.3 (`AgentLoop`/`TrajectoryAgent` for ReAct/CodeAct/RLM/PoT), 6.4 (typed
+`augment`), 6.5 (`mode` middleware monoid). The authoritative step-6 contract is
+[algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
+are superseded where they disagree with that spec. Remaining work is optional/additive (CIO substrate, etc.).
 **Scope:** behavior-preserving extraction of the shared primitives hiding inside the composite
 program modules. Steps 1–5 of a longer arc.
 
@@ -37,11 +38,12 @@ shrank net while the duplication was removed.
   signature used with a composite). `decodePrepended` ships the opening-String case only, shaped and named
   as the general `Thought`-form so the generalization stays additive.
 
-**Step 6 (in progress):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`parallel`
-in `Compose.scala`), and 6.3 (`AgentLoop.run` + `TrajectoryAgent` unifying ReAct/CodeAct/RLM and PoT's
-`retryUntil`) are landed. Remaining: `augment` generalization (the `Thought`-shaped form) and `mode` (the
-non-learnable middleware monoid), with the kyo-compat CIO substrate migration as a separate non-blocking
-phase. The authoritative contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
+**Step 6 (complete):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`parallel` in
+`Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent` unifying ReAct/CodeAct/RLM and PoT's `retryUntil`),
+6.4 (typed `augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
+middleware monoid) are all landed and law-tested. Remaining is optional/additive: the kyo-compat CIO substrate
+migration, usage-merge on `>>>`, `augment` closing position, execution-wrapping modes. The authoritative
+contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
 
 ## Why
 
