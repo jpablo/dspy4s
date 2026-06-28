@@ -81,18 +81,19 @@ feedback(p, critic, n, reward, threshold) : Prog[I, O] => Prog[I, O]         // 
 //   NOTE: ProgramOfThought is NOT a feedback instance (code-truth, see acceptance table) — its retry is
 //   "regenerate-until-execution-succeeds", a distinct primitive, not best-of-n-with-reward.
 
-agentLoop(policy, extractor, env, classify, render, maxIterations) : Prog[I, WithReasoning[O]]
-//   policy, extractor : DynamicPredict (addressable)
-//   env.step : Action => M[Observation]      // tool dispatch | interpreter | sandbox + sub-LM (RLM)
-//   classify : DynamicPrediction => Continue(Action) | Done(Result)
-//   Done(Result): either "run extractor over the trajectory" (ReAct/CodeAct) or "output carried in the
-//   action" (RLM SUBMIT); the 3-way RLM case folds into this 2-constructor classify
-//   (= ReAct, CodeAct, RLM).
+AgentLoop.run[St, R](state, maxIterations)(onExhausted)(step) : M[R]          // bounded loop  [IMPLEMENTED 6.3]
+//   step : (St, Int) => M[Continue(St) | Done(R)] ; onExhausted : St => M[R]. The shared control-flow core of
+//   ReAct / CodeAct / RLM / PoT. CODE-TRUTH CORRECTION: the env.step/classify/render decomposition below was
+//   NOT adopted — see the correction under the acceptance table. Each module keeps its own `step` closure.
 
-retryUntil(gen, regen, run, ok, maxIterations) : ...        // regenerate-on-error loop  [NOT YET; = PoT inner loop]
-//   run attempt; on failure feed (previous, error) into a DIFFERENT predictor (regen) and retry until `ok`
-//   or maxIterations; first success wins (no reward, no keep-best). PoT = retryUntil(...) >>> answer-step.
-//   This is the home ProgramOfThought needs — see acceptance table; it is NOT feedback.
+TrajectoryAgent.runAndExtract[S](...)(step) : M[(DynamicPrediction, String)]  // ReAct/CodeAct  [IMPLEMENTED 6.3]
+//   bounded loop building a Vector[S] trajectory (via AgentLoop.run), then the extractor with
+//   overflow-truncation; the module does the final decodePrepended into WithReasoning[O]. (= ReAct, CodeAct)
+
+// retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
+//   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
+//   success wins (no reward, no keep-best); exhausting the budget surfaces the last failure. Not a separate
+//   combinator (one consumer) — PoT calls AgentLoop.run directly. PoT = retryUntil(...) then the answer step.
 ```
 
 ## Laws (the contract)
@@ -151,10 +152,10 @@ plus the new combinator law suites are green:
 | `MultiChainComparison` | `augment["rationale", …]` over the attempt-folded signature (holds compare-predict) |
 | `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
 | `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
-| `ProgramOfThought` | `retryUntil(...) >>> answer-step` — NOT feedback (corrected; see below). Deferred. |
-| `ReAct` | `agentLoop(policy, extractor, env = tools, …)` |
-| `CodeAct` | `agentLoop(policy, extractor, env = interpreter, …)` |
-| `RLM` | `agentLoop(policy, extractor, env = sandbox + sub-LM, …)` |
+| `ProgramOfThought` | `retryUntil(...)` then answer-step — DONE (6.3): `AgentLoop.run` regenerate-on-error. NOT feedback (see below). |
+| `ReAct` | DONE (6.3): `TrajectoryAgent.runAndExtract` + `reactStep` (tool dispatch; keeps per-iteration truncation+break) |
+| `CodeAct` | DONE (6.3): `TrajectoryAgent.runAndExtract` + `codeActStep` (interpreter) |
+| `RLM` | DONE (6.3): `AgentLoop.run` (SUBMIT = Done inside the loop; extract fallback = onExhausted) |
 | user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) — DONE (6.2): `AndThen` + `>>>`, plus `parallel` |
 
 ### Code-truth correction: ProgramOfThought is not `feedback`
@@ -176,6 +177,26 @@ showed that does not hold. PoT's inner loop (`tryIteration`) differs from `feedb
 So PoT belongs to a `retryUntil` primitive (regenerate-until-ok), composed via `>>>` — not `feedback`. It is
 deferred out of 6.1; the natural home is alongside `agentLoop` (6.3) or its own small combinator. Folding it
 into `feedback` would have been the category error the grill set out to avoid.
+
+### Code-truth correction: `agentLoop`'s env/classify/render decomposition does not fit
+
+The grilled `agentLoop(policy, extractor, env, classify, render)` with `env.step: Action => M[Observation]` and
+`classify : DynamicPrediction => Continue(Action) | Done(Result)` was too decomposed for the actual code:
+
+- **Done-detection is entangled with the action, not separable into `classify`.** CodeAct runs the *finishing*
+  code (the `finished` flag is read alongside the executed snippet); RLM detects SUBMIT only *after* executing
+  the code (from the interpreter's `finalOutput`); ReAct's `finish` is itself a tool that runs. In all three
+  the "done" signal arrives during/after the action, so a pre-action `classify` cannot produce it.
+- **The three classify/terminal shapes genuinely differ.** ReAct/CodeAct produce `WithReasoning[O]` via a
+  *separate* extractor that always runs; RLM's output is carried *inside* the loop by SUBMIT (extractor only as
+  a fallback). One `Action`/`Observation` vocabulary across tool-call vs code-string vs SUBMIT-record would be
+  indirection, not dedup.
+
+So 6.3 extracted the part that IS genuinely shared — the bounded `Continue | Done | exhausted` iteration
+([`AgentLoop.run`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/AgentLoop.scala)) plus the
+ReAct/CodeAct loop+extract postlude ([`TrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/TrajectoryAgent.scala))
+— and left each module's per-step semantics in its own `step` closure. Same discipline as the PoT and
+`parallel` corrections: extract the real shared core, do not force a decomposition the code rejects.
 
 ## Resolved on paper vs deferred (fork 5)
 
@@ -206,9 +227,12 @@ suites as the regression net:
    batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the applicative
    `parallel(a, b)` is new. Category laws are stated on the threaded `.output` value (the carrier decision),
    not the full `Prediction` envelope.
-3. **`agentLoop` (+ `retryUntil`).** Port ReAct + CodeAct to the shared loop with `env.step : Action =>
-   M[Observation]`, then RLM. Extract `retryUntil` (the PoT inner loop) here and recast `ProgramOfThought` as
-   `retryUntil(...) >>> answer`. Highest dedup, highest risk; the place to go carefully.
+3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
+   `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
+   ported ReAct, CodeAct, RLM onto them and recast `ProgramOfThought`'s retry as `AgentLoop.run`
+   (regenerate-on-error). `AgentLoopLawSuite` pins the primitive; the four module suites are green unchanged.
+   **Code-truth correction:** the `env.step`/`classify`/`render` decomposition was NOT adopted (see above) —
+   the shared core is the bounded loop, each module keeps its own step closure.
 4. **`augment` generalization.** Raise `decodePrepended` to the `Thought`-shaped form (position, typed field,
    optional hook), with the current opening-String case as the trivial instance (the step-3 design ceiling).
 5. **`mode`.** Introduce the non-learnable middleware monoid as the home for model-swap / temperature /

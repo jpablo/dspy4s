@@ -1,8 +1,9 @@
 # dspy4s algebras (algebra-driven design notes)
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
-algebra 2 (program composition) is specified and now under implementation (steps 6.1 + 6.2 landed: the
-`bestOf` reducer and the `id`/`>>>`/`parallel` combinators; see the status section at the bottom).
+algebra 2 (program composition) is specified and now under implementation (steps 6.1–6.3 landed: the `bestOf`
+reducer, the `id`/`>>>`/`parallel` combinators, and the `AgentLoop` agentic-iteration core; see the status
+section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
 downstream. Related: [composite-primitives.md](composite-primitives.md), [kyo-ai-comparison.md](kyo-ai-comparison.md).
@@ -129,10 +130,11 @@ closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one 
 - ~~`Refine` reimplements `selectBest` inline.~~ **Resolved (step 6.1).** Both now reduce to the shared
   `AttemptSelection.bestOf`: `BestOfN` is the independent instance (no feedback), `Refine` the sequential
   instance (feedback = advice→adapter hook). The law `refine = bestOf + critic-hint` is structural.
-- `ReAct` / `CodeAct` / `RLM` are one `loop` written three times (fails parsimony/orthogonality). The fix is
-  `loop` as a combinator parameterized by an environment (the step-6 `Effect`). `ProgramOfThought` is a
-  separate `retryUntil` (regenerate-on-error) loop, not the agent loop and not `feedback` (code-truth; see the
-  step-6 spec's correction).
+- ~~`ReAct` / `CodeAct` / `RLM` are one `loop` written three times.~~ **Resolved (step 6.3).** All three (and
+  PoT's `retryUntil`) run on the shared `AgentLoop.run` bounded-iteration primitive; ReAct/CodeAct also share
+  `TrajectoryAgent.runAndExtract` (loop + extractor). Code-truth: the `env.step`/`classify`/`render`
+  decomposition was rejected (done-detection is entangled with the action); each module keeps its own step
+  closure. `ProgramOfThought` is `retryUntil` (regenerate-on-error), not the agent loop and not `feedback`.
 
 The conclusion: the step-6 plan and this algebra are the same object. ADD supplies the vocabulary (Category,
 Monoid, Applicative) and the laws that turn a set of combinators into a law-governed algebra.
@@ -144,11 +146,11 @@ Monoid, Applicative) and the laws that turn a set of combinators into a law-gove
 - **Clean / law-shaped:** `Either[DspyError, A]` (errors as values, a monad), `CIO` (monad),
   `decodePrepended` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
   `Aggregation.majority` (a semilattice-flavored reduce).
-- **Ad-hoc (ADD would refactor):** the three hand-written agent loops (no `loop`), PoT's `retryUntil` retry
-  written inline, `BestOfN` / `Refine` sharing no middleware (no `Mode` monoid). (Resolved already: `Refine`
-  reimplementing the selection loop — now the shared `AttemptSelection.bestOf`, step 6.1; sequential
-  composition — now `>>>`/`AndThen`, step 6.2; the `SignatureLayout` unique-name `require` — now closed by
-  construction.)
+- **Ad-hoc (ADD would refactor):** `BestOfN` / `Refine` / `MultiChainComparison` sharing no middleware (no
+  `Mode` monoid). (Resolved already: `Refine` reimplementing the selection loop — now the shared
+  `AttemptSelection.bestOf`, step 6.1; sequential composition — now `>>>`/`AndThen`, step 6.2; the three
+  hand-written agent loops + PoT's inline retry — now the shared `AgentLoop.run` / `TrajectoryAgent`, step 6.3;
+  the `SignatureLayout` unique-name `require` — now closed by construction.)
 
 ## Testing discipline (how the laws become properties)
 
@@ -176,4 +178,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.2 done** (commit `60d2ea5`): `id` / `>>>` / `parallel` in `Compose.scala`; `ComposeLawSuite` covers the
     Category + Applicative laws and addressability. Code-truth correction recorded: the applicative `parallel`
     is new, NOT the existing batch-executor `Parallel`.
-  - **Next:** 6.3 `agentLoop` (ReAct/CodeAct/RLM) + `retryUntil` (PoT), then `augment`/`mode`.
+  - **6.3 done** (commit `6faa94e`): `AgentLoop.run` + `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT
+    all reduced onto them; `AgentLoopLawSuite` pins the primitive. Code-truth correction recorded: the
+    `env.step`/`classify`/`render` decomposition was rejected; each module keeps its own step closure.
+  - **Next:** `augment` generalization (the `Thought`-shaped form), then `mode` (the non-learnable middleware
+    monoid).

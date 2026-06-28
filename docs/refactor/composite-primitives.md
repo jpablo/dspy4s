@@ -2,9 +2,9 @@
 
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 implemented on the branch (full `sbt test` green); step 6 started — 6.1 (`bestOf`
-reducer) and 6.2 (`id`/`>>>`/`parallel`) landed. The authoritative step-6 contract is
-[algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
-are superseded where they disagree with that spec.
+reducer), 6.2 (`id`/`>>>`/`parallel`), and 6.3 (`AgentLoop`/`TrajectoryAgent` for ReAct/CodeAct/RLM/PoT)
+landed. The authoritative step-6 contract is [algebra-2-program-composition.md](algebra-2-program-composition.md);
+the pre-grill notes lower in this file are superseded where they disagree with that spec.
 **Scope:** behavior-preserving extraction of the shared primitives hiding inside the composite
 program modules. Steps 1–5 of a longer arc.
 
@@ -37,11 +37,11 @@ shrank net while the duplication was removed.
   signature used with a composite). `decodePrepended` ships the opening-String case only, shaped and named
   as the general `Thought`-form so the generalization stays additive.
 
-**Step 6 (in progress):** 6.1 (`Refine`↔`BestOfN` unification via the shared `AttemptSelection.bestOf`
-reducer) and 6.2 (`id`/`>>>`/`parallel` in `Compose.scala`) are landed. Remaining: 6.3 `agentLoop`
-(ReAct/CodeAct/RLM) + `retryUntil` (ProgramOfThought), then `augment`/`mode`, with the kyo-compat CIO
-substrate migration as a separate non-blocking phase. The authoritative contract is
-[algebra-2-program-composition.md](algebra-2-program-composition.md).
+**Step 6 (in progress):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`parallel`
+in `Compose.scala`), and 6.3 (`AgentLoop.run` + `TrajectoryAgent` unifying ReAct/CodeAct/RLM and PoT's
+`retryUntil`) are landed. Remaining: `augment` generalization (the `Thought`-shaped form) and `mode` (the
+non-learnable middleware monoid), with the kyo-compat CIO substrate migration as a separate non-blocking
+phase. The authoritative contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
 
 ## Why
 
@@ -314,19 +314,21 @@ Step 6 is now underway on this branch. The authoritative contract is
 [algebra-2-program-composition.md](algebra-2-program-composition.md); the items below are kept for history,
 annotated with their current (post-grill, post-6.1) status.
 
-- **Step 6: the `Effect` interface + the agentic `loop` + the control middleware.** Where Kyo/ZIO/CE plug
-  in. **Corrected:** only `ReAct` / `CodeAct` / `RLM` collapse to one `agentLoop`; `ProgramOfThought` does
-  NOT (it is a `retryUntil`, see below). The substrate candidate is identified (kyo-compat); the design
-  shape is informed by kyo-ai. See the [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted).
+- **The agentic `loop`. DONE (6.3, commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
+  `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
+  ReAct/CodeAct/RLM all run on them. **Corrected:** the `env.step`/`classify`/`render` decomposition was NOT
+  adopted (done-detection is entangled with the action; the three classify/terminal shapes differ) — each
+  module keeps its own step closure. The control middleware (`mode`) and the kyo-compat substrate remain
+  later/optional; the [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted) stands.
 - **Full `Refine` ↔ `BestOfN` unification. DONE (6.1, commit `96c9072`).** Both reduce to the shared
   `AttemptSelection.bestOf`. **Corrected:** the grill decided against "one mode-style middleware" — they are
   **two combinators sharing one reducer** (`selectBest` = independent / no feedback; `feedback` = sequential,
   the advice→adapter hook), because `selectBest` is permutation-invariant and `feedback` is order-dependent.
   Pinned by `AttemptSelectionLawSuite`.
-- **ProgramOfThought / RLM loop migration.** **Corrected:** these do NOT share one loop. `RLM` joins
-  `ReAct` / `CodeAct` under `agentLoop` (continue/SUBMIT classify). `ProgramOfThought` is a separate
-  `retryUntil` (regenerate-until-execution-succeeds) composed via `>>>` with its answer step — not `feedback`
-  and not the agent loop (code-truth; see the algebra-2 spec's correction). Both land in 6.3.
+- **ProgramOfThought / RLM loop migration. DONE (6.3).** **Corrected:** these do NOT share one loop. `RLM`
+  joins `ReAct` / `CodeAct` on `AgentLoop.run` (SUBMIT = Done inside the loop; extract = onExhausted).
+  `ProgramOfThought` is a separate `retryUntil` (regenerate-until-execution-succeeds) on `AgentLoop.run`, then
+  its answer step — not `feedback` and not the agent loop (code-truth; see the algebra-2 spec's corrections).
 
 ## Step 6 design lessons (from kyo-ai)
 
