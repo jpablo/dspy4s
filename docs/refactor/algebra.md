@@ -1,8 +1,8 @@
 # dspy4s algebras (algebra-driven design notes)
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
-algebra 2 (program composition) is specified and now under implementation (step 6.1 landed: the `bestOf`
-reducer; see the status section at the bottom).
+algebra 2 (program composition) is specified and now under implementation (steps 6.1 + 6.2 landed: the
+`bestOf` reducer and the `id`/`>>>`/`parallel` combinators; see the status section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
 downstream. Related: [composite-primitives.md](composite-primitives.md), [kyo-ai-comparison.md](kyo-ai-comparison.md).
@@ -123,8 +123,9 @@ closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one 
 
 **Ugly laws in the current code = the work to do.**
 
-- No `>>>`: programs are sequenced with hand-written `for`-comprehensions. The Category is hiding; making
-  it first-class buys associativity + identity and a real pipe.
+- ~~No `>>>`: programs are sequenced with hand-written `for`-comprehensions.~~ **Resolved (step 6.2).** `>>>`
+  (`AndThen`) + `id` (`Identity`) + `parallel` (`Both`) are first-class in `Compose.scala`; the Category buys
+  associativity + identity (on the threaded value) and a real pipe, `parallel` the independent dual.
 - ~~`Refine` reimplements `selectBest` inline.~~ **Resolved (step 6.1).** Both now reduce to the shared
   `AttemptSelection.bestOf`: `BestOfN` is the independent instance (no feedback), `Refine` the sequential
   instance (feedback = advice→adapter hook). The law `refine = bestOf + critic-hint` is structural.
@@ -143,10 +144,11 @@ Monoid, Applicative) and the laws that turn a set of combinators into a law-gove
 - **Clean / law-shaped:** `Either[DspyError, A]` (errors as values, a monad), `CIO` (monad),
   `decodePrepended` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
   `Aggregation.majority` (a semilattice-flavored reduce).
-- **Ad-hoc (ADD would refactor):** sequential composition (no Category), the three hand-written agent loops
-  (no `loop`), PoT's `retryUntil` retry written inline, `BestOfN` / `Refine` sharing no middleware (no `Mode`
-  monoid). (Resolved already: `Refine` reimplementing the selection loop — now the shared `AttemptSelection.bestOf`,
-  step 6.1; the `SignatureLayout` unique-name `require` — now closed by construction.)
+- **Ad-hoc (ADD would refactor):** the three hand-written agent loops (no `loop`), PoT's `retryUntil` retry
+  written inline, `BestOfN` / `Refine` sharing no middleware (no `Mode` monoid). (Resolved already: `Refine`
+  reimplementing the selection loop — now the shared `AttemptSelection.bestOf`, step 6.1; sequential
+  composition — now `>>>`/`AndThen`, step 6.2; the `SignatureLayout` unique-name `require` — now closed by
+  construction.)
 
 ## Testing discipline (how the laws become properties)
 
@@ -171,4 +173,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.1 done** (commit `96c9072`): `bestOf` extracted as `AttemptSelection.bestOf`; `BestOfN` + `Refine`
     reduced onto it; `AttemptSelectionLawSuite` pins the reducer laws. Code-truth correction recorded: PoT is
     `retryUntil`, not `feedback`.
-  - **Next:** 6.2 `>>>` (Category) + `parallel`, then 6.3 `agentLoop` (+ `retryUntil` for PoT).
+  - **6.2 done** (commit `60d2ea5`): `id` / `>>>` / `parallel` in `Compose.scala`; `ComposeLawSuite` covers the
+    Category + Applicative laws and addressability. Code-truth correction recorded: the applicative `parallel`
+    is new, NOT the existing batch-executor `Parallel`.
+  - **Next:** 6.3 `agentLoop` (ReAct/CodeAct/RLM) + `retryUntil` (PoT), then `augment`/`mode`.

@@ -45,12 +45,18 @@ fields (see Optimizer-addressability); fixed parts (`env.step`, `reward`, `criti
 
 ```
 predict(sig: Signature[I, O]) : Prog[I, O]                       // the atom: one LM round-trip (= Predict)
-id[I]                          : Prog[I, I]                       // pure passthrough
+id[I]                          : Prog[I, I]                       // pure passthrough           [IMPLEMENTED 6.2]
 
-a >>> b                        : (Prog[I, X], Prog[X, O]) => Prog[I, O]      // Category (sequential)
-//   runs a, feeds a.output: X into a fresh TypedCall[X] inheriting the outer call's controls, runs b
+a >>> b                        : (Prog[I, X], Prog[X, O]) => Prog[I, O]      // Category (sequential)  [IMPLEMENTED 6.2]
+//   runs a, feeds a.output: X into a fresh TypedCall[X] inheriting the outer call's controls, runs b.
+//   IMPLEMENTED as AndThen + the `>>>` extension; threads the plain value (the Prediction envelope of the
+//   intermediate goes to the trace, not the result). p >>> id keeps p.output but resets .raw (carrier split).
 
-parallel(a, b)                 : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)] // Applicative (independent)
+parallel(a, b)                 : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)] // Applicative (independent)  [IMPLEMENTED 6.2]
+//   IMPLEMENTED as Both + Compose.parallel. NOTE: this is NOT the existing `Parallel` class — that is a batch
+//   executor over Vector[(DynamicModule, ProgramCall)] on a thread pool, a different abstraction. The applicative
+//   `parallel(a, b)` runs two typed programs on the same input and tuples the outputs (sequential on Either;
+//   concurrency is the later CIO concern). The raw merges both sub-predictions' records (second wins on collision).
 
 augment[Name, T](field, position)(p) : Prog[I, O] => Prog[I, Out]           // Thought / CoT
 //   position = opening (prepend, conditions the answer) | closing (append, self-check); opening shipped today
@@ -149,7 +155,7 @@ plus the new combinator law suites are green:
 | `ReAct` | `agentLoop(policy, extractor, env = tools, …)` |
 | `CodeAct` | `agentLoop(policy, extractor, env = interpreter, …)` |
 | `RLM` | `agentLoop(policy, extractor, env = sandbox + sub-LM, …)` |
-| user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) |
+| user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) — DONE (6.2): `AndThen` + `>>>`, plus `parallel` |
 
 ### Code-truth correction: ProgramOfThought is not `feedback`
 
@@ -193,8 +199,13 @@ suites as the regression net:
    instance. `ProgramOfThought` was NOT migrated — code-truth showed it is `retryUntil`, not `feedback` (see
    the correction above). Pinned by `AttemptSelectionLawSuite`; `TypedBestOfNSuite` / `RefinePerModuleAdviceSuite`
    green unchanged. Built on the step-4 `isolatedAttempt`/`propagateAttempt` primitives.
-2. **`>>>` (Category) and `parallel`.** `>>>` is new (replaces user for-comprehensions); `parallel` largely
-   exists as `Parallel`. Add the Category law suite.
+2. **`>>>` (Category) and `parallel`. DONE (commit `60d2ea5`).** Added `id` / `AndThen` (`>>>`) / `Both`
+   (`parallel`) in `Compose.scala`, with hand-written `Predictors` instances (concretely typed children, so
+   pipelines stay addressable) and `ComposeLawSuite` covering the Category + Applicative laws.
+   **Code-truth correction:** `parallel` did NOT "largely exist as `Parallel`" — `Parallel` is a thread-pool
+   batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the applicative
+   `parallel(a, b)` is new. Category laws are stated on the threaded `.output` value (the carrier decision),
+   not the full `Prediction` envelope.
 3. **`agentLoop` (+ `retryUntil`).** Port ReAct + CodeAct to the shared loop with `env.step : Action =>
    M[Observation]`, then RLM. Extract `retryUntil` (the PoT inner loop) here and recast `ProgramOfThought` as
    `retryUntil(...) >>> answer`. Highest dedup, highest risk; the place to go carefully.

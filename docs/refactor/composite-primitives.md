@@ -2,8 +2,9 @@
 
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 implemented on the branch (full `sbt test` green); step 6 started — 6.1 (`bestOf`
-reducer) landed. The authoritative step-6 contract is [algebra-2-program-composition.md](algebra-2-program-composition.md);
-the pre-grill notes lower in this file are superseded where they disagree with that spec.
+reducer) and 6.2 (`id`/`>>>`/`parallel`) landed. The authoritative step-6 contract is
+[algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
+are superseded where they disagree with that spec.
 **Scope:** behavior-preserving extraction of the shared primitives hiding inside the composite
 program modules. Steps 1–5 of a longer arc.
 
@@ -37,9 +38,10 @@ shrank net while the duplication was removed.
   as the general `Thought`-form so the generalization stays additive.
 
 **Step 6 (in progress):** 6.1 (`Refine`↔`BestOfN` unification via the shared `AttemptSelection.bestOf`
-reducer) is landed. Remaining: 6.2 `>>>`/`parallel`, 6.3 `agentLoop` (ReAct/CodeAct/RLM) + `retryUntil`
-(ProgramOfThought), then `augment`/`mode`, with the kyo-compat CIO substrate migration as a separate
-non-blocking phase. The authoritative contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
+reducer) and 6.2 (`id`/`>>>`/`parallel` in `Compose.scala`) are landed. Remaining: 6.3 `agentLoop`
+(ReAct/CodeAct/RLM) + `retryUntil` (ProgramOfThought), then `augment`/`mode`, with the kyo-compat CIO
+substrate migration as a separate non-blocking phase. The authoritative contract is
+[algebra-2-program-composition.md](algebra-2-program-composition.md).
 
 ## Why
 
