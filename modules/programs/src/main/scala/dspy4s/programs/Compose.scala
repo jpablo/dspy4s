@@ -132,6 +132,10 @@ object Compose:
       b: B
   ): Both[I, OA, OB, A, B] = Both(a, b)
 
+  /** Non-learnable control middleware: `mode(m)(p)` runs `p` with its per-call controls rewritten by `m` (model
+    * / temperature / rolloutId / traceEnabled). See [[Mode]]. */
+  def mode[I, O, P <: Module[TypedCall[I], Prediction[O]]](m: Mode)(p: P): Moded[I, O, P] = Moded(m, p)
+
 /** `a >>> b`: sequential composition. Defined at package level so it is available wherever the programs
   * package is in scope (or via `import dspy4s.programs.*`). */
 extension [I, X, A <: Module[TypedCall[I], Prediction[X]]](self: A)
