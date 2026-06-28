@@ -1,7 +1,9 @@
 # Refactor plan: composite primitives (steps 1–5)
 
 **Branch:** `refactor/composite-primitives`
-**Status:** steps 1–5 implemented on the branch (full `sbt test` green); step 6 not started.
+**Status:** steps 1–5 implemented on the branch (full `sbt test` green); step 6 started — 6.1 (`bestOf`
+reducer) landed. The authoritative step-6 contract is [algebra-2-program-composition.md](algebra-2-program-composition.md);
+the pre-grill notes lower in this file are superseded where they disagree with that spec.
 **Scope:** behavior-preserving extraction of the shared primitives hiding inside the composite
 program modules. Steps 1–5 of a longer arc.
 
@@ -34,9 +36,10 @@ shrank net while the duplication was removed.
   signature used with a composite). `decodePrepended` ships the opening-String case only, shaped and named
   as the general `Thought`-form so the generalization stays additive.
 
-**Not started:** step 6 (the `Effect` interface + the mode-style control middleware + the `Refine`↔`BestOfN`
-unification + the ProgramOfThought/RLM loop migration) on the kyo-compat substrate, and the de-risking
-spike. See the step-6 sections below.
+**Step 6 (in progress):** 6.1 (`Refine`↔`BestOfN` unification via the shared `AttemptSelection.bestOf`
+reducer) is landed. Remaining: 6.2 `>>>`/`parallel`, 6.3 `agentLoop` (ReAct/CodeAct/RLM) + `retryUntil`
+(ProgramOfThought), then `augment`/`mode`, with the kyo-compat CIO substrate migration as a separate
+non-blocking phase. The authoritative contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
 
 ## Why
 
@@ -303,24 +306,25 @@ when the `F[_]` work lands.
 
 ---
 
-## Out of scope for this branch (named so we don't drift)
+## Step 6 (in progress on this branch; tracked in the algebra-2 spec)
 
-- **Step 6: the `Effect` interface + the agentic `loop` + the control middleware.** This is where
-  Kyo/ZIO/CE plug in and where ReAct/CodeAct/RLM/ProgramOfThought collapse to one loop. Designed
-  separately, after 1–5 prove the seams. The substrate candidate is identified (kyo-compat); the design
-  shape is informed by kyo-ai. See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai) and the
-  [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted) below.
-- **Full `Refine` ↔ `BestOfN` unification.** `BestOfN.selectBest` currently has no inter-attempt hook
-  (Refine generates advice between attempts and swaps the adapter per attempt). Forcing selectBest to serve
-  both right before the combinator redesign would over-fit it to two callers. **Recommendation:** in this
-  branch, Refine and BestOfN share only `isolatedAttempt`/`propagateAttempt` (step 4); the deeper
-  unification waits for step 6, where both become instances of one **mode-style middleware** (not a
-  `selectBest` + separate `feedback`). See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai).
-  (Step 5 here is `truncateOnOverflow`, not the Refine unification; the original numbering folded these
-  together; this is the honest split.)
-- **ProgramOfThought / RLM loop migration.** They share the loop+execute shape but have distinct
-  result-classification (PoT regenerate-on-error; RLM continue/SUBMIT/llm_query). Unify under step 6 once
-  the `Effect` model is validated against all four agentic loops; do not force them now.
+Step 6 is now underway on this branch. The authoritative contract is
+[algebra-2-program-composition.md](algebra-2-program-composition.md); the items below are kept for history,
+annotated with their current (post-grill, post-6.1) status.
+
+- **Step 6: the `Effect` interface + the agentic `loop` + the control middleware.** Where Kyo/ZIO/CE plug
+  in. **Corrected:** only `ReAct` / `CodeAct` / `RLM` collapse to one `agentLoop`; `ProgramOfThought` does
+  NOT (it is a `retryUntil`, see below). The substrate candidate is identified (kyo-compat); the design
+  shape is informed by kyo-ai. See the [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted).
+- **Full `Refine` ↔ `BestOfN` unification. DONE (6.1, commit `96c9072`).** Both reduce to the shared
+  `AttemptSelection.bestOf`. **Corrected:** the grill decided against "one mode-style middleware" — they are
+  **two combinators sharing one reducer** (`selectBest` = independent / no feedback; `feedback` = sequential,
+  the advice→adapter hook), because `selectBest` is permutation-invariant and `feedback` is order-dependent.
+  Pinned by `AttemptSelectionLawSuite`.
+- **ProgramOfThought / RLM loop migration.** **Corrected:** these do NOT share one loop. `RLM` joins
+  `ReAct` / `CodeAct` under `agentLoop` (continue/SUBMIT classify). `ProgramOfThought` is a separate
+  `retryUntil` (regenerate-until-execution-succeeds) composed via `>>>` with its answer step — not `feedback`
+  and not the agent loop (code-truth; see the algebra-2 spec's correction). Both land in 6.3.
 
 ## Step 6 design lessons (from kyo-ai)
 

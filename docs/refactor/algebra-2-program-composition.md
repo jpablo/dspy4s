@@ -59,16 +59,21 @@ augment[Name, T](field, position)(p) : Prog[I, O] => Prog[I, Out]           // T
 mode(m: Mode)(p)               : Prog[I, O] => Prog[I, O]         // Monoid middleware, NON-learnable only
 //   model swap / temperature / retry / pre-post; m introduces no learnable predict of its own
 
-bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // shared reducer
+bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // shared reducer  [IMPLEMENTED 6.1]
 //   keep the argmax-reward attempt, short-circuit at threshold, tolerate failCount failures;
-//   each attempt runs in RuntimeEnvironment.isolatedAttempt; the winner is propagated (step 4 primitives)
+//   each attempt runs in RuntimeEnvironment.isolatedAttempt; the winner is propagated (step 4 primitives).
+//   IMPLEMENTED as programs.runtime.AttemptSelection.bestOf, with an optional inter-attempt feedback hook
+//   (A, trace, score) => Either[err, Option[AdapterRef]] returning the NEXT attempt's adapter override.
 
-selectBest(p, n, reward, threshold) : Prog[I, O] => Prog[I, O]   // bestOf over INDEPENDENT samples
-//   n attempts varying rolloutId / temperature; order-independent (= BestOfN)
+selectBest(p, n, reward, threshold) : Prog[I, O] => Prog[I, O]   // bestOf over INDEPENDENT samples  [= BestOfN, DONE]
+//   n attempts varying rolloutId / temperature; order-independent (feedback = None)
 
-feedback(p, critic, n, reward, threshold) : Prog[I, O] => Prog[I, O]         // bestOf over a SEQUENTIAL stream
-//   critic : (Prediction[O], trace, reward) => Hint ; attempt k+1 carries the hint from attempt k
-//   order-dependent (= Refine, critic = OfferFeedback; = ProgramOfThought, critic = regenerate-on-error)
+feedback(p, critic, n, reward, threshold) : Prog[I, O] => Prog[I, O]         // bestOf over a SEQUENTIAL stream  [= Refine, DONE]
+//   the carried hint is realized as the next attempt's adapter override (Refine: OfferFeedback advice routed
+//   into each predictor's hint_ via HintInjectingAdapter); attempt k+1 runs under the hint from attempt k.
+//   order-dependent (= Refine, critic = OfferFeedback).
+//   NOTE: ProgramOfThought is NOT a feedback instance (code-truth, see acceptance table) — its retry is
+//   "regenerate-until-execution-succeeds", a distinct primitive, not best-of-n-with-reward.
 
 agentLoop(policy, extractor, env, classify, render, maxIterations) : Prog[I, WithReasoning[O]]
 //   policy, extractor : DynamicPredict (addressable)
@@ -76,7 +81,12 @@ agentLoop(policy, extractor, env, classify, render, maxIterations) : Prog[I, Wit
 //   classify : DynamicPrediction => Continue(Action) | Done(Result)
 //   Done(Result): either "run extractor over the trajectory" (ReAct/CodeAct) or "output carried in the
 //   action" (RLM SUBMIT); the 3-way RLM case folds into this 2-constructor classify
-//   (= ReAct, CodeAct, RLM). ProgramOfThought is NOT here; it is feedback.
+//   (= ReAct, CodeAct, RLM).
+
+retryUntil(gen, regen, run, ok, maxIterations) : ...        // regenerate-on-error loop  [NOT YET; = PoT inner loop]
+//   run attempt; on failure feed (previous, error) into a DIFFERENT predictor (regen) and retry until `ok`
+//   or maxIterations; first success wins (no reward, no keep-best). PoT = retryUntil(...) >>> answer-step.
+//   This is the home ProgramOfThought needs — see acceptance table; it is NOT feedback.
 ```
 
 ## Laws (the contract)
@@ -133,13 +143,33 @@ plus the new combinator law suites are green:
 |---|---|
 | `ChainOfThought` | `augment["reasoning", String, opening](predict)` |
 | `MultiChainComparison` | `augment["rationale", …]` over the attempt-folded signature (holds compare-predict) |
-| `BestOfN` | `selectBest(p, n, reward, threshold)` |
-| `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` |
-| `ProgramOfThought` | `feedback(p, critic = regenerate-on-error, …)` |
+| `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
+| `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
+| `ProgramOfThought` | `retryUntil(...) >>> answer-step` — NOT feedback (corrected; see below). Deferred. |
 | `ReAct` | `agentLoop(policy, extractor, env = tools, …)` |
 | `CodeAct` | `agentLoop(policy, extractor, env = interpreter, …)` |
 | `RLM` | `agentLoop(policy, extractor, env = sandbox + sub-LM, …)` |
 | user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) |
+
+### Code-truth correction: ProgramOfThought is not `feedback`
+
+The grill's spec claimed `ProgramOfThought = feedback(critic = regenerate-on-error)`. Reading the actual
+[`ProgramOfThought`](../../modules/programs/src/main/scala/dspy4s/programs/ProgramOfThought.scala) during 6.1
+showed that does not hold. PoT's inner loop (`tryIteration`) differs from `feedback`/`bestOf` on every axis:
+
+- **No reward, no keep-best.** It retries on *execution failure* (parse error or non-zero exit), not on a
+  sub-threshold reward; it accepts the FIRST successful execution rather than the argmax of `n`.
+- **Fail, not best-so-far, on exhaustion.** If no attempt executes, it returns `Left`; `bestOf` returns the
+  best attempt seen. (With a binary reward + threshold = 1 the *selection* coincides, but this divergence and
+  the next one do not.)
+- **Structured regenerate, not adapter-hint.** The retry runs a *different* predictor (`regenerator`) with
+  `previous_code` + `error` as typed input fields, not the same predictor under a hint-injecting adapter.
+- **Loop is a sub-step.** The retry wraps only code-gen; a separate `answer` step runs afterward, i.e.
+  PoT ≈ `retryUntil(generate, regenerate, execute) >>> answer`, a `>>>` of a different primitive.
+
+So PoT belongs to a `retryUntil` primitive (regenerate-until-ok), composed via `>>>` — not `feedback`. It is
+deferred out of 6.1; the natural home is alongside `agentLoop` (6.3) or its own small combinator. Folding it
+into `feedback` would have been the category error the grill set out to avoid.
 
 ## Resolved on paper vs deferred (fork 5)
 
@@ -157,13 +187,17 @@ plus the new combinator law suites are green:
 Smallest blast radius and highest dedup first; each step law-tested against this spec, existing composite
 suites as the regression net:
 
-1. **`bestOf` + `selectBest` + `feedback`.** Extract `bestOf` from `BestOfN.selectBest`; express `selectBest`
-   (independent) and `feedback` (sequential, critic hint) on it; migrate `Refine` and `ProgramOfThought` onto
-   `feedback`. Highest dedup, lowest risk (builds on the step-4 `isolatedAttempt`/`propagateAttempt`).
+1. **`bestOf` + `selectBest` + `feedback`. DONE (commit `96c9072`).** Extracted `bestOf` into
+   `programs.runtime.AttemptSelection` (generalizing `BestOfN.selectBest` with an optional inter-attempt
+   feedback hook); `BestOfN` is the `feedback = None` instance and `Refine` is the feedback (advice→adapter)
+   instance. `ProgramOfThought` was NOT migrated — code-truth showed it is `retryUntil`, not `feedback` (see
+   the correction above). Pinned by `AttemptSelectionLawSuite`; `TypedBestOfNSuite` / `RefinePerModuleAdviceSuite`
+   green unchanged. Built on the step-4 `isolatedAttempt`/`propagateAttempt` primitives.
 2. **`>>>` (Category) and `parallel`.** `>>>` is new (replaces user for-comprehensions); `parallel` largely
    exists as `Parallel`. Add the Category law suite.
-3. **`agentLoop`.** Port ReAct + CodeAct to the shared loop with `env.step : Action => M[Observation]`, then
-   RLM. Highest dedup, highest risk; the place to go carefully.
+3. **`agentLoop` (+ `retryUntil`).** Port ReAct + CodeAct to the shared loop with `env.step : Action =>
+   M[Observation]`, then RLM. Extract `retryUntil` (the PoT inner loop) here and recast `ProgramOfThought` as
+   `retryUntil(...) >>> answer`. Highest dedup, highest risk; the place to go carefully.
 4. **`augment` generalization.** Raise `decodePrepended` to the `Thought`-shaped form (position, typed field,
    optional hook), with the current opening-String case as the trivial instance (the step-3 design ceiling).
 5. **`mode`.** Introduce the non-learnable middleware monoid as the home for model-swap / temperature /
