@@ -9,9 +9,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
@@ -21,6 +19,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.typed.Prediction
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
@@ -76,76 +75,34 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
   override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
 
   override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val baseContext       = RuntimeEnvironment.current
-    val rolloutStart      = call.rolloutId.getOrElse(0)
-    var remainingFailures = failCount.getOrElse(n)
-    var bestReward        = Double.NegativeInfinity
-    var best: Option[Prediction[O]]  = None
-    var bestTrace         = Vector.empty[TraceEntry]
-    var bestHistory       = Vector.empty[HistoryEntry]
-    var lastError: Option[DspyError] = None
-    // The per-module advice map (component name -> advice) carried from a sub-threshold attempt into the next one
-    // (None on the first attempt).
-    var advice: Option[Map[String, String]] = None
-
-    var idx = 0
-    while idx < n do
-      // Each attempt runs in an isolated trace/history context (like BestOfN.selectBest). On retry attempts where
-      // advice exists, swap the context's adapter to a HintInjectingAdapter that injects each predictor's OWN advice
-      // (matched by its layout) into that predictor's `hint_`.
-      val attemptAdapter = advice.map { adviceMap =>
-        val byLayout = predictors.readNamed(module).iterator.map { case (name, predict) =>
-          predict.layout -> adviceMap.getOrElse(name, "N/A")
-        }.toMap
-        Refine.HintInjectingAdapter(Refine.resolveBaseAdapter(baseContext), byLayout)
-      }
-      val (attemptResult, trace, history) = RuntimeEnvironment.isolatedAttempt(baseContext, attemptAdapter) {
+    val baseContext  = RuntimeEnvironment.current
+    val rolloutStart = call.rolloutId.getOrElse(0)
+    // Refine is the SEQUENTIAL instance of the shared best-of-`n` reducer: a `feedback` hook turns each
+    // sub-threshold attempt into per-module advice, routed (matched by layout) into the next attempt's `hint_`
+    // via a HintInjectingAdapter. Selection / failure-budget / trace propagation are the shared `bestOf` loop.
+    AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
+      runAttempt = idx =>
         module.apply(call.copy(
-          rolloutId = Some(rolloutStart + idx),                                          // cache-busting selector
-          config    = call.config.updated("temperature", DynamicValues.fromAny(1.0d))    // provider knob
-        ))
+          rolloutId = Some(rolloutStart + idx),                                       // cache-busting selector
+          config    = call.config.updated("temperature", DynamicValues.fromAny(1.0d)) // provider knob
+        )),
+      reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction)),
+      feedback = Some { (prediction, trace, score) =>
+        // Generate per-module advice grounded in this attempt's trajectory + I/O + reward (under the ambient
+        // LM/adapter, NOT the hint adapter), then build the next attempt's adapter routing each predictor's OWN
+        // advice into ITS `hint_`. Auxiliary: a generation failure charges the budget and keeps `best` (handled
+        // by `bestOf`).
+        val named       = predictors.readNamed(module)
+        val moduleNames = named.map(_._1)
+        Refine.generateAdvice(call.input, prediction, trace, score, threshold, moduleNames)(using baseContext)
+          .map { adviceMap =>
+            val byLayout = named.iterator.map { case (name, predict) =>
+              predict.layout -> adviceMap.getOrElse(name, "N/A")
+            }.toMap
+            Some(Refine.HintInjectingAdapter(Refine.resolveBaseAdapter(baseContext), byLayout))
+          }
       }
-
-      attemptResult match
-        case Right(prediction) =>
-          BestOfN.guardedReward(moduleName)(rewardFn(call.input, prediction)) match
-            case Left(error) => return Left(error)
-            case Right(score) =>
-              if score > bestReward then
-                bestReward  = score
-                best        = Some(prediction)
-                bestTrace   = trace
-                bestHistory = history
-
-              if score >= threshold then
-                idx = n // short-circuit at threshold
-              else if idx == n - 1 then
-                idx += 1 // last attempt; no feedback to generate
-              else
-                // Generate per-module advice grounded in this attempt's trajectory + I/O + reward, for the next
-                // attempt. Advice is auxiliary: a failure here must not discard `best`. Mirror the module-failure
-                // path — record the error, charge the failure budget, and continue without new advice.
-                val moduleNames = predictors.readNamed(module).map(_._1)
-                Refine.generateAdvice(call.input, prediction, trace, score, threshold, moduleNames)(using baseContext) match
-                  case Right(adviceMap) => advice = Some(adviceMap)
-                  case Left(error) =>
-                    lastError = Some(error)
-                    if remainingFailures <= 0 then return Left(error)
-                    remainingFailures -= 1
-                idx += 1
-
-        case Left(error) =>
-          lastError = Some(error)
-          if remainingFailures <= 0 then return Left(error)
-          remainingFailures -= 1
-          idx += 1
-
-    best match
-      case Some(value) =>
-        RuntimeEnvironment.propagateAttempt(bestTrace, bestHistory)
-        Right(value)
-      case None =>
-        Left(lastError.getOrElse(RuntimeError(moduleName, "No successful predictions were produced")))
+    )
 
   /** Convenience entry mirroring the typed caller signature; builds a [[TypedCall]] and dispatches through the
     * wrapped [[apply]]. */
