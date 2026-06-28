@@ -1,9 +1,42 @@
 # Refactor plan: composite primitives (steps 1–5)
 
 **Branch:** `refactor/composite-primitives`
-**Status:** draft / plan only (no implementation yet)
+**Status:** steps 1–5 implemented on the branch (full `sbt test` green); step 6 not started.
 **Scope:** behavior-preserving extraction of the shared primitives hiding inside the composite
 program modules. Steps 1–5 of a longer arc.
+
+## Status (implemented)
+
+Steps 1–5 are implemented on this branch, each a behavior-preserving commit with a focused unit suite; the
+existing composite suites guard the migrations. Full `sbt test` across all 10 modules is green (111 test
+runs, 0 failed) under `-Werror -Wunused:all -Wsafe-init -Wshadow:all`.
+
+| Step | Commit | Primitive | Duplication removed |
+|---|---|---|---|
+| 1 | `0c4e299` | `SignatureOps` (`prependOutput` / `appendInput` / `replaceOutputs`) | A, B |
+| 2 | `217f2a4` | `DynamicValues.requireString` | C |
+| 3 | `d52c45f` | `OutputAugmentation.decodePrepended` (+ `productOutputRequired`) | C call sites, D, E |
+| 4 | `eb12e2b` | `RuntimeEnvironment.isolatedAttempt` / `propagateAttempt` | G |
+| 5 | `4b1b6e2` | `TrajectoryTruncation.truncateOnOverflow` | F |
+
+Net `+430 / −206` over 15 Scala files; ~197 of the insertions are new test coverage, so production code
+shrank net while the duplication was removed.
+
+**As-implemented deltas from the step sketches below (all behavior-preserving):**
+
+- `prependOutput` returns `SignatureLayout` (total: `insert(0) == prepend` for an output field), not
+  `Either`; `ChainOfThought.augmentLayout` wraps it in `Right(...)` to keep its signature, so the
+  ReAct/CodeAct call sites are untouched. The ReAct/CodeAct extractor signatures were also migrated to
+  `appendInput`, so the composites make no direct low-level mutator calls.
+- Step 2's `requireString` labels were chosen so the missing-field messages stay byte-identical; only the
+  non-String mismatch prose is unified.
+- Step 3 unifies the fieldless-output error prose (label-based), an untested edge case (a string-DSL
+  signature used with a composite). `decodePrepended` ships the opening-String case only, shaped and named
+  as the general `Thought`-form so the generalization stays additive.
+
+**Not started:** step 6 (the `Effect` interface + the mode-style control middleware + the `Refine`↔`BestOfN`
+unification + the ProgramOfThought/RLM loop migration) on the kyo-compat substrate, and the de-risking
+spike. See the step-6 sections below.
 
 ## Why
 
