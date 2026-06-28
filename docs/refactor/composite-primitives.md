@@ -146,7 +146,8 @@ identifier-shaped names).
 - `ReAct.reactSignature` / `CodeAct.codeActSignature` use `appendInput(trajectory)` + `replaceOutputs(...)`.
 - `MultiChainComparison.augmentedSignatureLayout` uses `appendInput` per attempt + `prependOutput(rationale)`.
 
-**Test:** new `SignatureOpsSuite` (core) for the laws; existing composite suites cover the migrations.
+**Test:** `SignatureOpsSuite` (core) example tests, plus `SignatureOpsLawSuite` (ScalaCheck) for the
+algebra's laws (L1–L6); see [algebra.md](algebra.md). Existing composite suites cover the migrations.
 **Risk:** very low (pure, total). **Effect note:** permanently pure; no `F[_]` ever.
 
 ## Step 2: `requireString` (covers C)
