@@ -9,10 +9,10 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, Signatur
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.typed.Signature
+import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-import java.util.concurrent.atomic.AtomicInteger
 import scala.util.control.NonFatal
 
 /** Live RLM end-to-end against the REAL Deno+Pyodide sandbox (assume-skipped without `deno`): a scripted action
@@ -32,15 +32,6 @@ class RLMLiveSuite extends FunSuite:
     catch case NonFatal(_) => false
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
-
-  private final class ScriptedLm(responses: Vector[String]) extends LanguageModel:
-    private val idx = new AtomicInteger(0)
-    override val id: String = "scripted-rlm-live"
-    override val mode: LmMode = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val i = idx.getAndIncrement()
-      val text = if i < responses.size then responses(i) else ""
-      Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
   private object ActionAdapter extends Adapter:
     override val name: String = "rlm-live-adapter"

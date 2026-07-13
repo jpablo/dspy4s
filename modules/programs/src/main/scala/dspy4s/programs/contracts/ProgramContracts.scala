@@ -33,7 +33,22 @@ final case class TypedCall[I](
     config: DynamicValue.Record = DynamicValue.Record.empty,
     traceEnabled: Boolean = true,
     rolloutId: Option[Int] = None
-)
+):
+  // Per-call memo of the encoded input record, keyed by the encoding Shape's identity. `Module.apply` (the
+  // callback/trace input bag) and every typed module's `forward` both need the encoding — without the memo each
+  // call paid the (pure) full-record encode twice, which hurts exactly the large-input (RAG / long-context)
+  // cases. Benign race: encode is pure, so a concurrent duplicate computes the identical record; the tuple is
+  // written as one volatile reference so a reader never sees a shape paired with another shape's record.
+  @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
+
+  /** Encode `input` through `shape`, memoized per call instance (see the field note above). */
+  private[dspy4s] def encodedInput(shape: dspy4s.typed.Shape[I]): DynamicValue.Record =
+    val cached = cachedEncoding
+    if (cached ne null) && (cached._1 eq shape) then cached._2
+    else
+      val computed = shape.encode(input)
+      cachedEncoding = (shape, computed)
+      computed
 
 trait ProgramRuntime:
   def resolveModel(using RuntimeContext): Either[DspyError, LanguageModel]

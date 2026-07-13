@@ -52,7 +52,7 @@ final class ParallelExecutor(
     if data.isEmpty then
       return Right(ParallelExecutionResult(results = Vector.empty, failedIndices = Vector.empty, errors = Map.empty))
 
-    val captured = ContextPropagation.capture
+    val captured = ContextPropagation.captureAll
     val pool = Executors.newFixedThreadPool(numThreads)
     val completion = ExecutorCompletionService[(Int, Option[Either[DspyError, B]])](pool)
     val cancelRequested = AtomicBoolean(false)
@@ -61,7 +61,7 @@ final class ParallelExecutor(
       def submit(index: Int): Unit =
         val _ = completion.submit(new Callable[(Int, Option[Either[DspyError, B]])]:
           override def call(): (Int, Option[Either[DspyError, B]]) =
-            RuntimeEnvironment.withContext(captured) {
+            captured.run {
               RuntimeEnvironment.withGeneratedAsyncTask("parallel-task") {
                 if cancelRequested.get() then index -> None
                 else

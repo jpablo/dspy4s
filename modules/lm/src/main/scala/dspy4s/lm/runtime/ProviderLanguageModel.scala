@@ -4,7 +4,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LanguageModel
@@ -152,7 +151,10 @@ object ProviderResponseParser:
       case Some(rec) => rec
       case None =>
         raw.flatMap(asString) match
-          case Some(value) if value.trim.nonEmpty => DynamicValues.recordFromEntries(Seq(WireKeys.input := value))
+          // OpenAI sends `function.arguments` as a JSON STRING; decode it into a Record (the ToolCall contract:
+          // args are decoded at the parse boundary). Shares ToolCallAssembler.parseArguments with the streaming
+          // path so both decode identically; non-JSON strings fall back to `{input: raw}` there.
+          case Some(value) if value.trim.nonEmpty => ToolCallAssembler.parseArguments(value)
           case _ =>
             raw match
               case Some(other) => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))

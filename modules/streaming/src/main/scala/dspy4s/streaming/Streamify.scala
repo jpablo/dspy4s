@@ -47,7 +47,7 @@ object Streamify:
 
     inputs =>
       val queue = StreamingQueue[StreamEvent](queueCapacity)
-      val captured = ContextPropagation.capture
+      val captured = ContextPropagation.captureAll
 
       val provider = statusMessageProvider.getOrElse(StatusMessageProvider.default)
       val callback = new StatusStreamingCallback(provider, queue)
@@ -71,28 +71,32 @@ object Streamify:
       val producer = new Thread(
         new Runnable:
           override def run(): Unit =
-            val _ = ContextPropagation.inContext(captured) {
-              RuntimeEnvironment.withSettings(lmOverride) {
-                val existingCallbacks = RuntimeEnvironment.current.callbacks
-                RuntimeEnvironment.withCallbacks(existingCallbacks :+ callback) {
-                  given RuntimeContext = RuntimeEnvironment.current
-                  try
-                    streamable.run(program, inputs) match
-                      case Right(prediction) =>
-                        if includeFinalPrediction then { val _ = queue.offer(PredictionEvent(prediction)) }
-                      case Left(error) =>
-                        queue.offer(ErrorEvent(error))
-                  catch
-                    case NonFatal(error) =>
-                      val runtimeError = dspy4s.core.contracts.RuntimeError(
-                        "streamify",
-                        Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
-                      )
-                      queue.offer(ErrorEvent(runtimeError))
+            // close() must run no matter how the producer dies — a throwable that escapes the inner NonFatal
+            // catch (InterruptedException, StackOverflowError) or a throw in the context-setup calls would
+            // otherwise never enqueue the end-of-stream sentinel and leave the consumer parked in take() forever.
+            try
+              val _ = captured.run {
+                RuntimeEnvironment.withSettings(lmOverride) {
+                  val existingCallbacks = RuntimeEnvironment.current.callbacks
+                  RuntimeEnvironment.withCallbacks(existingCallbacks :+ callback) {
+                    given RuntimeContext = RuntimeEnvironment.current
+                    try
+                      streamable.run(program, inputs) match
+                        case Right(prediction) =>
+                          if includeFinalPrediction then { val _ = queue.offer(PredictionEvent(prediction)) }
+                        case Left(error) =>
+                          queue.offer(ErrorEvent(error))
+                    catch
+                      case NonFatal(error) =>
+                        val runtimeError = dspy4s.core.contracts.RuntimeError(
+                          "streamify",
+                          Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+                        )
+                        queue.offer(ErrorEvent(runtimeError))
+                  }
                 }
               }
-            }
-            queue.close()
+            finally queue.close()
       )
       producer.setDaemon(true)
       producer.setName("dspy4s-streamify-producer")

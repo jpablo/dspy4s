@@ -92,6 +92,17 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(decoded, Right((P7Emotion.joy, 0.8)))
   }
 
+  test("fromType labels a *:-spelled tuple output positionally (first element is _1)") {
+    // Regression: the labeler used to number from the recursion tail, so `Int *: Boolean *: EmptyTuple`
+    // came out reversed as [_2: Int, _1: Boolean].
+    val sig = Signature.fromType[String => (Int *: Boolean *: EmptyTuple)]("ConsSpelled")
+    assertEquals(sig.layout.outputFields.map(_.name), Vector("_1", "_2"))
+    assertEquals(
+      sig.layout.outputFields.map(_.typeRef),
+      Vector(dspy4s.core.contracts.TypeRef.int, dspy4s.core.contracts.TypeRef.bool)
+    )
+  }
+
   test("method signature enum output uses TypeRef.string at the wire boundary") {
     val sig = Signature.from(p7NamedEmotion)
     val field = sig.layout.outputFields.head

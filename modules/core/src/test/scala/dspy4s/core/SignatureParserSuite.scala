@@ -2,9 +2,7 @@ package dspy4s.core
 
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.FieldUpdate
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.signatures.SignatureParser
 import dspy4s.core.signatures.SignatureDsl
@@ -44,69 +42,12 @@ class SignatureParserSuite extends FunSuite:
     assert(parsed.left.toOption.get.isInstanceOf[ValidationError])
   }
 
-  test("insert preserves input output ordering") {
+  test("prepend preserves input output ordering") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val inserted = signature.insert(
-      index = 0,
-      field = FieldSpec(name = "context", role = FieldRole.Input)
-    )
+    val updated = signature.prepend(FieldSpec(name = "context", role = FieldRole.Input))
 
-    assert(inserted.isRight)
-    val updated = inserted.toOption.get
     assertEquals(updated.inputFields.map(_.name), Vector("context", "question"))
     assertEquals(updated.outputFields.map(_.name), Vector("answer"))
-  }
-
-  test("withUpdatedField updates description and prefix") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val updated = signature.withUpdatedField(
-      fieldName = "answer",
-      description = Some("final answer"),
-      prefix = Some("Answer:")
-    )
-
-    assert(updated.isRight)
-    val answer = updated.toOption.get.outputFields.head
-    assertEquals(answer.description, Some("final answer"))
-    assertEquals(answer.prefix, Some("Answer:"))
-  }
-
-  test("withUpdatedFields supports python-style type token update") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val updated = signature.withUpdatedFields(
-      fieldName = "question",
-      typeToken = Some("int")
-    )
-
-    assert(updated.isRight)
-    val question = updated.toOption.get.inputFields.head
-    assertEquals(question.typeRef, TypeRef.int)
-  }
-
-  test("withUpdatedFields supports multi-field patching") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val updated = signature.withUpdatedFields(
-      "question" -> FieldUpdate(prefix = Some("Question:")),
-      "answer" -> FieldUpdate(
-        typeToken = Some("double"),
-        description = Some("confidence score")
-      )
-    )
-
-    assert(updated.isRight)
-    val rebuilt = updated.toOption.get
-    assertEquals(rebuilt.inputFields.head.prefix, Some("Question:"))
-    assertEquals(rebuilt.outputFields.head.typeRef, TypeRef.double)
-    assertEquals(rebuilt.outputFields.head.description, Some("confidence score"))
-  }
-
-  test("withUpdatedFields fails when field does not exist") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val updated = signature.withUpdatedFields(
-      "missing" -> FieldUpdate(prefix = Some("Missing:"))
-    )
-
-    assert(updated.isLeft)
   }
 
   test("signature dumpState and fromState roundtrip") {

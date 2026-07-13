@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
@@ -53,10 +54,11 @@ final case class TwoStepAdapter(
     val chat = ChatAdapter()
     for
       extractorLayout <- buildExtractorLayout(layout)
+      textField = extractorLayout.inputFields.head.name
       invocation = AdapterInvocation(
         layout  = extractorLayout,
         demos   = Vector.empty,
-        inputs  = Example(values = DynamicValues.record("text" := output.text), inputKeys = Set("text")),
+        inputs  = Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
         request = LmRequest(model = extractionModel.id)
       )
       prompt   <- chat.format(invocation)
@@ -65,10 +67,14 @@ final case class TwoStepAdapter(
       parsed   <- chat.parse(extractorLayout, lmOutput)
     yield parsed
 
-  /** The on-the-fly extractor signature: `text -> <the original output fields>`. */
+  /** The on-the-fly extractor signature: `text -> <the original output fields>`. When the original signature
+    * already has an output field named `text`, the synthetic input is renamed (`_text`, `__text`, ...) —
+    * SignatureLayout.create rejects duplicate names, which would otherwise fail every parse deterministically. */
   private def buildExtractorLayout(layout: SignatureLayout): Either[DspyError, SignatureLayout] =
+    val reserved = layout.outputFields.map(_.name).toSet
+    val inputName = Iterator.iterate("text")("_" + _).dropWhile(reserved.contains).next()
     val textInput = FieldSpec(
-      name        = "text",
+      name        = inputName,
       role        = FieldRole.Input,
       description = Some("The text from which to extract the structured output fields")
     )
@@ -93,9 +99,4 @@ final case class TwoStepAdapter(
        |$outputs""".stripMargin
 
   private def renderFields(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
-    fields.flatMap { field =>
-      DynamicValues.recordGet(values, field.name)
-        .map(DynamicValues.renderText)
-        .orElse(field.defaultValue.map(_.toString))
-        .map(v => s"${field.prefix.getOrElse(s"${field.name}:")} $v")
-    }.mkString("\n")
+    AdapterTextSupport.renderFields(fields, values)

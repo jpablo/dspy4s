@@ -60,18 +60,25 @@ object AutoEvaluation:
   private[metrics] def judge(layout: SignatureLayout): Either[DspyError, DynamicPredict] =
     ChainOfThought.augmentLayout(layout).map(augmented => DynamicPredict(layout = augmented, name = Some("judge")))
 
-  /** Run a judge predictor with the given input record and read a `[0, 1]` Double output field from its
-    * prediction. Parse failures (missing / non-numeric field) surface as `Left`. */
+  /** Run a judge predictor ONCE with the given input record and read one or more `[0, 1]` Double output fields
+    * from that single prediction (returned in `readFields` order). One completion supplies every requested
+    * field — calling the judge once per field would double the LM cost AND pair numbers from different,
+    * possibly disagreeing completions. Parse failures (missing / non-numeric field) surface as `Left`. */
   private[metrics] def runJudge(
-      layout: SignatureLayout,
+      predictor: Either[DspyError, DynamicPredict],
       inputs: DynamicValue.Record,
-      readField: String
-  )(using RuntimeContext): Either[DspyError, Double] =
+      readFields: Seq[String]
+  )(using RuntimeContext): Either[DspyError, Vector[Double]] =
     for
-      predictor  <- judge(layout)
-      prediction <- predictor.apply(ProgramCall(inputs = inputs, traceEnabled = false))
-      value      <- prediction.asDouble(readField)
-    yield value
+      p          <- predictor
+      prediction <- p.apply(ProgramCall(inputs = inputs, traceEnabled = false))
+      values <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
+        for
+          soFar <- acc
+          value <- prediction.asDouble(field)
+        yield soFar :+ value
+      }
+    yield values
 
 object SemanticF1:
   // Mirrors `SemanticRecallPrecision` (non-decompositional).
@@ -118,6 +125,9 @@ final case class SemanticF1(
     val instructions = if decompositional then SemanticF1.decompositionalInstructions else SemanticF1.baseInstructions
     SignatureLayout.of(name = "SemanticRecallPrecision", fields = inputs ++ outputs, instructions = Some(instructions))
 
+  // Built once per metric instance — the judge layout never changes between score() calls.
+  private val judgePredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(layout)
+
   override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
   ): Either[DspyError, Double] =
@@ -130,9 +140,8 @@ final case class SemanticF1(
         "ground_truth"    -> DynamicValues.fromAny(groundTruth),
         "system_response" -> DynamicValues.fromAny(systemResponse)
       ))
-      recall    <- AutoEvaluation.runJudge(layout, inputs, "recall")
-      precision <- AutoEvaluation.runJudge(layout, inputs, "precision")
-    yield AutoEvaluation.f1Score(precision, recall)
+      scores <- AutoEvaluation.runJudge(judgePredictor, inputs, Seq("recall", "precision"))
+    yield AutoEvaluation.f1Score(precision = scores(1), recall = scores(0))
 
 object CompleteAndGrounded:
   private val completenessInstructions =
@@ -190,6 +199,11 @@ final case class CompleteAndGrounded(
       instructions = Some(CompleteAndGrounded.groundednessInstructions)
     )
 
+  // Built once per metric instance — the judge layouts never change between score() calls. These stay two
+  // separate LM calls (unlike SemanticF1) because they judge against different layouts and inputs.
+  private val completenessPredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(completenessLayout)
+  private val groundednessPredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(groundednessLayout)
+
   override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
   ): Either[DspyError, Double] =
@@ -208,6 +222,6 @@ final case class CompleteAndGrounded(
         "retrieved_context" -> DynamicValues.fromAny(context),
         "system_response"   -> DynamicValues.fromAny(systemResponse)
       ))
-      completeness <- AutoEvaluation.runJudge(completenessLayout, completenessInputs, "completeness")
-      groundedness <- AutoEvaluation.runJudge(groundednessLayout, groundednessInputs, "groundedness")
-    yield AutoEvaluation.f1Score(groundedness, completeness)
+      completeness <- AutoEvaluation.runJudge(completenessPredictor, completenessInputs, Seq("completeness"))
+      groundedness <- AutoEvaluation.runJudge(groundednessPredictor, groundednessInputs, Seq("groundedness"))
+    yield AutoEvaluation.f1Score(groundedness.head, completeness.head)

@@ -31,18 +31,36 @@ object ToolCallAssembler:
       delta.argumentsFragment.foreach(arguments.append)
 
   def assemble(deltas: Iterable[LmToolCallDelta]): Vector[ToolCall] =
-    val byIndex = mutable.LinkedHashMap.empty[Int, Accumulator]
+    val ordered = mutable.ArrayBuffer.empty[Accumulator]
+    val active  = mutable.HashMap.empty[Int, Accumulator]
     deltas.foreach { delta =>
-      val acc = byIndex.getOrElseUpdate(delta.index, new Accumulator(delta.index))
+      val acc = active.get(delta.index) match
+        case Some(current) if !startsNewCall(current, delta) => current
+        case _ =>
+          val fresh = new Accumulator(delta.index)
+          ordered += fresh
+          active(delta.index) = fresh
+          fresh
       acc.merge(delta)
     }
-    byIndex.values.iterator.flatMap { acc =>
+    ordered.iterator.flatMap { acc =>
       acc.name.map { name =>
         ToolCall(name = name, args = parseArguments(acc.arguments.toString))
       }
     }.toVector
 
-  private def parseArguments(raw: String): DynamicValue.Record =
+  /** Some OpenAI-compatible servers omit `tool_calls[].index`, so consecutive DISTINCT calls all arrive at the
+    * fallback index 0. A delta carrying an `id` or `name` that CONFLICTS with the index's current accumulator
+    * therefore begins a new call (spec-compliant streams never conflict within one index, so this is a no-op
+    * for them). Fragments without id/name keep attaching to the index's most recent call. */
+  private def startsNewCall(current: Accumulator, delta: LmToolCallDelta): Boolean =
+    delta.id.exists(id => current.id.exists(_ != id)) ||
+      delta.name.exists(name => current.name.exists(_ != name))
+
+  /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `{input: raw}` when it is not
+    * valid JSON, `{value: json}` when it parses to a non-object. Shared with the non-streaming
+    * `ProviderResponseParser.parseArgs` so both paths decode identically. */
+  private[runtime] def parseArguments(raw: String): DynamicValue.Record =
     val trimmed = raw.trim
     if trimmed.isEmpty then DynamicValue.Record.empty
     else

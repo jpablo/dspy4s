@@ -43,7 +43,12 @@ object Aggregation:
   ): Either[DspyError, DynamicPrediction] =
     if rows.isEmpty then Left(ValidationError("Cannot compute majority over an empty set of completions"))
     else
-      val resolvedField = field.getOrElse(DynamicValues.recordKeys(rows.head).last)
+      // "Last key" must skip the synthetic `tool_calls` value PredictEngine appends to every prediction —
+      // otherwise the default vote runs over identical empty tool-call payloads instead of the answer field.
+      val resolvedField = field.getOrElse {
+        val keys = DynamicValues.recordKeys(rows.head)
+        keys.filterNot(_ == runtime.PredictEngine.ToolCallsKey).lastOption.getOrElse(keys.last)
+      }
       val rowAccessor: DynamicValue.Record => Either[DspyError, DynamicValue] = row =>
         DynamicValues.recordGet(row, resolvedField).toRight(
           NotFoundError("completion_field", s"Completion field '$resolvedField' does not exist")

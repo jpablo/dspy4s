@@ -22,6 +22,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.programs.runtime.AgentLoop
+import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.typed.{Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -158,12 +159,12 @@ final case class RLM[I, O](
       "Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs."
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
-    baseSignature.inputShape.encode(call.input)
+    call.encodedInput(baseSignature.inputShape)
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
   override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
 
   override protected def forward(call: TypedCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
-    val inputs = baseSignature.inputShape.encode(call.input)
+    val inputs = call.encodedInput(baseSignature.inputShape)
     val inputVars: Map[String, DynamicValue] =
       baseLayout.inputFields.map(f => f.name -> DynamicValues.recordGet(inputs, f.name).getOrElse(DynamicValue.Null)).toMap
     val variablesMeta = baseLayout.inputFields.map { f =>
@@ -513,10 +514,23 @@ object RLM:
           case _                                => Vector.empty
         if prompts.isEmpty then Right(DynamicValues.fromAny(List.empty[String]))
         else
-          checkAndIncrement(prompts.size).map { _ =>
-            // Sequential (upstream uses a thread pool); per-prompt failures become [ERROR] items, like upstream.
-            val answers = prompts.map(p => queryLm(p).fold(err => s"[ERROR] ${err.message}", identity))
-            DynamicValues.fromAny(answers.toList)
+          checkAndIncrement(prompts.size).flatMap { _ =>
+            // Concurrent, as the tool's own instruction promises the model ("much faster") — upstream uses an
+            // 8-worker thread pool. Per-prompt failures become [ERROR] items, like upstream.
+            val executor = ParallelExecutor(numThreads = math.min(8, prompts.size), maxErrors = prompts.size)
+            executor
+              .execute(
+                task = (p: String) => queryLm(p).fold(err => s"[ERROR] ${err.message}", identity),
+                data = prompts
+              )(using ctx)
+              .map { outcome =>
+                val answers = prompts.indices.map { i =>
+                  outcome.results(i).getOrElse(
+                    s"[ERROR] ${outcome.errors.get(i).map(_.message).getOrElse("prompt was not executed")}"
+                  )
+                }
+                DynamicValues.fromAny(answers.toList)
+              }
           }
     )
 

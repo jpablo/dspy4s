@@ -69,7 +69,7 @@ final case class Predict[I, O](
   def boundLm: Option[LanguageModel] = lm
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
-    signature.inputShape.encode(call.input)
+    call.encodedInput(signature.inputShape)
 
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
 
@@ -77,7 +77,7 @@ final case class Predict[I, O](
     prediction.raw.values
 
   override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val inputRecord = signature.inputShape.encode(call.input)
+    val inputRecord = call.encodedInput(signature.inputShape)
     // Defensive: shape implementations that don't statically guarantee full coverage of declared input fields
     // (notably the Map-based shape used by trait specs) could let a caller silently omit a required input.
     // Validate before spending an LM call. Case-class derivations always produce a complete record, so the

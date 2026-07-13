@@ -164,7 +164,7 @@ private[dspy4s] final case class PredictEngine(
       completions <- Completions.fromRows(parsedOutputs.map(_.values))
       first <- DynamicPrediction.fromCompletions(completions)
       withUsage = first.copy(lmUsage = response.usage.map(usageToMap))
-      prediction = withUsage.withValue("tool_calls", toToolCallPayload(toolCalls))
+      prediction = withUsage.withValue(PredictEngine.ToolCallsKey, toToolCallPayload(toolCalls))
     yield prediction
 
   private def usageToMap(usage: LmUsage): Map[String, Long] =
@@ -183,3 +183,9 @@ private[dspy4s] final case class PredictEngine(
         ))
       }
     ))
+
+private[dspy4s] object PredictEngine:
+  /** Name of the synthetic prediction value the engine appends to EVERY prediction (the structured tool calls,
+    * empty for a non-tool turn). Consumers that iterate a prediction's values positionally — e.g.
+    * [[dspy4s.programs.Aggregation.majority]]'s "last output field" default — must skip this key. */
+  val ToolCallsKey: String = "tool_calls"

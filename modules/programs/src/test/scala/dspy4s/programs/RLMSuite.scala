@@ -9,6 +9,7 @@ import dspy4s.core.contracts.{CodeResult, DspyError, DynamicValues, FieldRole, F
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.typed.Signature
+import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -33,16 +34,6 @@ class RLMSuite extends FunSuite:
       val i = idx.getAndIncrement()
       if i < responses.size then responses(i) else Right(CodeResult("", "", 0))
     override def close(): Unit = closed = true
-
-  /** Scripted LM: canned responses, in order. */
-  private final class ScriptedLm(responses: Vector[String]) extends LanguageModel:
-    val calls: AtomicInteger = AtomicInteger(0)
-    override val id: String = "scripted-rlm-lm"
-    override val mode: LmMode = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val i = calls.getAndIncrement()
-      val text = if i < responses.size then responses(i) else ""
-      Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
   /** Adapter convention: action steps (outputs include `code`) parse `reasoning||code`; the extract step assigns
     * the text to every output field. Records the `repl_history` input of every action call. */

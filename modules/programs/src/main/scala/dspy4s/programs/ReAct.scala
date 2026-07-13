@@ -158,12 +158,12 @@ final case class ReAct[I, O](
        |$toolList""".stripMargin
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
-    baseSignature.inputShape.encode(call.input)
+    call.encodedInput(baseSignature.inputShape)
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
   override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
 
   override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    val inputs = baseSignature.inputShape.encode(call.input)
+    val inputs = call.encodedInput(baseSignature.inputShape)
     val baseCall = ProgramCall(
       inputs       = inputs,
       config       = call.config,

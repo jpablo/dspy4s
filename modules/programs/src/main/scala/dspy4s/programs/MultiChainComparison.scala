@@ -26,7 +26,18 @@ final case class MultiChainCall[I](
     config: DynamicValue.Record = DynamicValue.Record.empty,
     traceEnabled: Boolean = true,
     rolloutId: Option[Int] = None
-)
+):
+  // Same per-call encode memo as TypedCall (see there): Module.apply's callInputs and forward both need the
+  // encoded input; cache it so the pure encode runs once per call.
+  @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
+
+  private[dspy4s] def encodedInput(shape: dspy4s.typed.Shape[I]): DynamicValue.Record =
+    val cached = cachedEncoding
+    if (cached ne null) && (cached._1 eq shape) then cached._2
+    else
+      val computed = shape.encode(input)
+      cachedEncoding = (shape, computed)
+      computed
 
 /** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected
   * reasoning + final answer. Typed port of Python DSPy's `dspy.MultiChainComparison`. The flow:
@@ -98,7 +109,7 @@ final case class MultiChainComparison[I, O](
     comparePredictOverride.getOrElse(DynamicPredict(layout = augmentedSignatureLayout))
 
   override protected def callInputs(call: MultiChainCall[I]): DynamicValue.Record =
-    baseSignature.inputShape.encode(call.input)
+    call.encodedInput(baseSignature.inputShape)
   override protected def callTraceEnabled(call: MultiChainCall[I]): Boolean = call.traceEnabled
   override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
 
@@ -108,7 +119,7 @@ final case class MultiChainComparison[I, O](
         s"Number of attempts (${call.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
       ))
     else
-      val baseInputs = baseSignature.inputShape.encode(call.input)
+      val baseInputs = call.encodedInput(baseSignature.inputShape)
       val appended = call.attempts.iterator.zipWithIndex.map { (attempt, idx) =>
         s"reasoning_attempt_${idx + 1}" ->
           (DynamicValue.Primitive(PrimitiveValue.String(formatAttempt(attempt))): DynamicValue)

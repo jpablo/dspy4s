@@ -8,19 +8,18 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.contracts.ToolChoice
-import dspy4s.adapters.internal.JsonDynamic
+import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 import scala.util.matching.Regex
 
@@ -252,24 +251,7 @@ final case class ChatAdapter(
     }.mkString("\n\n")
 
   private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
-    typeRef match
-      case TypeRef.int =>
-        raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
-          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
-      case TypeRef.double =>
-        raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
-          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
-      case TypeRef.bool =>
-        raw.trim.toLowerCase match
-          case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
-          case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
-          case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
-      case TypeRef.json | TypeRef.list =>
-        JsonDynamic.parse(raw).left.map(_ =>
-          ValidationError(s"Field could not be parsed as JSON from '$raw'")
-        )
-      case _ =>
-        Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+    AdapterTextSupport.coerceText(typeRef, raw)
 
 object ChatAdapter:
   /** Pattern matching `[[ ## field_name ## ]]`. Capture group 1 is the

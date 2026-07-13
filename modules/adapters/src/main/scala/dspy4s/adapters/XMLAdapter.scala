@@ -7,20 +7,20 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 import scala.util.Try
+import scala.util.matching.Regex
 import scala.xml.Elem
 import scala.xml.XML
 
@@ -65,40 +65,30 @@ final case class XMLAdapter(
     Some(new XmlStreamingState(layout.outputFields))
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    parseStructured(layout, output).orElse {
-      if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
-        val field = layout.outputFields.head
-        val trimmed = output.text.trim
-        if trimmed.nonEmpty then
-          Right(
-            ParsedOutput(
-              values = DynamicValue.Record(Chunk.single(
-                field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))
-              )),
-              rawText = Some(output.text),
-              metadata = Map("adapter" -> name, "fallback" -> "text")
-            )
-          )
-        else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
-      else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
-    }
+    // The plain-text fallback only applies when the reply is not an XML document at all (the model ignored the
+    // format). Falling back on ANY structured failure would mask real errors: a present-but-unfillable field
+    // used to return the ENTIRE raw XML document as the field's "value".
+    extractXml(output.text).flatMap(parseXml) match
+      case Right(document) => parseFields(layout, document, output)
+      case Left(_) =>
+        if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
+          AdapterTextSupport.singleOutputTextFallback(name, layout, output)
+        else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
 
-  private def parseStructured(layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
-    for
-      xmlText <- extractXml(output.text)
-      document <- parseXml(xmlText)
-      entries <- layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
-        for
-          soFar <- acc
-          raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
-          coerced <- coerce(field.typeRef, raw)
-        yield soFar :+ (field.name -> coerced)
-      }
-    yield ParsedOutput(
-      values   = DynamicValue.Record(Chunk.from(entries)),
-      rawText  = Some(output.text),
-      metadata = Map("adapter" -> name)
-    )
+  private def parseFields(layout: SignatureLayout, document: Elem, output: LmOutput): Either[DspyError, ParsedOutput] =
+    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
+      for
+        soFar <- acc
+        raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
+        coerced <- AdapterTextSupport.coerceText(field.typeRef, raw)
+      yield soFar :+ (field.name -> coerced)
+    }.map { entries =>
+      ParsedOutput(
+        values   = DynamicValue.Record(Chunk.from(entries)),
+        rawText  = Some(output.text),
+        metadata = Map("adapter" -> name)
+      )
+    }
 
   private def buildOutputXml(layout: SignatureLayout, values: DynamicValue.Record): String =
     val body = layout.outputFields.flatMap { field =>
@@ -109,22 +99,13 @@ final case class XMLAdapter(
     s"<outputs>$body</outputs>"
 
   private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: DynamicValue.Record): String =
-    fields.flatMap { field =>
-      val value = DynamicValues.recordGet(values, field.name)
-        .map(DynamicValues.renderText)
-        .orElse(field.defaultValue.map(_.toString))
-      value.map { v =>
-        val prefix = field.prefix.getOrElse(s"${field.name}:")
-        s"$prefix $v"
-      }
-    }.mkString("\n")
+    AdapterTextSupport.renderFields(fields, values)
 
   private def extractXml(text: String): Either[DspyError, String] =
     val trimmed = text.trim
     if trimmed.startsWith("<") then Right(trimmed)
     else
-      val fenced = "(?s)```xml\\s*(<.*?>.*?</.*?>)\\s*```".r
-      fenced.findFirstMatchIn(text).map(_.group(1)) match
+      XMLAdapter.FencedXml.findFirstMatchIn(text).map(_.group(1)) match
         case Some(xml) => Right(xml)
         case None =>
           val first = text.indexOf('<')
@@ -135,27 +116,18 @@ final case class XMLAdapter(
   private def parseXml(raw: String): Either[DspyError, Elem] =
     Try(XML.loadString(raw)).toEither.left.map(error => ParseError("adapter", error.getMessage))
 
+  /** A present-but-empty tag is a PRESENT field with an empty value (`Some("")`), not a missing field —
+    * treating it as missing used to route single-output signatures into the text fallback, which returned the
+    * whole raw XML document as the field's value. */
   private def extractFieldText(xml: Elem, fieldName: String): Option[String] =
-    (xml \\ fieldName).headOption.map(_.text.trim).filter(_.nonEmpty)
-
-  private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
-    typeRef match
-      case TypeRef.int =>
-        raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
-          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
-      case TypeRef.double =>
-        raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
-          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
-      case TypeRef.bool =>
-        raw.trim.toLowerCase match
-          case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
-          case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
-          case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
-      case _ =>
-        Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+    (xml \\ fieldName).headOption.map(_.text.trim)
 
   private def escapeXml(value: String): String =
     value
       .replace("&", "&amp;")
       .replace("<", "&lt;")
       .replace(">", "&gt;")
+
+object XMLAdapter:
+  /** Fenced ```xml block extractor, compiled once (parse runs per LM completion). */
+  private val FencedXml: Regex = "(?s)```xml\\s*(<.*?>.*?</.*?>)\\s*```".r

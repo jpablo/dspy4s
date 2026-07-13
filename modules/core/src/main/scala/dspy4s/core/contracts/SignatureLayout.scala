@@ -193,24 +193,6 @@ object FieldConstraints:
   def maxLength(n: Int): Constraint     = Constraint.MaxLength(n)
   def multipleOf(n: Double): Constraint = Constraint.MultipleOf(n)
 
-/** Partial update DTO for the field-mutation surface on [[SignatureLayout]]. Each `Option` field that's `Some`
-  * overwrites the corresponding [[FieldSpec]] property; metadata is merged additively.
-  *
-  * `typeToken` is a string alternative to `typeRef`: callers that have the DSL type word (`"bool"`, `"int"`, ...)
-  * can pass it and the runtime resolves via [[TypeRef.fromToken]]. If both are set, `typeRef` wins.
-  *
-  * Public mostly as a transitional artifact -- the consumer
-  * (`SignatureLayout.withUpdatedFields`) is `private[dspy4s]`, so user code currently has no path to call it. */
-final case class FieldUpdate(
-    typeRef: Option[TypeRef] = None,
-    typeToken: Option[String] = None,
-    description: Option[String] = None,
-    prefix: Option[String] = None,
-    defaultValue: Option[Any] = None
-):
-  def resolvedTypeRef: Option[TypeRef] =
-    typeRef.orElse(typeToken.map(TypeRef.fromToken))
-
 object FieldSpec:
   private val identifierPattern: Regex = raw"[A-Za-z_][A-Za-z0-9_]*".r
 
@@ -267,12 +249,11 @@ object FieldSpec:
   * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name
   * uniqueness closed by construction (see Invariants) rather than relying on a runtime precondition.
   *
-  * '''Field mutation.''' The `append` / `prepend` / `insert` / `delete` / `withFields` /
-  * `withUpdatedField*` methods are `private[dspy4s]`. They exist because composite programs (`ChainOfThought`,
-  * `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base layout with auxiliary fields
-  * (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User code should mutate at the
-  * typed `Signature` surface (use a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather
-  * than reaching into the layout directly.
+  * '''Field mutation.''' The `append` / `prepend` / `withFields` methods are `private[dspy4s]`. They exist
+  * because composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to
+  * augment a base layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a
+  * `DynamicPredict`. User code should mutate at the typed `Signature` surface (use a different `Spec` trait, a
+  * different `Signature.derived[I, O]`, etc.) rather than reaching into the layout directly.
   *
   * '''Invariants.''' Name uniqueness is maintained by construction, not by a precondition: the primary
   * constructor is `private`, so every layout comes from [[SignatureLayout.create]] (which rejects duplicate
@@ -323,82 +304,12 @@ final case class SignatureLayout private (
 
   private[dspy4s] def append(field: FieldSpec): SignatureLayout = withFields(fields :+ field)
 
-  private[dspy4s] def insert(index: Int, field: FieldSpec): Either[DspyError, SignatureLayout] =
-    val (inputs, outputs) = (inputFields, outputFields)
-    val target = if field.role == FieldRole.Input then inputs else outputs
-    val normalizedIndex = if index < 0 then target.size + index + 1 else index
-    if normalizedIndex < 0 || normalizedIndex > target.size then
-      Left(
-        ValidationError(
-          s"Invalid index $index for ${field.role} fields of size ${target.size}"
-        )
-      )
-    else
-      val updatedTarget = target.patch(normalizedIndex, Vector(field), 0)
-      val updatedFields =
-        if field.role == FieldRole.Input then updatedTarget ++ outputs
-        else inputs ++ updatedTarget
-      Right(withFields(updatedFields))
-
   private[dspy4s] def prepend(field: FieldSpec): SignatureLayout =
     val sameRole = fields.filter(_.role == field.role)
     val otherRole = fields.filterNot(_.role == field.role)
     field.role match
       case FieldRole.Input  => withFields((field +: sameRole) ++ otherRole)
       case FieldRole.Output => withFields(otherRole ++ (field +: sameRole))
-
-  private[dspy4s] def delete(fieldName: String): SignatureLayout =
-    withFields(fields.filterNot(_.name == fieldName))
-
-  private[dspy4s] def withUpdatedField(
-      fieldName: String,
-      typeRef: Option[TypeRef] = None,
-      description: Option[String] = None,
-      prefix: Option[String] = None,
-      defaultValue: Option[Any] = None
-  ): Either[DspyError, SignatureLayout] =
-    fields.find(_.name == fieldName) match
-      case None =>
-        Left(NotFoundError("field", s"Field '$fieldName' does not exist in signature '$name'"))
-      case Some(existing) =>
-        val updated = existing.copy(
-          typeRef = typeRef.getOrElse(existing.typeRef),
-          description = description.orElse(existing.description),
-          prefix = prefix.orElse(existing.prefix),
-          defaultValue = defaultValue.orElse(existing.defaultValue)
-        )
-        Right(withFields(fields.map { field => if field.name == fieldName then updated else field }))
-
-  private[dspy4s] def withUpdatedFields(
-      fieldName: String,
-      typeRef: Option[TypeRef] = None,
-      typeToken: Option[String] = None,
-      description: Option[String] = None,
-      prefix: Option[String] = None,
-      defaultValue: Option[Any] = None
-  ): Either[DspyError, SignatureLayout] =
-    withUpdatedField(
-      fieldName = fieldName,
-      typeRef = typeRef.orElse(typeToken.map(TypeRef.fromToken)),
-      description = description,
-      prefix = prefix,
-      defaultValue = defaultValue
-    )
-
-  private[dspy4s] def withUpdatedFields(updates: (String, FieldUpdate)*): Either[DspyError, SignatureLayout] =
-    updates.foldLeft[Either[DspyError, SignatureLayout]](Right(this)) { (acc, entry) =>
-      val (fieldName, update) = entry
-      acc.flatMap(
-        _.withUpdatedFields(
-          fieldName = fieldName,
-          typeRef = update.typeRef,
-          typeToken = update.typeToken,
-          description = update.description,
-          prefix = update.prefix,
-          defaultValue = update.defaultValue
-        )
-      )
-    }
 
   // ── Read helpers ────────────────────────────────────────────────────
 

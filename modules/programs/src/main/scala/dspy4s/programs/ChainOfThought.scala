@@ -50,7 +50,7 @@ final case class ChainOfThought[I, O](
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
-    signature.inputShape.encode(call.input)
+    call.encodedInput(signature.inputShape)
 
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
 
@@ -91,8 +91,13 @@ final case class ChainOfThought[I, O](
     ChainOfThought.augmentLayout(signature.layout)
 
   private def augmentedOutputShape: Shape[Out] = new Shape[Out]:
+    // Idempotent, like the type-level WithReasoning and the layout's prependOutput: when O already declares
+    // `reasoning`, Out = O and its arity matches the base specs — an unconditional prepend would desync
+    // encode's fieldSpecs.zip(values), mislabeling every field and dropping the last.
     val fieldSpecs: Vector[FieldSpec] =
-      ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
+      if signature.outputShape.fieldSpecs.exists(_.name == ChainOfThought.reasoningField.name) then
+        signature.outputShape.fieldSpecs
+      else ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
 
     // Reuse the base output's JSON schema so the structured (nested) field shapes still reach the adapter
     // (and thus the LM). The prepended `reasoning` field is a plain String already covered by the adapter's

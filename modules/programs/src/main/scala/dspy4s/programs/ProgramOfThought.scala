@@ -5,12 +5,10 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
@@ -18,8 +16,6 @@ import dspy4s.programs.contracts.TypedCall
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
-
-import scala.util.matching.Regex
 
 private def stringDv(s: String): DynamicValue =
   DynamicValue.Primitive(PrimitiveValue.String(s))
@@ -155,12 +151,12 @@ final case class ProgramOfThought[I, O](
       }))
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
-    baseSignature.inputShape.encode(call.input)
+    call.encodedInput(baseSignature.inputShape)
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
   override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
 
   override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    val inputs = baseSignature.inputShape.encode(call.input)
+    val inputs = call.encodedInput(baseSignature.inputShape)
     val baseCall = ProgramCall(
       inputs       = inputs,
       config       = call.config,
@@ -178,9 +174,9 @@ final case class ProgramOfThought[I, O](
       (code, codeOutput) = codeAndOutput
       extractInputs = inputs.updated("final_generated_code", stringDv(code)).updated("code_output", stringDv(codeOutput))
       result    <- answerer.apply(baseCall.copy(inputs = extractInputs))
-      reasoning <- extractReasoning(result.values)
-      baseOut   <- baseSignature.outputShape.decode(result.values)
-      augmented <- prepend.prepend(reasoning, baseOut).toRight(unsupportedOutputShape(baseOut))
+      augmented <- OutputAugmentation.decodePrepended(
+                     result.values, baseSignature.outputShape, "reasoning", "ProgramOfThought", baseSignature.name
+                   )
     yield Prediction(output = augmented, raw = result)
 
   /** Convenience entry mirroring the typed caller signature; builds a [[TypedCall]] and dispatches through the
@@ -226,7 +222,9 @@ final case class ProgramOfThought[I, O](
 
       predict.apply(call.copy(inputs = inputs)).flatMap { prediction =>
         val rawCode = prediction.get("generated_code").map(DynamicValues.renderText).getOrElse("")
-        extractCode(rawCode) match
+        // Shared with CodeAct — upstream's `_parse_code` is one function serving both programs, so both get
+        // the same LM-output tolerance (fence stripping, `---` truncation, trailing-assignment echo).
+        CodeAct.parseCode(rawCode) match
           case Left(parseErr) =>
             Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
               rawCode, parseErr, s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
@@ -248,36 +246,6 @@ final case class ProgramOfThought[I, O](
                 Left(interpreterErr)
       }
 
-  private def extractCode(raw: String): Either[String, String] =
-    val trimmed = raw.trim
-    if trimmed.isEmpty then Left("Empty code after parsing.")
-    else
-      ProgramOfThought.FencedBlock.findFirstMatchIn(trimmed) match
-        case Some(m) =>
-          val body = m.group(1).trim
-          if body.isEmpty then Left("Empty code after parsing.")
-          else Right(body)
-        case None =>
-          Right(trimmed)
-
-  private def extractReasoning(values: DynamicValue.Record): Either[DspyError, String] =
-    DynamicValues.recordGet(values, "reasoning") match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other) =>
-        Left(ValidationError(s"ProgramOfThought reasoning field must be a String, got: $other"))
-      case None =>
-        Left(NotFoundError(
-          resource = "prediction_field",
-          message  = "Required field 'reasoning' is missing from the ProgramOfThought answer prediction"
-        ))
-
-  private def unsupportedOutputShape(baseOut: O): DspyError =
-    ValidationError(
-      s"ProgramOfThought requires a product output (named tuple or case class); the signature " +
-      s"'${baseSignature.name}' has a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed " +
-      s"signature (Signature.of / Signature.derived / Signature.fromType / a literal Signature.fromString)."
-    )
-
   /** Use the default settings-based runtime resolution for the inner
     * DynamicPredict programs. */
   private object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
@@ -289,7 +257,3 @@ object ProgramOfThought:
   /** A failed code attempt carried into the next regenerate step: the `code` that failed and its `error` (fed to
     * the regenerator as `previous_code` / `error`), plus the pre-built message used if the budget is exhausted. */
   private[programs] final case class Attempt(code: String, error: String, exhaustionMessage: String)
-
-  /** Matches a fenced code block, optionally tagged ```python. Captures the
-    * snippet body in group 1. Multiline-aware. */
-  private val FencedBlock: Regex = """(?s)```(?:python|py)?\s*\n?(.*?)```""".r

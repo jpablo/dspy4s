@@ -103,11 +103,11 @@ class JsonStreamingStateSuite extends FunSuite:
     assertEquals(grouped.get("w"), Some("ok"))
   }
 
-  test("finish() flushes a value that the model truncated mid-stream") {
+  test("a value the model truncated mid-stream streams via receive() and is terminated by finish()") {
     val state = new JsonStreamingState(Vector(output("v")))
-    val _ = state.receive("""{"v": "abc""") // string never closes
+    val streamed = state.receive("""{"v": "abc""") // string never closes
     val flushed = state.finish()
-    val text = flushed.filter(_.fieldName == "v").map(_.text).mkString
+    val text = (streamed ++ flushed).filter(_.fieldName == "v").map(_.text).mkString
     assertEquals(text, "abc")
     assertEquals(flushed.lastOption.map(_.isLast), Some(true))
   }

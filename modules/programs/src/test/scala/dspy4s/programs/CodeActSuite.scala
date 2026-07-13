@@ -20,6 +20,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.typed.Signature
+import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,19 +42,6 @@ class CodeActSuite extends FunSuite:
       val i = idx.getAndIncrement() % responses.size
       responses(i)
     override def close(): Unit = closed = true
-
-  /** Returns canned LM responses from a queue, advancing on each `call`.
-    * Used to feed CodeAct successive codeact and extractor outputs. */
-  private final class ScriptedLm(responses: Vector[String]) extends LanguageModel:
-    private val idx = new AtomicInteger(0)
-    override val id: String = "scripted-codeact-lm"
-    override val mode: LmMode = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val i = idx.getAndIncrement()
-      if i >= responses.size then
-        Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
-      else
-        Right(LmResponse(outputs = Vector(LmOutput(text = responses(i)))))
 
   /** Scripted Adapter that parses the LM's raw text differently based on
     * the signature's expected outputs. For the codeact signature we look

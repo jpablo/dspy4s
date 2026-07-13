@@ -8,6 +8,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.programs.Predictors
+import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.optimize.Runnable
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the
@@ -52,7 +53,20 @@ final class GepaAdapter[P](
         EvaluationBatch(batch.map(_ => DynamicPrediction.empty), batch.map(_ => failureScore), trajectories = None)
 
   private def withTraces(prog: P, batch: Vector[Example])(using RuntimeContext): EvaluationBatch =
-    val trajectories = batch.map(example => runOne(prog, example))
+    // Reflective runs are independent — runOne isolates its trace context per example — so they go through the
+    // same parallel executor as the scores-only Evaluate path instead of serializing every minibatch run.
+    val trajectories = ParallelExecutor.fromSettings()
+      .execute(
+        task = (example: Example) => runOne(prog, example)(using RuntimeEnvironment.current),
+        data = batch
+      ) match
+      case Right(outcome) =>
+        batch.indices.toVector.map { i =>
+          outcome.results(i).getOrElse(Trajectory(batch(i), DynamicPrediction.empty, Vector.empty, failureScore))
+        }
+      case Left(_) =>
+        // Whole-batch failure (timeout / max-errors): degrade to failure trajectories, mirroring scoresOnly.
+        batch.map(example => Trajectory(example, DynamicPrediction.empty, Vector.empty, failureScore))
     EvaluationBatch(
       outputs = trajectories.map(_.prediction),
       scores = trajectories.map(_.score),

@@ -5,14 +5,17 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.:=
+import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
+import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
+import dspy4s.lm.contracts.StreamingLanguageModel
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -93,6 +96,20 @@ object UsageTracking:
   private val activeTrackers = new ThreadLocal[Vector[UsageTracker]]:
     override def initialValue(): Vector[UsageTracker] = Vector.empty
 
+  // The tracker stack must travel with the RuntimeContext to worker threads (ParallelExecutor, futures,
+  // the streamify producer) — otherwise usage recorded there is silently dropped. Registered once at object
+  // init; installing a tracker touches this object, so registration always precedes any capture that matters.
+  ContextPropagation.registerCarrier(new ContextPropagation.Carrier:
+    override def capture(): ContextPropagation.Snapshot =
+      val captured = activeTrackers.get()
+      new ContextPropagation.Snapshot:
+        override def restore[A](thunk: => A): A =
+          val previous = activeTrackers.get()
+          activeTrackers.set(captured)
+          try thunk
+          finally activeTrackers.set(previous)
+  )
+
   def withTracker[A](tracker: UsageTracker)(thunk: => A): A =
     val previous = activeTrackers.get()
     activeTrackers.set(previous :+ tracker)
@@ -111,9 +128,36 @@ final case class ManagedLanguageModel(
     cache: Option[LmCache] = None,
     retryPolicy: RetryPolicy = RetryPolicies.never,
     sleep: Long => Unit = ManagedLanguageModel.defaultSleep
-) extends LanguageModel:
+) extends StreamingLanguageModel:
   override val id: String = delegate.id
   override val mode: LmMode = delegate.mode
+  // Capability flags pass through — wrapping must not hide what the delegate supports (adapters consult
+  // these to decide e.g. whether to emit `response_format` or native tools).
+  override def supportsFunctionCalling: Boolean = delegate.supportsFunctionCalling
+  override def supportsResponseSchema: Boolean  = delegate.supportsResponseSchema
+  override def supportsReasoning: Boolean       = delegate.supportsReasoning
+
+  /** Streaming passthrough, so wrapping a streaming provider in ManagedLanguageModel does not silently disable
+    * token streaming (streamify only wraps `StreamingLanguageModel`s).
+    *
+    *   - Streaming delegate: tokens come straight from the delegate. The cache and retry policy do NOT apply to
+    *     streamed calls (same as calling the provider's `stream` directly).
+    *   - Non-streaming delegate: falls back to one terminal chunk assembled from the managed [[call]] (which
+    *     keeps cache / retries / history / usage), or a reified `finishReason = "error"` chunk on failure —
+    *     the same error convention providers use. */
+  override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+    delegate match
+      case streaming: StreamingLanguageModel => streaming.stream(request)
+      case _ =>
+        call(request) match
+          case Right(response) =>
+            Iterator.single(LmChunk(
+              text = response.outputs.headOption.map(_.text).getOrElse(""),
+              finishReason = Some("stop"),
+              usage = response.usage
+            ))
+          case Left(error) =>
+            Iterator.single(LmChunk(finishReason = Some("error"), raw = Some(Map("error" -> error.message))))
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     cache.flatMap(_.get(request)) match

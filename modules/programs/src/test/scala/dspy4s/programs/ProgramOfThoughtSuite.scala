@@ -13,14 +13,11 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.SubprocessPythonInterpreter
-import dspy4s.lm.contracts.LanguageModel
-import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.LmRequest
-import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.typed.Signature
+import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -41,15 +38,6 @@ class ProgramOfThoughtSuite extends FunSuite:
       val i = idx.getAndIncrement() % responses.size
       responses(i)
     override def close(): Unit = closed = true
-
-  private final class ScriptedLm(responses: Vector[String]) extends LanguageModel:
-    private val idx = new AtomicInteger(0)
-    override val id: String = "scripted-pot-lm"
-    override val mode: LmMode = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val i = idx.getAndIncrement()
-      val text = if i >= responses.size then "" else responses(i)
-      Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
   /** Adapter that picks output values from the LM's text by simple
     * convention used only for these scaffold tests:

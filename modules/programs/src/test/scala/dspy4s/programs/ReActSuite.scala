@@ -23,6 +23,7 @@ import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.typed.Signature
 import dspy4s.programs.contracts.ToolFunction
+import dspy4s.programs.support.ScriptedLm
 import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
@@ -33,17 +34,6 @@ class ReActSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
-
-  /** Returns canned LM response texts from a queue, advancing per `call`. Feeds successive react steps then the
-    * final extractor step. */
-  private final class ScriptedLm(responses: Vector[String]) extends LanguageModel:
-    val calls: AtomicInteger = AtomicInteger(0)
-    override val id: String = "scripted-react-lm"
-    override val mode: LmMode = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val i = calls.getAndIncrement()
-      val text = if i < responses.size then responses(i) else ""
-      Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
   /** Test adapter. For a react step (its outputs include `next_tool_name`) it parses the convention
     * `thought || tool_name || key=value` into the three react fields (`key=value` -> `{key: value}` args, blank ->

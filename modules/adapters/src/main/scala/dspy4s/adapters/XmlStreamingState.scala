@@ -108,8 +108,20 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends AdapterSt
         c match
           case '>' =>
             val tag = tagBuilder.toString
-            if currentField.contains(tag) then emitFinal(out)
-            phase = BetweenTags
+            if currentField.contains(tag) then
+              emitFinal(out)
+              phase = BetweenTags
+            else if currentField.isDefined && tag == "outputs" then
+              // The model closed the `<outputs>` wrapper without closing the field: flush what we have.
+              emitFinal(out)
+              phase = BetweenTags
+            else if currentField.isDefined then
+              // A closing tag that doesn't match the streaming field — nested markup the model emitted
+              // (e.g. `</i>`). Treat it as literal content and keep streaming; switching to BetweenTags
+              // would silently drop it AND everything up to the next '<', diverging from the batch parser.
+              val _ = contentBuffer.append("</").append(tag).append('>')
+              phase = InContent
+            else phase = BetweenTags
           case ' ' | '\t' | '\r' | '\n' => () // tolerate whitespace before '>'
           case _ => tagBuilder.append(c)
       case InContent =>

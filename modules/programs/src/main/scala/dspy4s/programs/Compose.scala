@@ -61,24 +61,37 @@ final case class AndThen[I, X, O, A <: Module[TypedCall[I], Prediction[X]], B <:
       ))
     }
 
+/** Shared `Predictors` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural
+  * `read(first) ++ read(second)`, `replace` slicing by `first`'s read-arity, and `first.` / `second.` name
+  * prefixing (fork 4). One implementation keeps optimizer addressing in sync between `>>>` and `parallel` —
+  * a change to the slicing or path naming applied to one combinator cannot silently miss the other. */
+private[programs] object PairPredictors:
+  def read[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[DynamicPredict] =
+    pa.read(first) ++ pb.read(second)
+
+  def replace[A, B, P](pa: Predictors[A], pb: Predictors[B])(first: A, second: B, updates: Vector[DynamicPredict])(
+      rebuild: (A, B) => P
+  ): P =
+    val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(first).size)
+    rebuild(pa.replace(first, firstUpdates), pb.replace(second, secondUpdates))
+
+  def readNamed[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[(String, DynamicPredict)] =
+    pa.readNamed(first).map { case (sub, p) => (if sub == "self" then "first" else s"first.$sub") -> p } ++
+      pb.readNamed(second).map { case (sub, p) => (if sub == "self" then "second" else s"second.$sub") -> p }
+
 object AndThen:
   /** Structural `read(a) ++ read(b)`; `replace` slices the updates by `first`'s read-arity (fork 4). */
   given andThenPredictors[I, X, O, A <: Module[TypedCall[I], Prediction[X]], B <: Module[TypedCall[X], Prediction[O]]](
       using pa: Predictors[A], pb: Predictors[B]
   ): Predictors[AndThen[I, X, O, A, B]] with
     def read(program: AndThen[I, X, O, A, B]): Vector[DynamicPredict] =
-      pa.read(program.first) ++ pb.read(program.second)
+      PairPredictors.read(pa, pb)(program.first, program.second)
 
     def replace(program: AndThen[I, X, O, A, B], updates: Vector[DynamicPredict]): AndThen[I, X, O, A, B] =
-      val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(program.first).size)
-      program.copy(
-        first  = pa.replace(program.first, firstUpdates),
-        second = pb.replace(program.second, secondUpdates)
-      )
+      PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) => program.copy(first = a, second = b))
 
     override def readNamed(program: AndThen[I, X, O, A, B]): Vector[(String, DynamicPredict)] =
-      pa.readNamed(program.first).map { case (sub, p) => (if sub == "self" then "first" else s"first.$sub") -> p } ++
-        pb.readNamed(program.second).map { case (sub, p) => (if sub == "self" then "second" else s"second.$sub") -> p }
+      PairPredictors.readNamed(pa, pb)(program.first, program.second)
 
 /** `parallel(a, b)` — independent composition: run both programs on the same input and tuple their outputs.
   * The Applicative operation; the dual of `>>>` (independent vs dependent). On the synchronous `Either`
@@ -103,22 +116,18 @@ final case class Both[I, OA, OB, A <: Module[TypedCall[I], Prediction[OA]], B <:
     )
 
 object Both:
+  /** Same structural distribution as [[AndThen.andThenPredictors]], via [[PairPredictors]]. */
   given bothPredictors[I, OA, OB, A <: Module[TypedCall[I], Prediction[OA]], B <: Module[TypedCall[I], Prediction[OB]]](
       using pa: Predictors[A], pb: Predictors[B]
   ): Predictors[Both[I, OA, OB, A, B]] with
     def read(program: Both[I, OA, OB, A, B]): Vector[DynamicPredict] =
-      pa.read(program.first) ++ pb.read(program.second)
+      PairPredictors.read(pa, pb)(program.first, program.second)
 
     def replace(program: Both[I, OA, OB, A, B], updates: Vector[DynamicPredict]): Both[I, OA, OB, A, B] =
-      val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(program.first).size)
-      program.copy(
-        first  = pa.replace(program.first, firstUpdates),
-        second = pb.replace(program.second, secondUpdates)
-      )
+      PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) => program.copy(first = a, second = b))
 
     override def readNamed(program: Both[I, OA, OB, A, B]): Vector[(String, DynamicPredict)] =
-      pa.readNamed(program.first).map { case (sub, p) => (if sub == "self" then "first" else s"first.$sub") -> p } ++
-        pb.readNamed(program.second).map { case (sub, p) => (if sub == "self" then "second" else s"second.$sub") -> p }
+      PairPredictors.readNamed(pa, pb)(program.first, program.second)
 
 /** The composition combinators as functions / operators. `id` and `parallel` are plain factories; `>>>` is an
   * infix extension on any typed program. Import `dspy4s.programs.*` (or this object's members) to use them. */

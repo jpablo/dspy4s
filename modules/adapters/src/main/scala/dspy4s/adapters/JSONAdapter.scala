@@ -9,6 +9,7 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.contracts.ToolChoice
+import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -27,6 +28,7 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.util.Try
+import scala.util.matching.Regex
 
 final case class JSONAdapter(
     name: String = "json",
@@ -64,12 +66,15 @@ final case class JSONAdapter(
 
     val demoMessages = invocation.demos.flatMap { demo =>
       val userText = renderFields(invocation.layout.inputFields, demo.values)
-      val assistantJson = textOutputFields
-        .flatMap(field =>
+      // Demo outputs must be NATIVE JSON values (int 42, not the string "42"): parse's coerce rejects
+      // string-quoted numbers/booleans, so string-rendered demos would teach the model exactly the shape the
+      // parser cannot accept. ujson.Obj preserves field order (signature order), unlike a Map round-trip.
+      val assistantJson = ujson.Obj.from(
+        textOutputFields.flatMap(field =>
           DynamicValues.recordGet(demo.values, field.name)
-            .map(dv => field.name -> DynamicValues.renderText(dv))
+            .map(dv => field.name -> JsonDynamic.toUjson(dv))
         )
-        .toMap
+      )
       Vector(
         Message(role = MessageRole.User, text = Some(userText)),
         Message(role = MessageRole.Assistant, text = Some(ujson.write(assistantJson)))
@@ -167,23 +172,15 @@ final case class JSONAdapter(
     if layout.outputFields.exists(NativeFunctionCalling.isToolCallsField) && output.toolCalls.nonEmpty then
       Right(parseNativeToolTurn(layout, output))
     else
-      parseStructured(layout, output).orElse {
-        if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
-          val field = layout.outputFields.head
-          val trimmed = output.text.trim
-          if trimmed.nonEmpty then
-            Right(
-              ParsedOutput(
-                values = DynamicValue.Record(Chunk.single(
-                  field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))
-                )),
-                rawText = Some(output.text),
-                metadata = Map("adapter" -> name, "fallback" -> "text")
-              )
-            )
-          else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
-        else Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
-      }
+      // The plain-text fallback only applies when the reply carries no parseable JSON object at all (the model
+      // ignored the format) — mirroring XMLAdapter. Falling back on ANY structured failure would mask real
+      // errors (a parsed object with a missing/miscoerced field would return the raw text as the "value").
+      extractJson(output.text).flatMap(parseJsonObject) match
+        case Right(root) => parseFields(layout, root, output)
+        case Left(_) =>
+          if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
+            AdapterTextSupport.singleOutputTextFallback(name, layout, output)
+          else Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
 
   /** Native tool turn: the model returned `tool_calls` (typically with an empty or non-JSON body). Fill the
     * `tool_calls` field from the structured calls; parse any JSON body that IS present for the remaining text
@@ -206,30 +203,27 @@ final case class JSONAdapter(
       metadata = Map("adapter" -> name)
     )
 
-  private def parseStructured(layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
-    for
-      jsonText <- extractJson(output.text)
-      root <- parseJsonObject(jsonText)
-      entries <- layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
-        for
-          soFar <- acc
-          value <- root.obj.get(field.name) match
-            case Some(raw) => coerce(field.typeRef, raw)
-            case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
-        yield soFar :+ (field.name -> value)
-      }
-    yield ParsedOutput(
-      values   = DynamicValue.Record(Chunk.from(entries)),
-      rawText  = Some(output.text),
-      metadata = Map("adapter" -> name)
-    )
+  private def parseFields(layout: SignatureLayout, root: Value, output: LmOutput): Either[DspyError, ParsedOutput] =
+    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
+      for
+        soFar <- acc
+        value <- root.obj.get(field.name) match
+          case Some(raw) => coerce(field.typeRef, raw)
+          case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
+      yield soFar :+ (field.name -> value)
+    }.map { entries =>
+      ParsedOutput(
+        values   = DynamicValue.Record(Chunk.from(entries)),
+        rawText  = Some(output.text),
+        metadata = Map("adapter" -> name)
+      )
+    }
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim
     if trimmed.startsWith("{") && trimmed.endsWith("}") then Right(trimmed)
     else
-      val fencedPattern = "(?s)```json\\s*(\\{.*?\\})\\s*```".r
-      fencedPattern.findFirstMatchIn(text).map(_.group(1)) match
+      JSONAdapter.FencedJson.findFirstMatchIn(text).map(_.group(1)) match
         case Some(json) => Right(json)
         case None =>
           extractFirstJsonObject(text).toRight(ParseError("adapter", "Could not find JSON object in model output"))
@@ -294,12 +288,8 @@ final case class JSONAdapter(
       case other        => other.render()
 
   private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: DynamicValue.Record): String =
-    fields.flatMap { field =>
-      val rendered = DynamicValues.recordGet(values, field.name)
-        .map(DynamicValues.renderText)
-        .orElse(field.defaultValue.map(_.toString))
-      rendered.map { value =>
-        val prefix = field.prefix.getOrElse(s"${field.name}:")
-        s"$prefix $value"
-      }
-    }.mkString("\n")
+    AdapterTextSupport.renderFields(fields, values)
+
+object JSONAdapter:
+  /** Fenced ```json block extractor, compiled once (parse runs per LM completion). */
+  private val FencedJson: Regex = "(?s)```json\\s*(\\{.*?\\})\\s*```".r

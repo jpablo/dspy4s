@@ -60,11 +60,15 @@ object Ensemble:
   ) extends DynamicModule:
     override val moduleName: String = "ensemble"
 
+    // One RNG for the program's lifetime: the SEQUENCE of samples is reproducible from `seed`, but each call
+    // draws a different subset. Reseeding per call made every invocation select the identical subset, so the
+    // other members never ran (java.util.Random underneath is thread-safe).
+    private val rng = new scala.util.Random(seed)
+
     override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       val selected = size match
         case Some(n) =>
           // `random.sample`-style selection without replacement: shuffle, then take n.
-          val rng = new scala.util.Random(seed)
           rng.shuffle(programs).take(n)
         case None => programs
 

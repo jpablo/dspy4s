@@ -3,6 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
+import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -67,23 +68,38 @@ final class StreamingLanguageModelWrapper private (
     val toolDeltas = mutable.ArrayBuffer.empty[LmToolCallDelta]
     val chunks = delegate.stream(request)
     try
+      // Providers reify transport/HTTP failures into a terminal chunk with `finishReason = "error"` and the
+      // message under `raw` (see OpenAiLanguageModel.stream). Surface that as a Left instead of folding it
+      // into a successful empty response the adapter would then misreport as a parse error.
+      var streamError: Option[String] = None
       chunks.foreach { chunk =>
-        emit(ctx, chunk)
-        text.append(chunk.text)
-        chunk.usage.foreach(usage => lastUsage = Some(usage))
-        if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
+        if chunk.finishReason.contains("error") then streamError = Some(errorMessage(chunk.raw))
+        else
+          emit(ctx, chunk)
+          text.append(chunk.text)
+          chunk.usage.foreach(usage => lastUsage = Some(usage))
+          if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
       }
-      flush(ctx)
-      val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
-      Right(
-        LmResponse(
-          outputs = Vector(LmOutput(text = text.toString, toolCalls = toolCalls)),
-          usage = lastUsage
-        )
-      )
+      streamError match
+        case Some(message) => Left(RuntimeError("streaming_lm", message))
+        case None =>
+          flush(ctx)
+          val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
+          Right(
+            LmResponse(
+              outputs = Vector(LmOutput(text = text.toString, toolCalls = toolCalls)),
+              usage = lastUsage
+            )
+          )
     catch
       case NonFatal(error) =>
         Left(RuntimeError("streaming_lm", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+    finally
+      // The delegate's iterator self-closes only on exhaustion; an exception mid-stream (from emit/receive)
+      // would otherwise abandon the live HTTP SSE connection until GC finalization.
+      chunks match
+        case closable: ClosableIterator[?] => closable.close()
+        case _                             => ()
 
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     val ctx = activeContext()
@@ -99,6 +115,15 @@ final class StreamingLanguageModelWrapper private (
       predictName: String,
       state: Option[AdapterStreamingState]
   )
+
+  /** Extract the provider's error message from a reified error chunk's `raw` payload
+    * (`Map("error" -> message)` by convention). */
+  private def errorMessage(raw: Option[Any]): String =
+    raw match
+      case Some(m: Map[?, ?]) =>
+        m.collectFirst { case (k, v) if String.valueOf(k) == "error" => String.valueOf(v) }.getOrElse(m.toString)
+      case Some(other) => other.toString
+      case None        => "LM stream terminated with an error"
 
   private def activeContext(): CallContext =
     ActivePredictContext.current match

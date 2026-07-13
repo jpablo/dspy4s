@@ -132,15 +132,18 @@ private[typed] object FunctionMacro:
         case _ => None
 
     def unnamedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
-      tpe.dealias match
-        case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
-          unnamedTupleParts(tail) match
-            case Some(rest) => Some(("_" + (rest.size + 1), head) :: rest)
-            case None       => None
-        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
-          Some(args.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
-        case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
-        case _                                          => None
+      // Flatten the tuple into its element types FIRST, then label positionally (`_1`, `_2`, ...). Numbering
+      // inside the recursion from the tail's size reversed the labels for `*:`-spelled tuples — the first
+      // element got the highest index (`Int *: Boolean *: EmptyTuple` came out as `[_2: Int, _1: Boolean]`).
+      def elements(t: TypeRepr): Option[List[TypeRepr]] =
+        t.dealias match
+          case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
+            elements(tail).map(head :: _)
+          case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
+            Some(args)
+          case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
+          case _                                          => None
+      elements(tpe).map(_.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
 
     def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
       items.foreach { (fieldName, tpe) =>
@@ -300,15 +303,18 @@ private[typed] object FunctionMacro:
         case _ => None
 
     def unnamedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
-      tpe.dealias match
-        case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
-          unnamedTupleParts(tail) match
-            case Some(rest) => Some(("_" + (rest.size + 1), head) :: rest)
-            case None       => None
-        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
-          Some(args.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
-        case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
-        case _                                          => None
+      // Flatten the tuple into its element types FIRST, then label positionally (`_1`, `_2`, ...). Numbering
+      // inside the recursion from the tail's size reversed the labels for `*:`-spelled tuples — the first
+      // element got the highest index (`Int *: Boolean *: EmptyTuple` came out as `[_2: Int, _1: Boolean]`).
+      def elements(t: TypeRepr): Option[List[TypeRepr]] =
+        t.dealias match
+          case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
+            elements(tail).map(head :: _)
+          case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
+            Some(args)
+          case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
+          case _                                          => None
+      elements(tpe).map(_.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
 
     def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
       items.foreach { (fieldName, tpe) =>

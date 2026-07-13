@@ -33,10 +33,14 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
   private val singleFieldFallback: Option[FieldSpec] =
     Option.when(outputFields.size == 1)(outputFields.head)
 
-  // Longest possible marker is the completed sentinel; we hold back that
-  // many trailing chars on every mid-stream emission so any partial marker
-  // is preserved for the next receive() call.
-  private val markerMaxLen: Int = ChatAdapter.CompletedMarker.length
+  // Longest possible marker — the completed sentinel or any output-field
+  // marker (`[[ ## name ## ]]`); we hold back that many trailing chars on
+  // every mid-stream emission so any partial marker is preserved for the
+  // next receive() call. Sizing to the completed sentinel alone would let a
+  // partial marker for a field name longer than `completed` be split and
+  // emitted as content, permanently losing the field boundary.
+  private val markerMaxLen: Int =
+    (outputFields.map(f => s"[[ ## ${f.name} ## ]]".length) :+ ChatAdapter.CompletedMarker.length).max
 
   private val buffer = new StringBuilder
   private var currentField: Option[String] = None
@@ -76,9 +80,7 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
           // Skip the trailing newline that follows the marker, if present,
           // so emitted content doesn't begin with an empty leading line.
           while buffer.nonEmpty && buffer.charAt(0) == '\n' do buffer.deleteCharAt(0)
-          currentField = field match
-            case Some(name) if outputNames.contains(name) => Some(name)
-            case _                                        => None
+          currentField = Some(field).filter(outputNames.contains)
           // Loop — there may be another marker already in the buffer.
         case None =>
           effectiveActiveField match
@@ -129,7 +131,7 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
     while result.isEmpty && it.hasNext do
       val m = it.next()
       if isLineAligned(text, m.start) then
-        result = Some(MarkerHit(Some(m.group(1)), markerStart = lineAlignedStart(text, m.start), markerEnd = m.end))
+        result = Some(MarkerHit(m.group(1), markerStart = lineAlignedStart(text, m.start), markerEnd = m.end))
     result
 
   /** True if position `i` is at the start of a line — either position 0,
@@ -163,7 +165,7 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
     while endExclusive > start && s.charAt(endExclusive - 1) == '\n' do endExclusive -= 1
     s.substring(start, endExclusive)
 
-  private final case class MarkerHit(field: Option[String], markerStart: Int, markerEnd: Int)
+  private final case class MarkerHit(field: String, markerStart: Int, markerEnd: Int)
 
 object ChatStreamingState:
   /** True iff `text`'s tail or interior could still grow into a

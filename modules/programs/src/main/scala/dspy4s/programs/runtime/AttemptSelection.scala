@@ -32,7 +32,9 @@ object AttemptSelection:
     *
     * @param runAttempt builds and runs attempt `idx` under the isolated [[RuntimeContext]] supplied here (the
     *                   caller varies `rolloutId` / `config` by index).
-    * @param reward     scores a successful attempt; a `Left` aborts the whole reduction.
+    * @param reward     scores a successful attempt; a `Left` charges the failure budget and the reduction
+    *                   continues with the best-so-far retained (upstream parity: reward_fn exceptions count
+    *                   toward fail_count).
     * @param feedback   optional inter-attempt hook. After a sub-threshold attempt that is not the last, it is
     *                   given the attempt's `(value, trace, score)` and returns the `Option[AdapterRef]` the
     *                   next attempt's isolated context runs under (`None` keeps the base adapter). The hook is
@@ -68,7 +70,13 @@ object AttemptSelection:
       attemptResult match
         case Right(value) =>
           reward(value) match
-            case Left(error) => return Left(error)
+            case Left(error) =>
+              // A reward failure charges the failure budget like a module failure — upstream DSPy catches
+              // reward_fn exceptions and continues; aborting would discard budgeted attempts and best-so-far.
+              lastError = Some(error)
+              if remainingFailures <= 0 then return Left(error)
+              remainingFailures -= 1
+              idx += 1
             case Right(score) =>
               if score > bestReward then
                 bestReward  = score

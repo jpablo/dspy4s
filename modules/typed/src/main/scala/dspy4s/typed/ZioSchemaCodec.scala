@@ -209,6 +209,12 @@ private[typed] object ZioSchemaCodec:
   def derivedFromZioSchema[A](role: FieldRole)(using schema: Schema[A]): Shape[A] =
     val rootReflect = schema.reflect
     val specs       = fieldSpecsFromReflect(rootReflect, role)
+    // Option-typed fields are not required on the wire: an LM that omits the key entirely means None, the
+    // same as an explicit null/"none". Collected once so decode can exempt them from the missing-field check.
+    val optionalFieldNames: Set[String] = rootReflect match
+      case rec: Reflect.Record[?, ?] =>
+        rec.fields.iterator.filter(term => optionSomeValueReflect(term.value).isDefined).map(_.name).toSet
+      case _ => Set.empty
 
     new Shape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
@@ -226,12 +232,24 @@ private[typed] object ZioSchemaCodec:
 
       override def decode(raw: DynamicValue.Record): Either[DspyError, A] =
         val present = DynamicValues.recordKeys(raw).toSet
-        val missing = fieldSpecs.iterator.map(_.name).filterNot(present.contains).toList
+        val missing = fieldSpecs.iterator
+          .map(_.name)
+          .filterNot(present.contains)
+          .filterNot(optionalFieldNames.contains)
+          .toList
         if missing.nonEmpty then
           Left(NotFoundError(
             resource = "prediction_field",
             message  = s"Missing required fields: ${missing.mkString(", ")}"
           ))
         else
-          val normalized = normalize(raw, rootReflect)
+          // Fill absent optional fields with Null so normalize's Option handling maps them to None.
+          val absentOptionals = fieldSpecs.iterator
+            .map(_.name)
+            .filter(name => optionalFieldNames.contains(name) && !present.contains(name))
+            .toSeq
+          val filled =
+            if absentOptionals.isEmpty then raw
+            else DynamicValue.Record(raw.fields ++ Chunk.from(absentOptionals.map(_ -> (DynamicValue.Null: DynamicValue))))
+          val normalized = normalize(filled, rootReflect)
           schema.fromDynamicValue(normalized).left.map(err => ValidationError(err.toString))
