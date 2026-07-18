@@ -187,10 +187,14 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
     usage-merge on `>>>`, `augment` closing position, execution-wrapping modes.
-  - **Para prototype** (commit `9d4b5cd`): the optimizer-addressability layer identified as the Para
-    construction (morphism = parameters x shape; composition concatenates parameters; `replace` is the
-    reparameterization 2-cell; homogeneous `DynamicPredict` parameters make `Vector` the exact, not
-    approximate, parameter object). Prototyped as `dspy4s.programs.para.ParaCat` over packaged `Prog`
-    morphisms, whose construction gate makes un-addressable programs a compile error; pinned by
-    `ParaCatLawSuite`. Adoption as the optimizer entry-point API is deferred to the CIO phase; see the
-    "Para formalization" section of the step-6 spec.
+  - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`): the optimizer-addressability layer
+    identified as the Para construction (morphism = parameters x shape; composition concatenates parameters;
+    `replace` is the reparameterization 2-cell; homogeneous `DynamicPredict` parameters make `Vector` the
+    exact, not approximate, parameter object). Prototyped as `dspy4s.programs.para.ParaCat` over packaged
+    `Prog` morphisms (construction gate: un-addressable programs are a compile error) and closed end-to-end:
+    `Prog` also packages the input decoder (threaded through composition), giving uniform
+    `Predictors[Prog]` + `Runnable[Prog]`, so `new COPRO[Prog[I, O]]` works directly, including on upcast
+    values and composed pipelines. Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Known wrinkle: `id`
+    carries a failing decoder (the fix is codec-equipped objects, the CategoryTC P[_] slot). Adoption as the
+    public optimizer entry-point API is deferred to the CIO phase; see the "Para formalization" section of
+    the step-6 spec.

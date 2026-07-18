@@ -170,21 +170,29 @@ Honest limitation: the Mirror-based `Predictors.derived` still resolves for any 
 contributes empty for fields without instances, so the gate is airtight only for non-`Product` programs;
 tightening that fallback is a `Predictors`-layer fix (same track as the instance gaps above).
 
-**Entry-point experiment (commit `8d7e009`).** `dspy4s.optimize.para.ParaCompile.copro` drives COPRO through
-a packaged `Prog`: the path-dependent instantiation `new COPRO[prog.Rep](config)(using prog.addressable,
-runnable)` shows the packaged evidence IS the `Predictors` instance the generic optimizer needs, with no
-optimizer internals touched, and call-site assertions go through the Para surface (`params`) with no
-`Predictors` summon. Findings, pinned by `ParaCompileSuite` (one at compile time):
+**Entry-point experiment (commit `8d7e009`), CLOSED (commit `d1d38d0`).** The first round drove COPRO through
+a packaged `Prog` via the path-dependent instantiation `new COPRO[prog.Rep](config)(using prog.addressable,
+runnable)` and surfaced the finding: **Para evidence alone is not enough to optimize.** Optimizers also need
+`Runnable` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
+type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.
 
-- **Para evidence alone is not enough to optimize.** Optimizers also need `Runnable` (decode a record, run),
-  which `Prog` does not package; it arrives as `using Runnable[prog.Rep]`, resolvable only while the caller
-  holds the packaging-refined type. After an upcast to bare `Prog[I, O]`, `params` / `reparam` keep working
-  but `copro` stops compiling (`Runnable[erased.Rep]` unsummonable). Composed pipelines (`AndThen`) have no
-  `Runnable` at all.
-- **Conclusion for full adoption:** package the evaluation capability too, most naturally an input decoder
-  (`DynamicValue.Record => Either[DspyError, I]`) captured at `Prog.of` time. Composition threads the first
-  leg's decoder, which would also give composed pipelines the `Runnable` that bare user composites must
-  hand-write today (the gap `Runnable`'s scaladoc documents).
+The close: `Prog` now also packages `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at
+`Prog.of` time (explicitly, or via the `ProgInput` typeclass from a program's signature) and threaded through
+composition (`f >>> g` keeps `f`'s decoder; `reparam` preserves it). Both optimizer capabilities are then
+uniform over the packaged type: `Predictors[Prog[I, O]]` (Prog companion; read/replace = the Para
+projection/reparameterization) and `Runnable[Prog[I, O]]` (ParaCompile; decode + run). So `Prog[I, O]` is a
+first-class optimizable program: `new COPRO[Prog[I, O]](config)` type-checks directly (any `Teleprompter`
+does), the previously-uncompilable upcast case now optimizes, and a composed pipeline `a >>> b` is
+record-runnable and optimizable end-to-end, which the ambient `Module` world cannot do without a hand-written
+`Runnable` (the gap `Runnable`'s scaladoc documents). Pinned by `ParaCatLawSuite` (decoder threading) and
+`ParaCompileSuite` (upcast + composed-pipeline optimization).
+
+Remaining wrinkle from the close, documented and pinned: `id[A]` carries a failing decoder (nothing decodes
+an arbitrary `A` from a record), so the left-unit law holds on the run/params observations but degrades on
+the evaluation observation (`id >>> p` threads the failing decoder; `p >>> id` is fine). The principled fix
+is a constrained category over CODEC-EQUIPPED OBJECTS (the `CategoryTC[P[_], Hom]` object-constraint slot,
+with `P[A]` = "A decodes from a record"), which would also make `ParaCat.id` honest; deferred to full
+adoption.
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -302,10 +310,11 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
-- **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above) from prototype to
-  the optimizer entry-point API, together with the missing `Predictors` instances (BestOfN / Refine / RLM),
-  a tightened derivation fallback, and the packaged input decoder the entry-point experiment concluded is
-  required (so evaluation survives upcasts and composition). Best done alongside the CIO phase so the API
-  breaks once.
+- **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above; the input decoder is
+  now packaged and the entry-point loop is closed) from prototype to the optimizer entry-point API, together
+  with the missing `Predictors` instances (BestOfN / Refine / RLM), a tightened derivation fallback, the
+  remaining `ProgInput` instances (ChainOfThought / ReAct / CodeAct), and codec-equipped objects (the
+  `CategoryTC` P[_] slot) to make `id`'s decoder honest. Best done alongside the CIO phase so the API breaks
+  once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.
