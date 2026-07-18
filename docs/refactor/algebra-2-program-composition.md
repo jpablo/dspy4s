@@ -138,13 +138,39 @@ typeclasses, not new machinery. The rule:
   captures a learnable predict inside a closure is un-addressable and therefore wrong.
 - `read` distributes over the algebra (the homomorphism law above). Per combinator:
   - `>>>`, `parallel`: structural (`read(a) ++ read(b)`; Mirror-derivable from the two child fields).
-  - `augment(p)`, `selectBest(p)`: pass-through (`read(p)`).
-  - `loop`: holds `policy` + `extractor` fields (`read = [policy, extractor]`; = ReAct/CodeAct today).
-  - `feedback`: holds inner `p` + `critic` predict (`read = read(p) ++ [critic]`; = Refine today).
+  - `augment(p)`, `selectBest(p)`: pass-through (`read(p)`). GAP (code-truth): `BestOfN` has no `Predictors`
+    instance today, so the pass-through is specified but not implemented.
+  - `loop`: holds `policy` + `extractor` fields (`read = [policy, extractor]`; = ReAct/CodeAct today; RLM has
+    the override fields but no instance yet, a recorded gap).
+  - `feedback`: holds inner `p` + `critic` predict (`read = read(p) ++ [critic]`). GAP (code-truth): this is
+    the target, not the present state; `Refine` consumes `Predictors[P]` for advice routing but builds its
+    OfferFeedback critic inline per call, so the critic is not addressable and `Refine` exposes no instance.
 - **`mode` is restricted to non-learnable transforms** so it can stay closure-shaped and ergonomic. Anything
   with a learnable sub-generation (synthesis, comparison, critique) is a dedicated combinator that holds the
   predict as a field (`selectBest`, `feedback`, `MultiChainComparison`), never a mode. This is the one place
   the design must diverge from kyo-ai, whose closure-captured `Tool`/`Mode` carry no optimizer constraint.
+
+### Para formalization (prototype landed)
+
+The addressability layer is an instance of the **Para construction** from categorical learning theory
+("Backprop as Functor", Fong/Spivak/Tuyeras; "Categorical Foundations of Gradient-Based Learning",
+Cruttwell et al.): a morphism is a pair (parameters, shape), composition tensors the parameters, and
+reparameterization is the 2-cell layer optimizers act on. dspy4s's learnables are homogeneous (every
+parameter is a `DynamicPredict`), so the parameter tensor degenerates to the free monoid
+`Vector[DynamicPredict]`, and `Predictors.read` / `replace` are exactly Para's projection and
+reparameterization; the untyped `Vector` is therefore lossless, not a shadow.
+
+Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
+jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
+`dspy4s.programs.para.ParaCat` (id / `>>>` / `params` / `reparam` with the Para laws) over
+`dspy4s.programs.para.Prog` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
+`Predictors[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
+the category (compile error at `Prog.of`, proven by a `compileErrors` test); pinned by `ParaCatLawSuite`.
+Honest limitation: the Mirror-based `Predictors.derived` still resolves for any `Product` and silently
+contributes empty for fields without instances, so the gate is airtight only for non-`Product` programs;
+tightening that fallback is a `Predictors`-layer fix (same track as the instance gaps above). Nothing
+consumes the prototype yet; the candidate adoption point is the CIO substrate phase, where the optimizer
+entry points get touched anyway.
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -262,5 +288,8 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
+- **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above) from prototype to
+  the optimizer entry-point API, together with the missing `Predictors` instances (BestOfN / Refine / RLM)
+  and a tightened derivation fallback. Best done alongside the CIO phase so the API breaks once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.

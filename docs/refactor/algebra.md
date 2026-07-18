@@ -187,3 +187,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
     usage-merge on `>>>`, `augment` closing position, execution-wrapping modes.
+  - **Para prototype** (commit `9d4b5cd`): the optimizer-addressability layer identified as the Para
+    construction (morphism = parameters x shape; composition concatenates parameters; `replace` is the
+    reparameterization 2-cell; homogeneous `DynamicPredict` parameters make `Vector` the exact, not
+    approximate, parameter object). Prototyped as `dspy4s.programs.para.ParaCat` over packaged `Prog`
+    morphisms, whose construction gate makes un-addressable programs a compile error; pinned by
+    `ParaCatLawSuite`. Adoption as the optimizer entry-point API is deferred to the CIO phase; see the
+    "Para formalization" section of the step-6 spec.
