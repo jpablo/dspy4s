@@ -1,8 +1,8 @@
 package dspy4s.programs.para
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.AndThen
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Identity
@@ -11,7 +11,9 @@ import dspy4s.programs.Predictors
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
+import dspy4s.typed.Shape
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.Schema
 
 /** PROTOTYPE (step-6 follow-up): the Para-shaped category with the optimizer built into the categorical
   * interface, rather than bolted on per node via ad-hoc [[Predictors]] instances.
@@ -42,49 +44,87 @@ import zio.blocks.schema.DynamicValue
   * cannot enter the category (a compile error at `Prog.of`, versus the ambient `Module` world where
   * addressability is best-effort).
   *
-  * Evaluation capability (the `ParaCompile` experiment's conclusion, closed here). Optimizers need more than
-  * the Para structure: they run candidates on data-bag [[dspy4s.core.contracts.Example]]s, which requires
+  * Evaluation capability (the `ParaCompile` experiment's conclusion, closed). Optimizers need more than the
+  * Para structure: they run candidates on data-bag [[dspy4s.core.contracts.Example]]s, which requires
   * decoding a `DynamicValue.Record` into the typed input `I`. [[Prog]] therefore also packages
   * `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at `Prog.of` time (from the
-  * program's signature via [[ProgInput]], or supplied explicitly) and THREADED through composition (`f >>> g`
-  * keeps `f`'s decoder, the composite's input being `f`'s input). Together with the packaged `Predictors`
-  * this makes `Prog[I, O]` itself a first-class optimizable program: see [[Prog.progPredictors]] and the
-  * uniform `Runnable[Prog[I, O]]` in `dspy4s.optimize.para.ParaCompile`. Composed pipelines get evaluation
-  * for free, where bare user composites must hand-write a `Runnable` today.
+  * program's signature via [[ProgInput]], from the input type's [[RecordCodec]], or supplied explicitly) and
+  * THREADED through composition (`f >>> g` keeps `f`'s decoder, the composite's input being `f`'s input).
+  * Together with the packaged `Predictors` this makes `Prog[I, O]` itself a first-class optimizable program:
+  * see [[Prog.progPredictors]] and the uniform `Runnable[Prog[I, O]]` in
+  * `dspy4s.optimize.para.ParaCompile`. Composed pipelines get evaluation for free, where bare user
+  * composites must hand-write a `Runnable` today.
   *
-  * Honest wrinkles, recorded rather than hidden:
-  *   - **`id` has no input decoder.** Nothing can decode an arbitrary `A` from a record, so `ParaCat.id`
-  *     carries a failing decoder. On the run/params observations the unit laws hold, but on the evaluation
-  *     observation `id >>> p` degrades (it threads id's failing decoder). The principled fix is a
-  *     constrained category over CODEC-EQUIPPED OBJECTS (the `CategoryTC[P[_], Hom]` object-constraint slot,
-  *     with `P[A]` = "A decodes from a record"), deferred to full adoption.
-  *   - For `Product` program types the Mirror-based `Predictors.derived` still resolves and silently
-  *     contributes empty for fields without instances; packaging surfaces the evidence but cannot tighten
-  *     that fallback (a `Predictors`-layer issue, tracked separately).
+  * Codec-equipped objects (the `CategoryTC[P[_], Hom]` object-constraint slot). [[ParaCat]] is parameterized
+  * by an object constraint `P[_]`, instantiated for [[Prog]] at `P = RecordCodec` ("the object decodes from
+  * a record"). Unlike the blanket Ok-style constrained category (every object of every operation
+  * constrained), the constraint appears ONLY where evaluation evidence must be SYNTHESIZED rather than
+  * threaded: `id[A: P]` builds its decoder from the object's codec, while `>>>` needs nothing (both legs
+  * already carry packaged decoders). Consequences, stated honestly:
+  *   - over codec-equipped objects the structure is a genuine category: `id` exists and the unit laws hold
+  *     on ALL observations, including evaluation, when programs are packaged coherently (decoders drawn from
+  *     the same codecs, which [[RecordCodec.fromSchema]] guarantees for signature-derived programs by using
+  *     the SAME `Shape.derivedWithRole(Input)` decode path as `Signature.derived`);
+  *   - morphisms whose endpoint types carry no codec still compose (the packaged decoders travel with them),
+  *     but `id` does not exist there: without codecs the structure is only a semicategory, and `id` at a
+  *     non-codec object is a compile error (pinned in the law suite).
+  *
+  * Honest limitation retained: for `Product` program types the Mirror-based `Predictors.derived` still
+  * resolves and silently contributes empty for fields without instances; packaging surfaces the evidence but
+  * cannot tighten that fallback (a `Predictors`-layer issue, tracked separately).
   *
   * Status: prototype. The optimizer entry point over `Prog` lives in `dspy4s.optimize.para.ParaCompile`;
   * promotion to the public API is deferred to the CIO substrate phase. */
-trait ParaCat[Hom[_, _]]:
-  /** The Category unit at `A`; parameter-free (`params(id) = Vector.empty`). */
-  def id[A]: Hom[A, A]
+trait ParaCat[P[_], Hom[_, _]]:
+  /** The Category unit at a CODEC-EQUIPPED object `A` (the `P[_]` constraint synthesizes the evaluation
+    * evidence); parameter-free (`params(id) = Vector.empty`). */
+  def id[A: P]: Hom[A, A]
 
   extension [A, B](f: Hom[A, B])
-    /** Diagrammatic composition (the library's `>>>` order): run `f`, thread its output into `g`. */
+    /** Diagrammatic composition (the library's `>>>` order): run `f`, thread its output into `g`. Not
+      * object-constrained: packaged morphisms carry their own evidence. */
     infix def >>>[C](g: Hom[B, C]): Hom[A, C]
     /** Para projection: the morphism's tunable parameters, in stable address order. */
     def params: Vector[DynamicPredict]
     /** Para reparameterization (the 2-cell optimizers act on): the same shape over new parameters. */
     def reparam(ps: Vector[DynamicPredict]): Hom[A, B]
 
+/** The object constraint of the Para category over [[Prog]] (the `CategoryTC` `P[_]` slot): `A` decodes
+  * from a data-bag record. Supplies `id`'s decoder and (via [[ProgInput]]'s low-priority instance) coherent
+  * default packaging for any typed program whose input type is codec-equipped. */
+trait RecordCodec[A]:
+  def decode(record: DynamicValue.Record): Either[DspyError, A]
+
+object RecordCodec:
+  /** Named carrier (precedent: `Predictors.DerivedPredictors`) so the given below does not mint an anonymous
+    * class per summon site. */
+  private final class ShapeBacked[A](shape: Shape[A]) extends RecordCodec[A]:
+    def decode(record: DynamicValue.Record): Either[DspyError, A] = shape.decode(record)
+
+  /** Any product with a zio-blocks `Schema`, decoded via the typed layer's INPUT `Shape` — the SAME
+    * `Shape.derivedWithRole(FieldRole.Input)` path `Signature.derived` gives `inputShape`, so codec-derived
+    * decoders cohere definitionally with signature-packaged programs (the left-unit coherence condition). */
+  given fromSchema[A <: Product](using Schema[A]): RecordCodec[A] =
+    ShapeBacked(Shape.derivedWithRole[A](FieldRole.Input))
+
 /** How to obtain a record-to-`I` input decoder from a program's own structure at packaging time. The
   * `programs`-module home for the per-type knowledge `dspy4s.optimize.Runnable` keeps per optimizer target
-  * (decode via the signature's `inputShape`). Prototype scope: only the [[Predict]] instance ships; the
-  * other typed leaves (`ChainOfThought`, `ReAct`, `CodeAct`) are the same one-liner over their signatures.
-  * Composites never need an instance: composition threads the first leg's packaged decoder. */
+  * (decode via the signature's `inputShape`). Prototype scope: the [[Predict]] instance ships (the other
+  * typed leaves are the same one-liner over their signatures), plus the low-priority [[RecordCodec]]-based
+  * fallback covering ANY typed program whose input type is codec-equipped. Composites never need an
+  * instance: composition threads the first leg's packaged decoder. */
 trait ProgInput[F, I]:
   def decoder(program: F): DynamicValue.Record => Either[DspyError, I]
 
-object ProgInput:
+trait LowPriorityProgInput:
+  /** Coherent default packaging from the object codec: any typed program whose input type has a
+    * [[RecordCodec]]. Lower priority than a program's own signature-derived instance. `F` is deliberately
+    * unconstrained here (the codec-based decoder never inspects the program, and constraining `F` by a
+    * bound mentioning `I` defeats implicit inference); `Prog.of`'s own bound polices what `F` may be. */
+  given fromRecordCodec[F, I](using codec: RecordCodec[I]): ProgInput[F, I] with
+    def decoder(program: F): DynamicValue.Record => Either[DspyError, I] = codec.decode
+
+object ProgInput extends LowPriorityProgInput:
   given forPredict[I, O]: ProgInput[Predict[I, O], I] with
     def decoder(program: Predict[I, O]): DynamicValue.Record => Either[DspyError, I] =
       program.signature.inputShape.decode
@@ -120,8 +160,8 @@ object Prog:
       val addressable: Predictors[F] = ev
       val decodeInput: DynamicValue.Record => Either[DspyError, I] = decode
 
-  /** Package a program whose input decoder is derivable from its own structure (a [[ProgInput]] instance,
-    * e.g. any `Predict[I, O]` via its signature). */
+  /** Package a program whose input decoder is derivable ([[ProgInput]]: from its signature for `Predict`, or
+    * from the input type's [[RecordCodec]] for any typed program with a codec-equipped input). */
   def of[I, O, F <: Module[TypedCall[I], Prediction[O]]](f: F)(using
       ev: Predictors[F],
       codec: ProgInput[F, I]
@@ -144,20 +184,13 @@ object Prog:
     override def readNamed(program: Prog[I, O]): Vector[(String, DynamicPredict)] =
       program.addressable.readNamed(program.program)
 
-  /** The Para-shaped category instance over packaged programs. Composition packages an [[AndThen]] node with
-    * the structurally-derived evidence of its two children (so `params` distributes by construction) and
-    * threads the FIRST leg's input decoder (the composite's input is the first leg's input). */
-  given paraCatProg: ParaCat[Prog] with
-    def id[A]: Prog[A, A] =
-      // No decoder exists for an arbitrary A; see the "honest wrinkles" note on the ParaCat scaladoc.
-      Prog.of(
-        Identity[A](),
-        _ =>
-          Left(ValidationError(
-            "id[A] carries no input decoder (an arbitrary A cannot be decoded from a record); " +
-              "record-based evaluation needs a concrete packaged program at the head of the pipeline"
-          ))
-      )
+  /** The Para-shaped category instance over packaged programs, with objects constrained by [[RecordCodec]].
+    * `id` synthesizes its decoder from the object's codec; composition packages an [[AndThen]] node with the
+    * structurally-derived evidence of its two children (so `params` distributes by construction) and threads
+    * the FIRST leg's input decoder (the composite's input is the first leg's input). */
+  given paraCatProg: ParaCat[RecordCodec, Prog] with
+    def id[A: RecordCodec]: Prog[A, A] =
+      Prog.of(Identity[A](), summon[RecordCodec[A]].decode)
 
     extension [A, B](f: Prog[A, B])
       infix def >>>[C](g: Prog[B, C]): Prog[A, C] =

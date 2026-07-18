@@ -8,7 +8,7 @@ import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmRespon
 import dspy4s.optimize.{COPROConfig, Runnable, QAInput, QAOutput}
 import dspy4s.optimize.para.ParaCompile.{*, given}
 import dspy4s.programs.Predict
-import dspy4s.programs.para.Prog
+import dspy4s.programs.para.{ParaCat, Prog, RecordCodec}
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -184,5 +184,23 @@ class ParaCompileSuite extends FunSuite:
       val report = result.toOption.get
       assertEquals(report.metadata.get("predictors"), Some(2))
       assertEquals(report.bestProgram.params.size, 2)
+    }
+  }
+
+  // ── 5. Codec-equipped objects: an id-headed pipeline evaluates and optimizes ─────────────────────────────
+
+  test("id at the head of a pipeline is record-runnable and optimizable (codec-equipped objects)") {
+    // id[QAInput] synthesizes its decoder from RecordCodec[QAInput] (via the input type's Schema, the same
+    // Shape decode path Signature.derived uses), so the previously-degraded left-unit case now evaluates and
+    // optimizes end-to-end.
+    val C = summon[ParaCat[RecordCodec, Prog]]
+    val pipeline: Prog[QAInput, QAOutput] = C.id[QAInput] >>> Prog.of(Predict[QAInput, QAOutput](taskSignature))
+    RuntimeEnvironment.withSettings(settings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val ran = summon[Runnable[Prog[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
+      assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
+      val report = pipeline.copro(config(), trainset).toOption.get
+      assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
+      assertEquals(report.metadata.get("best_score"), Some(100.0))
     }
   }

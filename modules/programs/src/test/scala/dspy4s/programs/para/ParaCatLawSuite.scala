@@ -15,10 +15,16 @@ import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.Schema
+
+// Top-level fixtures (Schema derivation requires top-level types): codec-equipped objects for the id laws.
+final case class Boxed(n: Int) derives Schema
+final case class Wrapped(s: String) derives Schema
 
 /** Laws for the Para-shaped category prototype ([[ParaCat]] / [[Prog]]): the Para laws (parameter-free
   * identity, composition concatenates parameters, reparameterization round-trip and write-back), the Category
-  * laws on the packaged carrier, and the construction gate (no `Predictors` evidence, no `Prog`). See the
+  * laws on the packaged carrier (id at CODEC-EQUIPPED objects, per the `RecordCodec` object constraint), and
+  * the two construction gates (no `Predictors` evidence, no `Prog`; no `RecordCodec`, no `id`). See the
   * scaladoc on [[ParaCat]] for the correspondence this pins. */
 class ParaCatLawSuite extends FunSuite:
 
@@ -55,7 +61,7 @@ class ParaCatLawSuite extends FunSuite:
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[ParaCat[Prog]]
+  private val C = summon[ParaCat[RecordCodec, Prog]]
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
@@ -68,7 +74,7 @@ class ParaCatLawSuite extends FunSuite:
 
   // ── Para law: the identity is parameter-free ─────────────────────────────────────────────────────────────
   test("params(id) = empty") {
-    assertEquals(C.id[Int].params, Vector.empty[DynamicPredict])
+    assertEquals(C.id[Boxed].params, Vector.empty[DynamicPredict])
   }
 
   // ── Para law: composition concatenates parameters ────────────────────────────────────────────────────────
@@ -99,13 +105,13 @@ class ParaCatLawSuite extends FunSuite:
     assertEquals(ab.reparam(fresh)(TypedCall(5)).map(_.output), Right(2))
   }
 
-  // ── Category laws on the packaged carrier ────────────────────────────────────────────────────────────────
+  // ── Category laws on the packaged carrier (id needs codec-equipped endpoints) ───────────────────────────
   test("id >>> f = f = f >>> id on the threaded output value and on params") {
-    val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
-    val left  = C.id[Int] >>> f
-    val right = f >>> C.id[String]
-    assertEquals(left(TypedCall(7)).map(_.output), f(TypedCall(7)).map(_.output))
-    assertEquals(right(TypedCall(7)).map(_.output), f(TypedCall(7)).map(_.output))
+    val f = pack(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val left  = C.id[Boxed] >>> f
+    val right = f >>> C.id[Wrapped]
+    assertEquals(left(TypedCall(Boxed(7))).map(_.output), f(TypedCall(Boxed(7))).map(_.output))
+    assertEquals(right(TypedCall(Boxed(7))).map(_.output), f(TypedCall(Boxed(7))).map(_.output))
     assertEquals(left.params, f.params)
     assertEquals(right.params, f.params)
   }
@@ -131,15 +137,26 @@ class ParaCatLawSuite extends FunSuite:
     assertEquals((a >>> b).reparam((a >>> b).params).decodeInput(DynamicValue.Record.empty), Right(7))
   }
 
-  test("id carries no decoder (documented wrinkle): id fails, f >>> id keeps f's decoder") {
-    val dec7: DynamicValue.Record => Either[DspyError, Int] = _ => Right(7)
-    val f = Prog.of(step[Int, String]("f", "i -> s")(i => s"v$i"), dec7)
-    // id itself cannot decode an arbitrary A from a record.
-    assert(C.id[Int].decodeInput(DynamicValue.Record.empty).isLeft)
-    // The right unit keeps f's decoder; the LEFT unit degrades on this observation (id >>> f threads id's
-    // failing decoder), the documented law wrinkle whose principled fix is codec-equipped objects.
-    assertEquals((f >>> C.id[String]).decodeInput(DynamicValue.Record.empty), Right(7))
-    assert((C.id[Int] >>> f).decodeInput(DynamicValue.Record.empty).isLeft)
+  test("id's decoder IS the object codec; the left unit holds on evaluation under coherent packaging") {
+    // Previously the pinned WRINKLE: id carried a failing decoder, so id >>> p degraded on the evaluation
+    // observation. With codec-equipped objects (RecordCodec, the CategoryTC P[_] slot) id synthesizes its
+    // decoder from the object's codec, and coherent packaging (p packaged via the same codec, through
+    // ProgInput.fromRecordCodec) restores the left unit on this observation too.
+    val boxedRecord = DynamicValues.record("n" := 5)
+    val p = Prog.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}"))) // packaged via the codec
+    assertEquals(C.id[Boxed].decodeInput(boxedRecord), Right(Boxed(5)))
+    assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), p.decodeInput(boxedRecord))
+    assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
+    assertEquals((p >>> C.id[Wrapped]).decodeInput(boxedRecord), Right(Boxed(5)))
+  }
+
+  test("id at a non-codec object does not compile (the structure is only a semicategory there)") {
+    // Int is not a Product, so RecordCodec.fromSchema does not apply: id[Int] has no evaluation evidence to
+    // synthesize and is rejected at compile time. Morphisms touching Int still compose (their packaged
+    // decoders travel with them); only the unit is gated.
+    val errors = compileErrors("C.id[Int]")
+    assert(errors.nonEmpty, "expected id at a non-codec object to fail compilation")
+    assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }
 
   // ── The construction gate: no Predictors evidence, no Prog ───────────────────────────────────────────────
