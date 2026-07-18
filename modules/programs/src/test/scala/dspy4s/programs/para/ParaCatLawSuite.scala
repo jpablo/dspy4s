@@ -4,6 +4,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
@@ -17,15 +18,18 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
 
+import java.util.concurrent.atomic.AtomicInteger
+
 // Top-level fixtures (Schema derivation requires top-level types): codec-equipped objects for the id laws.
 final case class Boxed(n: Int) derives Schema
 final case class Wrapped(s: String) derives Schema
 
-/** Laws for the Para-shaped category prototype ([[ParaCat]] / [[Prog]]): the Para laws (parameter-free
-  * identity, composition concatenates parameters, reparameterization round-trip and write-back), the Category
-  * laws on the packaged carrier (id at CODEC-EQUIPPED objects, per the `RecordCodec` object constraint), and
-  * the two construction gates (no `Predictors` evidence, no `Prog`; no `RecordCodec`, no `id`). See the
-  * scaladoc on [[ParaCat]] for the correspondence this pins. */
+/** Executes the `@Law` statements of the Para prototype's structures ([[Cat]] / [[ParaCat]] over [[Prog]],
+  * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural
+  * `==` for parameter vectors and delooping morphisms, observational equality (run output / params / decode)
+  * for `Prog` morphisms. Also pins the two construction gates (no `Predictors`, no `Prog`; no `RecordCodec`,
+  * no `id`), decoder threading, and the copy NON-law (`parallel` shares its input; copying is not natural
+  * for effectful morphisms). */
 class ParaCatLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -72,59 +76,92 @@ class ParaCatLawSuite extends FunSuite:
   /** Package a Step with the stub decoder (Step has no signature, so no ProgInput instance applies). */
   private def pack[I, O](m: Step[I, O]): Prog[I, O] = Prog.of(m, noCodec[I])
 
-  // ── Para law: the identity is parameter-free ─────────────────────────────────────────────────────────────
-  test("params(id) = empty") {
-    assertEquals(C.id[Boxed].params, Vector.empty[DynamicPredict])
+  /** Execute an IsEq of Prog morphisms under the morphism observations: params and run output at `input`. */
+  private def assertObsEq[I, O](eq: IsEq[Prog[I, O]], input: I): Unit =
+    assertEquals(eq.lhs.params, eq.rhs.params)
+    assertEquals(eq.lhs(TypedCall(input)).map(_.output), eq.rhs(TypedCall(input)).map(_.output))
+
+  /** Execute an IsEq whose carrier supports plain structural equality (parameter vectors). */
+  private def assertIsEq[A](eq: IsEq[A]): Unit =
+    assertEquals(eq.lhs, eq.rhs)
+
+  // ── Cat laws over Prog, executed from the trait's @Law statements ────────────────────────────────────────
+  test("Cat laws (identity left/right, associativity) hold observationally on Prog") {
+    val f = pack(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
+    assertObsEq(C.identityLeft(f), Boxed(7))
+    assertObsEq(C.identityRight(f), Boxed(7))
+
+    val a = pack(step[Int, String]("a", "i -> s")(i => s"<$i>"))
+    val g = pack(step[String, String]("g", "s -> t")(s => s + s))
+    val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
+    assertObsEq(C.associativity(a, g, h), 3)
+    assertEquals(((a >>> g) >>> h)(TypedCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
-  // ── Para law: composition concatenates parameters ────────────────────────────────────────────────────────
-  test("params(f >>> g) = params(f) ++ params(g)") {
+  // ── Para laws, executed from the @Law statements ─────────────────────────────────────────────────────────
+  test("Para laws: paramsId, paramsCompose, reparam round-trip and write-back") {
     val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
     val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
     val ab = a >>> b
-    assertEquals(ab.params, a.params ++ b.params)
-  }
-
-  // ── Para law: reparameterization round-trip and write-back ───────────────────────────────────────────────
-  test("reparam(f, params(f)) preserves params and behavior") {
-    val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
-    val ab = a >>> b
-    val rt = ab.reparam(ab.params)
-    assertEquals(rt.params, ab.params)
-    assertEquals(rt(TypedCall(5)).map(_.output), ab(TypedCall(5)).map(_.output))
-  }
-
-  test("params(reparam(f, ps)) = ps (write-back, addressed by position)") {
-    val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
-    val ab = a >>> b
+    assertIsEq(C.paramsId[Boxed])
+    assertIsEq(C.paramsCompose(a, b))
+    assertIsEq(C.reparamRoundTrip(ab))
     val fresh = Vector(predict("i -> s2"), predict("s -> n2"))
-    assertEquals(ab.reparam(fresh).params, fresh)
-    // The shape is untouched: the reparameterized composite still computes the same function.
+    assertIsEq(C.reparamWriteBack(ab, fresh))
+    // Behavior riders: reparameterization changes parameters, never the shape's computation.
+    assertEquals(ab.reparam(ab.params)(TypedCall(5)).map(_.output), ab(TypedCall(5)).map(_.output))
     assertEquals(ab.reparam(fresh)(TypedCall(5)).map(_.output), Right(2))
   }
 
-  // ── Category laws on the packaged carrier (id needs codec-equipped endpoints) ───────────────────────────
-  test("id >>> f = f = f >>> id on the threaded output value and on params") {
-    val f = pack(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val left  = C.id[Boxed] >>> f
-    val right = f >>> C.id[Wrapped]
-    assertEquals(left(TypedCall(Boxed(7))).map(_.output), f(TypedCall(Boxed(7))).map(_.output))
-    assertEquals(right(TypedCall(Boxed(7))).map(_.output), f(TypedCall(Boxed(7))).map(_.output))
-    assertEquals(left.params, f.params)
-    assertEquals(right.params, f.params)
+  // ── parallel: fan-out behavior, its params law, and the copy NON-law ─────────────────────────────────────
+  test("parallel runs both legs on the same input and satisfies paramsParallel") {
+    val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
+    val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
+    assertEquals(C.parallel(f, g)(TypedCall(4)).map(_.output), Right(("v4", 5)))
+    assertIsEq(C.paramsParallel(f, g))
   }
 
-  test("(f >>> g) >>> h = f >>> (g >>> h) on the output value and on params") {
-    val f = pack(step[Int, String]("f", "i -> s")(i => s"<$i>"))
-    val g = pack(step[String, String]("g", "s -> t")(s => s + s))
-    val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
-    val l = (f >>> g) >>> h
-    val r = f >>> (g >>> h)
-    assertEquals(l(TypedCall(3)).map(_.output), r(TypedCall(3)).map(_.output))
-    assertEquals(l.params, r.params)
-    assertEquals(l(TypedCall(3)).map(_.output), Right(6))
+  test("copy is NOT natural: h >>> parallel(f, g) shares h; parallel(h >>> f, h >>> g) re-runs it") {
+    val runs = AtomicInteger(0)
+    val h = pack(step[Int, Int]("h", "i -> j") { i => val _ = runs.incrementAndGet(); i * 10 })
+    val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
+    val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
+
+    val shared = h >>> C.parallel(f, g)
+    val copied = C.parallel(h >>> f, h >>> g)
+
+    runs.set(0)
+    val sharedOut = shared(TypedCall(3)).map(_.output)
+    assertEquals(runs.get(), 1) // h ran once (the whole point of sharing)
+    runs.set(0)
+    val copiedOut = copied(TypedCall(3)).map(_.output)
+    assertEquals(runs.get(), 2) // h ran twice
+
+    // With a DETERMINISTIC h the outputs coincide; with an effectful (LLM) h they need not — which is why
+    // fan-out naturality is a NON-law here (the CD/Markov-category shape), not an oversight.
+    assertEquals(sharedOut, copiedOut)
+    // And the optimizer sees the difference structurally: h's parameters appear once vs twice.
+    assertEquals(shared.params.size, 3)
+    assertEquals(copied.params.size, 4)
+
+  }
+
+  // ── The delooping is itself a lawful Cat instance (checked with real ==) ─────────────────────────────────
+  test("paramsDeloop satisfies the Cat laws under structural equality") {
+    val v1 = Vector(predict("a -> b"))
+    val v2 = Vector(predict("b -> c"))
+    val v3 = Vector(predict("c -> d"))
+    assertIsEq(paramsDeloop.identityLeft[Unit, Unit](v1))
+    assertIsEq(paramsDeloop.identityRight[Unit, Unit](v1))
+    assertIsEq(paramsDeloop.associativity[Unit, Unit, Unit, Unit](v1, v2, v3))
+  }
+
+  // ── ReadFunctor: params as a functor value; its laws executed ────────────────────────────────────────────
+  test("ReadFunctor preserves identities and composition (params is a functor into the delooping)") {
+    val a = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
+    val b = pack(step[String, Int]("b", "s -> n")(s => s.length))
+    assertIsEq(ReadFunctor.identities[Boxed])
+    assertIsEq(ReadFunctor.composition(a, b))
   }
 
   // ── The packaged evaluation capability: decoder threading through composition ───────────────────────────
@@ -138,10 +175,9 @@ class ParaCatLawSuite extends FunSuite:
   }
 
   test("id's decoder IS the object codec; the left unit holds on evaluation under coherent packaging") {
-    // Previously the pinned WRINKLE: id carried a failing decoder, so id >>> p degraded on the evaluation
-    // observation. With codec-equipped objects (RecordCodec, the CategoryTC P[_] slot) id synthesizes its
-    // decoder from the object's codec, and coherent packaging (p packaged via the same codec, through
-    // ProgInput.fromRecordCodec) restores the left unit on this observation too.
+    // With codec-equipped objects (RecordCodec, the CategoryTC P[_] slot) id synthesizes its decoder from
+    // the object's codec, and coherent packaging (p packaged via the same codec, through
+    // ProgInput.fromRecordCodec) gives the left unit on the evaluation observation too.
     val boxedRecord = DynamicValues.record("n" := 5)
     val p = Prog.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}"))) // packaged via the codec
     assertEquals(C.id[Boxed].decodeInput(boxedRecord), Right(Boxed(5)))

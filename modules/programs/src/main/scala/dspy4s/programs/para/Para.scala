@@ -2,8 +2,12 @@ package dspy4s.programs.para
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
+import dspy4s.core.contracts.IsEq
+import dspy4s.core.contracts.Law
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.<->
 import dspy4s.programs.AndThen
+import dspy4s.programs.Both
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Identity
 import dspy4s.programs.Predict
@@ -26,14 +30,16 @@ import zio.blocks.schema.Schema
   * degenerates to the free monoid `Vector[DynamicPredict]` and `Predictors.read` / `Predictors.replace` are
   * exactly Para's projection / reparameterization. This file makes that identity a first-class interface.
   *
-  * Laws (checked in `ParaCatLawSuite`):
-  * {{{
-  *   params(id)        = Vector.empty                          // identity is parameter-free
-  *   params(f >>> g)   = params(f) ++ params(g)                // composition concatenates parameters
-  *   reparam(f, params(f)) = f                                 // reparameterization round-trip (on params/run)
-  *   params(reparam(f, ps)) = ps                               // reparameterization writes back
-  * }}}
-  * plus the Category laws on the packaged carrier (identity, associativity, on the threaded output value).
+  * Laws are stated ON the structures as `@Law` methods returning [[IsEq]] (the math-with-scala statement
+  * style) and EXECUTED by `ParaCatLawSuite` under the observation honest for each law: structural `==` for
+  * parameter vectors, observational equality (run output / params / decode) for morphisms. The categorical
+  * inventory:
+  *
+  *   - [[Cat]]: the base category (id at codec-equipped objects, `>>>`), instantiated by [[Prog]] AND by the
+  *     [[paramsDeloop]] delooping of the parameter monoid.
+  *   - [[ParaCat]]: [[Cat]] plus the Para operations (`params` / `reparam`) and the fan-out `parallel`.
+  *   - [[ReadFunctor]]: `params` as a FUNCTOR VALUE `Prog --> B(Vector[DynamicPredict])`; its functor laws
+  *     are precisely the Para projection laws.
   *
   * Encoding note. The morphisms of the underlying category are NOT a uniform binary type: they are
   * concretely-typed case classes (`AndThen[I, X, O, A, B]`, ...) precisely so per-node `Predictors` instances
@@ -41,33 +47,31 @@ import zio.blocks.schema.Schema
   * Sigma-type `(Rep <: Module[...], program: Rep, Predictors[Rep], decodeInput)` that hides the concrete
   * representation behind a binary `Prog[I, O]`, carrying its addressability AND evaluation evidence with it.
   * Packaging is the only way to construct a `Prog`, so a program whose type has no `Predictors` instance
-  * cannot enter the category (a compile error at `Prog.of`, versus the ambient `Module` world where
-  * addressability is best-effort).
+  * cannot enter the category (a compile error at `Prog.of`).
   *
-  * Evaluation capability (the `ParaCompile` experiment's conclusion, closed). Optimizers need more than the
-  * Para structure: they run candidates on data-bag [[dspy4s.core.contracts.Example]]s, which requires
-  * decoding a `DynamicValue.Record` into the typed input `I`. [[Prog]] therefore also packages
-  * `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at `Prog.of` time (from the
-  * program's signature via [[ProgInput]], from the input type's [[RecordCodec]], or supplied explicitly) and
-  * THREADED through composition (`f >>> g` keeps `f`'s decoder, the composite's input being `f`'s input).
-  * Together with the packaged `Predictors` this makes `Prog[I, O]` itself a first-class optimizable program:
-  * see [[Prog.progPredictors]] and the uniform `Runnable[Prog[I, O]]` in
-  * `dspy4s.optimize.para.ParaCompile`. Composed pipelines get evaluation for free, where bare user
-  * composites must hand-write a `Runnable` today.
+  * Evaluation capability. Optimizers run candidates on data-bag [[dspy4s.core.contracts.Example]]s, which
+  * requires decoding a `DynamicValue.Record` into the typed input `I`. [[Prog]] therefore also packages
+  * `decodeInput`, captured at `Prog.of` time (from the program's signature via [[ProgInput]], from the input
+  * type's [[RecordCodec]], or supplied explicitly) and THREADED through composition (`f >>> g` keeps `f`'s
+  * decoder). Together with the packaged `Predictors` this makes `Prog[I, O]` a first-class optimizable
+  * program: see [[Prog.progPredictors]] and `Runnable[Prog[I, O]]` in `dspy4s.optimize.para.ParaCompile`.
   *
-  * Codec-equipped objects (the `CategoryTC[P[_], Hom]` object-constraint slot). [[ParaCat]] is parameterized
-  * by an object constraint `P[_]`, instantiated for [[Prog]] at `P = RecordCodec` ("the object decodes from
-  * a record"). Unlike the blanket Ok-style constrained category (every object of every operation
-  * constrained), the constraint appears ONLY where evaluation evidence must be SYNTHESIZED rather than
-  * threaded: `id[A: P]` builds its decoder from the object's codec, while `>>>` needs nothing (both legs
-  * already carry packaged decoders). Consequences, stated honestly:
-  *   - over codec-equipped objects the structure is a genuine category: `id` exists and the unit laws hold
-  *     on ALL observations, including evaluation, when programs are packaged coherently (decoders drawn from
-  *     the same codecs, which [[RecordCodec.fromSchema]] guarantees for signature-derived programs by using
-  *     the SAME `Shape.derivedWithRole(Input)` decode path as `Signature.derived`);
-  *   - morphisms whose endpoint types carry no codec still compose (the packaged decoders travel with them),
-  *     but `id` does not exist there: without codecs the structure is only a semicategory, and `id` at a
-  *     non-codec object is a compile error (pinned in the law suite).
+  * Codec-equipped objects (the `CategoryTC[P[_], Hom]` object-constraint slot). [[Cat]] is parameterized by
+  * an object constraint `P[_]`, instantiated for [[Prog]] at `P = RecordCodec` ("the object decodes from a
+  * record"). Unlike the blanket Ok-style constrained category, the constraint appears ONLY where evaluation
+  * evidence must be SYNTHESIZED rather than threaded: `id[A: P]` builds its decoder from the object's codec,
+  * while `>>>` needs nothing (both legs already carry packaged decoders). Over codec-equipped objects the
+  * structure is a genuine category (unit laws hold on all observations under coherent packaging, which
+  * [[RecordCodec.fromSchema]] guarantees for signature-derived programs by sharing `Signature.derived`'s
+  * decode path); morphisms touching non-codec objects still compose, but `id` does not exist there (a
+  * semicategory), pinned as a compile error in the law suite.
+  *
+  * `parallel` and the copy non-law. [[ParaCat.parallel]] runs BOTH legs on the SAME input and tuples the
+  * outputs: categorically the fan-out (pairing) of copy-then-tensor, the CD/Markov-category shape, NOT a
+  * plain monoidal tensor. Copy is deliberately NOT natural here: for an effectful `h`,
+  * `h >>> parallel(f, g)` runs `h` once (shared) while `parallel(h >>> f, h >>> g)` runs it twice, and the
+  * two differ both distributionally and in `params` (the optimizer sees `h` twice on the right — genuinely a
+  * different program). The law suite pins this as executable evidence, not a footnote.
   *
   * Honest limitation retained: for `Product` program types the Mirror-based `Predictors.derived` still
   * resolves and silently contributes empty for fields without instances; packaging surfaces the evidence but
@@ -75,19 +79,77 @@ import zio.blocks.schema.Schema
   *
   * Status: prototype. The optimizer entry point over `Prog` lives in `dspy4s.optimize.para.ParaCompile`;
   * promotion to the public API is deferred to the CIO substrate phase. */
-trait ParaCat[P[_], Hom[_, _]]:
-  /** The Category unit at a CODEC-EQUIPPED object `A` (the `P[_]` constraint synthesizes the evaluation
-    * evidence); parameter-free (`params(id) = Vector.empty`). */
+trait Cat[P[_], Hom[_, _]]:
+  /** The Category unit at a `P`-equipped object (for [[Prog]], `P` synthesizes the evaluation evidence). */
   def id[A: P]: Hom[A, A]
 
   extension [A, B](f: Hom[A, B])
-    /** Diagrammatic composition (the library's `>>>` order): run `f`, thread its output into `g`. Not
-      * object-constrained: packaged morphisms carry their own evidence. */
+    /** Diagrammatic composition: run `f`, thread its output into `g`. Not object-constrained: packaged
+      * morphisms carry their own evidence. */
     infix def >>>[C](g: Hom[B, C]): Hom[A, C]
+
+  @Law("left unit")
+  def identityLeft[A: P, B](f: Hom[A, B]): IsEq[Hom[A, B]] =
+    (id[A] >>> f) <-> f
+
+  @Law("right unit")
+  def identityRight[A, B: P](f: Hom[A, B]): IsEq[Hom[A, B]] =
+    (f >>> id[B]) <-> f
+
+  @Law("associativity")
+  def associativity[A, B, C, D](f: Hom[A, B], g: Hom[B, C], h: Hom[C, D]): IsEq[Hom[A, D]] =
+    ((f >>> g) >>> h) <-> (f >>> (g >>> h))
+
+/** [[Cat]] plus the Para structure (projection / reparameterization) and the fan-out `parallel`. */
+trait ParaCat[P[_], Hom[_, _]] extends Cat[P, Hom]:
+  extension [A, B](f: Hom[A, B])
     /** Para projection: the morphism's tunable parameters, in stable address order. */
     def params: Vector[DynamicPredict]
     /** Para reparameterization (the 2-cell optimizers act on): the same shape over new parameters. */
     def reparam(ps: Vector[DynamicPredict]): Hom[A, B]
+
+  /** Fan-out (pairing): run both legs on the SAME input, tuple the outputs. Copy-then-tensor fused (the
+    * CD/Markov shape); copy is NOT natural for effectful morphisms — see the file scaladoc and the law
+    * suite's counterexample. */
+  def parallel[I, A, B](f: Hom[I, A], g: Hom[I, B]): Hom[I, (A, B)]
+
+  @Law("the identity is parameter-free")
+  def paramsId[A: P]: IsEq[Vector[DynamicPredict]] =
+    id[A].params <-> Vector.empty
+
+  @Law("composition concatenates parameters")
+  def paramsCompose[A, B, C](f: Hom[A, B], g: Hom[B, C]): IsEq[Vector[DynamicPredict]] =
+    (f >>> g).params <-> (f.params ++ g.params)
+
+  @Law("fan-out concatenates parameters")
+  def paramsParallel[I, A, B](f: Hom[I, A], g: Hom[I, B]): IsEq[Vector[DynamicPredict]] =
+    parallel(f, g).params <-> (f.params ++ g.params)
+
+  @Law("reparameterization round-trip")
+  def reparamRoundTrip[A, B](f: Hom[A, B]): IsEq[Vector[DynamicPredict]] =
+    f.reparam(f.params).params <-> f.params
+
+  @Law("reparameterization writes back (arity-matched ps)")
+  def reparamWriteBack[A, B](f: Hom[A, B], ps: Vector[DynamicPredict]): IsEq[Vector[DynamicPredict]] =
+    f.reparam(ps).params <-> ps
+
+/** The trivial object constraint, for categories whose Hom ignores its object indices (the delooping). */
+type AnyObject[A] = DummyImplicit
+
+/** The delooping B(M) of the parameter monoid M = `Vector[DynamicPredict]`: one object (all indices
+  * collapse), morphisms are parameter vectors, composition is concatenation, id is the empty vector. The
+  * target of [[ReadFunctor]]. */
+type ParamsHom[A, B] = Vector[DynamicPredict]
+
+given paramsDeloop: Cat[AnyObject, ParamsHom] with
+  def id[A: AnyObject]: ParamsHom[A, A] = Vector.empty
+  extension [A, B](f: ParamsHom[A, B])
+    infix def >>>[C](g: ParamsHom[B, C]): ParamsHom[A, C] = f ++ g
+
+/** An identity-on-objects functor between Hom-indexed categories — the minimal math-with-scala `Functor`
+  * shape needed here (the delooping target ignores objects, so an object map would be inert). */
+trait CatFunctor[Source[_, _], Target[_, _]]:
+  def map[A, B](f: Source[A, B]): Target[A, B]
 
 /** The object constraint of the Para category over [[Prog]] (the `CategoryTC` `P[_]` slot): `A` decodes
   * from a data-bag record. Supplies `id`'s decoder and (via [[ProgInput]]'s low-priority instance) coherent
@@ -138,8 +200,8 @@ sealed trait Prog[I, O]:
   val program: Rep
   val addressable: Predictors[Rep]
 
-  /** Decode a data-bag record into the typed input `I` (the packaged evaluation capability; see the
-    * scaladoc on [[ParaCat]]). Captured at packaging time; threaded through composition. */
+  /** Decode a data-bag record into the typed input `I` (the packaged evaluation capability). Captured at
+    * packaging time; threaded through composition. */
   val decodeInput: DynamicValue.Record => Either[DspyError, I]
 
   /** Run the packaged program (delegates to the module's wrapped `apply`, so tracing/callbacks apply). */
@@ -187,10 +249,16 @@ object Prog:
   /** The Para-shaped category instance over packaged programs, with objects constrained by [[RecordCodec]].
     * `id` synthesizes its decoder from the object's codec; composition packages an [[AndThen]] node with the
     * structurally-derived evidence of its two children (so `params` distributes by construction) and threads
-    * the FIRST leg's input decoder (the composite's input is the first leg's input). */
+    * the FIRST leg's input decoder; `parallel` packages a [[Both]] the same way (both legs share the input,
+    * so the first leg's decoder serves the pair). */
   given paraCatProg: ParaCat[RecordCodec, Prog] with
     def id[A: RecordCodec]: Prog[A, A] =
       Prog.of(Identity[A](), summon[RecordCodec[A]].decode)
+
+    def parallel[I, A, B](f: Prog[I, A], g: Prog[I, B]): Prog[I, (A, B)] =
+      Prog.of(Both[I, A, B, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
+        Both.bothPredictors[I, A, B, f.Rep, g.Rep](using f.addressable, g.addressable)
+      )
 
     extension [A, B](f: Prog[A, B])
       infix def >>>[C](g: Prog[B, C]): Prog[A, C] =
@@ -202,3 +270,18 @@ object Prog:
 
       def reparam(ps: Vector[DynamicPredict]): Prog[A, B] =
         Prog.of(f.addressable.replace(f.program, ps), f.decodeInput)(using f.addressable)
+
+/** [[ParaCat.params]] as a FUNCTOR VALUE: the (object-collapsing) functor from the [[Prog]] category to the
+  * [[paramsDeloop]] delooping of the parameter monoid. Its functor laws are precisely the Para projection
+  * laws ([[ParaCat.paramsId]] / [[ParaCat.paramsCompose]]), restated here in functor vocabulary — the
+  * categorical name for what `Predictors.read` is. */
+object ReadFunctor extends CatFunctor[Prog, ParamsHom]:
+  def map[A, B](f: Prog[A, B]): ParamsHom[A, B] = f.params
+
+  @Law("functor preserves identities")
+  def identities[A: RecordCodec]: IsEq[ParamsHom[A, A]] =
+    map(Prog.paraCatProg.id[A]) <-> paramsDeloop.id[A]
+
+  @Law("functor preserves composition")
+  def composition[A, B, C](f: Prog[A, B], g: Prog[B, C]): IsEq[ParamsHom[A, C]] =
+    map(f >>> g) <-> (map(f) >>> map(g))
