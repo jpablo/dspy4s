@@ -70,7 +70,7 @@ class TypedBestOfNSuite extends FunSuite:
       Right(candidate("B", 0.9)),
       Right(candidate("C", 0.5))
     ))
-    val bestOfN = BestOfN[Q, Cand](
+    val bestOfN = BestOfN[TypedStub, Q, Cand](
       module    = stub,
       n         = 3,
       rewardFn  = (_, pred) => pred.output.score,
@@ -97,7 +97,7 @@ class TypedBestOfNSuite extends FunSuite:
       Right(candidate("A", 0.95)),   // >= threshold -> stop after the first attempt
       Right(candidate("B", 0.10))
     ))
-    val bestOfN = BestOfN[Q, Cand](stub, n = 3, rewardFn = (_, p) => p.output.score, threshold = 0.9)
+    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, p) => p.output.score, threshold = 0.9)
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = bestOfN.apply(TypedCall(Q("x")))
@@ -111,7 +111,7 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f2")),
       Left(RuntimeError("typed_stub", "f3"))
     ))
-    val bestOfN = BestOfN[Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0)
+    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0)
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = bestOfN.apply(TypedCall(Q("x")))
@@ -125,7 +125,7 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f2")),
       Right(candidate("ok", 1.0))
     ))
-    val bestOfN = BestOfN[Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
+    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = bestOfN.apply(TypedCall(Q("x")))
@@ -144,7 +144,7 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f4")),
       Left(RuntimeError("typed_stub", "f5"))
     ))
-    val bestOfN = BestOfN[Q, Cand](stub, n = 5, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(3))
+    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 5, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(3))
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = bestOfN.apply(TypedCall(Q("x")))
@@ -163,7 +163,7 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "boom")),            // first failure, at a high index
       Right(candidate("D", 0.9))
     ))
-    val bestOfN = BestOfN[Q, Cand](stub, n = 5, rewardFn = (_, p) => p.output.score, threshold = 1.0, failCount = Some(2))
+    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 5, rewardFn = (_, p) => p.output.score, threshold = 1.0, failCount = Some(2))
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = bestOfN.apply(TypedCall(Q("x")))

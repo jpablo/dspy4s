@@ -19,9 +19,13 @@ import zio.blocks.schema.DynamicValue
   * `callInputs` is empty: a generic wrapper has no `Signature` to encode `I` for its own trace entry, so the
   * meaningful inputs live on the nested inner program's event. The best-of-`n` selection loop lives in
   * [[dspy4s.programs.runtime.AttemptSelection.bestOf]] (generic over the attempt result), shared with [[Refine]];
-  * `BestOfN` is its independent-samples instance (no inter-attempt feedback). */
-final case class BestOfN[I, O](
-    module: Module[TypedCall[I], Prediction[O]],
+  * `BestOfN` is its independent-samples instance (no inter-attempt feedback).
+  *
+  * @tparam P the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the
+  *           pass-through `Predictors` instance ([[BestOfN.bestOfNPredictors]]) can delegate to the inner
+  *           program's own instance; an abstract `Module[...]` field would erase that evidence. */
+final case class BestOfN[P <: Module[TypedCall[I], Prediction[O]], I, O](
+    module: P,
     n: Int,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
@@ -54,3 +58,19 @@ final case class BestOfN[I, O](
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     apply(TypedCall(input, config, traceEnabled))
+
+object BestOfN:
+  /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any
+    * learnable predict of its own, so `read` / `replace` / `readNamed` delegate to the inner program's
+    * instance unchanged. */
+  given bestOfNPredictors[P <: Module[TypedCall[I], Prediction[O]], I, O](using
+      inner: Predictors[P]
+  ): Predictors[BestOfN[P, I, O]] with
+    def read(program: BestOfN[P, I, O]): Vector[DynamicPredict] =
+      inner.read(program.module)
+
+    def replace(program: BestOfN[P, I, O], updates: Vector[DynamicPredict]): BestOfN[P, I, O] =
+      program.copy(module = inner.replace(program.module, updates))
+
+    override def readNamed(program: BestOfN[P, I, O]): Vector[(String, DynamicPredict)] =
+      inner.readNamed(program.module)

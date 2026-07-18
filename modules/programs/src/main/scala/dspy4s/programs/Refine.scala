@@ -62,13 +62,24 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
     n: Int,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
-    failCount: Option[Int] = None
+    failCount: Option[Int] = None,
+    /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
+      * [[Refine.offerFeedbackLayout]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
+      * addressable + immutably replaceable (see [[Refine.refinePredictors]]), mirroring the ReAct/CodeAct
+      * override pattern. */
+    criticPredictOverride: Option[DynamicPredict] = None
 )(using
     predictors: Predictors[P]
 ) extends Module[TypedCall[I], Prediction[O]]:
   require(n > 0, "n must be greater than 0")
 
   override val moduleName: String = "refine"
+
+  /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern). The feedback hook
+    * runs this member rather than rebuilding a predict per attempt, so optimizers can tune the critic's
+    * instructions/demos like any other learnable. Tunable via [[criticPredictOverride]]. */
+  val criticPredict: DynamicPredict =
+    criticPredictOverride.getOrElse(DynamicPredict(layout = Refine.offerFeedbackLayout, name = Some("offer_feedback")))
 
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record = DynamicValue.Record.empty
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean       = call.traceEnabled
@@ -94,7 +105,7 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
         // by `bestOf`).
         val named       = predictors.readNamed(module)
         val moduleNames = named.map(_._1)
-        Refine.generateAdvice(call.input, prediction, trace, score, threshold, moduleNames)(using baseContext)
+        Refine.generateAdvice(criticPredict, call.input, prediction, trace, score, threshold, moduleNames)(using baseContext)
           .map { adviceMap =>
             val byLayout = named.iterator.map { case (name, predict) =>
               predict.layout -> adviceMap.getOrElse(name, "N/A")
@@ -114,6 +125,33 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
     apply(TypedCall(input, config, traceEnabled))
 
 object Refine:
+
+  /** Addressability (the spec's `feedback` rule): `read = read(module) ++ [critic]`, the critic LAST.
+    * `replace` routes the leading updates to the inner program and the trailing one to the critic via the
+    * eq-based override pattern (see [[Predictors.reactPredictors]]): `replace(p, read(p)) == p` holds because
+    * `read` returns the exact member objects. */
+  given refinePredictors[P <: Module[TypedCall[I], Prediction[O]], I, O](using
+      inner: Predictors[P]
+  ): Predictors[Refine[P, I, O]] with
+    def read(program: Refine[P, I, O]): Vector[DynamicPredict] =
+      inner.read(program.module) :+ program.criticPredict
+
+    def replace(program: Refine[P, I, O], updates: Vector[DynamicPredict]): Refine[P, I, O] =
+      val innerArity = inner.read(program.module).size
+      require(
+        updates.size == innerArity + 1,
+        s"Refine expects ${innerArity + 1} updates (inner predicts ++ critic), got ${updates.size}"
+      )
+      val nextCritic =
+        if updates(innerArity) eq program.criticPredict then program.criticPredictOverride
+        else Some(updates(innerArity))
+      program.copy(
+        module                = inner.replace(program.module, updates.take(innerArity)),
+        criticPredictOverride = nextCritic
+      )
+
+    override def readNamed(program: Refine[P, I, O]): Vector[(String, DynamicPredict)] =
+      inner.readNamed(program.module) :+ ("critic" -> program.criticPredict)
 
   /** Resolve the base adapter from the ambient context, narrowing the `AdapterRef` to a concrete [[Adapter]];
     * falls back to a default [[ChatAdapter]] when none is configured (mirrors Python's
@@ -199,11 +237,13 @@ object Refine:
         s"${entry.component}: $inputs -> $outputs"
       }.mkString("\n")
 
-  /** Run the OfferFeedback sub-program with the ambient LM/adapter (NOT under the hint adapter) to produce a
-    * per-module advice map, grounded in the attempt's trace, the program I/O, the reward value, the threshold, and
-    * the `moduleNames` for which advice is sought. The raw `advice` output (a JSON object keyed by module name) is
-    * parsed via [[parseAdvice]], which degrades to uniform advice across `moduleNames` for a non-JSON output. */
+  /** Run the OfferFeedback critic (the instance's addressable [[Refine.criticPredict]], passed in) with the
+    * ambient LM/adapter (NOT under the hint adapter) to produce a per-module advice map, grounded in the
+    * attempt's trace, the program I/O, the reward value, the threshold, and the `moduleNames` for which advice
+    * is sought. The raw `advice` output (a JSON object keyed by module name) is parsed via [[parseAdvice]],
+    * which degrades to uniform advice across `moduleNames` for a non-JSON output. */
   private[programs] def generateAdvice[I, O](
+      critic: DynamicPredict,
       input: I,
       prediction: Prediction[O],
       trace: Vector[TraceEntry],
@@ -215,8 +255,7 @@ object Refine:
       .map(e => DynamicValues.renderText(e.inputs))
       .getOrElse(input.toString)
     val programOutputs = DynamicValues.renderText(prediction.raw.values)
-    val feedback = DynamicPredict(offerFeedbackLayout, name = Some("offer_feedback"))
-    feedback.apply(ProgramCall(inputs = DynamicValues.record(
+    critic.apply(ProgramCall(inputs = DynamicValues.record(
       "program_inputs"     := programInputs,
       "program_trajectory" := renderTrajectory(trace),
       "program_outputs"    := programOutputs,

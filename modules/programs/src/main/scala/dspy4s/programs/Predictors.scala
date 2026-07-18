@@ -113,7 +113,8 @@ object Predictors extends LowPriority:
     override def readNamed(program: P): Vector[(String, DynamicPredict)] = Vector("self" -> leaf.get(program))
 
   /** Hand-written [[Predictors]] instances for the composite typed programs whose learnable sub-predicts are
-    * hoisted to stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[MultiChainComparison]]). They live in
+    * hoisted to stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[RLM]], [[MultiChainComparison]];
+    * the evidence-parameterized wrappers [[BestOfN]] / [[Refine]] carry theirs in their companions). They live in
     * the [[Predictors]] companion so they are in implicit scope without an explicit import (and so a user composite
     * containing such a program resolves them rather than silently falling back to [[empty]]). They are concrete
     * `Predictors[ConcreteType]` instances; being strictly more specific than [[derived]] (and there being no
@@ -146,6 +147,18 @@ object Predictors extends LowPriority:
       val nextExtractor = if updates(1) eq program.extractorPredict then program.extractorPredictOverride
                           else Some(updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
+
+  given rlmPredictors[I, O]: Predictors[RLM[I, O]] with
+    def read(program: RLM[I, O]): Vector[DynamicPredict] =
+      Vector(program.actionPredict, program.extractPredict)
+
+    def replace(program: RLM[I, O], updates: Vector[DynamicPredict]): RLM[I, O] =
+      require(updates.size == 2, s"RLM expects exactly 2 updates (action, extract), got ${updates.size}")
+      val nextAction  = if updates(0) eq program.actionPredict then program.actionPredictOverride
+                        else Some(updates(0))
+      val nextExtract = if updates(1) eq program.extractPredict then program.extractPredictOverride
+                        else Some(updates(1))
+      program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
   given multiChainComparisonPredictors[I, O]: Predictors[MultiChainComparison[I, O]] with
     def read(program: MultiChainComparison[I, O]): Vector[DynamicPredict] =
