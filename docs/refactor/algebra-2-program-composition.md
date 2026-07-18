@@ -168,9 +168,23 @@ jpablo/math-with-scala, with the constraint moved from objects to the morphism r
 the category (compile error at `Prog.of`, proven by a `compileErrors` test); pinned by `ParaCatLawSuite`.
 Honest limitation: the Mirror-based `Predictors.derived` still resolves for any `Product` and silently
 contributes empty for fields without instances, so the gate is airtight only for non-`Product` programs;
-tightening that fallback is a `Predictors`-layer fix (same track as the instance gaps above). Nothing
-consumes the prototype yet; the candidate adoption point is the CIO substrate phase, where the optimizer
-entry points get touched anyway.
+tightening that fallback is a `Predictors`-layer fix (same track as the instance gaps above).
+
+**Entry-point experiment (commit `8d7e009`).** `dspy4s.optimize.para.ParaCompile.copro` drives COPRO through
+a packaged `Prog`: the path-dependent instantiation `new COPRO[prog.Rep](config)(using prog.addressable,
+runnable)` shows the packaged evidence IS the `Predictors` instance the generic optimizer needs, with no
+optimizer internals touched, and call-site assertions go through the Para surface (`params`) with no
+`Predictors` summon. Findings, pinned by `ParaCompileSuite` (one at compile time):
+
+- **Para evidence alone is not enough to optimize.** Optimizers also need `Runnable` (decode a record, run),
+  which `Prog` does not package; it arrives as `using Runnable[prog.Rep]`, resolvable only while the caller
+  holds the packaging-refined type. After an upcast to bare `Prog[I, O]`, `params` / `reparam` keep working
+  but `copro` stops compiling (`Runnable[erased.Rep]` unsummonable). Composed pipelines (`AndThen`) have no
+  `Runnable` at all.
+- **Conclusion for full adoption:** package the evaluation capability too, most naturally an input decoder
+  (`DynamicValue.Record => Either[DspyError, I]`) captured at `Prog.of` time. Composition threads the first
+  leg's decoder, which would also give composed pipelines the `Runnable` that bare user composites must
+  hand-write today (the gap `Runnable`'s scaladoc documents).
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -289,7 +303,9 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
 - **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above) from prototype to
-  the optimizer entry-point API, together with the missing `Predictors` instances (BestOfN / Refine / RLM)
-  and a tightened derivation fallback. Best done alongside the CIO phase so the API breaks once.
+  the optimizer entry-point API, together with the missing `Predictors` instances (BestOfN / Refine / RLM),
+  a tightened derivation fallback, and the packaged input decoder the entry-point experiment concluded is
+  required (so evaluation survives upcasts and composition). Best done alongside the CIO phase so the API
+  breaks once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.
