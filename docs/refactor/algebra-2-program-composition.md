@@ -205,6 +205,28 @@ structure is a genuine category while elsewhere it is a semicategory (morphisms 
 `ProgInput` also gains a low-priority `RecordCodec`-based fallback, so any typed program with a
 codec-equipped input packages via `Prog.of(f)` alone.
 
+**Law statements, the read functor, and fan-out (commit `446ccb6`, adopted from jpablo/math-with-scala).**
+Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
+
+- **Laws as statements.** `core.contracts.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
+  and the `@Law` annotation. The Para structures now state their laws as `@Law` methods ON the traits, and
+  `ParaCatLawSuite` executes the statements instead of hand-building both sides, each under the honest
+  observation (structural `==` for parameter vectors; run output + params for `Prog` morphisms). The
+  deliberate split from the formalization library: there the equations are the deliverable, here they are
+  executable specifications.
+- **`params` as a functor value.** `ParaCat` splits into a base `Cat[P[_], Hom]` so the delooping of the
+  parameter monoid (`ParamsHom` / `paramsDeloop`: one object, morphisms are parameter vectors, composition
+  is concatenation) is itself a lawful `Cat` instance, and `ReadFunctor : CatFunctor[Prog, ParamsHom]` names
+  what `Predictors.read` is categorically; its functor laws are exactly the Para projection laws.
+- **`parallel`, named honestly.** Added to the `Prog` layer as the fan-out (pairing): both legs share the
+  input, so it is copy-then-tensor fused, the CD/Markov-category shape, NOT a plain monoidal tensor (a
+  correction of the earlier "monoidal structure" suggestion). The copy NON-law is pinned as an executable
+  counterexample: `h >>> parallel(f, g)` runs `h` once while `parallel(h >>> f, h >>> g)` runs it twice,
+  with visibly different parameters (sizes 3 vs 4); the outputs coincide only for deterministic `h`, which
+  is precisely why fan-out naturality cannot be a law for LLM morphisms. This is also the categorical
+  restatement of why the spec's `parallel` is "independent composition": sharing vs re-running are
+  different programs, and the algebra keeps them distinguishable.
+
 ## Acceptance criteria: each composite reduces to a recipe
 
 "Step 6 done" means each existing composite is defined as a combinator expression, and its existing suite

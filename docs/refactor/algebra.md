@@ -199,3 +199,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
+  - **Law-statement adoption** (commit `446ccb6`, from jpablo/math-with-scala): laws are now stated ON the
+    Para structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the suites
+    under per-law honest observations. Newly named structures: the delooping of the parameter monoid as an
+    explicit `Cat` instance; `ReadFunctor` (`Predictors.read` as a functor value, whose functor laws are the
+    Para projection laws); and `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law
+    (sharing vs re-running an effectful `h` differ, in behavior distributionally and in parameters
+    structurally) pinned as an executable counterexample.
