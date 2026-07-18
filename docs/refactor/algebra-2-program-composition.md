@@ -187,12 +187,21 @@ record-runnable and optimizable end-to-end, which the ambient `Module` world can
 `Runnable` (the gap `Runnable`'s scaladoc documents). Pinned by `ParaCatLawSuite` (decoder threading) and
 `ParaCompileSuite` (upcast + composed-pipeline optimization).
 
-Remaining wrinkle from the close, documented and pinned: `id[A]` carries a failing decoder (nothing decodes
-an arbitrary `A` from a record), so the left-unit law holds on the run/params observations but degrades on
-the evaluation observation (`id >>> p` threads the failing decoder; `p >>> id` is fine). The principled fix
-is a constrained category over CODEC-EQUIPPED OBJECTS (the `CategoryTC[P[_], Hom]` object-constraint slot,
-with `P[A]` = "A decodes from a record"), which would also make `ParaCat.id` honest; deferred to full
-adoption.
+**Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:
+`id[A]` carried a failing decoder (nothing decodes an arbitrary `A` from a record), so the left unit
+degraded on the evaluation observation. The fix is the `CategoryTC[P[_], Hom]` object-constraint slot from
+jpablo/math-with-scala, applied where it belongs: `ParaCat` is now `ParaCat[P[_], Hom[_,_]]`, instantiated
+for `Prog` at `P = RecordCodec` ("the object decodes from a record", built on the SAME
+`Shape.derivedWithRole(Input)` decode path `Signature.derived` uses, so codec- and signature-derived
+decoders cohere definitionally). Unlike a blanket Ok-style constrained category, the constraint appears
+ONLY where evaluation evidence must be synthesized rather than threaded: `id[A: RecordCodec]` builds its
+decoder from the object's codec; `>>>` stays unconstrained (packaged morphisms carry their own evidence).
+Result, pinned by the suites: the left unit holds on the evaluation observation under coherent packaging
+(`id >>> p` decodes identically to `p`); an id-headed pipeline optimizes end-to-end through COPRO; and `id`
+at a non-codec object is a compile error, the honest statement that over codec-equipped objects the
+structure is a genuine category while elsewhere it is a semicategory (morphisms compose, no unit).
+`ProgInput` also gains a low-priority `RecordCodec`-based fallback, so any typed program with a
+codec-equipped input packages via `Prog.of(f)` alone.
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -311,10 +320,9 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
 - **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above; the input decoder is
-  now packaged and the entry-point loop is closed) from prototype to the optimizer entry-point API, together
-  with the missing `Predictors` instances (BestOfN / Refine / RLM), a tightened derivation fallback, the
-  remaining `ProgInput` instances (ChainOfThought / ReAct / CodeAct), and codec-equipped objects (the
-  `CategoryTC` P[_] slot) to make `id`'s decoder honest. Best done alongside the CIO phase so the API breaks
-  once.
+  packaged, the entry-point loop is closed, and objects are codec-equipped, so the prototype is functionally
+  complete) from prototype to the optimizer entry-point API, together with the missing `Predictors` instances
+  (BestOfN / Refine / RLM), a tightened derivation fallback, and the remaining `ProgInput` instances
+  (ChainOfThought / ReAct / CodeAct). Best done alongside the CIO phase so the API breaks once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.

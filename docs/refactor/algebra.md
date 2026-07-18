@@ -187,14 +187,15 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
     usage-merge on `>>>`, `augment` closing position, execution-wrapping modes.
-  - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`): the optimizer-addressability layer
-    identified as the Para construction (morphism = parameters x shape; composition concatenates parameters;
-    `replace` is the reparameterization 2-cell; homogeneous `DynamicPredict` parameters make `Vector` the
-    exact, not approximate, parameter object). Prototyped as `dspy4s.programs.para.ParaCat` over packaged
-    `Prog` morphisms (construction gate: un-addressable programs are a compile error) and closed end-to-end:
-    `Prog` also packages the input decoder (threaded through composition), giving uniform
+  - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
+    optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
+    composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
+    `DynamicPredict` parameters make `Vector` the exact, not approximate, parameter object). Prototyped as
+    `dspy4s.programs.para.ParaCat[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
+    `Prog` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
+    `Prog` packages addressability + the input decoder (threaded through composition), giving uniform
     `Predictors[Prog]` + `Runnable[Prog]`, so `new COPRO[Prog[I, O]]` works directly, including on upcast
-    values and composed pipelines. Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Known wrinkle: `id`
-    carries a failing decoder (the fix is codec-equipped objects, the CategoryTC P[_] slot). Adoption as the
-    public optimizer entry-point API is deferred to the CIO phase; see the "Para formalization" section of
-    the step-6 spec.
+    values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Prog`;
+    no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
+    Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
+    deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
