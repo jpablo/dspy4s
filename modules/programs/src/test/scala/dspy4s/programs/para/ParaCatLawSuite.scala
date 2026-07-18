@@ -6,6 +6,7 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predictor
@@ -58,6 +59,13 @@ class ParaCatLawSuite extends FunSuite:
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
+  /** Stub decoder for tests that do not exercise record-based evaluation. */
+  private def noCodec[I]: DynamicValue.Record => Either[DspyError, I] =
+    _ => Left(ValidationError("test stub: no input codec"))
+
+  /** Package a Step with the stub decoder (Step has no signature, so no ProgInput instance applies). */
+  private def pack[I, O](m: Step[I, O]): Prog[I, O] = Prog.of(m, noCodec[I])
+
   // ── Para law: the identity is parameter-free ─────────────────────────────────────────────────────────────
   test("params(id) = empty") {
     assertEquals(C.id[Int].params, Vector.empty[DynamicPredict])
@@ -65,16 +73,16 @@ class ParaCatLawSuite extends FunSuite:
 
   // ── Para law: composition concatenates parameters ────────────────────────────────────────────────────────
   test("params(f >>> g) = params(f) ++ params(g)") {
-    val a  = Prog.of(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b  = Prog.of(step[String, Int]("b", "s -> n")(s => s.length))
+    val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
+    val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
     val ab = a >>> b
     assertEquals(ab.params, a.params ++ b.params)
   }
 
   // ── Para law: reparameterization round-trip and write-back ───────────────────────────────────────────────
   test("reparam(f, params(f)) preserves params and behavior") {
-    val a  = Prog.of(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b  = Prog.of(step[String, Int]("b", "s -> n")(s => s.length))
+    val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
+    val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
     val ab = a >>> b
     val rt = ab.reparam(ab.params)
     assertEquals(rt.params, ab.params)
@@ -82,8 +90,8 @@ class ParaCatLawSuite extends FunSuite:
   }
 
   test("params(reparam(f, ps)) = ps (write-back, addressed by position)") {
-    val a  = Prog.of(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b  = Prog.of(step[String, Int]("b", "s -> n")(s => s.length))
+    val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
+    val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
     val ab = a >>> b
     val fresh = Vector(predict("i -> s2"), predict("s -> n2"))
     assertEquals(ab.reparam(fresh).params, fresh)
@@ -93,7 +101,7 @@ class ParaCatLawSuite extends FunSuite:
 
   // ── Category laws on the packaged carrier ────────────────────────────────────────────────────────────────
   test("id >>> f = f = f >>> id on the threaded output value and on params") {
-    val f = Prog.of(step[Int, String]("f", "i -> s")(i => s"v$i"))
+    val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val left  = C.id[Int] >>> f
     val right = f >>> C.id[String]
     assertEquals(left(TypedCall(7)).map(_.output), f(TypedCall(7)).map(_.output))
@@ -103,14 +111,35 @@ class ParaCatLawSuite extends FunSuite:
   }
 
   test("(f >>> g) >>> h = f >>> (g >>> h) on the output value and on params") {
-    val f = Prog.of(step[Int, String]("f", "i -> s")(i => s"<$i>"))
-    val g = Prog.of(step[String, String]("g", "s -> t")(s => s + s))
-    val h = Prog.of(step[String, Int]("h", "t -> n")(s => s.length))
+    val f = pack(step[Int, String]("f", "i -> s")(i => s"<$i>"))
+    val g = pack(step[String, String]("g", "s -> t")(s => s + s))
+    val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
     val l = (f >>> g) >>> h
     val r = f >>> (g >>> h)
     assertEquals(l(TypedCall(3)).map(_.output), r(TypedCall(3)).map(_.output))
     assertEquals(l.params, r.params)
     assertEquals(l(TypedCall(3)).map(_.output), Right(6))
+  }
+
+  // ── The packaged evaluation capability: decoder threading through composition ───────────────────────────
+  test(">>> threads the FIRST leg's input decoder (the composite's input is the first leg's input)") {
+    val dec7: DynamicValue.Record => Either[DspyError, Int] = _ => Right(7)
+    val a = Prog.of(step[Int, String]("a", "i -> s")(i => s"v$i"), dec7)
+    val b = pack(step[String, Int]("b", "s -> n")(s => s.length)) // b's decoder is the failing stub
+    assertEquals((a >>> b).decodeInput(DynamicValue.Record.empty), Right(7))
+    // reparam preserves the decoder too.
+    assertEquals((a >>> b).reparam((a >>> b).params).decodeInput(DynamicValue.Record.empty), Right(7))
+  }
+
+  test("id carries no decoder (documented wrinkle): id fails, f >>> id keeps f's decoder") {
+    val dec7: DynamicValue.Record => Either[DspyError, Int] = _ => Right(7)
+    val f = Prog.of(step[Int, String]("f", "i -> s")(i => s"v$i"), dec7)
+    // id itself cannot decode an arbitrary A from a record.
+    assert(C.id[Int].decodeInput(DynamicValue.Record.empty).isLeft)
+    // The right unit keeps f's decoder; the LEFT unit degrades on this observation (id >>> f threads id's
+    // failing decoder), the documented law wrinkle whose principled fix is codec-equipped objects.
+    assertEquals((f >>> C.id[String]).decodeInput(DynamicValue.Record.empty), Right(7))
+    assert((C.id[Int] >>> f).decodeInput(DynamicValue.Record.empty).isLeft)
   }
 
   // ── The construction gate: no Predictors evidence, no Prog ───────────────────────────────────────────────

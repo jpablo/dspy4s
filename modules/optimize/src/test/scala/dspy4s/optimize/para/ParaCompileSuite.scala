@@ -5,8 +5,8 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, SignatureLayout}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
-import dspy4s.optimize.{COPROConfig, QAInput, QAOutput}
-import dspy4s.optimize.para.ParaCompile.*
+import dspy4s.optimize.{COPROConfig, Runnable, QAInput, QAOutput}
+import dspy4s.optimize.para.ParaCompile.{*, given}
 import dspy4s.programs.Predict
 import dspy4s.programs.para.Prog
 import dspy4s.typed.Signature
@@ -16,9 +16,9 @@ import zio.blocks.schema.DynamicValue
 /** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Prog]] entry point, over a TYPED
   * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite`
   * (instruction generation keyed by rolloutId; the task answers gold only under the winning instruction).
-  * Also pins the prototype's ergonomics finding: the Para operations (`params`) survive an upcast to bare
-  * `Prog[I, O]`, but `copro` does not (its `Runnable[prog.Rep]` becomes unsummonable), proven at compile
-  * time. */
+  * Also pins the closed loop: with `decodeInput` packaged, `copro` works on an UPCAST `Prog[I, O]` (the
+  * earlier revision proved at compile time that it could not) and on a COMPOSED pipeline `a >>> b`, which
+  * the ambient `Module` world cannot run from records at all. */
 class ParaCompileSuite extends FunSuite:
 
   // ── Fixtures (COPROSuite's, over the typed student) ───────────────────────
@@ -141,14 +141,48 @@ class ParaCompileSuite extends FunSuite:
     assertEquals(a, Some(winningInstruction))
   }
 
-  // ── 3. The ergonomics finding, pinned at compile time ────────────────────────────────────────────────────
+  // ── 3. The closed loop, part 1: the upcast that used to fail now works ───────────────────────────────────
 
-  test("upcasting to bare Prog[I, O] keeps the Para operations but loses copro (Runnable unsummonable)") {
+  test("copro works on an UPCAST Prog[I, O] (the packaged decoder closed the Runnable gap)") {
+    // The earlier revision pinned (via compileErrors) that this exact shape could NOT compile: Runnable had
+    // to be summoned against the packaging-refined Rep. With decodeInput packaged, both optimizer
+    // capabilities are uniform over Prog[I, O], so the erased type is fully optimizable.
     val erased: Prog[QAInput, QAOutput] = Prog.of(Predict[QAInput, QAOutput](taskSignature))
-    // The Para surface survives the upcast: params still works on the erased type.
     assertEquals(erased.params.size, 1)
-    // But the optimizer entry point does not: Runnable[erased.Rep] has an abstract Rep, so nothing resolves.
-    val errors = compileErrors("erased.copro(config(), trainset)")
-    assert(errors.nonEmpty, "expected copro on an upcast Prog to fail compilation")
-    assert(errors.contains("Runnable"), s"expected a missing-Runnable error, got:\n$errors")
+    RuntimeEnvironment.withSettings(settings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val report = erased.copro(config(), trainset).toOption.get
+      assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
+    }
+  }
+
+  // ── 4. The closed loop, part 2: a COMPOSED pipeline is record-runnable and optimizable ──────────────────
+
+  test("a composed pipeline (a >>> b) is record-runnable and optimizable through the packaged evidence") {
+    // Second stage maps QAOutput back to QAInput (fields `answer -> question`, unique within one layout).
+    val first  = Prog.of(Predict[QAInput, QAOutput](taskSignature))
+    val second = Prog.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
+    val pipeline: Prog[QAInput, QAInput] = first >>> second
+    // The metric compares the pipeline's final output field ("question"); this test proves the PLUMBING
+    // (record-run + optimization over a composite), not instruction discovery, so zero scores are fine.
+    val pipelineConfig = COPROConfig(
+      metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "question"),
+      breadth = 5,
+      depth = 1,
+      seed = 0L,
+      instructionMarker = instrGenMarker
+    )
+    RuntimeEnvironment.withSettings(settings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      // Uniform record-based evaluation on a composite: decode via the threaded first-leg decoder, run both
+      // stages. Bare user composites need a hand-written Runnable for exactly this (Runnable's scaladoc).
+      val ran = summon[Runnable[Prog[QAInput, QAInput]]].run(pipeline, rec("question" := "q1"))
+      assert(ran.isRight, s"record-run of the composed pipeline failed: ${ran.left.toOption}")
+      // And the whole pipeline is optimizable: COPRO sees both predicts through the packaged evidence.
+      val result = pipeline.copro(pipelineConfig, trainset)
+      assert(result.isRight, s"compile failed: ${result.left.toOption}")
+      val report = result.toOption.get
+      assertEquals(report.metadata.get("predictors"), Some(2))
+      assertEquals(report.bestProgram.params.size, 2)
+    }
   }
