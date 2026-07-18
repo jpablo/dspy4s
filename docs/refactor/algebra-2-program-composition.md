@@ -138,13 +138,15 @@ typeclasses, not new machinery. The rule:
   captures a learnable predict inside a closure is un-addressable and therefore wrong.
 - `read` distributes over the algebra (the homomorphism law above). Per combinator:
   - `>>>`, `parallel`: structural (`read(a) ++ read(b)`; Mirror-derivable from the two child fields).
-  - `augment(p)`, `selectBest(p)`: pass-through (`read(p)`). GAP (code-truth): `BestOfN` has no `Predictors`
-    instance today, so the pass-through is specified but not implemented.
-  - `loop`: holds `policy` + `extractor` fields (`read = [policy, extractor]`; = ReAct/CodeAct today; RLM has
-    the override fields but no instance yet, a recorded gap).
-  - `feedback`: holds inner `p` + `critic` predict (`read = read(p) ++ [critic]`). GAP (code-truth): this is
-    the target, not the present state; `Refine` consumes `Predictors[P]` for advice routing but builds its
-    OfferFeedback critic inline per call, so the critic is not addressable and `Refine` exposes no instance.
+  - `augment(p)`, `selectBest(p)`: pass-through (`read(p)`). DONE (commit `dd2fd4f`): `BestOfN` is now
+    parameterized over the concrete inner type (`BestOfN[P, I, O]`, mirroring `Refine`) with a pass-through
+    instance in its companion.
+  - `loop`: holds `policy` + `extractor` fields (`read = [policy, extractor]`; = ReAct/CodeAct, and now RLM:
+    `rlmPredictors` reads `[actionPredict, extractPredict]` via the override-field pattern, commit `dd2fd4f`).
+  - `feedback`: holds inner `p` + `critic` predict (`read = read(p) ++ [critic]`). DONE (commit `dd2fd4f`):
+    the OfferFeedback critic is hoisted to an addressable `criticPredict` field (override pattern) and
+    `refinePredictors` exposes it last, so optimizers can tune the critic like any other learnable.
+    Pinned by `CompositePredictorsSuite`.
 - **`mode` is restricted to non-learnable transforms** so it can stay closure-shaped and ergonomic. Anything
   with a learnable sub-generation (synthesis, comparison, critique) is a dedicated combinator that holds the
   predict as a field (`selectBest`, `feedback`, `MultiChainComparison`), never a mode. This is the one place
@@ -320,9 +322,10 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
 - **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above; the input decoder is
-  packaged, the entry-point loop is closed, and objects are codec-equipped, so the prototype is functionally
-  complete) from prototype to the optimizer entry-point API, together with the missing `Predictors` instances
-  (BestOfN / Refine / RLM), a tightened derivation fallback, and the remaining `ProgInput` instances
-  (ChainOfThought / ReAct / CodeAct). Best done alongside the CIO phase so the API breaks once.
+  packaged, the entry-point loop is closed, objects are codec-equipped, and the BestOfN / Refine / RLM
+  `Predictors` instances are now in place, so the prototype and its instance coverage are functionally
+  complete) from prototype to the optimizer entry-point API, together with a tightened derivation fallback
+  (the Mirror `empty` silent-drop) and the remaining `ProgInput` instances (ChainOfThought / ReAct /
+  CodeAct). Best done alongside the CIO phase so the API breaks once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.
