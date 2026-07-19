@@ -25,16 +25,16 @@ import java.util.concurrent.atomic.AtomicInteger
 final case class Boxed(n: Int) derives Schema
 final case class Wrapped(s: String) derives Schema
 
-/** Executes the `@Law` statements of the Para prototype's structures ([[Cat]] / [[ParaCat]] over [[Prog]],
-  * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural
-  * `==` for parameter vectors and delooping morphisms, observational equality (run output / params / decode)
-  * for `Prog` morphisms. Also pins the two construction gates (no `Predictors`, no `Prog`; no `RecordCodec`,
-  * no `id`), decoder threading, and the copy NON-law (`parallel` shares its input; copying is not natural
-  * for effectful morphisms). */
-class ParaCatLawSuite extends FunSuite:
+/** Executes the `@Law` statements of the Para prototype's structures ([[Category]] / [[ParaCategory]] over [[Program]],
+  * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
+  * parameter vectors and delooping morphisms, observational equality (run output / params / decode) for `Program`
+  * morphisms. Also pins the two construction gates (no `Predictors`, no `Program`; no `RecordCodec`, no `id`), decoder
+  * threading, and the copy NON-law (`parallel` shares its input; copying is not natural for effectful morphisms).
+  */
+class ParaCategoryLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
@@ -42,10 +42,10 @@ class ParaCatLawSuite extends FunSuite:
   /** A typed program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[TypedCall[I], Prediction[O]]:
-    override val moduleName: String = s"step_$tag"
-    override protected def callInputs(call: TypedCall[I]): DynamicValue.Record       = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[I]): Boolean             = call.traceEnabled
-    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record       = p.raw.values
+    override val moduleName: String                                            = s"step_$tag"
+    override protected def callInputs(call: TypedCall[I]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: TypedCall[I]): Boolean       = call.traceEnabled
+    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
     override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
@@ -54,19 +54,20 @@ class ParaCatLawSuite extends FunSuite:
       def get(program: Step[I, O]): DynamicPredict                      = program.predict
       def set(program: Step[I, O], updated: DynamicPredict): Step[I, O] = program.copy(predict = updated)
 
-  /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove
-    * the construction gate below. */
+  /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove the
+    * construction gate below.
+    */
   private final class Opaque extends Module[TypedCall[Int], Prediction[Int]]:
-    override val moduleName: String = "opaque"
-    override protected def callInputs(call: TypedCall[Int]): DynamicValue.Record       = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[Int]): Boolean             = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record       = p.raw.values
+    override val moduleName: String                                              = "opaque"
+    override protected def callInputs(call: TypedCall[Int]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: TypedCall[Int]): Boolean       = call.traceEnabled
+    override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record = p.raw.values
     override protected def forward(call: TypedCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, DynamicPrediction.empty))
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[ParaCat[RecordCodec, Prog]]
+  private val C = summon[ParaCategory[RecordCodec, Program]]
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
@@ -74,11 +75,11 @@ class ParaCatLawSuite extends FunSuite:
   private def noCodec[I]: DynamicValue.Record => Either[DspyError, I] =
     _ => Left(ValidationError("test stub: no input codec"))
 
-  /** Package a Step with the stub decoder (Step has no signature, so no ProgInput instance applies). */
-  private def pack[I, O](m: Step[I, O]): Prog[I, O] = Prog.of(m, noCodec[I])
+  /** Package a Step with the stub decoder (Step has no signature, so no ProgramInput instance applies). */
+  private def pack[I, O](m: Step[I, O]): Program[I, O] = Program.of(m, noCodec[I])
 
-  /** Execute an IsEq of Prog morphisms under the morphism observations: params and run output at `input`. */
-  private def assertObsEq[I, O](eq: IsEq[Prog[I, O]], input: I): Unit =
+  /** Execute an IsEq of Program morphisms under the morphism observations: params and run output at `input`. */
+  private def assertObsEq[I, O](eq: IsEq[Program[I, O]], input: I): Unit =
     assertEquals(eq.lhs.params, eq.rhs.params)
     assertEquals(eq.lhs(TypedCall(input)).map(_.output), eq.rhs(TypedCall(input)).map(_.output))
 
@@ -86,8 +87,8 @@ class ParaCatLawSuite extends FunSuite:
   private def assertIsEq[A](eq: IsEq[A]): Unit =
     assertEquals(eq.lhs, eq.rhs)
 
-  // ── Cat laws over Prog, executed from the trait's @Law statements ────────────────────────────────────────
-  test("Cat laws (identity left/right, associativity) hold observationally on Prog") {
+  // ── Category laws over Program, executed from the trait's @Law statements ───────────────────────────────────
+  test("Category laws (identity left/right, associativity) hold observationally on Program") {
     val f = pack(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
     assertObsEq(C.identityLeft(f), Boxed(7))
     assertObsEq(C.identityRight(f), Boxed(7))
@@ -124,7 +125,9 @@ class ParaCatLawSuite extends FunSuite:
 
   test("copy is NOT natural: h >>> parallel(f, g) shares h; parallel(h >>> f, h >>> g) re-runs it") {
     val runs = AtomicInteger(0)
-    val h = pack(step[Int, Int]("h", "i -> j") { i => val _ = runs.incrementAndGet(); i * 10 })
+    val h = pack(step[Int, Int]("h", "i -> j") { i =>
+      val _ = runs.incrementAndGet(); i * 10
+    })
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
 
@@ -147,7 +150,7 @@ class ParaCatLawSuite extends FunSuite:
 
   }
 
-  // ── The parameter monoid, and its delooping as a lawful Cat instance (both checked with real ==) ─────────
+  // ── The parameter monoid, and its delooping as a lawful Category instance (checked with real ==) ─────────
   test("the parameter monoid Monoid[Vector[DynamicPredict]] satisfies the monoid laws") {
     val M  = Monoid[Vector[DynamicPredict]]
     val v1 = Vector(predict("a -> b"))
@@ -158,7 +161,7 @@ class ParaCatLawSuite extends FunSuite:
     assertIsEq(M.identityRight(v1))
   }
 
-  test("paramsDeloop is that monoid delooped: Cat laws hold, and id delegates to the monoid's empty") {
+  test("paramsDeloop is that monoid delooped: Category laws hold, and id delegates to the monoid's empty") {
     val M  = Monoid[Vector[DynamicPredict]]
     val v1 = Vector(predict("a -> b"))
     val v2 = Vector(predict("b -> c"))
@@ -181,7 +184,7 @@ class ParaCatLawSuite extends FunSuite:
   // ── The packaged evaluation capability: decoder threading through composition ───────────────────────────
   test(">>> threads the FIRST leg's input decoder (the composite's input is the first leg's input)") {
     val dec7: DynamicValue.Record => Either[DspyError, Int] = _ => Right(7)
-    val a = Prog.of(step[Int, String]("a", "i -> s")(i => s"v$i"), dec7)
+    val a = Program.of(step[Int, String]("a", "i -> s")(i => s"v$i"), dec7)
     val b = pack(step[String, Int]("b", "s -> n")(s => s.length)) // b's decoder is the failing stub
     assertEquals((a >>> b).decodeInput(DynamicValue.Record.empty), Right(7))
     // reparam preserves the decoder too.
@@ -191,9 +194,9 @@ class ParaCatLawSuite extends FunSuite:
   test("id's decoder IS the object codec; the left unit holds on evaluation under coherent packaging") {
     // With codec-equipped objects (RecordCodec, the CategoryTC P[_] slot) id synthesizes its decoder from
     // the object's codec, and coherent packaging (p packaged via the same codec, through
-    // ProgInput.fromRecordCodec) gives the left unit on the evaluation observation too.
+    // ProgramInput.fromRecordCodec) gives the left unit on the evaluation observation too.
     val boxedRecord = DynamicValues.record("n" := 5)
-    val p = Prog.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}"))) // packaged via the codec
+    val p = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}"))) // packaged via the codec
     assertEquals(C.id[Boxed].decodeInput(boxedRecord), Right(Boxed(5)))
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), p.decodeInput(boxedRecord))
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
@@ -209,14 +212,14 @@ class ParaCatLawSuite extends FunSuite:
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }
 
-  // ── The construction gate: no Predictors evidence, no Prog ───────────────────────────────────────────────
+  // ── The construction gate: no Predictors evidence, no Program ───────────────────────────────────────────────
   test("packaging a program without Predictors evidence does not compile") {
     // Opaque is a plain (non-Product) Module: no Predictor leaf, no Mirror, so Predictors[Opaque] cannot be
-    // summoned and Prog.of is a compile error. In the ambient Module world the same program runs fine but is
+    // summoned and Program.of is a compile error. In the ambient Module world the same program runs fine but is
     // silently un-addressable; in the packaged category it cannot exist.
     val opaque = new Opaque
     assertEquals(opaque.apply(TypedCall(3)).map(_.output), Right(3)) // valid ambient program
-    val errors = compileErrors("Prog.of(new Opaque)")
-    assert(errors.nonEmpty, "expected Prog.of(new Opaque) to fail compilation")
+    val errors = compileErrors("Program.of(new Opaque)")
+    assert(errors.nonEmpty, "expected Program.of(new Opaque) to fail compilation")
     assert(errors.contains("Predictors"), s"expected a missing-Predictors error, got:\n$errors")
   }

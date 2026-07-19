@@ -10,7 +10,7 @@ Paths below are relative to `studio:/Users/jpablo/Dropbox/`.
 
 ## Tier 1: category theory ∩ machine learning (directly on-topic)
 
-These speak to exactly what the Para/`Prog` prototype is doing: parametrized morphisms, bidirectional (lens-shaped) learning, optimization as structure.
+These speak to exactly what the Para/`Program` prototype is doing: parametrized morphisms, bidirectional (lens-shaped) learning, optimization as structure.
 
 | Item | Location |
 |---|---|

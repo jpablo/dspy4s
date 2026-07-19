@@ -82,14 +82,14 @@ uniqueness; the raw mutators that can break it are private).
 
 ## Algebra 2: program composition (step-6 frontier)
 
-The algebra over programs (`Module[I, O]`, or a `Prog[I, O]`). This is the design target for step 6.
+The algebra over programs (`Module[I, O]`, or a `Program[I, O]`). This is the design target for step 6.
 
 > **Now specified.** The five open forks were resolved by a design grill, and the full operation + law set,
 > the per-module reduction recipes (acceptance criteria), and the implementation sequencing live in
 > [algebra-2-program-composition.md](algebra-2-program-composition.md). The sketch below is the overview;
 > that file is the contract step 6 implements against.
 
-**Purpose, as an observation.** A program exists to be run: `run : Prog[I, O] => I => M[O]`, a Kleisli arrow
+**Purpose, as an observation.** A program exists to be run: `run : Program[I, O] => I => M[O]`, a Kleisli arrow
 `I ⇝ O`. `M` involves the LLM, so `run` is not pure and laws do not hold pointwise on outputs. The
 denotational move (take the source of nondeterminism as input): a program denotes `LM => I => Result`. Laws
 are then checked in one of three honest ways:
@@ -101,14 +101,14 @@ are then checked in one of three honest ways:
 **Constructors and combinators, with the structure each one is:**
 
 ```
-predict(sig)  : Prog[I, O]                                   -- terminal atom (one LM round-trip)
-id[I]         : Prog[I, I]                                   -- pure passthrough
-p >>> q       : (Prog[I, X], Prog[X, O]) => Prog[I, O]       -- CATEGORY
-augment[n, T] : Prog[I, O] => Prog[I, (n: T) *: O]           -- Thought / CoT
-mode(m)       : Prog[I, O] => Prog[I, O]                     -- MONOID (middleware)
-selectBest    : (Prog[I, O], n, reward, threshold) => Prog[I, O]
-parallel      : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)]  -- ordered fan-out / &&&
-loop          : (step, env, done) => Prog[I, O]              -- the agentic scheme
+predict(sig)  : Program[I, O]                                   -- terminal atom (one LM round-trip)
+id[I]         : Program[I, I]                                   -- pure passthrough
+p >>> q       : (Program[I, X], Program[X, O]) => Program[I, O]       -- CATEGORY
+augment[n, T] : Program[I, O] => Program[I, (n: T) *: O]           -- Thought / CoT
+mode(m)       : Program[I, O] => Program[I, O]                     -- MONOID (middleware)
+selectBest    : (Program[I, O], n, reward, threshold) => Program[I, O]
+parallel      : (Program[I, A], Program[I, B]) => Program[I, (A, B)]  -- ordered fan-out / &&&
+loop          : (step, env, done) => Program[I, O]              -- the agentic scheme
 ```
 
 **Laws the known structures hand you for free:**
@@ -134,12 +134,12 @@ operation runs the left program before the right program, so execution order is 
 carrier does **not** form a symmetric monoidal, CD, or Markov category.
 
 The reusable executable interface is
-[`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/para/Para.scala), with the
+[`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/para/OrderedExecution.scala), with the
 `given orderedProgram` instance over `ModuleHom`. It deliberately exposes operations without asserting tensor
 interchange, symmetry of effects, or discard naturality:
 
 ```
->>>            sequential value composition                         Cat / AndThen             ✅
+>>>            sequential value composition                         Category / AndThen        ✅
 tensor a,b     ordered independent inputs, paired outputs            Tensor / Compose.tensor   ✅ (Module level)
 copy           duplicate the input I => (I, I)                       Copy / Compose.copy       ✅
 discard        drop a value I => ()                                  Discard / Compose.discard ✅
@@ -170,10 +170,10 @@ The load-bearing facts, all executable:
   `h >>> copy = copy >>> tensor(h, h)`, i.e. iff `h` is deterministic under the chosen observation. Both sides
   are pinned: the positive case for a pure `h` in
   `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
-  `ParaCatLawSuite`. This remains useful without claiming a Markov structure for execution.
+  `ParaCategoryLawSuite`. This remains useful without claiming a Markov structure for execution.
 
-**Why `tensor` lives at the Module level, not on `ParaCat`.** `parallel` lifts into the packaged `Prog` /
-`ParaCat` category because both legs share one input, so the pair reuses that input's decoder. The tensor's
+**Why `tensor` lives at the Module level, not on `ParaCategory`.** `parallel` lifts into the packaged `Program` /
+`ParaCategory` category because both legs share one input, so the pair reuses that input's decoder. The tensor's
 input `(I, J)` has no canonical single-record decoder (two independent inputs, one flat `Example` record), so
 `tensor` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
 category naturally supports fan-out, and the raw tensor is the structural op beneath it.
@@ -255,33 +255,33 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
     `DynamicPredict` parameters make `Vector` the exact, not approximate, parameter object). Prototyped as
-    `dspy4s.programs.para.ParaCat[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
-    `Prog` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
-    `Prog` packages addressability + the input decoder (threaded through composition), giving uniform
-    `Predictors[Prog]` + `Runnable[Prog]`, so `new COPRO[Prog[I, O]]` works directly, including on upcast
-    values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Prog`;
+    `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
+    `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
+    `Program` packages addressability + the input decoder (threaded through composition), giving uniform
+    `Predictors[Program]` + `Runnable[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
+    values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
-    Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
+    Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
     now stated ON the structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the
     suites under per-law honest observations. Applied to the Para structures (`446ccb6`) and retrofitted onto
     Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
-    structures from the Para pass: the delooping of the parameter monoid as an explicit `Cat` instance;
+    structures from the Para pass: the delooping of the parameter monoid as an explicit `Category` instance;
     `ReadFunctor` (`Predictors.read` as a functor value; its functor laws — preserves id + composition — are
-    carried on the `CatFunctor` trait and are exactly the Para projection laws); and
+    carried on the `CategoryFunctor` trait and are exactly the Para projection laws); and
     `parallel` as ordered fan-out, with the copy NON-law (sharing vs re-running an effectful `h` differ, in
     behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the
     uniform law-statement style across the codebase; every use must name an observational equality preserved by
     its public combinators.
-  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Cat` / `ParaCat` pattern (an
+  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParaCategory` pattern (an
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
     `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[DynamicPredict]]`
     (`d3be8e1`, the parameter monoid — codomain of the `Predictors` homomorphism). The delooping is generalized
-    to `delooping[M](using Monoid[M]): Cat[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
-    `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Cat`. Algebra 1's two
+    to `delooping[M](using Monoid[M]): Category[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
+    `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Category`. Algebra 1's two
     commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit.

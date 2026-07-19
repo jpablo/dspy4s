@@ -8,17 +8,18 @@ import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmRespon
 import dspy4s.optimize.{COPROConfig, Runnable, QAInput, QAOutput}
 import dspy4s.optimize.para.ParaCompile.{*, given}
 import dspy4s.programs.Predict
-import dspy4s.programs.para.{ParaCat, Prog, RecordCodec}
+import dspy4s.programs.para.{ParaCategory, Program, RecordCodec}
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Prog]] entry point, over a TYPED
-  * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite`
-  * (instruction generation keyed by rolloutId; the task answers gold only under the winning instruction).
-  * Also pins the closed loop: with `decodeInput` packaged, `copro` works on an UPCAST `Prog[I, O]` (the
-  * earlier revision proved at compile time that it could not) and on a COMPOSED pipeline `a >>> b`, which
-  * the ambient `Module` world cannot run from records at all. */
+/** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a TYPED
+  * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction
+  * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the closed loop:
+  * with `decodeInput` packaged, `copro` works on an UPCAST `Program[I, O]` (the earlier revision proved at compile time
+  * that it could not) and on a COMPOSED pipeline `a >>> b`, which the ambient `Module` world cannot run from records at
+  * all.
+  */
 class ParaCompileSuite extends FunSuite:
 
   // ── Fixtures (COPROSuite's, over the typed student) ───────────────────────
@@ -43,8 +44,7 @@ class ParaCompileSuite extends FunSuite:
 
   private object InstructionAwareAdapter extends Adapter:
     override val name: String = "instruction-aware"
-    override def format(invocation: AdapterInvocation)(using RuntimeContext)
-        : Either[DspyError, FormattedPrompt] =
+    override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
       val q =
         DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
@@ -55,8 +55,9 @@ class ParaCompileSuite extends FunSuite:
         Vector(Message(role = MessageRole.User, text = Some(s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]")))
       ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
-        : Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
@@ -73,7 +74,7 @@ class ParaCompileSuite extends FunSuite:
           if text.contains(winningInstruction) then gold.getOrElse(q, "unknown") else "WRONG"
       Right(LmResponse(
         outputs = Vector(LmOutput(text = out)),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   private def extractBetween(s: String, start: String, end: String): String =
@@ -88,7 +89,7 @@ class ParaCompileSuite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def taskSignature: Signature[QAInput, QAOutput] =
     Signature.derived[QAInput, QAOutput]("QA").withInstructions(Some("INSTR_INITIAL: default"))
@@ -110,11 +111,11 @@ class ParaCompileSuite extends FunSuite:
 
   // ── 1. Happy path: the packaged entry point finds the winner; assertions via the Para surface ────────────
 
-  test("COPRO through a packaged Prog selects the winning instruction (asserted via params)") {
-    val student = Prog.of(Predict[QAInput, QAOutput](taskSignature))
+  test("COPRO through a packaged Program selects the winning instruction (asserted via params)") {
+    val student = Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = student.copro(config(), trainset)
+      val result           = student.copro(config(), trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
       // The whole assertion goes through the Para surface: no Predictors summon at the call site.
@@ -129,7 +130,7 @@ class ParaCompileSuite extends FunSuite:
 
   test("the packaged entry point is deterministic for a fixed seed") {
     def run(): Option[String] =
-      val student = Prog.of(Predict[QAInput, QAOutput](taskSignature))
+      val student = Program.of(Predict[QAInput, QAOutput](taskSignature))
       RuntimeEnvironment.withSettings(settings) {
         given RuntimeContext = RuntimeEnvironment.current
         student.copro(config(seed = 42L), trainset).toOption
@@ -143,15 +144,15 @@ class ParaCompileSuite extends FunSuite:
 
   // ── 3. The closed loop, part 1: the upcast that used to fail now works ───────────────────────────────────
 
-  test("copro works on an UPCAST Prog[I, O] (the packaged decoder closed the Runnable gap)") {
+  test("copro works on an UPCAST Program[I, O] (the packaged decoder closed the Runnable gap)") {
     // The earlier revision pinned (via compileErrors) that this exact shape could NOT compile: Runnable had
     // to be summoned against the packaging-refined Rep. With decodeInput packaged, both optimizer
-    // capabilities are uniform over Prog[I, O], so the erased type is fully optimizable.
-    val erased: Prog[QAInput, QAOutput] = Prog.of(Predict[QAInput, QAOutput](taskSignature))
+    // capabilities are uniform over Program[I, O], so the erased type is fully optimizable.
+    val erased: Program[QAInput, QAOutput] = Program.of(Predict[QAInput, QAOutput](taskSignature))
     assertEquals(erased.params.size, 1)
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val report = erased.copro(config(), trainset).toOption.get
+      val report           = erased.copro(config(), trainset).toOption.get
       assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
     }
   }
@@ -160,9 +161,9 @@ class ParaCompileSuite extends FunSuite:
 
   test("a composed pipeline (a >>> b) is record-runnable and optimizable through the packaged evidence") {
     // Second stage maps QAOutput back to QAInput (fields `answer -> question`, unique within one layout).
-    val first  = Prog.of(Predict[QAInput, QAOutput](taskSignature))
-    val second = Prog.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
-    val pipeline: Prog[QAInput, QAInput] = first >>> second
+    val first  = Program.of(Predict[QAInput, QAOutput](taskSignature))
+    val second = Program.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
+    val pipeline: Program[QAInput, QAInput] = first >>> second
     // The metric compares the pipeline's final output field ("question"); this test proves the PLUMBING
     // (record-run + optimization over a composite), not instruction discovery, so zero scores are fine.
     val pipelineConfig = COPROConfig(
@@ -176,7 +177,7 @@ class ParaCompileSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       // Uniform record-based evaluation on a composite: decode via the threaded first-leg decoder, run both
       // stages. Bare user composites need a hand-written Runnable for exactly this (Runnable's scaladoc).
-      val ran = summon[Runnable[Prog[QAInput, QAInput]]].run(pipeline, rec("question" := "q1"))
+      val ran = summon[Runnable[Program[QAInput, QAInput]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the composed pipeline failed: ${ran.left.toOption}")
       // And the whole pipeline is optimizable: COPRO sees both predicts through the packaged evidence.
       val result = pipeline.copro(pipelineConfig, trainset)
@@ -193,11 +194,11 @@ class ParaCompileSuite extends FunSuite:
     // id[QAInput] synthesizes its decoder from RecordCodec[QAInput] (via the input type's Schema, the same
     // Shape decode path Signature.derived uses), so the previously-degraded left-unit case now evaluates and
     // optimizes end-to-end.
-    val C = summon[ParaCat[RecordCodec, Prog]]
-    val pipeline: Prog[QAInput, QAOutput] = C.id[QAInput] >>> Prog.of(Predict[QAInput, QAOutput](taskSignature))
+    val C                                    = summon[ParaCategory[RecordCodec, Program]]
+    val pipeline: Program[QAInput, QAOutput] = C.id[QAInput] >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran = summon[Runnable[Prog[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
+      val ran              = summon[Runnable[Program[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
       val report = pipeline.copro(config(), trainset).toOption.get
       assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
