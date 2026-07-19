@@ -125,20 +125,36 @@ closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one 
 
 ### The program category is a Markov category
 
-The right abstract home for Algebra 2 is a **Markov category** (Fritz 2020; Cho–Jacobs): a symmetric monoidal
-category in which every object carries a commutative-comonoid structure (**copy** and **discard**), where
-discard is natural but **copy need not be** — copy commutes with a morphism `h` iff `h` is *deterministic*.
-That is exactly the shape of dspy4s's programs, whose morphisms `I ⇝ M[O]` are effectful/nondeterministic
-(the LM). The generators, and what dspy4s has:
+The abstract home for Algebra 2 is a **CD category** (copy-discard; Cho–Jacobs), and a **Markov category**
+(Fritz 2020) under output-observational equality: a symmetric monoidal category in which every object carries a
+commutative-comonoid structure (**copy** and **discard**), where **neither is required natural** — copy
+commutes with a morphism `h` iff `h` is *deterministic*, and discard is natural only once you stop observing
+effects (see the equality note below). That is exactly the shape of dspy4s's programs, whose morphisms
+`I ⇝ M[O]` are effectful/nondeterministic (the LM). This is now a first-class trait,
+[`CDCategory[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/para/Para.scala) `extends
+Cat[AnyObject, Hom]`, with the `given cdProgram` instance over the plain program carrier `ModuleHom`. The
+generators:
 
 ```
->>>              sequential composition (Category)                         Cat / AndThen        ✅
-tensor  a ⊗ b    independent inputs, paired outputs (monoidal tensor)      Tensor / Compose.tensor  ✅ (Module level)
-copy    Δ        duplicate the input  I ⇝ (I, I)                           Copy / Compose.copy      ✅
-parallel a,b     fan-out: SAME input to both = copy then tensor            Both / Compose.parallel  ✅
-discard  !       drop a value  I ⇝ ()                                      —                        deferred
-swap σ, assoc    symmetry + associators                                    —                        deferred
+>>>              sequential composition (Category)                     Cat / AndThen             ✅
+tensor  a ⊗ b    independent inputs, paired outputs (monoidal tensor)  Tensor / Compose.tensor   ✅ (Module level)
+copy    Δ        duplicate the input  I ⇝ (I, I)                       Copy / Compose.copy       ✅
+discard !        drop a value  I ⇝ ()                                  Discard / Compose.discard ✅
+swap   σ         exchange a tensor's components                        Swap / Compose.swap       ✅
+parallel a,b     fan-out: SAME input to both = copy then tensor        Both / Compose.parallel   ✅
+assoc / unitors  associators, pentagon/triangle coherence             —                         deferred
 ```
+
+`CDCategory`'s positive laws are stated `@Law` and executed by `CDCategoryLawSuite` under output-observational
+equality: tensor interchange + identity, swap involution, copy cocommutativity, and discard-naturality.
+Coassociativity / counit and the pentagon/triangle coherence need unitor/associator morphisms and are deferred
+(no consumer).
+
+**CD on the nose, Markov under output-observational equality.** Discard-naturality (`f >>> discard = discard`)
+and unit-terminality hold only when you observe outputs alone; on the nose `f >>> discard` still ran `f` (spent
+tokens, wrote a trace), and there are many distinct `Prog[A, Unit]`, so the unit is not literally terminal. So
+the category is a **CD category** always, and a **Markov category** exactly under the output observation the law
+suites use — the same equality-dependence that governs every other structure on this branch.
 
 The load-bearing facts, all executable:
 
@@ -163,7 +179,8 @@ category naturally supports fan-out, and the raw tensor is the structural op ben
 `Monad` as a monoid in `End(X)` — does not apply: dspy4s's objects are types, not functors, and its monads
 (`Either`, later `CIO`) are ambient and used, never re-derived. The generalization dspy4s actually wanted was
 not richer objects but the **Markov refinement** (copy that fails to be natural) of the category it already
-has. `discard` / `swap` / associators are the natural completion, deferred until a consumer appears.
+has. Only the monoidal coherence (associators / unitors, pentagon / triangle) remains deferred — no consumer
+exercises it.
 
 **Ugly laws in the current code = the work to do.**
 
@@ -261,9 +278,13 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     to `delooping[M](using Monoid[M]): Cat[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
     `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Cat`. Remaining
     candidate: Algebra 1's two commuting endomorphism submonoids, if lifted onto explicit instances.
-  - **Markov structure + tensor** (commit `508a8e6`): the program category identified as a Markov category
-    (see "The program category is a Markov category" above), with the monoidal tensor `⊗` (`Tensor` /
-    `Compose.tensor`) and copy `Δ` (`Copy` / `Compose.copy`) added for completeness. `parallel = copy >>>
-    tensor` and the Markov determinism law (copy natural iff deterministic) are executable in `ComposeLawSuite`.
+  - **Markov structure + tensor** (commits `508a8e6`, `71c8880`): the program category identified as a CD
+    category (Markov under output-observational equality), now a first-class trait `CDCategory[Hom] extends
+    Cat[AnyObject, Hom]` with the `given cdProgram` instance over the `ModuleHom` carrier. Generators `tensor`
+    `⊗` / `copy` `Δ` / `discard` `!` / `swap` `σ` in `Compose`; positive laws (tensor interchange + identity,
+    swap involution, cocommutativity, discard-naturality) as `@Law`, plus the `copyNaturality` classifier
+    (natural iff deterministic). `parallel = copy >>> tensor`. Executable in `ComposeLawSuite` /
+    `CDCategoryLawSuite`, including the non-degeneracy witness (copy fails for an effect-observing morphism).
     Assessed and NOT adopted: `typista.org`'s higher-kinded `CategoryTC1` / monad-as-monoid-in-endofunctors
-    tower (objects are types not functors; monads are ambient). `discard` / `swap` / associators deferred.
+    tower (objects are types not functors; monads are ambient). Only monoidal coherence (associators / unitors /
+    pentagon / triangle) remains deferred.

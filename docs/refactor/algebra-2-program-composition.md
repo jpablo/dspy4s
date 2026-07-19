@@ -350,8 +350,10 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
-- **Remaining Markov/CD-category generators**: `discard` / `swap` / associators (the tensor `⊗` and copy `Δ`
-  shipped in `508a8e6`; a genuine `tensor` on `ParaCat`/`Prog` would also need a pair-input decoder).
+- **Monoidal coherence for the CD category**: associators / unitors / pentagon / triangle. The CD structure is
+  an explicit trait `CDCategory[Hom]` (commit `71c8880`) with `tensor` `⊗` / `copy` `Δ` / `discard` `!` /
+  `swap` `σ` and their positive laws; only the coherence morphisms (needed for counit / coassociativity) remain
+  deferred, no consumer. A genuine `tensor` on `ParaCat`/`Prog` would also need a pair-input decoder.
 - **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above; the input decoder is
   packaged, the entry-point loop is closed, objects are codec-equipped, and the BestOfN / Refine / RLM
   `Predictors` instances are now in place, so the prototype and its instance coverage are functionally
