@@ -211,10 +211,11 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law (sharing vs re-running an effectful
     `h` differ, in behavior distributionally and in parameters structurally) pinned as an executable
     counterexample. The `IsEq`/`@Law` vocabulary is now the uniform law-statement style across the codebase.
-  - **Abstract-structure traits** (commit `d7ab930`): following the `Cat` / `ParaCat` pattern (an abstract
-    trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]` trait
-    (`empty` / `combine`, laws on the trait); `Mode` becomes a `given Monoid[Mode]` (the endomorphism monoid on
-    `Controls`), replacing its loose companion `@Law` methods. This is the general home for reusable algebraic
-    traits; the parameter monoid (`Vector[DynamicPredict]` under `++`, currently the `paramsDeloop` `Cat`
-    instance) is the natural next `Monoid` instance, and Algebra 1's two commuting endomorphism submonoids the
-    next candidates to lift onto explicit instances.
+  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Cat` / `ParaCat` pattern (an
+    abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
+    trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
+    `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[DynamicPredict]]`
+    (`d3be8e1`, the parameter monoid — codomain of the `Predictors` homomorphism). The delooping is generalized
+    to `delooping[M](using Monoid[M]): Cat[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
+    `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Cat`. Remaining
+    candidate: Algebra 1's two commuting endomorphism submonoids, if lifted onto explicit instances.
