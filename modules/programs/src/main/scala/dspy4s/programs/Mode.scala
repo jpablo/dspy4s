@@ -20,9 +20,21 @@ import zio.blocks.schema.DynamicValue
   * combinator that holds the predict as a field (`selectBest`, `feedback`, `MultiChainComparison`), never a mode
   * (fork 4).
   *
-  * Modes form a **monoid** under `++` (left-to-right control transform) with unit [[Mode.id]]:
-  * `mode(m1 ++ m2) = mode(m1) ∘ mode(m2)` and `mode(Mode.id) = id` (on the result; `mode` is trace-transparent,
-  * so the law holds on the trace too).
+  * Two separate facts, often conflated:
+  *
+  *   1. '''`Mode` is a monoid''' under `++` (left-to-right control transform) with unit [[Mode.id]] — concretely
+  *      the endomorphism monoid on `Controls` (`++` = function composition, `Mode.id` = the identity transform).
+  *      Its laws (associativity, left/right identity; see the `@Law` methods below) hold up to '''extensional
+  *      equality''' of the wrapped transform (`m1 ≡ m2` iff `∀ c. m1.transform(c) == m2.transform(c)`), NOT the
+  *      case class's structural `==` — `++` allocates a fresh closure each time, so `==` (reference equality on
+  *      the function field) would reject even `Mode.id ++ m ≡ m`. `ModeLawSuite` checks the laws under that
+  *      extensional equality. Non-commutative, as an endomorphism monoid is (last write wins: `temperature(0.5)
+  *      ++ temperature(0.9)` sets 0.9).
+  *
+  *   2. '''`mode` is a monoid homomorphism''' from that monoid into program endomorphisms:
+  *      `mode(m1 ++ m2) = mode(m1) ∘ mode(m2)` and `mode(Mode.id) = id` (a monoid ACTION on programs, distinct
+  *      from fact 1). This holds on the result and, because `mode` is trace-transparent, on the trace too; it is
+  *      checked observationally via the recorder in `ModeLawSuite`.
   *
   * Scope: `mode` covers pure control transforms. Execution-wrapping modes (retry, pre/post hooks) are the
   * additive extension — not built until a consumer needs them. */
