@@ -9,10 +9,14 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.<->
 import dspy4s.programs.AndThen
 import dspy4s.programs.Both
+import dspy4s.programs.Copy
+import dspy4s.programs.Discard
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Identity
 import dspy4s.programs.Predict
 import dspy4s.programs.Predictors
+import dspy4s.programs.Swap
+import dspy4s.programs.Tensor
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
@@ -162,6 +166,82 @@ def delooping[M](using M: Monoid[M]): Cat[AnyObject, Delooped[M]] =
 type ParamsHom = Delooped[Vector[DynamicPredict]]
 
 given paramsDeloop: Cat[AnyObject, ParamsHom] = delooping[Vector[DynamicPredict]]
+
+/** The plain (un-packaged) program morphisms — the carrier of the CD/Markov structure. Unlike `Prog` these
+  * carry no optimizer / decoder evidence (the CD laws are observational on outputs, not about `params`), which
+  * is also why the tensor lives here and not on `ParaCat`. */
+type ModuleHom[I, O] = Module[TypedCall[I], Prediction[O]]
+
+/** A **CD category** (copy-discard): a symmetric monoidal category in which every object carries a commutative
+  * comonoid — copy `Δ` and discard `!` — with NEITHER copy nor discard required natural. dspy4s's program
+  * category is one (see `docs/refactor/algebra.md`, "The program category is a Markov category").
+  *
+  * Equality-dependence, stated honestly: under OUTPUT-observational equality (all maps `A → Unit` collapse to
+  * "output `()`") discard becomes natural and the unit terminal, so the structure is a **Markov** category
+  * under that observation; on the nose (observing cost / trace / effects) it is only CD. Copy is natural
+  * exactly on the **deterministic** morphisms — that is the classifier [[copyNaturality]], whose failure for an
+  * effect-observing morphism is the non-degeneracy witness that the category is properly Markov, not cartesian.
+  *
+  * Scope (deliberate). The positive laws that need no unitors/associators are stated as `@Law` and executed by
+  * `CDCategoryLawSuite` under output-observational equality. The comonoid **counit** / **coassociativity** and
+  * the monoidal **pentagon/triangle** coherence require unitor/associator morphisms and are DEFERRED (no
+  * consumer). Fixed over the trivial object constraint `AnyObject` (every type is an object), so `id` needs no
+  * evidence; instantiated only over [[ModuleHom]], not `Prog` (the tensor's `(A, B)` input has no single-record
+  * decoder). */
+trait CDCategory[Hom[_, _]] extends Cat[AnyObject, Hom]:
+  /** Monoidal tensor `⊗` on morphisms. */
+  def tensor[A, B, C, D](f: Hom[A, C], g: Hom[B, D]): Hom[(A, B), (C, D)]
+  /** Symmetry `σ`. */
+  def swap[A, B]: Hom[(A, B), (B, A)]
+  /** Comonoid copy `Δ`. */
+  def copy[A]: Hom[A, (A, A)]
+  /** Comonoid counit / discard `!`. */
+  def discard[A]: Hom[A, Unit]
+
+  @Law("tensor is a bifunctor (interchange)")
+  def tensorInterchange[A, B, C, D, E, F2](
+      f1: Hom[A, C], g1: Hom[B, D], f2: Hom[C, E], g2: Hom[D, F2]
+  ): IsEq[Hom[(A, B), (E, F2)]] =
+    (tensor(f1, g1) >>> tensor(f2, g2)) <-> tensor(f1 >>> f2, g1 >>> g2)
+
+  @Law("tensor preserves identities")
+  def tensorIdentity[A, B]: IsEq[Hom[(A, B), (A, B)]] =
+    tensor(id[A], id[B]) <-> id[(A, B)]
+
+  @Law("swap is involutive (symmetry)")
+  def swapInvolution[A, B]: IsEq[Hom[(A, B), (A, B)]] =
+    (swap[A, B] >>> swap[B, A]) <-> id[(A, B)]
+
+  @Law("copy is cocommutative")
+  def cocommutativity[A]: IsEq[Hom[A, (A, A)]] =
+    (copy[A] >>> swap[A, A]) <-> copy[A]
+
+  @Law("discard is natural (unit terminal) — under output-observational equality")
+  def discardNatural[A, B](f: Hom[A, B]): IsEq[Hom[A, Unit]] =
+    (f >>> discard[B]) <-> discard[A]
+
+  /** NOT a `@Law`: the determinism **classifier**. `copy` commutes with `f` iff `f` is deterministic — holds
+    * for a pure `f` (checked positively) and FAILS for an effect-observing `f` (the non-degeneracy witness).
+    * `f >>> copy` runs `f` once and duplicates; `copy >>> tensor(f, f)` runs it twice. */
+  def copyNaturality[A, B](f: Hom[A, B]): IsEq[Hom[A, (B, B)]] =
+    (f >>> copy[B]) <-> (copy[A] >>> tensor(f, f))
+
+/** dspy4s's program category as a CD category, over the plain [[ModuleHom]] carrier. `id`/`>>>` reuse the
+  * Category combinators; `tensor`/`copy`/`discard`/`swap` are the `Compose` generators, typed abstractly (the
+  * CD laws are observational, so per-node `Predictors` evidence is not needed here). */
+given cdProgram: CDCategory[ModuleHom] with
+  def id[A: AnyObject]: ModuleHom[A, A] = Identity[A]()
+
+  extension [A, B](f: ModuleHom[A, B])
+    infix def >>>[C](g: ModuleHom[B, C]): ModuleHom[A, C] =
+      AndThen[A, B, C, ModuleHom[A, B], ModuleHom[B, C]](f, g)
+
+  def tensor[A, B, C, D](f: ModuleHom[A, C], g: ModuleHom[B, D]): ModuleHom[(A, B), (C, D)] =
+    Tensor[A, B, C, D, ModuleHom[A, C], ModuleHom[B, D]](f, g)
+
+  def swap[A, B]: ModuleHom[(A, B), (B, A)] = Swap[A, B]()
+  def copy[A]: ModuleHom[A, (A, A)]         = Copy[A]()
+  def discard[A]: ModuleHom[A, Unit]        = Discard[A]()
 
 /** An identity-on-objects functor between Hom-indexed categories — the minimal math-with-scala `Functor`
   * shape needed here (the delooping target ignores objects, so an object map would be inert). */

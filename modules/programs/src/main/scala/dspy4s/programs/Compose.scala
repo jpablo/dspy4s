@@ -184,9 +184,38 @@ final case class Copy[I]() extends Module[TypedCall[I], Prediction[(I, I)]]:
 object Copy:
   given copyPredictors[I]: Predictors[Copy[I]] = Predictors.empty
 
-/** The composition combinators as functions / operators. `id` / `parallel` / `tensor` / `copy` are plain
-  * factories; `>>>` is an infix extension on any typed program. Import `dspy4s.programs.*` (or this object's
-  * members) to use them. */
+/** `discard` — the comonoid counit `!`: drop the input, producing `()`. Parameter-free. Under
+  * output-observational equality `f >>> discard = discard` (discard is natural / the unit is terminal), which
+  * is what makes the program category a Markov category *under that observation*; on the nose `f` still ran
+  * (cost / trace), so it is only a CD category. See [[dspy4s.programs.para.CDCategory]]. */
+final case class Discard[I]() extends Module[TypedCall[I], Prediction[Unit]]:
+  override val moduleName: String = "discard"
+  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record          = DynamicValue.Record.empty
+  override protected def callTraceEnabled(call: TypedCall[I]): Boolean                = call.traceEnabled
+  override protected def tracePayload(prediction: Prediction[Unit]): DynamicValue.Record = prediction.raw.values
+  override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[Unit]] =
+    Right(Prediction((), DynamicPrediction.empty))
+
+object Discard:
+  given discardPredictors[I]: Predictors[Discard[I]] = Predictors.empty
+
+/** `swap` — the symmetry `σ`: exchange the two components of a tensor. Parameter-free; involutive
+  * (`swap >>> swap = id`). Makes the monoidal structure symmetric. */
+final case class Swap[I, J]() extends Module[TypedCall[(I, J)], Prediction[(J, I)]]:
+  override val moduleName: String = "swap"
+  override protected def callInputs(call: TypedCall[(I, J)]): DynamicValue.Record       = DynamicValue.Record.empty
+  override protected def callTraceEnabled(call: TypedCall[(I, J)]): Boolean            = call.traceEnabled
+  override protected def tracePayload(prediction: Prediction[(J, I)]): DynamicValue.Record = prediction.raw.values
+  override protected def forward(call: TypedCall[(I, J)])(using RuntimeContext): Either[DspyError, Prediction[(J, I)]] =
+    val (i, j) = call.input
+    Right(Prediction((j, i), DynamicPrediction.empty))
+
+object Swap:
+  given swapPredictors[I, J]: Predictors[Swap[I, J]] = Predictors.empty
+
+/** The composition combinators as functions / operators. `id` / `parallel` / `tensor` / `copy` / `discard` /
+  * `swap` are plain factories; `>>>` is an infix extension on any typed program. Import `dspy4s.programs.*` (or
+  * this object's members) to use them. */
 object Compose:
   /** The Category unit at type `I`. */
   def id[I]: Identity[I] = Identity[I]()
@@ -205,6 +234,12 @@ object Compose:
 
   /** The comonoid copy `Δ`: duplicate the input into `(I, I)`. The first half of a fan-out. */
   def copy[I]: Copy[I] = Copy[I]()
+
+  /** The comonoid counit `!`: drop the input. */
+  def discard[I]: Discard[I] = Discard[I]()
+
+  /** The symmetry `σ`: exchange the two components of a tensor. */
+  def swap[I, J]: Swap[I, J] = Swap[I, J]()
 
   /** Non-learnable control middleware: `mode(m)(p)` runs `p` with its per-call controls rewritten by `m` (model
     * / temperature / rolloutId / traceEnabled). See [[Mode]]. */
