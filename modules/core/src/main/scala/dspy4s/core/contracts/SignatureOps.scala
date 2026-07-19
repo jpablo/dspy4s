@@ -89,3 +89,48 @@ private[dspy4s] object SignatureOps:
     @Law("L6 withInstructions: the last write wins")
     def instructionsLastWriteWins(s: SignatureLayout, a: String, b: String): IsEq[SignatureLayout] =
       s.withInstructions(Some(b)).withInstructions(Some(a)) <-> s.withInstructions(Some(a))
+
+// ── Algebra 1's two commuting submonoids, as explicit Monoid instances ──────────────────────────────────────
+// The signature algebra's carrier is LAYOUT ENDOMORPHISMS (`SignatureLayout => SignatureLayout`), not layouts
+// (layouts form no monoid). Its field-transform submonoid factors as InputTransform × OutputTransform — two
+// commuting submonoids of End(SignatureLayout), one per cohort (L1 keeps them disjoint, L3 makes them commute).
+// Each is wrapped as a newtype carrying a `Monoid` instance; laws hold up to OUTPUT-observational equality of
+// the wrapped transform (the same discipline as `Mode` / `SignatureOpsLawSuite`), not `==` on the function.
+
+/** The output-cohort endomorphism submonoid: `prependOutput` (idempotent by name) and `replaceOutputs`
+  * (left-absorbing) under composition, identity = the no-op transform. Apply with [[runOn]]. */
+private[dspy4s] final case class OutputTransform(runOn: SignatureLayout => SignatureLayout)
+
+private[dspy4s] object OutputTransform:
+  import SignatureOps.*
+  /** Generator: prepend an output field (idempotent by name). */
+  def prepend(field: FieldSpec): OutputTransform = OutputTransform(_.prependOutput(field))
+  /** Generator: replace all output fields (left-absorbing). */
+  def replace(fields: Vector[FieldSpec]): OutputTransform = OutputTransform(_.replaceOutputs(fields))
+
+  given monoid: Monoid[OutputTransform] with
+    def empty: OutputTransform = OutputTransform(identity)
+    extension (a: OutputTransform)
+      infix def combine(b: OutputTransform): OutputTransform = OutputTransform(a.runOn.andThen(b.runOn))
+
+/** The input-cohort endomorphism submonoid: `appendInput` (idempotent by name) under composition, identity =
+  * the no-op transform. Apply with [[runOn]]. */
+private[dspy4s] final case class InputTransform(runOn: SignatureLayout => SignatureLayout)
+
+private[dspy4s] object InputTransform:
+  import SignatureOps.*
+  /** Generator: append an input field (idempotent by name). */
+  def append(field: FieldSpec): InputTransform = InputTransform(_.appendInput(field))
+
+  given monoid: Monoid[InputTransform] with
+    def empty: InputTransform = InputTransform(identity)
+    extension (a: InputTransform)
+      infix def combine(b: InputTransform): InputTransform = InputTransform(a.runOn.andThen(b.runOn))
+
+/** The law RELATING the two submonoids (not a within-monoid law, so not on `Monoid`): they commute, because
+  * they act on disjoint field cohorts (the direct-product factorization; = `SignatureOps.laws.crossCohortCommute`
+  * at the newtype level). */
+private[dspy4s] object SignatureTransformLaws:
+  @Law("the input and output cohort submonoids commute")
+  def submonoidsCommute(i: InputTransform, o: OutputTransform, s: SignatureLayout): IsEq[SignatureLayout] =
+    o.runOn(i.runOn(s)) <-> i.runOn(o.runOn(s))

@@ -1,6 +1,6 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.{FieldRole, FieldSpec, IsEq, SignatureLayout}
+import dspy4s.core.contracts.{FieldRole, FieldSpec, InputTransform, IsEq, Monoid, OutputTransform, SignatureLayout, SignatureTransformLaws}
 import dspy4s.core.contracts.SignatureOps.laws
 import org.scalacheck.{Gen, Prop}
 
@@ -43,6 +43,18 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
       a.instructions.iterator.sameElements(b.instructions.iterator) &&
       a.name == b.name
 
+  // ── The two cohort submonoids as Monoid instances (over layout endomorphisms; observational equality) ─────
+  private val genOutT: Gen[OutputTransform] =
+    Gen.oneOf(genOutField.map(OutputTransform.prepend), genOutFields.map(OutputTransform.replace))
+  private val genInT: Gen[InputTransform] = genInField.map(InputTransform.append)
+
+  private val OT: Monoid[OutputTransform] = Monoid[OutputTransform]
+  private val IT: Monoid[InputTransform]  = Monoid[InputTransform]
+
+  /** Execute a stated `Monoid[OutputTransform]` law under output-observational equality of the transform. */
+  private def outEq(eq: IsEq[OutputTransform], s: SignatureLayout): Boolean = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
+  private def inEq(eq: IsEq[InputTransform], s: SignatureLayout): Boolean    = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
+
   /** Execute a stated layout equation under observational equality. */
   private def holdsLayout(eq: IsEq[SignatureLayout]): Boolean = obsEq(eq.lhs, eq.rhs)
 
@@ -80,4 +92,22 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
   }
   property("L6 withInstructions: the last write wins") {
     Prop.forAll(genLayout, genInstr, genInstr)((s, a, b) => holdsLayout(laws.instructionsLastWriteWins(s, a, b)))
+  }
+
+  // ── The submonoids as explicit Monoid instances (laws inherited from the Monoid trait, run observationally) ──
+  property("OutputTransform is a monoid (associativity + identity)") {
+    Prop.forAll(genLayout, genOutT, genOutT, genOutT) { (s, a, b, c) =>
+      outEq(OT.associativity(a, b, c), s) && outEq(OT.identityLeft(a), s) && outEq(OT.identityRight(a), s)
+    }
+  }
+  property("InputTransform is a monoid (associativity + identity)") {
+    Prop.forAll(genLayout, genInT, genInT, genInT) { (s, a, b, c) =>
+      inEq(IT.associativity(a, b, c), s) && inEq(IT.identityLeft(a), s) && inEq(IT.identityRight(a), s)
+    }
+  }
+  property("the input and output submonoids commute") {
+    Prop.forAll(genLayout, genInT, genOutT) { (s, i, o) =>
+      val eq = SignatureTransformLaws.submonoidsCommute(i, o, s)
+      obsEq(eq.lhs, eq.rhs)
+    }
   }
