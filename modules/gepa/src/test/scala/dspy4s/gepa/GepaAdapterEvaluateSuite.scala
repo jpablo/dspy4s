@@ -20,12 +20,13 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.Predictors
 import dspy4s.optimize.Runnable
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.PredictorId
 import munit.FunSuite
 
 class GepaAdapterEvaluateSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   /** Answers "Paris" for the France question (ChatAdapter marker format), "Lyon" otherwise. */
   private final class ScriptedLm extends LanguageModel:
@@ -53,8 +54,14 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get.withInstructions(Some("Answer.")))
 
   private val batch: Vector[Example] = Vector(
-    Example(values = DynamicValues.record("question" := "What is the capital of France?", "answer" := "Paris"), inputKeys = Set("question")),
-    Example(values = DynamicValues.record("question" := "Capital of nowhere?", "answer" := "Paris"), inputKeys = Set("question"))
+    Example(
+      values = DynamicValues.record("question" := "What is the capital of France?", "answer" := "Paris"),
+      inputKeys = Set("question")
+    ),
+    Example(
+      values = DynamicValues.record("question" := "Capital of nowhere?", "answer" := "Paris"),
+      inputKeys = Set("question")
+    )
   )
 
   private val adapter: GepaAdapter[DynamicPredict] = new GepaAdapter(program, metric)
@@ -62,23 +69,29 @@ class GepaAdapterEvaluateSuite extends FunSuite:
   test("evaluate with captureTraces returns aligned scores + per-example trajectories") {
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
+      val result           = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
 
-      assertEquals(result.scores, Vector(1.0, 0.0)) // example 1 matches "Paris"; example 2's gold is "Paris" but LM says "Lyon"
+      assertEquals(
+        result.scores,
+        Vector(1.0, 0.0)
+      ) // example 1 matches "Paris"; example 2's gold is "Paris" but LM says "Lyon"
       val trajs = result.trajectories.getOrElse(fail("expected trajectories"))
       assertEquals(trajs.size, 2)
       assertEquals(trajs.map(_.score), Vector(1.0, 0.0))
       // Each trajectory captured exactly the single predictor's trace entry.
       assertEquals(trajs.head.trace.size, 1)
       assertEquals(trajs.head.trace.head.component, "predict")
-      assertEquals(DynamicValues.recordGet(trajs.head.prediction.values, "answer").map(DynamicValues.renderText), Some("Paris"))
+      assertEquals(
+        DynamicValues.recordGet(trajs.head.prediction.values, "answer").map(DynamicValues.renderText),
+        Some("Paris")
+      )
     }
   }
 
   test("evaluate without captureTraces returns scores only (no trajectories)") {
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = adapter.evaluate(batch, Candidate.seed(program), captureTraces = false)
+      val result           = adapter.evaluate(batch, Candidate.seed(program), captureTraces = false)
 
       assertEquals(result.trajectories, None)
       assertEquals(result.scores, Vector(1.0, 0.0))
@@ -91,7 +104,11 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     // but the prompt the LM sees must carry the candidate instruction).
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = adapter.evaluate(batch.take(1), Map("self" -> "Answer with the city name only."), captureTraces = true)
+      val result = adapter.evaluate(
+        batch.take(1),
+        Map(PredictorId(0) -> "Answer with the city name only."),
+        captureTraces = true
+      )
       assertEquals(result.scores, Vector(1.0))
     }
   }
@@ -99,11 +116,11 @@ class GepaAdapterEvaluateSuite extends FunSuite:
   test("makeReflectiveDataset builds per-component {inputs, outputs, feedback} records from trajectories") {
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val evalBatch = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
-      val dataset   = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector("self"))
+      val evalBatch        = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
+      val dataset          = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(PredictorId(0)))
 
-      assertEquals(dataset.keySet, Set("self"))
-      val records = dataset("self")
+      assertEquals(dataset.keySet, Set(PredictorId(0)))
+      val records = dataset(PredictorId(0))
       assertEquals(records.size, 2)
       // inputs carry the question; generated outputs carry the model's answer; feedback explains the verdict.
       assert(records.head.inputs.contains("France"), records.head.inputs)

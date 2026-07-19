@@ -1,24 +1,35 @@
 package dspy4s.gepa
 
+import dspy4s.programs.PredictorId
 import dspy4s.programs.Predictors
 
-/** A GEPA candidate program: a map from component name to that predictor's instruction text — the genome the
-  * optimizer mutates (mirrors Python gepa's `dict[str, str]`). Instruction text is the only thing GEPA evolves;
-  * the program's structure (fields, demos, wiring) is fixed. See PORT_GAPS G-12. */
-type Candidate = Map[String, String]
+/** A GEPA candidate program: a map from stable predictor identity to instruction text — the genome the optimizer
+  * mutates. Instruction text is the only thing GEPA evolves; the program's structure (fields, demos, wiring) is fixed.
+  * Unlike upstream's attribute-path strings, [[PredictorId]] remains lawful for anonymous algebraic composition.
+  */
+type Candidate = Map[PredictorId, String]
 
 object Candidate:
 
-  /** The seed candidate: each predictor's CURRENT instruction, keyed by its component name (dspy's
-    * `{name: pred.signature.instructions}`). Names come from [[Predictors.readNamed]] — `"self"` for a standalone
-    * predict, field labels for a composite (P-c). */
+  /** The seed candidate: each predictor's current instruction, keyed by stable traversal identity. */
   def seed[P](program: P)(using ps: Predictors[P]): Candidate =
-    ps.readNamed(program).iterator.map { (name, predict) => name -> predict.layout.instructions.getOrElse("") }.toMap
+    ps.readIdentified(program).iterator.map { entry =>
+      entry.id -> entry.predictor.layout.instructions.getOrElse("")
+    }.toMap
 
-  /** Apply a candidate's instructions back onto the program's predictors, by component name (dspy's
-    * `with_instructions` over `named_predictors`). Predictors absent from the candidate keep their instruction. */
+  /** Apply a candidate's instructions back onto the same traversal identities. Predictors absent from the candidate
+    * keep their instruction.
+    */
   def applyTo[P](program: P, candidate: Candidate)(using ps: Predictors[P]): P =
-    val updated = ps.readNamed(program).map { (name, predict) =>
-      candidate.get(name).fold(predict)(instruction => predict.copy(layout = predict.layout.withInstructions(Some(instruction))))
+    val updated = ps.readIdentified(program).map { entry =>
+      candidate.get(entry.id).fold(entry.predictor) { instruction =>
+        entry.predictor.copy(layout = entry.predictor.layout.withInstructions(Some(instruction)))
+      }
     }
     ps.replace(program, updated)
+
+  /** Human-readable view for diagnostics and UI. A vector is used because structural display names are not the unique
+    * identity key and may collide in unusual user-defined `Predictors` instances.
+    */
+  def named[P](program: P, candidate: Candidate)(using ps: Predictors[P]): Vector[(String, String)] =
+    ps.readIdentified(program).flatMap(entry => candidate.get(entry.id).map(entry.displayName -> _))

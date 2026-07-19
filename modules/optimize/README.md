@@ -45,7 +45,8 @@ the trainset.
 Optimizers are generic over the program type `P`, working through two given instances rather than a fixed
 program class:
 
-- **`Predictors[P]`** — introspection: read the program's learnable predictors (`read` / `readNamed`) and write
+- **`Predictors[P]`** — introspection: read the program's learnable predictors (`read` / `readIdentified` /
+  `readNamed`) and write
   edited ones back (`replace`). One `Predict` is a length-1 list; a composite exposes all its leaves. This is
   what lets a single code path optimize both a standalone predictor and an arbitrary composite.
 - **`Runnable[P]`** — run `P` on a record of inputs, yielding the untyped `DynamicPrediction` that `Evaluate`

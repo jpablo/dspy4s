@@ -32,7 +32,7 @@ result.bestScore     // its mean validation score
 ```
 
 GEPA evolves **instructions only** — one per predictor (component). The program's structure (fields, demos,
-wiring) is fixed. A `Candidate` is therefore just a `Map[componentName, instructionText]` — the genome — and
+wiring) is fixed. A `Candidate` is therefore a `Map[PredictorId, instructionText]` — the genome — and
 the seed candidate is the program's current instructions.
 
 ## The signal: `FeedbackMetric`
@@ -62,7 +62,7 @@ scoring failures.
 ### Adapter
 
 `GepaAdapter` bridges a dspy4s program into the engine (Python's `DspyAdapter`). It applies a `Candidate` to
-the program (rewriting each predictor's instruction by component name) and evaluates a batch in one of two
+the program (rewriting each predictor's instruction by stable traversal ID) and evaluates a batch in one of two
 modes:
 
 - **Scores-only** (acceptance / full-eval fast path) — runs through `Evaluate` for scores.

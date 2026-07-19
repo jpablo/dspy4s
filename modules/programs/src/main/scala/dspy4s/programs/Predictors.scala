@@ -92,20 +92,36 @@ object Predictor:
 /** The general introspection contract optimizers consume -- typed analogue of Python's
   * named_predictors()/map_named_predictors(). `read` enumerates contained predictors in a stable order; `replace` swaps
   * them positionally and rebuilds the program immutably. Invariant: read(p).length and indices are stable across
-  * replace, and replace(p, read(p)) == p.
+  * replace, and replace(p, read(p)) == p. [[readIdentified]] turns those canonical indices into typed, unique
+  * [[PredictorId]] values; [[readNamed]] supplies structural display paths separately.
   */
 trait Predictors[P]:
   def read(program: P): Vector[DynamicPredict]
   def replace(program: P, updates: Vector[DynamicPredict]): P
 
-  /** Each predictor paired with a stable component NAME — the dspy4s analogue of Python's `named_predictors()`, and the
-    * key GEPA / Refine-per-module-advice need to associate a candidate, a trace, and a predictor. Names are dotted
-    * field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and `"field.sub"` when
-    * nested. `readNamed` is aligned with [[read]] order. The default uses positional index names;
-    * [[Predictors.DerivedPredictors]] overrides with the Mirror field labels (the latent names, G-12 P-c).
+  /** Each predictor paired with a human-readable structural name, analogous to Python's `named_predictors()`. Names are
+    * dotted field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and
+    * `"field.sub"` when nested. They describe the current syntax tree and therefore are not identity: reassociating an
+    * anonymous composition node can change its `first`/`second` path. `readNamed` is aligned with [[read]] order. The
+    * default uses positional names; [[Predictors.DerivedPredictors]] overrides with Mirror field labels.
     */
   def readNamed(program: P): Vector[(String, DynamicPredict)] =
     read(program).zipWithIndex.map { case (predict, i) => i.toString -> predict }
+
+  /** The canonical optimizer-facing traversal. IDs are derived once at the root from [[read]] order, so nested
+    * combinators cannot reset or prefix them. This makes identity unique and invariant under reassociation while
+    * retaining [[readNamed]]'s useful structural labels for diagnostics and prompts.
+    */
+  final def readIdentified(program: P): Vector[IdentifiedPredictor] =
+    val predictors   = read(program)
+    val displayNames = readNamed(program).map(_._1)
+    require(
+      displayNames.size == predictors.size,
+      s"Predictors.readNamed returned ${displayNames.size} entries but read returned ${predictors.size}"
+    )
+    predictors.zip(displayNames).zipWithIndex.map { case ((predictor, displayName), ordinal) =>
+      IdentifiedPredictor(PredictorId(ordinal), displayName, predictor)
+    }
 
 object Predictors extends LowPriority:
 

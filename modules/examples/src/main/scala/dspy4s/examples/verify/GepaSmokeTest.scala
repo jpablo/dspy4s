@@ -13,7 +13,17 @@
 package dspy4s.examples.verify
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DspyError, DynamicPrediction, DynamicValues, Example, LmEndEvent, RuntimeContext, TraceEntry}
+import dspy4s.core.contracts.{
+  CallbackEvent,
+  CallbackHandler,
+  DspyError,
+  DynamicPrediction,
+  DynamicValues,
+  Example,
+  LmEndEvent,
+  RuntimeContext,
+  TraceEntry
+}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -21,24 +31,37 @@ import dspy4s.gepa.{Gepa, GepaConfig}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.PredictorId
 
 import java.util.concurrent.atomic.AtomicInteger
 
 object GepaSmokeTest:
 
-  val signatureDsl            = "text -> label"
+  val signatureDsl             = "text -> label"
   val vagueBaselineInstruction = "Answer the question."
 
   private def example(text: String, label: String): Example =
     Example(values = DynamicValues.record("text" := text, "label" := label), inputKeys = Set("text"))
 
   private val withNum = Vector(
-    "I bought 3 apples", "There are 12 months in a year", "She ran 5 miles", "The recipe needs 2 cups",
-    "We have 7 days left", "He scored 21 points", "The box weighs 9 kg", "They planted 40 trees"
+    "I bought 3 apples",
+    "There are 12 months in a year",
+    "She ran 5 miles",
+    "The recipe needs 2 cups",
+    "We have 7 days left",
+    "He scored 21 points",
+    "The box weighs 9 kg",
+    "They planted 40 trees"
   )
   private val noNum = Vector(
-    "The sky is clear today", "Dogs love the park", "She enjoys mystery novels", "The coffee smells great",
-    "Birds sang in the trees", "He painted the fence", "We walked on the beach", "The soup is salty"
+    "The sky is clear today",
+    "Dogs love the park",
+    "She enjoys mystery novels",
+    "The coffee smells great",
+    "Birds sang in the trees",
+    "He painted the fence",
+    "We walked on the beach",
+    "The soup is salty"
   )
 
   // 5 of each for training (reflection minibatches), 3 of each held out for validation (frontier scoring).
@@ -55,14 +78,15 @@ object GepaSmokeTest:
         component: Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
-      val text = example.get("text").map(DynamicValues.renderText).getOrElse("")
-      val gold = example.get("label").map(DynamicValues.renderText).getOrElse("")
-      val got  = prediction.get("label").map(DynamicValues.renderText).getOrElse("")
+      val text    = example.get("text").map(DynamicValues.renderText).getOrElse("")
+      val gold    = example.get("label").map(DynamicValues.renderText).getOrElse("")
+      val got     = prediction.get("label").map(DynamicValues.renderText).getOrElse("")
       val correct = got.trim.equalsIgnoreCase(gold.trim)
       val fb =
         if correct then s"Correct ('$got')."
-        else s"""Incorrect. For the text "$text" the correct label is '$gold', but you produced '$got'. """ +
-          "The label must be exactly HAS_NUM when the text contains a digit, and NO_NUM otherwise."
+        else
+          s"""Incorrect. For the text "$text" the correct label is '$gold', but you produced '$got'. """ +
+            "The label must be exactly HAS_NUM when the text contains a digit, and NO_NUM otherwise."
       Right(ScoreWithFeedback(if correct then 1.0 else 0.0, fb))
 
   def envInt(name: String, default: Int): Int =
@@ -86,13 +110,15 @@ object GepaSmokeTest:
   OpenAiLanguageModel.fromEnv(model) match
     case Left(err) =>
       println(s"[gepa-smoke] Skipping — no live LM: ${err.message}")
-      println("""[gepa-smoke] Set OPENAI_API_KEY and re-run: sbt "examples/runMain dspy4s.examples.verify.gepaSmokeMain"""")
+      println(
+        """[gepa-smoke] Set OPENAI_API_KEY and re-run: sbt "examples/runMain dspy4s.examples.verify.gepaSmokeMain""""
+      )
 
     case Right(lm) =>
       val baseLayout = SignatureDsl.parse(signatureDsl).toOption.get.withInstructions(Some(vagueBaselineInstruction))
       // Pin temperature=0 so before/after scores are real, not sampling noise.
-      val student   = DynamicPredict(layout = baseLayout, config = DynamicValues.record("temperature" := 0.0))
-      val progress  = new ProgressLmCallback
+      val student  = DynamicPredict(layout = baseLayout, config = DynamicValues.record("temperature" := 0.0))
+      val progress = new ProgressLmCallback
 
       RuntimeEnvironment.withSettings(
         RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Vector(progress))
@@ -103,8 +129,16 @@ object GepaSmokeTest:
         // reflection LM in real use.
         // Opt in to the perfect-score early stop so the harness doesn't burn its post-convergence budget on
         // skip-perfect minibatches (the library default is off, matching upstream gepa's run-to-budget behavior).
-        val gepa = new Gepa[DynamicPredict](metric, reflectionLm = lm,
-          GepaConfig(maxMetricCalls = metricCalls, reflectionMinibatchSize = minibatchSize, stopOnPerfectScore = true, seed = 0L))
+        val gepa = new Gepa[DynamicPredict](
+          metric,
+          reflectionLm = lm,
+          GepaConfig(
+            maxMetricCalls = metricCalls,
+            reflectionMinibatchSize = minibatchSize,
+            stopOnPerfectScore = true,
+            seed = 0L
+          )
+        )
 
         println(s"[gepa-smoke] model=$model  budget=$metricCalls metric calls  minibatch=$minibatchSize")
         println(s"""[gepa-smoke] task: HAS_NUM/NO_NUM   baseline instruction: "$vagueBaselineInstruction"""")
@@ -114,6 +148,9 @@ object GepaSmokeTest:
 
         println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
         println(f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)")
-        println(s"""[gepa-smoke] discovered instruction:\n    "${result.bestCandidate.getOrElse("self", "(none)")}"""")
+        println(s"""[gepa-smoke] discovered instruction:\n    "${result.bestCandidate.getOrElse(
+            PredictorId(0),
+            "(none)"
+          )}"""")
         println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
       }

@@ -583,8 +583,10 @@ prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureF
 candidate selection, `GepaEngine` (reflective-mutation loop), and the `Gepa` facade. A deterministic
 instruction-sensitive test shows GEPA discovering a better instruction (score 0 → 1.0 within budget).
 **P-c done:** `Predictors.readNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
-field labels for a composite); GEPA now keys candidates by name and associates trace↔component by name→index.
-The `readNamed` capability is also what Refine per-module advice (G-5 follow-up) needs — now **done** (G-5 v2;
+field labels for a composite), while `readIdentified` assigns typed `PredictorId`s from the canonical traversal.
+GEPA keys candidates and trace-index association by ID; labels remain display/prompt metadata and may reflect an
+anonymous composition tree's current association. The `readNamed` capability is also what Refine per-module advice
+(G-5 follow-up) needs — now **done** (G-5 v2;
 `Predictors` relocated to `programs` to break the cycle). **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
 predictors must improve — GEPA evolves both (per-component reflective datasets + name→trace association), score
 0 → 1.0. **Round-robin component selection done** (gepa's default; `ComponentSelector.RoundRobin`/`All`).

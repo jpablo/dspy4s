@@ -20,7 +20,7 @@ Programs live on two layers that share one engine:
   runtime substrate both layers delegate to, through a single shared `PredictEngine`.
 
 The bridge for optimization is `Predictors[P]`, the dspy4s analogue of Python's `named_predictors()`: it
-enumerates a program's learnable sub-predictors (`read` / `readNamed`) and writes edited copies back
+enumerates a program's learnable sub-predictors (`read` / `readIdentified` / `readNamed`) and writes edited copies back
 (`replace`), which is exactly what the [`optimize`](../optimize/README.md) and [`gepa`](../gepa/README.md)
 modules drive.
 

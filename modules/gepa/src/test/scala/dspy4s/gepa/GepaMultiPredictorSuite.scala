@@ -19,6 +19,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.Predictors
+import dspy4s.programs.PredictorId
 import dspy4s.optimize.Runnable
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
@@ -26,13 +27,16 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 /** Two-predictor pipeline: `hinter` produces a hint, `answerer` answers using it. Top-level so `Predictors.derived`
-  * sees its Mirror field labels ("hinter", "answerer"). */
+  * sees its Mirror field labels ("hinter", "answerer").
+  */
 final case class Pipeline(hinter: DynamicPredict, answerer: DynamicPredict)
 
 object Pipeline:
   /** Run hinter → feed its hint into answerer. Two Module calls → two trace entries (in this order). */
   given Runnable[Pipeline] with
-    def run(program: Pipeline, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    def run(program: Pipeline, inputs: DynamicValue.Record)(using
+        RuntimeContext
+    ): Either[DspyError, DynamicPrediction] =
       program.hinter.apply(ProgramCall(inputs = inputs)).flatMap { hintPred =>
         val hint         = DynamicValues.recordGet(hintPred.values, "hint").getOrElse(DynamicValue.Null)
         val answerInputs = inputs.updated("hint", hint)
@@ -42,11 +46,12 @@ object Pipeline:
 class GepaMultiPredictorSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
-  /** Instruction-sensitive two-stage task. Stage 1 (output `hint`) emits "good_hint" only when its instruction
-    * carries TOKEN1. Stage 2 (output `answer`) emits "Paris" only when its instruction carries TOKEN2 AND it
-    * received "good_hint". So BOTH predictors must be improved for a correct final answer. */
+  /** Instruction-sensitive two-stage task. Stage 1 (output `hint`) emits "good_hint" only when its instruction carries
+    * TOKEN1. Stage 2 (output `answer`) emits "Paris" only when its instruction carries TOKEN2 AND it received
+    * "good_hint". So BOTH predictors must be improved for a correct final answer.
+    */
   private final class PipelineLm extends LanguageModel:
     override val id: String   = "pipeline"
     override val mode: LmMode = LmMode.Chat
@@ -87,33 +92,38 @@ class GepaMultiPredictorSuite extends FunSuite:
     DynamicPredict(layout = SignatureLayout.parse(layout).toOption.get.withInstructions(Some(instruction)))
 
   private val pipeline: Pipeline = Pipeline(
-    hinter   = predict("question -> hint", "Stage one."),
+    hinter = predict("question -> hint", "Stage one."),
     answerer = predict("question, hint -> answer", "Stage two.")
   )
 
   private val dataset: Vector[Example] = (1 to 4).toVector.map(i =>
-    Example(values = DynamicValues.record("question" := s"Capital ($i)?", "answer" := "Paris"), inputKeys = Set("question"))
+    Example(
+      values = DynamicValues.record("question" := s"Capital ($i)?", "answer" := "Paris"),
+      inputKeys = Set("question")
+    )
   )
 
-  test("the pipeline's two predictors are named by field label") {
-    assertEquals(Candidate.seed(pipeline).keySet, Set("hinter", "answerer"))
+  test("the pipeline's two predictors have stable IDs and retain field labels for display") {
+    assertEquals(Candidate.seed(pipeline).keySet, Set(PredictorId(0), PredictorId(1)))
+    assertEquals(Candidate.named(pipeline, Candidate.seed(pipeline)).map(_._1), Vector("hinter", "answerer"))
   }
 
   test("GEPA evolves BOTH predictors of a two-stage program to lift the score") {
     // These two predictors are interdependent (the answer needs BOTH fixed), so update all components at once;
     // round-robin (the default) would stall since fixing one alone never improves the minibatch.
     val gepa = new Gepa[Pipeline](
-      metric, new ReflectionLm,
+      metric,
+      new ReflectionLm,
       GepaConfig(maxMetricCalls = 30, reflectionMinibatchSize = 2, componentSelector = ComponentSelector.All, seed = 1L)
     )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = gepa.compile(pipeline, trainset = dataset, valset = dataset)
+      val result           = gepa.compile(pipeline, trainset = dataset, valset = dataset)
 
       assertEquals(result.bestScore, 1.0)
       // Both components were evolved to carry their required token (per-component reflection + association worked).
-      assert(result.bestCandidate("hinter").contains("TOKEN1"), result.bestCandidate("hinter"))
-      assert(result.bestCandidate("answerer").contains("TOKEN2"), result.bestCandidate("answerer"))
+      assert(result.bestCandidate(PredictorId(0)).contains("TOKEN1"), result.bestCandidate(PredictorId(0)))
+      assert(result.bestCandidate(PredictorId(1)).contains("TOKEN2"), result.bestCandidate(PredictorId(1)))
     }
   }
