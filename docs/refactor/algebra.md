@@ -54,8 +54,12 @@ L6 instructions         withInstructions(a) ∘ withInstructions(b) = withInstru
 ```
 
 **Structure.** The endomorphisms under `∘` form a monoid (identity = `id`). L3 says the input-combinators
-and output-combinators are two **commuting submonoids**. Within a cohort the generators are idempotent by
-name but order-sensitive (two `prependOutput`s do not commute), which is the signature of an
+and output-combinators are two **commuting submonoids**, now explicit `given Monoid` instances over the
+endomorphism newtypes `InputTransform` / `OutputTransform` (`SignatureOps.scala`; `empty` = the no-op
+transform, `combine` = composition, generators `append` / `prepend` / `replace`), with the cross-monoid
+commuting law `SignatureTransformLaws.submonoidsCommute`. Their laws hold up to output-observational equality
+of the wrapped transform (not `==`), executed in `SignatureOpsLawSuite`. Within a cohort the generators are
+idempotent by name but order-sensitive (two `prependOutput`s do not commute), which is the signature of an
 insertion-ordered, name-keyed map.
 
 **Design critique, resolved.** `SignatureLayout` used to enforce uniqueness with a runtime
@@ -277,8 +281,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[DynamicPredict]]`
     (`d3be8e1`, the parameter monoid — codomain of the `Predictors` homomorphism). The delooping is generalized
     to `delooping[M](using Monoid[M]): Cat[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
-    `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Cat`. Remaining
-    candidate: Algebra 1's two commuting endomorphism submonoids, if lifted onto explicit instances.
+    `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Cat`. Algebra 1's two
+    commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
+    `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
+    every monoid in the codebase is a named instance, none left implicit.
   - **Markov structure + tensor** (commits `508a8e6`, `71c8880`): the program category identified as a CD
     category (Markov under output-observational equality), now a first-class trait `CDCategory[Hom] extends
     Cat[AnyObject, Hom]` with the `given cdProgram` instance over the `ModuleHom` carrier. Generators `tensor`
