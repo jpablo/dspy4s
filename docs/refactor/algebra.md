@@ -261,6 +261,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `Predictors[Program]` + `Runnable[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
     values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
+    `Predictors.derived` now requires evidence for every product field; deliberately parameter-free field types
+    opt in with `Predictors.empty`, so an omitted learnable subtree can no longer disappear silently.
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are

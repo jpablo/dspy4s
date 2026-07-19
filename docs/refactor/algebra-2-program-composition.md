@@ -170,9 +170,9 @@ jpablo/math-with-scala, with the constraint moved from objects to the morphism r
 `dspy4s.programs.para.Program` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
 `Predictors[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
 the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ParaCategoryLawSuite`.
-Honest limitation: the Mirror-based `Predictors.derived` still resolves for any `Product` and silently
-contributes empty for fields without instances, so the gate is airtight only for non-`Product` programs;
-tightening that fallback is a `Predictors`-layer fix (same track as the instance gaps above).
+The Mirror-based `Predictors.derived` gate is strict: every product field must provide `Predictors` evidence.
+Intentionally parameter-free field types opt in with `Predictors.empty`; missing evidence is a compile error,
+so a learnable subtree cannot silently disappear from optimizer addressability.
 
 **Entry-point experiment (commit `8d7e009`), CLOSED (commit `d1d38d0`).** The first round drove COPRO through
 a packaged `Program` via the path-dependent instantiation `new COPRO[program.Rep](config)(using program.addressable,
@@ -359,8 +359,9 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
 - **Full Para adoption**: promote the packaged `Program` (see the Para formalization above; the input decoder is
   packaged, the entry-point loop is closed, objects are codec-equipped, and the BestOfN / Refine / RLM
   `Predictors` instances are now in place, so the prototype and its instance coverage are functionally
-  complete) from prototype to the optimizer entry-point API, together with a tightened derivation fallback
-  (the Mirror `empty` silent-drop) and the remaining `ProgramInput` instances (ChainOfThought / ReAct /
-  CodeAct). Best done alongside the CIO phase so the API breaks once.
+  complete) from prototype to the optimizer entry-point API, together with the remaining `ProgramInput`
+  instances (ChainOfThought / ReAct / CodeAct). The former Mirror silent-drop is already closed: structural
+  derivation now requires field evidence, with `Predictors.empty` as an explicit parameter-free opt-in. Best
+  done alongside the CIO phase so the API breaks once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.

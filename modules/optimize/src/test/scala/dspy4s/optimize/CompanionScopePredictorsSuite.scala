@@ -10,16 +10,16 @@ import munit.FunSuite
 
 import CompanionScopePredictorsSuite.Agent
 
-/** Regression for the HIGH-severity scope bug: the leaf `Predictor[Predict]` / `Predictor[ChainOfThought]`
-  * instances (and the hand-written `Predictors` instances for the composite typed programs) USED to live in a
-  * non-companion `object ProgramPredictors`, so they were only in implicit scope after an explicit
-  * `import ProgramPredictors.given`.
+/** Regression for the HIGH-severity scope bug: the leaf `Predictor[Predict]` / `Predictor[ChainOfThought]` instances
+  * (and the hand-written `Predictors` instances for the composite typed programs) USED to live in a non-companion
+  * `object ProgramPredictors`, so they were only in implicit scope after an explicit `import ProgramPredictors.given`.
   *
-  * This suite DELIBERATELY does NOT import them: it only exercises companion-scope resolution. On the old code a
-  * user composite `case class Agent(...)` with `given Predictors[Agent] = Predictors.derived` and no such import
-  * would resolve each typed-program field to ZERO predictors (`summonFieldInstance` falling through to
-  * `Predictors.empty`), so `read(agent).size` would be 0. With the instances moved to the typeclass companions it
-  * is 2. */
+  * This suite DELIBERATELY does NOT import them: it only exercises companion-scope resolution. On the old code a user
+  * composite `case class Agent(...)` with `given Predictors[Agent] = Predictors.derived` and no such import would
+  * resolve each typed-program field to ZERO predictors. With the instances moved to the typeclass companions it is 2;
+  * the strict derivation boundary now also makes a future omission fail compilation instead of silently falling back to
+  * `Predictors.empty`.
+  */
 class CompanionScopePredictorsSuite extends FunSuite:
 
   private val qaSignature = Signature.fromString("question -> answer")
@@ -28,13 +28,12 @@ class CompanionScopePredictorsSuite extends FunSuite:
 
   test("composite of typed programs resolves field predictors WITHOUT any import (was 0, now 2)") {
     val agent = Agent(
-      planner  = Predict(qaSignature, name = Some("plan")),
+      planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps   = summon[Predictors[Agent]]
     val read = ps.read(agent)
-    // Pre-fix: each typed-program field fell back to Predictors.empty -> size 0. Post-fix: each leaf is in
-    // companion scope -> size 2.
+    // Each typed-program leaf is found in companion scope; strict derivation would reject a missing instance.
     assertEquals(read.size, 2)
     assertEquals(read(0).name, Some("plan"))
     assertEquals(read(1).name, Some("reason"))
@@ -54,7 +53,7 @@ class CompanionScopePredictorsSuite extends FunSuite:
 
   test("composite round-trips: replace(p, read(p)) == p WITHOUT any import") {
     val agent = Agent(
-      planner  = Predict(qaSignature, name = Some("plan")),
+      planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps = summon[Predictors[Agent]]
@@ -63,23 +62,23 @@ class CompanionScopePredictorsSuite extends FunSuite:
 
   test("DerivedPredictors.replace rejects an over-long update vector (LOW #4)") {
     val agent = Agent(
-      planner  = Predict(qaSignature, name = Some("plan")),
+      planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps      = summon[Predictors[Agent]]
-    val correct = ps.read(agent)              // arity 2
-    val tooMany = correct :+ correct.head     // arity 3
-    val ex = intercept[IllegalArgumentException](ps.replace(agent, tooMany))
+    val correct = ps.read(agent)          // arity 2
+    val tooMany = correct :+ correct.head // arity 3
+    val ex      = intercept[IllegalArgumentException](ps.replace(agent, tooMany))
     assert(ex.getMessage.contains("expected 2 updates, got 3"), ex.getMessage)
   }
 
   test("DerivedPredictors.replace rejects a too-short update vector (LOW #4)") {
     val agent = Agent(
-      planner  = Predict(qaSignature, name = Some("plan")),
+      planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
-    val ps      = summon[Predictors[Agent]]
-    val tooFew  = Vector.empty[DynamicPredict]
+    val ps     = summon[Predictors[Agent]]
+    val tooFew = Vector.empty[DynamicPredict]
     intercept[IllegalArgumentException](ps.replace(agent, tooFew))
   }
 

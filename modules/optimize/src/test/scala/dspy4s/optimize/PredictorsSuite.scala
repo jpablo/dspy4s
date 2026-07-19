@@ -16,18 +16,19 @@ class PredictorsSuite extends FunSuite:
   // A composite of two predictors plus a non-predictor field.
   final case class Pipe(a: DynamicPredict, b: DynamicPredict, n: Int)
   object Pipe:
+    given Predictors[Int]  = Predictors.empty
     given Predictors[Pipe] = Predictors.derived
 
   test("Predictor lifts to a 1-element Predictors via fromPredictor") {
-    val p   = DynamicPredict(layout = sigA)
-    val ps  = summon[Predictors[DynamicPredict]]
+    val p  = DynamicPredict(layout = sigA)
+    val ps = summon[Predictors[DynamicPredict]]
     assertEquals(ps.read(p).size, 1)
     assertEquals(ps.read(p).head, p)
     val updated = DynamicPredict(layout = sigB)
     assertEquals(ps.replace(p, Vector(updated)), updated)
   }
 
-  test("derived read concatenates fields left-to-right, skipping non-predictor fields") {
+  test("derived read concatenates fields left-to-right, honoring explicitly parameter-free fields") {
     val a    = DynamicPredict(layout = sigA, name = Some("a"))
     val b    = DynamicPredict(layout = sigB, name = Some("b"))
     val pipe = Pipe(a, b, 7)
@@ -65,6 +66,20 @@ class PredictorsSuite extends FunSuite:
     assertEquals(empty.replace(42, Vector.empty), 42)
   }
 
+  test("derived rejects a field without Predictors evidence instead of silently treating it as empty") {
+    val errors = compileErrors("""
+      import dspy4s.programs.DynamicPredict
+      import dspy4s.programs.Predictors
+
+      final class Opaque
+      final case class Broken(predict: DynamicPredict, opaque: Opaque)
+      given Predictors[Broken] = Predictors.derived
+    """)
+
+    assert(errors.contains("Cannot derive Predictors"), errors)
+    assert(errors.contains("Predictors.empty"), errors)
+  }
+
   test("given priority: leaf vs structural derivation resolve distinctly") {
     // A leaf type (DynamicPredict has Predictor and is a Product) -> fromPredictor.
     assertEquals(
@@ -89,8 +104,8 @@ class PredictorsSuite extends FunSuite:
     assertEquals(ps.read(student).size, 1)
     assertEquals(ps.read(student).head.layout, sigA)
 
-    val demos    = Vector(Example(rec("question" := "q", "answer" := "x")))
-    val updated  = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
+    val demos   = Vector(Example(rec("question" := "q", "answer" := "x")))
+    val updated = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
     assertEquals(updated.demos, demos)
     // round-trip identity when re-reading then replacing the same predictors
     assertEquals(ps.replace(updated, ps.read(updated)), updated)
