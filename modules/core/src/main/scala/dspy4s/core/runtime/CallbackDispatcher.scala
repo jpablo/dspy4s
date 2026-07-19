@@ -20,11 +20,12 @@ import scala.util.control.NonFatal
   * wrapped thunk and the matching `*EndEvent` after, correlated by a shared `callId`, so handlers observe a
   * properly nested call tree (see [[dspy4s.core.contracts.CallbackEvent]] for the correlation model).
   *
-  * Two guarantees hold for every scope:
+  * Two guarantees hold for every scope whose start event was emitted successfully:
   *
-  *   - The end event ALWAYS fires -- on success, on a `Left(DspyError)`, and even when the thunk throws. A
-  *     thrown exception is reported as a `Left(RuntimeError("callback_dispatch", ...))` end event and then
-  *     rethrown, so observability never swallows a failure.
+  *   - The dispatcher attempts exactly one end emission -- on success, on a `Left(DspyError)`, and even when
+  *     the thunk throws. A thrown body exception is reported as a
+  *     `Left(RuntimeError("callback_dispatch", ...))` end event and then rethrown. If an end observer itself
+  *     throws, that end is not emitted a second time.
   *   - The scope's `callId` is installed as the active call for the duration of the thunk, so any scope opened
   *     inside it inherits that id as its `parentCallId`.
   *
@@ -147,20 +148,23 @@ object CallbackDispatcher:
       thunk(callId, parentCallId)
     }
 
-  /** Run `thunk` and ensure `emitEnd` fires exactly once with the outcome before returning: the thunk's own
-    * `Right`/`Left`, or -- if it throws a non-fatal exception -- a `Left(RuntimeError("callback_dispatch", ...))`,
-    * after which the original exception is rethrown so it still propagates to the caller. */
+  /** Run `thunk` and attempt `emitEnd` exactly once with its outcome. If the body throws, an end carrying a
+    * callback-dispatch error is attempted before the original exception is rethrown. An observer failure while
+    * reporting that body exception is attached as suppressed; an observer failure after an ordinary result
+    * propagates directly. */
   private def runWithEnd[A](
       thunk: => Either[DspyError, A]
   )(emitEnd: Either[DspyError, A] => Unit): Either[DspyError, A] =
-    try
-      val result = thunk
-      emitEnd(result)
-      result
-    catch
-      case NonFatal(error) =>
-        val runtimeError: Either[DspyError, A] = Left(
-          RuntimeError("callback_dispatch", Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
-        )
-        emitEnd(runtimeError)
-        throw error
+    val result =
+      try thunk
+      catch
+        case NonFatal(bodyError) =>
+          val runtimeError: Either[DspyError, A] = Left(
+            RuntimeError("callback_dispatch", Option(bodyError.getMessage).getOrElse(bodyError.getClass.getSimpleName))
+          )
+          try emitEnd(runtimeError)
+          catch
+            case NonFatal(observerError) => bodyError.addSuppressed(observerError)
+          throw bodyError
+    emitEnd(result)
+    result

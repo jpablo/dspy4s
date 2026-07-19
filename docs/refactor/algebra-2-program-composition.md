@@ -20,7 +20,8 @@ model outputs. They are stated on **composition** and checked in whichever way i
 - **structural** (on the program tree the combinator builds; no LLM): Category, Mode monoid, the `Predictors`
   homomorphism;
 - **mock-LM** (deterministic stub model): the augment round-trip;
-- **distributional** (holds for any model output): `bestOf` monotonicity, `selectBest` permutation-invariance.
+- **distributional** (holds for any model output): exhaustive finite-score `argMax` monotonicity under an
+  explicit deterministic tie-break. Ordered early-stop search is intentionally not permutation-invariant.
 
 ## Carrier (forks 1 and 5)
 
@@ -52,11 +53,11 @@ a >>> b                        : (Prog[I, X], Prog[X, O]) => Prog[I, O]      // 
 //   IMPLEMENTED as AndThen + the `>>>` extension; threads the plain value (the Prediction envelope of the
 //   intermediate goes to the trace, not the result). p >>> id keeps p.output but resets .raw (carrier split).
 
-parallel(a, b)                 : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)] // Applicative (independent)  [IMPLEMENTED 6.2]
+parallel(a, b)                 : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)] // ordered fan-out / &&&  [IMPLEMENTED 6.2]
 //   IMPLEMENTED as Both + Compose.parallel. NOTE: this is NOT the existing `Parallel` class — that is a batch
-//   executor over Vector[(DynamicModule, ProgramCall)] on a thread pool, a different abstraction. The applicative
-//   `parallel(a, b)` runs two typed programs on the same input and tuples the outputs (sequential on Either;
-//   concurrency is the later CIO concern). The raw merges both sub-predictions' records (second wins on collision).
+//   executor over Vector[(DynamicModule, ProgramCall)] on a thread pool, a different abstraction. This fan-out
+//   runs two typed programs left-to-right on the same input and tuples the outputs. The raw merges both
+//   sub-predictions' records (second wins on collision).
 
 augment[Name, T](field)(p) : Prog[I, O] => Prog[I, Out]                     // Thought / CoT  [IMPLEMENTED 6.4]
 //   IMPLEMENTED (opening position) as OutputAugmentation.decodeAugmented[O, Name, T, Out]: an arbitrary typed T
@@ -76,8 +77,8 @@ bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // 
 //   IMPLEMENTED as programs.runtime.AttemptSelection.bestOf, with an optional inter-attempt feedback hook
 //   (A, trace, score) => Either[err, Option[AdapterRef]] returning the NEXT attempt's adapter override.
 
-selectBest(p, n, reward, threshold) : Prog[I, O] => Prog[I, O]   // bestOf over INDEPENDENT samples  [= BestOfN, DONE]
-//   n attempts varying rolloutId / temperature; order-independent (feedback = None)
+selectBest(p, n, reward, threshold) : Prog[I, O] => Prog[I, O]   // bestOf over sampled attempts  [= BestOfN, DONE]
+//   n attempts varying rolloutId / temperature; ordered because early stopping and ties select the first match
 
 feedback(p, critic, n, reward, threshold) : Prog[I, O] => Prog[I, O]         // bestOf over a SEQUENTIAL stream  [= Refine, DONE]
 //   the carried hint is realized as the next attempt's adapter override (Refine: OfferFeedback advice routed
@@ -107,18 +108,18 @@ TrajectoryAgent.runAndExtract[S](...)(step) : M[(DynamicPrediction, String)]  //
 Category          id >>> p = p = p >>> id
                   (p >>> q) >>> r = p >>> (q >>> r)
 
-Applicative       parallel(pure(a), p) ≅ map(p)(a, _)
-(parallel)        parallel associates up to tuple reassociation
+Ordered fan-out   parallel runs left-to-right and fail-fast
+                  parallel associates on values up to tuple reassociation
 
 Mode monoid       mode(m1 ⊕ m2) = mode(m1) ∘ mode(m2)        mode(idMode) = id        ⊕ associative
 
 augment           base(run(augment[r](p))(i)) = run(p)(i)    // the added field is extra (round-trip, mock-LM)
                   augment[r] ∘ augment[r] = augment[r]        // idempotent (OutputAugmentation.Contains)
 
-bestOf            reward(bestOf(...)(attempts)) ≥ reward(a)   for every successful attempt a   // monotonicity
+argMax            exhaustive finite-score selection returns a maximum under its tie-break
 
-selectBest        selectBest(p, 1, _, _) = p                  // n = 1 is identity
-                  selectBest is invariant under attempt permutation (modulo tie-break)         // independent
+selectBest        ordered search: early stopping and ties preserve attempt order
+                  n = 1 still rewrites rollout controls, so it is not operational identity
 
 feedback          feedback is NOT permutation-invariant       // carried hint = order matters
 
@@ -126,8 +127,9 @@ Predictors        read(c) = ownPredicts ++ children.flatMap(read)     // concate
                   replace(p, read(p)) = p                              // round-trip
 ```
 
-The `selectBest` permutation-invariance vs `feedback` order-dependence is the algebraic statement of why they
-are two combinators sharing `bestOf`, not one combinator (fork 3).
+`selectBest` and `feedback` share attempt execution and selection mechanics, but both are ordered state machines:
+`feedback` additionally carries advice between attempts. Exhaustive `argMax` is the smaller pure reducer with
+commutative laws.
 
 ## Optimizer-addressability (fork 4)
 
@@ -223,17 +225,15 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   (`delooping[M](using Monoid[M]) : Cat[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
   `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).
 - **`parallel`, named honestly.** Added to the `Prog` layer as the fan-out (pairing): both legs share the
-  input, so it is copy-then-tensor fused, the CD/Markov-category shape, NOT a plain monoidal tensor (a
-  correction of the earlier "monoidal structure" suggestion). The copy NON-law is pinned as an executable
+  input, so it is copy-then-ordered-tensor fused. The copy NON-law is pinned as an executable
   counterexample: `h >>> parallel(f, g)` runs `h` once while `parallel(h >>> f, h >>> g)` runs it twice,
   with visibly different parameters (sizes 3 vs 4); the outputs coincide only for deterministic `h`, which
   is precisely why fan-out naturality cannot be a law for LLM morphisms. This is also the categorical
   restatement of why the spec's `parallel` is "independent composition": sharing vs re-running are
   different programs, and the algebra keeps them distinguishable.
-  The underlying monoidal tensor `⊗` (`Tensor` / `Compose.tensor`) and copy `Δ` (`Copy` / `Compose.copy`) were
-  later added for completeness (commit `508a8e6`), so `parallel = copy >>> tensor` and the Markov determinism
-  law (copy natural iff the morphism is deterministic) are executable; the full framing is in
-  [algebra.md](algebra.md) ("The program category is a Markov category"). `tensor` stays at the `Module` level
+  The underlying ordered independent-input operation (`Tensor` / `Compose.tensor`) and `Copy` were later added
+  for completeness (commit `508a8e6`), so `parallel = copy >>> tensor`; deterministic and effect-observing copy
+  cases are executable. The corrected framing is in [algebra.md](algebra.md). `tensor` stays at the `Module` level
   (its `(I, J)` input has no single-record decoder), and `discard` / `swap` / associators are deferred.
 
 ## Acceptance criteria: each composite reduces to a recipe
@@ -317,9 +317,9 @@ suites as the regression net:
    green unchanged. Built on the step-4 `isolatedAttempt`/`propagateAttempt` primitives.
 2. **`>>>` (Category) and `parallel`. DONE (commit `60d2ea5`).** Added `id` / `AndThen` (`>>>`) / `Both`
    (`parallel`) in `Compose.scala`, with hand-written `Predictors` instances (concretely typed children, so
-   pipelines stay addressable) and `ComposeLawSuite` covering the Category + Applicative laws.
+   pipelines stay addressable) and `ComposeLawSuite` covering value-category and ordered-fan-out semantics.
    **Code-truth correction:** `parallel` did NOT "largely exist as `Parallel`" — `Parallel` is a thread-pool
-   batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the applicative
+   batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the typed fan-out
    `parallel(a, b)` is new. Category laws are stated on the threaded `.output` value (the carrier decision),
    not the full `Prediction` envelope.
 3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
@@ -352,10 +352,10 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
-- **Monoidal coherence for the CD category**: associators / unitors / pentagon / triangle. The CD structure is
-  an explicit trait `CDCategory[Hom]` (commit `71c8880`) with `tensor` `⊗` / `copy` `Δ` / `discard` `!` /
-  `swap` `σ` and their positive laws; only the coherence morphisms (needed for counit / coassociativity) remain
-  deferred, no consumer. A genuine `tensor` on `ParaCat`/`Prog` would also need a pair-input decoder.
+- **Commutative denotational carrier**: the abstract `CDCategory[Hom]` law target remains, but unrestricted
+  `ModuleHom` implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or
+  other commutative carrier could implement CD/Markov laws. A pair-input decoder would still be needed to lift
+  ordered tensor into `ParaCat`/`Prog`.
 - **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above; the input decoder is
   packaged, the entry-point loop is closed, objects are codec-equipped, and the BestOfN / Refine / RLM
   `Predictors` instances are now in place, so the prototype and its instance coverage are functionally

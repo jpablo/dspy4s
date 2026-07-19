@@ -24,12 +24,13 @@ import scala.concurrent.Future
   *   - the typed surface, `Module[TypedCall[I], Prediction[O]]`, which `Predict[I, O]` / `ChainOfThought[I, O]`
   *     extend — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
   *
-  * A program is a pure [[forward]]; [[apply]] is the `final` caller entry (Scala's `__call__`) that wraps
+  * A program implements [[forward]]; [[apply]] is the `final` caller entry (Scala's `__call__`) that wraps
   * `forward` with the module lifecycle — the callback `ModuleStart`/`ModuleEnd` scope plus trace/history recording.
   * That bookkeeping is the runtime's responsibility (`RuntimeEnvironment` / `CallbackDispatcher`), not the
-  * program's; subclasses implement only `forward`. Because `apply` is `final`, the wrapping is universal and cannot
-  * be bypassed — every `Module`, typed or untyped, is observed identically (the typed layer is no longer an
-  * un-wrapped facade beside the spine).
+  * program's; subclasses implement only `forward`. Because `apply` is `final`, leaf modules cannot bypass the
+  * wrapping. Structural combinators use [[TransparentModule]] so association and identity wrappers remain
+  * operationally invisible: their children still receive the normal lifecycle, while the syntax used to compose
+  * those children does not add callbacks, trace, or history entries of its own.
   *
   * Callbacks, trace, and history all record `DynamicValue.Record`s, not the static `I` / `O`. The three
   * projection hooks bridge the generic `I` / `O` into those records:
@@ -45,6 +46,11 @@ import scala.concurrent.Future
 trait Module[I, O]:
   def moduleName: String
 
+  /** Whether this module participates in the callback/trace/history lifecycle. Ordinary executable modules use
+    * the default. Structural composition nodes override this through [[TransparentModule]] so algebraic
+    * reassociation does not change an execution's observable lifecycle. */
+  private[contracts] def callLifecycleEnabled(input: I): Boolean = true
+
   /** The program's actual computation, minus the module lifecycle. Subclasses implement this; callers invoke
     * [[apply]] (or [[applyAsync]]), never `forward`. */
   protected def forward(input: I)(using RuntimeContext): Either[DspyError, O]
@@ -59,35 +65,47 @@ trait Module[I, O]:
   protected def tracePayload(output: O): DynamicValue.Record
 
   final def apply(input: I)(using RuntimeContext): Either[DspyError, O] =
-    val inputBag = callInputs(input)
-    CallbackDispatcher.withModule(moduleName, inputBag) {
-      val result = forward(input)
-      if callTraceEnabled(input) then
-        result match
-          case Right(output) =>
-            val outputs = tracePayload(output)
-            RuntimeEnvironment.appendTrace(
-              TraceEntry(component = moduleName, inputs = inputBag, outputs = outputs)
-            )
-            RuntimeEnvironment.appendHistory(
-              HistoryEntry(component = moduleName, payload = DynamicValues.record("inputs" -> inputBag, "outputs" -> outputs))
-            )
-          case Left(error) =>
-            // P-a (G-12): normally a failure leaves no trace; under `captureFailureTraces` (GEPA's reflective
-            // evaluation) record a failure entry so the failed trajectory is visible — surfacing the raw model
-            // response from a parse error so reflection can see what the model actually produced.
-            if summon[RuntimeContext].captureFailureTraces then
-              val rawOutputs = error match
-                case ParseError(_, _, Some(raw)) => DynamicValues.record("raw_response" := raw)
-                case _                           => DynamicValue.Record.empty
+    if !callLifecycleEnabled(input) then forward(input)
+    else
+      val inputBag = callInputs(input)
+      CallbackDispatcher.withModule(moduleName, inputBag) {
+        val result = forward(input)
+        if callTraceEnabled(input) then
+          result match
+            case Right(output) =>
+              val outputs = tracePayload(output)
               RuntimeEnvironment.appendTrace(
-                TraceEntry(component = moduleName, inputs = inputBag, outputs = rawOutputs, failure = Some(error.message))
+                TraceEntry(component = moduleName, inputs = inputBag, outputs = outputs)
               )
-      result
-    }
+              RuntimeEnvironment.appendHistory(
+                HistoryEntry(component = moduleName, payload = DynamicValues.record("inputs" -> inputBag, "outputs" -> outputs))
+              )
+            case Left(error) =>
+              // P-a (G-12): normally a failure leaves no trace; under `captureFailureTraces` (GEPA's reflective
+              // evaluation) record a failure entry so the failed trajectory is visible — surfacing the raw model
+              // response from a parse error so reflection can see what the model actually produced.
+              if summon[RuntimeContext].captureFailureTraces then
+                val rawOutputs = error match
+                  case ParseError(_, _, Some(raw)) => DynamicValues.record("raw_response" := raw)
+                  case _                           => DynamicValue.Record.empty
+                RuntimeEnvironment.appendTrace(
+                  TraceEntry(component = moduleName, inputs = inputBag, outputs = rawOutputs, failure = Some(error.message))
+                )
+        result
+      }
 
   def applyAsync(input: I)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, O]] =
     ContextPropagation.future(apply(input))
+
+/** A structural program node whose own identity is not part of execution observability. Its children remain
+  * ordinary [[Module]]s and therefore still emit callbacks, trace, and history. Keeping this distinction in the
+  * base lifecycle prevents `AndThen(AndThen(a, b), c)` and `AndThen(a, AndThen(b, c))` from producing different
+  * runtime observations solely because their syntax trees are associated differently. */
+private[programs] trait TransparentModule[I, O] extends Module[I, O]:
+  final override private[contracts] def callLifecycleEnabled(input: I): Boolean = false
+  final override protected def callInputs(input: I): DynamicValue.Record = DynamicValue.Record.empty
+  final override protected def callTraceEnabled(input: I): Boolean = false
+  final override protected def tracePayload(output: O): DynamicValue.Record = DynamicValue.Record.empty
 
 /** The untyped program spine: `Module[ProgramCall, DynamicPrediction]` with the projection hooks defaulted to the
   * spine record shapes (`call.inputs` / `prediction.values`). `DynamicPredict` is the engine program on this

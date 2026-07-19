@@ -1,9 +1,12 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.CallbackEvent
+import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -13,10 +16,13 @@ import dspy4s.typed.Prediction
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** Laws for the program-composition combinators `id` / `>>>` / `parallel` (Algebra 2's Category + Applicative;
-  * `docs/refactor/algebra-2-program-composition.md`). Carrier note: `>>>` threads the plain output VALUE, so the
-  * Category laws are stated on `.output` (the threaded denotation), not on the full `Prediction` envelope —
-  * `p >>> id` keeps `p.output` but resets `.raw` (id's empty envelope), the documented value-vs-envelope split. */
+import scala.collection.mutable.ArrayBuffer
+
+/** Laws and operational semantics for `id` / `>>>` / ordered fan-out. Carrier note: `>>>` threads the plain
+  * output VALUE, so the Category laws are stated on `.output` (the threaded denotation), not on the full
+  * `Prediction` envelope — `p >>> id` keeps `p.output` but resets `.raw` (id's empty envelope), the documented
+  * value-vs-envelope split. Structural combinators are lifecycle-transparent, making output equality stable
+  * under association even when a leaf observes the live trace. */
 class ComposeLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -36,10 +42,25 @@ class ComposeLawSuite extends FunSuite:
     override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
+  /** A leaf that makes lifecycle structure semantically observable by returning the trace size at its forward
+    * boundary. Associativity requires both syntax trees to have run the same leaves before reaching it. */
+  private final case class TraceSize(predict: DynamicPredict) extends Module[TypedCall[String], Prediction[Int]]:
+    override val moduleName: String = "trace_size"
+    override protected def callInputs(call: TypedCall[String]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: TypedCall[String]): Boolean = call.traceEnabled
+    override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record = p.raw.values
+    override protected def forward(call: TypedCall[String])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
+      Right(Prediction(RuntimeEnvironment.current.trace.size, DynamicPrediction.empty))
+
   private object Step:
     given stepPredictor[I, O]: Predictor[Step[I, O]] with
       def get(program: Step[I, O]): DynamicPredict                       = program.predict
       def set(program: Step[I, O], updated: DynamicPredict): Step[I, O]  = program.copy(predict = updated)
+
+  private object TraceSize:
+    given traceSizePredictor: Predictor[TraceSize] with
+      def get(program: TraceSize): DynamicPredict = program.predict
+      def set(program: TraceSize, updated: DynamicPredict): TraceSize = program.copy(predict = updated)
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
@@ -63,10 +84,20 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(viaId.map(_.raw.values), direct.map(_.raw.values))
   }
 
-  test("p >>> id = p on the threaded output value (right unit; raw is id's empty envelope)") {
+  test("p >>> id = p on the threaded value and lifecycle (raw remains outside the category observation)") {
     val p = step[Int, String]("p", "i -> s")(i => s"v$i")
-    val viaId = (p >>> Compose.id[String]).apply(TypedCall(7))
-    assertEquals(viaId.map(_.output), p.apply(TypedCall(7)).map(_.output))
+
+    def run(program: Module[TypedCall[Int], Prediction[String]]) =
+      RuntimeEnvironment.resetForTests()
+      val result = program.apply(TypedCall(7))
+      (result, RuntimeEnvironment.current.trace.map(_.component))
+
+    val viaId = run(p >>> Compose.id[String])
+    val direct = run(p)
+    assertEquals(viaId._1.map(_.output), direct._1.map(_.output))
+    assertEquals(viaId._2, direct._2)
+    assertEquals(viaId._1.map(_.raw), Right(DynamicPrediction.empty))
+    assertNotEquals(viaId._1.map(_.raw), direct._1.map(_.raw))
   }
 
   // ── Category: associativity ──────────────────────────────────────────────────────────────────────────────
@@ -80,7 +111,42 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(left, Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
-  // ── Applicative: parallel ────────────────────────────────────────────────────────────────────────────────
+  test("associativity remains observable when the final leaf reads the live trace") {
+    val a = step[Int, String]("a", "i -> s")(_.toString)
+    val b = step[String, String]("b", "s -> t")(identity)
+    val c = TraceSize(predict("t -> n"))
+
+    def run(program: Module[TypedCall[Int], Prediction[Int]]): (Either[DspyError, Int], Vector[String]) =
+      RuntimeEnvironment.resetForTests()
+      val output = program.apply(TypedCall(1)).map(_.output)
+      output -> RuntimeEnvironment.current.trace.map(_.component)
+
+    val left  = run((a >>> b) >>> c)
+    val right = run(a >>> (b >>> c))
+
+    assertEquals(left, right)
+    assertEquals(left, Right(2) -> Vector("step_a", "step_b", "trace_size"))
+  }
+
+  test("structural composition emits callbacks only for semantic leaves") {
+    val starts = ArrayBuffer.empty[String]
+    val handler = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
+        case start: ModuleStartEvent => starts += start.moduleName
+        case _                       => ()
+
+    val a = step[Int, String]("a", "i -> s")(_.toString)
+    val b = step[String, String]("b", "s -> t")(identity)
+    val c = step[String, Int]("c", "t -> n")(_.length)
+
+    RuntimeEnvironment.withCallbacks(Vector(handler)) {
+      val _ = ((a >>> b) >>> c).apply(TypedCall(1))
+    }
+
+    assertEquals(starts.toVector, Vector("step_a", "step_b", "step_c"))
+  }
+
+  // ── Ordered fan-out ─────────────────────────────────────────────────────────────────────────────────────
   test("parallel(a, b) runs both on the same input and tuples the outputs") {
     val a = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b = step[Int, Int]("b", "i -> n")(i => i * 10)
@@ -127,7 +193,7 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(P.readNamed(par).map(_._1), Vector("first", "second"))
   }
 
-  // ── Monoidal tensor ⊗ and copy Δ (the Markov structure) ──────────────────────────────────────────────────
+  // ── Ordered tensor and structural copy ──────────────────────────────────────────────────────────────────
   test("tensor(a, b) runs INDEPENDENT programs on independent inputs and pairs them") {
     val a = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b = step[Boolean, Int]("b", "p -> n")(p => if p then 1 else 0)
@@ -157,10 +223,10 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(P.readNamed(tn).map(_._1), Vector("first", "second"))
   }
 
-  // ── Markov determinism law: copy commutes with a DETERMINISTIC morphism ──────────────────────────────────
+  // ── Determinism classifier: copy commutes with a deterministic morphism ─────────────────────────────────
   // h >>> copy  =  copy >>> tensor(h, h)   holds because our Step is deterministic (a pure function). For an
-  // effect-observing h the two sides run h once vs twice and diverge — the copy NON-naturality already pinned
-  // in ParaCatLawSuite. That equivalence-iff-determinism is the defining property of a Markov category.
+  // effect-observing h the two sides run h once vs twice and diverge — the copy NON-naturality is already pinned
+  // in ParaCatLawSuite. This is a useful classifier, not a law of unrestricted executable programs.
   test("copy is natural for a deterministic morphism: h >>> copy = copy >>> tensor(h, h)") {
     val h = step[Int, String]("h", "i -> s")(i => s"v$i")
     val lhs = (h >>> Compose.copy[String]).apply(TypedCall(5)).map(_.output)

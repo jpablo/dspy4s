@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
@@ -94,7 +95,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       )
     }
 
-    execResultE.map { execResult =>
+    execResultE.flatMap { execResult =>
       val evaluations = dataset.indices.map { idx =>
         execResult.results(idx) match
           case Some((prediction, score)) =>
@@ -120,15 +121,28 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
         )
       )
 
-      cfg.saveAsJson.foreach(path => dspy4s.evaluate.EvaluationResultPersistence.saveAsJson(result, path))
-      cfg.saveAsCsv.foreach(path => dspy4s.evaluate.EvaluationResultPersistence.saveAsCsv(result, path))
+      def persistenceError(kind: String, message: String): DspyError =
+        RuntimeError("evaluation_persistence", s"Failed to save $kind results: $message")
 
-      if cfg.displayProgress then
-        println(f"[Evaluate] score=${aggregate}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")
+      val persisted =
+        cfg.saveAsJson
+          .fold[Either[DspyError, Unit]](Right(()))(path =>
+            EvaluationResultPersistence.saveAsJson(result, path).left.map(persistenceError("JSON", _))
+          )
+          .flatMap { _ =>
+            cfg.saveAsCsv.fold[Either[DspyError, Unit]](Right(()))(path =>
+              EvaluationResultPersistence.saveAsCsv(result, path).left.map(persistenceError("CSV", _))
+            )
+          }
 
-      tableLimit(cfg.displayTable).foreach(limit => println(result.renderTable(limit)))
+      persisted.map { _ =>
+        if cfg.displayProgress then
+          println(f"[Evaluate] score=${aggregate}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")
 
-      result
+        tableLimit(cfg.displayTable).foreach(limit => println(result.renderTable(limit)))
+
+        result
+      }
     }
 
   override def evaluate(

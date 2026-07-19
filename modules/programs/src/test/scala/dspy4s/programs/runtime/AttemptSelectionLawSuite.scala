@@ -9,10 +9,9 @@ import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Laws for the shared best-of-`n` reducer ([[AttemptSelection.bestOf]]), the `bestOf` operation of the
-  * program-composition algebra (`docs/refactor/algebra-2-program-composition.md`). The end-to-end module
-  * behavior is covered by TypedBestOfNSuite / RefinePerModuleAdviceSuite; this pins the primitive with pure
-  * synthetic attempts (no LLM), the honest way to state the distributional laws. */
+/** Semantics of the shared best-of-`n` search loop ([[AttemptSelection.bestOf]]). The end-to-end module behavior
+  * is covered by TypedBestOfNSuite / RefinePerModuleAdviceSuite; this suite distinguishes exhaustive finite-score
+  * selection properties from ordered early-stop and feedback behavior. */
 class AttemptSelectionLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -25,8 +24,7 @@ class AttemptSelectionLawSuite extends FunSuite:
       reward     = d => Right(d)
     )
 
-  // ── selectBest(p, 1, _, _) = p : a single attempt is returned verbatim, even below threshold ──────────────
-  test("n = 1 is identity (returns the only attempt, regardless of threshold)") {
+  test("the reducer returns its only successful attempt, regardless of threshold") {
     val calls = AtomicInteger(0)
     val result = AttemptSelection.bestOf[Double](1, threshold = 0.9, None, "law")(
       runAttempt = _ => { calls.incrementAndGet(); Right(0.2) }, // below threshold
@@ -36,16 +34,14 @@ class AttemptSelectionLawSuite extends FunSuite:
     assertEquals(calls.get(), 1)
   }
 
-  // ── monotonicity: the result reward is ≥ every successful attempt's reward (argmax) ───────────────────────
-  test("returns the argmax-reward attempt (monotonicity)") {
+  test("exhaustive finite-score selection returns the argmax-reward attempt") {
     val rewards = Vector(0.1, 0.9, 0.5)
     val result  = scripted(rewards, threshold = 2.0) // unreachable threshold -> all attempts run
     assertEquals(result, Right(0.9))
     assert(rewards.forall(r => result.toOption.exists(_ >= r)))
   }
 
-  // ── selectBest is permutation-invariant (independent samples, distinct rewards avoid tie-break) ───────────
-  test("no-feedback selection is invariant under attempt permutation") {
+  test("exhaustive distinct-score selection is invariant under attempt permutation") {
     val base = Vector(0.1, 0.9, 0.5)
     val perms = Vector(
       Vector(0.1, 0.9, 0.5),
@@ -95,8 +91,7 @@ class AttemptSelectionLawSuite extends FunSuite:
     assertEquals(result, Right(0.7)) // best survives the in-budget failure
   }
 
-  // ── feedback makes the stream sequential: the carried adapter reaches the NEXT attempt and changes the
-  //    outcome, so feedback is NOT permutation-invariant (the algebraic distinction from selectBest) ─────────
+  // Feedback adds carried state to the already ordered search: the adapter reaches the next attempt.
   test("feedback carries an adapter into the next attempt (order-dependent)") {
     val feedbackFired = AtomicInteger(0)
 

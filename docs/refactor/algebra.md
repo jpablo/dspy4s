@@ -107,7 +107,7 @@ p >>> q       : (Prog[I, X], Prog[X, O]) => Prog[I, O]       -- CATEGORY
 augment[n, T] : Prog[I, O] => Prog[I, (n: T) *: O]           -- Thought / CoT
 mode(m)       : Prog[I, O] => Prog[I, O]                     -- MONOID (middleware)
 selectBest    : (Prog[I, O], n, reward, threshold) => Prog[I, O]
-parallel      : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)]  -- APPLICATIVE
+parallel      : (Prog[I, A], Prog[I, B]) => Prog[I, (A, B)]  -- ordered fan-out / &&&
 loop          : (step, env, done) => Prog[I, O]              -- the agentic scheme
 ```
 
@@ -116,61 +116,61 @@ loop          : (step, env, done) => Prog[I, O]              -- the agentic sche
 ```
 Category    id >>> p = p = p >>> id        (p >>> q) >>> r = p >>> (q >>> r)
 Mode monoid mode(m1 ⊕ m2) = mode(m1) ∘ mode(m2)     mode(idMode) = id     ⊕ associative
-Applicative parallel(pure a, p) ≅ map(p)(a, _)      parallel associative up to reassociation
+Fan-out     parallel is left-to-right and fail-fast; associative on values up to tuple reassociation
 augment     base(run(augment[r](p))(i)) = run(p)(i)         -- the prepended field is extra (round-trip)
             augment[r] ∘ augment[r] = augment[r]            -- idempotent (OutputAugmentation.Contains)
-selectBest  selectBest(p, 1, reward, threshold) = p         -- n = 1 is identity
-            selectBest returns argmax reward                -- monotone in reward
+argMax      exhaustive selection returns a maximum under a finite score and explicit tie-break
+selectBest  ordered search additionally observes rollout controls, early-stop policy, and failures
 ```
 
 **Symmetry (free features).** `augment` opening (prepend, conditions the answer) has a dual: `augment`
 closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one of N) is the dual of
 `ensemble` / majority (reduce N). `>>>` (dependent) is dual to `parallel` (independent).
 
-### The program category is a Markov category
+### The executable program carrier is ordered, not Markov
 
-The abstract home for Algebra 2 is a **CD category** (copy-discard; Cho–Jacobs), and a **Markov category**
-(Fritz 2020) under output-observational equality: a symmetric monoidal category in which every object carries a
-commutative-comonoid structure (**copy** and **discard**), where **neither is required natural** — copy
-commutes with a morphism `h` iff `h` is *deterministic*, and discard is natural only once you stop observing
-effects (see the equality note below). That is exactly the shape of dspy4s's programs, whose morphisms
-`I ⇝ M[O]` are effectful/nondeterministic (the LM). This is now a first-class trait,
-[`CDCategory[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/para/Para.scala) `extends
-Cat[AnyObject, Hom]`, with the `given cdProgram` instance over the plain program carrier `ModuleHom`. The
-generators:
+`ModuleHom[I, O]` contains fail-fast errors, callbacks, tools, LM calls, trace, and usage. Its independent-input
+operation runs the left program before the right program, so execution order is observable. Consequently the
+carrier does **not** form a symmetric monoidal, CD, or Markov category.
+
+The reusable executable interface is
+[`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/para/Para.scala), with the
+`given orderedProgram` instance over `ModuleHom`. It deliberately exposes operations without asserting tensor
+interchange, symmetry of effects, or discard naturality:
 
 ```
->>>              sequential composition (Category)                     Cat / AndThen             ✅
-tensor  a ⊗ b    independent inputs, paired outputs (monoidal tensor)  Tensor / Compose.tensor   ✅ (Module level)
-copy    Δ        duplicate the input  I ⇝ (I, I)                       Copy / Compose.copy       ✅
-discard !        drop a value  I ⇝ ()                                  Discard / Compose.discard ✅
-swap   σ         exchange a tensor's components                        Swap / Compose.swap       ✅
-parallel a,b     fan-out: SAME input to both = copy then tensor        Both / Compose.parallel   ✅
-assoc / unitors  associators, pentagon/triangle coherence             —                         deferred
+>>>            sequential value composition                         Cat / AndThen             ✅
+tensor a,b     ordered independent inputs, paired outputs            Tensor / Compose.tensor   ✅ (Module level)
+copy           duplicate the input I => (I, I)                       Copy / Compose.copy       ✅
+discard        drop a value I => ()                                  Discard / Compose.discard ✅
+swap           exchange two value components                         Swap / Compose.swap       ✅
+parallel a,b   ordered fan-out: same input = copy then tensor        Both / Compose.parallel   ✅
 ```
 
-`CDCategory`'s positive laws are stated `@Law` and executed by `CDCategoryLawSuite` under output-observational
-equality: tensor interchange + identity, swap involution, copy cocommutativity, and discard-naturality.
-Coassociativity / counit and the pentagon/triangle coherence need unitor/associator morphisms and are deferred
-(no consumer).
+The former tensor-interchange claim changed execution from `f1, g1, f2, g2` to `f1, f2, g1, g2`. With `g1`
+failing `"g1"` and `f2` failing `"f2"`, the two sides return different errors. That counterexample is executable
+in `OrderedTensorOpsSuite`. The abstract `CDCategory` law vocabulary remains for a future commutative
+denotational carrier such as stochastic kernels, but there is no `CDCategory[ModuleHom]` instance.
 
-**CD on the nose, Markov under output-observational equality.** Discard-naturality (`f >>> discard = discard`)
-and unit-terminality hold only when you observe outputs alone; on the nose `f >>> discard` still ran `f` (spent
-tokens, wrote a trace), and there are many distinct `Prog[A, Unit]`, so the unit is not literally terminal. So
-the category is a **CD category** always, and a **Markov category** exactly under the output observation the law
-suites use — the same equality-dependence that governs every other structure on this branch.
+Sequential association is made stable by lifecycle-transparent structural nodes: `Identity`, `AndThen`,
+`Both`, `Tensor`, `Copy`, `Discard`, `Swap`, and `Moded` add no callbacks, trace, or history of their own. Leaf
+modules remain fully instrumented. `ComposeLawSuite` pins this with a final leaf that reads the live trace.
+
+The remaining carrier limitation is explicit: sequential Category equality observes the threaded value and
+lifecycle, but not the final `Prediction.raw` envelope (`p >>> id` ends with id's empty raw). A later carrier
+split must put semantic output and accumulated run evidence in separate types; until then this is a quotient,
+not structural equality on `Module[TypedCall[I], Prediction[O]]`.
 
 The load-bearing facts, all executable:
 
 - **`parallel = copy >>> tensor`.** Fan-out is copy-then-tensor; `parallel(a, b) = Δ >>> (a ⊗ b)`
   (`ComposeLawSuite`). This is why `parallel` shares one input while `tensor` takes two.
-- **Copy is not natural — and that IS the point.** `h >>> parallel(f, g)` runs `h` once (shared);
+- **Copy classifies deterministic behavior but is not a general law.** `h >>> parallel(f, g)` runs `h` once (shared);
   `parallel(h >>> f, h >>> g) = Δ >>> (h ⊗ h) >>> (f ⊗ g)` runs it twice. These agree iff
-  `h >>> Δ = Δ >>> (h ⊗ h)`, i.e. iff `h` commutes with copy, i.e. iff `h` is **deterministic** — the Markov
-  determinism criterion. Both sides are pinned: the positive law (`copy` natural for a pure `h`) in
+  `h >>> copy = copy >>> tensor(h, h)`, i.e. iff `h` is deterministic under the chosen observation. Both sides
+  are pinned: the positive case for a pure `h` in
   `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
-  `ParaCatLawSuite`. So "an LLM morphism is nondeterministic ⟹ copy doesn't commute with it" is not prose here;
-  it is the copy non-law we already test, and it is why the optimizer sees `h`'s parameters once vs twice.
+  `ParaCatLawSuite`. This remains useful without claiming a Markov structure for execution.
 
 **Why `tensor` lives at the Module level, not on `ParaCat`.** `parallel` lifts into the packaged `Prog` /
 `ParaCat` category because both legs share one input, so the pair reuses that input's decoder. The tensor's
@@ -181,10 +181,9 @@ category naturally supports fan-out, and the raw tensor is the structural op ben
 **Not adopted (deliberately).** The higher-kinded generalization from `typista.org`'s categories article —
 `CategoryTC1[P[F[_]], Hom[F[_], G[_]]]` (objects = endofunctors) and the internal-monoid tower that recovers
 `Monad` as a monoid in `End(X)` — does not apply: dspy4s's objects are types, not functors, and its monads
-(`Either`, later `CIO`) are ambient and used, never re-derived. The generalization dspy4s actually wanted was
-not richer objects but the **Markov refinement** (copy that fails to be natural) of the category it already
-has. Only the monoidal coherence (associators / unitors, pentagon / triangle) remains deferred — no consumer
-exercises it.
+(`Either`, later `CIO`) are ambient and used, never re-derived. The useful generalization here is instead an
+ordered Arrow/premonoidal vocabulary for executable effects. A separate commutative denotational carrier would
+be required before monoidal or Markov coherence becomes meaningful.
 
 **Ugly laws in the current code = the work to do.**
 
@@ -201,7 +200,7 @@ exercises it.
   closure. `ProgramOfThought` is `retryUntil` (regenerate-on-error), not the agent loop and not `feedback`.
 
 The conclusion: the step-6 plan and this algebra are the same object. ADD supplies the vocabulary (Category,
-Monoid, Applicative) and the laws that turn a set of combinators into a law-governed algebra.
+Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carrier.
 
 ---
 
@@ -240,9 +239,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.1 done** (commit `96c9072`): `bestOf` extracted as `AttemptSelection.bestOf`; `BestOfN` + `Refine`
     reduced onto it; `AttemptSelectionLawSuite` pins the reducer laws. Code-truth correction recorded: PoT is
     `retryUntil`, not `feedback`.
-  - **6.2 done** (commit `60d2ea5`): `id` / `>>>` / `parallel` in `Compose.scala`; `ComposeLawSuite` covers the
-    Category + Applicative laws and addressability. Code-truth correction recorded: the applicative `parallel`
-    is new, NOT the existing batch-executor `Parallel`.
+  - **6.2 done** (commit `60d2ea5`, later law-audit correction): `id` / `>>>` / `parallel` in `Compose.scala`;
+    `ComposeLawSuite` covers value-category laws, lifecycle-transparent association, ordered fan-out, and
+    addressability. `parallel` is Arrow-like fan-out, not an Applicative or the batch-executor `Parallel`.
   - **6.3 done** (commit `6faa94e`): `AgentLoop.run` + `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT
     all reduced onto them; `AgentLoopLawSuite` pins the primitive. Code-truth correction recorded: the
     `env.step`/`classify`/`render` decomposition was rejected; each module keeps its own step closure.
@@ -272,9 +271,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     structures from the Para pass: the delooping of the parameter monoid as an explicit `Cat` instance;
     `ReadFunctor` (`Predictors.read` as a functor value; its functor laws — preserves id + composition — are
     carried on the `CatFunctor` trait and are exactly the Para projection laws); and
-    `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law (sharing vs re-running an effectful
-    `h` differ, in behavior distributionally and in parameters structurally) pinned as an executable
-    counterexample. The `IsEq`/`@Law` vocabulary is now the uniform law-statement style across the codebase.
+    `parallel` as ordered fan-out, with the copy NON-law (sharing vs re-running an effectful `h` differ, in
+    behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the
+    uniform law-statement style across the codebase; every use must name an observational equality preserved by
+    its public combinators.
   - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Cat` / `ParaCat` pattern (an
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
@@ -285,13 +285,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit.
-  - **Markov structure + tensor** (commits `508a8e6`, `71c8880`): the program category identified as a CD
-    category (Markov under output-observational equality), now a first-class trait `CDCategory[Hom] extends
-    Cat[AnyObject, Hom]` with the `given cdProgram` instance over the `ModuleHom` carrier. Generators `tensor`
-    `⊗` / `copy` `Δ` / `discard` `!` / `swap` `σ` in `Compose`; positive laws (tensor interchange + identity,
-    swap involution, cocommutativity, discard-naturality) as `@Law`, plus the `copyNaturality` classifier
-    (natural iff deterministic). `parallel = copy >>> tensor`. Executable in `ComposeLawSuite` /
-    `CDCategoryLawSuite`, including the non-degeneracy witness (copy fails for an effect-observing morphism).
-    Assessed and NOT adopted: `typista.org`'s higher-kinded `CategoryTC1` / monad-as-monoid-in-endofunctors
-    tower (objects are types not functors; monads are ambient). Only monoidal coherence (associators / unitors /
-    pentagon / triangle) remains deferred.
+  - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
+    audit): `tensor` / `copy` / `discard` / `swap` remain useful `Compose` generators and
+    `parallel = copy >>> tensor`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not
+    `CDCategory`. `OrderedTensorOpsSuite` pins the fail-fast interchange counterexample (`g1` versus `f2`),
+    while `ComposeLawSuite` pins lifecycle-transparent association. The abstract `CDCategory` target remains
+    available for a future commutative denotational carrier.

@@ -13,6 +13,8 @@ import dspy4s.evaluate.metrics.FunctionMetric
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+import java.nio.file.Files
+
 class EvaluateSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
@@ -124,6 +126,26 @@ class EvaluateSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val result = evaluator()(program)
     assert(result.isRight)
+  }
+
+  test("Evaluate propagates a configured persistence failure") {
+    val directory = Files.createTempDirectory("dspy4s-evaluate-sink-")
+    try
+      val dataset = Vector(ex("answer" := "x"))
+      val evaluator = Evaluate(
+        devset = dataset,
+        metric = new ExactMatch(),
+        saveAsJson = Some(directory.toString)
+      )
+      given RuntimeContext = RuntimeEnvironment.current
+
+      val result = evaluator()((_: Example) => Right(pred("answer" := "x")))
+
+      assert(result.isLeft)
+      assertEquals(result.left.toOption.map(_.code), Some("runtime_error"))
+      assert(result.left.toOption.exists(_.message.contains("Failed to save JSON results")))
+    finally
+      val _ = Files.deleteIfExists(directory)
   }
 
   test("Evaluate captures the DspyError on a failing example when provideTraceback is set") {

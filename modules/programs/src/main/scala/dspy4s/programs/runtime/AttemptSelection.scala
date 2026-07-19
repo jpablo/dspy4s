@@ -17,10 +17,10 @@ import scala.util.control.NonFatal
   * attempt's trace/history are propagated to the caller. The reducer keeps the highest-reward attempt,
   * short-circuits at `threshold`, and tolerates up to `failCount` failures.
   *
-  * The two combinators differ only in how the attempt stream is generated:
+  * The two combinators differ in the state carried between attempts:
   *
-  *   - '''selectBest''' (independent samples, = [[dspy4s.programs.BestOfN]]) passes no `feedback`: attempts vary
-  *     only by `rolloutId` / `config`, so the stream is order-independent.
+  *   - '''selectBest''' (= [[dspy4s.programs.BestOfN]]) passes no `feedback`: attempts vary only by `rolloutId`
+  *     / `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier attempts.
   *   - '''feedback''' (sequential stream, = [[dspy4s.programs.Refine]]) passes a `feedback` hook: after a
   *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the
   *     adapter override the NEXT attempt runs under (Refine's `hint_`-injecting adapter), making the stream
@@ -40,7 +40,7 @@ object AttemptSelection:
     *                   next attempt's isolated context runs under (`None` keeps the base adapter). The hook is
     *                   AUXILIARY: a `Left` charges the failure budget and keeps the best-so-far (the prior
     *                   carried adapter is retained), mirroring the module-failure path. Omitted (`None`) for
-    *                   independent best-of-`n`. */
+    *                   best-of-`n` without carried feedback. */
   private[programs] def bestOf[A](
       n: Int,
       threshold: Double,

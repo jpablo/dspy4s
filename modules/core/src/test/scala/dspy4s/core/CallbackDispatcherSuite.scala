@@ -19,6 +19,7 @@ import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext
@@ -68,6 +69,27 @@ class CallbackDispatcherSuite extends FunSuite:
     val end = events.last.asInstanceOf[ModuleEndEvent]
     assert(end.output.isLeft)
     assert(end.output.left.toOption.get.isInstanceOf[RuntimeError])
+  }
+
+  test("a throwing end observer is attempted exactly once") {
+    val endAttempts = AtomicInteger(0)
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
+        case _: ModuleEndEvent =>
+          endAttempts.incrementAndGet()
+          throw IllegalStateException("end observer failed")
+        case _ => ()
+
+    val error = intercept[IllegalStateException] {
+      RuntimeEnvironment.withCallbacks(Vector(callback)) {
+        CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "hi")) {
+          Right("ok")
+        }
+      }
+    }
+
+    assertEquals(error.getMessage, "end observer failed")
+    assertEquals(endAttempts.get(), 1)
   }
 
   test("withLm and withAdapter emit typed callback events") {

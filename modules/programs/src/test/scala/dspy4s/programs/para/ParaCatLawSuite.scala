@@ -139,7 +139,7 @@ class ParaCatLawSuite extends FunSuite:
     assertEquals(runs.get(), 2) // h ran twice
 
     // With a DETERMINISTIC h the outputs coincide; with an effectful (LLM) h they need not — which is why
-    // fan-out naturality is a NON-law here (the CD/Markov-category shape), not an oversight.
+    // Fan-out naturality is a NON-law for ordered effectful execution, not an oversight.
     assertEquals(sharedOut, copiedOut)
     // And the optimizer sees the difference structurally: h's parameters appear once vs twice.
     assertEquals(shared.params.size, 3)

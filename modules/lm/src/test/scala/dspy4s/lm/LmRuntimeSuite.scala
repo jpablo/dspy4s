@@ -31,6 +31,9 @@ import munit.FunSuite
 import java.nio.file.Files
 import java.nio.file.Path
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.Await
+import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 
 class LmRuntimeSuite extends FunSuite:
@@ -67,6 +70,25 @@ class LmRuntimeSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
     LmCacheRegistry.resetDefault()
+
+  test("LanguageModel.acall suspends the call on the supplied execution context") {
+    val pending = ArrayBuffer.empty[Runnable]
+    given ExecutionContext = new ExecutionContext:
+      override def execute(runnable: Runnable): Unit = pending += runnable
+      override def reportFailure(cause: Throwable): Unit = throw cause
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val lm = new StubLanguageModel(Vector(Right(baseResponse)))
+    val future = lm.acall(baseRequest)
+
+    assertEquals(lm.calls.toVector, Vector.empty)
+    assertEquals(pending.size, 1)
+
+    pending.remove(0).run()
+
+    assertEquals(Await.result(future, 1.second), Right(baseResponse))
+    assertEquals(lm.calls.toVector, Vector(baseRequest))
+  }
 
   test("request hash is stable for equivalent map orderings") {
     val requestA = baseRequest.copy(

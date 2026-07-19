@@ -72,8 +72,8 @@ import zio.blocks.schema.Schema
   * semicategory), pinned as a compile error in the law suite.
   *
   * `parallel` and the copy non-law. [[ParaCat.parallel]] runs BOTH legs on the SAME input and tuples the
-  * outputs: categorically the fan-out (pairing) of copy-then-tensor, the CD/Markov-category shape, NOT a
-  * plain monoidal tensor. Copy is deliberately NOT natural here: for an effectful `h`,
+  * outputs: operationally the fan-out of copy followed by ordered independent-input execution. Copy is
+  * deliberately NOT natural here: for an effectful `h`,
   * `h >>> parallel(f, g)` runs `h` once (shared) while `parallel(h >>> f, h >>> g)` runs it twice, and the
   * two differ both distributionally and in `params` (the optimizer sees `h` twice on the right — genuinely a
   * different program). The law suite pins this as executable evidence, not a footnote.
@@ -113,9 +113,8 @@ trait ParaCat[P[_], Hom[_, _]] extends Cat[P, Hom]:
     /** Para reparameterization (the 2-cell optimizers act on): the same shape over new parameters. */
     def reparam(ps: Vector[DynamicPredict]): Hom[A, B]
 
-  /** Fan-out (pairing): run both legs on the SAME input, tuple the outputs. Copy-then-tensor fused (the
-    * CD/Markov shape); copy is NOT natural for effectful morphisms — see the file scaladoc and the law
-    * suite's counterexample. */
+  /** Ordered fan-out: run both legs on the SAME input and tuple the outputs. Copy followed by ordered
+    * independent-input execution, fused; copy is not natural for effectful morphisms. */
   def parallel[I, A, B](f: Hom[I, A], g: Hom[I, B]): Hom[I, (A, B)]
 
   @Law("the identity is parameter-free")
@@ -167,14 +166,28 @@ type ParamsHom = Delooped[Vector[DynamicPredict]]
 
 given paramsDeloop: Cat[AnyObject, ParamsHom] = delooping[Vector[DynamicPredict]]
 
-/** The plain (un-packaged) program morphisms — the carrier of the CD/Markov structure. Unlike `Prog` these
-  * carry no optimizer / decoder evidence (the CD laws are observational on outputs, not about `params`), which
-  * is also why the tensor lives here and not on `ParaCat`. */
+/** The plain (un-packaged) executable program morphisms. Unlike `Prog` these carry no optimizer / decoder
+  * evidence, which is why the ordered independent-input operation lives here and not on `ParaCat`. */
 type ModuleHom[I, O] = Module[TypedCall[I], Prediction[O]]
 
+/** A category equipped with ordered independent-input execution plus structural swap/copy/discard operations.
+  * No bifunctoriality, symmetry, or discard-naturality laws are asserted: fail-fast errors and ordinary runtime
+  * effects make execution order observable. This is the honest reusable vocabulary for unrestricted
+  * [[ModuleHom]]s; a commutative denotational carrier may implement the stronger [[CDCategory]] below. */
+trait OrderedTensorOps[Hom[_, _]] extends Cat[AnyObject, Hom]:
+  /** Run `f` on the first input, then `g` on the second input, and pair their outputs. */
+  def tensor[A, B, C, D](f: Hom[A, C], g: Hom[B, D]): Hom[(A, B), (C, D)]
+  /** Exchange two input components. */
+  def swap[A, B]: Hom[(A, B), (B, A)]
+  /** Duplicate an input value. */
+  def copy[A]: Hom[A, (A, A)]
+  /** Drop an input value. */
+  def discard[A]: Hom[A, Unit]
+
 /** A **CD category** (copy-discard): a symmetric monoidal category in which every object carries a commutative
-  * comonoid — copy `Δ` and discard `!` — with NEITHER copy nor discard required natural. dspy4s's program
-  * category is one (see `docs/refactor/algebra.md`, "The program category is a Markov category").
+  * comonoid — copy `Δ` and discard `!`. This abstract law vocabulary is intentionally not instantiated for
+  * unrestricted executable [[ModuleHom]]s: their fail-fast errors, callbacks, tools, and LM calls are ordered,
+  * so tensor interchange is false. A future commutative stochastic-kernel carrier can lawfully implement it.
   *
   * Equality-dependence, stated honestly: under OUTPUT-observational equality (all maps `A → Unit` collapse to
   * "output `()`") discard becomes natural and the unit terminal, so the structure is a **Markov** category
@@ -182,21 +195,9 @@ type ModuleHom[I, O] = Module[TypedCall[I], Prediction[O]]
   * exactly on the **deterministic** morphisms — that is the classifier [[copyNaturality]], whose failure for an
   * effect-observing morphism is the non-degeneracy witness that the category is properly Markov, not cartesian.
   *
-  * Scope (deliberate). The positive laws that need no unitors/associators are stated as `@Law` and executed by
-  * `CDCategoryLawSuite` under output-observational equality. The comonoid **counit** / **coassociativity** and
-  * the monoidal **pentagon/triangle** coherence require unitor/associator morphisms and are DEFERRED (no
-  * consumer). Fixed over the trivial object constraint `AnyObject` (every type is an object), so `id` needs no
-  * evidence; instantiated only over [[ModuleHom]], not `Prog` (the tensor's `(A, B)` input has no single-record
-  * decoder). */
-trait CDCategory[Hom[_, _]] extends Cat[AnyObject, Hom]:
-  /** Monoidal tensor `⊗` on morphisms. */
-  def tensor[A, B, C, D](f: Hom[A, C], g: Hom[B, D]): Hom[(A, B), (C, D)]
-  /** Symmetry `σ`. */
-  def swap[A, B]: Hom[(A, B), (B, A)]
-  /** Comonoid copy `Δ`. */
-  def copy[A]: Hom[A, (A, A)]
-  /** Comonoid counit / discard `!`. */
-  def discard[A]: Hom[A, Unit]
+  * Scope (deliberate). These partial laws omit unitors/associators, comonoid counit/coassociativity, and the
+  * pentagon/triangle coherence. They are retained as a target interface, not as a claim about current execution. */
+trait CDCategory[Hom[_, _]] extends OrderedTensorOps[Hom]:
 
   @Law("tensor is a bifunctor (interchange)")
   def tensorInterchange[A, B, C, D, E, F2](
@@ -226,10 +227,12 @@ trait CDCategory[Hom[_, _]] extends Cat[AnyObject, Hom]:
   def copyNaturality[A, B](f: Hom[A, B]): IsEq[Hom[A, (B, B)]] =
     (f >>> copy[B]) <-> (copy[A] >>> tensor(f, f))
 
-/** dspy4s's program category as a CD category, over the plain [[ModuleHom]] carrier. `id`/`>>>` reuse the
-  * Category combinators; `tensor`/`copy`/`discard`/`swap` are the `Compose` generators, typed abstractly (the
-  * CD laws are observational, so per-node `Predictors` evidence is not needed here). */
-given cdProgram: CDCategory[ModuleHom] with
+/** The unrestricted executable program category with ordered tensor-like operations. Sequential composition is
+  * categorical on the threaded value and lifecycle once structural wrappers are transparent; the final
+  * `Prediction.raw` envelope is deliberately outside that observation (`p >>> id` ends in id's empty envelope).
+  * This quotient is temporary until semantic output and accumulated run evidence have separate carriers.
+  * Independent-input execution remains ordered and therefore deliberately has no interchange law. */
+given orderedProgram: OrderedTensorOps[ModuleHom] with
   def id[A: AnyObject]: ModuleHom[A, A] = Identity[A]()
 
   extension [A, B](f: ModuleHom[A, B])

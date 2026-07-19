@@ -6,6 +6,7 @@ import dspy4s.core.contracts.Monoid
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
 import zio.blocks.schema.DynamicValue
@@ -70,15 +71,12 @@ object Mode:
     def empty: Mode = Mode.id
     extension (a: Mode) infix def combine(b: Mode): Mode = a ++ b
 
-/** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Trace-transparent — it records no trace
-  * entry of its own (`callTraceEnabled = false`), so a chain of modes collapses to the wrapped program's single
-  * event and the monoid law holds on the trace; the wrapped program records its own event as usual. */
+/** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Lifecycle-transparent — it records no
+  * callback, trace, or history event of its own, so a chain of modes collapses to the wrapped program's single
+  * lifecycle scope and the monoid law holds on runtime observations. */
 final case class Moded[I, O, P <: Module[TypedCall[I], Prediction[O]]](mode: Mode, program: P)
-    extends Module[TypedCall[I], Prediction[O]]:
+    extends TransparentModule[TypedCall[I], Prediction[O]]:
   override val moduleName: String = s"mode(${program.moduleName})"
-  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record       = DynamicValue.Record.empty
-  override protected def callTraceEnabled(call: TypedCall[I]): Boolean             = false
-  override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
 
   override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val controls = mode.transform(Mode.Controls(call.config, call.traceEnabled, call.rolloutId))

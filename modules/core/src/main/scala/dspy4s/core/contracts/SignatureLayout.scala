@@ -341,6 +341,7 @@ final case class SignatureLayout private (
         "description"  -> opt(field.description),
         "prefix"       -> opt(field.prefix),
         "defaultValue" -> opt(field.defaultValue),
+        "enumValues"   -> DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))),
         "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue)))
       )))
     }
@@ -438,6 +439,12 @@ object SignatureLayout:
             val defaultValue = DynamicValues.recordGet(rec, "defaultValue") match
               case None | Some(_: DynamicValue.Null.type) => None
               case Some(dv)                                => Some(DynamicValues.toAny(dv))
+            val enumValues = DynamicValues.recordGet(rec, "enumValues") match
+              case Some(seq: DynamicValue.Sequence) =>
+                seq.elements.iterator.collect {
+                  case DynamicValue.Primitive(PrimitiveValue.String(value)) => value
+                }.toVector
+              case _ => Vector.empty[String]
             val constraints = DynamicValues.recordGet(rec, "constraints") match
               case Some(seq: DynamicValue.Sequence) =>
                 seq.elements.iterator.collect { case r: DynamicValue.Record => r }.flatMap(Constraint.fromState).toVector
@@ -449,6 +456,7 @@ object SignatureLayout:
               description  = getString(rec, "description"),
               prefix       = getString(rec, "prefix"),
               defaultValue = defaultValue,
+              enumValues   = enumValues,
               constraints  = constraints
             )
         case _ => Left(ValidationError("Invalid field entry in signature state"))

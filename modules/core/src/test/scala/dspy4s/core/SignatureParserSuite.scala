@@ -72,6 +72,28 @@ class SignatureParserSuite extends FunSuite:
     assert(signature.equalsByStructure(rebuilt.toOption.get))
   }
 
+  test("signature state and JSON preserve enum values") {
+    val signature = SignatureLayout.create(
+      name = "Sentiment",
+      fields = Vector(
+        FieldSpec(name = "text", role = FieldRole.Input),
+        FieldSpec(
+          name = "label",
+          role = FieldRole.Output,
+          enumValues = Vector("negative", "neutral", "positive")
+        )
+      )
+    ).toOption.get
+
+    val fromState = SignatureLayout.fromState(signature.dumpState)
+    val fromJson = SignatureLayout.fromJson(signature.dumpJson)
+
+    assertEquals(fromState.map(_.outputFields.head.enumValues), Right(Vector("negative", "neutral", "positive")))
+    assertEquals(fromJson.map(_.outputFields.head.enumValues), Right(Vector("negative", "neutral", "positive")))
+    assert(fromState.exists(signature.equalsByStructure))
+    assert(fromJson.exists(signature.equalsByStructure))
+  }
+
   test("signature fromState fails on invalid role") {
     val state = DynamicValue.Record(Chunk.from(Seq(
       "name"         -> DynamicValue.Primitive(PrimitiveValue.String("BadSignature")),

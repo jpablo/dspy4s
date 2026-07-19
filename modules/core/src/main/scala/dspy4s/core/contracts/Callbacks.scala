@@ -5,9 +5,9 @@ import zio.blocks.schema.DynamicValue
 import java.time.Instant
 import java.util.UUID
 
-/** Observable lifecycle event emitted around one of the four kinds of work dspy4s wraps in an instrumented scope: a
-  * module call, an LM call, an adapter format/parse, or a tool invocation. Each scope produces exactly one
-  * `*StartEvent` and one `*EndEvent` (even on failure or exception), correlated by a shared [[callId]].
+/** Observable lifecycle event emitted around one of the four kinds of work dspy4s wraps in an instrumented scope:
+  * a module call, an LM call, an adapter format/parse, or a tool invocation. Every successfully started scope
+  * attempts exactly one matching `*EndEvent` (even on body failure or exception), correlated by [[callId]].
   *
   * '''Correlation model.''' Every scope is given a fresh [[callId]] when it opens and inherits the enclosing scope's
   * id as its [[parentCallId]]. So a top-level `Predict` call produces a tree:
@@ -24,12 +24,13 @@ import java.util.UUID
   * }}}
   *
   * Tool invocations inside `ReAct` / `CodeAct` produce nested `ToolStart` / `ToolEnd` pairs under their enclosing
-  * module.
+  * module. A scope whose start was delivered attempts exactly one matching end emission; a throwing observer can
+  * abort delivery to later observers, so callback handlers should normally be outcome-transparent.
   *
   * '''Producer.''' [[dspy4s.core.runtime.CallbackDispatcher]] is the sole producer; its `withModule` / `withLm` /
   * `withAdapter` / `withTool` scopes open a call id, push it as the active id for the thread, emit the start event,
-  * run the wrapped thunk, and always emit an end event (with `Left(RuntimeError("callback_dispatch", ...))` if the
-  * thunk threw, then rethrows). User code does not emit events directly.
+  * run the wrapped thunk, and attempt one end event (with `Left(RuntimeError("callback_dispatch", ...))` if the
+  * thunk threw, then rethrow). User code does not emit events directly.
   *
   * '''Consumer.''' Implement [[CallbackHandler]] and register it via
   * [[dspy4s.core.runtime.RuntimeEnvironment.withCallbacks]] or by setting the `callbacks` field on a
@@ -143,9 +144,9 @@ final case class ToolEndEvent(
   *
   * Handlers run on the producer thread inline with the work being observed. Two consequences:
   *
-  *   - Throwing from `onEvent` will propagate into the dispatcher and be reported as
-  *     `Left(RuntimeError("callback_dispatch", ...))` on the matching End event. Don't throw unless you mean to
-  *     abort the surrounding scope.
+  *   - Throwing from `onEvent` propagates into the dispatcher. A body/start observer failure is reported on the
+  *     scope's single attempted End event when possible; an End observer failure is never retried. Don't throw
+  *     unless you mean to abort the surrounding scope.
   *   - Blocking work in `onEvent` blocks the surrounding scope. Hand off to a queue or async sink if the handler
   *     does I/O.
   *
