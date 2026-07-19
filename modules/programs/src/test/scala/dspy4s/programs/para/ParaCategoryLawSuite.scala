@@ -1,20 +1,31 @@
 package dspy4s.programs.para
 
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.CallbackEvent
+import dspy4s.core.contracts.CallbackHandler
+import dspy4s.core.contracts.CodeInterpreter
+import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.Monoid
+import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.programs.ChainOfThought
+import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predictor
+import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
+import dspy4s.typed.Shape
+import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
@@ -27,9 +38,11 @@ final case class Wrapped(s: String) derives Schema
 
 /** Executes the `@Law` statements of the Para prototype's structures ([[Category]] / [[ParaCategory]] over [[Program]],
   * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
-  * parameter vectors and delooping morphisms, observational equality (run output / params / decode) for `Program`
-  * morphisms. Also pins the two construction gates (no `Predictors`, no `Program`; no `RecordCodec`, no `id`), decoder
-  * threading, and the copy NON-law (`parallel` shares its input; copying is not natural for effectful morphisms).
+  * parameter vectors and delooping morphisms, observational equality (typed output / params / coherent decode /
+  * lifecycle) for `Program` morphisms. Final `Prediction.raw` is deliberately outside that equality and has an explicit
+  * counterexample below. Also pins the two construction gates (no `Predictors`, no `Program`; no `RecordCodec`, no
+  * `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying is not natural for effectful
+  * morphisms).
   */
 class ParaCategoryLawSuite extends FunSuite:
 
@@ -54,6 +67,11 @@ class ParaCategoryLawSuite extends FunSuite:
       def get(program: Step[I, O]): DynamicPredict                      = program.predict
       def set(program: Step[I, O], updated: DynamicPredict): Step[I, O] = program.copy(predict = updated)
 
+  private object UnusedInterpreter extends CodeInterpreter:
+    def execute(code: String): Either[DspyError, CodeResult] =
+      throw new AssertionError(s"decoder test unexpectedly executed code: $code")
+    def close(): Unit = ()
+
   /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove the
     * construction gate below.
     */
@@ -76,12 +94,43 @@ class ParaCategoryLawSuite extends FunSuite:
     _ => Left(ValidationError("test stub: no input codec"))
 
   /** Package a Step with the stub decoder (Step has no signature, so no ProgramInput instance applies). */
-  private def pack[I, O](m: Step[I, O]): Program[I, O] = Program.of(m, noCodec[I])
+  private def pack[I, O](m: Step[I, O]): Program[I, O] = Program.unsafeOf(m, noCodec[I])
 
-  /** Execute an IsEq of Program morphisms under the morphism observations: params and run output at `input`. */
-  private def assertObsEq[I, O](eq: IsEq[Program[I, O]], input: I): Unit =
+  private final case class ProgramObservation[O](
+      output: Either[DspyError, O],
+      starts: Vector[String],
+      trace: Vector[String],
+      history: Vector[String]
+  )
+
+  /** Observe the executable semantics retained by Category equality. Structural nodes must not perturb lifecycle. */
+  private def observe[I, O](program: Program[I, O], input: I): ProgramObservation[O] =
+    RuntimeEnvironment.resetForTests()
+    val starts = Vector.newBuilder[String]
+    val callback = new CallbackHandler:
+      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
+        case start: ModuleStartEvent => starts += start.moduleName
+        case _                       => ()
+    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val output            = program(TypedCall(input)).map(_.output)
+      ProgramObservation(
+        output,
+        starts.result(),
+        RuntimeEnvironment.current.trace.map(_.component),
+        RuntimeEnvironment.current.history.map(_.component)
+      )
+    }
+
+  /** Execute an IsEq under the documented Program observation. `raw` is tested separately as an explicit non-law. */
+  private def assertObsEq[I, O](
+      eq: IsEq[Program[I, O]],
+      input: I,
+      record: DynamicValue.Record
+  ): Unit =
     assertEquals(eq.lhs.params, eq.rhs.params)
-    assertEquals(eq.lhs(TypedCall(input)).map(_.output), eq.rhs(TypedCall(input)).map(_.output))
+    assertEquals(eq.lhs.decodeInput(record), eq.rhs.decodeInput(record))
+    assertEquals(observe(eq.lhs, input), observe(eq.rhs, input))
 
   /** Execute an IsEq whose carrier supports plain structural equality (parameter vectors). */
   private def assertIsEq[A](eq: IsEq[A]): Unit =
@@ -89,15 +138,26 @@ class ParaCategoryLawSuite extends FunSuite:
 
   // ── Category laws over Program, executed from the trait's @Law statements ───────────────────────────────────
   test("Category laws (identity left/right, associativity) hold observationally on Program") {
-    val f = pack(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
-    assertObsEq(C.identityLeft(f), Boxed(7))
-    assertObsEq(C.identityRight(f), Boxed(7))
+    val f = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val boxed7 = DynamicValues.record("n" := 7)
+    assertObsEq(C.identityLeft(f), Boxed(7), boxed7)
+    assertObsEq(C.identityRight(f), Boxed(7), boxed7)
 
     val a = pack(step[Int, String]("a", "i -> s")(i => s"<$i>"))
     val g = pack(step[String, String]("g", "s -> t")(s => s + s))
     val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
-    assertObsEq(C.associativity(a, g, h), 3)
+    assertObsEq(C.associativity(a, g, h), 3, DynamicValue.Record.empty)
     assertEquals(((a >>> g) >>> h)(TypedCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
+  }
+
+  test("right identity preserves the Category observation but not the final raw envelope") {
+    val f      = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val direct = f(TypedCall(Boxed(7)))
+    val viaId  = (f >>> C.id[Wrapped])(TypedCall(Boxed(7)))
+
+    assertEquals(viaId.map(_.output), direct.map(_.output))
+    assertEquals(viaId.map(_.raw), Right(DynamicPrediction.empty))
+    assertNotEquals(viaId.map(_.raw), direct.map(_.raw))
   }
 
   // ── Para laws, executed from the @Law statements ─────────────────────────────────────────────────────────
@@ -115,15 +175,17 @@ class ParaCategoryLawSuite extends FunSuite:
     assertEquals(ab.reparam(fresh)(TypedCall(5)).map(_.output), Right(2))
   }
 
-  // ── parallel: fan-out behavior, its params law, and the copy NON-law ─────────────────────────────────────
-  test("parallel runs both legs on the same input and satisfies paramsParallel") {
+  // ── fanout: behavior, its params law, and the copy NON-law ───────────────────────────────────────────────
+  test("fanout runs both legs on the same input and satisfies paramsFanout") {
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
-    assertEquals(C.parallel(f, g)(TypedCall(4)).map(_.output), Right(("v4", 5)))
+    assertEquals(C.fanout(f, g)(TypedCall(4)).map(_.output), Right(("v4", 5)))
+    assertIsEq(C.paramsFanout(f, g))
+    assertEquals(C.parallel(f, g)(TypedCall(4)), C.fanout(f, g)(TypedCall(4)))
     assertIsEq(C.paramsParallel(f, g))
   }
 
-  test("copy is NOT natural: h >>> parallel(f, g) shares h; parallel(h >>> f, h >>> g) re-runs it") {
+  test("copy is NOT natural: h >>> fanout(f, g) shares h; fanout(h >>> f, h >>> g) re-runs it") {
     val runs = AtomicInteger(0)
     val h = pack(step[Int, Int]("h", "i -> j") { i =>
       val _ = runs.incrementAndGet(); i * 10
@@ -131,8 +193,8 @@ class ParaCategoryLawSuite extends FunSuite:
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
 
-    val shared = h >>> C.parallel(f, g)
-    val copied = C.parallel(h >>> f, h >>> g)
+    val shared = h >>> C.fanout(f, g)
+    val copied = C.fanout(h >>> f, h >>> g)
 
     runs.set(0)
     val sharedOut = shared(TypedCall(3)).map(_.output)
@@ -184,7 +246,7 @@ class ParaCategoryLawSuite extends FunSuite:
   // ── The packaged evaluation capability: decoder threading through composition ───────────────────────────
   test(">>> threads the FIRST leg's input decoder (the composite's input is the first leg's input)") {
     val dec7: DynamicValue.Record => Either[DspyError, Int] = _ => Right(7)
-    val a = Program.of(step[Int, String]("a", "i -> s")(i => s"v$i"), dec7)
+    val a = Program.unsafeOf(step[Int, String]("a", "i -> s")(i => s"v$i"), dec7)
     val b = pack(step[String, Int]("b", "s -> n")(s => s.length)) // b's decoder is the failing stub
     assertEquals((a >>> b).decodeInput(DynamicValue.Record.empty), Right(7))
     // reparam preserves the decoder too.
@@ -201,6 +263,46 @@ class ParaCategoryLawSuite extends FunSuite:
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), p.decodeInput(boxedRecord))
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
     assertEquals((p >>> C.id[Wrapped]).decodeInput(boxedRecord), Right(Boxed(5)))
+  }
+
+  test("unsafeOf makes decoder incoherence explicit and keeps it outside the Category claim") {
+    val boxedRecord = DynamicValues.record("n" := 5)
+    val p = Program.unsafeOf(
+      step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")),
+      _ => Right(Boxed(99))
+    )
+
+    assertEquals(p.decodeInput(boxedRecord), Right(Boxed(99)))
+    assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
+  }
+
+  test("signature-backed composite modules supply ProgramInput without a RecordCodec fallback") {
+    val layout = SignatureLayout.parse("question -> s").toOption.get
+    val signature = Signature[DynamicValue.Record, Wrapped](
+      name = "RecordInput",
+      layout = layout,
+      inputShape = Shape.MapShape(layout.inputFields),
+      outputShape = Shape.derivedWithRole[Wrapped](FieldRole.Output)
+    )
+    val input = DynamicValues.record("question" := "hello")
+
+    val chain = Program.of(ChainOfThought(signature))
+    val react = Program.of(ReAct(signature, tools = Vector.empty))
+    val code  = Program.of(CodeAct(signature, UnusedInterpreter))
+
+    assertEquals(chain.decodeInput(input), Right(input))
+    assertEquals(react.decodeInput(input), Right(input))
+    assertEquals(code.decodeInput(input), Right(input))
+    assertEquals(chain.params.size, 1)
+    assertEquals(react.params.size, 2)
+    assertEquals(code.params.size, 2)
+
+    val errors = compileErrors("summon[RecordCodec[DynamicValue.Record]]")
+    assert(errors.nonEmpty, "test requires an input type without the generic RecordCodec fallback")
+
+    // A direct signature-backed instance also wins unambiguously when the generic RecordCodec fallback is available.
+    val productChain = Program.of(ChainOfThought(Signature.derived[Boxed, Wrapped]("ProductInput")))
+    assertEquals(productChain.decodeInput(DynamicValues.record("n" := 3)), Right(Boxed(3)))
   }
 
   test("id at a non-codec object does not compile (the structure is only a semicategory there)") {

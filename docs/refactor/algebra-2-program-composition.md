@@ -61,7 +61,7 @@ dimap(before)(after)(p)         : Program[I, O] => Program[J, B]      // profunc
 fanout(a, b)                   : (Program[I, A], Program[I, B]) => Program[I, (A, B)] // ordered fan-out / &&&
 split(a, b)                    : (Program[I, A], Program[J, B]) => Program[(I,J), (A,B)] // ordered split / ***
 recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected typed failures only
-//   IMPLEMENTED as Both + Compose.parallel. NOTE: this is NOT the existing `Parallel` class — that is a batch
+//   IMPLEMENTED as Both + Compose.fanout. NOTE: this is NOT the existing `Parallel` class — that is a batch
 //   executor over Vector[(DynamicModule, ProgramCall)] on a thread pool, a different abstraction. This fan-out
 //   runs two typed programs left-to-right on the same input and tuples the outputs. The raw merges both
 //   sub-predictions' records (second wins on collision).
@@ -173,7 +173,7 @@ reparameterization; the untyped `Vector` is therefore lossless, not a shadow.
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
-`dspy4s.programs.para.ParaCategory` (id / `>>>` / `params` / `reparam` with the Para laws) over
+`dspy4s.programs.para.ParaCategory` (id / `>>>` / ordered `fanout` / `params` / `reparam` with the Para laws) over
 `dspy4s.programs.para.Program` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
 `Predictors[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
 the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ParaCategoryLawSuite`.
@@ -188,8 +188,11 @@ runnable)` and surfaced the finding: **Para evidence alone is not enough to opti
 type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.
 
 The close: `Program` now also packages `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at
-`Program.of` time (explicitly, or via the `ProgramInput` typeclass from a program's signature) and threaded through
-composition (`f >>> g` keeps `f`'s decoder; `reparam` preserves it). Both optimizer capabilities are then
+`Program.of` time via the `ProgramInput` capability typeclass and threaded through composition (`f >>> g` keeps `f`'s
+decoder; `reparam` preserves it). `ProgramInput` has signature-backed instances for `Predict`, `ChainOfThought`,
+`ReAct`, and `CodeAct`, plus a low-priority `RecordCodec` fallback for third-party typed modules. `Program.unsafeOf`
+is the explicitly named escape hatch for a hand-supplied decoder; such a decoder must satisfy the documented
+coherence condition to participate in record-evaluation equality. Both optimizer capabilities are then
 uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
 projection/reparameterization) and `Runnable[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
@@ -211,8 +214,9 @@ Result, pinned by the suites: the left unit holds on the evaluation observation 
 (`id >>> p` decodes identically to `p`); an id-headed pipeline optimizes end-to-end through COPRO; and `id`
 at a non-codec object is a compile error, the honest statement that over codec-equipped objects the
 structure is a genuine category while elsewhere it is a semicategory (morphisms compose, no unit).
-`ProgramInput` also gains a low-priority `RecordCodec`-based fallback, so any typed program with a
-codec-equipped input packages via `Program.of(f)` alone.
+`ProgramInput` also has a low-priority `RecordCodec`-based fallback, so any typed program with a codec-equipped input
+packages via `Program.of(f)` alone. Signature-backed instances cover non-`RecordCodec` inputs for `Predict`,
+`ChainOfThought`, `ReAct`, and `CodeAct` by using the exact `inputShape` the module executes.
 
 **Law statements, the read functor, and fan-out (commit `446ccb6`, adopted from jpablo/math-with-scala).**
 Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
@@ -220,9 +224,11 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
 - **Laws as statements.** `core.contracts.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
   and the `@Law` annotation. The Para structures now state their laws as `@Law` methods ON the traits, and
   `ParaCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
-  observation (structural `==` for parameter vectors; run output + params for `Program` morphisms). The
-  deliberate split from the formalization library: there the equations are the deliverable, here they are
-  executable specifications.
+  observation (structural `==` for parameter vectors; typed output + params + coherent decoder + lifecycle for
+  `Program` morphisms). Final `Prediction.raw` is deliberately outside Category equality: `p >>> id` retains the
+  typed output and lifecycle but ends with identity's empty envelope. Both that counterexample and an incoherent
+  `unsafeOf` decoder counterexample are executable. The deliberate split from the formalization library: there the
+  equations are the deliverable, here they are executable specifications.
 - **`params` as a functor value.** `ParaCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
   parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`
   category to the parameter-monoid delooping) names what `Predictors.read` is categorically; its functor laws
@@ -231,17 +237,17 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   parameter monoid is now an explicit `given Monoid[Vector[DynamicPredict]]` and the delooping is generic
   (`delooping[M](using Monoid[M]) : Category[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
   `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).
-- **`parallel`, named honestly.** Added to the `Program` layer as the fan-out (pairing): both legs share the
+- **`fanout`, named honestly.** Added to the `Program` layer as the ordered pairing: both legs share the
   input, so it is copy-then-ordered-tensor fused. The copy NON-law is pinned as an executable
-  counterexample: `h >>> parallel(f, g)` runs `h` once while `parallel(h >>> f, h >>> g)` runs it twice,
+  counterexample: `h >>> fanout(f, g)` runs `h` once while `fanout(h >>> f, h >>> g)` runs it twice,
   with visibly different parameters (sizes 3 vs 4); the outputs coincide only for deterministic `h`, which
   is precisely why fan-out naturality cannot be a law for LLM morphisms. This is also the categorical
-  restatement of why the spec's `parallel` is "independent composition": sharing vs re-running are
+  restatement of why the spec's fan-out is not independent execution: sharing vs re-running are
   different programs, and the algebra keeps them distinguishable.
   The underlying ordered independent-input operation (`Tensor` / `Compose.tensor`) and `Copy` were later added
-  for completeness (commit `508a8e6`), so `parallel = copy >>> tensor`; deterministic and effect-observing copy
+  for completeness (commit `508a8e6`), so `fanout = copy >>> split`; deterministic and effect-observing copy
   cases are executable. The corrected framing is in [algebra.md](algebra.md). `tensor` stays at the `Module` level
-  (its `(I, J)` input has no single-record decoder), and `discard` / `swap` / associators are deferred.
+  as the compatibility name for `split` (its `(I, J)` input has no single-record decoder).
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -364,10 +370,10 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
   other commutative carrier could implement CD/Markov laws. A pair-input decoder would still be needed to lift
   ordered tensor into `ParaCategory`/`Program`.
 - **Full Para adoption**: promote the packaged `Program` (see the Para formalization above; the input decoder is
-  packaged, the entry-point loop is closed, objects are codec-equipped, and the BestOfN / Refine / RLM
-  `Predictors` instances are now in place, so the prototype and its instance coverage are functionally
-  complete) from prototype to the optimizer entry-point API, together with the remaining `ProgramInput`
-  instances (ChainOfThought / ReAct / CodeAct). The former Mirror silent-drop is already closed: structural
+  packaged, the entry-point loop is closed, objects are codec-equipped, the signature-backed `ProgramInput` boundary
+  covers Predict / ChainOfThought / ReAct / CodeAct, and the BestOfN / Refine / RLM `Predictors` instances are now in
+  place, so the prototype and its instance coverage are functionally complete) from prototype to the optimizer
+  entry-point API. The former Mirror silent-drop is already closed: structural
   derivation now requires field evidence, with `Predictors.empty` as an explicit parameter-free opt-in. Best
   done alongside the CIO phase so the API breaks once.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of

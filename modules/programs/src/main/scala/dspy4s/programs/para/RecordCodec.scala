@@ -2,8 +2,12 @@ package dspy4s.programs.para
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
+import dspy4s.programs.ChainOfThought
+import dspy4s.programs.CodeAct
 import dspy4s.programs.Predict
+import dspy4s.programs.ReAct
 import dspy4s.typed.Shape
+import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
 
@@ -28,6 +32,10 @@ object RecordCodec:
   *
   * Program-specific instances may use their signature. The low-priority fallback works for any typed program whose
   * input type has a [[RecordCodec]]. Composition needs no instance because it threads the first leg's packaged decoder.
+  *
+  * Instances are expected to be coherent with the program's actual typed-call boundary: decoding a record and running
+  * the program must mean the same thing as supplying the decoded `I` directly. This is a capability typeclass rather
+  * than an inherited program member because third-party module types can provide the capability independently.
   */
 trait ProgramInput[F, I]:
   def decoder(program: F): DynamicValue.Record => Either[DspyError, I]
@@ -37,6 +45,20 @@ trait LowPriorityProgramInput:
     def decoder(program: F): DynamicValue.Record => Either[DspyError, I] = codec.decode
 
 object ProgramInput extends LowPriorityProgramInput:
-  given forPredict[I, O]: ProgramInput[Predict[I, O], I] with
-    def decoder(program: Predict[I, O]): DynamicValue.Record => Either[DspyError, I] =
-      program.signature.inputShape.decode
+  /** Build input-decoding evidence for a module that exposes its authoritative typed signature. */
+  private def signatureBacked[F, I, O](signature: F => Signature[I, O]): ProgramInput[F, I] =
+    new ProgramInput[F, I]:
+      def decoder(program: F): DynamicValue.Record => Either[DspyError, I] =
+        signature(program).inputShape.decode
+
+  given forPredict[I, O]: ProgramInput[Predict[I, O], I] =
+    signatureBacked(_.signature)
+
+  given forChainOfThought[I, O]: ProgramInput[ChainOfThought[I, O], I] =
+    signatureBacked(_.signature)
+
+  given forReAct[I, O]: ProgramInput[ReAct[I, O], I] =
+    signatureBacked(_.baseSignature)
+
+  given forCodeAct[I, O]: ProgramInput[CodeAct[I, O], I] =
+    signatureBacked(_.baseSignature)

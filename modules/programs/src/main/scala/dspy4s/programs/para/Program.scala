@@ -16,8 +16,13 @@ import zio.blocks.schema.DynamicValue
   *
   * The package hides a concrete module representation while retaining its [[Predictors]] evidence and input decoder.
   * Consequently, the binary type `Program[I, O]` supports parameter projection, reparameterization, and record-based
-  * evaluation without knowing the representation. Construction through [[Program.of]] is the gate: a representation
-  * without `Predictors` evidence cannot enter the category.
+  * evaluation without knowing the representation. Construction through [[Program.of]] is the coherent gate;
+  * [[Program.unsafeOf]] is the explicitly named custom-decoder escape hatch. Neither admits a representation without
+  * `Predictors` evidence.
+  *
+  * The category laws use typed output, parameters, coherent record decoding, and lifecycle as their observation. They
+  * do not use structural equality of this existential package or final `Prediction.raw`: right identity preserves the
+  * semantic output and lifecycle but identity supplies an empty final raw envelope.
   */
 sealed trait Program[I, O]:
   type Rep <: Module[TypedCall[I], Prediction[O]]
@@ -33,8 +38,7 @@ sealed trait Program[I, O]:
 
 object Program:
 
-  /** Package a program with its addressability evidence and an explicit input decoder. */
-  def of[I, O, F <: Module[TypedCall[I], Prediction[O]]](
+  private def packageWith[I, O, F <: Module[TypedCall[I], Prediction[O]]](
       f: F,
       decode: DynamicValue.Record => Either[DspyError, I]
   )(using ev: Predictors[F]): Program[I, O] { type Rep = F } =
@@ -44,12 +48,24 @@ object Program:
       val addressable: Predictors[F]                               = ev
       val decodeInput: DynamicValue.Record => Either[DspyError, I] = decode
 
+  /** Package a module with an explicitly supplied input decoder.
+    *
+    * Prefer [[of]]: this escape hatch cannot prove that `decode` agrees with the module's typed-call boundary or with
+    * the source object's [[RecordCodec]]. An incoherent decoder remains runnable, but falls outside the observational
+    * equality under which the category laws hold.
+    */
+  def unsafeOf[I, O, F <: Module[TypedCall[I], Prediction[O]]](
+      f: F,
+      decode: DynamicValue.Record => Either[DspyError, I]
+  )(using ev: Predictors[F]): Program[I, O] { type Rep = F } =
+    packageWith(f, decode)
+
   /** Package a program whose input decoder is derivable from [[ProgramInput]]. */
   def of[I, O, F <: Module[TypedCall[I], Prediction[O]]](f: F)(using
       ev: Predictors[F],
       codec: ProgramInput[F, I]
   ): Program[I, O] { type Rep = F } =
-    of(f, codec.decoder(f))
+    packageWith(f, codec.decoder(f))
 
   /** Addressability for packaged programs delegates to the evidence retained by the package. */
   given programPredictors[I, O]: Predictors[Program[I, O]] with
@@ -57,7 +73,7 @@ object Program:
       program.addressable.read(program.program)
 
     def replace(program: Program[I, O], updates: Vector[DynamicPredict]): Program[I, O] =
-      Program.of(program.addressable.replace(program.program, updates), program.decodeInput)(using
+      Program.packageWith(program.addressable.replace(program.program, updates), program.decodeInput)(using
         program.addressable
       )
 
@@ -67,27 +83,28 @@ object Program:
   /** The Para category over packaged programs.
     *
     * Identity synthesizes a decoder from the object's [[RecordCodec]]. Composition and fan-out retain the structural
-    * `Predictors` evidence of their children and thread the shared input decoder from the first leg.
+    * `Predictors` evidence of their children and thread the shared input decoder from the first leg. Decoder equality
+    * assumes packages were built through coherent [[ProgramInput]] evidence; [[unsafeOf]] documents the escape hatch.
     */
   given paraCategoryProgram: ParaCategory[RecordCodec, Program] with
     def id[A: RecordCodec]: Program[A, A] =
-      Program.of(Identity[A](), summon[RecordCodec[A]].decode)
+      Program.packageWith(Identity[A](), summon[RecordCodec[A]].decode)
 
-    def parallel[I, A, B](f: Program[I, A], g: Program[I, B]): Program[I, (A, B)] =
-      Program.of(Both[I, A, B, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
+    def fanout[I, A, B](f: Program[I, A], g: Program[I, B]): Program[I, (A, B)] =
+      Program.packageWith(Both[I, A, B, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
         Both.bothPredictors[I, A, B, f.Rep, g.Rep](using f.addressable, g.addressable)
       )
 
     extension [A, B](f: Program[A, B])
       infix def >>>[C](g: Program[B, C]): Program[A, C] =
-        Program.of(AndThen[A, B, C, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
+        Program.packageWith(AndThen[A, B, C, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
           AndThen.andThenPredictors[A, B, C, f.Rep, g.Rep](using f.addressable, g.addressable)
         )
 
       def params: Vector[DynamicPredict] = f.addressable.read(f.program)
 
       def reparam(ps: Vector[DynamicPredict]): Program[A, B] =
-        Program.of(f.addressable.replace(f.program, ps), f.decodeInput)(using f.addressable)
+        Program.packageWith(f.addressable.replace(f.program, ps), f.decodeInput)(using f.addressable)
 
 /** Parameter projection as a functor from packaged programs into the delooped parameter monoid. */
 object ReadFunctor extends CategoryFunctor[RecordCodec, Program, AnyObject, ParamsHom]:

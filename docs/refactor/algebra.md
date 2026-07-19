@@ -151,7 +151,7 @@ tensor a,b     ordered independent inputs, paired outputs            Tensor / Co
 copy           duplicate the input I => (I, I)                       Copy / Compose.copy       ✅
 discard        drop a value I => ()                                  Discard / Compose.discard ✅
 swap           exchange two value components                         Swap / Compose.swap       ✅
-parallel a,b   ordered fan-out: same input = copy then tensor        Both / Compose.parallel   ✅
+fanout a,b     ordered fan-out: same input = copy then split         Both / Compose.fanout     ✅
 ```
 
 The former tensor-interchange claim changed execution from `f1, g1, f2, g2` to `f1, f2, g1, g2`. With `g1`
@@ -170,20 +170,20 @@ not structural equality on `Module[TypedCall[I], Prediction[O]]`.
 
 The load-bearing facts, all executable:
 
-- **`parallel = copy >>> tensor`.** Fan-out is copy-then-tensor; `parallel(a, b) = Δ >>> (a ⊗ b)`
-  (`ComposeLawSuite`). This is why `parallel` shares one input while `tensor` takes two.
-- **Copy classifies deterministic behavior but is not a general law.** `h >>> parallel(f, g)` runs `h` once (shared);
-  `parallel(h >>> f, h >>> g) = Δ >>> (h ⊗ h) >>> (f ⊗ g)` runs it twice. These agree iff
-  `h >>> copy = copy >>> tensor(h, h)`, i.e. iff `h` is deterministic under the chosen observation. Both sides
+- **`fanout = copy >>> split`.** Fan-out is copy-then-split; `fanout(a, b) = Δ >>> (a ⊗ b)`
+  (`ComposeLawSuite`). This is why `fanout` shares one input while `split` takes two.
+- **Copy classifies deterministic behavior but is not a general law.** `h >>> fanout(f, g)` runs `h` once (shared);
+  `fanout(h >>> f, h >>> g) = Δ >>> (h ⊗ h) >>> (f ⊗ g)` runs it twice. These agree iff
+  `h >>> copy = copy >>> split(h, h)`, i.e. iff `h` is deterministic under the chosen observation. Both sides
   are pinned: the positive case for a pure `h` in
   `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
   `ParaCategoryLawSuite`. This remains useful without claiming a Markov structure for execution.
 
-**Why `tensor` lives at the Module level, not on `ParaCategory`.** `parallel` lifts into the packaged `Program` /
-`ParaCategory` category because both legs share one input, so the pair reuses that input's decoder. The tensor's
+**Why `split` lives at the Module level, not on `ParaCategory`.** `fanout` lifts into the packaged `Program` /
+`ParaCategory` category because both legs share one input, so the pair reuses that input's decoder. The split's
 input `(I, J)` has no canonical single-record decoder (two independent inputs, one flat `Example` record), so
-`tensor` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
-category naturally supports fan-out, and the raw tensor is the structural op beneath it.
+`split` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
+category naturally supports fan-out, and the raw split is the structural op beneath it.
 
 **Not adopted (deliberately).** The higher-kinded generalization from `typista.org`'s categories article —
 `CategoryTC1[P[F[_]], Hom[F[_], G[_]]]` (objects = endofunctors) and the internal-monoid tower that recovers
@@ -248,7 +248,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `retryUntil`, not `feedback`.
   - **6.2 done** (commit `60d2ea5`, later law-audit correction): `id` / `>>>` / `parallel` in `Compose.scala`;
     `ComposeLawSuite` covers value-category laws, lifecycle-transparent association, ordered fan-out, and
-    addressability. `parallel` is Arrow-like fan-out, not an Applicative or the batch-executor `Parallel`.
+    addressability. `fanout` is Arrow-like ordered pairing, not an Applicative or the batch-executor `Parallel`;
+    `parallel` remains its compatibility name.
   - **6.3 done** (commit `6faa94e`): `AgentLoop.run` + `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT
     all reduced onto them; `AgentLoopLawSuite` pins the primitive. Code-truth correction recorded: the
     `env.step`/`classify`/`render` decomposition was rejected; each module keeps its own step closure.
@@ -268,6 +269,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `Predictors[Program]` + `Runnable[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
     values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
+    Signature-backed `ProgramInput` instances cover Predict / ChainOfThought / ReAct / CodeAct even when their input
+    type has no `RecordCodec`; `Program.unsafeOf` names the custom-decoder escape hatch and its coherence obligation.
     `Predictors.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `Predictors.empty`, so an omitted learnable subtree can no longer disappear silently.
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
@@ -280,7 +283,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     structures from the Para pass: the delooping of the parameter monoid as an explicit `Category` instance;
     `ReadFunctor` (`Predictors.read` as a functor value; its functor laws — preserves id + composition — are
     carried on the `CategoryFunctor` trait and are exactly the Para projection laws); and
-    `parallel` as ordered fan-out, with the copy NON-law (sharing vs re-running an effectful `h` differ, in
+    `fanout` as ordered shared-input pairing, with `parallel` retained as a compatibility name and the copy NON-law
+    (sharing vs re-running an effectful `h` differ, in
     behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the
     uniform law-statement style across the codebase; every use must name an observational equality preserved by
     its public combinators.
@@ -295,8 +299,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit.
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
-    audit): `tensor` / `copy` / `discard` / `swap` remain useful `Compose` generators and
-    `parallel = copy >>> tensor`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not
+    audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and
+    `fanout = copy >>> split`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not
     `CDCategory`. `OrderedTensorOpsSuite` pins the fail-fast interchange counterexample (`g1` versus `f2`),
     while `ComposeLawSuite` pins lifecycle-transparent association. The abstract `CDCategory` target remains
     available for a future commutative denotational carrier.
