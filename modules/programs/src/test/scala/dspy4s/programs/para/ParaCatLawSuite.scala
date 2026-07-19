@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.IsEq
+import dspy4s.core.contracts.Monoid
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
@@ -146,14 +147,27 @@ class ParaCatLawSuite extends FunSuite:
 
   }
 
-  // ── The delooping is itself a lawful Cat instance (checked with real ==) ─────────────────────────────────
-  test("paramsDeloop satisfies the Cat laws under structural equality") {
+  // ── The parameter monoid, and its delooping as a lawful Cat instance (both checked with real ==) ─────────
+  test("the parameter monoid Monoid[Vector[DynamicPredict]] satisfies the monoid laws") {
+    val M  = Monoid[Vector[DynamicPredict]]
+    val v1 = Vector(predict("a -> b"))
+    val v2 = Vector(predict("b -> c"))
+    val v3 = Vector(predict("c -> d"))
+    assertIsEq(M.associativity(v1, v2, v3))
+    assertIsEq(M.identityLeft(v1))
+    assertIsEq(M.identityRight(v1))
+  }
+
+  test("paramsDeloop is that monoid delooped: Cat laws hold, and id delegates to the monoid's empty") {
+    val M  = Monoid[Vector[DynamicPredict]]
     val v1 = Vector(predict("a -> b"))
     val v2 = Vector(predict("b -> c"))
     val v3 = Vector(predict("c -> d"))
     assertIsEq(paramsDeloop.identityLeft[Unit, Unit](v1))
     assertIsEq(paramsDeloop.identityRight[Unit, Unit](v1))
     assertIsEq(paramsDeloop.associativity[Unit, Unit, Unit, Unit](v1, v2, v3))
+    // The delooping delegates to the monoid: the category's identity IS the monoid's empty element.
+    assertEquals(paramsDeloop.id[Unit], M.empty)
   }
 
   // ── ReadFunctor: params as a functor value; its laws executed ────────────────────────────────────────────

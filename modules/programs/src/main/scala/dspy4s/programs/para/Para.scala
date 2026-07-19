@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.Law
+import dspy4s.core.contracts.Monoid
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.<->
 import dspy4s.programs.AndThen
@@ -136,15 +137,31 @@ trait ParaCat[P[_], Hom[_, _]] extends Cat[P, Hom]:
 /** The trivial object constraint, for categories whose Hom ignores its object indices (the delooping). */
 type AnyObject[A] = DummyImplicit
 
-/** The delooping B(M) of the parameter monoid M = `Vector[DynamicPredict]`: one object (all indices
-  * collapse), morphisms are parameter vectors, composition is concatenation, id is the empty vector. The
-  * target of [[ReadFunctor]]. */
-type ParamsHom[A, B] = Vector[DynamicPredict]
+/** The '''parameter monoid''': `Vector[DynamicPredict]` under concatenation — the free monoid on the
+  * homogeneous Para parameters, and the codomain of the [[Predictors]] homomorphism. Stated as an explicit
+  * `given Monoid[Vector[DynamicPredict]]` so the delooping below is literally "this monoid, delooped" rather
+  * than an ad-hoc `Cat` whose composition happens to be `++`. */
+given paramsMonoid: Monoid[Vector[DynamicPredict]] with
+  def empty: Vector[DynamicPredict] = Vector.empty
+  extension (a: Vector[DynamicPredict])
+    infix def combine(b: Vector[DynamicPredict]): Vector[DynamicPredict] = a ++ b
 
-given paramsDeloop: Cat[AnyObject, ParamsHom] with
-  def id[A: AnyObject]: ParamsHom[A, A] = Vector.empty
-  extension [A, B](f: ParamsHom[A, B])
-    infix def >>>[C](g: ParamsHom[B, C]): ParamsHom[A, C] = f ++ g
+/** The delooping B(M) of ANY monoid M: the one-object category whose morphisms are the monoid's elements,
+  * composition is `combine`, identity is `empty` — the classic "a monoid is a one-object category". A plain
+  * `def` (not a `given`) so it does not compete with more specific `Cat` instances during resolution; the
+  * parameter-monoid delooping is exposed as the [[paramsDeloop]] `given` below. */
+type Delooped[M] = [A, B] =>> M
+
+def delooping[M](using M: Monoid[M]): Cat[AnyObject, Delooped[M]] =
+  new Cat[AnyObject, Delooped[M]]:
+    def id[A: AnyObject]: M = M.empty
+    extension [A, B](f: M) infix def >>>[C](g: M): M = f.combine(g)
+
+/** The delooping of the [[paramsMonoid]] — one object, morphisms are parameter vectors, composition is `++`,
+  * id is the empty vector. The target of [[ReadFunctor]]. */
+type ParamsHom = Delooped[Vector[DynamicPredict]]
+
+given paramsDeloop: Cat[AnyObject, ParamsHom] = delooping[Vector[DynamicPredict]]
 
 /** An identity-on-objects functor between Hom-indexed categories — the minimal math-with-scala `Functor`
   * shape needed here (the delooping target ignores objects, so an object map would be inert). */
