@@ -9,8 +9,8 @@ import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
 
-/** The program-composition combinators `id` / `>>>` / `parallel` — value-level category composition plus ordered
-  * fan-out (`docs/refactor/algebra-2-program-composition.md`).
+/** The program-composition combinators `id` / `>>>` / `fanout` / `split` — value-level category composition plus
+  * ordered shared- and independent-input pairing (`docs/refactor/algebra-2-program-composition.md`).
   *
   * Carrier (the grill's fork-1/5 decision): a program is `Module[TypedCall[I], Prediction[O]]`. `>>>` threads the plain
   * typed value `O` (not the `Prediction[O]` envelope): it runs the first program, feeds its `prediction.output` into a
@@ -97,7 +97,7 @@ object AndThen:
     override def readNamed(program: AndThen[I, X, O, A, B]): Vector[(String, DynamicPredict)] =
       PairPredictors.readNamed(pa, pb)(program.first, program.second)
 
-/** `parallel(a, b)` — ordered fan-out: run both programs on the same input and tuple their outputs. On the synchronous
+/** `fanout(a, b)` (compatibility name `parallel`) — run both programs on the same input and tuple their outputs. On the synchronous
   * `Either` substrate the two attempts run left-to-right and fail fast; this is Arrow-like `&&&`, not concurrent
   * execution and not by itself an `Applicative` instance. The result's raw merges both sub-predictions' value records
   * (`second` wins on a key collision).
@@ -135,8 +135,8 @@ object Both:
     override def readNamed(program: Both[I, OA, OB, A, B]): Vector[(String, DynamicPredict)] =
       PairPredictors.readNamed(pa, pb)(program.first, program.second)
 
-/** `tensor(a, b)` — run two programs left-to-right on independent inputs and pair both outputs. It is the operation
-  * beneath shared-input fan-out: `parallel(a, b) = copy >>> tensor(a, b)`. Because `Either` failures and runtime
+/** `split(a, b)` (compatibility name `tensor`) — run two programs left-to-right on independent inputs and pair both
+  * outputs. It is the operation beneath shared-input fan-out: `fanout(a, b) = copy >>> split(a, b)`. Because `Either` failures and runtime
   * effects make that order observable, this operation is not a bifunctorial monoidal tensor on unrestricted modules.
   * Unlike `parallel` it does NOT lift into the packaged `Program`/`ParaCategory` category: its input `(I, J)` has no
   * canonical single-record decoder (fan-out reuses the shared input's decoder; the tensor's two inputs don't), so it
@@ -218,25 +218,50 @@ final case class Swap[I, J]() extends TransparentModule[TypedCall[(I, J)], Predi
 object Swap:
   given swapPredictors[I, J]: Predictors[Swap[I, J]] = Predictors.empty
 
-/** The composition combinators as functions / operators. `id` / `parallel` / `tensor` / `copy` / `discard` / `swap` are
-  * plain factories; `>>>` is an infix extension on any typed program. Import `dspy4s.programs.*` (or this object's
-  * members) to use them.
+/** The composition combinators as functions / operators. `lift` / `id` / `fanout` / `split` / `copy` / `discard` /
+  * `swap` are plain factories; `>>>`, variance transforms, and recovery also have fluent extensions. Import
+  * `dspy4s.programs.*` (or this object's members) to use them.
   */
 object Compose:
   /** The Category unit at type `I`. */
   def id[I]: Identity[I] = Identity[I]()
 
-  /** Independent composition: `parallel(a, b)` runs both on the same input and tuples the outputs (fan-out). */
-  def parallel[I, OA, OB, A <: Module[TypedCall[I], Prediction[OA]], B <: Module[TypedCall[I], Prediction[OB]]](
+  /** Lift a total Scala function into a transparent, parameter-free program. */
+  def lift[I, O](f: I => O): Lift[I, O] = Lift(f)
+
+  /** Lift an explicitly fallible Scala function into a transparent, parameter-free program. */
+  def liftEither[I, O](f: I => Either[DspyError, O]): LiftEither[I, O] = LiftEither(f)
+
+  /** Ordered shared-input fanout (`&&&`): run `a`, then `b`, and pair their outputs. */
+  def fanout[I, OA, OB, A <: Module[TypedCall[I], Prediction[OA]], B <: Module[TypedCall[I], Prediction[OB]]](
       a: A,
       b: B
   ): Both[I, OA, OB, A, B] = Both(a, b)
 
-  /** Ordered independent-input composition: run `a`, then `b`, and pair both outputs. */
-  def tensor[I, J, A, B, FA <: Module[TypedCall[I], Prediction[A]], FB <: Module[TypedCall[J], Prediction[B]]](
+  /** Compatibility name for [[fanout]]. This operation is ordered, not concurrent. */
+  def parallel[I, OA, OB, A <: Module[TypedCall[I], Prediction[OA]], B <: Module[TypedCall[I], Prediction[OB]]](
+      a: A,
+      b: B
+  ): Both[I, OA, OB, A, B] = fanout(a, b)
+
+  /** Ordered independent-input split (`***`): run `a` on the first input, then `b` on the second. */
+  def split[I, J, A, B, FA <: Module[TypedCall[I], Prediction[A]], FB <: Module[TypedCall[J], Prediction[B]]](
       a: FA,
       b: FB
   ): Tensor[I, J, A, B, FA, FB] = Tensor(a, b)
+
+  /** Compatibility name for [[split]]. */
+  def tensor[I, J, A, B, FA <: Module[TypedCall[I], Prediction[A]], FB <: Module[TypedCall[J], Prediction[B]]](
+      a: FA,
+      b: FB
+  ): Tensor[I, J, A, B, FA, FB] = split(a, b)
+
+  /** Try `primary`, then a fixed fallback only when `policy` selects the primary error. */
+  def recover[I, O, P <: Module[TypedCall[I], Prediction[O]], F <: Module[TypedCall[I], Prediction[O]]](
+      primary: P,
+      fallback: F,
+      policy: RecoveryPolicy
+  ): RecoverWith[I, O, P, F] = RecoverWith(primary, fallback, policy)
 
   /** Duplicate the input into `(I, I)`. The first half of a fan-out. */
   def copy[I]: Copy[I] = Copy[I]()
@@ -258,3 +283,11 @@ object Compose:
 extension [I, X, A <: Module[TypedCall[I], Prediction[X]]](self: A)
   infix def >>>[O, B <: Module[TypedCall[X], Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
     AndThen[I, X, O, A, B](self, next)
+
+  /** Fluent ordered shared-input fanout. */
+  def fanout[O, B <: Module[TypedCall[I], Prediction[O]]](other: B): Both[I, X, O, A, B] =
+    Both(self, other)
+
+  /** Fluent ordered independent-input split. */
+  def split[J, O, B <: Module[TypedCall[J], Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
+    Tensor(self, other)

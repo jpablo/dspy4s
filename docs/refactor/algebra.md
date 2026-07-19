@@ -108,6 +108,13 @@ augment[n, T] : Program[I, O] => Program[I, (n: T) *: O]           -- Thought / 
 mode(m)       : Program[I, O] => Program[I, O]                     -- MONOID (middleware)
 selectBest    : (Program[I, O], n, reward, threshold) => Program[I, O]
 parallel      : (Program[I, A], Program[I, B]) => Program[I, (A, B)]  -- ordered fan-out / &&&
+lift          : (I => O) => Program[I, O]                              -- parameter-free local transform
+mapOutput     : (O => B) => Program[I, O] => Program[I, B]             -- preserves final raw prediction
+contramapInput: (J => I) => Program[I, O] => Program[J, O]
+dimap         : (J => I, O => B) => Program[I, O] => Program[J, B]
+fanout        : (Program[I, A], Program[I, B]) => Program[I, (A, B)]   -- honest name for ordered `parallel`
+split         : (Program[I, A], Program[J, B]) => Program[(I,J),(A,B)] -- ordered independent inputs
+recover       : (RecoveryPolicy, Program[I,O]) => Program[I,O] => Program[I,O]
 loop          : (step, env, done) => Program[I, O]              -- the agentic scheme
 ```
 

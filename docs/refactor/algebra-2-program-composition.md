@@ -47,13 +47,20 @@ fields (see Optimizer-addressability); fixed parts (`env.step`, `reward`, `criti
 ```
 predict(sig: Signature[I, O]) : Program[I, O]                       // the atom: one LM round-trip (= Predict)
 id[I]                          : Program[I, I]                       // pure passthrough           [IMPLEMENTED 6.2]
+lift(f: I => O)                : Program[I, O]                       // local, parameter-free transform
+liftEither(f: I => Either[E,O]): Program[I, O]                       // explicit local failure
 
 a >>> b                        : (Program[I, X], Program[X, O]) => Program[I, O]      // Category (sequential)  [IMPLEMENTED 6.2]
+mapOutput(f)(p)                 : Program[I, O] => Program[I, B]      // covariant output map; preserves raw
+contramapInput(f)(p)            : Program[I, O] => Program[J, O]      // contravariant input map
+dimap(before)(after)(p)         : Program[I, O] => Program[J, B]      // profunctor-style boundary map
 //   runs a, feeds a.output: X into a fresh TypedCall[X] inheriting the outer call's controls, runs b.
 //   IMPLEMENTED as AndThen + the `>>>` extension; threads the plain value (the Prediction envelope of the
 //   intermediate goes to the trace, not the result). p >>> id keeps p.output but resets .raw (carrier split).
 
-parallel(a, b)                 : (Program[I, A], Program[I, B]) => Program[I, (A, B)] // ordered fan-out / &&&  [IMPLEMENTED 6.2]
+fanout(a, b)                   : (Program[I, A], Program[I, B]) => Program[I, (A, B)] // ordered fan-out / &&&
+split(a, b)                    : (Program[I, A], Program[J, B]) => Program[(I,J), (A,B)] // ordered split / ***
+recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected typed failures only
 //   IMPLEMENTED as Both + Compose.parallel. NOTE: this is NOT the existing `Parallel` class — that is a batch
 //   executor over Vector[(DynamicModule, ProgramCall)] on a thread pool, a different abstraction. This fan-out
 //   runs two typed programs left-to-right on the same input and tuples the outputs. The raw merges both

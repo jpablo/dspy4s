@@ -42,6 +42,18 @@ modules drive.
 | `RLM[I, O]` | Recursive Language Model (experimental): long inputs become REPL variables the LM explores with generated code calling `llm_query()` / `SUBMIT()`. |
 | `Parallel` | Concurrent executor over `(DynamicModule, ProgramCall)` tasks. |
 
+### Composition
+
+Typed modules compose without adding lifecycle noise: structural nodes are transparent, while semantic leaves retain
+their callbacks, trace, history, and optimizer-addressable predictors.
+
+- `Compose.lift` / `liftEither` embed local transformations.
+- `>>>` composes dependent stages.
+- `mapOutput`, `contramapInput`, and `dimap` adapt typed boundaries while preserving the inner raw prediction.
+- `fanout` pairs two programs over one shared input, left-to-right; `parallel` remains its compatibility name.
+- `split` pairs two programs over independent tuple inputs, left-to-right; `tensor` remains its compatibility name.
+- `recoverWith(policy)(fallback)` makes error selection explicit and retains both branches for optimization.
+
 ### Contracts & introspection
 
 | Type | Role |
