@@ -32,7 +32,7 @@ changing the domain types.
 | `Message` / `MessageRole` / `ContentPart` | A chat message (System/User/Assistant) with `text` or multimodal `parts`. |
 | `LmOutput` | One response item: text, typed `Vector[ToolCall]`, metadata. |
 | `LmMode` | `Chat` / `Text` / `Responses` — selects the wire shape. |
-| `LmUsage` / `TokenCategory` | Token counters (prompt/completion/total) plus a typed map of extras (cached, reasoning, audio, …). |
+| `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a typed map of extras (cached, reasoning, audio, …); re-exported here for source compatibility. |
 | `Embedder` | `embed(texts): Either[DspyError, Vector[Vector[Float]]]`, with an `Embedder.cached` factory. |
 | `LmChunk` / `LmToolCallDelta` | One streaming chunk (text, finish reason, usage) and incremental tool-call fragments. |
 | `LmCache` / `RetryPolicy` | The memoization and retry interfaces the runtime layer composes. |
@@ -77,8 +77,8 @@ changing the domain types.
 
 | File | Contents |
 |------|----------|
-| `contracts/LmContracts.scala` | `LmMode`, `Message`, `LmRequest`, `LmResponse`, `LmUsage`, `LmOutput`, `LanguageModel`, `LmCache`, `RetryPolicy` |
-| `contracts/Embedder.scala`, `LmStreaming.scala`, `TokenCategory.scala` | embeddings, streaming chunk types, token categories |
+| `contracts/LmContracts.scala` | `LmMode`, `Message`, `LmRequest`, `LmResponse`, `LmOutput`, `LanguageModel`, `LmCache`, `RetryPolicy`, plus the core `LmUsage` compatibility alias |
+| `contracts/Embedder.scala`, `LmStreaming.scala`, `TokenCategory.scala` | embeddings, streaming chunk types, and the core `TokenCategory` compatibility alias |
 | `providers/OpenAiLanguageModel.scala`, `OpenAiEmbedder.scala`, `OpenAiClient.scala` | the OpenAI-compatible model, embedder, and HTTP client |
 | `providers/OpenAiUsage.scala`, `OpenAiStreamChunk.scala`, `DynamicJson.scala`, `WireKeys.scala` | typed wire DTOs, JSON helpers, wire-field constants |
 | `providers/HttpTransport.scala`, `JdkHttpTransport.scala` | transport interface + JDK implementation |

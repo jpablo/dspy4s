@@ -21,6 +21,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.contracts.TokenCategory
 import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
@@ -28,6 +29,13 @@ import munit.FunSuite
 import scala.collection.mutable.ArrayBuffer
 
 class PredictSuite extends FunSuite:
+  private val expectedUsage = LmUsage(
+    totalTokens = 12,
+    promptTokens = 7,
+    completionTokens = 5,
+    extras = Map(TokenCategory.Cached -> 2L, TokenCategory.Other("vendor_x") -> 1L)
+  )
+
   private object DummyAdapter extends Adapter:
     override val name: String = "dummy-adapter"
 
@@ -66,7 +74,7 @@ class PredictSuite extends FunSuite:
             LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.95)),
             LmOutput(text = "Lyon", metadata = DynamicValues.record("score" := 0.33))
           ),
-          usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
+          usage = Some(expectedUsage)
         )
       )
 
@@ -115,7 +123,7 @@ class PredictSuite extends FunSuite:
         assertEquals(lookupString(prediction.values, "answer"), "Paris")
         assertEquals(prediction.asDouble("score"), Right(0.95))
         assertEquals(prediction.completions.get.size, 2)
-        assertEquals(prediction.lmUsage.flatMap(_.get("total_tokens")), Some(12L))
+        assertEquals(prediction.lmUsage, Some(expectedUsage))
         assertEquals(RuntimeEnvironment.current.trace.size, 1)
         assertEquals(RuntimeEnvironment.current.history.size, 1)
       }

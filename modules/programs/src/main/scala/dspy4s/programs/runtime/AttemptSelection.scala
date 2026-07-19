@@ -2,8 +2,8 @@ package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.AdapterRef
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -55,8 +55,7 @@ object AttemptSelection:
     var remainingFailures = failCount.getOrElse(n)
     var bestReward        = Double.NegativeInfinity
     var best: Option[A]   = None
-    var bestTrace         = Vector.empty[TraceEntry]
-    var bestHistory       = Vector.empty[HistoryEntry]
+    var bestDelta         = RuntimeDelta.empty
     var lastError: Option[DspyError] = None
     // Adapter override carried from a sub-threshold attempt's feedback into the next attempt (None until the
     // first feedback fires; for Refine this is the hint-injecting adapter derived from the generated advice).
@@ -64,10 +63,9 @@ object AttemptSelection:
 
     var idx = 0
     while idx < n do
-      val (attemptResult, trace, history) =
-        RuntimeEnvironment.isolatedAttempt(baseContext, carriedAdapter)(runAttempt(idx))
+      val executed = RuntimeEnvironment.isolatedAttempt(baseContext, carriedAdapter)(runAttempt(idx))
 
-      attemptResult match
+      executed.value match
         case Right(value) =>
           reward(value) match
             case Left(error) =>
@@ -79,10 +77,9 @@ object AttemptSelection:
               idx += 1
             case Right(score) =>
               if score > bestReward then
-                bestReward  = score
-                best        = Some(value)
-                bestTrace   = trace
-                bestHistory = history
+                bestReward = score
+                best       = Some(value)
+                bestDelta  = executed.delta
 
               if score >= threshold then
                 idx = n // short-circuit at threshold
@@ -94,7 +91,7 @@ object AttemptSelection:
                 feedback match
                   case None => ()
                   case Some(generate) =>
-                    generate(value, trace, score) match
+                    generate(value, executed.delta.trace, score) match
                       case Right(nextAdapter) => carriedAdapter = nextAdapter
                       case Left(error) =>
                         lastError = Some(error)
@@ -110,7 +107,7 @@ object AttemptSelection:
 
     best match
       case Some(value) =>
-        RuntimeEnvironment.propagateAttempt(bestTrace, bestHistory)
+        RuntimeEnvironment.propagateAttempt(bestDelta)
         Right(value)
       case None =>
         Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))

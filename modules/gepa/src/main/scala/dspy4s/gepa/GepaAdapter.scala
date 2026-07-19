@@ -125,7 +125,10 @@ final class GepaAdapter[P](
 
   /** Run one example in an isolated, failure-capturing context and assemble its [[Trajectory]]. */
   private def runOne(prog: P, example: Example)(using RuntimeContext): Trajectory =
-    val isolated = summon[RuntimeContext].copy(trace = Vector.empty, captureFailureTraces = true)
+    val base = summon[RuntimeContext]
+    val isolated = base
+      .withConfig(base.config.copy(captureFailureTraces = true))
+      .withDelta(base.delta.copy(trace = Vector.empty))
     RuntimeEnvironment.withContext(isolated) {
       given RuntimeContext = RuntimeEnvironment.current
       runner.run(prog, example.inputs) match

@@ -5,9 +5,11 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryRenderer
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.TraceEntry
 
 import java.util.concurrent.atomic.AtomicLong
@@ -97,7 +99,7 @@ object RuntimeEnvironment:
   /** Run `thunk` tagged with the given async-task id, used to scope [[configure]] ownership and correlate work
     * that fans out across async tasks. */
   def withAsyncTask[A](taskId: String)(thunk: => A): A =
-    withSetting(_.copy(asyncTaskId = Some(taskId)))(thunk)
+    withSetting(ctx => ctx.withScope(ctx.scope.copy(asyncTaskId = Some(taskId))))(thunk)
 
   /** Like [[withAsyncTask]], but mints a fresh `"$prefix-N"` id from a monotonic counter. */
   def withGeneratedAsyncTask[A](prefix: String = "async-task")(thunk: => A): A =
@@ -123,15 +125,19 @@ object RuntimeEnvironment:
     * preserved on exit, since those bubble up to the enclosing scope. */
   def withActiveCall[A](callId: String)(thunk: => A): A =
     val previous = localContext
-    val updated = previous.copy(
+    val updatedScope = previous.scope.copy(
       activeCallId = Some(callId),
       callStack    = previous.callStack :+ callId
     )
-    contextRef.set(updated)
+    contextRef.set(previous.withScope(updatedScope))
     try thunk
     finally
       val after = localContext
-      contextRef.set(after.copy(activeCallId = previous.activeCallId, callStack = previous.callStack))
+      val restoredScope = after.scope.copy(
+        activeCallId = previous.activeCallId,
+        callStack    = previous.callStack
+      )
+      contextRef.set(after.withScope(restoredScope))
 
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay
     * on exit. The low-level primitive the other `with*` helpers build on. Because the restore is wholesale, any
@@ -150,7 +156,7 @@ object RuntimeEnvironment:
 
   /** Run `thunk` with the callback handler list replaced by `callbacks`, restoring it afterward. */
   def withCallbacks[A](callbacks: Vector[CallbackHandler])(thunk: => A): A =
-    withContext(current.copy(callbacks = callbacks))(thunk)
+    withContext(current.withServices(current.services.copy(callbacks = callbacks)))(thunk)
 
   /** Append a trace entry to this thread's overlay; visible to [[current]] for the rest of the enclosing scope. */
   def appendTrace(entry: TraceEntry): Unit =
@@ -167,26 +173,26 @@ object RuntimeEnvironment:
       val nextHistory = (base.history :+ entry).takeRight(cap)
       contextRef.set(base.withHistory(nextHistory))
 
-  /** Run `body` under a fresh trace/history overlay derived from `base` (optionally swapping the adapter),
-    * returning the body's result paired with the trace and history it accumulated. Used by the BestOfN /
-    * Refine attempt loops, which isolate each attempt then propagate only the winner's observability via
-    * [[propagateAttempt]]. */
+  /** Run `body` under a fresh [[RuntimeDelta]] derived from `base` (optionally swapping the adapter), returning
+    * the body's result and accumulated output as an [[Executed]]. Used by the BestOfN / Refine attempt loops,
+    * which isolate each attempt then propagate only the winner's observability via [[propagateAttempt]]. */
   def isolatedAttempt[A](base: RuntimeContext, adapter: Option[AdapterRef] = None)(
       body: RuntimeContext ?=> A
-  ): (A, Vector[TraceEntry], Vector[HistoryEntry]) =
-    val isolated = base.copy(trace = Vector.empty, history = Vector.empty, adapter = adapter.orElse(base.adapter))
+  ): Executed[A] =
+    val isolated = base
+      .withServices(base.services.copy(adapter = adapter.orElse(base.adapter)))
+      .withDelta(RuntimeDelta.empty)
     withContext(isolated) {
       given RuntimeContext = current
       val result = body
-      val ctx    = current
-      (result, ctx.trace, ctx.history)
+      Executed(result, current.delta)
     }
 
-  /** Replay a captured attempt's trace and history into the current overlay, in order. The propagate half of
+  /** Replay a captured attempt's delta into the current overlay, in order. The propagate half of
     * [[isolatedAttempt]]: the winning attempt's observability bubbles up to the enclosing scope. */
-  def propagateAttempt(trace: Vector[TraceEntry], history: Vector[HistoryEntry]): Unit =
-    trace.foreach(appendTrace)
-    history.foreach(appendHistory)
+  def propagateAttempt(delta: RuntimeDelta): Unit =
+    delta.trace.foreach(appendTrace)
+    delta.history.foreach(appendHistory)
 
   /** Render the last `n` LM-call history entries on the active context as a human-readable string, in the spirit
     * of upstream `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread

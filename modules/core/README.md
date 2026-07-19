@@ -15,9 +15,9 @@ Four abstractions anchor the framework:
 - **A signature/field model.** A `SignatureLayout` is an ordered list of `FieldSpec`s, each tagged with a
   `FieldRole` (`Input`/`Output`), a wire `TypeRef`, a description, prefix, and constraints. Adapters and
   programs read this to build prompts and parse responses.
-- **A threaded execution context.** A `RuntimeContext` carries the active LM, adapter, callbacks, concurrency
-  knobs, and the per-thread accumulations (trace, history, call stack). It passes as a `using` parameter, so
-  configuration is scoped, not global mutable state.
+- **A partitioned execution context.** A `RuntimeContext` keeps runtime dependencies (`RuntimeServices`), policy
+  (`RuntimeConfig`), dynamic correlation (`RuntimeScope`), and observable output (`RuntimeDelta`) distinct. It
+  passes as a `using` parameter, so configuration is scoped, not global mutable state.
 - **A pure observability model.** Lifecycle work emits `CallbackEvent`s (module/LM/adapter/tool start and end),
   correlated into a tree by call id. Handlers build traces and history by observing events, so programs stay
   free of logging concerns.
@@ -29,7 +29,8 @@ Four abstractions anchor the framework:
 | Type | Role |
 |------|------|
 | `Example` | A training/demo data point: a `DynamicValue.Record` of fields plus the `inputKeys` partition marking inputs vs labels. |
-| `DynamicPrediction` | The result of one predict call: completion fields, optional multi-candidate `Completions`, and LM usage. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
+| `DynamicPrediction` | The result of one predict call: completion fields, optional multi-candidate `Completions`, and typed `LmUsage`. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
+| `LmUsage` / `TokenCategory` | Typed token accounting shared by predictions and LM responses; pointwise addition is a commutative monoid. |
 | `Completions` | A column-oriented view of N candidate completions; `at(i)` reconstructs row `i` as a `DynamicPrediction`. |
 | `DynamicValues` | The helper surface over the spine: `fromAny`, `recordFromEntries`, `recordGet`, `mergeRecords`, `renderText`, plus the `:=` and `updated` extensions. `fromAny` is reserved for user-facing edges. |
 
@@ -47,7 +48,8 @@ Four abstractions anchor the framework:
 
 | Type | Role |
 |------|------|
-| `RuntimeContext` | The active context: configured fields (LM, adapter, callbacks, concurrency, history cap) + accumulated fields (trace, history, call stack). Threads as `using`. |
+| `RuntimeContext` | The active context, partitioned into `RuntimeServices`, `RuntimeConfig`, `RuntimeScope`, and `RuntimeDelta`. Flat construction/access remains available for callers. |
+| `RuntimeDelta` / `Executed[A]` | Ordered trace/history output and its writer-like value carrier. Delta concatenation is a monoid; `Executed.flatMap` combines deltas in execution order. |
 | `RuntimeEnvironment` | Process-wide manager: the global default context, thread-local overlays, monotonic call/async-task ids, and callback dispatch. `configure` sets the global; `with*` scopes overrides. |
 | `CallbackEvent` / `CallbackHandler` | The eight lifecycle events (module/LM/adapter/tool × start/end), correlated by `callId`/`parentCallId`, and the handler interface that consumes them. |
 | `TraceEntry` / `HistoryEntry` | Recorded module calls (inputs/outputs/failure) and LM calls; appended to the context when enabled, capped by `maxHistorySize`. `HistoryRenderer` produces dspy-style inspection output. |
@@ -73,9 +75,11 @@ Four abstractions anchor the framework:
 
 | File / package | Contents |
 |----------------|----------|
-| `contracts/Data.scala` | `Example`, `Completions`, `DynamicPrediction` |
+| `contracts/Data.scala`, `Usage.scala` | `Example`, `Completions`, `DynamicPrediction`, `LmUsage`, `TokenCategory` |
 | `contracts/DynamicValues.scala` | spine helpers + `:=` / `updated` extensions |
-| `contracts/Runtime.scala` | `RuntimeContext`, `TraceEntry`, `HistoryEntry`, LM/adapter refs |
+| `contracts/Runtime.scala` | Cycle-breaking LM/adapter reference traits |
+| `contracts/RuntimeContext.scala` | `RuntimeContext`, services/config/scope partitions, and the flat compatibility surface |
+| `contracts/RuntimeOutput.scala` | `TraceEntry`, `HistoryEntry`, the `RuntimeDelta` monoid, and `Executed[A]` |
 | `contracts/Errors.scala` | the `DspyError` hierarchy |
 | `contracts/SignatureLayout.scala` | `SignatureLayout`, `FieldSpec`, `FieldRole`, `TypeRef`, `Constraint` |
 | `contracts/SignatureOps.scala` | idempotent layout-surgery extensions (prepend/append/replace) |

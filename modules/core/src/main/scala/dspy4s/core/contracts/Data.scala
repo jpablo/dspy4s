@@ -169,12 +169,12 @@ object Completions:
 final case class DynamicPrediction(
     values: DynamicValue.Record,
     completions: Option[Completions] = None,
-    lmUsage: Option[Map[String, Long]] = None
+    lmUsage: Option[LmUsage] = None
 ):
   /** Field-value accessor by name. */
   def get(key: String): Option[DynamicValue] = DynamicValues.recordGet(values, key)
 
-  def withUsage(usage: Map[String, Long]): DynamicPrediction = copy(lmUsage = Some(usage))
+  def withUsage(usage: LmUsage): DynamicPrediction = copy(lmUsage = Some(usage))
 
   def withValue(key: String, value: DynamicValue): DynamicPrediction =
     copy(values = values.updated(key, value))

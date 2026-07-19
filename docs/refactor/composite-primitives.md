@@ -248,21 +248,22 @@ optimizer dimension; ours does. See [Step 6 design lessons](#step-6-design-lesso
 **Where:** `RuntimeEnvironment` (core); it already owns `withContext`/`appendTrace`/`appendHistory`.
 
 ```scala
-/** Run `body` under an isolated trace/history overlay (optionally swapping the adapter), returning the
-  * body's result plus the trace/history it accumulated. Shared by the BestOfN / Refine attempt loops. */
+/** Run `body` under an isolated output delta (optionally swapping the adapter), returning the body's result
+  * and accumulated output in the writer carrier shared by the BestOfN / Refine attempt loops. */
 def isolatedAttempt[A](base: RuntimeContext, adapter: Option[AdapterRef] = None)
-                      (body: RuntimeContext ?=> A): (A, Vector[TraceEntry], Vector[HistoryEntry]) =
-  val isolated = base.copy(trace = Vector.empty, history = Vector.empty,
-                           adapter = adapter.orElse(base.adapter))
+                      (body: RuntimeContext ?=> A): Executed[A] =
+  val isolated = base
+    .withServices(base.services.copy(adapter = adapter.orElse(base.adapter)))
+    .withDelta(RuntimeDelta.empty)
   withContext(isolated) {
     given RuntimeContext = current
     val r = body
-    (r, current.trace, current.history)
+    Executed(r, current.delta)
   }
 
-/** Replay a winning attempt's captured trace/history into the caller's context. */
-def propagateAttempt(trace: Vector[TraceEntry], history: Vector[HistoryEntry]): Unit =
-  trace.foreach(appendTrace); history.foreach(appendHistory)
+/** Replay a winning attempt's captured output into the caller's context. */
+def propagateAttempt(delta: RuntimeDelta): Unit =
+  delta.trace.foreach(appendTrace); delta.history.foreach(appendHistory)
 ```
 
 **Migrations:** `BestOfN.selectBest` (lines 90–96, 118–119) and `Refine.forward` (102–115, 153–154) call
@@ -270,8 +271,10 @@ these. Refine passes its per-attempt `HintInjectingAdapter` as the `adapter` arg
 **Test:** new `IsolatedAttemptSuite` (core) asserting isolation (inner trace/history do not leak unless
 propagated) and that `propagateAttempt` replays in order; existing `TypedBestOfNSuite` /
 `RefinePerModuleAdviceSuite` cover the migrations.
-**Risk:** low-medium (mutable-state plumbing; keep capture order identical). **Effect note:** the
-`body: RuntimeContext ?=> A` closure is the seam that later becomes `F[A]`; keep it the single trailing arg.
+**Risk:** low-medium (mutable-state plumbing; keep capture order identical). `RuntimeDelta` is an ordered monoid,
+and `Executed[A]` makes the previously anonymous result/trace/history tuple an explicit writer-like carrier.
+**Effect note:** the `body: RuntimeContext ?=> A` closure is the seam that later becomes `F[A]`; keep it the
+single trailing arg.
 
 ## Step 5: `truncateOnOverflow` (covers F)
 

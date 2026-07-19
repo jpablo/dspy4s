@@ -163,7 +163,7 @@ class TypedPredictSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result = Predict(sig).apply(P4QAInput("Capital of France?")).toOption.get
       assertEquals(result.raw.completions.map(_.size), Some(2))
-      assertEquals(result.raw.lmUsage.flatMap(_.get("total_tokens")), Some(12L))
+      assertEquals(result.raw.lmUsage.map(_.totalTokens), Some(12L))
     }
   }
 

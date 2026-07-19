@@ -19,7 +19,6 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.lm.contracts.LmUsage
 import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
@@ -163,16 +162,9 @@ private[dspy4s] final case class PredictEngine(
     for
       completions <- Completions.fromRows(parsedOutputs.map(_.values))
       first <- DynamicPrediction.fromCompletions(completions)
-      withUsage = first.copy(lmUsage = response.usage.map(usageToMap))
+      withUsage = first.copy(lmUsage = response.usage)
       prediction = withUsage.withValue(PredictEngine.ToolCallsKey, toToolCallPayload(toolCalls))
     yield prediction
-
-  private def usageToMap(usage: LmUsage): Map[String, Long] =
-    usage.extras.map { case (category, value) => category.wireName -> value } ++ Map(
-      "total_tokens" -> usage.totalTokens,
-      "prompt_tokens" -> usage.promptTokens,
-      "completion_tokens" -> usage.completionTokens
-    )
 
   private def toToolCallPayload(toolCalls: Vector[ToolCall]): DynamicValue =
     DynamicValue.Sequence(Chunk.from(

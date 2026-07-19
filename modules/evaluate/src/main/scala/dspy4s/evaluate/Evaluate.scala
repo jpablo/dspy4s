@@ -78,7 +78,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     val baseCtx = summon[RuntimeContext]
     val evalCtx =
       if cfg.callbackMetadata.fields.isEmpty then baseCtx
-      else baseCtx.copy(callbackMetadata = cfg.callbackMetadata)
+      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
 
     val execResultE = RuntimeEnvironment.withContext(evalCtx) {
       val executor = buildExecutor(cfg)(using evalCtx)

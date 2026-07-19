@@ -373,7 +373,7 @@ that need completions, LM usage, or other adapter metadata:
 val tp = Predict(sig).run((question = "...")).toOption.get
 
 tp.output.answer        // typed access
-tp.raw.lmUsage          // Option[Map[String, Long]] — token counts
+tp.raw.lmUsage          // Option[LmUsage] — typed core + provider-specific token counts
 tp.raw.completions      // Option[Completions] — multiple candidates
 tp.raw.value("answer")  // dynamic accessor on the raw DynamicPrediction
 ```

@@ -178,7 +178,7 @@ class ChainOfThoughtSuite extends FunSuite:
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
       val tp = ChainOfThought(sig).apply((document = "...")).toOption.get
-      assertEquals(tp.raw.lmUsage.flatMap(_.get("total_tokens")), Some(10L))
+      assertEquals(tp.raw.lmUsage.map(_.totalTokens), Some(10L))
       assertEquals(tp.raw.asString("reasoning"), Right("short reasoning"))
       assertEquals(tp.raw.asString("summary"),   Right("short summary"))
     }
