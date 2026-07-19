@@ -123,6 +123,48 @@ selectBest  selectBest(p, 1, reward, threshold) = p         -- n = 1 is identity
 closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one of N) is the dual of
 `ensemble` / majority (reduce N). `>>>` (dependent) is dual to `parallel` (independent).
 
+### The program category is a Markov category
+
+The right abstract home for Algebra 2 is a **Markov category** (Fritz 2020; Cho–Jacobs): a symmetric monoidal
+category in which every object carries a commutative-comonoid structure (**copy** and **discard**), where
+discard is natural but **copy need not be** — copy commutes with a morphism `h` iff `h` is *deterministic*.
+That is exactly the shape of dspy4s's programs, whose morphisms `I ⇝ M[O]` are effectful/nondeterministic
+(the LM). The generators, and what dspy4s has:
+
+```
+>>>              sequential composition (Category)                         Cat / AndThen        ✅
+tensor  a ⊗ b    independent inputs, paired outputs (monoidal tensor)      Tensor / Compose.tensor  ✅ (Module level)
+copy    Δ        duplicate the input  I ⇝ (I, I)                           Copy / Compose.copy      ✅
+parallel a,b     fan-out: SAME input to both = copy then tensor            Both / Compose.parallel  ✅
+discard  !       drop a value  I ⇝ ()                                      —                        deferred
+swap σ, assoc    symmetry + associators                                    —                        deferred
+```
+
+The load-bearing facts, all executable:
+
+- **`parallel = copy >>> tensor`.** Fan-out is copy-then-tensor; `parallel(a, b) = Δ >>> (a ⊗ b)`
+  (`ComposeLawSuite`). This is why `parallel` shares one input while `tensor` takes two.
+- **Copy is not natural — and that IS the point.** `h >>> parallel(f, g)` runs `h` once (shared);
+  `parallel(h >>> f, h >>> g) = Δ >>> (h ⊗ h) >>> (f ⊗ g)` runs it twice. These agree iff
+  `h >>> Δ = Δ >>> (h ⊗ h)`, i.e. iff `h` commutes with copy, i.e. iff `h` is **deterministic** — the Markov
+  determinism criterion. Both sides are pinned: the positive law (`copy` natural for a pure `h`) in
+  `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
+  `ParaCatLawSuite`. So "an LLM morphism is nondeterministic ⟹ copy doesn't commute with it" is not prose here;
+  it is the copy non-law we already test, and it is why the optimizer sees `h`'s parameters once vs twice.
+
+**Why `tensor` lives at the Module level, not on `ParaCat`.** `parallel` lifts into the packaged `Prog` /
+`ParaCat` category because both legs share one input, so the pair reuses that input's decoder. The tensor's
+input `(I, J)` has no canonical single-record decoder (two independent inputs, one flat `Example` record), so
+`tensor` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
+category naturally supports fan-out, and the raw tensor is the structural op beneath it.
+
+**Not adopted (deliberately).** The higher-kinded generalization from `typista.org`'s categories article —
+`CategoryTC1[P[F[_]], Hom[F[_], G[_]]]` (objects = endofunctors) and the internal-monoid tower that recovers
+`Monad` as a monoid in `End(X)` — does not apply: dspy4s's objects are types, not functors, and its monads
+(`Either`, later `CIO`) are ambient and used, never re-derived. The generalization dspy4s actually wanted was
+not richer objects but the **Markov refinement** (copy that fails to be natural) of the category it already
+has. `discard` / `swap` / associators are the natural completion, deferred until a consumer appears.
+
 **Ugly laws in the current code = the work to do.**
 
 - ~~No `>>>`: programs are sequenced with hand-written `for`-comprehensions.~~ **Resolved (step 6.2).** `>>>`
@@ -219,3 +261,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     to `delooping[M](using Monoid[M]): Cat[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
     `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Cat`. Remaining
     candidate: Algebra 1's two commuting endomorphism submonoids, if lifted onto explicit instances.
+  - **Markov structure + tensor** (commit `508a8e6`): the program category identified as a Markov category
+    (see "The program category is a Markov category" above), with the monoidal tensor `⊗` (`Tensor` /
+    `Compose.tensor`) and copy `Δ` (`Copy` / `Compose.copy`) added for completeness. `parallel = copy >>>
+    tensor` and the Markov determinism law (copy natural iff deterministic) are executable in `ComposeLawSuite`.
+    Assessed and NOT adopted: `typista.org`'s higher-kinded `CategoryTC1` / monad-as-monoid-in-endofunctors
+    tower (objects are types not functors; monads are ambient). `discard` / `swap` / associators deferred.

@@ -228,6 +228,11 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   is precisely why fan-out naturality cannot be a law for LLM morphisms. This is also the categorical
   restatement of why the spec's `parallel` is "independent composition": sharing vs re-running are
   different programs, and the algebra keeps them distinguishable.
+  The underlying monoidal tensor `⊗` (`Tensor` / `Compose.tensor`) and copy `Δ` (`Copy` / `Compose.copy`) were
+  later added for completeness (commit `508a8e6`), so `parallel = copy >>> tensor` and the Markov determinism
+  law (copy natural iff the morphism is deterministic) are executable; the full framing is in
+  [algebra.md](algebra.md) ("The program category is a Markov category"). `tensor` stays at the `Module` level
+  (its `(I, J)` input has no single-record decoder), and `discard` / `swap` / associators are deferred.
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -345,6 +350,8 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `paralle
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
+- **Remaining Markov/CD-category generators**: `discard` / `swap` / associators (the tensor `⊗` and copy `Δ`
+  shipped in `508a8e6`; a genuine `tensor` on `ParaCat`/`Prog` would also need a pair-input decoder).
 - **Full Para adoption**: promote the packaged `Prog` (see the Para formalization above; the input decoder is
   packaged, the entry-point loop is closed, objects are codec-equipped, and the BestOfN / Refine / RLM
   `Predictors` instances are now in place, so the prototype and its instance coverage are functionally
