@@ -215,8 +215,10 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   deliberate split from the formalization library: there the equations are the deliverable, here they are
   executable specifications.
 - **`params` as a functor value.** `ParaCat` splits into a base `Cat[P[_], Hom]` so the delooping of the
-  parameter monoid is itself a lawful `Cat` instance, and `ReadFunctor : CatFunctor[Prog, ParamsHom]` names
-  what `Predictors.read` is categorically; its functor laws are exactly the Para projection laws. The
+  parameter monoid is itself a lawful `Cat` instance, and `ReadFunctor` (a `CatFunctor` from the `Prog`
+  category to the parameter-monoid delooping) names what `Predictors.read` is categorically; its functor laws
+  (preserves id + composition), carried on the `CatFunctor` trait against the two `Cat` instances, are exactly
+  the Para projection laws. The
   parameter monoid is now an explicit `given Monoid[Vector[DynamicPredict]]` and the delooping is generic
   (`delooping[M](using Monoid[M]) : Cat[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
   `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).

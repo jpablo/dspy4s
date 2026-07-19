@@ -266,7 +266,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
     structures from the Para pass: the delooping of the parameter monoid as an explicit `Cat` instance;
-    `ReadFunctor` (`Predictors.read` as a functor value, whose functor laws are the Para projection laws); and
+    `ReadFunctor` (`Predictors.read` as a functor value; its functor laws — preserves id + composition — are
+    carried on the `CatFunctor` trait and are exactly the Para projection laws); and
     `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law (sharing vs re-running an effectful
     `h` differ, in behavior distributionally and in parameters structurally) pinned as an executable
     counterexample. The `IsEq`/`@Law` vocabulary is now the uniform law-statement style across the codebase.
