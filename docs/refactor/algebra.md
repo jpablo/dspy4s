@@ -201,8 +201,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
-  - **Law-statement adoption** (commits `446ccb6`, `7004627`, from jpablo/math-with-scala): laws are now
-    stated ON the structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the
+  - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
+    now stated ON the structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the
     suites under per-law honest observations. Applied to the Para structures (`446ccb6`) and retrofitted onto
     Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
@@ -211,3 +211,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law (sharing vs re-running an effectful
     `h` differ, in behavior distributionally and in parameters structurally) pinned as an executable
     counterexample. The `IsEq`/`@Law` vocabulary is now the uniform law-statement style across the codebase.
+  - **Abstract-structure traits** (commit `d7ab930`): following the `Cat` / `ParaCat` pattern (an abstract
+    trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]` trait
+    (`empty` / `combine`, laws on the trait); `Mode` becomes a `given Monoid[Mode]` (the endomorphism monoid on
+    `Controls`), replacing its loose companion `@Law` methods. This is the general home for reusable algebraic
+    traits; the parameter monoid (`Vector[DynamicPredict]` under `++`, currently the `paramsDeloop` `Cat`
+    instance) is the natural next `Monoid` instance, and Algebra 1's two commuting endomorphism submonoids the
+    next candidates to lift onto explicit instances.
