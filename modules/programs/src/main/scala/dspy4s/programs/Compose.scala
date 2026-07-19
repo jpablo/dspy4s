@@ -129,17 +129,82 @@ object Both:
     override def readNamed(program: Both[I, OA, OB, A, B]): Vector[(String, DynamicPredict)] =
       PairPredictors.readNamed(pa, pb)(program.first, program.second)
 
-/** The composition combinators as functions / operators. `id` and `parallel` are plain factories; `>>>` is an
-  * infix extension on any typed program. Import `dspy4s.programs.*` (or this object's members) to use them. */
+/** `tensor(a, b)` — the monoidal tensor `⊗`: run two INDEPENDENT programs on INDEPENDENT inputs and pair
+  * both. The dual of the fan-out `parallel` (which shares one input): `parallel(a, b) = copy >>> tensor(a, b)`.
+  * This is the tensor of the program category's symmetric-monoidal / Markov structure (see
+  * `docs/refactor/algebra.md`). Unlike `parallel` it does NOT lift into the packaged `Prog`/`ParaCat` category:
+  * its input `(I, J)` has no canonical single-record decoder (fan-out reuses the shared input's decoder; the
+  * tensor's two inputs don't), so it lives at the `Module` level. Result raw merges both sub-predictions'
+  * records (`second` wins on collision). */
+final case class Tensor[I, J, A, B, FA <: Module[TypedCall[I], Prediction[A]], FB <: Module[TypedCall[J], Prediction[B]]](
+    first: FA,
+    second: FB
+) extends Module[TypedCall[(I, J)], Prediction[(A, B)]]:
+  override val moduleName: String = "tensor"
+  override protected def callInputs(call: TypedCall[(I, J)]): DynamicValue.Record          = DynamicValue.Record.empty
+  override protected def callTraceEnabled(call: TypedCall[(I, J)]): Boolean                = call.traceEnabled
+  override protected def tracePayload(prediction: Prediction[(A, B)]): DynamicValue.Record = prediction.raw.values
+
+  override protected def forward(call: TypedCall[(I, J)])(using RuntimeContext): Either[DspyError, Prediction[(A, B)]] =
+    val (i, j) = call.input
+    for
+      predA <- first.apply(TypedCall(i, call.config, call.traceEnabled, call.rolloutId))
+      predB <- second.apply(TypedCall(j, call.config, call.traceEnabled, call.rolloutId))
+    yield Prediction(
+      output = (predA.output, predB.output),
+      raw    = DynamicPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
+    )
+
+object Tensor:
+  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both` (via [[PairPredictors]]). */
+  given tensorPredictors[I, J, A, B, FA <: Module[TypedCall[I], Prediction[A]], FB <: Module[TypedCall[J], Prediction[B]]](
+      using pa: Predictors[FA], pb: Predictors[FB]
+  ): Predictors[Tensor[I, J, A, B, FA, FB]] with
+    def read(program: Tensor[I, J, A, B, FA, FB]): Vector[DynamicPredict] =
+      PairPredictors.read(pa, pb)(program.first, program.second)
+
+    def replace(program: Tensor[I, J, A, B, FA, FB], updates: Vector[DynamicPredict]): Tensor[I, J, A, B, FA, FB] =
+      PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) => program.copy(first = a, second = b))
+
+    override def readNamed(program: Tensor[I, J, A, B, FA, FB]): Vector[(String, DynamicPredict)] =
+      PairPredictors.readNamed(pa, pb)(program.first, program.second)
+
+/** `copy` — the comonoid copy `Δ`: duplicate the input `I` into `(I, I)`. Parameter-free (like `id`); the
+  * first half of a fan-out, so `parallel(a, b) = copy >>> tensor(a, b)`. In the program category's Markov
+  * structure copy is NOT natural for effectful morphisms — that non-law (`copy` commutes with `h` iff `h` is
+  * deterministic) is pinned in `ParaCatLawSuite` and is the characteristic feature of a Markov category. */
+final case class Copy[I]() extends Module[TypedCall[I], Prediction[(I, I)]]:
+  override val moduleName: String = "copy"
+  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record             = DynamicValue.Record.empty
+  override protected def callTraceEnabled(call: TypedCall[I]): Boolean                   = call.traceEnabled
+  override protected def tracePayload(prediction: Prediction[(I, I)]): DynamicValue.Record = prediction.raw.values
+  override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[(I, I)]] =
+    Right(Prediction((call.input, call.input), DynamicPrediction.empty))
+
+object Copy:
+  given copyPredictors[I]: Predictors[Copy[I]] = Predictors.empty
+
+/** The composition combinators as functions / operators. `id` / `parallel` / `tensor` / `copy` are plain
+  * factories; `>>>` is an infix extension on any typed program. Import `dspy4s.programs.*` (or this object's
+  * members) to use them. */
 object Compose:
   /** The Category unit at type `I`. */
   def id[I]: Identity[I] = Identity[I]()
 
-  /** Independent composition: `parallel(a, b)` runs both on the same input and tuples the outputs. */
+  /** Independent composition: `parallel(a, b)` runs both on the same input and tuples the outputs (fan-out). */
   def parallel[I, OA, OB, A <: Module[TypedCall[I], Prediction[OA]], B <: Module[TypedCall[I], Prediction[OB]]](
       a: A,
       b: B
   ): Both[I, OA, OB, A, B] = Both(a, b)
+
+  /** The monoidal tensor `⊗`: run `a` and `b` on INDEPENDENT inputs, pairing both. `parallel = copy >>> tensor`. */
+  def tensor[I, J, A, B, FA <: Module[TypedCall[I], Prediction[A]], FB <: Module[TypedCall[J], Prediction[B]]](
+      a: FA,
+      b: FB
+  ): Tensor[I, J, A, B, FA, FB] = Tensor(a, b)
+
+  /** The comonoid copy `Δ`: duplicate the input into `(I, I)`. The first half of a fan-out. */
+  def copy[I]: Copy[I] = Copy[I]()
 
   /** Non-learnable control middleware: `mode(m)(p)` runs `p` with its per-call controls rewritten by `m` (model
     * / temperature / rolloutId / traceEnabled). See [[Mode]]. */

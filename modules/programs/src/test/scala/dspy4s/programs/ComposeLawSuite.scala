@@ -126,3 +126,45 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(P.read(par), Vector(a.predict, b.predict))
     assertEquals(P.readNamed(par).map(_._1), Vector("first", "second"))
   }
+
+  // ── Monoidal tensor ⊗ and copy Δ (the Markov structure) ──────────────────────────────────────────────────
+  test("tensor(a, b) runs INDEPENDENT programs on independent inputs and pairs them") {
+    val a = step[Int, String]("a", "i -> s")(i => s"s$i")
+    val b = step[Boolean, Int]("b", "p -> n")(p => if p then 1 else 0)
+    val result = Compose.tensor(a, b).apply(TypedCall((4, true)))
+    assertEquals(result.map(_.output), Right(("s4", 1)))
+  }
+
+  test("copy(Δ) duplicates its input") {
+    assertEquals(Compose.copy[Int].apply(TypedCall(7)).map(_.output), Right((7, 7)))
+  }
+
+  test("parallel(a, b) = copy >>> tensor(a, b)  (fan-out is copy-then-tensor)") {
+    val a = step[Int, String]("a", "i -> s")(i => s"s$i")
+    val b = step[Int, Int]("b", "i -> n")(i => i * 10)
+    val viaFanout    = Compose.parallel(a, b).apply(TypedCall(4)).map(_.output)
+    val viaCopyTensor = (Compose.copy[Int] >>> Compose.tensor(a, b)).apply(TypedCall(4)).map(_.output)
+    assertEquals(viaFanout, viaCopyTensor)
+    assertEquals(viaFanout, Right(("s4", 40)))
+  }
+
+  test("tensor read = read(a) ++ read(b) (structural, same as parallel)") {
+    val a = step[Int, String]("a", "i -> s")(i => s"v$i")
+    val b = step[Boolean, Int]("b", "p -> n")(_ => 0)
+    val tn = Compose.tensor(a, b)
+    val P  = summon[Predictors[Tensor[Int, Boolean, String, Int, Step[Int, String], Step[Boolean, Int]]]]
+    assertEquals(P.read(tn), Vector(a.predict, b.predict))
+    assertEquals(P.readNamed(tn).map(_._1), Vector("first", "second"))
+  }
+
+  // ── Markov determinism law: copy commutes with a DETERMINISTIC morphism ──────────────────────────────────
+  // h >>> copy  =  copy >>> tensor(h, h)   holds because our Step is deterministic (a pure function). For an
+  // effect-observing h the two sides run h once vs twice and diverge — the copy NON-naturality already pinned
+  // in ParaCatLawSuite. That equivalence-iff-determinism is the defining property of a Markov category.
+  test("copy is natural for a deterministic morphism: h >>> copy = copy >>> tensor(h, h)") {
+    val h = step[Int, String]("h", "i -> s")(i => s"v$i")
+    val lhs = (h >>> Compose.copy[String]).apply(TypedCall(5)).map(_.output)
+    val rhs = (Compose.copy[Int] >>> Compose.tensor(h, h)).apply(TypedCall(5)).map(_.output)
+    assertEquals(lhs, rhs)
+    assertEquals(lhs, Right(("v5", "v5")))
+  }
