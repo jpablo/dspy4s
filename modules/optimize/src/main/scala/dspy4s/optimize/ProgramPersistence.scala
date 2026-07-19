@@ -56,23 +56,7 @@ object ProgramPersistence:
     case rec: DynamicValue.Record => DynamicPredict.fromState(rec)
     case _                        => Left(ValidationError(s"Program state predictor '$at' must be a record"))
 
-  private def loadLegacy[P](program: P, seq: DynamicValue.Sequence, expected: Int)(using
-      predictors: Predictors[P]
-  ): Either[DspyError, P] =
-    val entries = seq.elements.toVector
-    if entries.size != expected then
-      Left(ValidationError(s"Program state has ${entries.size} predictors but the program expects $expected"))
-    else
-      entries.zipWithIndex
-        .foldLeft[Either[DspyError, Vector[DynamicPredict]]](Right(Vector.empty)) { case (acc, (raw, index)) =>
-          for
-            decoded <- acc
-            predictor <- decodePredictor(raw, s"legacy index $index")
-          yield decoded :+ predictor
-        }
-        .map(updates => predictors.replace(program, updates))
-
-  private def loadIdentified[P](program: P, record: DynamicValue.Record)(using
+  private def loadById[P](program: P, record: DynamicValue.Record)(using
       predictors: Predictors[P]
   ): Either[DspyError, P] =
     val expectedIds = predictors.readIdentified(program).map(_.id)
@@ -105,13 +89,10 @@ object ProgramPersistence:
         Right(predictors.replace(program, expectedIds.map(byId)))
     }
 
-  /** Rebuild a program from the state produced by [[dumpState]], matching state by stable predictor id. The legacy
-    * positional array format remains readable for backwards compatibility. */
+  /** Rebuild a program from the state produced by [[dumpState]], matching state by stable predictor id. */
   def loadState[P](program: P, state: DynamicValue.Record)(using predictors: Predictors[P]): Either[DspyError, P] =
-    val expected = predictors.read(program).size
     DynamicValues.recordGet(state, "predictors") match
-      case Some(record: DynamicValue.Record) => loadIdentified(program, record)
-      case Some(seq: DynamicValue.Sequence)  => loadLegacy(program, seq, expected)
+      case Some(record: DynamicValue.Record) => loadById(program, record)
       case Some(_) => Left(ValidationError("Program state 'predictors' must be an id-keyed record"))
       case None    => Left(ValidationError("Program state is missing 'predictors'"))
 

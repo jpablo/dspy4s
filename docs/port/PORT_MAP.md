@@ -129,9 +129,8 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 
 - **Program `save`/`load` + `dumpState`/`loadState`.** ✅ ported (commit `9c5a6db`) via `ProgramPersistence`
   (`modules/optimize/.../ProgramPersistence.scala`), built on `Predictors`. JSON state of
-  `{ "predictors": { "predictor-0": <DynamicPredict state>, ... } }`; IDs are validated on load and the legacy
-  positional array remains readable. Demos/config/instructions round-trip (typed field *structure* intentionally
-  not written back). See PORT_GAPS G-4.
+  `{ "predictors": { "predictor-0": <DynamicPredict state>, ... } }`; IDs are validated on load.
+  Demos/config/instructions round-trip (typed field *structure* intentionally not written back). See PORT_GAPS G-4.
 - **Per-module `config` + bound LM.** ✅ ported — `DynamicPredict` / `Predict[I, O]` carry an immutable
   module-level `config` (commit `b85fe27`, merged under per-call config) and an optional bound LM
   (`Predict.withLm` / `Predict.boundLm`, commit `b2d0096`; a bound LM wins over the ambient `RuntimeContext` LM).

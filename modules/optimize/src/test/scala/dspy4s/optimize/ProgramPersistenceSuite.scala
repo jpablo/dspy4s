@@ -129,26 +129,6 @@ class ProgramPersistenceSuite extends FunSuite:
     assertEquals(restored.b.demos, secondDemo)
   }
 
-  test("loadState accepts the legacy positional predictor array") {
-    val trained = Pipe2(
-      a = Predict(qaSignature, demos = demo.take(1), name = Some("ask")),
-      b = Predict(qaSignature, demos = demo.drop(1), name = Some("answer"))
-    )
-    val fresh = Pipe2(
-      a = Predict(qaSignature, name = Some("ask")),
-      b = Predict(qaSignature, name = Some("answer"))
-    )
-    val legacy = DynamicValue.Record(Chunk.from(Seq(
-      "predictors" -> DynamicValue.Sequence(
-        Chunk.from(summon[Predictors[Pipe2]].read(trained).map(_.dumpState: DynamicValue))
-      )
-    )))
-
-    val restored = ProgramPersistence.loadState(fresh, legacy).toOption.get
-    assertEquals(restored.a.demos, trained.a.demos)
-    assertEquals(restored.b.demos, trained.b.demos)
-  }
-
   test("loadState rejects missing and unknown predictor ids") {
     val program = Pipe2(
       a = Predict(qaSignature, name = Some("ask")),
@@ -168,19 +148,17 @@ class ProgramPersistenceSuite extends FunSuite:
     assert(result.left.toOption.get.message.contains("predictor-2"))
   }
 
-  // ── Negative: wrong-length predictors array ────────────────────────────────
-
-  test("loadState rejects a wrong-length 'predictors' array") {
-    val program = Predict(qaSignature, name = Some("ask")) // expects exactly 1 predictor
-    val twoPredictors = DynamicValue.Record(Chunk.from(Seq(
+  test("loadState rejects positional predictor arrays") {
+    val program = Predict(qaSignature, name = Some("ask"))
+    val positional = DynamicValue.Record(Chunk.from(Seq(
       "predictors" -> DynamicValue.Sequence(Chunk.from(Seq(
-        ProgramPersistence.dumpState(program),
-        ProgramPersistence.dumpState(program)
-      ): Seq[DynamicValue]))
+        DynamicValue.Record.empty: DynamicValue
+      )))
     )))
-    val result = ProgramPersistence.loadState(program, twoPredictors)
+    val result = ProgramPersistence.loadState(program, positional)
     assert(result.isLeft, s"expected Left, got $result")
     assert(result.left.toOption.get.isInstanceOf[ValidationError])
+    assert(result.left.toOption.get.message.contains("id-keyed record"))
   }
 
 object ProgramPersistenceSuite:

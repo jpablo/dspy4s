@@ -222,7 +222,7 @@ share one code path. New primitives:
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
   `Predictors`-based: `{ "predictors": { "predictor-0": <DynamicPredict state>, ... } }`.
-  Stable IDs are validated on load; the former positional array is accepted as a legacy format. JSON via
+  Stable IDs are validated on load. JSON via
   `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
   `RuntimeError`.
 
