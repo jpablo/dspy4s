@@ -40,7 +40,8 @@ A layout *denotes* `(in, out, instr, name)`. Two layouts are equal iff those fou
 `prependOutput(f)`, `appendInput(f)`, `replaceOutputs(fs)`, `withInstructions(s)`. The low-level
 `append` / `prepend` / `insert` / `delete` on `SignatureLayout` are implementation, kept `private[dspy4s]`.
 
-**Laws** (`SignatureOps.scala`; property-tested in `SignatureOpsLawSuite`):
+**Laws** (stated ON the structure as `@Law` methods in `SignatureOps.laws` returning `IsEq`; executed over
+generated layouts by `SignatureOpsLawSuite` under observational equality / `sameElements`):
 
 ```
 L1 cohort isolation     in(prependOutput(f)(s)) = in(s)        out(appendInput(g)(s)) = out(s)
@@ -167,8 +168,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
 
 ## Status and next
 
-- Algebra 1: specified, laws property-tested (`SignatureOpsLawSuite`, 9 properties), and the unique-name
-  `require` retired (uniqueness now closed by construction; see the resolved critique above).
+- Algebra 1: specified, laws stated as `@Law`/`IsEq` statements on `SignatureOps.laws` and executed by
+  `SignatureOpsLawSuite` (10 properties, commit `7004627`), and the unique-name `require` retired (uniqueness
+  now closed by construction; see the resolved critique above).
 - Algebra 2: specified (grilled). Operation + law set, per-module reduction recipes, and sequencing in
   [algebra-2-program-composition.md](algebra-2-program-composition.md). No pre-implementation spike required;
   the kyo-compat CIO migration is a separate, non-blocking later phase.
@@ -199,10 +201,13 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Pinned by `ParaCatLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
-  - **Law-statement adoption** (commit `446ccb6`, from jpablo/math-with-scala): laws are now stated ON the
-    Para structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the suites
-    under per-law honest observations. Newly named structures: the delooping of the parameter monoid as an
-    explicit `Cat` instance; `ReadFunctor` (`Predictors.read` as a functor value, whose functor laws are the
-    Para projection laws); and `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law
-    (sharing vs re-running an effectful `h` differ, in behavior distributionally and in parameters
-    structurally) pinned as an executable counterexample.
+  - **Law-statement adoption** (commits `446ccb6`, `7004627`, from jpablo/math-with-scala): laws are now
+    stated ON the structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the
+    suites under per-law honest observations. Applied to the Para structures (`446ccb6`) and retrofitted onto
+    Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
+    (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
+    structures from the Para pass: the delooping of the parameter monoid as an explicit `Cat` instance;
+    `ReadFunctor` (`Predictors.read` as a functor value, whose functor laws are the Para projection laws); and
+    `parallel` as the fan-out of the CD/Markov shape, with the copy NON-law (sharing vs re-running an effectful
+    `h` differ, in behavior distributionally and in parameters structurally) pinned as an executable
+    counterexample. The `IsEq`/`@Law` vocabulary is now the uniform law-statement style across the codebase.
