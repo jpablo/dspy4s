@@ -15,6 +15,7 @@ import dspy4s.core.contracts.TraceEntry
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
+import scala.util.control.NonFatal
 
 /** The process's single source of truth for the active [[RuntimeContext]] -- the configured LM / adapter /
   * callbacks plus the per-call accumulated trace, history, and call stack. State lives in two tiers that
@@ -188,11 +189,14 @@ object RuntimeEnvironment:
       Executed(result, current.delta)
     }
 
-  /** Replay a captured attempt's delta into the current overlay, in order. The propagate half of
-    * [[isolatedAttempt]]: the winning attempt's observability bubbles up to the enclosing scope. */
-  def propagateAttempt(delta: RuntimeDelta): Unit =
+  /** Replay an explicitly captured delta into the current overlay, in order. This is the caller-controlled join
+    * operation for isolated attempts and [[ContextPropagation.futureExecuted]] workers. */
+  def propagate(delta: RuntimeDelta): Unit =
     delta.trace.foreach(appendTrace)
     delta.history.foreach(appendHistory)
+
+  /** Compatibility name for the winning-attempt propagation path. */
+  def propagateAttempt(delta: RuntimeDelta): Unit = propagate(delta)
 
   /** Render the last `n` LM-call history entries on the active context as a human-readable string, in the spirit
     * of upstream `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread
@@ -214,11 +218,19 @@ object RuntimeEnvironment:
   /** The callback handlers registered on the active context. */
   def activeCallbacks: Vector[CallbackHandler] = current.callbacks
 
-  /** Deliver `event` to every active callback handler, with the active [[RuntimeContext]] in implicit scope. */
+  /** Deliver `event` to every active callback handler, with the active [[RuntimeContext]] in implicit scope.
+    * Handlers are observational: a non-fatal failure is reported and delivery continues, so an observer cannot
+    * replace the result of the work it watches or starve later observers. */
   def emit(event: CallbackEvent): Unit =
     val context = current
     given RuntimeContext = context
-    activeCallbacks.foreach(_.onEvent(event))
+    activeCallbacks.foreach { callback =>
+      try callback.onEvent(event)
+      catch
+        case NonFatal(error) =>
+          val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+          Console.err.println(s"dspy4s callback ${callback.getClass.getName} failed for ${event.getClass.getSimpleName}: $detail")
+    }
 
   /** Reset all global and thread-local state to defaults: clears configure ownership, the id counters, the
     * global default context, and this thread's overlay. Test-only. */

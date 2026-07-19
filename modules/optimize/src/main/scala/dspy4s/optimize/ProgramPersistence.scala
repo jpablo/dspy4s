@@ -1,6 +1,7 @@
 package dspy4s.optimize
 
 import dspy4s.programs.Predictors
+import dspy4s.programs.PredictorId
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -40,40 +41,79 @@ object ProgramPersistence:
   /** JSON codec for the `DynamicValue`-shaped state, mirroring `SignatureLayout`'s private codec. */
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  /** Serialize a program's learnable state to a `DynamicValue.Record`: `{ "predictors": [ <DynamicPredict
-    * state>... ] }`, one entry per predictor `Predictors.read` exposes, in stable order. */
+  /** Serialize a program's learnable state to a `DynamicValue.Record`: `{ "predictors": {
+    * "predictor-0": <DynamicPredict state>, ... } }`. Stable [[PredictorId]] keys make loading independent of JSON
+    * object order and let topology mismatches fail explicitly instead of silently applying state positionally. */
   def dumpState[P](program: P)(using predictors: Predictors[P]): DynamicValue.Record =
-    val states: Seq[DynamicValue] = predictors.read(program).map(p => p.dumpState: DynamicValue)
+    val states: Seq[(String, DynamicValue)] = predictors.readIdentified(program).map { identified =>
+      identified.id.render -> (identified.predictor.dumpState: DynamicValue)
+    }
     DynamicValue.Record(Chunk.from(Seq(
-      "predictors" -> DynamicValue.Sequence(Chunk.from(states))
+      "predictors" -> DynamicValue.Record(Chunk.from(states))
     )))
 
-  /** Rebuild a program from the state produced by [[dumpState]]. Reads the `predictors` array (which must have
-    * the same length as `Predictors.read(program)`), re-hydrates each entry via [[DynamicPredict.fromState]], and
-    * writes them back with `Predictors.replace`. See the object comment for the demos-only round-trip caveat on
-    * typed targets. */
+  private def decodePredictor(raw: DynamicValue, at: String): Either[DspyError, DynamicPredict] = raw match
+    case rec: DynamicValue.Record => DynamicPredict.fromState(rec)
+    case _                        => Left(ValidationError(s"Program state predictor '$at' must be a record"))
+
+  private def loadLegacy[P](program: P, seq: DynamicValue.Sequence, expected: Int)(using
+      predictors: Predictors[P]
+  ): Either[DspyError, P] =
+    val entries = seq.elements.toVector
+    if entries.size != expected then
+      Left(ValidationError(s"Program state has ${entries.size} predictors but the program expects $expected"))
+    else
+      entries.zipWithIndex
+        .foldLeft[Either[DspyError, Vector[DynamicPredict]]](Right(Vector.empty)) { case (acc, (raw, index)) =>
+          for
+            decoded <- acc
+            predictor <- decodePredictor(raw, s"legacy index $index")
+          yield decoded :+ predictor
+        }
+        .map(updates => predictors.replace(program, updates))
+
+  private def loadIdentified[P](program: P, record: DynamicValue.Record)(using
+      predictors: Predictors[P]
+  ): Either[DspyError, P] =
+    val expectedIds = predictors.readIdentified(program).map(_.id)
+    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, DynamicPredict)]]](
+      Right(Vector.empty)
+    ) { case (acc, (rawId, rawState)) =>
+      for
+        entries <- acc
+        id <- PredictorId.parse(rawId).left.map(ValidationError.apply)
+        predictor <- decodePredictor(rawState, rawId)
+      yield entries :+ (id -> predictor)
+    }
+
+    parsed.flatMap { entries =>
+      val duplicateIds = entries.groupMap(_._1)(_._2).collect { case (id, values) if values.size > 1 => id }.toVector.sorted
+      val actualIds     = entries.map(_._1).toSet
+      val expectedSet   = expectedIds.toSet
+      val missing       = (expectedSet -- actualIds).toVector.sorted
+      val unknown       = (actualIds -- expectedSet).toVector.sorted
+      if duplicateIds.nonEmpty then
+        Left(ValidationError(s"Program state has duplicate predictor ids: ${duplicateIds.mkString(", ")}"))
+      else if missing.nonEmpty || unknown.nonEmpty then
+        val details = Vector(
+          Option.when(missing.nonEmpty)(s"missing: ${missing.mkString(", ")}"),
+          Option.when(unknown.nonEmpty)(s"unknown: ${unknown.mkString(", ")}")
+        ).flatten.mkString("; ")
+        Left(ValidationError(s"Program state predictor ids do not match the program ($details)"))
+      else
+        val byId = entries.toMap
+        Right(predictors.replace(program, expectedIds.map(byId)))
+    }
+
+  /** Rebuild a program from the state produced by [[dumpState]], matching state by stable predictor id. The legacy
+    * positional array format remains readable for backwards compatibility. */
   def loadState[P](program: P, state: DynamicValue.Record)(using predictors: Predictors[P]): Either[DspyError, P] =
     val expected = predictors.read(program).size
     DynamicValues.recordGet(state, "predictors") match
-      case Some(seq: DynamicValue.Sequence) =>
-        val entries = seq.elements.toVector
-        if entries.size != expected then
-          Left(ValidationError(
-            s"Program state has ${entries.size} predictors but the program expects $expected"
-          ))
-        else
-          val rebuilt = entries.foldLeft[Either[DspyError, Vector[DynamicPredict]]](Right(Vector.empty)) {
-            (acc, raw) =>
-              for
-                acc1 <- acc
-                pred <- raw match
-                          case rec: DynamicValue.Record => DynamicPredict.fromState(rec)
-                          case _ => Left(ValidationError("Program state 'predictors' must be records"))
-              yield acc1 :+ pred
-          }
-          rebuilt.map(updates => predictors.replace(program, updates))
-      case _ =>
-        Left(ValidationError("Program state is missing a 'predictors' sequence"))
+      case Some(record: DynamicValue.Record) => loadIdentified(program, record)
+      case Some(seq: DynamicValue.Sequence)  => loadLegacy(program, seq, expected)
+      case Some(_) => Left(ValidationError("Program state 'predictors' must be an id-keyed record"))
+      case None    => Left(ValidationError("Program state is missing 'predictors'"))
 
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
     * [[loadJson]]. */

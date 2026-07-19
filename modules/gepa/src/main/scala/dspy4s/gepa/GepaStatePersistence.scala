@@ -7,11 +7,11 @@ import zio.blocks.schema.json.JsonCodecDeriver
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import scala.util.control.NonFatal
 
 /** JSON persistence for [[GepaState]] — the basis for resuming an interrupted run (gepa's `state.save`/`load` into a
-  * run dir). Only the search state (candidate pool, per-instance validation subscores, lineage, and the metric-call
-  * meter) is persisted; the eval cache, RNG position, and merge schedule are not — a resumed run keeps every discovered
-  * candidate (so no budget is re-spent rediscovering them) and continues searching from that pool.
+  * run dir). The search state contains enough information to warm the evaluation cache on resume: every candidate's
+  * validation subscores are aligned with the current validation set. RNG position and merge schedule are not persisted.
   */
 object GepaStatePersistence:
 
@@ -61,8 +61,13 @@ object GepaStatePersistence:
     val _ = Files.createDirectories(dir)
     val _ = Files.write(dir.resolve(fileName), toJson(state).getBytes(StandardCharsets.UTF_8))
 
-  /** Load a previously-saved state from `dir`, or `None` if there is no (readable) snapshot there. */
-  def load(dir: Path): Option[GepaState] =
+  /** Load a previously-saved state from `dir`. Absence is distinct from an unreadable or invalid checkpoint: a corrupt
+    * file must never be silently treated as a fresh run and overwritten. */
+  def load(dir: Path): Either[String, Option[GepaState]] =
     val file = dir.resolve(fileName)
-    if !Files.exists(file) then None
-    else fromJson(new String(Files.readAllBytes(file), StandardCharsets.UTF_8)).toOption
+    if !Files.exists(file) then Right(None)
+    else
+      try fromJson(new String(Files.readAllBytes(file), StandardCharsets.UTF_8)).map(Some(_))
+      catch
+        case NonFatal(error) =>
+          Left(s"Could not read GEPA checkpoint '$file': ${Option(error.getMessage).getOrElse(error.toString)}")

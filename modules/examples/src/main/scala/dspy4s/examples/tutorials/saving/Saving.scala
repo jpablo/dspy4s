@@ -53,7 +53,7 @@ object Saving:
   // ── Snippets 2/3 — save the compiled program's state to disk ──
   // | compiled_dspy_program.save("./dspy_program/program.json", save_program=False)
   // | compiled_dspy_program.save("./dspy_program/program.pkl", save_program=False)   # .pkl variant: N/A in dspy4s
-  // `ProgramPersistence.save` writes `{ "predictors": [ { signature, demos, config } ... ] }` as JSON.
+  // `ProgramPersistence.save` writes predictor state keyed by stable ids (`predictor-0`, ...) as JSON.
   // --8<-- [start:save]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)

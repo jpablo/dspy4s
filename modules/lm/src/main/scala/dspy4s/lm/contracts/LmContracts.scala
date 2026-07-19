@@ -1,6 +1,7 @@
 package dspy4s.lm.contracts
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.LanguageModelRef
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ToolCall
@@ -86,4 +87,11 @@ trait LanguageModel extends LanguageModelRef:
   def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse]
 
   def acall(request: LmRequest)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, LmResponse]] =
-    ContextPropagation.future(call(request))
+    acallExecuted(request).map(_.value)(using ExecutionContext.parasitic)
+
+  /** Async writer entry for callers that need to retain the worker's trace/history delta. */
+  def acallExecuted(request: LmRequest)(using
+      RuntimeContext,
+      ExecutionContext
+  ): Future[Executed[Either[DspyError, LmResponse]]] =
+    ContextPropagation.futureExecuted(call(request))

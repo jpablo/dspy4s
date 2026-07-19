@@ -89,3 +89,54 @@ class GepaEvalCacheSuite extends FunSuite:
       assertEquals(lm.calls.get(), 5)
     }
   }
+
+  test("duplicate examples in one batch are evaluated once and returned in batch order") {
+    val lm      = new CountingLm
+    val adapter = new GepaAdapter[DynamicPredict](program, metric)
+    val cache   = new GepaEvalCache[DynamicPredict](adapter)
+    val cand    = Map(PredictorId(0) -> "Answer A.")
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val (scores, evals)  = cache.scores(cand, Vector(batch.head, batch.head, batch.last, batch.head))
+
+      assertEquals(scores, Vector(1.0, 1.0, 1.0, 1.0))
+      assertEquals(evals, 2)
+      assertEquals(lm.calls.get(), 2)
+    }
+  }
+
+  test("examples with equal values but different input metadata do not alias") {
+    val lm              = new CountingLm
+    val adapter         = new GepaAdapter[DynamicPredict](program, metric)
+    val cache           = new GepaEvalCache[DynamicPredict](adapter)
+    val cand            = Map(PredictorId(0) -> "Answer A.")
+    val original        = batch.head
+    val differentInputs = original.copy(inputKeys = Set("answer"))
+    val augmented       = original.copy(augmented = true)
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val (_, evals)       = cache.scores(cand, Vector(original, differentInputs, augmented))
+
+      assertEquals(evals, 3)
+      assertEquals(lm.calls.get(), 3)
+    }
+  }
+
+  test("restored candidate scores warm the cache without LM calls") {
+    val lm      = new CountingLm
+    val adapter = new GepaAdapter[DynamicPredict](program, metric)
+    val cache   = new GepaEvalCache[DynamicPredict](adapter)
+    val cand    = Map(PredictorId(0) -> "Answer A.")
+
+    assertEquals(cache.restore(cand, batch, Vector(0.25, 0.75)), Right(()))
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val (scores, evals)  = cache.scores(cand, batch)
+
+      assertEquals(scores, Vector(0.25, 0.75))
+      assertEquals(evals, 0)
+      assertEquals(lm.calls.get(), 0)
+    }
+  }

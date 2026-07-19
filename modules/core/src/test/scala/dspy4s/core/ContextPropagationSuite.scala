@@ -1,7 +1,10 @@
 package dspy4s.core
 
 import dspy4s.core.contracts.ConfigurationError
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
@@ -68,3 +71,21 @@ class ContextPropagationSuite extends FunSuite:
       val _ = singleThread.shutdownNow()
   }
 
+  test("futureExecuted returns the worker's runtime delta without mutating the submitting thread") {
+    given ExecutionContext = ExecutionContext.global
+
+    val executed = RuntimeEnvironment.withSettings(RuntimeContext()) {
+      val result = Await.result(
+        ContextPropagation.futureExecuted {
+          RuntimeEnvironment.appendHistory(HistoryEntry("worker", DynamicValues.record("result" := "ok")))
+          "done"
+        },
+        3.seconds
+      )
+      assertEquals(RuntimeEnvironment.current.history, Vector.empty)
+      result
+    }
+
+    assertEquals(executed.value, "done")
+    assertEquals(executed.delta.history.map(_.component), Vector("worker"))
+  }

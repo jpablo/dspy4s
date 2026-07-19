@@ -47,15 +47,19 @@ final case class GepaResult[P](
 /** The GEPA engine: genetic-Pareto reflective prompt evolution. Each iteration selects a parent candidate from the
   * Pareto frontier, reflects on its failures over a train minibatch to propose a better instruction, accepts the
   * mutation iff it improves the minibatch, then full-evaluates the accepted candidate on the validation set and
-  * folds it into the Pareto frontier — until the metric-call budget is spent. After an accepted mutation it
-  * schedules a [[MergeProposer]] crossover, attempted first the next iteration. A [[GepaEvalCache]] memoizes
+  * folds it into the Pareto frontier — until no atomic step fits in the remaining metric-call budget. After an
+  * accepted mutation it schedules a [[MergeProposer]] crossover, attempted first the next iteration. A
+  * [[GepaEvalCache]] memoizes
   * scores-only evals so repeated `(candidate, example)` pairs are free. A faithful port of the external `gepa`
-  * engine. See PORT_GAPS G-12. */
+  * engine. Atomic seed/iteration steps never cross `maxMetricCalls`; a run stops when the remaining budget cannot
+  * cover the next step's worst-case cost. See PORT_GAPS G-12. */
 final class GepaEngine[P](
     adapter: GepaAdapter[P],
     reflectionLm: LanguageModel,
     config: GepaConfig
 ):
+
+  require(config.maxMetricCalls >= 0, "maxMetricCalls must be non-negative")
 
   def optimize(seedCandidate: Candidate, trainset: Vector[Example], valset: Vector[Example], runDir: Option[Path] = None)(using
       RuntimeContext
@@ -66,24 +70,47 @@ final class GepaEngine[P](
     val merger  = Option.when(config.useMerge)(new MergeProposer(valset, config.maxMergeInvocations, rng, cache))
 
     // Resume from a saved run dir if present; otherwise seed by full-evaluating the starting candidate on the valset.
-    var state = runDir.flatMap(GepaStatePersistence.load).getOrElse {
-      val (seedScores, seedEvals) = fullEval(seedCandidate, valset, cache)
-      GepaState.seed(seedCandidate, seedScores, metricCalls = seedEvals)
+    // Seed evaluation is atomic, so reject a budget that cannot hold it instead of violating the advertised bound.
+    val restored = runDir.flatMap { dir =>
+      GepaStatePersistence.load(dir) match
+        case Right(state) => state
+        case Left(error)  => throw IllegalStateException(s"Invalid GEPA checkpoint in '$dir': $error")
     }
+    var state = restored match
+      case Some(saved) =>
+        validateAndWarm(saved, seedCandidate, valset, cache)
+        saved
+      case None =>
+        val seedCost = cache.uncachedCount(seedCandidate, valset)
+        require(
+          seedCost <= config.maxMetricCalls,
+          s"maxMetricCalls=${config.maxMetricCalls} cannot cover the seed validation cost of $seedCost"
+        )
+        val (seedScores, seedEvals) = fullEval(seedCandidate, valset, cache)
+        GepaState.seed(seedCandidate, seedScores, metricCalls = seedEvals)
     runDir.foreach(GepaStatePersistence.save(_, state))
     // Per-candidate round-robin pointer (which component to evolve next), threaded across iterations.
     var pointers = Map.empty[Int, Int]
     var i        = 0 // iteration index, drives the epoch-shuffled batch sampler
+    var canContinue = true
+
+    // A reflective iteration evaluates the parent and proposal on one minibatch, then may validate every distinct
+    // example for a newly accepted candidate. Reserving this atomic worst case keeps maxMetricCalls a hard bound.
+    val reflectiveIterationCost = 2L * config.reflectionMinibatchSize + valset.distinct.size
+    // A merge's subsample is drawn from valset and shares the cache with its possible full eval, so at most one call
+    // per distinct validation example is needed for the merged candidate.
+    val mergeIterationCost = valset.distinct.size.toLong
 
     // Opt-in: stop once the best candidate is already perfect on validation — further iterations can only re-discover
     // it (and the budget would be spent on `skipPerfectScore` minibatches). Off by default for gepa parity.
     def converged(s: GepaState): Boolean =
       config.stopOnPerfectScore && s.aggregateScore(s.bestIndex) >= config.perfectScore
 
-    while state.totalMetricCalls < config.maxMetricCalls && !converged(state) do
+    while canContinue && state.totalMetricCalls < config.maxMetricCalls && !converged(state) do
+      val remaining = config.maxMetricCalls.toLong - state.totalMetricCalls
       // 1) Merge first if one is scheduled and the last iteration produced a new program (gepa's ordering). A merge
       //    proposal (accepted or rejected) consumes the iteration; only a "no triplet found" falls through.
-      val mergeConsumedIteration = merger.filter(_.shouldAttempt).flatMap { mp =>
+      val mergeConsumedIteration = merger.filter(mp => mp.shouldAttempt && remaining >= mergeIterationCost).flatMap { mp =>
         val proposalOpt = mp.propose(state)
         mp.lastIterFoundNewProgram = false
         proposalOpt.map { proposal =>
@@ -99,13 +126,16 @@ final class GepaEngine[P](
 
       // 2) Otherwise, a reflective-mutation iteration; an acceptance schedules a future merge.
       if !mergeConsumedIteration then
-        merger.foreach(_.lastIterFoundNewProgram = false)
-        val (nextState, nextPointers, accepted) = iterate(state, pointers, trainset, valset, rng, sampler, cache, i)
-        state = nextState
-        pointers = nextPointers
-        if accepted then merger.foreach(_.onReflectiveAccepted())
-      i += 1
-      runDir.foreach(GepaStatePersistence.save(_, state)) // checkpoint after each iteration for resume
+        if remaining < reflectiveIterationCost then canContinue = false
+        else
+          merger.foreach(_.lastIterFoundNewProgram = false)
+          val (nextState, nextPointers, accepted) = iterate(state, pointers, trainset, valset, rng, sampler, cache, i)
+          state = nextState
+          pointers = nextPointers
+          if accepted then merger.foreach(_.onReflectiveAccepted())
+      if canContinue then
+        i += 1
+        runDir.foreach(GepaStatePersistence.save(_, state)) // checkpoint after each iteration for resume
 
     val best = state.bestIndex
     GepaResult(
@@ -172,3 +202,28 @@ final class GepaEngine[P](
       RuntimeContext
   ): (Vector[Double], Int) =
     cache.scores(candidate, valset)
+
+  /** Validate a checkpoint against the current program/data topology and restore its already-accounted validation
+    * scores into the evaluation cache. */
+  private def validateAndWarm(
+      state: GepaState,
+      seedCandidate: Candidate,
+      valset: Vector[Example],
+      cache: GepaEvalCache[P]
+  ): Unit =
+    val expectedIds = seedCandidate.keySet
+    val mismatched = state.candidates.zipWithIndex.collect {
+      case (candidate, index) if candidate.keySet != expectedIds => index -> candidate.keySet
+    }
+    if mismatched.nonEmpty then
+      throw IllegalStateException(
+        s"GEPA checkpoint predictor ids do not match the current program at candidates ${mismatched.map(_._1).mkString(", ")}"
+      )
+    val wrongRows = state.valSubscores.zipWithIndex.collect { case (scores, index) if scores.size != valset.size => index }
+    if wrongRows.nonEmpty then
+      throw IllegalStateException(
+        s"GEPA checkpoint validation rows do not match the current valset size ${valset.size}: ${wrongRows.mkString(", ")}"
+      )
+    state.candidates.zip(state.valSubscores).foreach { case (candidate, scores) =>
+      cache.restore(candidate, valset, scores).fold(error => throw IllegalStateException(error), identity)
+    }

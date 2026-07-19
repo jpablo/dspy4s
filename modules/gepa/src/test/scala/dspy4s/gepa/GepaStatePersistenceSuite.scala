@@ -3,6 +3,9 @@ package dspy4s.gepa
 import dspy4s.programs.PredictorId
 import munit.FunSuite
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+
 class GepaStatePersistenceSuite extends FunSuite:
 
   test("toJson/fromJson round-trips a state (candidates, subscores, multi-parent lineage, call meter)") {
@@ -36,4 +39,17 @@ class GepaStatePersistenceSuite extends FunSuite:
     )
     val malformed = GepaStatePersistence.toJson(valid).replace(PredictorId(0).render, "display-name")
     assert(GepaStatePersistence.fromJson(malformed).isLeft)
+  }
+
+  test("load distinguishes an absent checkpoint from a corrupt checkpoint") {
+    val dir = Files.createTempDirectory("gepa-state-load")
+    try
+      assertEquals(GepaStatePersistence.load(dir), Right(None))
+
+      val _      = Files.write(dir.resolve(GepaStatePersistence.fileName), "not json".getBytes(StandardCharsets.UTF_8))
+      val loaded = GepaStatePersistence.load(dir)
+      assert(loaded.isLeft, s"expected corrupt checkpoint to be reported, got $loaded")
+    finally
+      val _ = Files.deleteIfExists(dir.resolve(GepaStatePersistence.fileName))
+      val _ = Files.deleteIfExists(dir)
   }

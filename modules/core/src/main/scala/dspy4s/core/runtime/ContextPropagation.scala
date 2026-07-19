@@ -1,6 +1,8 @@
 package dspy4s.core.runtime
 
+import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeDelta
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
@@ -11,12 +13,13 @@ import scala.concurrent.Future
   * callbacks plus the accumulated trace, history, and call stack -- in a `ThreadLocal`. Thread-locals do not
   * follow work that hops to another thread, so when a program runs on a pool thread (a `Future`, a parallel
   * executor worker, a streaming consumer thread) that worker starts with a fresh, empty context. Without
-  * propagation, a `Predict.run` executed there would find no LM configured, fire no callbacks, and record
-  * nothing back to the originating trace.
+  * propagation, a `Predict.run` executed there would find no LM configured and fire no callbacks.
   *
   * This object closes that gap: [[capture]] snapshots the submitting thread's context, and the run helpers
-  * re-install it on the worker for the duration of the task, so async / parallel work behaves as if it had run
-  * inline. It is dspy4s's equivalent of DSPy's context propagation into parallel and async execution.
+  * re-install it on the worker for the duration of the task, so dependencies and dynamic scope behave as if the
+  * work had run inline. Worker mutations remain isolated when its thread-local is restored; [[futureExecuted]]
+  * returns trace/history explicitly for callers that need to join that output. It is dspy4s's equivalent of
+  * DSPy's context propagation into parallel and async execution.
   *
   * Scope: the [[RuntimeContext]] plus every registered [[Carrier]] travels (e.g. the usage-tracker stack
   * registered by the lm module). The [[ActivePredictContext]] stack lives in a separate thread-local and is
@@ -96,3 +99,22 @@ object ContextPropagation:
       body: => A
   )(using base: ExecutionContext): Future[A] =
     Future(body)(using wrapExecutionContext(base))
+
+  /** Run `body` asynchronously under the captured services/config/scope and a fresh output delta. Unlike
+    * [[future]], the trace and history produced on the worker are returned explicitly in [[Executed]] instead of
+    * disappearing when the worker's thread-local context is restored. The submitting thread is never mutated;
+    * callers may deliberately replay the returned delta with [[RuntimeEnvironment.propagate]]. */
+  def futureExecuted[A](
+      body: => A
+  )(using base: ExecutionContext): Future[Executed[A]] =
+    val captured = captureAll
+    Future(
+      captured.run {
+        RuntimeEnvironment.withGeneratedAsyncTask("future") {
+          RuntimeEnvironment.withContext(RuntimeEnvironment.current.withDelta(RuntimeDelta.empty)) {
+            val value = body
+            Executed(value, RuntimeEnvironment.current.delta)
+          }
+        }
+      }
+    )(using base)

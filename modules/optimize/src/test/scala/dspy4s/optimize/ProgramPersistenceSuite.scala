@@ -6,6 +6,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.Predict
+import dspy4s.programs.PredictorId
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
@@ -90,6 +91,81 @@ class ProgramPersistenceSuite extends FunSuite:
     val got = restored.toOption.get
     assertEquals(got.a.demos, trained.a.demos)
     assertEquals(got.b.demos, trained.b.demos)
+  }
+
+  test("dumpState keys predictor state by stable predictor id") {
+    val program = Pipe2(
+      a = Predict(qaSignature, demos = demo, name = Some("ask")),
+      b = Predict(qaSignature, name = Some("answer"))
+    )
+
+    val predictors = ProgramPersistence.dumpState(program).fields.toVector.collectFirst {
+      case ("predictors", record: DynamicValue.Record) => record
+    }.getOrElse(fail("expected a predictor-id record"))
+
+    assertEquals(predictors.fields.toVector.map(_._1).toSet, Set(PredictorId(0).render, PredictorId(1).render))
+  }
+
+  test("keyed predictor state loads by id rather than JSON object order") {
+    val firstDemo  = demo.take(1)
+    val secondDemo = demo.drop(1)
+    val trained = Pipe2(
+      a = Predict(qaSignature, demos = firstDemo, name = Some("ask")),
+      b = Predict(qaSignature, demos = secondDemo, name = Some("answer"))
+    )
+    val fresh = Pipe2(
+      a = Predict(qaSignature, name = Some("ask")),
+      b = Predict(qaSignature, name = Some("answer"))
+    )
+    val dumped = ProgramPersistence.dumpState(trained)
+    val keyed = dumped.fields.toVector.collectFirst {
+      case ("predictors", record: DynamicValue.Record) => record
+    }.getOrElse(fail("expected a predictor-id record"))
+    val reversed = DynamicValue.Record(Chunk.from(keyed.fields.toVector.reverse))
+    val state    = DynamicValue.Record(Chunk.from(Seq("predictors" -> reversed)))
+
+    val restored = ProgramPersistence.loadState(fresh, state).toOption.get
+    assertEquals(restored.a.demos, firstDemo)
+    assertEquals(restored.b.demos, secondDemo)
+  }
+
+  test("loadState accepts the legacy positional predictor array") {
+    val trained = Pipe2(
+      a = Predict(qaSignature, demos = demo.take(1), name = Some("ask")),
+      b = Predict(qaSignature, demos = demo.drop(1), name = Some("answer"))
+    )
+    val fresh = Pipe2(
+      a = Predict(qaSignature, name = Some("ask")),
+      b = Predict(qaSignature, name = Some("answer"))
+    )
+    val legacy = DynamicValue.Record(Chunk.from(Seq(
+      "predictors" -> DynamicValue.Sequence(
+        Chunk.from(summon[Predictors[Pipe2]].read(trained).map(_.dumpState: DynamicValue))
+      )
+    )))
+
+    val restored = ProgramPersistence.loadState(fresh, legacy).toOption.get
+    assertEquals(restored.a.demos, trained.a.demos)
+    assertEquals(restored.b.demos, trained.b.demos)
+  }
+
+  test("loadState rejects missing and unknown predictor ids") {
+    val program = Pipe2(
+      a = Predict(qaSignature, name = Some("ask")),
+      b = Predict(qaSignature, name = Some("answer"))
+    )
+    val oneState = summon[Predictors[Pipe2]].read(program).head.dumpState
+    val malformed = DynamicValue.Record(Chunk.from(Seq(
+      "predictors" -> DynamicValue.Record(Chunk.from(Seq(
+        PredictorId(0).render -> oneState,
+        PredictorId(2).render -> oneState
+      )))
+    )))
+
+    val result = ProgramPersistence.loadState(program, malformed)
+    assert(result.isLeft, s"expected Left, got $result")
+    assert(result.left.toOption.get.message.contains("predictor-1"))
+    assert(result.left.toOption.get.message.contains("predictor-2"))
   }
 
   // ── Negative: wrong-length predictors array ────────────────────────────────

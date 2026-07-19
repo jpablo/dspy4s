@@ -52,11 +52,15 @@ object RetryPolicies:
 
       override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
         val exponent = if attempt <= 0 then 0 else attempt
-        val scaled = baseDelayMillis * (1L << math.min(exponent, 20))
-        val bounded = math.min(scaled, maxDelayMillis)
+        val factor = 1L << math.min(exponent, 20)
+        val bounded =
+          if baseDelayMillis == 0L then 0L
+          else if baseDelayMillis > maxDelayMillis / factor then maxDelayMillis
+          else baseDelayMillis * factor
         if jitterFactor == 0.0 then bounded
         else
-          val maxJitter = math.max((bounded * jitterFactor).toLong, 0L)
+          val headroom  = maxDelayMillis - bounded
+          val maxJitter = math.min(math.max((bounded.toDouble * jitterFactor).toLong, 0L), headroom)
           val jitter = if maxJitter == 0L then 0L else ThreadLocalRandom.current().nextLong(maxJitter + 1L)
           bounded + jitter
 

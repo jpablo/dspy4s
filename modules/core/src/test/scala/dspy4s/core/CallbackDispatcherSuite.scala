@@ -71,25 +71,49 @@ class CallbackDispatcherSuite extends FunSuite:
     assert(end.output.left.toOption.get.isInstanceOf[RuntimeError])
   }
 
-  test("a throwing end observer is attempted exactly once") {
+  test("a throwing end observer is isolated, attempted once, and does not hide the result") {
     val endAttempts = AtomicInteger(0)
-    val callback = new CallbackHandler:
+    val observed = ArrayBuffer.empty[CallbackEvent]
+    val throwing = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
         case _: ModuleEndEvent =>
           endAttempts.incrementAndGet()
           throw IllegalStateException("end observer failed")
         case _ => ()
+    val later = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = observed += event
 
-    val error = intercept[IllegalStateException] {
-      RuntimeEnvironment.withCallbacks(Vector(callback)) {
-        CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "hi")) {
-          Right("ok")
-        }
+    val result = RuntimeEnvironment.withCallbacks(Vector(throwing, later)) {
+      CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "hi")) {
+        Right("ok")
       }
     }
 
-    assertEquals(error.getMessage, "end observer failed")
+    assertEquals(result, Right("ok"))
     assertEquals(endAttempts.get(), 1)
+    assertEquals(observed.map(_.getClass.getSimpleName).toVector, Vector("ModuleStartEvent", "ModuleEndEvent"))
+  }
+
+  test("a throwing start observer does not prevent the body or later observers") {
+    val bodyRuns = AtomicInteger(0)
+    val observed = ArrayBuffer.empty[CallbackEvent]
+    val throwing = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
+        case _: ModuleStartEvent => throw IllegalStateException("start observer failed")
+        case _                   => ()
+    val later = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = observed += event
+
+    val result = RuntimeEnvironment.withCallbacks(Vector(throwing, later)) {
+      CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "hi")) {
+        bodyRuns.incrementAndGet()
+        Right("ok")
+      }
+    }
+
+    assertEquals(result, Right("ok"))
+    assertEquals(bodyRuns.get(), 1)
+    assertEquals(observed.map(_.getClass.getSimpleName).toVector, Vector("ModuleStartEvent", "ModuleEndEvent"))
   }
 
   test("withLm and withAdapter emit typed callback events") {

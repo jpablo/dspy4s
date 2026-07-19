@@ -187,6 +187,21 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(delays.toVector, Vector(5L, 10L))
   }
 
+  test("exponential backoff saturates instead of overflowing large delays") {
+    val base = Long.MaxValue / 2L + 1L
+    val policy = RetryPolicies.exponentialBackoff(
+      maxRetries = 30,
+      baseDelayMillis = base,
+      maxDelayMillis = Long.MaxValue,
+      jitterFactor = 0.0
+    )
+    val error = RuntimeError("lm", "temporary")
+
+    assertEquals(policy.delayBeforeNextAttemptMillis(0, error), base)
+    assertEquals(policy.delayBeforeNextAttemptMillis(1, error), Long.MaxValue)
+    assertEquals(policy.delayBeforeNextAttemptMillis(20, error), Long.MaxValue)
+  }
+
   test("retry code filtering prevents retries for non-matching errors") {
     val delegate = new StubLanguageModel(
       Vector(

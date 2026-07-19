@@ -11,7 +11,7 @@ package dspy4s.programs
   * may reflect the current case-class/combinator syntax. Nor does an ID survive an arbitrary schema edit that inserts,
   * removes, or reorders predictors; such a change defines a different traversal.
   */
-final case class PredictorId(ordinal: Int) extends Ordered[PredictorId]:
+final case class PredictorId(ordinal: Int) extends Ordered[PredictorId] derives CanEqual:
   require(ordinal >= 0, s"PredictorId ordinal must be non-negative, got $ordinal")
 
   /** Stable text form used at persistence and logging boundaries. */

@@ -89,7 +89,7 @@ class GepaEngineSuite extends FunSuite:
     }
   }
 
-  test("stopOnPerfectScore halts once the best candidate is perfect (opt-in; default runs to budget)") {
+  test("stopOnPerfectScore halts once perfect; default continues while another iteration fits") {
     val adapter = new GepaAdapter(program, metric)
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -105,7 +105,7 @@ class GepaEngineSuite extends FunSuite:
       assertEquals(stopped.bestScore, 1.0)
       assert(stopped.totalMetricCalls < 40, s"early-stop should beat the budget; used ${stopped.totalMetricCalls}")
 
-      // Default (parity): no perfect-score stop, so it keeps spending the budget after convergence.
+      // Default: no perfect-score stop, so it keeps spending after convergence while another atomic iteration fits.
       val running = new GepaEngine(
         adapter,
         new ReflectionLm,
@@ -157,6 +157,65 @@ class GepaEngineSuite extends FunSuite:
     assertEquals(lm2.calls.get(), 0, "resumed run must not re-run the seed evaluation")
     assertEquals(second.totalMetricCalls, first.totalMetricCalls) // continued from the saved meter
     assertEquals(second.numCandidates, first.numCandidates)
+  }
+
+  test("metric-call budget is a hard upper bound between atomic iterations") {
+    val lm = new CountingTaskLm
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      new GepaEngine(
+        new GepaAdapter(program, metric),
+        new ReflectionLm,
+        GepaConfig(maxMetricCalls = dataset.size + 1, reflectionMinibatchSize = 2, seed = 1L)
+      ).optimize(Candidate.seed(program), dataset, dataset)
+    }
+
+    assertEquals(result.totalMetricCalls, dataset.size)
+    assert(result.totalMetricCalls <= dataset.size + 1)
+    assertEquals(lm.calls.get(), dataset.size)
+  }
+
+  test("a fresh run rejects a budget too small for seed validation before calling the LM") {
+    val lm = new CountingTaskLm
+    val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      intercept[IllegalArgumentException] {
+        new GepaEngine(
+          new GepaAdapter(program, metric),
+          new ReflectionLm,
+          GepaConfig(maxMetricCalls = dataset.size - 1, reflectionMinibatchSize = 2, seed = 1L)
+        ).optimize(Candidate.seed(program), dataset, dataset)
+      }
+    }
+
+    assert(error.getMessage.contains("seed validation cost"))
+    assertEquals(lm.calls.get(), 0)
+  }
+
+  test("a corrupt run-dir checkpoint is reported and not overwritten") {
+    val dir     = java.nio.file.Files.createTempDirectory("gepa-corrupt-resume")
+    val file    = dir.resolve(GepaStatePersistence.fileName)
+    val corrupt = "not json".getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    val _       = java.nio.file.Files.write(file, corrupt)
+    val lm      = new CountingTaskLm
+    try
+      val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+        given RuntimeContext = RuntimeEnvironment.current
+        intercept[IllegalStateException] {
+          new GepaEngine(
+            new GepaAdapter(program, metric),
+            new ReflectionLm,
+            GepaConfig(maxMetricCalls = dataset.size, reflectionMinibatchSize = 2, seed = 1L)
+          ).optimize(Candidate.seed(program), dataset, dataset, runDir = Some(dir))
+        }
+      }
+
+      assert(error.getMessage.contains("Invalid GEPA checkpoint"))
+      assertEquals(java.nio.file.Files.readAllBytes(file).toVector, corrupt.toVector)
+      assertEquals(lm.calls.get(), 0)
+    finally
+      val _ = java.nio.file.Files.deleteIfExists(file)
+      val _ = java.nio.file.Files.deleteIfExists(dir)
   }
 
   test("Gepa facade compiles a student end-to-end") {

@@ -221,9 +221,10 @@ share one code path. New primitives:
   (`name` / `runtime` are environment/identity, restored to defaults on load).
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
-  `Predictors`-based: `{ "predictors": [<DynamicPredict state>..] }`. JSON via
-  `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO
-  wraps exceptions into `RuntimeError`.
+  `Predictors`-based: `{ "predictors": { "predictor-0": <DynamicPredict state>, ... } }`.
+  Stable IDs are validated on load; the former positional array is accepted as a legacy format. JSON via
+  `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
+  `RuntimeError`.
 
 **Round-trip scope.** Demos round-trip for every program. `DynamicPredict` leaves
 round-trip everything (signature/layout + demos + config). `Predict` restores demos,

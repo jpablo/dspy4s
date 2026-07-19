@@ -24,8 +24,8 @@ import java.util.UUID
   * }}}
   *
   * Tool invocations inside `ReAct` / `CodeAct` produce nested `ToolStart` / `ToolEnd` pairs under their enclosing
-  * module. A scope whose start was delivered attempts exactly one matching end emission; a throwing observer can
-  * abort delivery to later observers, so callback handlers should normally be outcome-transparent.
+  * module. Every scope attempts exactly one start and one matching end emission. Non-fatal observer failures are
+  * reported and isolated: they neither abort the work nor prevent delivery to later observers.
   *
   * '''Producer.''' [[dspy4s.core.runtime.CallbackDispatcher]] is the sole producer; its `withModule` / `withLm` /
   * `withAdapter` / `withTool` scopes open a call id, push it as the active id for the thread, emit the start event,
@@ -144,9 +144,8 @@ final case class ToolEndEvent(
   *
   * Handlers run on the producer thread inline with the work being observed. Two consequences:
   *
-  *   - Throwing from `onEvent` propagates into the dispatcher. A body/start observer failure is reported on the
-  *     scope's single attempted End event when possible; an End observer failure is never retried. Don't throw
-  *     unless you mean to abort the surrounding scope.
+  *   - A non-fatal exception from `onEvent` is reported and isolated by `RuntimeEnvironment.emit`; delivery
+  *     continues with the next handler. Fatal JVM errors are not intercepted.
   *   - Blocking work in `onEvent` blocks the surrounding scope. Hand off to a queue or async sink if the handler
   *     does I/O.
   *

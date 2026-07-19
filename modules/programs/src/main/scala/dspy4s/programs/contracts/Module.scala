@@ -3,6 +3,7 @@ package dspy4s.programs.contracts
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
@@ -40,9 +41,9 @@ import scala.concurrent.Future
   *   - [[tracePayload]] — the output bag recorded as the trace/history `outputs` on success.
   *
   * [[moduleName]] is the public identity (snake_case: `"predict"`, `"chain_of_thought"`, `"react"`), used by
-  * callbacks, trace entries, and stream-listener routing. [[applyAsync]] is the async entry; it propagates the
-  * callback / trace / `ActivePredictContext` thread-locals across the thread boundary via
-  * [[dspy4s.core.runtime.ContextPropagation.future]]. */
+  * callbacks, trace entries, and stream-listener routing. [[applyAsync]] is the value-only async entry;
+  * [[applyAsyncExecuted]] additionally returns the worker's trace/history delta. Both propagate runtime services,
+  * configuration, scope, and registered carriers across the thread boundary. */
 trait Module[I, O]:
   def moduleName: String
 
@@ -94,8 +95,14 @@ trait Module[I, O]:
         result
       }
 
+  /** Async value-only compatibility entry. Worker trace/history is isolated; use [[applyAsyncExecuted]] when the
+    * observable runtime output must be retained and explicitly joined into another execution. */
   def applyAsync(input: I)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, O]] =
-    ContextPropagation.future(apply(input))
+    applyAsyncExecuted(input).map(_.value)(using ExecutionContext.parasitic)
+
+  /** Async writer entry: returns the program result together with the worker-produced runtime delta. */
+  def applyAsyncExecuted(input: I)(using RuntimeContext, ExecutionContext): Future[Executed[Either[DspyError, O]]] =
+    ContextPropagation.futureExecuted(apply(input))
 
 /** A structural program node whose own identity is not part of execution observability. Its children remain
   * ordinary [[Module]]s and therefore still emit callbacks, trace, and history. Keeping this distinction in the
