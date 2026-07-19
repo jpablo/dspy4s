@@ -243,10 +243,25 @@ given cdProgram: CDCategory[ModuleHom] with
   def copy[A]: ModuleHom[A, (A, A)]         = Copy[A]()
   def discard[A]: ModuleHom[A, Unit]        = Discard[A]()
 
-/** An identity-on-objects functor between Hom-indexed categories — the minimal math-with-scala `Functor`
-  * shape needed here (the delooping target ignores objects, so an object map would be inert). */
-trait CatFunctor[Source[_, _], Target[_, _]]:
+/** A functor between two `Hom`-indexed categories, identity-on-objects (the delooping target ignores objects,
+  * so an object map would be inert). Carries the functor laws ON the trait — like `Cat` / `ParaCat` / `Monoid`
+  * / `CDCategory` — stated against the source and target `Cat` instances it is given (the math-with-scala
+  * `Functor[F, Source: Category, Target: Category]` shape). `PS` / `PT` are the two categories' object
+  * constraints (see `Cat`); a law over an object `A` needs both `PS[A]` and `PT[A]` so it can name `id` in
+  * each category. */
+trait CatFunctor[PS[_], Source[_, _], PT[_], Target[_, _]](using
+    source: Cat[PS, Source],
+    target: Cat[PT, Target]
+):
   def map[A, B](f: Source[A, B]): Target[A, B]
+
+  @Law("functor preserves identities")
+  def identities[A: PS: PT]: IsEq[Target[A, A]] =
+    map(source.id[A]) <-> target.id[A]
+
+  @Law("functor preserves composition")
+  def composition[A, B, C](f: Source[A, B], g: Source[B, C]): IsEq[Target[A, C]] =
+    map(f >>> g) <-> (map(f) >>> map(g))
 
 /** The object constraint of the Para category over [[Prog]] (the `CategoryTC` `P[_]` slot): `A` decodes
   * from a data-bag record. Supplies `id`'s decoder and (via [[ProgInput]]'s low-priority instance) coherent
@@ -372,13 +387,6 @@ object Prog:
   * [[paramsDeloop]] delooping of the parameter monoid. Its functor laws are precisely the Para projection
   * laws ([[ParaCat.paramsId]] / [[ParaCat.paramsCompose]]), restated here in functor vocabulary — the
   * categorical name for what `Predictors.read` is. */
-object ReadFunctor extends CatFunctor[Prog, ParamsHom]:
+object ReadFunctor extends CatFunctor[RecordCodec, Prog, AnyObject, ParamsHom]:
   def map[A, B](f: Prog[A, B]): ParamsHom[A, B] = f.params
-
-  @Law("functor preserves identities")
-  def identities[A: RecordCodec]: IsEq[ParamsHom[A, A]] =
-    map(Prog.paraCatProg.id[A]) <-> paramsDeloop.id[A]
-
-  @Law("functor preserves composition")
-  def composition[A, B, C](f: Prog[A, B], g: Prog[B, C]): IsEq[ParamsHom[A, C]] =
-    map(f >>> g) <-> (map(f) >>> map(g))
+  // `identities` / `composition` are inherited from CatFunctor (source = paraCatProg, target = paramsDeloop).
