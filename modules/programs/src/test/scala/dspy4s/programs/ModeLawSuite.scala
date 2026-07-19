@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.IsEq
+import dspy4s.core.contracts.Monoid
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -60,7 +61,8 @@ class ModeLawSuite extends FunSuite:
   private def assertModeLaw(eq: IsEq[Mode], samples: Vector[Mode.Controls]): Unit =
     samples.foreach(c => assertEquals(eq.lhs.transform(c), eq.rhs.transform(c)))
 
-  test("Mode is a lawful monoid: associativity + identity (the @Law statements, executed)") {
+  test("Mode is a lawful monoid: the Monoid[Mode] instance's laws, executed") {
+    val M  = Monoid[Mode]
     val m1 = Mode.temperature(0.5)
     val m2 = Mode.model("gpt-x")
     val m3 = Mode.rolloutId(3)
@@ -68,9 +70,9 @@ class ModeLawSuite extends FunSuite:
       Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None),
       Mode.Controls(DynamicValues.record("temperature" := 0.1), traceEnabled = false, rolloutId = Some(2))
     )
-    assertModeLaw(Mode.associativity(m1, m2, m3), samples)
-    assertModeLaw(Mode.identityLeft(m1), samples)
-    assertModeLaw(Mode.identityRight(m1), samples)
+    assertModeLaw(M.associativity(m1, m2, m3), samples)
+    assertModeLaw(M.identityLeft(m1), samples)
+    assertModeLaw(M.identityRight(m1), samples)
   }
 
   test("Mode monoid: mode(m1 ++ m2) sees the same controls as mode(m1) ∘ mode(m2)") {

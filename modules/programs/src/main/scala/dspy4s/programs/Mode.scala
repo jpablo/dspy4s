@@ -2,11 +2,9 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.IsEq
-import dspy4s.core.contracts.Law
+import dspy4s.core.contracts.Monoid
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
-import dspy4s.core.contracts.<->
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
@@ -23,11 +21,12 @@ import zio.blocks.schema.DynamicValue
   * Two separate facts, often conflated:
   *
   *   1. '''`Mode` is a monoid''' under `++` (left-to-right control transform) with unit [[Mode.id]] — concretely
-  *      the endomorphism monoid on `Controls` (`++` = function composition, `Mode.id` = the identity transform).
-  *      Its laws (associativity, left/right identity; see the `@Law` methods below) hold up to '''extensional
-  *      equality''' of the wrapped transform (`m1 ≡ m2` iff `∀ c. m1.transform(c) == m2.transform(c)`), NOT the
-  *      case class's structural `==` — `++` allocates a fresh closure each time, so `==` (reference equality on
-  *      the function field) would reject even `Mode.id ++ m ≡ m`. `ModeLawSuite` checks the laws under that
+  *      the endomorphism monoid on `Controls` (`++` = function composition, `Mode.id` = the identity transform),
+  *      witnessed by the [[Mode.monoid]] `given Monoid[Mode]` (`combine` = `++`, `empty` = `id`). Its laws come
+  *      from the [[dspy4s.core.contracts.Monoid]] trait and hold up to '''extensional equality''' of the wrapped
+  *      transform (`m1 ≡ m2` iff `∀ c. m1.transform(c) == m2.transform(c)`), NOT the case class's structural
+  *      `==` — `++` allocates a fresh closure each time, so `==` (reference equality on the function field) would
+  *      reject even `Mode.id ++ m ≡ m`. `ModeLawSuite` executes the trait's laws through the instance under that
   *      extensional equality. Non-commutative, as an endomorphism monoid is (last write wins: `temperature(0.5)
   *      ++ temperature(0.9)` sets 0.9).
   *
@@ -62,19 +61,14 @@ object Mode:
   /** Set the framework cache-busting rolloutId. */
   def rolloutId(value: Int): Mode = Mode(controls => controls.copy(rolloutId = Some(value)))
 
-  // ── Monoid laws, stated as @Law statements (the math-with-scala style; see core.contracts.Laws). Two
-  //    Modes are equal iff their control transforms agree on every Controls, so `ModeLawSuite` executes these
-  //    by applying both sides to sample Controls. (The mode-ACTION homomorphism law, mode(m1 ++ m2) =
-  //    mode(m1) ∘ mode(m2), is a separate program-level equation observed via the recorder in that suite.) ──
-  @Law("monoid associativity")
-  def associativity(m1: Mode, m2: Mode, m3: Mode): IsEq[Mode] =
-    ((m1 ++ m2) ++ m3) <-> (m1 ++ (m2 ++ m3))
-
-  @Law("monoid left identity")
-  def identityLeft(m: Mode): IsEq[Mode] = (Mode.id ++ m) <-> m
-
-  @Law("monoid right identity")
-  def identityRight(m: Mode): IsEq[Mode] = (m ++ Mode.id) <-> m
+  /** `Mode` as the endomorphism monoid on `Controls`: `combine` = `++` (compose the control transforms),
+    * `empty` = [[Mode.id]]. The associativity / identity laws come from [[dspy4s.core.contracts.Monoid]] and
+    * are executed by `ModeLawSuite` under extensional equality of the transform (see fact 1 in the class
+    * scaladoc). Distinct from the mode-ACTION homomorphism (`mode(m1 ++ m2) = mode(m1) ∘ mode(m2)`), which is
+    * a program-level equation observed via the recorder in that suite. */
+  given monoid: Monoid[Mode] with
+    def empty: Mode = Mode.id
+    extension (a: Mode) infix def combine(b: Mode): Mode = a ++ b
 
 /** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Trace-transparent — it records no trace
   * entry of its own (`callTraceEnabled = false`), so a chain of modes collapses to the wrapped program's single
