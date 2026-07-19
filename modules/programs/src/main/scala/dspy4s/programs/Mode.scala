@@ -2,8 +2,11 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.IsEq
+import dspy4s.core.contracts.Law
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
+import dspy4s.core.contracts.<->
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TypedCall
 import dspy4s.typed.Prediction
@@ -46,6 +49,20 @@ object Mode:
 
   /** Set the framework cache-busting rolloutId. */
   def rolloutId(value: Int): Mode = Mode(controls => controls.copy(rolloutId = Some(value)))
+
+  // ── Monoid laws, stated as @Law statements (the math-with-scala style; see core.contracts.Laws). Two
+  //    Modes are equal iff their control transforms agree on every Controls, so `ModeLawSuite` executes these
+  //    by applying both sides to sample Controls. (The mode-ACTION homomorphism law, mode(m1 ++ m2) =
+  //    mode(m1) ∘ mode(m2), is a separate program-level equation observed via the recorder in that suite.) ──
+  @Law("monoid associativity")
+  def associativity(m1: Mode, m2: Mode, m3: Mode): IsEq[Mode] =
+    ((m1 ++ m2) ++ m3) <-> (m1 ++ (m2 ++ m3))
+
+  @Law("monoid left identity")
+  def identityLeft(m: Mode): IsEq[Mode] = (Mode.id ++ m) <-> m
+
+  @Law("monoid right identity")
+  def identityRight(m: Mode): IsEq[Mode] = (m ++ Mode.id) <-> m
 
 /** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Trace-transparent — it records no trace
   * entry of its own (`callTraceEnabled = false`), so a chain of modes collapses to the wrapped program's single
