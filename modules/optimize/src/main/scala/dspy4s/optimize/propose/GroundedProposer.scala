@@ -11,6 +11,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
 import dspy4s.programs.Predictors
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.PredictorView
 import dspy4s.programs.contracts.ProgramCall
 
 /** Knobs for [[GroundedProposer]], mirroring the relevant slice of upstream's
@@ -103,7 +104,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
       trainset: Vector[Example],
       demoCandidates: Vector[Vector[Example]] = Vector.empty
   )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
-    val predictors = ps.read(program)
+    val predictors = ps.inspect(program)
     for
       summary  <- datasetSummary(trainset)
       perPred  <- traverse(predictors.zipWithIndex.toVector) { case (predictor, idx) =>
@@ -176,7 +177,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
   /** Generate `config.numInstructions` candidate instructions for one predictor, grounded in the (cached) dataset
     * summary, the predictor's signature-derived description, the optional demo set, and a rotating tip. */
   private def proposeForPredictor(
-      predictor: DynamicPredict,
+      predictor: PredictorView,
       idx: Int,
       summary: Option[String],
       demoSet: Vector[Example]
@@ -223,11 +224,11 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
 
   /** The signature-derived module description (the `DescribeModule` analogue): the predictor's name plus a
     * `Name(inputs) -> outputs` field-name rendering. dspy4s has no program source to introspect. */
-  private def describeModule(predictor: DynamicPredict): String =
+  private def describeModule(predictor: PredictorView): String =
     val layout  = predictor.layout
     val inputs  = layout.inputFields.map(_.name).mkString(", ")
     val outputs = layout.outputFields.map(_.name).mkString(", ")
-    val name    = predictor.name.getOrElse(layout.name)
+    val name    = predictor.moduleName
     s"$name($inputs) -> $outputs"
 
   /** Render an [[Example]] as a `field: value` block for grounding prompts. */

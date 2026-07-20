@@ -142,7 +142,7 @@ object OptimizerSmokeTest:
             case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0
 
         def instructionOf(program: DynamicPredict): String =
-          summon[Predictors[DynamicPredict]].read(program).headOption.flatMap(_.layout.instructions).getOrElse("(none)")
+          summon[Predictors[DynamicPredict]].read(program).headOption.flatMap(_.instructions).getOrElse("(none)")
 
         def checkpoint(label: String): Unit =
           println(s"\n[smoke] $label  (${progress.count} LM calls so far${

@@ -33,11 +33,12 @@ import scala.util.control.NonFatal
   * predictor's name (used as `TokenEvent.predictName`) and signature (used to
   * build a fresh [[AdapterStreamingState]] from the configured adapter). This
   * lets a single Streamify wrap a program that internally invokes multiple
-  * `DynamicPredict`s with different signatures — each LM call routes to per-field
-  * chunks under the correct signature.
+  * prediction leaves with different signatures, whether typed `Predict`s or
+  * `DynamicPredict`s — each LM call routes to per-field chunks under the correct
+  * signature.
   *
   * When there is no active predict context (e.g. the LM is called outside any
-  * `DynamicPredict.execute`, or no adapter is configured), the wrapper falls back to
+  * `PredictEngine.execute`, or no adapter is configured), the wrapper falls back to
   * raw-token emission with an empty `fieldName`.
   *
   * Listener filtering: when `listeners` is non-empty, only field chunks whose

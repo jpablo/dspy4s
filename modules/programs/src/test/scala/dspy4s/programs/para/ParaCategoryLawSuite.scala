@@ -20,6 +20,8 @@ import dspy4s.programs.ChainOfThought
 import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predictor
+import dspy4s.programs.PredictorMetadata
+import dspy4s.programs.PredictorState
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TypedCall
@@ -64,8 +66,10 @@ class ParaCategoryLawSuite extends FunSuite:
 
   private object Step:
     given stepPredictor[I, O]: Predictor[Step[I, O]] with
-      def get(program: Step[I, O]): DynamicPredict                      = program.predict
-      def set(program: Step[I, O], updated: DynamicPredict): Step[I, O] = program.copy(predict = updated)
+      def get(program: Step[I, O]): PredictorState = program.predict.predictorState
+      def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
+      def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
+        program.copy(predict = program.predict.withPredictorState(updated))
 
   private object UnusedInterpreter extends CodeInterpreter:
     def execute(code: String): Either[DspyError, CodeResult] =
@@ -168,7 +172,10 @@ class ParaCategoryLawSuite extends FunSuite:
     assertIsEq(C.paramsId[Boxed])
     assertIsEq(C.paramsCompose(a, b))
     assertIsEq(C.reparamRoundTrip(ab))
-    val fresh = Vector(predict("i -> s2"), predict("s -> n2"))
+    val fresh = Vector(
+      predict("i -> s").predictorState.copy(instructions = Some("first update")),
+      predict("s -> n").predictorState.copy(instructions = Some("second update"))
+    )
     assertIsEq(C.reparamWriteBack(ab, fresh))
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
     assertEquals(ab.reparam(ab.params)(TypedCall(5)).map(_.output), ab(TypedCall(5)).map(_.output))
@@ -213,21 +220,21 @@ class ParaCategoryLawSuite extends FunSuite:
   }
 
   // ── The parameter monoid, and its delooping as a lawful Category instance (checked with real ==) ─────────
-  test("the parameter monoid Monoid[Vector[DynamicPredict]] satisfies the monoid laws") {
-    val M  = Monoid[Vector[DynamicPredict]]
-    val v1 = Vector(predict("a -> b"))
-    val v2 = Vector(predict("b -> c"))
-    val v3 = Vector(predict("c -> d"))
+  test("the parameter monoid Monoid[Vector[PredictorState]] satisfies the monoid laws") {
+    val M  = Monoid[Vector[PredictorState]]
+    val v1 = Vector(predict("a -> b").predictorState)
+    val v2 = Vector(predict("b -> c").predictorState)
+    val v3 = Vector(predict("c -> d").predictorState)
     assertIsEq(M.associativity(v1, v2, v3))
     assertIsEq(M.identityLeft(v1))
     assertIsEq(M.identityRight(v1))
   }
 
   test("paramsDeloop is that monoid delooped: Category laws hold, and id delegates to the monoid's empty") {
-    val M  = Monoid[Vector[DynamicPredict]]
-    val v1 = Vector(predict("a -> b"))
-    val v2 = Vector(predict("b -> c"))
-    val v3 = Vector(predict("c -> d"))
+    val M  = Monoid[Vector[PredictorState]]
+    val v1 = Vector(predict("a -> b").predictorState)
+    val v2 = Vector(predict("b -> c").predictorState)
+    val v3 = Vector(predict("c -> d").predictorState)
     assertIsEq(paramsDeloop.identityLeft[Unit, Unit](v1))
     assertIsEq(paramsDeloop.identityRight[Unit, Unit](v1))
     assertIsEq(paramsDeloop.associativity[Unit, Unit, Unit, Unit](v1, v2, v3))

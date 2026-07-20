@@ -6,6 +6,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.CodeAct
 import dspy4s.programs.Predict
+import dspy4s.programs.ProgramOfThought
 import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
@@ -67,6 +68,13 @@ object Runnable:
   /** Typed composite [[CodeAct]]: same as [[fromReAct]] over `baseSignature`. */
   given fromCodeAct[I, O]: Runnable[CodeAct[I, O]] with
     def run(program: CodeAct[I, O], inputs: DynamicValue.Record)(using RuntimeContext)
+        : Either[DspyError, DynamicPrediction] =
+      program.baseSignature.inputShape.decode(inputs).flatMap(i => program.apply(i).map(_.raw))
+
+  /** Typed composite [[ProgramOfThought]]: decode through its base signature, run the generate/regenerate/answer
+    * pipeline, and expose the final raw prediction to optimizer metrics. */
+  given fromProgramOfThought[I, O]: Runnable[ProgramOfThought[I, O]] with
+    def run(program: ProgramOfThought[I, O], inputs: DynamicValue.Record)(using RuntimeContext)
         : Either[DspyError, DynamicPrediction] =
       program.baseSignature.inputShape.decode(inputs).flatMap(i => program.apply(i).map(_.raw))
 

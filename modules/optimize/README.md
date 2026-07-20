@@ -45,13 +45,14 @@ the trainset.
 Optimizers are generic over the program type `P`, working through two given instances rather than a fixed
 program class:
 
-- **`Predictors[P]`** — introspection: read the program's learnable predictors (`read` / `readIdentified` /
-  `readNamed`) and write
-  edited ones back (`replace`). One `Predict` is a length-1 list; a composite exposes all its leaves. This is
-  what lets a single code path optimize both a standalone predictor and an arbitrary composite.
+- **`Predictors[P]`** — introspection: `inspect` exposes non-executable `PredictorView`s (read-only signature/module
+  metadata plus writable state), `read` projects the `PredictorState`s, and `replace` writes an edited state vector
+  back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
+  optimize both a standalone predictor and an arbitrary composite.
 - **`Runnable[P]`** — run `P` on a record of inputs, yielding the untyped `DynamicPrediction` that `Evaluate`
   consumes. This is the "spine unification": it lets the optimizers target **typed** programs (`Predict[I, O]`,
-  `ChainOfThought[I, O]`, …) as well as the untyped `DynamicModule` spine, with no `asInstanceOf`.
+  `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the untyped `DynamicModule` spine, with no
+  `asInstanceOf`.
 
 Scoring across the family goes through `Evaluate` + the metric via shared helpers in `OptimizerSupport` (the
 `seed → rolloutId` mapping and the eval wiring are kept in one place so every optimizer behaves identically).
@@ -107,13 +108,12 @@ program is expected.
 
 ## Persistence
 
-`ProgramPersistence` saves/loads a program's learnable state as JSON — the analogue of Python's
-`dump_state` / `load_state`. Built on `Predictors`, so one path covers a single `Predict` and an arbitrary
-composite: `dumpState` serializes every predictor `read` exposes, `loadState` rebuilds each and writes it back
-via `replace`. What round-trips depends on the leaf's `set`: a `DynamicPredict` leaf restores everything
-(layout, demos, config); a typed `Predict`/`ChainOfThought` restores demos and instructions but keeps its own
-field *structure* (writing it back would desync `outputShape` from `layout`). This covers the
-"optimize once, deploy the artifact" workflow.
+`ProgramPersistence` saves/loads a program's writable `PredictorState` as JSON — the analogue of Python's
+`dump_state` / `load_state`. Every supported leaf has the same state: instructions, demos, and module-level config.
+Loading applies those values to a freshly constructed program while preserving signature structure, module names,
+runtimes, output schemas, bound LMs, and tools. See the authoritative
+[state contract](../../site/docs/runtime/saving-and-loading.md) for the lens laws, ordinal-ID limitation, and format
+compatibility policy.
 
 ## Source layout
 

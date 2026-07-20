@@ -19,8 +19,8 @@ import zio.blocks.schema.DynamicValue
   *
   *   1. [[run]] — invoke the program from a record of inputs, yielding the raw `DynamicPrediction` for the final
   *      `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
-  *      `StreamingLanguageModel` consulting `ActivePredictContext`, which the inner `DynamicPredict`s set as they
-  *      run — independent of how the outer program is invoked.
+  *      `StreamingLanguageModel` consulting `ActivePredictContext`, which each `PredictEngine` execution scopes for
+  *      both typed and dynamic prediction modules — independent of how the outer program is invoked.
   *   2. [[knownSignatures]] — best-effort `(predictName, signature)` pairs used *only* for stream-listener
   *      validation (warnings). An opaque program returns empty and validation is skipped. */
 trait Streamable[P]:
@@ -67,12 +67,15 @@ object Streamable:
         (program.extractorProgramName, program.extractorPredict.layout)
       )
 
-  /** Typed `ProgramOfThought`: decode the record into the typed input, run it, and emit the raw prediction. Its
-    * inner predicts use default names, so no distinct stream-listener targets are surfaced (validation skipped —
-    * matching the prior best-effort behavior). */
+  /** Typed `ProgramOfThought`: decode the record into the typed input, run it, and emit the raw prediction. Its three
+    * stable inner predictors are the stream-listener targets. */
   given programOfThought[I, O]: Streamable[ProgramOfThought[I, O]] with
     def run(program: ProgramOfThought[I, O], inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
       program.baseSignature.inputShape.decode(inputs).flatMap(i => program.apply(TypedCall(i)).map(_.raw))
 
     def knownSignatures(program: ProgramOfThought[I, O]): Vector[(String, SignatureLayout)] =
-      Vector.empty
+      Vector(
+        program.generatorPredict.moduleName   -> program.generatorPredict.layout,
+        program.regeneratorPredict.moduleName -> program.regeneratorPredict.layout,
+        program.answererPredict.moduleName    -> program.answererPredict.layout
+      )

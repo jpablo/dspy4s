@@ -325,11 +325,11 @@ final case class SignatureLayout private (
   def equalsByStructure(other: SignatureLayout): Boolean =
     instructions == other.instructions && fields.sameElements(other.fields)
 
-  /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]] -- the same codec-spine type carried everywhere
-    * else in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via [[dumpJson]].
-    * `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
-    * `DynamicValue.Null` when empty. This is the building block of the (not-yet-wired) save/load story -- a
-    * deliberately non-Python-pickle path (see PORT_DIFFERENCES). */
+  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same codec-spine type
+    * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
+    * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
+    * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller
+    * `PredictorState` contract instead of serializing a whole layout. */
   def dumpState: DynamicValue.Record =
     def str(s: String): DynamicValue        = DynamicValue.Primitive(PrimitiveValue.String(s))
     def opt(o: Option[Any]): DynamicValue   = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
@@ -402,8 +402,8 @@ object SignatureLayout:
   private[dspy4s] def of(name: String, fields: Vector[FieldSpec], instructions: Option[String]): SignatureLayout =
     SignatureLayout(name, fields, instructions)
 
-  /** Re-hydrate a layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]]. The inverse
-    * of the save/load serialization primitive; no production code wires this into a save/load feature yet. */
+  /** Re-hydrate a standalone layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]].
+    * Program persistence is state-only and therefore does not use this codec. */
   def fromState(state: DynamicValue.Record): Either[DspyError, SignatureLayout] =
     def getString(rec: DynamicValue.Record, key: String): Option[String] =
       DynamicValues.recordGet(rec, key) match

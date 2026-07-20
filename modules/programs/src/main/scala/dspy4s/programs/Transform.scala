@@ -28,10 +28,10 @@ private[programs] object TransformResult:
 private[programs] object UnaryPredictors:
   def passthrough[W, P](get: W => P)(replaceInner: (W, P) => W)(using inner: Predictors[P]): Predictors[W] =
     new Predictors[W]:
-      def read(program: W): Vector[DynamicPredict] = inner.read(get(program))
-      def replace(program: W, updates: Vector[DynamicPredict]): W =
+      def inspect(program: W): Vector[PredictorView] = inner.inspect(get(program))
+      def replace(program: W, updates: Vector[PredictorState]): W =
         replaceInner(program, inner.replace(get(program), updates))
-      override def readNamed(program: W): Vector[(String, DynamicPredict)] = inner.readNamed(get(program))
+      override def inspectNamed(program: W): Vector[(String, PredictorView)] = inner.inspectNamed(get(program))
 
 /** Lift a total Scala function into a parameter-free, lifecycle-transparent program. */
 final case class Lift[I, O](run: I => O) extends TransparentModule[TypedCall[I], Prediction[O]]:

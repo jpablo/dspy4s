@@ -122,24 +122,21 @@ Python `BaseModule.named_parameters()` walks `self.__dict__`,
 recurses through nested modules, yields anything that looks like a
 `Parameter`. Optimizers consume that iterator.
 
-Scala has no `__dict__`. The optimizer side uses a **`PredictOps[P]`
-typeclass**: each Predict-shaped program provides a `given` instance
-describing how to read its `layout` + `demos` and how to produce a
-demo-shuffled copy:
+Scala has no `__dict__`. The optimizer side uses **`Predictor[P]`** for
+one leaf and **`Predictors[P]`** for composite traversal. Each leaf exposes
+read-only metadata separately from the exact writable state:
 
 ```scala
-trait PredictOps[P]:
-  def name(program: P): String
-  def layout(program: P): SignatureLayout
-  def demos(program: P): Vector[Example]
-  def withDemos(program: P, demos: Vector[Example]): P
+trait Predictor[P]:
+  def get(program: P): PredictorState
+  def metadata(program: P): PredictorMetadata
+  def set(program: P, state: PredictorState): P
 ```
 
-`BootstrapFewShot` and `BootstrapFewShotWithRandomSearch` program
-against this interface. Less magical at the program-author side
-(you have to provide an instance for new Predict types), mechanically
-equivalent at the optimizer side. The trade-off is explicit by
-design.
+`PredictorState` contains instructions, demos, and module config;
+signature structure, names, runtimes, schemas, LMs, and tools cannot be
+replaced through the optimizer lens. Mirror derivation builds a
+`Predictors[P]` traversal for composites. The trade-off is explicit by design.
 
 ## 4. `predict_name` resolution: frame introspection → explicit naming
 
@@ -211,22 +208,26 @@ with a structured error ADT:
 
 Internally things still throw at deep enough layers; the boundary is
 checked. The typed layer additionally elevates adapter-parse
-failures to the `Predict.run` boundary instead of surfacing them
+failures to the `Predict.apply` boundary instead of surfacing them
 via lazy field access — a typed decode failure is a `Left`, not a
 `Throwable` at first field read.
 
-## 7. Save / load: pickle → typed dump/restore
+## 7. Save / load: Python state/program modes → typed state restore
 
 **Convention.**
 
-Python `module.save()` / `module.load()` use `cloudpickle`. The
-artifact is opaque Python bytes.
+Current Python DSPy has two modes. With `save_program=False`, `module.save()` /
+`module.load()` persist named-parameter state as JSON or pickle. A `Predict`
+state currently contains its signature, demos, traces, training data, and bound
+LM. Only `save_program=True` serializes the whole architecture with
+`cloudpickle`.
 
-dspy4s defines `SignatureLayout.dumpState: Map[String, Any]` and
-`SignatureLayout.fromState(state)`, with a similar pattern per
-program. The artifact format is JSON-friendly, dspy4s-native, and
-**deliberately not** binary-compatible with Python pickle. The
-non-compat is tracked as an explicit non-goal in
+dspy4s `ProgramPersistence` serializes each leaf's `PredictorState`
+(instructions, demos, config) into clean JSON keyed by traversal ordinal.
+It applies that state to a fresh program while preserving architecture and
+execution resources. The format is dspy4s-native and **deliberately not**
+compatible with Python state/pickle artifacts or the former layout-bearing
+predictor-state format. The non-compat is tracked as an explicit non-goal in
 [PORT_SCOPE.md](PORT_SCOPE.md).
 
 This means: a model trained in Python DSPy cannot be loaded into
@@ -330,8 +331,9 @@ adapter/LM/callback dance that Python has spread across
 
 **Every program is now typed.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
 `ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[TypedCall[I], …]` —
-`DynamicPredict` is the only program left on the untyped spine (it's the substrate the others build inner
-predicts from). Three pieces made this clean:
+`DynamicPredict` is the only program left on the untyped spine: it executes runtime-built signatures while typed
+`Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
+typed programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
 - **`OutputAugmentation`** (`dspy4s.typed`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
   output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
 - **Typed `Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into

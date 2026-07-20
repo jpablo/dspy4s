@@ -2,12 +2,12 @@ package dspy4s.optimize
 
 import dspy4s.programs.Predictors
 import dspy4s.programs.PredictorId
+import dspy4s.programs.PredictorState
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
-import dspy4s.programs.DynamicPredict
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -18,20 +18,15 @@ import java.nio.file.Paths
 /** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's
   * `BaseModule.dump_state` / `load_state` and `save` / `load`.
   *
-  * Built entirely on the [[Predictors]] introspection layer (G-1), so a single `Predict` (a length-1
-  * predictor list) and an arbitrary composite are covered by one code path: [[dumpState]] serializes every
-  * predictor `Predictors.read` exposes, and [[loadState]] rebuilds each and writes it back via
-  * `Predictors.replace`.
+  * Built entirely on the [[Predictors]] traversal, so a single typed or dynamic predictor and an arbitrary
+  * composite use the same path: [[dumpState]] serializes every writable [[PredictorState]], and [[loadState]]
+  * writes those states into a fresh program through `Predictors.replace`.
   *
-  * '''Round-trip scope.''' What survives a save/load depends on the target predictor's `Predictor.set`:
-  *   - For a [[DynamicPredict]] leaf (and user composites whose leaves are `DynamicPredict`), `set` is the
-  *     identity, so signature/layout, demos, and config all round-trip fully.
-  *   - For [[dspy4s.programs.Predict]], `set` restores '''demos, config, and the layout instructions''' (the
-  *     instruction string is shape-safe to write back); [[dspy4s.programs.ChainOfThought]] restores '''demos and
-  *     instructions''' (it has no module-level config field). What is NOT written back is the field '''structure'''
-  *     of the layout — that would desync `signature.outputShape` from `signature.layout`, so the typed program
-  *     keeps its own field shape. (The full layout still round-trips in the JSON itself.) This covers the
-  *     "optimize once (demos + instructions), deploy the artifact" workflow the optimizers produce.
+  * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature
+  * field structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the
+  * fresh target program and are preserved during loading. Loading therefore requires the same predictor
+  * traversal/order and a compatible architecture; ordinal IDs detect missing or extra entries, not a
+  * same-cardinality reorder.
   *
   * The JSON is produced by zio-blocks' `DynamicValue` JSON codec (the same codec
   * `SignatureLayout.dumpJson` uses) — clean, natural JSON with no ADT tags.
@@ -41,33 +36,32 @@ object ProgramPersistence:
   /** JSON codec for the `DynamicValue`-shaped state, mirroring `SignatureLayout`'s private codec. */
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  /** Serialize a program's learnable state to a `DynamicValue.Record`: `{ "predictors": {
-    * "predictor-0": <DynamicPredict state>, ... } }`. Stable [[PredictorId]] keys make loading independent of JSON
-    * object order and let topology mismatches fail explicitly instead of silently applying state positionally. */
+  /** Serialize a program's writable state to `{ "predictors": { "predictor-0": <PredictorState>, ... } }`.
+    * [[PredictorId]] keys make loading independent of JSON object order and detect missing/unknown ordinals. */
   def dumpState[P](program: P)(using predictors: Predictors[P]): DynamicValue.Record =
     val states: Seq[(String, DynamicValue)] = predictors.readIdentified(program).map { identified =>
-      identified.id.render -> (identified.predictor.dumpState: DynamicValue)
+      identified.id.render -> (identified.state.dumpState: DynamicValue)
     }
     DynamicValue.Record(Chunk.from(Seq(
       "predictors" -> DynamicValue.Record(Chunk.from(states))
     )))
 
-  private def decodePredictor(raw: DynamicValue, at: String): Either[DspyError, DynamicPredict] = raw match
-    case rec: DynamicValue.Record => DynamicPredict.fromState(rec)
+  private def decodeState(raw: DynamicValue, at: String): Either[DspyError, PredictorState] = raw match
+    case rec: DynamicValue.Record => PredictorState.fromState(rec)
     case _                        => Left(ValidationError(s"Program state predictor '$at' must be a record"))
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
       predictors: Predictors[P]
   ): Either[DspyError, P] =
     val expectedIds = predictors.readIdentified(program).map(_.id)
-    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, DynamicPredict)]]](
+    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, PredictorState)]]](
       Right(Vector.empty)
     ) { case (acc, (rawId, rawState)) =>
       for
         entries <- acc
         id <- PredictorId.parse(rawId).left.map(ValidationError.apply)
-        predictor <- decodePredictor(rawState, rawId)
-      yield entries :+ (id -> predictor)
+        state <- decodeState(rawState, rawId)
+      yield entries :+ (id -> state)
     }
 
     parsed.flatMap { entries =>

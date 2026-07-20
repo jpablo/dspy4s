@@ -9,7 +9,7 @@ class GepaStateSuite extends FunSuite:
 
   private def state(subscores: Vector[Double]*): GepaState =
     GepaState(
-      candidates = subscores.indices.map(i => Map(PredictorId(0) -> s"instr$i")).toVector,
+      candidates = subscores.indices.map(i => Map(PredictorId(0) -> Some(s"instr$i"))).toVector,
       valSubscores = subscores.toVector,
       parents = subscores.indices.map(_ => Vector.empty[Int]).toVector,
       totalMetricCalls = 0
@@ -36,7 +36,7 @@ class GepaStateSuite extends FunSuite:
   test("GepaState rejects ragged valSubscores up front (instead of an IndexOutOfBounds in paretoFrontier)") {
     intercept[IllegalArgumentException] {
       val _ = GepaState(
-        candidates = Vector(Map(PredictorId(0) -> "a"), Map(PredictorId(0) -> "b")),
+        candidates = Vector(Map(PredictorId(0) -> Some("a")), Map(PredictorId(0) -> Some("b"))),
         valSubscores = Vector(Vector(1.0, 0.0), Vector(1.0)), // second row is shorter — would crash paretoFrontier
         parents = Vector(Vector.empty[Int], Vector.empty[Int]),
         totalMetricCalls = 0
@@ -57,8 +57,8 @@ class GepaStateSuite extends FunSuite:
   }
 
   test("add appends a candidate and accrues metric calls") {
-    val s0 = GepaState.seed(Map(PredictorId(0) -> "seed"), Vector(0.5, 0.5), metricCalls = 2)
-    val s1 = s0.add(Map(PredictorId(0) -> "child"), Vector(1.0, 1.0), parents = Vector(0), metricCalls = 2)
+    val s0 = GepaState.seed(Map(PredictorId(0) -> Some("seed")), Vector(0.5, 0.5), metricCalls = 2)
+    val s1 = s0.add(Map(PredictorId(0) -> Some("child")), Vector(1.0, 1.0), parents = Vector(0), metricCalls = 2)
     assertEquals(s1.candidates.size, 2)
     assertEquals(s1.bestIndex, 1)
     assertEquals(s1.parents(1), Vector(0))
@@ -68,7 +68,7 @@ class GepaStateSuite extends FunSuite:
   test("ancestors walks the full lineage, including a merge's two branches up to a common ancestor") {
     // Lineage: 0 (seed) -> 1, 0 -> 2; then 3 is a MERGE of 1 and 2 (two parents).
     val s = GepaState(
-      candidates = Vector.tabulate(4)(i => Map(PredictorId(0) -> i.toString)),
+      candidates = Vector.tabulate(4)(i => Map(PredictorId(0) -> Some(i.toString))),
       valSubscores = Vector.fill(4)(Vector(1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(1, 2)),
       totalMetricCalls = 0

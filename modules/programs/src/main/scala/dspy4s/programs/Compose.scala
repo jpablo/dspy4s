@@ -60,24 +60,29 @@ final case class AndThen[I, X, O, A <: Module[TypedCall[I], Prediction[X]], B <:
       ))
     }
 
-/** Shared `Predictors` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural `read(first) ++
-  * read(second)`, `replace` slicing by `first`'s read-arity, and `first.` / `second.` name prefixing (fork 4). One
+/** Shared `Predictors` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural
+  * `inspect(first) ++ inspect(second)`, `replace` slicing by `first`'s read-arity, and `first.` / `second.` name
+  * prefixing (fork 4). One
   * implementation keeps optimizer addressing in sync between `>>>` and `parallel` — a change to the slicing or path
   * naming applied to one combinator cannot silently miss the other.
   */
 private[programs] object PairPredictors:
-  def read[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[DynamicPredict] =
-    pa.read(first) ++ pb.read(second)
+  def inspect[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[PredictorView] =
+    pa.inspect(first) ++ pb.inspect(second)
 
-  def replace[A, B, P](pa: Predictors[A], pb: Predictors[B])(first: A, second: B, updates: Vector[DynamicPredict])(
+  def replace[A, B, P](pa: Predictors[A], pb: Predictors[B])(first: A, second: B, updates: Vector[PredictorState])(
       rebuild: (A, B) => P
   ): P =
     val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(first).size)
     rebuild(pa.replace(first, firstUpdates), pb.replace(second, secondUpdates))
 
-  def readNamed[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[(String, DynamicPredict)] =
-    pa.readNamed(first).map { case (sub, p) => (if sub == "self" then "first" else s"first.$sub") -> p } ++
-      pb.readNamed(second).map { case (sub, p) => (if sub == "self" then "second" else s"second.$sub") -> p }
+  def inspectNamed[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[(String, PredictorView)] =
+    pa.inspectNamed(first).map { case (sub, view) =>
+      (if sub == "self" then "first" else s"first.$sub") -> view
+    } ++
+      pb.inspectNamed(second).map { case (sub, view) =>
+        (if sub == "self" then "second" else s"second.$sub") -> view
+      }
 
 object AndThen:
   /** Structural `read(a) ++ read(b)`; `replace` slices the updates by `first`'s read-arity (fork 4). */
@@ -86,16 +91,16 @@ object AndThen:
       pa: Predictors[A],
       pb: Predictors[B]
   ): Predictors[AndThen[I, X, O, A, B]] with
-    def read(program: AndThen[I, X, O, A, B]): Vector[DynamicPredict] =
-      PairPredictors.read(pa, pb)(program.first, program.second)
+    def inspect(program: AndThen[I, X, O, A, B]): Vector[PredictorView] =
+      PairPredictors.inspect(pa, pb)(program.first, program.second)
 
-    def replace(program: AndThen[I, X, O, A, B], updates: Vector[DynamicPredict]): AndThen[I, X, O, A, B] =
+    def replace(program: AndThen[I, X, O, A, B], updates: Vector[PredictorState]): AndThen[I, X, O, A, B] =
       PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
-    override def readNamed(program: AndThen[I, X, O, A, B]): Vector[(String, DynamicPredict)] =
-      PairPredictors.readNamed(pa, pb)(program.first, program.second)
+    override def inspectNamed(program: AndThen[I, X, O, A, B]): Vector[(String, PredictorView)] =
+      PairPredictors.inspectNamed(pa, pb)(program.first, program.second)
 
 /** `fanout(a, b)` (compatibility name `parallel`) — run both programs on the same input and tuple their outputs. On the synchronous
   * `Either` substrate the two attempts run left-to-right and fail fast; this is Arrow-like `&&&`, not concurrent
@@ -124,16 +129,16 @@ object Both:
       pa: Predictors[A],
       pb: Predictors[B]
   ): Predictors[Both[I, OA, OB, A, B]] with
-    def read(program: Both[I, OA, OB, A, B]): Vector[DynamicPredict] =
-      PairPredictors.read(pa, pb)(program.first, program.second)
+    def inspect(program: Both[I, OA, OB, A, B]): Vector[PredictorView] =
+      PairPredictors.inspect(pa, pb)(program.first, program.second)
 
-    def replace(program: Both[I, OA, OB, A, B], updates: Vector[DynamicPredict]): Both[I, OA, OB, A, B] =
+    def replace(program: Both[I, OA, OB, A, B], updates: Vector[PredictorState]): Both[I, OA, OB, A, B] =
       PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
-    override def readNamed(program: Both[I, OA, OB, A, B]): Vector[(String, DynamicPredict)] =
-      PairPredictors.readNamed(pa, pb)(program.first, program.second)
+    override def inspectNamed(program: Both[I, OA, OB, A, B]): Vector[(String, PredictorView)] =
+      PairPredictors.inspectNamed(pa, pb)(program.first, program.second)
 
 /** `split(a, b)` (compatibility name `tensor`) — run two programs left-to-right on independent inputs and pair both
   * outputs. It is the operation beneath shared-input fan-out: `fanout(a, b) = copy >>> split(a, b)`. Because `Either` failures and runtime
@@ -171,16 +176,16 @@ object Tensor:
       pa: Predictors[FA],
       pb: Predictors[FB]
   ): Predictors[Tensor[I, J, A, B, FA, FB]] with
-    def read(program: Tensor[I, J, A, B, FA, FB]): Vector[DynamicPredict] =
-      PairPredictors.read(pa, pb)(program.first, program.second)
+    def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[PredictorView] =
+      PairPredictors.inspect(pa, pb)(program.first, program.second)
 
-    def replace(program: Tensor[I, J, A, B, FA, FB], updates: Vector[DynamicPredict]): Tensor[I, J, A, B, FA, FB] =
+    def replace(program: Tensor[I, J, A, B, FA, FB], updates: Vector[PredictorState]): Tensor[I, J, A, B, FA, FB] =
       PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
-    override def readNamed(program: Tensor[I, J, A, B, FA, FB]): Vector[(String, DynamicPredict)] =
-      PairPredictors.readNamed(pa, pb)(program.first, program.second)
+    override def inspectNamed(program: Tensor[I, J, A, B, FA, FB]): Vector[(String, PredictorView)] =
+      PairPredictors.inspectNamed(pa, pb)(program.first, program.second)
 
 /** `copy`: duplicate the input `I` into `(I, I)`. Parameter-free (like `id`); the first half of a fan-out, so
   * `parallel(a, b) = copy >>> tensor(a, b)`. Copy commutes with deterministic programs but not effect-observing

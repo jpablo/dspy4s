@@ -40,7 +40,11 @@ final case class ChainOfThought[I, O](
     signature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     runtime: ProgramRuntime = new SettingsProgramRuntime {},
-    name: Option[String] = None
+    name: Option[String] = None,
+    /** Module-level LM defaults carried as writable [[PredictorState]], matching [[Predict]] and [[DynamicPredict]].
+      * Per-call config still wins on key collisions.
+      */
+    config: DynamicValue.Record = DynamicValue.Record.empty
 )(using prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ChainOfThought.WithReasoning[O]])
     extends Module[TypedCall[I], Prediction[ChainOfThought.WithReasoning[O]]]:
 
@@ -74,7 +78,7 @@ final case class ChainOfThought[I, O](
     * program's `chain_of_thought` event. */
   private lazy val predictor: Either[DspyError, Predict[I, Out]] =
     augmentedSignature.map { sig =>
-      Predict(sig, demos, None, runtime)
+      Predict(signature = sig, demos = demos, runtime = runtime, config = config)
     }
 
   private def augmentedSignature: Either[DspyError, Signature[I, Out]] =

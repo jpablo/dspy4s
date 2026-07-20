@@ -112,6 +112,9 @@ object Optimize:
       reflectionLm = reflectionLm,
       GepaConfig(maxMetricCalls = budget, reflectionMinibatchSize = minibatch, stopOnPerfectScore = true, seed = 0L)
     )
-    val result   = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
-    val optInstr = result.bestCandidate.getOrElse(PredictorId(0), Agent.plannerInstructionsBaseline)
+    val result = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
+    val optInstr = result.bestCandidate
+      .get(PredictorId(0))
+      .flatten
+      .getOrElse(Agent.plannerInstructionsBaseline)
     OptimizationReport(baseline, accuracy(optInstr, valset), optInstr, result.numCandidates)

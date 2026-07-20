@@ -16,8 +16,9 @@ is the improved program:
 --8<-- "learn/optimization/Optimizers.scala:optimize-bootstrap"
 ```
 
-Optimizers operate on the untyped `DynamicPredict`, which carries the predictor
-state they read and rewrite. The returned program can be
+Optimizers are generic over the program type. `Predictors[P]` exposes each leaf's
+writable `PredictorState`, while `Runnable[P]` executes either typed programs or
+the untyped `DynamicModule` spine. The returned program can be
 [saved and loaded](../runtime/saving-and-loading.md), so optimization runs once
 and the result ships with your application.
 

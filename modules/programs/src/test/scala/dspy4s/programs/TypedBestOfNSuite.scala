@@ -265,8 +265,10 @@ class TypedBestOfNSuite extends FunSuite:
 
   /** Inner typed program that drives the AMBIENT adapter + LM (so an injected `hint_` actually reaches the prompt
     * the LM sees). Mirrors what a real `Predict[Q, Cand]` does, minus the static-Signature codec. */
-  private final class InnerPredict extends Module[TypedCall[Q], Prediction[Cand]]:
-    val layout: SignatureLayout = SignatureLayout.parse("q -> answer, score").toOption.get
+  private final case class InnerPredict(state: PredictorState = PredictorState())
+      extends Module[TypedCall[Q], Prediction[Cand]]:
+    val layout: SignatureLayout =
+      SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(state.instructions)
     override val moduleName: String = "inner_predict"
     override protected def callInputs(call: TypedCall[Q]): DynamicValue.Record = rec("q" := call.input.q)
     override protected def callTraceEnabled(call: TypedCall[Q]): Boolean       = call.traceEnabled
@@ -278,9 +280,9 @@ class TypedBestOfNSuite extends FunSuite:
       val lm      = ctx.lm.collect { case m: LanguageModel => m }.get
       val invocation = AdapterInvocation(
         layout  = layout,
-        demos   = Vector.empty,
+        demos   = state.demos,
         inputs  = Example(values = rec("q" := call.input.q), inputKeys = Set("q")),
-        request = LmRequest(model = lm.id)
+        request = LmRequest(model = lm.id, options = state.config)
       )
       for
         prompt   <- adapter.format(invocation)
@@ -290,13 +292,13 @@ class TypedBestOfNSuite extends FunSuite:
         score    <- DynamicPrediction(values = parsed.values).asDouble("score")
       yield Prediction(output = Cand(answer, score), raw = DynamicPrediction(values = parsed.values))
 
-  /** `InnerPredict` runs one LM call on a fixed layout; expose that layout as its single "self" predictor so Refine's
-    * advice can route back to it. `replace` is identity (these tests never edit the program). */
-  private given Predictors[InnerPredict] with
-    def read(program: InnerPredict): Vector[DynamicPredict]                       = Vector(DynamicPredict(layout = program.layout))
-    def replace(program: InnerPredict, updates: Vector[DynamicPredict]): InnerPredict = program
-    override def readNamed(program: InnerPredict): Vector[(String, DynamicPredict)] =
-      Vector("self" -> DynamicPredict(layout = program.layout))
+  /** `InnerPredict` runs one LM call on a fixed layout; expose a lawful single state focus so Refine's advice can
+    * route back to it without treating an executable `DynamicPredict` as optimizer state. */
+  private given Predictor[InnerPredict] with
+    def get(program: InnerPredict): PredictorState = program.state
+    def metadata(program: InnerPredict): PredictorMetadata =
+      PredictorMetadata.from(program.layout, program.moduleName)
+    def set(program: InnerPredict, updated: PredictorState): InnerPredict = program.copy(state = updated)
 
   test("Refine generates advice and injects it as a hint so a retry improves above threshold") {
     val adapter = ScriptingAdapter()

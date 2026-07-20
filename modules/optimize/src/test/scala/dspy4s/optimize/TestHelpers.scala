@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.Predictor
+import dspy4s.programs.{Predictor, PredictorMetadata, PredictorState}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -9,7 +9,6 @@ import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
@@ -24,7 +23,8 @@ final case class ScriptedPredictProgram(
     answers: Map[String, String],
     layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
-    failsWith: Option[RuntimeException] = None
+    failsWith: Option[RuntimeException] = None,
+    config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
   override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
@@ -37,7 +37,8 @@ final case class ScriptedPredictProgram(
 final case class DemoAwarePredictProgram(
     layout: SignatureLayout,
     demos: Vector[Example] = Vector.empty,
-    answers: Map[String, String] = Map.empty
+    answers: Map[String, String] = Map.empty,
+    config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
   override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
@@ -54,14 +55,28 @@ final case class DemoAwarePredictProgram(
 
 object DemoAwarePredictProgram:
   given demoAwarePredictor: Predictor[DemoAwarePredictProgram] with
-    def get(program: DemoAwarePredictProgram): DynamicPredict =
-      DynamicPredict(layout = program.layout, demos = program.demos, name = Some(program.moduleName))
-    def set(program: DemoAwarePredictProgram, updated: DynamicPredict): DemoAwarePredictProgram =
-      program.copy(demos = updated.demos)
+    def get(program: DemoAwarePredictProgram): PredictorState =
+      PredictorState(program.layout.instructions, program.demos, program.config)
+    def metadata(program: DemoAwarePredictProgram): PredictorMetadata =
+      PredictorMetadata.from(program.layout, program.moduleName)
+    def set(program: DemoAwarePredictProgram, updated: PredictorState): DemoAwarePredictProgram =
+      if updated == get(program) then program
+      else program.copy(
+        layout = program.layout.withInstructions(updated.instructions),
+        demos = updated.demos,
+        config = updated.config
+      )
 
 object ScriptedPredictProgram:
   given scriptedPredictor: Predictor[ScriptedPredictProgram] with
-    def get(program: ScriptedPredictProgram): DynamicPredict =
-      DynamicPredict(layout = program.layout, demos = program.demos, name = Some(program.moduleName))
-    def set(program: ScriptedPredictProgram, updated: DynamicPredict): ScriptedPredictProgram =
-      program.copy(demos = updated.demos)
+    def get(program: ScriptedPredictProgram): PredictorState =
+      PredictorState(program.layout.instructions, program.demos, program.config)
+    def metadata(program: ScriptedPredictProgram): PredictorMetadata =
+      PredictorMetadata.from(program.layout, program.moduleName)
+    def set(program: ScriptedPredictProgram, updated: PredictorState): ScriptedPredictProgram =
+      if updated == get(program) then program
+      else program.copy(
+        layout = program.layout.withInstructions(updated.instructions),
+        demos = updated.demos,
+        config = updated.config
+      )

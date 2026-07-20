@@ -8,7 +8,8 @@ This example walks the full optimize-then-reuse cycle: build a `question -> answ
 --8<-- "tutorials/saving/Saving.scala:program"
 ```
 
-The program is a single `question -> answer` predictor. `DynamicPredict` carries the `Predictors` instance that the optimizers and `ProgramPersistence` rely on. A typed `ChainOfThought` over the same signature round-trips the same way.
+The example uses a single dynamic `question -> answer` predictor for brevity. Optimizers and `ProgramPersistence`
+are generic over any program with `Predictors` evidence, including typed `Predict` and `ChainOfThought` programs.
 
 ## Compile it
 
@@ -24,7 +25,8 @@ The program is a single `question -> answer` predictor. `DynamicPredict` carries
 --8<-- "tutorials/saving/Saving.scala:save"
 ```
 
-`ProgramPersistence.save` writes each predictor's signature, demos, and config as JSON. Only the learned state is written, not the program's code.
+`ProgramPersistence.save` writes each leaf's `PredictorState`: instructions, demos, and module-level config. It
+does not write signature field structure, module names, runtime bindings, tools, or program code.
 
 ## Recreate and load
 
@@ -32,7 +34,10 @@ The program is a single `question -> answer` predictor. `DynamicPredict` carries
 --8<-- "tutorials/saving/Saving.scala:load"
 ```
 
-`load` takes a freshly built program of the same shape so it knows the predictor layout, then returns a new immutable program with the saved demos, config, and instructions written into it. The pattern is: construct the structure in Scala with `program()`, then load the state into it. For more on the save and load API, see [Saving and loading](../runtime/saving-and-loading.md).
+`load` takes a freshly built program with the same predictor traversal/order, then returns a new immutable program
+with the saved instructions, demos, and config written into it. The fresh value keeps its signature structure,
+name, runtime, output schema, bound LM, and tools. For the complete contract and ordinal-ID caveat, see
+[Saving and loading](../runtime/saving-and-loading.md).
 
 ## Running it
 
@@ -44,6 +49,9 @@ The runnable `savingMain` performs the round-trip offline. It hand-attaches a co
 
 ## Notes
 
-The whole-program save form (Python's `save_program=True`, which serializes the program's architecture into a directory) is out of scope. dspy4s programs are immutable Scala values, so you recreate the program in code and reload its state. There is no code or pickle serialization, hence no `.pkl` variant and no `modules_to_serialize` option; the library has one JSON state format.
+The whole-program save form (Python's `save_program=True`, which serializes the program's architecture into a
+directory) is out of scope. There is no code or pickle serialization, hence no `.pkl` variant and no
+`modules_to_serialize` option. The former layout-bearing predictor-state format is unsupported; regenerate saved
+artifacts with the current version.
 
 Full source: [Saving.scala](https://github.com/jpablo/dspy4s/blob/main/modules/examples/src/main/scala/dspy4s/examples/tutorials/saving/Saving.scala)

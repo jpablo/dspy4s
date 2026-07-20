@@ -1,9 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.Predictors
+import dspy4s.programs.{PredictorState, Predictors}
 
 import dspy4s.programs.ChainOfThought
-import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predict
 import dspy4s.typed.Signature
 import munit.FunSuite
@@ -32,11 +31,11 @@ class CompanionScopePredictorsSuite extends FunSuite:
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps   = summon[Predictors[Agent]]
-    val read = ps.read(agent)
+    val views = ps.inspect(agent)
     // Each typed-program leaf is found in companion scope; strict derivation would reject a missing instance.
-    assertEquals(read.size, 2)
-    assertEquals(read(0).name, Some("plan"))
-    assertEquals(read(1).name, Some("reason"))
+    assertEquals(views.size, 2)
+    assertEquals(views(0).moduleName, "plan")
+    assertEquals(views(1).moduleName, "reason")
   }
 
   test("standalone Predict resolves to the 1-element leaf WITHOUT any import") {
@@ -78,7 +77,7 @@ class CompanionScopePredictorsSuite extends FunSuite:
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps     = summon[Predictors[Agent]]
-    val tooFew = Vector.empty[DynamicPredict]
+    val tooFew = Vector.empty[PredictorState]
     intercept[IllegalArgumentException](ps.replace(agent, tooFew))
   }
 

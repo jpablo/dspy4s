@@ -4,10 +4,10 @@
  * Source:   docs/docs/tutorials/saving/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md
  * Status:   translated — program state `save` / `load` is now ported (PORT_GAPS G-4,
- *           `dspy4s.optimize.ProgramPersistence`). dspy4s serializes a program's *learnable state*
- *           (per-predictor signature/layout + demos + config) to clean JSON — the analogue of Python's
- *           `save(..., save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small
- *           hand-built trainset (no `dspy.datasets`, PORT_GAPS G-21).
+ *           `dspy4s.optimize.ProgramPersistence`). dspy4s serializes each leaf's writable `PredictorState`
+ *           (instructions + demos + module config) to clean JSON — the analogue of Python's `save(...,
+ *           save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset
+ *           (no `dspy.datasets`, PORT_GAPS G-21).
  *
  *           Out of scope: the "whole-program" `save_program=True` directory form (snippets 6–8). That
  *           cloudpickles the program's *architecture/code* so it can be reloaded without re-declaring it.
@@ -28,8 +28,8 @@ import java.nio.file.Files
 object Saving:
 
   /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`.
-    * We use the untyped `DynamicPredict` because it carries the `Predictors` instance the optimizers and
-    * `ProgramPersistence` need; a typed `ChainOfThought` round-trips identically. */
+    * This tutorial uses `DynamicPredict` for a compact runtime-layout example; typed `Predict` and
+    * `ChainOfThought` are supported through the same `Predictors` / `PredictorState` contract. */
   // --8<-- [start:program]
   def program(): DynamicPredict =
     DynamicPredict(Signature.fromString("question -> answer").layout)
@@ -53,7 +53,7 @@ object Saving:
   // ── Snippets 2/3 — save the compiled program's state to disk ──
   // | compiled_dspy_program.save("./dspy_program/program.json", save_program=False)
   // | compiled_dspy_program.save("./dspy_program/program.pkl", save_program=False)   # .pkl variant: N/A in dspy4s
-  // `ProgramPersistence.save` writes predictor state keyed by stable ids (`predictor-0`, ...) as JSON.
+  // `ProgramPersistence.save` writes PredictorState keyed by traversal ordinals (`predictor-0`, ...) as JSON.
   // --8<-- [start:save]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)
@@ -63,8 +63,8 @@ object Saving:
   // | loaded_dspy_program = dspy.ChainOfThought("question -> answer")   # recreate the architecture
   // | loaded_dspy_program.load("./dspy_program/program.json")
   // | assert len(compiled_dspy_program.demos) == len(loaded_dspy_program.demos)
-  // dspy4s `load` takes the freshly-recreated program (so it knows the predictor shape) and returns a NEW
-  // immutable program with the saved demos/config/instructions written back.
+  // dspy4s `load` takes the freshly-recreated program and returns a NEW immutable value with the saved
+  // instructions/demos/config written back. Architecture, names, runtime bindings, schemas, LMs, and tools stay fresh.
   // --8<-- [start:load]
   def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
     ProgramPersistence.load(fresh, path)
@@ -74,6 +74,7 @@ object Saving:
   // Out of scope: that form cloudpickles the program's architecture/code into a directory so it can be reloaded
   // without re-declaring it. dspy4s programs are immutable Scala values — recreate the program in code
   // (snippet 4) and reload its STATE (above). No code/pickle serialization, hence no `modules_to_serialize`.
+  // The former state entries containing a full `signature` layout are unsupported; regenerate those artifacts.
 
 /** Demonstrates the save → recreate → load → compare round-trip OFFLINE (no LM): we hand-attach a couple of
   * demos (standing in for the output of `Saving.compile`, which needs an LM) so the persistence round-trip is

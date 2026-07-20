@@ -119,10 +119,10 @@ class ParaCompileSuite extends FunSuite:
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
       // The whole assertion goes through the Para surface: no Predictors summon at the call site.
-      assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
+      assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
       assertEquals(report.metadata.get("best_score"), Some(100.0))
       assert(report.candidates.nonEmpty)
-      assertEquals(report.candidates.head.program.params.head.layout.instructions, Some(winningInstruction))
+      assertEquals(report.candidates.head.program.params.head.instructions, Some(winningInstruction))
     }
   }
 
@@ -135,7 +135,7 @@ class ParaCompileSuite extends FunSuite:
         given RuntimeContext = RuntimeEnvironment.current
         student.copro(config(seed = 42L), trainset).toOption
           .flatMap(_.bestProgram.params.headOption)
-          .flatMap(_.layout.instructions)
+          .flatMap(_.instructions)
       }
     val a = run()
     assertEquals(a, run())
@@ -153,7 +153,7 @@ class ParaCompileSuite extends FunSuite:
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val report           = erased.copro(config(), trainset).toOption.get
-      assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
+      assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
     }
   }
 
@@ -201,7 +201,7 @@ class ParaCompileSuite extends FunSuite:
       val ran              = summon[Runnable[Program[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
       val report = pipeline.copro(config(), trainset).toOption.get
-      assertEquals(report.bestProgram.params.head.layout.instructions, Some(winningInstruction))
+      assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
       assertEquals(report.metadata.get("best_score"), Some(100.0))
     }
   }

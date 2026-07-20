@@ -41,8 +41,7 @@ object CodeInterpreterErrors:
   *     handles). Idempotent. After `close()`, behavior of further `execute`
   *     calls is implementation-defined — most impls should fail fast.
   *
-  * Used by [[dspy4s.programs.CodeAct]] and (future) `ProgramOfThought` /
-  * `RLM` ports.
+  * Used by [[dspy4s.programs.CodeAct]], `ProgramOfThought`, and `RLM`.
   */
 trait CodeInterpreter extends AutoCloseable:
   def execute(code: String): Either[DspyError, CodeResult]

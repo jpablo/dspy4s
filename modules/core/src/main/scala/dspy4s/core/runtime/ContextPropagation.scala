@@ -13,7 +13,7 @@ import scala.concurrent.Future
   * callbacks plus the accumulated trace, history, and call stack -- in a `ThreadLocal`. Thread-locals do not
   * follow work that hops to another thread, so when a program runs on a pool thread (a `Future`, a parallel
   * executor worker, a streaming consumer thread) that worker starts with a fresh, empty context. Without
-  * propagation, a `Predict.run` executed there would find no LM configured and fire no callbacks.
+  * propagation, a predictor call executed there would find no LM configured and fire no callbacks.
   *
   * This object closes that gap: [[capture]] snapshots the submitting thread's context, and the run helpers
   * re-install it on the worker for the duration of the task, so dependencies and dynamic scope behave as if the

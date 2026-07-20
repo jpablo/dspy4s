@@ -91,8 +91,8 @@ object Moded:
   given modedPredictors[I, O, P <: Module[TypedCall[I], Prediction[O]]](using
       inner: Predictors[P]
   ): Predictors[Moded[I, O, P]] with
-    def read(program: Moded[I, O, P]): Vector[DynamicPredict] = inner.read(program.program)
-    def replace(program: Moded[I, O, P], updates: Vector[DynamicPredict]): Moded[I, O, P] =
+    def inspect(program: Moded[I, O, P]): Vector[PredictorView] = inner.inspect(program.program)
+    def replace(program: Moded[I, O, P], updates: Vector[PredictorState]): Moded[I, O, P] =
       program.copy(program = inner.replace(program.program, updates))
-    override def readNamed(program: Moded[I, O, P]): Vector[(String, DynamicPredict)] =
-      inner.readNamed(program.program)
+    override def inspectNamed(program: Moded[I, O, P]): Vector[(String, PredictorView)] =
+      inner.inspectNamed(program.program)

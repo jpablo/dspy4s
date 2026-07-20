@@ -7,67 +7,72 @@ import scala.compiletime.summonFrom
 import scala.deriving.Mirror
 import scala.util.NotGiven
 
-/** A program that IS one learnable predictor (the leaf of the introspection tree). */
+/** A program that is one learnable predictor (a leaf of the introspection tree).
+  *
+  * This is a lens onto exactly the program's writable [[PredictorState]]. For all states `s`, `s1`, and `s2`, its
+  * intended laws are:
+  *
+  *   - Get-Put: `set(p, get(p)) == p`
+  *   - Put-Get: `get(set(p, s)) == s`
+  *   - Put-Put: `set(set(p, s1), s2) == set(p, s2)`
+  *   - Frame: `metadata(set(p, s)) == metadata(p)`
+  *
+  * The metadata frame is what excludes signature structure and execution resources from optimizer replacement.
+  */
 trait Predictor[P]:
-  def get(program: P): DynamicPredict
-  def set(program: P, updated: DynamicPredict): P
+  def get(program: P): PredictorState
+  def metadata(program: P): PredictorMetadata
+  def set(program: P, updated: PredictorState): P
+
+  final def inspect(program: P): PredictorView = PredictorView(metadata(program), get(program))
 
 object Predictor:
   /** A [[DynamicPredict]] is itself a learnable predictor leaf. Defined in the [[Predictor]] companion so it is in
     * implicit scope wherever a `Predictor[DynamicPredict]` (or its `NotGiven`) is sought.
     */
   given Predictor[DynamicPredict] with
-    def get(program: DynamicPredict): DynamicPredict                          = program
-    def set(program: DynamicPredict, updated: DynamicPredict): DynamicPredict = updated
+    def get(program: DynamicPredict): PredictorState         = program.predictorState
+    def metadata(program: DynamicPredict): PredictorMetadata = program.predictorView.metadata
+    def set(program: DynamicPredict, updated: PredictorState): DynamicPredict =
+      program.withPredictorState(updated)
 
   /** Leaf [[Predictor]] for the typed single-predictor program [[Predict]]. A `Predict` field inside a user composite
     * resolves here (via [[Predictors.fromPredictor]], 1 element) rather than being structurally torn apart by
     * [[Predictors.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the [[Predictor]] companion
     * so it is in implicit scope without an explicit import.
     *
-    * `get` projects the program's learnable state into the [[DynamicPredict]] the program actually runs on: the layout
-    * is `signature.layout` (the exact layout the inner [[dspy4s.programs.runtime.PredictEngine]] executes), with the
-    * program's `demos`, name, and output JSON schema.
-    *
-    * `set` writes back the editable learnable state: `demos`, the module-level `config`, and the layout's
-    * `instructions` (applied via `signature.withInstructions`, which touches only the instruction string). It
-    * deliberately does NOT swap the full layout back into the typed signature — that would desync
-    * `signature.outputShape` (which still decodes the original `O`) from `signature.layout`. Editing only the
-    * instructions string is shape-safe and is what instruction optimizers (COPRO/MIPRO) need. The invariant `set(p,
-    * get(p)) == p` holds (demos/config/instructions are projected by `get` and re-applied unchanged).
+    * State is exactly instructions, demos, and module config. The signature field structure, output shape, name,
+    * runtime, bound LM, and tools remain on the original typed program and are exposed only as read-only metadata.
     */
   given predictPredictor[I, O]: Predictor[Predict[I, O]] with
-    def get(program: Predict[I, O]): DynamicPredict =
-      DynamicPredict(
-        layout = program.signature.layout,
-        demos = program.demos,
-        name = Some(program.moduleName),
-        outputJsonSchema = program.signature.outputShape.jsonSchemaString,
-        config = program.config
-      )
+    def get(program: Predict[I, O]): PredictorState =
+      PredictorState(program.signature.layout.instructions, program.demos, program.config)
 
-    def set(program: Predict[I, O], updated: DynamicPredict): Predict[I, O] =
-      program.copy(
-        demos = updated.demos,
-        config = updated.config,
-        signature = program.signature.withInstructions(updated.layout.instructions)
-      )
+    def metadata(program: Predict[I, O]): PredictorMetadata =
+      PredictorMetadata.from(program.signature.layout, program.moduleName)
+
+    def set(program: Predict[I, O], updated: PredictorState): Predict[I, O] =
+      if updated == get(program) then program
+      else
+        program.copy(
+          demos = updated.demos,
+          config = updated.config,
+          signature = program.signature.withInstructions(updated.instructions)
+        )
 
   /** Leaf [[Predictor]] for the typed single-predictor program [[ChainOfThought]]. Like [[predictPredictor]], but the
     * exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
     * `ChainOfThought.augmentLayout` returns an `Either`; it is resolved fail-fast here (consistent with the P3
     * hand-written instances), and only fails for layouts that cannot be augmented.
     *
-    * `set` writes back `demos` and the layout's `instructions` (via `signature.withInstructions`, shape-safe).
-    * `ChainOfThought` has no module-level `config` field (G-3 added it only to `Predict`/`DynamicPredict`), so config
-    * is not round-tripped here — a minor follow-up. The `prepend` evidence is required to reconstruct the program via
-    * `copy`. The invariant `set(p, get(p)) == p` holds.
+    * State remains instructions, demos, and config. The augmented signature structure is metadata only; writing a state
+    * changes the base signature's instructions, from which the same augmented structure is rebuilt.
     */
   given chainOfThoughtPredictor[I, O](using
       prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ChainOfThought.WithReasoning[O]]
   ): Predictor[ChainOfThought[I, O]] with
-    def get(program: ChainOfThought[I, O]): DynamicPredict =
-      val augmented = ChainOfThought
+    private def augmented(program: ChainOfThought[I, O]) =
+      ChainOfThought
         .augmentLayout(program.signature.layout)
         .fold(
           err =>
@@ -76,51 +81,70 @@ object Predictor:
             ),
           identity
         )
-      DynamicPredict(
-        layout = augmented,
-        demos = program.demos,
-        name = Some(program.moduleName),
-        outputJsonSchema = program.signature.outputShape.jsonSchemaString
-      )
 
-    def set(program: ChainOfThought[I, O], updated: DynamicPredict): ChainOfThought[I, O] =
-      program.copy(
-        demos = updated.demos,
-        signature = program.signature.withInstructions(updated.layout.instructions)
-      )
+    def get(program: ChainOfThought[I, O]): PredictorState =
+      PredictorState(program.signature.layout.instructions, program.demos, program.config)
 
-/** The general introspection contract optimizers consume -- typed analogue of Python's
-  * named_predictors()/map_named_predictors(). `read` enumerates contained predictors in a stable order; `replace` swaps
-  * them positionally and rebuilds the program immutably. Invariant: read(p).length and indices are stable across
-  * replace, and replace(p, read(p)) == p. [[readIdentified]] turns those canonical indices into typed, unique
-  * [[PredictorId]] values; [[readNamed]] supplies structural display paths separately.
+    def metadata(program: ChainOfThought[I, O]): PredictorMetadata =
+      PredictorMetadata.from(augmented(program), program.moduleName)
+
+    def set(program: ChainOfThought[I, O], updated: PredictorState): ChainOfThought[I, O] =
+      if updated == get(program) then program
+      else
+        program.copy(
+          demos = updated.demos,
+          config = updated.config,
+          signature = program.signature.withInstructions(updated.instructions)
+        )
+
+/** The general optimizer traversal -- the typed analogue of Python's `named_predictors` / `map_named_predictors`.
+  *
+  * [[inspect]] enumerates non-executable [[PredictorView]] snapshots in stable order. [[read]] projects just their
+  * writable states, and [[replace]] writes an arity-matched state vector back while preserving metadata and execution
+  * resources. Exact no-op replacement satisfies `replace(p, read(p)) == p`; read-after-write satisfies `read(replace(p,
+  * states)) == states`. For override-backed composites, Put-Put is observational through `read` even when two source
+  * values use different internal `Option` representations.
   */
 trait Predictors[P]:
-  def read(program: P): Vector[DynamicPredict]
-  def replace(program: P, updates: Vector[DynamicPredict]): P
+  def inspect(program: P): Vector[PredictorView]
+  final def read(program: P): Vector[PredictorState] = inspect(program).map(_.state)
+  def replace(program: P, updates: Vector[PredictorState]): P
 
-  /** Each predictor paired with a human-readable structural name, analogous to Python's `named_predictors()`. Names are
+  /** Each view paired with a human-readable structural name, analogous to Python's `named_predictors()`. Names are
     * dotted field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and
     * `"field.sub"` when nested. They describe the current syntax tree and therefore are not identity: reassociating an
-    * anonymous composition node can change its `first`/`second` path. `readNamed` is aligned with [[read]] order. The
+    * anonymous composition node can change its `first`/`second` path. This traversal is aligned with [[inspect]]. The
     * default uses positional names; [[Predictors.DerivedPredictors]] overrides with Mirror field labels.
     */
-  def readNamed(program: P): Vector[(String, DynamicPredict)] =
-    read(program).zipWithIndex.map { case (predict, i) => i.toString -> predict }
+  def inspectNamed(program: P): Vector[(String, PredictorView)] =
+    inspect(program).zipWithIndex.map { case (view, i) => i.toString -> view }
+
+  private final def alignedNamed(program: P): (Vector[PredictorView], Vector[String]) =
+    val views = inspect(program)
+    val named = inspectNamed(program)
+    require(
+      named.size == views.size,
+      s"Predictors.inspectNamed returned ${named.size} entries but inspect returned ${views.size}"
+    )
+    require(
+      named.map(_._2) == views,
+      "Predictors.inspectNamed must preserve the views and order returned by inspect"
+    )
+    views -> named.map(_._1)
+
+  /** Structural names paired with writable state, in [[read]] order. */
+  final def readNamed(program: P): Vector[(String, PredictorState)] =
+    val (views, displayNames) = alignedNamed(program)
+    displayNames.zip(views.map(_.state))
 
   /** The canonical optimizer-facing traversal. IDs are derived once at the root from [[read]] order, so nested
     * combinators cannot reset or prefix them. This makes identity unique and invariant under reassociation while
-    * retaining [[readNamed]]'s useful structural labels for diagnostics and prompts.
+    * retaining [[inspectNamed]]'s useful structural labels for diagnostics and prompts.
     */
   final def readIdentified(program: P): Vector[IdentifiedPredictor] =
-    val predictors   = read(program)
-    val displayNames = readNamed(program).map(_._1)
-    require(
-      displayNames.size == predictors.size,
-      s"Predictors.readNamed returned ${displayNames.size} entries but read returned ${predictors.size}"
-    )
-    predictors.zip(displayNames).zipWithIndex.map { case ((predictor, displayName), ordinal) =>
-      IdentifiedPredictor(PredictorId(ordinal), displayName, predictor)
+    val (views, displayNames) = alignedNamed(program)
+    displayNames.zip(views).zipWithIndex.map { case ((displayName, view), ordinal) =>
+      IdentifiedPredictor(PredictorId(ordinal), displayName, view)
     }
 
 object Predictors extends LowPriority:
@@ -130,72 +154,116 @@ object Predictors extends LowPriority:
     * resolve here, not be torn into its case-class fields by the structural derivation.
     */
   given fromPredictor[P](using leaf: Predictor[P]): Predictors[P] with
-    def read(program: P): Vector[DynamicPredict] = Vector(leaf.get(program))
-    def replace(program: P, updates: Vector[DynamicPredict]): P =
+    def inspect(program: P): Vector[PredictorView] = Vector(leaf.inspect(program))
+    def replace(program: P, updates: Vector[PredictorState]): P =
       require(updates.size == 1, s"Predictor leaf expects exactly 1 update, got ${updates.size}")
       leaf.set(program, updates.head)
     // A leaf contributes "self" to the name path (the dspy convention for a standalone predict); a composite
-    // collapses "self" into just its field label (see DerivedPredictors.readNamed).
-    override def readNamed(program: P): Vector[(String, DynamicPredict)] = Vector("self" -> leaf.get(program))
+    // collapses "self" into just its field label (see DerivedPredictors.inspectNamed).
+    override def inspectNamed(program: P): Vector[(String, PredictorView)] = Vector("self" -> leaf.inspect(program))
 
   /** Hand-written [[Predictors]] instances for the composite typed programs whose learnable sub-predicts are hoisted to
-    * stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[RLM]], [[MultiChainComparison]]; the
-    * evidence-parameterized wrappers [[BestOfN]] / [[Refine]] carry theirs in their companions). They live in the
+    * stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[RLM]], [[ProgramOfThought]], and
+    * [[MultiChainComparison]]; the evidence-parameterized wrappers [[BestOfN]] / [[Refine]] carry theirs in their
+    * companions). They live in the
     * [[Predictors]] companion so they are in implicit scope without an explicit import (and so a user composite
     * containing such a program resolves them; strict derivation rejects missing field evidence). They are concrete
     * `Predictors[ConcreteType]` instances; being strictly more specific than [[derived]] (and there being no
     * `Predictor` leaf for these types, so [[derived]] is even eligible), the compiler selects them.
     *
-    * `replace` rebuilds the program immutably via the per-predict `*Override` fields and satisfies `replace(p, read(p))
-    * \== p`: `replace` only rewrites an override field when the incoming update is not the program's current effective
-    * predict, compared by reference (`eq`). Since `read` returns the exact member objects, `replace(p, read(p))` leaves
-    * every override field untouched and yields `p`; an edited `copy` is a fresh object, so it is wrapped into the
-    * `*Override` field instead.
+    * `replace` writes state through each current executable predictor. An unchanged state preserves the existing
+    * override field exactly; a changed state creates an override with the same signature structure and execution
+    * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
     */
   given reactPredictors[I, O]: Predictors[ReAct[I, O]] with
-    def read(program: ReAct[I, O]): Vector[DynamicPredict] =
-      Vector(program.reactPredict, program.extractorPredict)
+    def inspect(program: ReAct[I, O]): Vector[PredictorView] =
+      Vector(program.reactPredict.predictorView, program.extractorPredict.predictorView)
 
-    def replace(program: ReAct[I, O], updates: Vector[DynamicPredict]): ReAct[I, O] =
+    override def inspectNamed(program: ReAct[I, O]): Vector[(String, PredictorView)] =
+      Vector("react" -> program.reactPredict.predictorView, "extractor" -> program.extractorPredict.predictorView)
+
+    def replace(program: ReAct[I, O], updates: Vector[PredictorState]): ReAct[I, O] =
       require(updates.size == 2, s"ReAct expects exactly 2 updates (react, extractor), got ${updates.size}")
-      val nextReact = if updates(0) eq program.reactPredict then program.reactPredictOverride else Some(updates(0))
-      val nextExtractor = if updates(1) eq program.extractorPredict then program.extractorPredictOverride
-      else Some(updates(1))
+      val nextReact = updateOverride(program.reactPredict, program.reactPredictOverride, updates(0))
+      val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
 
   given codeActPredictors[I, O]: Predictors[CodeAct[I, O]] with
-    def read(program: CodeAct[I, O]): Vector[DynamicPredict] =
-      Vector(program.codeActPredict, program.extractorPredict)
+    def inspect(program: CodeAct[I, O]): Vector[PredictorView] =
+      Vector(program.codeActPredict.predictorView, program.extractorPredict.predictorView)
 
-    def replace(program: CodeAct[I, O], updates: Vector[DynamicPredict]): CodeAct[I, O] =
+    override def inspectNamed(program: CodeAct[I, O]): Vector[(String, PredictorView)] =
+      Vector("codeact" -> program.codeActPredict.predictorView, "extractor" -> program.extractorPredict.predictorView)
+
+    def replace(program: CodeAct[I, O], updates: Vector[PredictorState]): CodeAct[I, O] =
       require(updates.size == 2, s"CodeAct expects exactly 2 updates (codeact, extractor), got ${updates.size}")
-      val nextCodeAct = if updates(0) eq program.codeActPredict then program.codeActPredictOverride
-      else Some(updates(0))
-      val nextExtractor = if updates(1) eq program.extractorPredict then program.extractorPredictOverride
-      else Some(updates(1))
+      val nextCodeAct = updateOverride(program.codeActPredict, program.codeActPredictOverride, updates(0))
+      val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
 
   given rlmPredictors[I, O]: Predictors[RLM[I, O]] with
-    def read(program: RLM[I, O]): Vector[DynamicPredict] =
-      Vector(program.actionPredict, program.extractPredict)
+    def inspect(program: RLM[I, O]): Vector[PredictorView] =
+      Vector(program.actionPredict.predictorView, program.extractPredict.predictorView)
 
-    def replace(program: RLM[I, O], updates: Vector[DynamicPredict]): RLM[I, O] =
+    override def inspectNamed(program: RLM[I, O]): Vector[(String, PredictorView)] =
+      Vector("action" -> program.actionPredict.predictorView, "extract" -> program.extractPredict.predictorView)
+
+    def replace(program: RLM[I, O], updates: Vector[PredictorState]): RLM[I, O] =
       require(updates.size == 2, s"RLM expects exactly 2 updates (action, extract), got ${updates.size}")
-      val nextAction = if updates(0) eq program.actionPredict then program.actionPredictOverride
-      else Some(updates(0))
-      val nextExtract = if updates(1) eq program.extractPredict then program.extractPredictOverride
-      else Some(updates(1))
+      val nextAction = updateOverride(program.actionPredict, program.actionPredictOverride, updates(0))
+      val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
       program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
-  given multiChainComparisonPredictors[I, O]: Predictors[MultiChainComparison[I, O]] with
-    def read(program: MultiChainComparison[I, O]): Vector[DynamicPredict] =
-      Vector(program.comparePredict)
+  given programOfThoughtPredictors[I, O]: Predictors[ProgramOfThought[I, O]] with
+    def inspect(program: ProgramOfThought[I, O]): Vector[PredictorView] =
+      Vector(
+        program.generatorPredict.predictorView,
+        program.regeneratorPredict.predictorView,
+        program.answererPredict.predictorView
+      )
 
-    def replace(program: MultiChainComparison[I, O], updates: Vector[DynamicPredict]): MultiChainComparison[I, O] =
+    override def inspectNamed(program: ProgramOfThought[I, O]): Vector[(String, PredictorView)] =
+      Vector(
+        "generator"   -> program.generatorPredict.predictorView,
+        "regenerator" -> program.regeneratorPredict.predictorView,
+        "answerer"    -> program.answererPredict.predictorView
+      )
+
+    def replace(program: ProgramOfThought[I, O], updates: Vector[PredictorState]): ProgramOfThought[I, O] =
+      require(
+        updates.size == 3,
+        s"ProgramOfThought expects exactly 3 updates (generator, regenerator, answerer), got ${updates.size}"
+      )
+      if updates == inspect(program).map(_.state) then program
+      else
+        val nextGenerator = updateOverride(program.generatorPredict, program.generatorPredictOverride, updates(0))
+        val nextRegenerator =
+          updateOverride(program.regeneratorPredict, program.regeneratorPredictOverride, updates(1))
+        val nextAnswerer = updateOverride(program.answererPredict, program.answererPredictOverride, updates(2))
+        program.copy(
+          generatorPredictOverride = nextGenerator,
+          regeneratorPredictOverride = nextRegenerator,
+          answererPredictOverride = nextAnswerer
+        )
+
+  given multiChainComparisonPredictors[I, O]: Predictors[MultiChainComparison[I, O]] with
+    def inspect(program: MultiChainComparison[I, O]): Vector[PredictorView] =
+      Vector(program.comparePredict.predictorView)
+
+    override def inspectNamed(program: MultiChainComparison[I, O]): Vector[(String, PredictorView)] =
+      Vector("compare" -> program.comparePredict.predictorView)
+
+    def replace(program: MultiChainComparison[I, O], updates: Vector[PredictorState]): MultiChainComparison[I, O] =
       require(updates.size == 1, s"MultiChainComparison expects exactly 1 update (compare), got ${updates.size}")
-      val nextCompare = if updates(0) eq program.comparePredict then program.comparePredictOverride
-      else Some(updates(0))
+      val nextCompare = updateOverride(program.comparePredict, program.comparePredictOverride, updates(0))
       program.copy(comparePredictOverride = nextCompare)
+
+  private def updateOverride(
+      current: DynamicPredict,
+      existing: Option[DynamicPredict],
+      updated: PredictorState
+  ): Option[DynamicPredict] =
+    if updated == current.predictorState then existing else Some(current.withPredictorState(updated))
 
   /** Identity instance for types intentionally known to contain no predictors.
     *
@@ -204,8 +272,10 @@ object Predictors extends LowPriority:
     * compile error instead of silently hiding a potentially learnable subtree.
     */
   def empty[P]: Predictors[P] = new Predictors[P]:
-    def read(program: P): Vector[DynamicPredict]                = Vector.empty
-    def replace(program: P, updates: Vector[DynamicPredict]): P = program
+    def inspect(program: P): Vector[PredictorView] = Vector.empty
+    def replace(program: P, updates: Vector[PredictorState]): P =
+      require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
+      program
 
   /** Named (non-inline) carrier of the derived behaviour. Keeping it a top-level class -- rather than an anonymous
     * class inside `derived` -- avoids `-Werror` rejecting an inline-duplicated anonymous class definition at each use
@@ -216,31 +286,35 @@ object Predictors extends LowPriority:
       fieldInstances: List[Predictors[Any]],
       labels: List[String]
   ) extends Predictors[P]:
-    def read(program: P): Vector[DynamicPredict] =
-      fieldInstances.zipWithIndex.foldLeft(Vector.empty[DynamicPredict]) { case (acc, (inst, i)) =>
-        acc ++ inst.read(program.productElement(i))
+    def inspect(program: P): Vector[PredictorView] =
+      fieldInstances.zipWithIndex.foldLeft(Vector.empty[PredictorView]) { case (acc, (inst, i)) =>
+        acc ++ inst.inspect(program.productElement(i))
       }
 
     /** Names each predictor by its case-class field path (P-c). A field whose value is a leaf predict gets just the
       * field label (its leaf name "self" is collapsed); a nested composite field yields `"field.sub"`.
       */
-    override def readNamed(program: P): Vector[(String, DynamicPredict)] =
+    override def inspectNamed(program: P): Vector[(String, PredictorView)] =
       fieldInstances.zip(labels).zipWithIndex.flatMap { case ((inst, label), i) =>
-        inst.readNamed(program.productElement(i)).map { case (sub, predict) =>
-          (if sub == "self" then label else s"$label.$sub") -> predict
+        inst.inspectNamed(program.productElement(i)).map { case (sub, view) =>
+          (if sub == "self" then label else s"$label.$sub") -> view
         }
       }.toVector
 
-    def replace(program: P, updates: Vector[DynamicPredict]): P =
+    def replace(program: P, updates: Vector[PredictorState]): P =
+      val arities = fieldInstances.zipWithIndex.map { case (inst, i) =>
+        inst.read(program.productElement(i)).size
+      }
+      val expected = arities.sum
+      require(expected == updates.size, s"Predictors.replace expected $expected updates, got ${updates.size}")
       var cursor = 0
       val rebuiltArgs = fieldInstances.zipWithIndex.map { case (inst, i) =>
         val value = program.productElement(i)
-        val arity = inst.read(value).size
+        val arity = arities(i)
         val slice = updates.slice(cursor, cursor + arity)
         cursor += arity
         inst.replace(value, slice)
       }
-      require(cursor == updates.size, s"Predictors.replace expected $cursor updates, got ${updates.size}")
       m.fromProduct(Tuple.fromArray(rebuiltArgs.toArray))
 
   /** Recurse over the Mirror's element types, summoning each field's `Predictors`.

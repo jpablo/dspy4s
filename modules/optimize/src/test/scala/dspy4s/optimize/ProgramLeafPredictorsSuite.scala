@@ -29,14 +29,14 @@ class ProgramLeafPredictorsSuite extends FunSuite:
 
   // ── Predict ─────────────────────────────────────────────────────────────
 
-  test("Predictor[Predict].get exposes the program's layout, demos, name and output schema") {
+  test("Predictor[Predict] separates writable state from read-only metadata") {
     val predict = Predict(qaSignature, demos = demo, name = Some("ask"))
     val leaf    = predictorOf(predict)
-    val dp      = leaf.get(predict)
-    assertEquals(dp.layout, predict.signature.layout)
-    assertEquals(dp.demos, demo)
-    assertEquals(dp.name, Some("ask"))
-    assertEquals(dp.outputJsonSchema, predict.signature.outputShape.jsonSchemaString)
+    val state   = leaf.get(predict)
+    val view    = leaf.inspect(predict)
+    assertEquals(view.layout, predict.signature.layout)
+    assertEquals(state.demos, demo)
+    assertEquals(view.moduleName, "ask")
   }
 
   test("Predictor[Predict]: set(p, get(p)) round-trips to identity") {
@@ -59,9 +59,9 @@ class ProgramLeafPredictorsSuite extends FunSuite:
     val predict = Predict(qaSignature, name = Some("ask"))
     val leaf    = predictorOf(predict)
     val cur     = leaf.get(predict)
-    val out     = leaf.set(predict, cur.copy(layout = cur.layout.withInstructions(Some("Think carefully."))))
+    val out     = leaf.set(predict, cur.copy(instructions = Some("Think carefully.")))
     assertEquals(out.signature.instructions, Some("Think carefully."))
-    assertEquals(leaf.get(out).layout.instructions, Some("Think carefully."))
+    assertEquals(leaf.get(out).instructions, Some("Think carefully."))
   }
 
   test("Predictor[Predict]: set writes back module config") {
@@ -76,15 +76,16 @@ class ProgramLeafPredictorsSuite extends FunSuite:
 
   // ── ChainOfThought ───────────────────────────────────────────────────────
 
-  test("Predictor[ChainOfThought].get exposes the AUGMENTED layout (reasoning prepended) + demos") {
+  test("Predictor[ChainOfThought] exposes augmented read-only metadata plus writable state") {
     val cot  = ChainOfThought(qaSignature, demos = demo, name = Some("think"))
     val leaf = predictorOf(cot)
-    val dp   = leaf.get(cot)
+    val state = leaf.get(cot)
+    val view  = leaf.inspect(cot)
     // the exposed layout is the augmented one containing the leading `reasoning` output field
-    assertEquals(dp.layout.outputFields.head.name, "reasoning")
-    assert(dp.layout.outputFields.exists(_.name == "answer"))
-    assertEquals(dp.demos, demo)
-    assertEquals(dp.name, Some("think"))
+    assertEquals(view.layout.outputFields.head.name, "reasoning")
+    assert(view.layout.outputFields.exists(_.name == "answer"))
+    assertEquals(state.demos, demo)
+    assertEquals(view.moduleName, "think")
   }
 
   test("Predictor[ChainOfThought]: set(p, get(p)) round-trips to identity") {
@@ -106,7 +107,7 @@ class ProgramLeafPredictorsSuite extends FunSuite:
     val cot  = ChainOfThought(qaSignature, name = Some("think"))
     val leaf = predictorOf(cot)
     val cur  = leaf.get(cot)
-    val out  = leaf.set(cot, cur.copy(layout = cur.layout.withInstructions(Some("Reason step by step."))))
+    val out  = leaf.set(cot, cur.copy(instructions = Some("Reason step by step.")))
     assertEquals(out.signature.instructions, Some("Reason step by step."))
   }
 
@@ -136,12 +137,12 @@ class ProgramLeafPredictorsSuite extends FunSuite:
       b = ChainOfThought(qaSignature, name = Some("think"))
     )
     val ps   = summon[Predictors[Pipe2]]
-    val read = ps.read(pipe)
-    assertEquals(read.size, 2)
-    assertEquals(read(0).name, Some("ask"))
-    assertEquals(read(1).name, Some("think"))
+    val views = ps.inspect(pipe)
+    assertEquals(views.size, 2)
+    assertEquals(views(0).moduleName, "ask")
+    assertEquals(views(1).moduleName, "think")
     // the CoT field exposes the augmented layout (reasoning prepended)
-    assertEquals(read(1).layout.outputFields.head.name, "reasoning")
+    assertEquals(views(1).layout.outputFields.head.name, "reasoning")
     // round-trip identity
     assertEquals(ps.replace(pipe, ps.read(pipe)), pipe)
   }

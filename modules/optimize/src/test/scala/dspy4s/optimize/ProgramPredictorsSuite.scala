@@ -38,16 +38,15 @@ class ProgramPredictorsSuite extends FunSuite:
 
   // ── ReAct ──────────────────────────────────────────────────────────────
 
-  test("ReAct: read returns the two hoisted predicts (react, extractor) in stable order") {
+  test("ReAct: inspect returns the two hoisted predictor views in stable order") {
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search))
     val ps    = predictorsOf(react)
-    val read  = ps.read(react)
-    assertEquals(read.size, 2)
-    assertEquals(read(0).name, Some("react"))
-    assertEquals(read(1).name, Some("react_extract"))
-    // the read predicts ARE the program's hoisted members (reference identity)
-    assert(read(0) eq react.reactPredict)
-    assert(read(1) eq react.extractorPredict)
+    val views = ps.inspect(react)
+    assertEquals(views.size, 2)
+    assertEquals(views(0).moduleName, "react")
+    assertEquals(views(1).moduleName, "react_extract")
+    assertEquals(views(0).state, react.reactPredict.predictorState)
+    assertEquals(views(1).state, react.extractorPredict.predictorState)
   }
 
   test("ReAct: replace(p, read(p)) round-trips to identity") {
@@ -76,15 +75,15 @@ class ProgramPredictorsSuite extends FunSuite:
 
   // ── CodeAct ────────────────────────────────────────────────────────────
 
-  test("CodeAct: read returns the two hoisted predicts (codeact, extractor) in stable order") {
+  test("CodeAct: inspect returns the two hoisted predictor views in stable order") {
     val codeAct = CodeAct(baseSignature = qaSignature, interpreter = NoopInterpreter)
     val ps      = predictorsOf(codeAct)
-    val read    = ps.read(codeAct)
-    assertEquals(read.size, 2)
-    assertEquals(read(0).name, Some("codeact"))
-    assertEquals(read(1).name, Some("codeact_extract"))
-    assert(read(0) eq codeAct.codeActPredict)
-    assert(read(1) eq codeAct.extractorPredict)
+    val views   = ps.inspect(codeAct)
+    assertEquals(views.size, 2)
+    assertEquals(views(0).moduleName, "codeact")
+    assertEquals(views(1).moduleName, "codeact_extract")
+    assertEquals(views(0).state, codeAct.codeActPredict.predictorState)
+    assertEquals(views(1).state, codeAct.extractorPredict.predictorState)
   }
 
   test("CodeAct: replace(p, read(p)) round-trips to identity") {
@@ -110,12 +109,12 @@ class ProgramPredictorsSuite extends FunSuite:
 
   // ── MultiChainComparison ─────────────────────────────────────────────────
 
-  test("MultiChainComparison: read returns the single hoisted compare predict") {
+  test("MultiChainComparison: inspect returns the single hoisted compare predictor view") {
     val mcc  = MultiChainComparison(baseSignature = qaSignature, m = 3)
     val ps   = predictorsOf(mcc)
-    val read = ps.read(mcc)
-    assertEquals(read.size, 1)
-    assert(read(0) eq mcc.comparePredict)
+    val views = ps.inspect(mcc)
+    assertEquals(views.size, 1)
+    assertEquals(views.head.state, mcc.comparePredict.predictorState)
   }
 
   test("MultiChainComparison: replace(p, read(p)) round-trips to identity") {

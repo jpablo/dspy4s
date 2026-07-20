@@ -130,8 +130,12 @@ selectBest        ordered search: early stopping and ties preserve attempt order
 
 feedback          feedback is NOT permutation-invariant       // carried hint = order matters
 
-Predictors        read(c) = ownPredicts ++ children.flatMap(read)     // concatenation homomorphism
-                  replace(p, read(p)) = p                              // round-trip
+Predictors        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
+                  read(c) = inspect(c).map(_.state)                    // parameter projection
+                  replace(p, read(p)) = p                              // Get-Put
+                  read(replace(p, states)) = states                    // Put-Get
+                  inspect(replace(p, states)).map(_.metadata)
+                    = inspect(p).map(_.metadata)                        // frame
 ```
 
 `selectBest` and `feedback` share attempt execution and selection mechanics, but both are ordered state machines:
@@ -166,10 +170,10 @@ typeclasses, not new machinery. The rule:
 The addressability layer is an instance of the **Para construction** from categorical learning theory
 ("Backprop as Functor", Fong/Spivak/Tuyeras; "Categorical Foundations of Gradient-Based Learning",
 Cruttwell et al.): a morphism is a pair (parameters, shape), composition tensors the parameters, and
-reparameterization is the 2-cell layer optimizers act on. dspy4s's learnables are homogeneous (every
-parameter is a `DynamicPredict`), so the parameter tensor degenerates to the free monoid
-`Vector[DynamicPredict]`, and `Predictors.read` / `replace` are exactly Para's projection and
-reparameterization; the untyped `Vector` is therefore lossless, not a shadow.
+reparameterization is the 2-cell layer optimizers act on. dspy4s's writable parameters are homogeneous (every
+parameter is a `PredictorState` containing instructions, demos, and config), so the parameter tensor degenerates
+to the free monoid `Vector[PredictorState]`. `Predictors.read` / `replace` are exactly Para's projection and
+reparameterization; signature structure and module identity remain in the morphism's read-only metadata.
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
@@ -234,7 +238,7 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   category to the parameter-monoid delooping) names what `Predictors.read` is categorically; its functor laws
   (preserves id + composition), carried on the `CategoryFunctor` trait against the two `Category` instances, are exactly
   the Para projection laws. The
-  parameter monoid is now an explicit `given Monoid[Vector[DynamicPredict]]` and the delooping is generic
+  parameter monoid is now an explicit `given Monoid[Vector[PredictorState]]` and the delooping is generic
   (`delooping[M](using Monoid[M]) : Category[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
   `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).
 - **`fanout`, named honestly.** Added to the `Program` layer as the ordered pairing: both legs share the

@@ -32,8 +32,9 @@ result.bestScore     // its mean validation score
 ```
 
 GEPA evolves **instructions only** — one per predictor (component). The program's structure (fields, demos,
-wiring) is fixed. A `Candidate` is therefore a `Map[PredictorId, instructionText]` — the genome — and
-the seed candidate is the program's current instructions.
+wiring) is fixed. A `Candidate` is therefore a `Map[PredictorId, Option[String]]` — the genome — and
+the seed candidate is the program's current instructions. The option preserves the distinction between no
+instruction (`None`) and an explicitly empty instruction (`Some("")`).
 
 ## The signal: `FeedbackMetric`
 
@@ -127,7 +128,7 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 | `GepaAdapter.scala` | program ↔ engine bridge (apply candidate, evaluate, capture traces) |
 | `GepaEngine.scala` | the search loop + `GepaConfig` / `GepaResult` |
 | `GepaState.scala` | candidate pool, subscores, lineage, Pareto frontier |
-| `Candidate.scala` | the genome (component → instruction) + seed/apply |
+| `Candidate.scala` | the genome (component → optional instruction) + seed/apply |
 | `InstructionProposer.scala` | reflective mutation (prompt the reflection LM) |
 | `MergeProposer.scala` | crossover over common ancestors |
 | `MinibatchSampler.scala` | minibatch sampling strategies |

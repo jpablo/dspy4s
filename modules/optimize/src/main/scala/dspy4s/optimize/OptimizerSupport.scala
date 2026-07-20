@@ -16,7 +16,7 @@ private[optimize] object OptimizerSupport:
   def applyInstruction[P](program: P, idx: Int, instruction: String)(using ps: Predictors[P]): P =
     val leaves = ps.read(program)
     val leaf   = leaves(idx)
-    ps.replace(program, leaves.updated(idx, leaf.copy(layout = leaf.layout.withInstructions(Some(instruction)))))
+    ps.replace(program, leaves.updated(idx, leaf.copy(instructions = Some(instruction))))
 
   /** Map an optimizer `seed` to a base `rolloutId` in `[0, 1024)`. Optimizers offset this base to carve out
     * deterministic, non-overlapping rolloutId windows per predictor / round / candidate, so candidate sampling is

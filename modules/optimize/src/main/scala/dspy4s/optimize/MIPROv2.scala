@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.{DynamicPredict, Predictors}
+import dspy4s.programs.{PredictorState, Predictors}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Example
@@ -57,7 +57,7 @@ final case class MIPROv2Config(
   *   3. '''Search''' (Step 3, "find optimal prompt parameters"). For `numTrials` trials with a seeded RNG, randomly
   *      picks one demo-assignment index (applied whole-program) and, per predictor, one instruction-candidate
   *      index. The trial program is built with a single [[Predictors.replace]] applying each chosen instruction
-  *      (`leaf.copy(layout = leaf.layout.withInstructions(Some(instr)))`) AND chosen demos (`.copy(demos = ...)`).
+  *      (`state.copy(instructions = Some(instr))`) AND chosen demos (`.copy(demos = ...)`).
   *      Each trial is scored on the valset (falling back to the trainset) via [[dspy4s.evaluate.Evaluate]] + [[Runnable]] + the
   *      metric. A baseline candidate (the unmodified student) is always scored too. The best-scoring candidate is
   *      returned as `bestProgram`; all scored candidates (trials + baseline) are returned sorted descending.
@@ -155,7 +155,7 @@ final class MIPROv2[P: Predictors: Runnable](config: MIPROv2Config) extends Tele
     // Ground the proposer on the first bootstrapped demo assignment if present (index 0 is zero-shot), else empty.
     val seedDemos: Vector[Vector[Example]] = demoCandidates.lift(1).getOrElse(Vector.empty)
     val currentInstructions: Vector[String] =
-      ps.read(student).map(_.layout.instructions.getOrElse(""))
+      ps.read(student).map(_.instructions.getOrElse(""))
 
     proposer.proposeInstructions(student, trainset, seedDemos).map { proposed =>
       proposed.zipWithIndex.map { case (perPredictor, idx) =>
@@ -219,15 +219,15 @@ final class MIPROv2[P: Predictors: Runnable](config: MIPROv2Config) extends Tele
   /** Build a trial program by applying, via a single [[Predictors.replace]], each predictor's chosen instruction
     * and chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[Predictors.read]] order. */
   private def applyTrial(
-      leaves: Vector[DynamicPredict],
+      leaves: Vector[PredictorState],
       student: P,
       instructions: Vector[String],
       demoAssignment: Vector[Vector[Example]]
   ): P =
     val updated = leaves.zipWithIndex.map { case (leaf, idx) =>
-      val instr = instructions.lift(idx).getOrElse(leaf.layout.instructions.getOrElse(""))
+      val instr = instructions.lift(idx).getOrElse(leaf.instructions.getOrElse(""))
       val demos = demoAssignment.lift(idx).getOrElse(leaf.demos)
-      leaf.copy(layout = leaf.layout.withInstructions(Some(instr)), demos = demos)
+      leaf.copy(instructions = Some(instr), demos = demos)
     }
     ps.replace(student, updated)
 

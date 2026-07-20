@@ -115,9 +115,10 @@ private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   final override protected def tracePayload(output: O): DynamicValue.Record = DynamicValue.Record.empty
 
 /** The untyped program spine: `Module[ProgramCall, DynamicPrediction]` with the projection hooks defaulted to the
-  * spine record shapes (`call.inputs` / `prediction.values`). `DynamicPredict` is the engine program on this
-  * spine (it's the runtime substrate the typed programs build their inner predicts from); user-defined data-bag
-  * programs may extend it too. Subclasses implement only `forward` + `moduleName`; `tracePayload` stays
+  * spine record shapes (`call.inputs` / `prediction.values`). [[dspy4s.programs.DynamicPredict DynamicPredict]]
+  * is the untyped prediction module on this spine; user-defined data-bag programs may extend it too. The typed
+  * [[dspy4s.programs.Predict Predict]] is a sibling module over the shared `PredictEngine`, not a wrapper around
+  * `DynamicPredict`. Subclasses implement only `forward` + `moduleName`; `tracePayload` stays
   * overridable for programs that record a projection. (The typed programs — `Predict` / `ChainOfThought` /
   * `ReAct` / `CodeAct` / `ProgramOfThought` / `MultiChainComparison` / `BestOfN` / `Refine` — instead extend
   * `Module[TypedCall[I], Prediction[…]]`.) */

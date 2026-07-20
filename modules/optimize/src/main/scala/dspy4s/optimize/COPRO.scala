@@ -126,8 +126,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
   private def optimizePredictor(program: P, idx: Int, evalset: Vector[Example])(using
       RuntimeContext
   ): (P, Vector[CandidateProgram[P]]) =
-    val leaves            = ps.read(program)
-    val predictor         = leaves(idx)
+    val predictor         = ps.inspect(program)(idx)
     val baseInstruction   = predictor.layout.instructions.getOrElse("")
     val fieldNames        = predictor.layout.fields.map(_.name)
 

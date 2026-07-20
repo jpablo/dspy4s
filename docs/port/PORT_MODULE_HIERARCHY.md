@@ -30,7 +30,7 @@ Module[I, O]                            # ONE generic base (port of dspy.Module)
   │                                     #   final apply (wraps callbacks/trace/history) -> abstract forward
   │
   ├─ DynamicModule = Module[ProgramCall, DynamicPrediction]   # untyped spine (bag projection hooks defaulted)
-  │    └─ DynamicPredict                # the leaf predict engine — the runtime substrate the typed programs use
+  │    └─ DynamicPredict                # untyped executable sibling over PredictEngine
   │
   └─ typed layer = Module[TypedCall[I], Prediction[O]]        # EVERY user-facing program is here
        ├─ Predict[I, O]                 # forward = encode -> PredictEngine -> decode (sibling of DynamicPredict)
@@ -45,8 +45,9 @@ wrapping) over an abstract `forward`. It is instantiated at two layers: the unty
 `Module[ProgramCall, DynamicPrediction]` (aliased **`DynamicModule`**, with the callback/trace projection hooks
 defaulted to the bag shapes), and the typed surface `Module[TypedCall[I], Prediction[O]]` that **every
 user-facing program extends** — `Predict` / `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` /
-`MultiChainComparison` / `BestOfN` / `Refine`. Only **`DynamicPredict`** lives on the untyped spine, where it
-belongs: it's the runtime substrate the agents and CoT build their inner predicts from. `TypedCall[I]` is the
+`MultiChainComparison` / `BestOfN` / `Refine`. Only **`DynamicPredict`** lives on the untyped spine. It is the
+data-bag executable for runtime-built signatures; typed `Predict` is its sibling over `PredictEngine`, and
+`ChainOfThought` composes an inner typed `Predict`. `TypedCall[I]` is the
 typed-layer call object (the typed counterpart of `ProgramCall`: a typed `input` plus `config` / `traceEnabled`
 / `rolloutId`). The agents run their loop/extractor over the data-bag layer internally and decode the result
 back to the typed output; `MultiChainComparison` uses a bespoke `MultiChainCall[I]` (base input + candidate
@@ -78,10 +79,10 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | Overridable hook (async) | `aforward` (coroutine) | — *(no async hook; `applyAsync` wraps the sync `apply` via `ContextPropagation.future`)* |
 | Universal callable base | `Module` | `Module[I, O]` *(one generic base; untyped spine `DynamicModule` + typed `Module[TypedCall[I], Prediction[O]]`)* |
 | Container/persistence base | `BaseModule` | — *(absent; immutability + typeclasses, G-1)* |
-| Learnable-leaf marker | `Parameter` | — *(typeclass `PredictOps[P]`, G-1)* |
-| Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | — *(gap, G-1)* |
-| Attach demos | mutate `predictor.demos` | `PredictOps.withDemos` (returns a copy) |
-| Set the LM | `set_lm` / `get_lm` | ambient `RuntimeContext.lm` (no per-module LM) |
+| Learnable-leaf marker | `Parameter` | — *(typeclass `Predictor[P]`; writable carrier `PredictorState`)* |
+| Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | `Predictors[P].inspect` / `inspectNamed` |
+| Attach demos | mutate `predictor.demos` | update `PredictorState.demos`, then immutable `replace` |
+| Set the LM | `set_lm` / `get_lm` | ambient LM or immutable per-module `Predict.withLm` / `boundLm` |
 | Where cross-cutting wrapping lives | `Module.__call__` (universal, non-bypassable) | `Module.apply` (`final`; universal, non-bypassable — [G-2 resolved](PORT_GAPS.md)) |
 
 ## Per-class side-by-side
@@ -116,11 +117,12 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    one module event. (A convenience `apply(input, config, traceEnabled)` overload builds the `TypedCall` and
    dispatches through the `final apply`.)
 
-4. **`Predict` is a `Parameter`; dspy4s's leaf is `DynamicPredict`.** Python's
-   `Predict` is simultaneously a `Module` and a learnable `Parameter`. dspy4s
-   has no `Parameter` marker; the learnable leaf is `DynamicPredict`, and
-   "this is tunable" is expressed by a `PredictOps[DynamicPredict]` typeclass
-   instance rather than a base class (G-1).
+4. **`Predict` is a `Parameter`; dspy4s uses a lawful state lens.** Python's
+   `Predict` is simultaneously a `Module` and a mutable `Parameter`. dspy4s has
+   no marker base class: `Predictor[P]` exposes the leaf's writable
+   `PredictorState` (instructions, demos, config), while `PredictorMetadata`
+   keeps signature structure and module identity read-only. `Predictors[P]`
+   derives composite traversal and immutable replacement (G-1).
 
 5. **ChainOfThought composes a Predict (matches Python).** Python's `ChainOfThought` *is a* `Module` that *has a*
    `Predict` and whose `forward` returns `self.predict(**kwargs)`. dspy4s is now the same shape:

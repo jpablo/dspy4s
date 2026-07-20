@@ -177,8 +177,12 @@ final class GepaEngine[P](
 
     val reflective   = adapter.makeReflectiveDataset(parent, parentEval, components)
     val newCandidate = components.foldLeft(parent) { (cand, component) =>
-      InstructionProposer.propose(parent.getOrElse(component, ""), reflective.getOrElse(component, Vector.empty), reflectionLm) match
-        case Right(text) => cand.updated(component, text)
+      InstructionProposer.propose(
+        parent.getOrElse(component, None).getOrElse(""),
+        reflective.getOrElse(component, Vector.empty),
+        reflectionLm
+      ) match
+        case Right(text) => cand.updated(component, Some(text))
         case Left(_)     => cand // reflection failed for this component — keep its instruction
     }
 

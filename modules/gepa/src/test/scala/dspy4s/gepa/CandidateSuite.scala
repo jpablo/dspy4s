@@ -1,6 +1,9 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.Example
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.:=
 import dspy4s.programs.Predictors
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.PredictorId
@@ -27,14 +30,17 @@ class CandidateSuite extends FunSuite:
       SignatureLayout.parse("question -> answer").toOption.get.withInstructions(Some(instruction))
     )
 
+  private def predict(instruction: Option[String]): DynamicPredict =
+    DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get.withInstructions(instruction))
+
   test("seed reads each predictor's current instruction keyed by stable predictor ID") {
-    assertEquals(Candidate.seed(predict("Answer the question.")), Map(PredictorId(0) -> "Answer the question."))
+    assertEquals(Candidate.seed(predict("Answer the question.")), Map(PredictorId(0) -> Some("Answer the question.")))
   }
 
   test("applyTo writes a candidate's instruction back onto the predictor") {
     val applied = Candidate.applyTo(
       predict("Answer the question."),
-      Map(PredictorId(0) -> "Be concise and precise.")
+      Map(PredictorId(0) -> Some("Be concise and precise."))
     )
     assertEquals(applied.layout.instructions, Some("Be concise and precise."))
   }
@@ -44,9 +50,26 @@ class CandidateSuite extends FunSuite:
     assertEquals(Candidate.applyTo(p, Map.empty).layout.instructions, Some("Original."))
   }
 
-  test("applyTo(seed) round-trips the instruction") {
-    val p = predict("Round trip me.")
-    assertEquals(Candidate.applyTo(p, Candidate.seed(p)).layout.instructions, p.layout.instructions)
+  test("applyTo(seed) preserves the exact predictor state") {
+    val p = predict("Round trip me.").copy(
+      demos = Vector(Example.empty),
+      config = DynamicValues.record("temperature" := 0.3)
+    )
+    val applied = Candidate.applyTo(p, Candidate.seed(p))
+    assertEquals(summon[Predictors[DynamicPredict]].read(applied), summon[Predictors[DynamicPredict]].read(p))
+  }
+
+  test("seed and applyTo distinguish absent from explicitly empty instructions") {
+    val absent = predict(None)
+    val empty  = predict(Some(""))
+
+    assertEquals(Candidate.seed(absent), Map(PredictorId(0) -> None))
+    assertEquals(Candidate.seed(empty), Map(PredictorId(0) -> Some("")))
+    assertNotEquals(Candidate.seed(absent), Candidate.seed(empty))
+    assertEquals(Candidate.applyTo(absent, Candidate.seed(absent)).layout.instructions, None)
+    assertEquals(Candidate.applyTo(empty, Candidate.seed(empty)).layout.instructions, Some(""))
+    assertEquals(Candidate.applyTo(predict("Original."), Map(PredictorId(0) -> None)).layout.instructions, None)
+    assertEquals(Candidate.applyTo(absent, Map(PredictorId(0) -> Some(""))).layout.instructions, Some(""))
   }
 
   test("candidate identity survives structural reassociation even when display paths change") {
@@ -61,10 +84,10 @@ class CandidateSuite extends FunSuite:
     assertEquals(leftEntries.map(_.id), rightEntries.map(_.id))
     assertNotEquals(leftEntries.map(_.displayName), rightEntries.map(_.displayName))
 
-    val edited  = Candidate.seed(left).map { case (id, instruction) => id -> s"$instruction!" }
+    val edited  = Candidate.seed(left).map { case (id, instruction) => id -> instruction.map(_ + "!") }
     val applied = Candidate.applyTo(right, edited)
     assertEquals(
-      summon[Predictors[RightNested]].read(applied).map(_.layout.instructions),
+      summon[Predictors[RightNested]].read(applied).map(_.instructions),
       Vector(Some("A!"), Some("B!"), Some("C!"))
     )
   }

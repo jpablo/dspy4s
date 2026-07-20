@@ -262,7 +262,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
-    `DynamicPredict` parameters make `Vector` the exact, not approximate, parameter object). Prototyped as
+    `PredictorState` parameters make `Vector` the exact, not approximate, parameter object, while layout/module
+    metadata remains read-only). Prototyped as
     `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
     `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
     `Program` packages addressability + the input decoder (threaded through composition), giving uniform
@@ -291,7 +292,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParaCategory` pattern (an
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
-    `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[DynamicPredict]]`
+    `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[PredictorState]]`
     (`d3be8e1`, the parameter monoid — codomain of the `Predictors` homomorphism). The delooping is generalized
     to `delooping[M](using Monoid[M]): Category[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
     `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Category`. Algebra 1's two

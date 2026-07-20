@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.Predictors
+import dspy4s.programs.{PredictorState, Predictors}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.Example
@@ -23,9 +23,11 @@ class PredictorsSuite extends FunSuite:
     val p  = DynamicPredict(layout = sigA)
     val ps = summon[Predictors[DynamicPredict]]
     assertEquals(ps.read(p).size, 1)
-    assertEquals(ps.read(p).head, p)
-    val updated = DynamicPredict(layout = sigB)
-    assertEquals(ps.replace(p, Vector(updated)), updated)
+    assertEquals(ps.read(p).head, p.predictorState)
+    val updated = p.predictorState.copy(instructions = Some("updated"))
+    val replaced = ps.replace(p, Vector(updated))
+    assertEquals(replaced.predictorState, updated)
+    assertEquals(replaced.layout.fields, sigA.fields)
   }
 
   test("derived read concatenates fields left-to-right, honoring explicitly parameter-free fields") {
@@ -33,10 +35,10 @@ class PredictorsSuite extends FunSuite:
     val b    = DynamicPredict(layout = sigB, name = Some("b"))
     val pipe = Pipe(a, b, 7)
     val ps   = summon[Predictors[Pipe]]
-    val read = ps.read(pipe)
-    assertEquals(read.size, 2)
-    assertEquals(read(0).name, Some("a"))
-    assertEquals(read(1).name, Some("b"))
+    val views = ps.inspect(pipe)
+    assertEquals(views.size, 2)
+    assertEquals(views(0).moduleName, "a")
+    assertEquals(views(1).moduleName, "b")
   }
 
   test("derived replace round-trips to identity: replace(p, read(p)) == p") {
@@ -53,8 +55,8 @@ class PredictorsSuite extends FunSuite:
     val pipe    = Pipe(a, b, 7)
     val ps      = summon[Predictors[Pipe]]
     val newDemo = Vector(Example(rec("question" := "q", "answer" := "x")))
-    val editedA = a.copy(demos = newDemo)
-    val out     = ps.replace(pipe, Vector(editedA, b))
+    val editedA = a.predictorState.copy(demos = newDemo)
+    val out     = ps.replace(pipe, Vector(editedA, b.predictorState))
     assertEquals(out.a.demos, newDemo)
     assertEquals(out.b, b)
     assertEquals(out.n, 7)
@@ -62,7 +64,7 @@ class PredictorsSuite extends FunSuite:
 
   test("empty is the identity instance: reads nothing, replace returns the program") {
     val empty = Predictors.empty[Int]
-    assertEquals(empty.read(42), Vector.empty[DynamicPredict])
+    assertEquals(empty.read(42), Vector.empty[PredictorState])
     assertEquals(empty.replace(42, Vector.empty), 42)
   }
 
@@ -102,7 +104,7 @@ class PredictorsSuite extends FunSuite:
     val student = ScriptedPredictProgram(Map.empty, sigA)
     val ps      = summon[Predictors[ScriptedPredictProgram]]
     assertEquals(ps.read(student).size, 1)
-    assertEquals(ps.read(student).head.layout, sigA)
+    assertEquals(ps.inspect(student).head.layout, sigA)
 
     val demos   = Vector(Example(rec("question" := "q", "answer" := "x")))
     val updated = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))

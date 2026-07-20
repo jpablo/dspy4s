@@ -50,7 +50,7 @@ sealed trait CallbackEvent extends Product with Serializable:
   def callId: String
 
   /** Identifier of the enclosing scope, if any. `None` at the top of a call tree (typically a user-initiated
-    * `Predict.run`). Use to reconstruct parent/child relationships across the event stream. */
+    * predictor call). Use to reconstruct parent/child relationships across the event stream. */
   def parentCallId: Option[String]
 
 /** Opens a module-level scope (a `Predict`, `ChainOfThought`, `ReAct`, etc.). Paired with [[ModuleEndEvent]]. */

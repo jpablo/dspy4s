@@ -258,8 +258,8 @@ class TypedPredictSuite extends FunSuite:
     // `Predict[I, O]` is now a `Module[TypedCall[I], Prediction[O]]` whose `forward` does the typed decode
     // *inside* the lifecycle wrapping. So a decode failure makes `forward` return `Left`, and `Module.apply`
     // appends neither a trace nor a history entry -- the observability layer and the return value agree.
-    // (This replaces the earlier "known limitation" where the inner DynamicPredict had already recorded a
-    // successful call before the typed decode failed.)
+    // (This replaces the earlier "known limitation" where execution crossed a separately wrapped dynamic
+    // module boundary that recorded success before the typed decode failed.)
     val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -270,9 +270,9 @@ class TypedPredictSuite extends FunSuite:
     }
   }
 
-  // ── No regression in the underlying DynamicPredict path ────────────────────────
+  // ── No regression in the sibling DynamicPredict surface ────────────────────────
 
-  test("the inner DynamicPredict path still works directly (no PredictSuite regression)") {
+  test("the DynamicPredict sibling surface still works directly") {
     import dspy4s.core.signatures.SignatureDsl
     import dspy4s.programs.contracts.ProgramCall
     val sig = SignatureDsl.parse("question -> answer, score").toOption.get

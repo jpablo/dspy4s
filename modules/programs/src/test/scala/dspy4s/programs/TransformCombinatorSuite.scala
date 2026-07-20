@@ -36,8 +36,10 @@ class TransformCombinatorSuite extends FunSuite:
 
   private object Step:
     given stepPredictor[I, O]: Predictor[Step[I, O]] with
-      def get(program: Step[I, O]): DynamicPredict                      = program.predict
-      def set(program: Step[I, O], updated: DynamicPredict): Step[I, O] = program.copy(predict = updated)
+      def get(program: Step[I, O]): PredictorState = program.predict.predictorState
+      def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
+      def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
+        program.copy(predict = program.predict.withPredictorState(updated))
 
   private def predictor(signature: String): DynamicPredict =
     DynamicPredict(SignatureLayout.parse(signature).toOption.get)
@@ -45,7 +47,7 @@ class TransformCombinatorSuite extends FunSuite:
   private def step[I, O](tag: String, signature: String)(f: I => O): Step[I, O] =
     Step(tag, input => Right(f(input)), predictor(signature))
 
-  private def params[P](program: P)(using predictors: Predictors[P]): Vector[DynamicPredict] =
+  private def params[P](program: P)(using predictors: Predictors[P]): Vector[PredictorState] =
     predictors.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
@@ -73,7 +75,7 @@ class TransformCombinatorSuite extends FunSuite:
     assertEquals(mappedIdentity(TypedCall(12)), direct)
     assertEquals(sequential(TypedCall(12)), composed(TypedCall(12)))
     assertEquals(composed(TypedCall(12)).map(_.raw), direct.map(_.raw))
-    assertEquals(params(composed), Vector(base.predict))
+    assertEquals(params(composed), Vector(base.predict.predictorState))
   }
 
   test("contramapInput obeys identity/composition and forwards call controls") {
@@ -108,7 +110,7 @@ class TransformCombinatorSuite extends FunSuite:
     val derived = base.contramapInput[String](_.toInt).mapOutput(_.length)
 
     assertEquals(direct(TypedCall("42")), derived(TypedCall("42")))
-    assertEquals(params(direct), Vector(base.predict))
+    assertEquals(params(direct), Vector(base.predict.predictorState))
   }
 
   test("transform wrappers are lifecycle-transparent") {
@@ -149,6 +151,7 @@ class TransformCombinatorSuite extends FunSuite:
 
     assertEquals(Compose.split(first, second)(TypedCall((1, true))), Left(ValidationError("first failed")))
     assertEquals(order.toVector, Vector("first"))
-    assertEquals(params(Compose.split(first, second)), Vector(first.predict, second.predict))
-    assertEquals(params(first.split(second)), Vector(first.predict, second.predict))
+    val expectedStates = Vector(first.predict.predictorState, second.predict.predictorState)
+    assertEquals(params(Compose.split(first, second)), expectedStates)
+    assertEquals(params(first.split(second)), expectedStates)
   }

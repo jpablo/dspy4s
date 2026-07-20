@@ -29,17 +29,20 @@
 **Status:** Resolved (P1–P6, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07 / 1657f9c)
 
 **Resolution.** Closed by a typed `Predictors[P]` / `Predictor[P]` typeclass pair
-with Scala 3 Mirror derivation (`modules/optimize/.../Predictors.scala`): `read`
-enumerates the contained predictors of an arbitrary composite in stable order,
-`replace` rebuilds it immutably (`replace(p, read(p)) == p`). User composites derive
-it for free; framework composites (`ReAct`, `CodeAct`, `MultiChainComparison`) get
+with Scala 3 Mirror derivation (`modules/programs/.../Predictors.scala`). `inspect`
+enumerates non-executable `PredictorView`s (read-only metadata + writable state),
+`read` projects their `PredictorState`s, and `replace` rebuilds the program immutably.
+Each `Predictor` leaf satisfies Get-Put, Put-Get, Put-Put, and the metadata frame exactly.
+Composite traversal satisfies exact no-op replacement, read-after-write, and stable metadata/order;
+override-backed composites state last-write-wins observationally through `read`. User composites derive it for free; framework composites
+(`ReAct`, `CodeAct`, `MultiChainComparison`) get
 hand-written instances and had their sub-predicts **hoisted to stable fields**
 (closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
 `PredictOps` assumption onto `Predictors` (the `LabeledSampleProgram` glue was deleted),
 and a `Runnable[P]` capability (`Runnable.scala`) dropped the `P <: DynamicModule` bound
 so **typed** programs and user composites are now optimizable end-to-end. The legacy
 `PredictOps` typeclass and its bridge were removed in P6 — `Predictors` is the sole
-introspection typeclass. Remaining v1 limits: predictor edits are demos-only (instruction editing deferred);
+introspection typeclass. Writable state is uniformly instructions + demos + module config;
 `MultiChainComparison` has no `Runnable` (its `MultiChainCall` shape has no inputs-only
 run); arbitrary user composites supply their own `Runnable`.
 
@@ -68,7 +71,7 @@ user `Module`, attach demos (`predictor.demos = …`), set LMs, and clone
 candidate programs — all with **zero glue from the user**, because reflection
 finds the predictors no matter how they were nested.
 
-### dspy4s current state
+### dspy4s state before resolution
 
 We deliberately did **not** port `BaseModule` (see the rationale below — most
 of it is un-idiomatic in immutable, strictly-typed Scala). Instead:
@@ -165,7 +168,7 @@ was justified by there being a single instantiation — no longer true once the 
 
 **Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM `withLm`/`boundLm` (commit b2d0096)
 
-**Resolution (config).** `DynamicPredict` and `Predict[I, O]` now carry an immutable
+**Resolution (config).** `DynamicPredict`, `Predict[I, O]`, and `ChainOfThought[I, O]` now carry an immutable
 module-level `config: DynamicValue.Record`, threaded into `PredictEngine` and merged
 *under* the per-call config (per-call keys win: `{**module, **call}`); empty module
 config is unchanged behavior.
@@ -175,7 +178,7 @@ config is unchanged behavior.
 `lm.fold(runtime.resolveModel)(Right(_))` — a bound LM wins over the ambient `RuntimeContext`
 LM, so a program can pin different models to different predictors. `Predict.withLm(model)`
 (immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the typed accessors. The bound LM is
-a binding, not serialized learnable state (like `runtime`), so it is excluded from `dumpState`.
+an execution binding, not writable `PredictorState` (like `runtime`), so `ProgramPersistence` excludes it.
 
 **Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
 binding. dspy4s only supported per-*call* config; there was no place to attach a
@@ -187,7 +190,7 @@ module-scoped config or a module-bound LM.
 (`set_lm`/`get_lm`), so a predictor can carry its own generation params and a
 pinned LM independent of the ambient settings.
 
-### dspy4s current state
+### dspy4s state before resolution
 
 Config is supplied per call; the LM lives in `RuntimeContext` (ambient `using`),
 so there is no per-module `config` field and no `set_lm`/`get_lm`.
@@ -208,33 +211,29 @@ merged under the per-call override. Tier 0.
 
 **Status:** Resolved
 
-**Resolution.** Closed by wiring the `SignatureLayout` (de)serialization primitives
-up through the program tree, leveraging the `Predictors[P]` introspection layer
-(G-1) so a single `Predict` (a length-1 predictor list) and an arbitrary composite
-share one code path. New primitives:
+**Resolution.** Closed by wiring the `Predictors[P]` traversal into `ProgramPersistence`,
+so a single typed or dynamic predictor and an arbitrary composite share one code path.
+New primitives:
 
 - `Example.dumpState` / `Example.fromState` (`modules/core/.../contracts/Data.scala`) —
   `{ "values": <record>, "inputKeys": [..], "augmented": <bool> }`.
-- `DynamicPredict.dumpState` / `DynamicPredict.fromState`
-  (`modules/programs/.../DynamicPredict.scala`) —
-  `{ "signature": <SignatureLayout state>, "demos": [<Example state>..], "config": <record> }`
-  (`name` / `runtime` are environment/identity, restored to defaults on load).
+- `PredictorState.dumpState` / `PredictorState.fromState`
+  (`modules/programs/.../PredictorState.scala`) —
+  `{ "instructions": <string|null>, "demos": [<Example state>..], "config": <record> }`.
+  This is the complete writable state for `DynamicPredict`, typed `Predict`, and typed `ChainOfThought`.
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
-  `Predictors`-based: `{ "predictors": { "predictor-0": <DynamicPredict state>, ... } }`.
-  Stable IDs are validated on load. JSON via
+  `Predictors`-based: `{ "predictors": { "predictor-0": <PredictorState>, ... } }`.
+  Ordinal IDs are validated on load. JSON via
   `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
   `RuntimeError`.
 
-**Round-trip scope.** Demos round-trip for every program. `DynamicPredict` leaves
-round-trip everything (signature/layout + demos + config). `Predict` restores demos,
-config, and layout **instructions**; `ChainOfThought` restores demos and instructions
-(no module config field). The field **structure** of the layout is not written back into
-a typed program (that would desync `signature.outputShape` from `signature.layout`), so
-typed targets keep their own field shape (the full layout still round-trips in the JSON).
-`loadState` requires the `predictors` array length to equal `Predictors.read(program).size`
-(mismatch → `Left(ValidationError)`). Instruction write-back was added with the
-instruction-editing enabler (commit pending), unblocking COPRO/MIPRO-style optimizers.
+**Round-trip scope.** Instructions, demos, and module config round-trip for every supported leaf.
+Signature field structure and module name are read-only `PredictorMetadata`; runtimes, output schemas,
+bound LMs, tools, callbacks, and history are execution resources. Loading state into a fresh program
+preserves all of them. The target must have the same predictor traversal/order: `predictor-N` IDs reject
+missing/unknown ordinals and ignore JSON object order, but cannot detect a same-cardinality reorder.
+The former layout-bearing entry format (`signature` + `demos` + `config`) is unsupported; regenerate artifacts.
 
 **Summary (original).** There is no JSON state save/load for a program. The serialization
 primitives exist on `SignatureLayout`, but nothing wires them up to a program,
@@ -242,10 +241,13 @@ and the demos are never persisted.
 
 ### Python reference
 
-`BaseModule.dump_state`/`load_state` and `save`/`load` serialize a whole program
-(signatures + demos + config) to/from JSON.
+`BaseModule.dump_state`/`load_state` traverse named parameters. With
+`save_program=False`, `save`/`load` persist that state as JSON or pickle; a
+current `Predict` state contains signature, demos, traces, training data, and
+bound LM. `save_program=True` is the separate whole-architecture cloudpickle
+mode.
 
-### dspy4s current state
+### dspy4s state before resolution
 
 `SignatureLayout` has the layout (de)serialization primitives, but no program
 exposes `save`/`load`/`dumpState`/`loadState`; demos and config are never written
@@ -278,7 +280,7 @@ threshold, and injects it as a `hint_` input into the next attempt via a
 `P` (an upper-bounded typed module, so `I`/`O` still infer at call sites — `BestOfN`-style
 ergonomics, no call-site type annotations) and requires `Predictors[P]`. `OfferFeedback`
 now takes a `module_names` input and emits `advice` as a JSON object `{component: advice}`
-keyed by the inner program's named predictors (`Predictors.readNamed`, G-12 P-c). Each
+keyed by the inner program's named predictor views (`Predictors.inspectNamed`, G-12 P-c). Each
 predictor's call is matched to its advice by its `SignatureLayout` — the dspy4s stand-in
 for Python's `signature2name[signature]` object-identity routing — and only that predictor's
 `hint_` is injected (absent/`N/A` → no hint). A bare (non-JSON) advice string degrades to
@@ -583,10 +585,10 @@ prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureF
 (`evaluate`/`makeReflectiveDataset`), `InstructionProposer` (reflective mutation), `GepaState` + Pareto
 candidate selection, `GepaEngine` (reflective-mutation loop), and the `Gepa` facade. A deterministic
 instruction-sensitive test shows GEPA discovering a better instruction (score 0 → 1.0 within budget).
-**P-c done:** `Predictors.readNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
+**P-c done:** `Predictors.inspectNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
 field labels for a composite), while `readIdentified` assigns typed `PredictorId`s from the canonical traversal.
 GEPA keys candidates and trace-index association by ID; labels remain display/prompt metadata and may reflect an
-anonymous composition tree's current association. The `readNamed` capability is also what Refine per-module advice
+anonymous composition tree's current association. The `inspectNamed` capability is also what Refine per-module advice
 (G-5 follow-up) needs — now **done** (G-5 v2;
 `Predictors` relocated to `programs` to break the cycle). **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
 predictors must improve — GEPA evolves both (per-component reflective datasets + name→trace association), score
@@ -647,7 +649,8 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **P-b — parse-failure-as-feedback.** `PredictEngine.parseOutputs` aborts on `adapter.parse → Left` and discards
   the raw `LmOutput.text`. Need a `FailedPrediction`-style capture (raw completion + low score + format feedback),
   not an aborting error (dspy's `add_format_failure_as_feedback`).
-- **P-c — named predictors.** `Predictors.read` is positional (`Vector[DynamicPredict]`); trace entries are keyed
+- **P-c — named predictors.** At the time of this prerequisite spike, `Predictors.read` was positional
+  (`Vector[DynamicPredict]`); trace entries are keyed
   by `component = moduleName` (a possibly-colliding string). GEPA's whole model is keyed by unique component names.
   The names are **latent** — the Mirror derivation has `MirroredElemLabels` but only uses `MirroredElemTypes`;
   surfacing a named `read` is bounded. **This is also the exact blocker for Refine per-module advice (G-5 follow-up)
@@ -840,7 +843,7 @@ the dataset summary.
 
 `GroundedProposer` v1 grounds in a dataset summary + demos. Program-source grounding is impossible
 as-is (no source introspection in Scala; the same delta documented for Refine's `OfferFeedback`); a
-structural program description (from `Predictors.readNamed` + layouts) is the feasible analogue.
+structural program description (from `Predictors.inspectNamed` + layouts) is the feasible analogue.
 Summary refinement is just unimplemented.
 
 ### Why it matters

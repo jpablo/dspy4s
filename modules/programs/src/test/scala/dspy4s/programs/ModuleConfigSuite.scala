@@ -123,3 +123,21 @@ class ModuleConfigSuite extends FunSuite:
     assertEquals(reqs.size, 1)
     assertEquals(DynamicValues.recordToMap(reqs.head.options), DynamicValues.recordToMap(callConfig))
   }
+
+  // ── typed ChainOfThought[I, O] ──────────────────────────────────────────────
+
+  test("ChainOfThought: state config supplies defaults and per-call config wins on collision") {
+    val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
+    val module = ChainOfThought(
+      sig,
+      config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9)
+    )
+    val reqs = withCapture {
+      val _ = module.apply(MCQAInput("x"), config = DynamicValues.record("temperature" := 0.2))
+    }
+
+    assertEquals(reqs.size, 1)
+    val opts = DynamicValues.recordToMap(reqs.head.options)
+    assertEquals(opts.get("temperature"), Some(0.2: Any))
+    assertEquals(opts.get("top_p"), Some(0.9: Any))
+  }

@@ -24,7 +24,7 @@ val sig = Signature.of[QA]
 given dspy4s.core.contracts.RuntimeContext =
   dspy4s.core.runtime.RuntimeEnvironment.current
 
-val result = Predict(sig).run((question = "Capital of France?"))
+val result = Predict(sig).apply((question = "Capital of France?"))
 
 result.map(_.output.answer)   // typed: String
 result.map(_.output.score)    // typed: Double
@@ -70,7 +70,7 @@ The runtime name defaults to the trait name. Pass
 want to override either value at construction time.
 
 End-to-end typed I/O uses Scala named tuples:
-`Predict(sig).run((sentence = "..."))` accepts a named-tuple input,
+`Predict(sig).apply((sentence = "..."))` accepts a named-tuple input,
 and `tp.output.sentiment` is typed as `Emotion`. Compile-time
 validation catches methods not wrapped in the marker types, methods
 with parameters, missing `FieldCodec[X]`, duplicate field names,
@@ -96,7 +96,7 @@ val sig =
     (sentence: String) => (sentiment: Emotion, confidence: Double)
   ]
 
-Predict(sig).run((sentence = "..."))
+Predict(sig).apply((sentence = "..."))
   .map(_.output.sentiment)   // typed: Emotion
 ```
 
@@ -156,7 +156,7 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
 val sig = Signature.derived[EmotionInput, EmotionOutput]("Emotion")
 ```
 
-End-to-end typed I/O: `Predict(sig).run(EmotionInput("..."))`
+End-to-end typed I/O: `Predict(sig).apply(EmotionInput("..."))`
 returns `Either[DspyError, Prediction[EmotionOutput]]`, and
 `tp.output.sentiment` is typed as `Emotion`.
 
@@ -205,7 +205,7 @@ typed `Prediction[O]` pipeline.
 ```scala
 val sig = Signature.fromString("question -> answer").toOption.get
 
-Predict(sig).run(Map("question" -> "Capital of France?"))
+Predict(sig).apply(Map("question" -> "Capital of France?"))
   .map(_.output("answer"))   // Any — no static type
 ```
 
@@ -370,7 +370,7 @@ The typed wrapper preserves the underlying prediction for callers
 that need completions, LM usage, or other adapter metadata:
 
 ```scala
-val tp = Predict(sig).run((question = "...")).toOption.get
+val tp = Predict(sig).apply((question = "...")).toOption.get
 
 tp.output.answer        // typed access
 tp.raw.lmUsage          // Option[LmUsage] — typed core + provider-specific token counts
@@ -378,20 +378,21 @@ tp.raw.completions      // Option[Completions] — multiple candidates
 tp.raw.value("answer")  // dynamic accessor on the raw DynamicPrediction
 ```
 
-`tp.raw` is the *exact* `DynamicPrediction` returned by the underlying
-`DynamicPredict` — adapters, callbacks, trace, and history all see
-the same object. The typed layer just decodes its values into
-`tp.output`.
+`tp.raw` is the `DynamicPrediction` assembled by the shared
+`PredictEngine`, before the typed output decode. `Predict[I, O]` and
+`DynamicPredict` are sibling modules over that engine; the typed module
+preserves the raw prediction while also decoding its values into
+`tp.output`. Trace and history record those same raw values.
 
 ---
 
 ## Per-call runtime knobs
 
-`Predict.run` exposes the same knobs as the dynamic path through
+`Predict.apply` exposes the same knobs as the dynamic path through
 `ProgramCall`:
 
 ```scala
-Predict(sig).run(
+Predict(sig).apply(
   input        = (question = "..."),
   config       = Map("temperature" -> 0.7, "max_tokens" -> 50),
   traceEnabled = true   // false to suppress this call from the trace
@@ -409,9 +410,9 @@ via `DynamicPredict`.
 
 `Signature[I, O]` is a thin wrapper around a `SignatureLayout` plus
 two `Shape` instances (one for input encoding, one for output
-decoding). The runtime stack — adapters, `DynamicPredict`, LM,
-callbacks, trace — only consumes the **erased** `SignatureLayout`
-(`sig.layout`), so the typed layer is purely additive:
+decoding). The shared `PredictEngine` and adapters consume the
+**erased** `SignatureLayout` (`sig.layout`); the typed `Predict` adds
+encoding and decoding around that raw engine call:
 
 - New typed code can opt in surface-by-surface.
 - Existing dynamic code keeps working unchanged.
@@ -439,12 +440,6 @@ These are documented gaps, surfaced so you can plan around them:
   `Signature.derived[I, O]`.
 - **Literal-union output types**: not yet a `FieldCodec` instance;
   use a Scala enum.
-- **Decode-failure + trace divergence**: when the inner `DynamicPredict`
-  succeeds but the typed decode fails, the trace still records a
-  successful module call while `Predict.run` returns `Left`. The
-  discrepancy is benign (the underlying predict really did succeed);
-  consolidating the typed boundary's tracing is an open design
-  decision.
 - **Multi-completion typed decoding**: only the primary prediction is
   decoded into `Prediction.output` today. The raw completions are
   still on `tp.raw.completions` for manual decoding.

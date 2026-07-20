@@ -169,7 +169,7 @@ class MIPROv2Suite extends FunSuite:
       val result = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset))
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report  = result.toOption.get
-      val applied = predictors.read(report.bestProgram).head.layout.instructions
+      val applied = predictors.read(report.bestProgram).head.instructions
       assertEquals(applied, Some(winningInstruction))
       // The winner scored 100% (gold on every val example).
       assertEquals(report.metadata.get("best_score"), Some(100.0))
@@ -202,7 +202,7 @@ class MIPROv2Suite extends FunSuite:
         given RuntimeContext = RuntimeEnvironment.current
         optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption
           .flatMap(r => predictors.read(r.bestProgram).headOption)
-          .flatMap(_.layout.instructions)
+          .flatMap(_.instructions)
       }
     val a = run()
     val b = run()
@@ -226,7 +226,7 @@ class MIPROv2Suite extends FunSuite:
       assertEquals(scores.head, 100.0)
       assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
       // The top candidate carries the winning instruction.
-      val topInstr = predictors.read(report.candidates.head.program).head.layout.instructions
+      val topInstr = predictors.read(report.candidates.head.program).head.instructions
       assertEquals(topInstr, Some(winningInstruction))
       // Metadata is populated.
       assert(report.metadata.contains("best_score"))

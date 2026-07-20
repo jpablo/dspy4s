@@ -40,7 +40,7 @@ val gepa = new Gepa[DynamicPredict](
 )
 val result = gepa.compile(student, trainset = trainset, valset = valset)
 // result.bestProgram     — the program with the evolved instructions
-// result.bestCandidate   — Map[PredictorId -> instruction]
+// result.bestCandidate   — Map[PredictorId, Option[String]]
 // result.bestScore       — mean validation score
 ```
 

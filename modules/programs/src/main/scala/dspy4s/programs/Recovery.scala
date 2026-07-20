@@ -58,21 +58,21 @@ object RecoverWith:
       P <: Module[TypedCall[I], Prediction[O]],
       F <: Module[TypedCall[I], Prediction[O]]
   ](using primary: Predictors[P], fallback: Predictors[F]): Predictors[RecoverWith[I, O, P, F]] with
-    def read(program: RecoverWith[I, O, P, F]): Vector[DynamicPredict] =
-      primary.read(program.primary) ++ fallback.read(program.fallback)
+    def inspect(program: RecoverWith[I, O, P, F]): Vector[PredictorView] =
+      primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
 
-    def replace(program: RecoverWith[I, O, P, F], updates: Vector[DynamicPredict]): RecoverWith[I, O, P, F] =
+    def replace(program: RecoverWith[I, O, P, F], updates: Vector[PredictorState]): RecoverWith[I, O, P, F] =
       val (primaryUpdates, fallbackUpdates) = updates.splitAt(primary.read(program.primary).size)
       program.copy(
         primary = primary.replace(program.primary, primaryUpdates),
         fallback = fallback.replace(program.fallback, fallbackUpdates)
       )
 
-    override def readNamed(program: RecoverWith[I, O, P, F]): Vector[(String, DynamicPredict)] =
-      primary.readNamed(program.primary).map { case (sub, predictor) =>
-        (if sub == "self" then "primary" else s"primary.$sub") -> predictor
-      } ++ fallback.readNamed(program.fallback).map { case (sub, predictor) =>
-        (if sub == "self" then "fallback" else s"fallback.$sub") -> predictor
+    override def inspectNamed(program: RecoverWith[I, O, P, F]): Vector[(String, PredictorView)] =
+      primary.inspectNamed(program.primary).map { case (sub, view) =>
+        (if sub == "self" then "primary" else s"primary.$sub") -> view
+      } ++ fallback.inspectNamed(program.fallback).map { case (sub, view) =>
+        (if sub == "self" then "fallback" else s"fallback.$sub") -> view
       }
 
 extension [I, O, P <: Module[TypedCall[I], Prediction[O]]](self: P)

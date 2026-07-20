@@ -140,7 +140,7 @@ class COPROSuite extends FunSuite:
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
       val best   = report.bestProgram
-      val applied = summon[Predictors[DynamicPredict]].read(best).head.layout.instructions
+      val applied = summon[Predictors[DynamicPredict]].read(best).head.instructions
       assertEquals(applied, Some(winningInstruction))
       // The winner scored 100% (gold on every example).
       assertEquals(report.metadata.get("best_score"), Some(100.0))
@@ -157,7 +157,7 @@ class COPROSuite extends FunSuite:
         given RuntimeContext = RuntimeEnvironment.current
         optimizer.compile(student, trainset).toOption
           .flatMap(r => summon[Predictors[DynamicPredict]].read(r.bestProgram).headOption)
-          .flatMap(_.layout.instructions)
+          .flatMap(_.instructions)
       }
     val a = run()
     val b = run()
@@ -175,7 +175,7 @@ class COPROSuite extends FunSuite:
       val result = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best    = result.toOption.get.bestProgram
-      val applied = summon[Predictors[DynamicPredict]].read(best).head.layout.instructions
+      val applied = summon[Predictors[DynamicPredict]].read(best).head.instructions
       assertEquals(applied, Some(winningInstruction))
     }
   }
@@ -197,7 +197,7 @@ class COPROSuite extends FunSuite:
       assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
       // The top candidate carries the winning instruction.
       val topInstr =
-        summon[Predictors[DynamicPredict]].read(report.candidates.head.program).head.layout.instructions
+        summon[Predictors[DynamicPredict]].read(report.candidates.head.program).head.instructions
       assertEquals(topInstr, Some(winningInstruction))
       // Metadata is populated.
       assert(report.metadata.contains("best_score"))

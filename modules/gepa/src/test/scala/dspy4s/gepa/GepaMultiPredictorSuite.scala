@@ -123,7 +123,7 @@ class GepaMultiPredictorSuite extends FunSuite:
 
       assertEquals(result.bestScore, 1.0)
       // Both components were evolved to carry their required token (per-component reflection + association worked).
-      assert(result.bestCandidate(PredictorId(0)).contains("TOKEN1"), result.bestCandidate(PredictorId(0)))
-      assert(result.bestCandidate(PredictorId(1)).contains("TOKEN2"), result.bestCandidate(PredictorId(1)))
+      assert(result.bestCandidate(PredictorId(0)).exists(_.contains("TOKEN1")), result.bestCandidate(PredictorId(0)))
+      assert(result.bestCandidate(PredictorId(1)).exists(_.contains("TOKEN2")), result.bestCandidate(PredictorId(1)))
     }
   }

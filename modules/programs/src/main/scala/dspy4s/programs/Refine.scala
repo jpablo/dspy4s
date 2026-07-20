@@ -36,7 +36,7 @@ import zio.blocks.schema.Schema
   * advice) that is routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
   *
   * '''Per-module advice (parity with Python).''' OfferFeedback returns a JSON object `{componentName: advice}`
-  * keyed by the inner program's named predictors ([[Predictors.readNamed]], the dspy4s analogue of
+  * keyed by the inner program's named predictors ([[Predictors.inspectNamed]], the dspy4s analogue of
   * `named_predictors()`). Each predictor's call is matched to its advice by its [[SignatureLayout]] — the dspy4s
   * stand-in for Python's `signature2name[signature]` object-identity routing — and only that predictor's `hint_`
   * is injected. A predictor whose advice is absent or `N/A` gets no hint. When OfferFeedback returns a bare
@@ -103,12 +103,12 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
         // LM/adapter, NOT the hint adapter), then build the next attempt's adapter routing each predictor's OWN
         // advice into ITS `hint_`. Auxiliary: a generation failure charges the budget and keeps `best` (handled
         // by `bestOf`).
-        val named       = predictors.readNamed(module)
+        val named       = predictors.inspectNamed(module)
         val moduleNames = named.map(_._1)
         Refine.generateAdvice(criticPredict, call.input, prediction, trace, score, threshold, moduleNames)(using baseContext)
           .map { adviceMap =>
-            val byLayout = named.iterator.map { case (name, predict) =>
-              predict.layout -> adviceMap.getOrElse(name, "N/A")
+            val byLayout = named.iterator.map { case (name, view) =>
+              view.layout -> adviceMap.getOrElse(name, "N/A")
             }.toMap
             Some(Refine.HintInjectingAdapter(Refine.resolveBaseAdapter(baseContext), byLayout))
           }
@@ -127,31 +127,30 @@ final case class Refine[P <: Module[TypedCall[I], Prediction[O]], I, O](
 object Refine:
 
   /** Addressability (the spec's `feedback` rule): `read = read(module) ++ [critic]`, the critic LAST.
-    * `replace` routes the leading updates to the inner program and the trailing one to the critic via the
-    * eq-based override pattern (see [[Predictors.reactPredictors]]): `replace(p, read(p)) == p` holds because
-    * `read` returns the exact member objects. */
+    * `replace` routes the leading states to the inner program and the trailing state to the critic. An unchanged critic
+    * state retains the existing override exactly; a changed state preserves the critic's execution bindings. */
   given refinePredictors[P <: Module[TypedCall[I], Prediction[O]], I, O](using
       inner: Predictors[P]
   ): Predictors[Refine[P, I, O]] with
-    def read(program: Refine[P, I, O]): Vector[DynamicPredict] =
-      inner.read(program.module) :+ program.criticPredict
+    def inspect(program: Refine[P, I, O]): Vector[PredictorView] =
+      inner.inspect(program.module) :+ program.criticPredict.predictorView
 
-    def replace(program: Refine[P, I, O], updates: Vector[DynamicPredict]): Refine[P, I, O] =
+    def replace(program: Refine[P, I, O], updates: Vector[PredictorState]): Refine[P, I, O] =
       val innerArity = inner.read(program.module).size
       require(
         updates.size == innerArity + 1,
         s"Refine expects ${innerArity + 1} updates (inner predicts ++ critic), got ${updates.size}"
       )
       val nextCritic =
-        if updates(innerArity) eq program.criticPredict then program.criticPredictOverride
-        else Some(updates(innerArity))
+        if updates(innerArity) == program.criticPredict.predictorState then program.criticPredictOverride
+        else Some(program.criticPredict.withPredictorState(updates(innerArity)))
       program.copy(
         module                = inner.replace(program.module, updates.take(innerArity)),
         criticPredictOverride = nextCritic
       )
 
-    override def readNamed(program: Refine[P, I, O]): Vector[(String, DynamicPredict)] =
-      inner.readNamed(program.module) :+ ("critic" -> program.criticPredict)
+    override def inspectNamed(program: Refine[P, I, O]): Vector[(String, PredictorView)] =
+      inner.inspectNamed(program.module) :+ ("critic" -> program.criticPredict.predictorView)
 
   /** Resolve the base adapter from the ambient context, narrowing the `AdapterRef` to a concrete [[Adapter]];
     * falls back to a default [[ChatAdapter]] when none is configured (mirrors Python's

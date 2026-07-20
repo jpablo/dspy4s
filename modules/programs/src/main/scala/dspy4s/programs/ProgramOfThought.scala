@@ -47,7 +47,15 @@ private def stringDv(s: String): DynamicValue =
 final case class ProgramOfThought[I, O](
     baseSignature: Signature[I, O],
     interpreter: CodeInterpreter,
-    maxIterations: Int = 3
+    maxIterations: Int = 3,
+    /** Optional override for the initial code-generation predict. When `None` (the default), it is built from
+      * [[generateSignature]]. Carrying it as a defaulted, `copy`-reachable field makes this learnable sub-predict
+      * addressable + immutably replaceable (see the `Predictors[ProgramOfThought]` instance). */
+    generatorPredictOverride: Option[DynamicPredict] = None,
+    /** Optional override for the code-regeneration predict used after a failed attempt. */
+    regeneratorPredictOverride: Option[DynamicPredict] = None,
+    /** Optional override for the final answer-extraction predict. */
+    answererPredictOverride: Option[DynamicPredict] = None
 )(using
     prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ProgramOfThought.WithReasoning[O]]
 ) extends Module[TypedCall[I], Prediction[ProgramOfThought.WithReasoning[O]]]:
@@ -150,6 +158,26 @@ final case class ProgramOfThought[I, O](
         s"Given the final Python code and its printed output, produce the final $outputs."
       }))
 
+  /** The initial code-generation predict, built once from [[generateSignature]] and exposed as stable optimizer
+    * state. Addressable + tunable via [[generatorPredictOverride]]; [[forward]] executes this member rather than
+    * rebuilding a local predictor for each call. */
+  val generatorPredict: DynamicPredict =
+    generatorPredictOverride.getOrElse(
+      ProgramOfThought.defaultPredict(generateSignature, ProgramOfThought.generatorModuleName)
+    )
+
+  /** The retry code-regeneration predict, built once from [[regenerateSignature]]. */
+  val regeneratorPredict: DynamicPredict =
+    regeneratorPredictOverride.getOrElse(
+      ProgramOfThought.defaultPredict(regenerateSignature, ProgramOfThought.regeneratorModuleName)
+    )
+
+  /** The final answer-extraction predict, built once from [[answerSignature]]. */
+  val answererPredict: DynamicPredict =
+    answererPredictOverride.getOrElse(
+      ProgramOfThought.defaultPredict(answerSignature, ProgramOfThought.answererModuleName)
+    )
+
   override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
     call.encodedInput(baseSignature.inputShape)
   override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
@@ -164,16 +192,10 @@ final case class ProgramOfThought[I, O](
       rolloutId    = call.rolloutId
     )
     for
-      generatorLayout   <- ChainOfThought.augmentLayout(generateSignature)
-      regeneratorLayout <- ChainOfThought.augmentLayout(regenerateSignature)
-      answerLayout      <- ChainOfThought.augmentLayout(answerSignature)
-      generator   = DynamicPredict(layout = generatorLayout, runtime = SignatureProgramRuntime)
-      regenerator = DynamicPredict(layout = regeneratorLayout, runtime = SignatureProgramRuntime)
-      answerer    = DynamicPredict(layout = answerLayout, runtime = SignatureProgramRuntime)
-      codeAndOutput <- runCode(baseCall, generator, regenerator)
+      codeAndOutput <- runCode(baseCall)
       (code, codeOutput) = codeAndOutput
       extractInputs = inputs.updated("final_generated_code", stringDv(code)).updated("code_output", stringDv(codeOutput))
-      result    <- answerer.apply(baseCall.copy(inputs = extractInputs))
+      result    <- answererPredict.apply(baseCall.copy(inputs = extractInputs))
       augmented <- OutputAugmentation.decodePrepended(
                      result.values, baseSignature.outputShape, "reasoning", "ProgramOfThought", baseSignature.name
                    )
@@ -193,29 +215,25 @@ final case class ProgramOfThought[I, O](
     * `(previous_code, error)` into `regenerator` for the next attempt; the first success wins; exhausting the
     * budget surfaces the last failure. An interpreter-level failure aborts immediately (no LM fix). */
   private def runCode(
-      call: ProgramCall,
-      generator: DynamicPredict,
-      regenerator: DynamicPredict
+      call: ProgramCall
   )(using RuntimeContext): Either[DspyError, (String, String)] =
     AgentLoop.run[Option[ProgramOfThought.Attempt], (String, String)](None, 0, maxIterations)(
       onExhausted = {
         case Some(attempt) => Left(RuntimeError("program_of_thought", attempt.exhaustionMessage))
         case None          => Left(RuntimeError("program_of_thought", s"Max attempts ($maxIterations) reached."))
       }
-    )(potStep(call, generator, regenerator))
+    )(potStep(call))
 
   /** One code-generation attempt as an [[AgentLoop]] step: pick generator (first attempt) or regenerator
     * (carrying the prior failure), generate + parse + execute, and either finish with `(code, output)` or carry
     * the failure to the next attempt. */
   private def potStep(
-      call: ProgramCall,
-      generator: DynamicPredict,
-      regenerator: DynamicPredict
+      call: ProgramCall
   )(using
       RuntimeContext
   ): (Option[ProgramOfThought.Attempt], Int) => Either[DspyError, AgentLoop.Step[Option[ProgramOfThought.Attempt], (String, String)]] =
     (previous, _) =>
-      val predict = previous.fold(generator)(_ => regenerator)
+      val predict = previous.fold(generatorPredict)(_ => regeneratorPredict)
       val inputs = previous match
         case None          => call.inputs
         case Some(attempt) => call.inputs.updated("previous_code", stringDv(attempt.code)).updated("error", stringDv(attempt.error))
@@ -246,10 +264,6 @@ final case class ProgramOfThought[I, O](
                 Left(interpreterErr)
       }
 
-  /** Use the default settings-based runtime resolution for the inner
-    * DynamicPredict programs. */
-  private object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
-
 object ProgramOfThought:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
   type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
@@ -257,3 +271,20 @@ object ProgramOfThought:
   /** A failed code attempt carried into the next regenerate step: the `code` that failed and its `error` (fed to
     * the regenerator as `previous_code` / `error`), plus the pre-built message used if the budget is exhausted. */
   private[programs] final case class Attempt(code: String, error: String, exhaustionMessage: String)
+
+  private[programs] val generatorModuleName   = "program_of_thought_generate"
+  private[programs] val regeneratorModuleName = "program_of_thought_regenerate"
+  private[programs] val answererModuleName    = "program_of_thought_answer"
+
+  /** Use one stateless settings-based runtime for default inner predictors. Keeping it in the companion means a
+    * state-only `copy` rebuild retains the same execution resource. */
+  private object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
+
+  private def defaultPredict(layout: SignatureLayout, name: String): DynamicPredict =
+    DynamicPredict(
+      layout = ChainOfThought
+        .augmentLayout(layout)
+        .fold(error => throw new IllegalArgumentException(error.message), identity),
+      name = Some(name),
+      runtime = SignatureProgramRuntime
+    )

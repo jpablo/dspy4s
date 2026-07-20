@@ -61,16 +61,16 @@ final case class BestOfN[P <: Module[TypedCall[I], Prediction[O]], I, O](
 
 object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any
-    * learnable predict of its own, so `read` / `replace` / `readNamed` delegate to the inner program's
+    * learnable predict of its own, so `inspect` / `replace` / `inspectNamed` delegate to the inner program's
     * instance unchanged. */
   given bestOfNPredictors[P <: Module[TypedCall[I], Prediction[O]], I, O](using
       inner: Predictors[P]
   ): Predictors[BestOfN[P, I, O]] with
-    def read(program: BestOfN[P, I, O]): Vector[DynamicPredict] =
-      inner.read(program.module)
+    def inspect(program: BestOfN[P, I, O]): Vector[PredictorView] =
+      inner.inspect(program.module)
 
-    def replace(program: BestOfN[P, I, O], updates: Vector[DynamicPredict]): BestOfN[P, I, O] =
+    def replace(program: BestOfN[P, I, O], updates: Vector[PredictorState]): BestOfN[P, I, O] =
       program.copy(module = inner.replace(program.module, updates))
 
-    override def readNamed(program: BestOfN[P, I, O]): Vector[(String, DynamicPredict)] =
-      inner.readNamed(program.module)
+    override def inspectNamed(program: BestOfN[P, I, O]): Vector[(String, PredictorView)] =
+      inner.inspectNamed(program.module)

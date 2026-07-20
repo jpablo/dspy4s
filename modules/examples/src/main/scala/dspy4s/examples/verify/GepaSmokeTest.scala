@@ -148,9 +148,7 @@ object GepaSmokeTest:
 
         println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
         println(f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)")
-        println(s"""[gepa-smoke] discovered instruction:\n    "${result.bestCandidate.getOrElse(
-            PredictorId(0),
-            "(none)"
-          )}"""")
+        val discovered = result.bestCandidate.get(PredictorId(0)).flatten.getOrElse("(none)")
+        println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
         println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
       }

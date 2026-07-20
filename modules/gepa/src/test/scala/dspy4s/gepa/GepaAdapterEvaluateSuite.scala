@@ -106,7 +106,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result = adapter.evaluate(
         batch.take(1),
-        Map(PredictorId(0) -> "Answer with the city name only."),
+        Map(PredictorId(0) -> Some("Answer with the city name only.")),
         captureTraces = true
       )
       assertEquals(result.scores, Vector(1.0))

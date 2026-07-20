@@ -3,10 +3,14 @@ package dspy4s.optimize
 import dspy4s.programs.Predictors
 
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Example
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
+import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predict
 import dspy4s.programs.PredictorId
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
@@ -51,6 +55,38 @@ class ProgramPersistenceSuite extends FunSuite:
       assertEquals(loaded.toOption.get.demos, demo)
     finally
       Files.deleteIfExists(path): Unit
+  }
+
+  test("DynamicPredict loading restores only state and preserves the fresh executable environment") {
+    val trainedLayout = qaSignature.layout.withInstructions(Some("Use the trained prompt."))
+    val freshLayout = SignatureLayout.of(
+      name = "FreshQA",
+      fields = qaSignature.layout.fields,
+      instructions = Some("This will be replaced.")
+    )
+    val trained = DynamicPredict(
+      layout = trainedLayout,
+      demos = demo,
+      name = Some("training_predictor"),
+      outputJsonSchema = Some("training-schema"),
+      config = DynamicValues.record("temperature" := 0.2)
+    )
+    val freshRuntime = new SettingsProgramRuntime {}
+    val fresh = DynamicPredict(
+      layout = freshLayout,
+      name = Some("deployment_predictor"),
+      runtime = freshRuntime,
+      outputJsonSchema = Some("deployment-schema")
+    )
+
+    val restored = ProgramPersistence.loadState(fresh, ProgramPersistence.dumpState(trained)).toOption.get
+
+    assertEquals(restored.predictorState, trained.predictorState)
+    assertEquals(restored.layout.name, freshLayout.name)
+    assertEquals(restored.layout.fields, freshLayout.fields)
+    assertEquals(restored.name, fresh.name)
+    assert(restored.runtime eq freshRuntime)
+    assertEquals(restored.outputJsonSchema, fresh.outputJsonSchema)
   }
 
   // ── Composite (2 Predicts) ─────────────────────────────────────────────────

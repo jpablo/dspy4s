@@ -71,7 +71,7 @@ class InferRulesSuite extends FunSuite:
   private val metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
   private def instructionOf(report: dspy4s.optimize.contracts.OptimizationReport[DynamicPredict]): String =
-    summon[Predictors[DynamicPredict]].read(report.bestProgram).head.layout.instructions.getOrElse("")
+    summon[Predictors[DynamicPredict]].read(report.bestProgram).head.instructions.getOrElse("")
 
   test("InferRules induces rules, appends them to the instruction, and the rule-augmented program wins") {
     val student   = DynamicPredict(layout = taskLayout)

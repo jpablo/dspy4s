@@ -121,7 +121,7 @@ object Cheatsheet:
     new Evaluate(EvaluateConfig(devset = devset, metric = metric, numThreads = Some(4),
       displayProgress = true, displayTable = Right(5)))
 
-  // ── Snippets 12/13/18 — few-shot optimizers (operate on the untyped DynamicPredict) ──
+  // ── Snippets 12/13/18 — few-shot optimizers (these snippets instantiate generic optimizers with DynamicPredict) ──
   // | LabeledFewShot(k=8).compile(student, trainset)
   // --8<-- [start:opt-labeled]
   def labeledFewShot(student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
@@ -146,8 +146,8 @@ object Cheatsheet:
     )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 
   // ── Snippets 16/17 — save / load ──
-  // Ported (PORT_GAPS G-4): persist a program's learnable state (per-predictor signature + demos + config) as
-  // JSON via `ProgramPersistence`. `load` takes a freshly-recreated program and writes the saved state back.
+  // Ported (PORT_GAPS G-4): persist each leaf's `PredictorState` (instructions + demos + module config) as JSON.
+  // `load` applies it to a fresh program with the same predictor traversal/order; metadata/resources stay fresh.
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] = ProgramPersistence.save(program, path)
   def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] = ProgramPersistence.load(fresh, path)
 

@@ -14,6 +14,7 @@ import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.PredictorView
 import dspy4s.programs.Predictors
 import dspy4s.programs.contracts.ProgramCall
 
@@ -96,7 +97,7 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
         val base = bootstrapReport.bestProgram
 
         // 3) Snapshot each predictor's original instruction (rules are appended to THIS, not cumulatively).
-        val originalInstructions = ps.read(base).map(_.layout.instructions.getOrElse(""))
+        val originalInstructions = ps.read(base).map(_.instructions.getOrElse(""))
 
         // 4) Generate + score `numCandidates` rule-augmented candidates.
         val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
@@ -104,7 +105,7 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
 
         (0 until config.numCandidates).foreach { candIdx =>
           val candidate = ps.read(base).indices.foldLeft(base) { (prog, predIdx) =>
-            induceRules(ps.read(base)(predIdx), effTrain, candIdx, predIdx) match
+            induceRules(ps.inspect(base)(predIdx), effTrain, candIdx, predIdx) match
               case Some(rules) =>
                 val augmented = s"${originalInstructions(predIdx)}\n\n" +
                   s"Please adhere to the following rules when making your prediction:\n$rules"
@@ -132,7 +133,7 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
 
   /** Induce rules for one predictor from the trainset, narrowing the example set on a context-window overflow.
     * Returns the induced rules text, or `None` if even a single example can't produce rules. */
-  private def induceRules(predictor: DynamicPredict, trainset: Vector[Example], candIdx: Int, predIdx: Int)(using
+  private def induceRules(predictor: PredictorView, trainset: Vector[Example], candIdx: Int, predIdx: Int)(using
       RuntimeContext
   ): Option[String] =
     val gen = DynamicPredict(layout = ruleInductionLayout, name = Some("infer_rules_induction"))
@@ -158,7 +159,7 @@ final class InferRules[P: Predictors: Runnable](config: InferRulesConfig) extend
 
   /** Render demos as upstream's `format_examples` text, projecting each example to the predictor's own input/output
     * fields. */
-  private def formatExamples(demos: Vector[Example], predictor: DynamicPredict): String =
+  private def formatExamples(demos: Vector[Example], predictor: PredictorView): String =
     def render(fields: Vector[FieldSpec], ex: Example): String =
       fields.flatMap(f => DynamicValues.recordGet(ex.values, f.name).map(v => s"${f.name}: ${DynamicValues.renderText(v)}")).mkString("\n")
     demos.map { ex =>

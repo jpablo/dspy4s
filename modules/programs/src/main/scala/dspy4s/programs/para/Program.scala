@@ -4,7 +4,8 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.AndThen
 import dspy4s.programs.Both
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.PredictorState
+import dspy4s.programs.PredictorView
 import dspy4s.programs.Identity
 import dspy4s.programs.Predictors
 import dspy4s.programs.contracts.Module
@@ -69,16 +70,16 @@ object Program:
 
   /** Addressability for packaged programs delegates to the evidence retained by the package. */
   given programPredictors[I, O]: Predictors[Program[I, O]] with
-    def read(program: Program[I, O]): Vector[DynamicPredict] =
-      program.addressable.read(program.program)
+    def inspect(program: Program[I, O]): Vector[PredictorView] =
+      program.addressable.inspect(program.program)
 
-    def replace(program: Program[I, O], updates: Vector[DynamicPredict]): Program[I, O] =
+    def replace(program: Program[I, O], updates: Vector[PredictorState]): Program[I, O] =
       Program.packageWith(program.addressable.replace(program.program, updates), program.decodeInput)(using
         program.addressable
       )
 
-    override def readNamed(program: Program[I, O]): Vector[(String, DynamicPredict)] =
-      program.addressable.readNamed(program.program)
+    override def inspectNamed(program: Program[I, O]): Vector[(String, PredictorView)] =
+      program.addressable.inspectNamed(program.program)
 
   /** The Para category over packaged programs.
     *
@@ -101,9 +102,9 @@ object Program:
           AndThen.andThenPredictors[A, B, C, f.Rep, g.Rep](using f.addressable, g.addressable)
         )
 
-      def params: Vector[DynamicPredict] = f.addressable.read(f.program)
+      def params: Vector[PredictorState] = f.addressable.read(f.program)
 
-      def reparam(ps: Vector[DynamicPredict]): Program[A, B] =
+      def reparam(ps: Vector[PredictorState]): Program[A, B] =
         Program.packageWith(f.addressable.replace(f.program, ps), f.decodeInput)(using f.addressable)
 
 /** Parameter projection as a functor from packaged programs into the delooped parameter monoid. */

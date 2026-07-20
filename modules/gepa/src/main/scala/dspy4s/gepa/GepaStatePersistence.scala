@@ -18,7 +18,7 @@ object GepaStatePersistence:
   /** Flat, JSON-friendly projection of [[GepaState]]'s fields (no methods / `require`), so the codec derives cleanly.
     */
   private final case class Snapshot(
-      candidates: Vector[Map[String, String]],
+      candidates: Vector[Map[String, Option[String]]],
       valSubscores: Vector[Vector[Double]],
       parents: Vector[Vector[Int]],
       totalMetricCalls: Int

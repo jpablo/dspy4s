@@ -1,9 +1,9 @@
 # Saving & loading
 
-An [optimized program](../optimization/index.md) carries learned state:
-demonstrations, instructions, and configuration. `ProgramPersistence` writes that
-state to disk as JSON and reads it back, so you optimize once and load the result
-at startup.
+An [optimized program](../optimization/index.md) carries a small, explicit set of
+prompt parameters. `ProgramPersistence` writes those parameters to JSON and applies
+them to a freshly constructed program, so optimization can run once and the result
+can be loaded at startup.
 
 ## Save and load
 
@@ -11,18 +11,93 @@ at startup.
 --8<-- "learn/optimization/Optimizers.scala:save-load"
 ```
 
-`load` takes a freshly constructed program of the same shape and returns it with
-the saved state written in. This mirrors how the program was built in code: you
-recreate the structure, then load the learned state into it.
+`load` does not reconstruct an executable program. It takes a fresh program whose
+architecture and runtime bindings were created normally in Scala, then returns a new
+immutable value with the saved predictor states applied.
 
-## What is and is not saved
+## The state contract
 
-- **Saved:** each predictor's signature, demonstrations, and configuration. This
-  is the learned state, captured as plain JSON.
-- **Not saved:** your program's code. dspy4s does not serialize program
-  structure. You recreate the program in Scala, then `load` the state.
+Every optimizer-addressable leaf exposes the same writable `PredictorState`:
 
-This split keeps the saved artifact small, readable, and decoupled from the
-exact build of your application.
+| Field | Meaning |
+|---|---|
+| `instructions: Option[String]` | The signature-level prompt instructions. |
+| `demos: Vector[Example]` | Few-shot examples rendered by the adapter. |
+| `config: DynamicValue.Record` | Module-level LM option defaults; per-call options still win. |
+
+This contract is shared by typed `Predict`, typed `ChainOfThought`, and
+`DynamicPredict`. Framework composites expose the same state for each stable
+leaf—for example, `ProgramOfThought` exposes its generator, regenerator, and
+answerer. The executable predictor is not used as a parameter carrier.
+
+`Predictor[P]` is a lens onto this state. Its instances obey:
+
+- Get-Put: writing the state just read is a no-op.
+- Put-Get: reading after a write returns the written state.
+- Put-Put: only the last state written matters.
+- Frame: writing state does not change predictor metadata.
+
+At the composite level, `Predictors.replace(program, Predictors.read(program))`
+returns the original program, and an arity-matched replacement reads back as the
+same state vector.
+
+Algebraically, `Predictor[P]` is a lawful lens focused on one `PredictorState`,
+while `Predictors[P]` is an ordered finite traversal. Composition concatenates
+the child traversals, parameter-free structure contributes the empty vector, and
+`Vector[PredictorState]` forms the parameter monoid under concatenation. Named
+inspection is checked against the canonical traversal so labels cannot silently
+reorder or substitute states.
+
+## Metadata and execution resources
+
+`PredictorMetadata` is inspectable but not writable through optimizer replacement.
+It contains the signature field structure (with instructions removed) and module
+name. Loading preserves that metadata from the fresh target program.
+
+The following are also not persisted:
+
+- program code and composite structure;
+- runtime/model resolution and adapter configuration;
+- output JSON schemas, bound LMs, and tools;
+- callbacks, traces, history, and prior predictions.
+
+This boundary prevents a saved prompt artifact from replacing architecture or live
+execution resources. Recreate and configure those normally, then load state into it.
+
+## Predictor IDs and compatibility
+
+The JSON object keys are `predictor-0`, `predictor-1`, and so on. They are ordinal
+IDs derived from the root `Predictors` traversal:
+
+- JSON object order does not matter.
+- Missing and unknown ordinals are rejected.
+- An equal-size reorder cannot be detected, because the IDs are not semantic names.
+
+Load only into a compatible program with the same predictor count and traversal
+order. Structural display names are useful diagnostics, but they are not persisted
+identity.
+
+Each entry has this shape:
+
+```json
+{
+  "predictors": {
+    "predictor-0": {
+      "instructions": "Answer concisely.",
+      "demos": [],
+      "config": { "temperature": 0.2 }
+    }
+  }
+}
+```
+
+The former entry format containing a full `signature` layout is unsupported. There
+is no legacy migration path: regenerate the artifact with the current code. The
+field structure now belongs exclusively to the fresh program's metadata.
+
+## State-only versus whole-program persistence
+
+dspy4s supports state-only JSON. It does not implement Python DSPy's
+`save_program=True`, pickle/cloudpickle artifacts, or `modules_to_serialize`.
 
 Next: [Streaming](streaming.md).

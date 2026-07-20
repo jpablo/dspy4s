@@ -15,14 +15,14 @@ Programs live on two layers that share one engine:
 
 - **The typed surface** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind static input/output
   types and encode/decode at the boundary.
-- **The untyped spine** — `DynamicModule = Module[ProgramCall, DynamicPrediction]`, where programs build and
-  augment signatures at runtime (e.g. `ChainOfThought` prepends a `reasoning` field). `DynamicPredict` is the
-  runtime substrate both layers delegate to, through a single shared `PredictEngine`.
+- **The untyped spine** — `DynamicModule = Module[ProgramCall, DynamicPrediction]`, where programs can build and
+  augment signatures at runtime. `DynamicPredict` is the executable prediction leaf on this spine. The typed
+  `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
-The bridge for optimization is `Predictors[P]`, the dspy4s analogue of Python's `named_predictors()`: it
-enumerates a program's learnable sub-predictors (`read` / `readIdentified` / `readNamed`) and writes edited copies back
-(`replace`), which is exactly what the [`optimize`](../optimize/README.md) and [`gepa`](../gepa/README.md)
-modules drive.
+The bridge for optimization is `Predictors[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
+non-executable predictor views (`inspect` / `readIdentified`) and writable `PredictorState` values (`read`), then writes
+an arity-matched state vector back through `replace`. This is what the [`optimize`](../optimize/README.md) and
+[`gepa`](../gepa/README.md) modules drive.
 
 ## Key types
 
@@ -30,12 +30,14 @@ modules drive.
 
 | Type | Role |
 |------|------|
-| `Predict[I, O]` | The fundamental typed predictor: encode `I`, run the engine against the LM, decode into `Prediction[O]`. Delegates to a private memoized `DynamicPredict`. |
-| `DynamicPredict` | The untyped predictor and shared substrate; serializable learnable state (layout, demos, config). |
+| `Predict[I, O]` | The fundamental typed predictor: encode `I`, run its `PredictEngine` against the LM, decode into `Prediction[O]`. |
+| `DynamicPredict` | The untyped predictor for runtime-known layouts: accept a `ProgramCall`, run the shared engine, return a `DynamicPrediction`. |
+| `PredictorState` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
+| `PredictorView` | A non-executable snapshot pairing `PredictorState` with read-only signature structure and module name. |
 | `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
 | `ReAct[I, O]` | Reasoning-and-acting agent: iterates over a tool set using a text protocol (`next_thought` / `next_tool_name` / `next_tool_args`), then a CoT-augmented extractor produces `O`. Learnable: `reactPredict`, `extractorPredict`. |
 | `CodeAct[I, O]` | Generates and executes Python via a `CodeInterpreter` in a loop, then extracts outputs. Supports user tools bridged into the sandbox. |
-| `ProgramOfThought[I, O]` | Three-pass code reasoning: generate → regenerate on error → answer. |
+| `ProgramOfThought[I, O]` | Three-pass code reasoning: generate → regenerate on error → answer. Its three stable predictors are optimizer-addressable. |
 | `MultiChainComparison[I, O]` | Compares `m` candidate reasoning chains and synthesizes a corrected `rationale`. |
 | `BestOfN[I, O]` | Runs an inner program up to `n` times (varied by `rolloutId`), keeps the highest-reward result; short-circuits at a threshold. |
 | `Refine[P]` | Iterative feedback loop: runs, generates advice from the trace + reward, injects per-predictor hints into the next attempt. |
@@ -71,9 +73,9 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 - **Module purity.** `forward` is side-effect-free; trace, history, and callbacks are a transparent `final`
   wrapper, so every program is observed identically with no subclass boilerplate. (The
   [module-purity memory](../../README.md): runtime owns bookkeeping, no `ProgramMeta`/`BaseModule`/`Parameter`.)
-- **Two layers, neither wraps the other.** The typed predictors delegate to a private `DynamicPredict`, not a
-  public sibling; both reach the LM through the same `PredictEngine`. Programs that reshape signatures at
-  runtime construct `DynamicPredict(layout = augmented)` directly.
+- **Two layers, neither wraps the other.** `Predict[I, O]` and `DynamicPredict` each own a `PredictEngine` built
+  from their signature representation, so a typed call emits one `predict` module lifecycle rather than a
+  wrapper-over-dynamic pair. Programs that need a runtime-known layout construct `DynamicPredict` directly.
 - **`Predictors` is the optimizer backbone.** Optimizers never special-case program types — they read the
   predictor genome through `Predictors`, build edited copies, and `replace`. This is why one optimizer codepath
   covers a bare `Predict` and an arbitrary composite.
@@ -89,7 +91,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 
 | Path | Contents |
 |------|----------|
-| `Predict.scala`, `DynamicPredict.scala` | the typed predictor and the untyped substrate |
+| `Predict.scala`, `DynamicPredict.scala` | sibling typed and untyped predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
 | `Predictors.scala` | the `Predictors`/`Predictor` introspection type-classes |

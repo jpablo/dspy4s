@@ -5,9 +5,10 @@
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md
  * Status:   translated (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
  *
- * dspy4s optimizers operate on the untyped `DynamicPredict` (which has a `Predictors` instance);
- * `compile(student, trainset)` returns an `OptimizationReport` whose `bestProgram` is the result.
- * Program state is persisted with `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
+ * This translation instantiates the generic optimizer with `DynamicPredict`; typed programs are supported too
+ * when they provide the same `Predictors` + `Runnable` capabilities. `compile(student, trainset)` returns an
+ * `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
+ * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
  */
 package dspy4s.examples.learn.optimization
 
@@ -44,9 +45,9 @@ object Optimizers:
   // ── Snippets 2 + 3 (lines 213–225) — save / load an optimized program ──
   // | optimized_program.save(YOUR_SAVE_PATH)
   // | loaded_program = YOUR_PROGRAM_CLASS(); loaded_program.load(path=YOUR_SAVE_PATH)
-  // Ported (PORT_GAPS G-4): `ProgramPersistence` writes/reads a program's learnable state (per-predictor
-  // signature + demos + config) as JSON. Like Python, `load` takes a freshly-recreated program of the same
-  // shape and returns it with the saved state written back. See tutorials/saving for the full treatment.
+  // Ported (PORT_GAPS G-4): `ProgramPersistence` writes/reads each leaf's `PredictorState`
+  // (instructions + demos + module config) as JSON. `load` applies it to a fresh program with the same predictor
+  // traversal/order while preserving that program's metadata and execution resources. See tutorials/saving.
   // --8<-- [start:save-load]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)

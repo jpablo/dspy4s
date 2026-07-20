@@ -122,8 +122,9 @@ graph TD
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
 7. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
-   Uses the `PredictOps[P]` typeclass to read `layout` + `demos` from a
-   program and produce demo-shuffled copies.
+   Uses `Predictors[P]` to inspect read-only predictor metadata, read/write
+   `PredictorState` (instructions, demos, config), and rebuild candidates;
+   `Runnable[P]` supplies uniform typed/untyped execution.
 
 8. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
    `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
@@ -159,15 +160,16 @@ goes through the typed surface.
 ### Typed chain (compile-time)
 
 ```
-Signature[I, O] ──→ Predict[I, O].run(input: I) ──→ Prediction[O]
+Signature[I, O] ──→ Predict[I, O].apply(input: I) ──→ Prediction[O]
                     encode I via Shape[I]            decode Record via Shape[O]
 ```
 
-`Predict[I, O].run` encodes the input through `signature.inputShape`,
-dispatches through a memoized inner `DynamicPredict`, then decodes the
-resulting `DynamicPrediction` through `signature.outputShape`. Decode
-failures surface as `Left(DspyError)` at this boundary, never via lazy
-field access.
+`Predict[I, O].apply` encodes the input through `signature.inputShape`,
+runs the shared `PredictEngine` directly, then decodes the resulting
+`DynamicPrediction` through `signature.outputShape`. `Predict` and
+`DynamicPredict` are sibling modules over that engine; neither calls the
+other. Decode failures surface as `Left(DspyError)` inside the typed
+module lifecycle, never via lazy field access.
 
 ## Ways to make a `Signature`
 
@@ -187,18 +189,17 @@ to scalars). `fromStringDynamic` is the runtime escape hatch for a DSL string on
 
 ## Canonical `Predict` call flow
 
-When `Predict[I, O].run(input)` fires:
+When `Predict[I, O].apply(input)` fires:
 
-1. **Encode** — `signature.inputShape.encode(input)` produces a
-   `DynamicValue.Record`. A defensive check verifies all declared input
-   fields are present (catches `MapShape` callers from the string DSL
-   missing a field).
-2. **Hand off** — wrap in `ProgramCall(inputs, config, traceEnabled)`,
-   call the memoized inner `DynamicPredict.apply(call)`.
-3. **`Module.apply` wraps** —
-   `CallbackDispatcher.withModule("predict", inputs)` scope; on success,
-   conditionally records `TraceEntry` + `HistoryEntry`.
-4. **`PredictEngine.execute`** (the shared body):
+1. **Build the typed call** — the convenience overload creates a
+   `TypedCall(input, config, traceEnabled)` and dispatches through the final
+   `Module.apply`. Its lifecycle input projection encodes `input` through
+   `signature.inputShape` into a memoized `DynamicValue.Record`.
+2. **`Module.apply` wraps** —
+   `CallbackDispatcher.withModule("predict", inputs)` scopes the complete
+   typed `forward`, including output decoding. A defensive check first
+   verifies that every declared input field is present.
+3. **`PredictEngine.execute`** (the shared raw execution body):
    1. Push `ActivePredict(name, layout)` onto the thread-local stack.
    2. `runtime.resolveModel` + `runtime.resolveAdapter` (pulled from
       `RuntimeContext.settings`).
@@ -211,8 +212,12 @@ When `Predict[I, O].run(input)` fires:
       `Vector[ParsedOutput]`.
    6. Assemble `DynamicPrediction` from completions; attach LM usage
       and tool-call payload.
-5. **Decode** — `Prediction.from(raw, signature.outputShape)` returns
+4. **Decode** — still inside `forward`,
+   `Prediction.from(raw, signature.outputShape)` returns
    `Either[DspyError, Prediction[O]]`.
+5. **Record success** — only a successful typed result is written to
+   trace/history. A decode failure returns `Left` from the same module
+   lifecycle and does not leave a successful prediction entry.
 
 `PredictEngine` is `private[dspy4s]`. Composite programs that need the
 `Module` API construct a `DynamicPredict` (which holds an
@@ -261,9 +266,9 @@ code:
   extra fields via the `private[dspy4s]` mutation helpers, internally
   construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
   `MultiChainComparison` are the templates.
-- **New optimizer** — use the `PredictOps[P]` typeclass to read
-  `layout` / `demos` and produce demo-shuffled program copies.
-  `BootstrapFewShot` is the template.
+- **New optimizer** — use `Predictors[P].inspect` for layout/name metadata,
+  `read` / `replace` for writable `PredictorState`, and `Runnable[P]` for
+  execution. `BootstrapFewShot` is the template.
 - **New stream listener** — implement `StreamListener[A]`, pass to
   `Streamify.streamify`. The streaming wrapper routes via
   `ActivePredictContext`.
@@ -285,8 +290,8 @@ code:
    `dspy.Tool(fn)`) — a macro that derives a tool's name, `@description`,
    and typed argument schema from a plain method and decodes each call
    argument by name/type.
-5. **Python save / pickle compatibility.** Mitigation: a dspy4s-native
-   artifact format (`SignatureLayout.dumpState` / `fromState`);
+5. **Python save / pickle compatibility.** Mitigation: a dspy4s-native,
+   state-only JSON format (`PredictorState` + `ProgramPersistence`);
    explicit non-compat note.
 
 ## How this maps to Python DSPy

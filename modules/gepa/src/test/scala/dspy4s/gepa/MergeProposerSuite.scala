@@ -76,37 +76,43 @@ class MergeProposerSuite extends FunSuite:
   // ── Pure crossover helpers ──────────────────────────────────────────────────────────────────────────────────
 
   test("crossover takes each component from whichever descendant improved it (complementary gains stacked)") {
-    val ancestor       = Map(first -> "A0", second -> "B0")
-    val id1            = Map(first -> "A1", second -> "B0") // changed first, kept second
-    val id2            = Map(first -> "A0", second -> "B1") // kept first, changed second
+    val ancestor       = Map(first -> Some("A0"), second -> Some("B0"))
+    val id1            = Map(first -> Some("A1"), second -> Some("B0")) // changed first, kept second
+    val id2            = Map(first -> Some("A0"), second -> Some("B1")) // kept first, changed second
     val (merged, desc) = MergeProposer.crossover(ancestor, 1, id1, 2, id2, _ => 0.0, new Random(0))
-    assertEquals(merged, Map(first -> "A1", second -> "B1")) // first from id1, second from id2
+    assertEquals(merged, Map(first -> Some("A1"), second -> Some("B1"))) // first from id1, second from id2
     assertEquals(desc, Vector(1, 2)) // components sorted (a, b) -> sources (id1, id2)
   }
 
   test("crossover breaks a both-changed component toward the higher-scoring descendant") {
-    val ancestor = Map(first -> "A0")
+    val ancestor = Map(first -> Some("A0"))
     val (merged, _) = MergeProposer.crossover(
       ancestor,
       1,
-      Map(first -> "A1"),
+      Map(first -> Some("A1")),
       2,
-      Map(first -> "A2"),
+      Map(first -> Some("A2")),
       aggregateScore = Map(1 -> 0.3, 2 -> 0.9),
       new Random(0)
     )
-    assertEquals(merged(first), "A2") // id2 scores higher
+    assertEquals(merged(first), Some("A2")) // id2 scores higher
   }
 
   test("hasDesirablePredictors requires a component changed by exactly one descendant") {
-    val anc = Map(first -> "A0", second -> "B0")
+    val anc = Map(first -> Some("A0"), second -> Some("B0"))
     assert(MergeProposer.hasDesirablePredictors(
       anc,
-      Map(first -> "A1", second -> "B0"),
-      Map(first -> "A0", second -> "B1")
+      Map(first -> Some("A1"), second -> Some("B0")),
+      Map(first -> Some("A0"), second -> Some("B1"))
     ))
     // Both descendants changed every component -> no component is "anchored" to the ancestor -> not desirable.
-    assert(!MergeProposer.hasDesirablePredictors(Map(first -> "A0"), Map(first -> "A1"), Map(first -> "A2")))
+    assert(
+      !MergeProposer.hasDesirablePredictors(
+        Map(first -> Some("A0")),
+        Map(first -> Some("A1")),
+        Map(first -> Some("A2"))
+      )
+    )
   }
 
   test("selectSubsample returns up to `num` valid, distinct-where-possible indices stratified by disagreement") {
@@ -124,9 +130,9 @@ class MergeProposerSuite extends FunSuite:
     // Hand-built lineage: seed 0 -> 1 (fixed the hinter) and 0 -> 2 (fixed the answerer). Per-instance subscores are
     // set so that 1 and 2 are the Pareto dominators (each best on one val instance) and 0 is dominated, making the
     // (1, 2, ancestor=0) triplet the only candidate pair.
-    val seedCand = Map(first -> "Stage one.", second -> "Stage two.")
-    val cand1    = Map(first -> "Use TOKEN1 to produce a good_hint.", second -> "Stage two.")
-    val cand2    = Map(first -> "Stage one.", second -> "Use TOKEN2 with the good_hint to answer.")
+    val seedCand = Map(first -> Some("Stage one."), second -> Some("Stage two."))
+    val cand1    = Map(first -> Some("Use TOKEN1 to produce a good_hint."), second -> Some("Stage two."))
+    val cand2    = Map(first -> Some("Stage one."), second -> Some("Use TOKEN2 with the good_hint to answer."))
     val state = GepaState(
       candidates = Vector(seedCand, cand1, cand2),
       valSubscores = Vector(Vector(0.0, 0.0), Vector(1.0, 0.0), Vector(0.0, 1.0)),
@@ -143,8 +149,8 @@ class MergeProposerSuite extends FunSuite:
       val p = proposal.get
       assertEquals(p.parents, Vector(1, 2))
       // The merge stacks both fixes: hinter from cand1 (TOKEN1), answerer from cand2 (TOKEN2).
-      assert(p.candidate(first).contains("TOKEN1"), p.candidate(first))
-      assert(p.candidate(second).contains("TOKEN2"), p.candidate(second))
+      assert(p.candidate(first).exists(_.contains("TOKEN1")), p.candidate(first))
+      assert(p.candidate(second).exists(_.contains("TOKEN2")), p.candidate(second))
       // With both fixed the merged program answers "Paris", beating either parent on the subsample.
       assert(p.accepted, "merged program should clear the subsample gate")
     }
@@ -153,7 +159,10 @@ class MergeProposerSuite extends FunSuite:
   test("propose returns None when there are fewer than three candidates (no ancestor to merge over)") {
     val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
     val state = GepaState(
-      candidates = Vector(Map(first -> "a", second -> "b"), Map(first -> "c", second -> "d")),
+      candidates = Vector(
+        Map(first -> Some("a"), second -> Some("b")),
+        Map(first -> Some("c"), second -> Some("d"))
+      ),
       valSubscores = Vector(Vector(1.0), Vector(1.0)),
       parents = Vector(Vector.empty, Vector(0)),
       totalMetricCalls = 0
