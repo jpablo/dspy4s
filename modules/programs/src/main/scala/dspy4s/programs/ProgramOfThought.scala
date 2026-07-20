@@ -13,6 +13,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
+import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -54,7 +55,7 @@ final case class ProgramOfThought[I, O](
     /** Optional override for the final answer-extraction predict. */
     answererPredictOverride: Option[DynamicPredict] = None
 )(using
-    prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ProgramOfThought.WithReasoning[O]]
+    prepend: PrependField.Of["reasoning", String, O]
 ) extends Module[ProgramCall[I], Prediction[ProgramOfThought.WithReasoning[O]]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */

@@ -16,6 +16,7 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.TrajectoryAgent
+import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -76,7 +77,7 @@ final case class CodeAct[I, O](
       */
     extractorPredictOverride: Option[DynamicPredict] = None
 )(using
-    prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, CodeAct.WithReasoning[O]]
+    prepend: PrependField.Of["reasoning", String, O]
 ) extends Module[ProgramCall[I], Prediction[CodeAct.WithReasoning[O]]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */

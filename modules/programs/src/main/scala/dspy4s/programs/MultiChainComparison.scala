@@ -12,6 +12,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -73,7 +74,7 @@ final case class MultiChainComparison[I, O](
       */
     comparePredictOverride: Option[DynamicPredict] = None
 )(using
-    prepend: OutputAugmentation.PrependField.Aux["rationale", String, O, MultiChainComparison.WithRationale[O]]
+    prepend: PrependField.Of["rationale", String, O]
 ) extends Module[MultiChainCall[I], Prediction[MultiChainComparison.WithRationale[O]]]:
 
   /** The output type — `rationale: String` prepended to `O`'s named-tuple view (always a named tuple). */

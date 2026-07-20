@@ -1,6 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.typed.OutputAugmentation
+import dspy4s.typed.OutputAugmentation.PrependField
 import scala.compiletime.error
 import scala.compiletime.erasedValue
 import scala.compiletime.summonFrom
@@ -79,7 +80,7 @@ object Predictor:
     * changes the base signature's instructions, from which the same augmented structure is rebuilt.
     */
   given chainOfThoughtPredictor[I, O](using
-      prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ChainOfThought.WithReasoning[O]]
+      prepend: PrependField.Of["reasoning", String, O]
   ): Predictor[ChainOfThought[I, O]] with
     private def augmented(program: ChainOfThought[I, O]) =
       ChainOfThought

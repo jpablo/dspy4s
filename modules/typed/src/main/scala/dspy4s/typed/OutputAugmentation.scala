@@ -54,6 +54,11 @@ object OutputAugmentation:
   object PrependField extends LowPriorityPrependField:
     type Aux[Name <: String & Singleton, T, O, O2] = PrependField[Name, T, O] { type Out = O2 }
 
+    /** Evidence for the canonical augmentation result [[WithField]]. Use [[Aux]] only when the output is intentionally
+      * pinned to some other type member.
+      */
+    type Of[Name <: String & Singleton, T, O] = Aux[Name, T, O, WithField[O, Name, T]]
+
     /** Named-tuple output without a `Name` field: prepend it via the supported whole-tuple constructor
       * `NamedTuple.build`. */
     given ntAbsent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using

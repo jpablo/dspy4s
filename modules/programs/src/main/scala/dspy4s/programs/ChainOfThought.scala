@@ -13,6 +13,7 @@ import dspy4s.core.contracts.{
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ProgramRuntime, ProgramCall}
 import dspy4s.programs.runtime.SettingsProgramRuntime
+import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
@@ -50,7 +51,7 @@ final case class ChainOfThought[I, O](
       * Per-call config still wins on key collisions.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty
-)(using prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ChainOfThought.WithReasoning[O]])
+)(using prepend: PrependField.Of["reasoning", String, O])
     extends Module[ProgramCall[I], Prediction[ChainOfThought.WithReasoning[O]]]:
 
   /** The augmented output type — always a named tuple. See [[ChainOfThought.WithReasoning]]. */

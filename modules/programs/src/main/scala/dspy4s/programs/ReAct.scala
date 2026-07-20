@@ -19,6 +19,7 @@ import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
+import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -58,7 +59,7 @@ final case class ReAct[I, O](
       */
     extractorPredictOverride: Option[DynamicPredict] = None
 )(using
-    prepend: OutputAugmentation.PrependField.Aux["reasoning", String, O, ReAct.WithReasoning[O]]
+    prepend: PrependField.Of["reasoning", String, O]
 ) extends Module[ProgramCall[I], Prediction[ReAct.WithReasoning[O]]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */

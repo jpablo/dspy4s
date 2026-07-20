@@ -13,7 +13,7 @@ class OutputAugmentationSuite extends FunSuite:
 
   // Summon the pinned instance the way a program would (Aux[Name, T, O, WithField[O, Name, T]]).
   private inline def prepend[Name <: String & Singleton, T, O](value: T, base: O)(using
-      p: PrependField.Aux[Name, T, O, WithField[O, Name, T]]
+      p: PrependField.Of[Name, T, O]
   ): Option[WithField[O, Name, T]] = p.prepend(value, base)
 
   test("named-tuple output without the field: prepends it") {
