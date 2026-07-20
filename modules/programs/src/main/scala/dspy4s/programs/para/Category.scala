@@ -56,7 +56,7 @@ trait CategoryFunctor[PS[_], Source[_, _], PT[_], Target[_, _]](using
   def map[A, B](f: Source[A, B]): Target[A, B]
 
   @Law("functor preserves identities")
-  def identities[A: PS: PT]: IsEq[Target[A, A]] =
+  def identities[A: {PS, PT}]: IsEq[Target[A, A]] =
     map(source.id[A]) <-> target.id[A]
 
   @Law("functor preserves composition")
