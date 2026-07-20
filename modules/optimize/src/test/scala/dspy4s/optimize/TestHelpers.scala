@@ -27,11 +27,13 @@ final case class ScriptedPredictProgram(
     config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
-  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      RuntimeContext
+  ): Either[DspyError, DynamicPrediction] =
     failsWith match
       case Some(err) => throw err
       case None =>
-        val q = lookupString(input.inputs, "question")
+        val q = lookupString(input.input, "question")
         Right(DynamicPrediction(rec("answer" := answers.getOrElse(q, "unknown"))))
 
 final case class DemoAwarePredictProgram(
@@ -41,8 +43,10 @@ final case class DemoAwarePredictProgram(
     config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
-  override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-    val q = lookupString(input.inputs, "question")
+  override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      RuntimeContext
+  ): Either[DspyError, DynamicPrediction] =
+    val q = lookupString(input.input, "question")
     // Use answers map first; then demos; else "unknown"
     val answer = answers.get(q)
       .orElse(
@@ -61,7 +65,8 @@ object DemoAwarePredictProgram:
       PredictorMetadata.from(program.layout, program.moduleName)
     def set(program: DemoAwarePredictProgram, updated: PredictorState): DemoAwarePredictProgram =
       if updated == get(program) then program
-      else program.copy(
+      else
+        program.copy(
         layout = program.layout.withInstructions(updated.instructions),
         demos = updated.demos,
         config = updated.config
@@ -75,7 +80,8 @@ object ScriptedPredictProgram:
       PredictorMetadata.from(program.layout, program.moduleName)
     def set(program: ScriptedPredictProgram, updated: PredictorState): ScriptedPredictProgram =
       if updated == get(program) then program
-      else program.copy(
+      else
+        program.copy(
         layout = program.layout.withInstructions(updated.instructions),
         demos = updated.demos,
         config = updated.config

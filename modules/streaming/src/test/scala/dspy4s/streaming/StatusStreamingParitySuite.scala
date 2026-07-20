@@ -19,11 +19,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import scala.collection.mutable.ArrayBuffer
 
-/** Ports the Python `@pytest.mark.anyio`-marked tests in
-  * `tests/streaming/test_streaming.py` that exercise the status-message side
-  * of the stream rather than per-field listeners. None of these tests need a
-  * live LM — they validate isolation and non-blocking semantics of the
-  * status pipeline.
+/** Ports the Python `@pytest.mark.anyio`-marked tests in `tests/streaming/test_streaming.py` that exercise the
+  * status-message side of the stream rather than per-field listeners. None of these tests need a live LM — they
+  * validate isolation and non-blocking semantics of the status pipeline.
   *
   * Python originals:
   *   - `test_concurrent_status_message_providers`
@@ -34,13 +32,15 @@ class StatusStreamingParitySuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
 
-  /** A program that invokes a tool and then "predicts" a fixed answer. We
-    * keep it minimal — no LM is configured because the test only inspects
-    * status events. */
+  /** A program that invokes a tool and then "predicts" a fixed answer. We keep it minimal — no LM is configured because
+    * the test only inspects status events.
+    */
   private def buildToolProgram(tool: ToolFunction, toolArgs: DynamicValue.Record): DynamicModule =
     new DynamicModule:
       override val moduleName: String = "tool_caller"
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(name = tool.name, args = toolArgs), Vector(tool)).map { _ =>
           DynamicPrediction(values = rec("answer" := "ok"))
         }

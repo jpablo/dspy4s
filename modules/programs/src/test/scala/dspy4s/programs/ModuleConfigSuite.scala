@@ -24,7 +24,9 @@ class ModuleConfigSuite extends FunSuite:
     override val name: String = "echo"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text, "score" := 0.5)))
 
   /** Records every `LmRequest` it receives so the test can inspect `options`. */
@@ -55,7 +57,7 @@ class ModuleConfigSuite extends FunSuite:
     val layout = SignatureDsl.parse("question -> answer, score").toOption.get
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.7))
     val reqs = withCapture {
-      val _ = module.apply(ProgramCall(inputs = rec("question" := "x")))
+      val _ = module.apply(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -67,7 +69,7 @@ class ModuleConfigSuite extends FunSuite:
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9))
     val reqs = withCapture {
       val _ = module.apply(ProgramCall(
-        inputs = rec("question" := "x"),
+        input = rec("question" := "x"),
         config = DynamicValues.record("temperature" := 0.2)
       ))
     }
@@ -82,7 +84,7 @@ class ModuleConfigSuite extends FunSuite:
     val module = DynamicPredict(layout)
     val callConfig = DynamicValues.record("temperature" := 0.42, "max_tokens" := 64)
     val reqs = withCapture {
-      val _ = module.apply(ProgramCall(inputs = rec("question" := "x"), config = callConfig))
+      val _ = module.apply(ProgramCall(input = rec("question" := "x"), config = callConfig))
     }
     assertEquals(reqs.size, 1)
     assertEquals(DynamicValues.recordToMap(reqs.head.options), DynamicValues.recordToMap(callConfig))

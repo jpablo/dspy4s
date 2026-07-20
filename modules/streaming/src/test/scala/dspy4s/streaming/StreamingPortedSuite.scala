@@ -33,14 +33,13 @@ import munit.FunSuite
 
 import scala.collection.mutable.ArrayBuffer
 
-/** Direct dspy4s ports of Python DSPy's
-  * `tests/streaming/test_streaming.py` tests that don't require live LMs,
-  * Pydantic-equivalent typing, async program execution, or the per-token
-  * chunk-emission discipline (which would need a state-machine refactor).
+/** Direct dspy4s ports of Python DSPy's `tests/streaming/test_streaming.py` tests that don't require live LMs,
+  * Pydantic-equivalent typing, async program execution, or the per-token chunk-emission discipline (which would need a
+  * state-machine refactor).
   *
-  * Each test names the Python original it ports. Comments note any
-  * deliberate behavioral deltas inherited from earlier choices
-  * (see PORT_MAP.md §4). */
+  * Each test names the Python original it ports. Comments note any deliberate behavioral deltas inherited from earlier
+  * choices (see PORT_MAP.md §4).
+  */
 class StreamingPortedSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -296,7 +295,9 @@ class StreamingPortedSuite extends FunSuite:
 
     val program = new DynamicModule:
       override val moduleName: String = "my_program"
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>
           DynamicPrediction(values = rec("answer" := "blue"))
         }

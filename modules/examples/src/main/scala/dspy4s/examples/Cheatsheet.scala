@@ -1,16 +1,14 @@
-/**
- * DSPy Cheatsheet
+/** DSPy Cheatsheet
  *
- * Source:   docs/docs/cheatsheet.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/cheatsheet.md
+  * Source: docs/docs/cheatsheet.md Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/cheatsheet.md
  * Status:   translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, retrieval 6, optimizers
- *           12/13/18/19/21/22/23/24, save/load 16/17, tools 27, streaming 28, usage 30, cache 31, refinement
- *           32–35). The few that remain depend on subsystems dspy4s doesn't have and are marked inline:
+  * 12/13/18/19/21/22/23/24, save/load 16/17, tools 27, streaming 28, usage 30, cache 31, refinement 32–35). The few
+  * that remain depend on subsystems dspy4s doesn't have and are marked inline:
  *             - LLM-as-judge metric (10): now expressible (G-6) — see learn/evaluation/Metrics + `SemanticF1`
  *             - async `asyncify` (29): no async program path
  *             - optimizers not ported: BootstrapFinetune/HFModel (20, G-16), Optuna (25, G-17), SIMBA (26, G-13)
- *           These constructs are demonstrated more fully in the dedicated tutorial examples (output_refinement,
- *           streaming, cache, learn/evaluation, learn/optimization, tutorials/saving).
+  * These constructs are demonstrated more fully in the dedicated tutorial examples (output_refinement, streaming,
+  * cache, learn/evaluation, learn/optimization, tutorials/saving).
  */
 package dspy4s.examples
 
@@ -21,11 +19,33 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.FunctionMetric
 import dspy4s.lm.runtime.UsageTracking
 import dspy4s.lm.contracts.Embedder
-import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, BootstrapFewShotWithRandomSearch,
-  COPRO, COPROConfig, Ensemble, KNNFewShot, LabeledFewShot, LabeledFewShotConfig, MIPROv2, MIPROv2Config,
-  ProgramPersistence, RandomSearchConfig}
-import dspy4s.programs.{BestOfN, ChainOfThought, CodeAct, DynamicPredict, Parallel, Predict, ProgramOfThought, ReAct, Refine}
-import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, TypedCall, description}
+import dspy4s.optimize.{
+  BootstrapFewShot,
+  BootstrapFewShotConfig,
+  BootstrapFewShotWithRandomSearch,
+  COPRO,
+  COPROConfig,
+  Ensemble,
+  KNNFewShot,
+  LabeledFewShot,
+  LabeledFewShotConfig,
+  MIPROv2,
+  MIPROv2Config,
+  ProgramPersistence,
+  RandomSearchConfig
+}
+import dspy4s.programs.{
+  BestOfN,
+  ChainOfThought,
+  CodeAct,
+  DynamicPredict,
+  Parallel,
+  Predict,
+  ProgramOfThought,
+  ReAct,
+  Refine
+}
+import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
 import dspy4s.programs.retrievers.KNN
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.DynamicValue
@@ -47,7 +67,7 @@ object Cheatsheet:
   // `rollout_id` is a framework control → the typed `rolloutId`; `temperature` is a provider knob → `config`.
   def predictWithConfig(using RuntimeContext): Either[DspyError, String] =
     Predict(Signature.fromString("question -> answer"))
-      .apply(TypedCall((question = "1+1"), config = rec("temperature" := 1.0), rolloutId = Some(1)))
+      .apply(ProgramCall((question = "1+1"), config = rec("temperature" := 1.0), rolloutId = Some(1)))
       .map(_.output.answer)
 
   // ── Snippet 3 (lines 34–40) — ChainOfThought ──
@@ -92,8 +112,8 @@ object Cheatsheet:
   def parallel(using RuntimeContext): Either[DspyError, Vector[Option[DynamicPrediction]]] =
     val predict = DynamicPredict(Signature.fromString("question -> answer").layout)
     Parallel(numThreads = Some(2)).apply(Vector(
-      predict -> ProgramCall(inputs = rec("question" := "1+1")),
-      predict -> ProgramCall(inputs = rec("question" := "2+2"))
+      predict -> ProgramCall(input = rec("question" := "1+1")),
+      predict -> ProgramCall(input = rec("question" := "2+2"))
     )).map(_.results)
   // --8<-- [end:parallel]
 
@@ -118,38 +138,58 @@ object Cheatsheet:
   // ── Snippet 11 (lines 165–171) — Evaluate ──
   // | evaluate_program = Evaluate(devset=devset, metric=..., num_threads=..., display_progress=True, display_table=n)
   def evaluator(devset: Vector[Example], metric: Metric): Evaluate =
-    new Evaluate(EvaluateConfig(devset = devset, metric = metric, numThreads = Some(4),
-      displayProgress = true, displayTable = Right(5)))
+    new Evaluate(EvaluateConfig(
+      devset = devset,
+      metric = metric,
+      numThreads = Some(4),
+      displayProgress = true,
+      displayTable = Right(5)
+    ))
 
   // ── Snippets 12/13/18 — few-shot optimizers (these snippets instantiate generic optimizers with DynamicPredict) ──
   // | LabeledFewShot(k=8).compile(student, trainset)
   // --8<-- [start:opt-labeled]
-  def labeledFewShot(student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
-      : Either[DspyError, DynamicPredict] =
+  def labeledFewShot(student: DynamicPredict, trainset: Vector[Example])(using
+      RuntimeContext
+  ): Either[DspyError, DynamicPredict] =
     new LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 8)).compile(student, trainset).map(_.bestProgram)
   // --8<-- [end:opt-labeled]
 
   // | BootstrapFewShot(metric=..., max_bootstrapped_demos=4, max_labeled_demos=16, max_rounds=1, max_errors=10).compile(...)
   // --8<-- [start:opt-bootstrap]
-  def bootstrapFewShot(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
-      : Either[DspyError, DynamicPredict] =
+  def bootstrapFewShot(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using
+      RuntimeContext
+  ): Either[DspyError, DynamicPredict] =
     new BootstrapFewShot[DynamicPredict](BootstrapFewShotConfig(
-      metric = Some(metric), maxBootstrappedDemos = 4, maxLabeledDemos = 16, maxRounds = 1, maxErrors = 10
+      metric = Some(metric),
+      maxBootstrappedDemos = 4,
+      maxLabeledDemos = 16,
+      maxRounds = 1,
+      maxErrors = 10
     )).compile(student, trainset).map(_.bestProgram)
   // --8<-- [end:opt-bootstrap]
 
   // | BootstrapFewShotWithRandomSearch(metric=..., max_bootstrapped_demos=2, num_candidate_programs=8).compile(student, trainset, valset=devset)
-  def bootstrapRandomSearch(metric: Metric, student: DynamicPredict, trainset: Vector[Example], devset: Vector[Example])(
-      using RuntimeContext): Either[DspyError, DynamicPredict] =
+  def bootstrapRandomSearch(
+      metric: Metric,
+      student: DynamicPredict,
+      trainset: Vector[Example],
+      devset: Vector[Example]
+  )(
+      using RuntimeContext
+  ): Either[DspyError, DynamicPredict] =
     new BootstrapFewShotWithRandomSearch[DynamicPredict](RandomSearchConfig(
-      metric = metric, maxBootstrappedDemos = 2, numCandidates = 8
+      metric = metric,
+      maxBootstrappedDemos = 2,
+      numCandidates = 8
     )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 
   // ── Snippets 16/17 — save / load ──
   // Ported (PORT_GAPS G-4): persist each leaf's `PredictorState` (instructions + demos + module config) as JSON.
   // `load` applies it to a fresh program with the same predictor traversal/order; metadata/resources stay fresh.
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] = ProgramPersistence.save(program, path)
-  def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] = ProgramPersistence.load(fresh, path)
+  def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
+    ProgramPersistence.load(fresh, path)
 
   // ── Snippets 19/21/22/23/24 — optimizers now ported ──
   // | Ensemble(reduce_fn=dspy.majority).compile([prog1, prog2, prog3])
@@ -157,23 +197,26 @@ object Cheatsheet:
 
   // | COPRO(metric=..., breadth=10, depth=3).compile(student, trainset=trainset)
   // --8<-- [start:opt-copro]
-  def copro(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
-      : Either[DspyError, DynamicPredict] =
+  def copro(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using
+      RuntimeContext
+  ): Either[DspyError, DynamicPredict] =
     new COPRO[DynamicPredict](COPROConfig(metric = metric)).compile(student, trainset).map(_.bestProgram)
   // --8<-- [end:opt-copro]
 
   // | MIPROv2(metric=..., auto="light").compile(student, trainset=trainset)   (dspy4s: explicit knobs, no `auto`)
   // --8<-- [start:opt-miprov2]
   def miprov2(metric: Metric, student: DynamicPredict, trainset: Vector[Example], devset: Vector[Example])(
-      using RuntimeContext): Either[DspyError, DynamicPredict] =
+      using RuntimeContext
+  ): Either[DspyError, DynamicPredict] =
     new MIPROv2[DynamicPredict](MIPROv2Config(metric = metric))
       .compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
   // --8<-- [end:opt-miprov2]
 
   // | knn = KNN(k=3, trainset, embedder); KNNFewShot(KNN=knn).compile(student)
   // --8<-- [start:opt-knn]
-  def knnFewShot(student: DynamicPredict, trainset: Vector[Example], embedder: Embedder)(using RuntimeContext)
-      : Either[DspyError, DynamicModule] =
+  def knnFewShot(student: DynamicPredict, trainset: Vector[Example], embedder: Embedder)(using
+      RuntimeContext
+  ): Either[DspyError, DynamicModule] =
     new KNNFewShot[DynamicPredict](k = 3, trainset = trainset, embedder = embedder).compile(student)
   // --8<-- [end:opt-knn]
 
@@ -200,7 +243,9 @@ object Cheatsheet:
 
   // ── Snippet 30 (lines 451–457) — usage tracking ──
   // | dspy.configure(track_usage=True); result = dspy.ChainOfThought(BasicQA)(question="..."); result.get_lm_usage()
-  def withUsageTracking(question: String)(using RuntimeContext): Either[DspyError, Map[String, dspy4s.lm.contracts.LmUsage]] =
+  def withUsageTracking(question: String)(using
+      RuntimeContext
+  ): Either[DspyError, Map[String, dspy4s.lm.contracts.LmUsage]] =
     UsageTracking.withNewTracker { tracker =>
       ChainOfThought(Signature.of[BasicQA]).apply((question = question)).map(_ => tracker.totalUsage)
     }
@@ -215,16 +260,25 @@ object Cheatsheet:
   // --8<-- [start:best-of-n]
   def bestOfN(question: String)(using RuntimeContext): Either[DspyError, String] =
     val qa = ChainOfThought(Signature.of[BasicQA])
-    BestOfN(module = qa, n = 3, rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
-      threshold = 1.0).apply((question = question)).map(_.output.answer)
+    BestOfN(
+      module = qa,
+      n = 3,
+      rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
+      threshold = 1.0
+    ).apply((question = question)).map(_.output.answer)
   // --8<-- [end:best-of-n]
 
   // ── Snippets 34/35 (lines 509–522) — Refine with fail_count ──
   // | refine = dspy.Refine(module=qa, N=3, reward_fn=..., threshold=1.0, fail_count=1)  # raise after 1 failure
   def refine(question: String, failCount: Int)(using RuntimeContext): Either[DspyError, String] =
     val qa = ChainOfThought(Signature.of[BasicQA])
-    Refine(module = qa, n = 3, rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
-      threshold = 1.0, failCount = Some(failCount)).apply((question = question)).map(_.output.answer)
+    Refine(
+      module = qa,
+      n = 3,
+      rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
+      threshold = 1.0,
+      failCount = Some(failCount)
+    ).apply((question = question)).map(_.output.answer)
 
 // Pure surface check (no LM). Run with: sbt "examples/runMain dspy4s.examples.cheatsheetMain"
 @main def cheatsheetMain(): Unit =

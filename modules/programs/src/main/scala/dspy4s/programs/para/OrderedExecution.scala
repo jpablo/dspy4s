@@ -10,11 +10,11 @@ import dspy4s.programs.Identity
 import dspy4s.programs.Swap
 import dspy4s.programs.Tensor
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 
 /** Plain executable program morphisms without optimizer-addressability or decoder evidence. */
-type ModuleHom[I, O] = Module[TypedCall[I], Prediction[O]]
+type ModuleHom[I, O] = Module[ProgramCall[I], Prediction[O]]
 
 /** A category with ordered independent-input execution and structural swap/copy/discard operations.
   *

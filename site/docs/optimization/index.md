@@ -17,7 +17,7 @@ is the improved program:
 ```
 
 Optimizers are generic over the program type. `Predictors[P]` exposes each leaf's
-writable `PredictorState`, while `Runnable[P]` executes either typed programs or
+writable `PredictorState`, while `ProgramRunner[P]` executes either typed programs or
 the untyped `DynamicModule` spine. The returned program can be
 [saved and loaded](../runtime/saving-and-loading.md), so optimization runs once
 and the result ships with your application.

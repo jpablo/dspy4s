@@ -5,8 +5,8 @@ import zio.blocks.schema.DynamicValue
 import java.time.Instant
 
 /** A single observed module call -- one entry per `Module.apply` (or any other module that records itself). `component`
-  * is the module's `moduleName` (`"predict"`, `"chain_of_thought"`, ...), `inputs` is the `ProgramCall.inputs` map,
-  * `outputs` is the module's `tracePayload(prediction)` (defaults to `prediction.values`).
+  * is the module's `moduleName` (`"predict"`, `"chain_of_thought"`, ...), `inputs` is the encoded `ProgramCall.input`
+  * record, `outputs` is the module's `tracePayload(prediction)` (defaults to `prediction.values`).
   *
   * Appended to [[RuntimeContext.trace]] when the underlying `ProgramCall.traceEnabled` is `true`. A successful call
   * records `failure = None` and `outputs = tracePayload(...)`. A FAILED call is recorded only when
@@ -23,8 +23,8 @@ final case class TraceEntry(
 )
 
 /** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and -- for LM
-  * entries -- usage accounting. `component` is the module name or LM id; `payload` is the caller-defined snapshot.
-  * The history ring is capped by [[RuntimeContext.maxHistorySize]] in `RuntimeEnvironment.appendHistory`.
+  * entries -- usage accounting. `component` is the module name or LM id; `payload` is the caller-defined snapshot. The
+  * history ring is capped by [[RuntimeContext.maxHistorySize]] in `RuntimeEnvironment.appendHistory`.
   */
 final case class HistoryEntry(component: String, payload: DynamicValue.Record, timestamp: Instant = Instant.now())
 

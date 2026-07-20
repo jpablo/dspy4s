@@ -21,7 +21,7 @@ class EnsembleSuite extends FunSuite:
   private def fixedAnswer(answer: String): ScriptedPredictProgram =
     ScriptedPredictProgram(answers = Map("q" -> answer), layout = signature)
 
-  private val call = ProgramCall(inputs = rec("question" := "q"))
+  private val call = ProgramCall(input = rec("question" := "q"))
 
   test("Ensemble majority-votes over programs: {A, A, B} -> A") {
     val programs = Vector(fixedAnswer("A"), fixedAnswer("A"), fixedAnswer("B"))

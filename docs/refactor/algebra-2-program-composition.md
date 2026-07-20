@@ -25,10 +25,10 @@ model outputs. They are stated on **composition** and checked in whichever way i
 
 ## Carrier (forks 1 and 5)
 
-- **The unit stays `Module[TypedCall[I], Prediction[O]]`.** No parallel `Program` type is introduced (this keeps
+- **The unit stays `Module[ProgramCall[I], Prediction[O]]`.** No parallel `Program` type is introduced (this keeps
   the `Predictors` optimizer machinery working). `Program[I, O]` below is denotational shorthand for that type.
 - **`>>>` threads the plain typed value `O`,** not `Prediction[O]`. Controls (`config`, `traceEnabled`,
-  `rolloutId`) ride in `TypedCall`; the `Prediction` envelope and the effect sit at the edges. Intermediate
+  `rolloutId`) ride in `ProgramCall`; the `Prediction` envelope and the effect sit at the edges. Intermediate
   `Prediction.raw` (reasoning, completions, per-step usage) goes to the `RuntimeContext` trace, not onto the
   composite result. (Usage-merge onto the result is a deferrable, non-breaking enhancement: usage is a
   monoid, so accumulating it preserves every law.)
@@ -41,7 +41,7 @@ model outputs. They are stated on **composition** and checked in whichever way i
 
 ## Operations
 
-`Program[I, O]` = `Module[TypedCall[I], Prediction[O]]`. Learnable parts are held as addressable immutable
+`Program[I, O]` = `Module[ProgramCall[I], Prediction[O]]`. Learnable parts are held as addressable immutable
 fields (see Optimizer-addressability); fixed parts (`env.step`, `reward`, `critic`, `classify`) are closures.
 
 ```
@@ -54,7 +54,7 @@ a >>> b                        : (Program[I, X], Program[X, O]) => Program[I, O]
 mapOutput(f)(p)                 : Program[I, O] => Program[I, B]      // covariant output map; preserves raw
 contramapInput(f)(p)            : Program[I, O] => Program[J, O]      // contravariant input map
 dimap(before)(after)(p)         : Program[I, O] => Program[J, B]      // profunctor-style boundary map
-//   runs a, feeds a.output: X into a fresh TypedCall[X] inheriting the outer call's controls, runs b.
+//   runs a, feeds a.output: X into a fresh ProgramCall[X] inheriting the outer call's controls, runs b.
 //   IMPLEMENTED as AndThen + the `>>>` extension; threads the plain value (the Prediction envelope of the
 //   intermediate goes to the trace, not the result). p >>> id keeps p.output but resets .raw (carrier split).
 
@@ -188,7 +188,7 @@ so a learnable subtree cannot silently disappear from optimizer addressability.
 **Entry-point experiment (commit `8d7e009`), CLOSED (commit `d1d38d0`).** The first round drove COPRO through
 a packaged `Program` via the path-dependent instantiation `new COPRO[program.Rep](config)(using program.addressable,
 runnable)` and surfaced the finding: **Para evidence alone is not enough to optimize.** Optimizers also need
-`Runnable` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
+`ProgramRunner` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
 type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.
 
 The close: `Program` now also packages `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at
@@ -198,11 +198,11 @@ decoder; `reparam` preserves it). `ProgramInput` has signature-backed instances 
 is the explicitly named escape hatch for a hand-supplied decoder; such a decoder must satisfy the documented
 coherence condition to participate in record-evaluation equality. Both optimizer capabilities are then
 uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
-projection/reparameterization) and `Runnable[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
+projection/reparameterization) and `ProgramRunner[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
 does), the previously-uncompilable upcast case now optimizes, and a composed pipeline `a >>> b` is
 record-runnable and optimizable end-to-end, which the ambient `Module` world cannot do without a hand-written
-`Runnable` (the gap `Runnable`'s scaladoc documents). Pinned by `ParaCategoryLawSuite` (decoder threading) and
+`ProgramRunner` (the gap `ProgramRunner`'s scaladoc documents). Pinned by `ParaCategoryLawSuite` (decoder threading) and
 `ParaCompileSuite` (upcast + composed-pipeline optimization).
 
 **Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:

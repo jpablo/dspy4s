@@ -12,8 +12,9 @@ import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** G-7 v1: the engine merges `FormattedPrompt.requestOptions` UNDER `invocation.request.options` (per-call /
-  * module options win on collision) before calling the LM. */
+/** G-7 v1: the engine merges `FormattedPrompt.requestOptions` UNDER `invocation.request.options` (per-call / module
+  * options win on collision) before calling the LM.
+  */
 class RequestOptionsMergeSuite extends FunSuite:
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
@@ -23,8 +24,13 @@ class RequestOptionsMergeSuite extends FunSuite:
   private final class OptsAdapter(opts: DynamicValue.Record) extends Adapter:
     override val name: String = "opts"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-      Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi"))), requestOptions = opts))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+      Right(FormattedPrompt(
+        messages = Vector(Message(role = MessageRole.User, text = Some("hi"))),
+        requestOptions = opts
+      ))
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text)))
 
   private final class CapturingLm(val sink: scala.collection.mutable.ArrayBuffer[LmRequest]) extends LanguageModel:
@@ -50,7 +56,7 @@ class RequestOptionsMergeSuite extends FunSuite:
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val adapterOpts = rec("response_format" := "json_object", "from_adapter" := true)
     val reqs = capture(new OptsAdapter(adapterOpts)) {
-      val _ = DynamicPredict(layout).apply(ProgramCall(inputs = rec("question" := "x")))
+      val _ = DynamicPredict(layout).apply(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -63,7 +69,7 @@ class RequestOptionsMergeSuite extends FunSuite:
     val adapterOpts = rec("temperature" := 0.0, "from_adapter" := true)
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.9))
     val reqs = capture(new OptsAdapter(adapterOpts)) {
-      val _ = module.apply(ProgramCall(inputs = rec("question" := "x")))
+      val _ = module.apply(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)

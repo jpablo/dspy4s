@@ -138,8 +138,8 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 
 ## Relation to dspy
 
-GEPA depends on [`optimize`](../optimize/README.md) for the `Predictors` / `Runnable` introspection spine it
-shares with COPRO/MIPROv2, and on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
+GEPA uses the shared `Predictors` / `ProgramRunner` introspection and execution spines also used by
+COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns a `GepaResult[P]` rather than an `OptimizationReport[P]`.
 Deferred relative to upstream: multi-objective frontiers and run-dir resume beyond the single-objective
 instance frontier (PORT_GAPS G-12). Per the [module-purity principle](../../README.md), the program stays an

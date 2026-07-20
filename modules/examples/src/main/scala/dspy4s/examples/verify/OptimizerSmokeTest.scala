@@ -33,7 +33,8 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config, Runnable}
+import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config}
+import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predictors
 
@@ -93,9 +94,10 @@ object OptimizerSmokeTest:
   def envInt(name: String, default: Int): Int =
     sys.env.get(name).flatMap(_.toIntOption).filter(_ > 0).getOrElse(default)
 
-  /** A live-progress callback: prints one char per completed LM call (`.` ok, `x` failed) and tracks the count,
-    * so the otherwise-silent optimizer phases visibly make progress. Registering a `CallbackHandler` in the
-    * `RuntimeContext` is the general dspy4s observability hook — swap this for a logger/tracer as needed. */
+  /** A live-progress callback: prints one char per completed LM call (`.` ok, `x` failed) and tracks the count, so the
+    * otherwise-silent optimizer phases visibly make progress. Registering a `CallbackHandler` in the `RuntimeContext`
+    * is the general dspy4s observability hook — swap this for a logger/tracer as needed.
+    */
   final class ProgressLmCallback extends CallbackHandler:
     private val calls  = new AtomicInteger(0)
     private val errors = new AtomicInteger(0)
@@ -136,7 +138,7 @@ object OptimizerSmokeTest:
         given RuntimeContext = RuntimeEnvironment.current
 
         def scoreOf(program: DynamicPredict): Double =
-          val runner = summon[Runnable[DynamicPredict]]
+          val runner = summon[ProgramRunner[DynamicPredict]]
           Evaluate(devset = valset, metric = metric)()((ex: Example) => runner.run(program, ex.inputs)) match
             case Right(result) => result.score
             case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0
@@ -146,7 +148,8 @@ object OptimizerSmokeTest:
 
         def checkpoint(label: String): Unit =
           println(s"\n[smoke] $label  (${progress.count} LM calls so far${
-              if progress.errorCount > 0 then s", ${progress.errorCount} failed" else ""})")
+              if progress.errorCount > 0 then s", ${progress.errorCount} failed" else ""
+            })")
 
         println(s"[smoke] model=$model  breadth=$breadth  trials=$trials  (temperature=0, deterministic)")
         println(s"[smoke] task: classify HAS_NUM/NO_NUM  (baseline instruction: \"$vagueBaselineInstruction\")")
@@ -170,8 +173,13 @@ object OptimizerSmokeTest:
         // ── MIPROv2 ──
         println("\n[smoke] running MIPROv2 ...")
         val mipro = new MIPROv2[DynamicPredict](
-          MIPROv2Config(metric = metric, numCandidates = breadth, numTrials = trials,
-            maxBootstrappedDemos = 2, maxLabeledDemos = 2)
+          MIPROv2Config(
+            metric = metric,
+            numCandidates = breadth,
+            numTrials = trials,
+            maxBootstrappedDemos = 2,
+            maxLabeledDemos = 2
+          )
         )
         mipro.compile(student, trainset, teacher = Some(student), valset = Some(valset)) match
           case Right(report) =>

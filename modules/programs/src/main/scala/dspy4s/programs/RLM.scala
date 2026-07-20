@@ -20,7 +20,6 @@ import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.contracts.TypedCall
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.typed.{Prediction, Signature}
@@ -31,39 +30,46 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** RLM — Recursive Language Model (a port of `dspy.RLM`, upstream-`@experimental`; PORT_GAPS G-20 part 2).
   *
-  * An inference strategy where LONG CONTEXTS never enter the prompt: input fields are injected into a sandboxed
-  * Python REPL as VARIABLES, and the LM iteratively writes code to explore them — printing findings, calling
-  * `llm_query(prompt)` / `llm_query_batched(prompts)` (sub-LM calls made FROM INSIDE the generated code) for
-  * semantic analysis, and finally `SUBMIT(field=value, ...)` to terminate with the structured outputs. The prompt
-  * sees only variable METADATA (type, length, preview) plus the running REPL history. If `maxIterations` is
-  * exhausted without a SUBMIT, an extract predict produces the outputs from the trajectory (the fallback).
-  * Reference: "Recursive Language Models" (Zhang, Kraska, Khattab, 2025).
+  * An inference strategy where LONG CONTEXTS never enter the prompt: input fields are injected into a sandboxed Python
+  * REPL as VARIABLES, and the LM iteratively writes code to explore them — printing findings, calling
+  * `llm_query(prompt)` / `llm_query_batched(prompts)` (sub-LM calls made FROM INSIDE the generated code) for semantic
+  * analysis, and finally `SUBMIT(field=value, ...)` to terminate with the structured outputs. The prompt sees only
+  * variable METADATA (type, length, preview) plus the running REPL history. If `maxIterations` is exhausted without a
+  * SUBMIT, an extract predict produces the outputs from the trajectory (the fallback). Reference: "Recursive Language
+  * Models" (Zhang, Kraska, Khattab, 2025).
   *
-  * `RLM[I, O]` is a `Module[TypedCall[I], Prediction[O]]` — SUBMIT's payload (or the extract's reply) is decoded
-  * into the typed outputs `O`; the rendered trajectory and `final_reasoning` ride on `.raw`.
+  * `RLM[I, O]` is a `Module[ProgramCall[I], Prediction[O]]` — SUBMIT's payload (or the extract's reply) is decoded into
+  * the typed outputs `O`; the rendered trajectory and `final_reasoning` ride on `.raw`.
   *
   * ==Deltas from Python==
-  *   - `llm_query_batched` runs its prompts SEQUENTIALLY (upstream uses an 8-worker thread pool); per-prompt
-  *     failures still yield `[ERROR] …` entries in the result list, like upstream.
-  *   - Output-type validation is the signature's `Schema` decode over the whole SUBMIT payload, not per-field
-  *     pydantic `parse_value`; a failed decode becomes a `[Type Error] …` observation and the loop continues.
-  *   - Upstream's `SandboxSerializable` custom-serialization path (bespoke setup/assignment code per value) is
-  *     not ported — inputs are plain `DynamicValue`s injected by the interpreter.
+  *   - `llm_query_batched` runs its prompts SEQUENTIALLY (upstream uses an 8-worker thread pool); per-prompt failures
+  *     still yield `[ERROR] …` entries in the result list, like upstream.
+  *   - Output-type validation is the signature's `Schema` decode over the whole SUBMIT payload, not per-field pydantic
+  *     `parse_value`; a failed decode becomes a `[Type Error] …` observation and the loop continues.
+  *   - Upstream's `SandboxSerializable` custom-serialization path (bespoke setup/assignment code per value) is not
+  *     ported — inputs are plain `DynamicValue`s injected by the interpreter.
   *   - `verbose` logging and the async path are omitted.
   *
-  * @param baseSignature      the task signature; inputs become REPL variables, outputs the SUBMIT fields
-  * @param maxIterations      REPL interaction budget before the extract fallback
-  * @param maxLlmCalls        total `llm_query`(+batched) sub-LM calls allowed per forward
-  * @param maxOutputChars     head+tail cap on each REPL output shown in the prompt
-  * @param verbose            log each iteration's reasoning/code and step output to stderr as it happens
-  *                           (upstream's `verbose` flag; `logger.info` there, `Console.err` here per the
-  *                           PredictEngine diagnostics precedent). The surviving record when a run fails mid-loop.
-  * @param tools              extra [[ToolFunction]]s callable from generated code (documented in the prompt);
-  *                           names must not collide with the built-ins (`llm_query`, `llm_query_batched`,
-  *                           `SUBMIT`, `print`)
-  * @param subLm              LM for `llm_query` — defaults to the ambient context's LM (pass a cheaper model here)
-  * @param interpreterFactory builds the per-forward REPL from (tools, output fields); defaults to a fresh
-  *                           [[DenoPyodideInterpreter]]. RLM closes what it builds after each forward.
+  * @param baseSignature
+  *   the task signature; inputs become REPL variables, outputs the SUBMIT fields
+  * @param maxIterations
+  *   REPL interaction budget before the extract fallback
+  * @param maxLlmCalls
+  *   total `llm_query`(+batched) sub-LM calls allowed per forward
+  * @param maxOutputChars
+  *   head+tail cap on each REPL output shown in the prompt
+  * @param verbose
+  *   log each iteration's reasoning/code and step output to stderr as it happens (upstream's `verbose` flag;
+  *   `logger.info` there, `Console.err` here per the PredictEngine diagnostics precedent). The surviving record when a
+  *   run fails mid-loop.
+  * @param tools
+  *   extra [[ToolFunction]]s callable from generated code (documented in the prompt); names must not collide with the
+  *   built-ins (`llm_query`, `llm_query_batched`, `SUBMIT`, `print`)
+  * @param subLm
+  *   LM for `llm_query` — defaults to the ambient context's LM (pass a cheaper model here)
+  * @param interpreterFactory
+  *   builds the per-forward REPL from (tools, output fields); defaults to a fresh [[DenoPyodideInterpreter]]. RLM
+  *   closes what it builds after each forward.
   */
 final case class RLM[I, O](
     baseSignature: Signature[I, O],
@@ -80,7 +86,7 @@ final case class RLM[I, O](
     actionPredictOverride: Option[DynamicPredict] = None,
     /** Optional override for the max-iterations extract-fallback predict. */
     extractPredictOverride: Option[DynamicPredict] = None
-) extends Module[TypedCall[I], Prediction[O]]:
+) extends Module[ProgramCall[I], Prediction[O]]:
 
   override val moduleName: String = "rlm"
   require(maxIterations > 0, "maxIterations must be greater than 0")
@@ -95,21 +101,42 @@ final case class RLM[I, O](
   private val baseLayout: SignatureLayout = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
 
-  /** Per-iteration action signature: `variables_info, repl_history, iteration -> reasoning, code`, instructed
-    * with the REPL protocol (upstream's `ACTION_INSTRUCTIONS_TEMPLATE` + user-tool docs). */
+  /** Per-iteration action signature: `variables_info, repl_history, iteration -> reasoning, code`, instructed with the
+    * REPL protocol (upstream's `ACTION_INSTRUCTIONS_TEMPLATE` + user-tool docs).
+    */
   val actionSignature: SignatureLayout =
     baseLayout
       .withFields(Vector(
-        FieldSpec("variables_info", FieldRole.Input, typeRef = TypeRef.string,
-          description = Some("Metadata about the variables available in the REPL")),
-        FieldSpec("repl_history", FieldRole.Input, typeRef = TypeRef.string,
-          description = Some("Previous REPL code executions and their outputs")),
-        FieldSpec("iteration", FieldRole.Input, typeRef = TypeRef.string,
-          description = Some("Current iteration number (1-indexed) out of max_iterations")),
-        FieldSpec("reasoning", FieldRole.Output, typeRef = TypeRef.string,
-          description = Some("Think step-by-step: what do you know? What remains? Plan your next action.")),
-        FieldSpec("code", FieldRole.Output, typeRef = TypeRef.string,
-          description = Some("Python code to execute. Use markdown code block format: ```python\\n<code>\\n```"))
+        FieldSpec(
+          "variables_info",
+          FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("Metadata about the variables available in the REPL")
+        ),
+        FieldSpec(
+          "repl_history",
+          FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("Previous REPL code executions and their outputs")
+        ),
+        FieldSpec(
+          "iteration",
+          FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("Current iteration number (1-indexed) out of max_iterations")
+        ),
+        FieldSpec(
+          "reasoning",
+          FieldRole.Output,
+          typeRef = TypeRef.string,
+          description = Some("Think step-by-step: what do you know? What remains? Plan your next action.")
+        ),
+        FieldSpec(
+          "code",
+          FieldRole.Output,
+          typeRef = TypeRef.string,
+          description = Some("Python code to execute. Use markdown code block format: ```python\\n<code>\\n```")
+        )
       ))
       .withInstructions(Some(buildActionInstructions))
 
@@ -117,10 +144,18 @@ final case class RLM[I, O](
   val extractSignature: SignatureLayout =
     baseLayout
       .withFields(Vector(
-        FieldSpec("variables_info", FieldRole.Input, typeRef = TypeRef.string,
-          description = Some("Metadata about the variables available in the REPL")),
-        FieldSpec("repl_history", FieldRole.Input, typeRef = TypeRef.string,
-          description = Some("Your REPL interactions so far"))
+        FieldSpec(
+          "variables_info",
+          FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("Metadata about the variables available in the REPL")
+        ),
+        FieldSpec(
+          "repl_history",
+          FieldRole.Input,
+          typeRef = TypeRef.string,
+          description = Some("Your REPL interactions so far")
+        )
       ) ++ baseLayout.outputFields)
       .withInstructions(Some(buildExtractInstructions))
 
@@ -158,27 +193,23 @@ final case class RLM[I, O](
       "Based on the REPL trajectory, extract the final outputs now.\n\n" +
       "Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs."
 
-  override protected def callInputs(call: TypedCall[I]): DynamicValue.Record =
+  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record =
     call.encodedInput(baseSignature.inputShape)
-  override protected def callTraceEnabled(call: TypedCall[I]): Boolean = call.traceEnabled
+  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean              = call.traceEnabled
   override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
 
-  override protected def forward(call: TypedCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
+  override protected def forward(call: ProgramCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputs = call.encodedInput(baseSignature.inputShape)
     val inputVars: Map[String, DynamicValue] =
       baseLayout.inputFields.map(f => f.name -> DynamicValues.recordGet(inputs, f.name).getOrElse(DynamicValue.Null)).toMap
     val variablesMeta = baseLayout.inputFields.map { f =>
       RLM.ReplVariable.fromValue(f.name, inputVars(f.name), Some(f))
     }
-    val baseCall = ProgramCall(
-      inputs       = inputs,
-      config       = call.config,
-      traceEnabled = call.traceEnabled,
-      rolloutId    = call.rolloutId
-    )
+    val baseCall = call.encoded(baseSignature.inputShape)
 
     val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ CodeAct.sandboxTools(tools)
-    val outputFields = baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, RLM.pythonTypeOf(f.typeRef)))
+    val outputFields =
+      baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, RLM.pythonTypeOf(f.typeRef)))
     val interpreter  = interpreterFactory(sandboxTools, outputFields)
     try iterate(baseCall, interpreter, inputVars, variablesMeta)
     finally interpreter.close()
@@ -189,13 +220,14 @@ final case class RLM[I, O](
       config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    apply(TypedCall(input, config, traceEnabled))
+    apply(ProgramCall(input, config, traceEnabled))
 
-  /** The REPL interaction loop on the shared [[AgentLoop]] skeleton: carry the [[RLM.ReplEntry]] history, each
-    * step writing+running code and either continuing or finishing on an accepted SUBMIT; on the iteration budget
-    * running out, [[extractFallback]] produces the outputs from the trajectory. */
+  /** The REPL interaction loop on the shared [[AgentLoop]] skeleton: carry the [[RLM.ReplEntry]] history, each step
+    * writing+running code and either continuing or finishing on an accepted SUBMIT; on the iteration budget running
+    * out, [[extractFallback]] produces the outputs from the trajectory.
+    */
   private def iterate(
-      call: ProgramCall,
+      call: ProgramCall[DynamicValue.Record],
       interpreter: ReplCodeInterpreter,
       inputVars: Map[String, DynamicValue],
       variablesMeta: Vector[RLM.ReplVariable]
@@ -206,7 +238,7 @@ final case class RLM[I, O](
 
   /** One REPL iteration as an [[AgentLoop]] step. */
   private def rlmStep(
-      call: ProgramCall,
+      call: ProgramCall[DynamicValue.Record],
       interpreter: ReplCodeInterpreter,
       inputVars: Map[String, DynamicValue],
       variablesMeta: Vector[RLM.ReplVariable]
@@ -220,7 +252,7 @@ final case class RLM[I, O](
         "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)),
         "iteration"      -> DynamicValues.fromAny(s"${iteration + 1}/$maxIterations")
       ))
-      actionPredict.apply(call.copy(inputs = actionInputs)).flatMap { action =>
+      actionPredict.apply(call.copy(input = actionInputs)).flatMap { action =>
         val reasoning = action.get("reasoning").map(DynamicValues.renderText).getOrElse("")
         val rawCode   = action.get("code").map(DynamicValues.renderText).getOrElse("")
         if verbose then
@@ -236,8 +268,9 @@ final case class RLM[I, O](
         }
       }
 
-  /** One REPL step: strip fences, execute with the input variables, classify the result. Returns
-    * `Right(Left(entry))` to continue the loop, `Right(Right((entry, outputs)))` on an accepted SUBMIT. */
+  /** One REPL step: strip fences, execute with the input variables, classify the result. Returns `Right(Left(entry))`
+    * to continue the loop, `Right(Right((entry, outputs)))` on an accepted SUBMIT.
+    */
   private def stepOutcome(
       interpreter: ReplCodeInterpreter,
       inputVars: Map[String, DynamicValue],
@@ -287,9 +320,10 @@ final case class RLM[I, O](
     }
 
   /** Max iterations exhausted: have the extract predict produce the outputs from the trajectory (upstream's
-    * `_extract_fallback`). */
+    * `_extract_fallback`).
+    */
   private def extractFallback(
-      call: ProgramCall,
+      call: ProgramCall[DynamicValue.Record],
       variablesMeta: Vector[RLM.ReplVariable],
       history: Vector[RLM.ReplEntry]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -301,7 +335,7 @@ final case class RLM[I, O](
       "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars))
     ))
     for
-      extracted <- extractPredict.apply(call.copy(inputs = extractInputs))
+      extracted <- extractPredict.apply(call.copy(input = extractInputs))
       output    <- baseSignature.outputShape.decode(extracted.values)
     yield Prediction(
       output = output,
@@ -377,8 +411,9 @@ object RLM:
       lines.result().mkString("\n")
 
   object ReplVariable:
-    /** Upstream `REPLVariable.from_value`: head+tail preview over the rendered value, Python-style type name,
-      * field description (skipping `${...}` placeholders). */
+    /** Upstream `REPLVariable.from_value`: head+tail preview over the rendered value, Python-style type name, field
+      * description (skipping `${...}` placeholders).
+      */
     def fromValue(name: String, value: DynamicValue, field: Option[FieldSpec], previewChars: Int = 1000): ReplVariable =
       val rendered = renderValue(value)
       val preview =
@@ -423,20 +458,30 @@ object RLM:
 
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  /** Parse a SUBMIT payload (the interpreter's `finalOutput` JSON) and verify every output field is present.
-    * Returns the upstream-style `[Error] …` message on a problem. */
-  private[programs] def parseSubmitted(finalJson: String, outputFieldNames: Vector[String]): Either[String, DynamicValue.Record] =
+  /** Parse a SUBMIT payload (the interpreter's `finalOutput` JSON) and verify every output field is present. Returns
+    * the upstream-style `[Error] …` message on a problem.
+    */
+  private[programs] def parseSubmitted(
+      finalJson: String,
+      outputFieldNames: Vector[String]
+  ): Either[String, DynamicValue.Record] =
     dynamicJsonCodec.decode(finalJson.getBytes(StandardCharsets.UTF_8)) match
       case Right(record: DynamicValue.Record) =>
         val present = DynamicValues.recordKeys(record).toSet
         val missing = outputFieldNames.filterNot(present.contains)
         if missing.isEmpty then Right(record)
-        else Left(s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})")
+        else
+          Left(
+            s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})"
+          )
       case _ =>
-        Left(s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}")
+        Left(
+          s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
+        )
 
   /** Upstream `_strip_code_fences`: strip decorative outer fences, accept ```python/```py/bare fences, REJECT an
-    * explicit non-Python language tag (the error becomes an `[Error]` observation). */
+    * explicit non-Python language tag (the error becomes an `[Error]` observation).
+    */
   private[programs] def stripCodeFences(raw: String): Either[String, String] =
     var code = raw.trim
     if !code.contains("```") then Right(code)
@@ -464,9 +509,10 @@ object RLM:
 
   // ── Built-in llm_query tools ────────────────────────────────────────────────────────────────────────────────
 
-  /** Build `llm_query` / `llm_query_batched` as [[SandboxTool]]s with a SHARED call counter capped at
-    * `maxLlmCalls` (upstream `_make_llm_tools`). The sub-LM is `subLm` or the captured context's LM; failures
-    * surface as in-sandbox exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`). */
+  /** Build `llm_query` / `llm_query_batched` as [[SandboxTool]]s with a SHARED call counter capped at `maxLlmCalls`
+    * (upstream `_make_llm_tools`). The sub-LM is `subLm` or the captured context's LM; failures surface as in-sandbox
+    * exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`).
+    */
   private[programs] def makeLlmTools(
       maxLlmCalls: Int,
       subLm: Option[LanguageModel],
@@ -476,9 +522,11 @@ object RLM:
 
     def checkAndIncrement(n: Int): Either[DspyError, Unit] =
       if counter.get() + n > maxLlmCalls then
-        Left(RuntimeError("rlm",
+        Left(RuntimeError(
+          "rlm",
           s"LLM call limit exceeded: ${counter.get()} + $n > $maxLlmCalls. " +
-            "Use Python code for aggregation instead of making more LLM calls."))
+            "Use Python code for aggregation instead of making more LLM calls."
+        ))
       else
         val _ = counter.addAndGet(n)
         Right(())
@@ -489,7 +537,10 @@ object RLM:
         case None => Left(RuntimeError("rlm", "No LM configured. Configure an ambient LM or pass subLm to RLM."))
         case Some(model) =>
           model
-            .call(LmRequest(model = model.id, messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))))(using ctx)
+            .call(LmRequest(
+              model = model.id,
+              messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
+            ))(using ctx)
             .map(_.outputs.headOption.map(_.text).getOrElse(""))
 
     val llmQuery = SandboxTool(
@@ -555,7 +606,8 @@ object RLM:
     case _                         => "str"
 
   /** Render a variable's value for length/preview: primitives as text, records/sequences as JSON (upstream
-    * pretty-prints with indent=2; ours is compact — metadata-only delta). */
+    * pretty-prints with indent=2; ours is compact — metadata-only delta).
+    */
   private def renderValue(value: DynamicValue): String = value match
     case DynamicValue.Primitive(_) => DynamicValues.renderText(value)
     case _                         => new String(dynamicJsonCodec.encode(value), StandardCharsets.UTF_8)

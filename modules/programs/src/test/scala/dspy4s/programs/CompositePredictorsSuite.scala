@@ -7,7 +7,7 @@ import dspy4s.core.contracts.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.{Prediction, Signature}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, Schema}
@@ -16,11 +16,12 @@ import zio.blocks.schema.{DynamicValue, Schema}
 final case class RlmIn(question: String) derives Schema
 final case class RlmOut(answer: String) derives Schema
 
-/** Round-trip and distribution laws for the `Predictors` instances added for the remaining composites
-  * ([[BestOfN]] pass-through, [[Refine]] `read = inner ++ [critic]`, [[RLM]] action+extract) — the gap-closing
-  * counterpart of `ComposeLawSuite` / `ModeLawSuite`'s addressability sections. The invariant under test is
-  * the spec's homomorphism contract: `read` distributes structurally, `replace(p, read(p)) == p`, and a
-  * genuine replace writes back positionally. */
+/** Round-trip and distribution laws for the `Predictors` instances added for the remaining composites ([[BestOfN]]
+  * pass-through, [[Refine]] `read = inner ++ [critic]`, [[RLM]] action+extract) — the gap-closing counterpart of
+  * `ComposeLawSuite` / `ModeLawSuite`'s addressability sections. The invariant under test is the spec's homomorphism
+  * contract: `read` distributes structurally, `replace(p, read(p)) == p`, and a genuine replace writes back
+  * positionally.
+  */
 class CompositePredictorsSuite extends FunSuite:
 
   private object Interpreter extends CodeInterpreter:
@@ -33,12 +34,12 @@ class CompositePredictorsSuite extends FunSuite:
 
   /** A typed program stub with one learnable leaf (same pattern as ComposeLawSuite's Step). */
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
-      extends Module[TypedCall[I], Prediction[O]]:
+      extends Module[ProgramCall[I], Prediction[O]]:
     override val moduleName: String = "leaf"
-    override protected def callInputs(call: TypedCall[I]): DynamicValue.Record       = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[I]): Boolean             = call.traceEnabled
+    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
     override protected def tracePayload(p: Prediction[O]): DynamicValue.Record       = p.raw.values
-    override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction.empty))
 
   private object Leaf:
@@ -93,7 +94,10 @@ class CompositePredictorsSuite extends FunSuite:
     val second   = Leaf[String, Int](_.length, predict("b -> c"))
     val composed = AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]](first, second)
     val b = BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int](
-      composed, n = 2, rewardFn = (_, _) => 1.0, threshold = 1.0
+      composed,
+      n = 2,
+      rewardFn = (_, _) => 1.0,
+      threshold = 1.0
     )
     val P = summon[Predictors[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
     assertEquals(P.read(b), Vector(first.predict.predictorState, second.predict.predictorState))

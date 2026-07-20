@@ -1,12 +1,11 @@
-/**
- * DSPy Optimizers (formerly Teleprompters)
+/** DSPy Optimizers (formerly Teleprompters)
  *
- * Source:   docs/docs/learn/optimization/optimizers.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md
- * Status:   translated (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
+  * Source: docs/docs/learn/optimization/optimizers.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md Status: translated
+  * (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
  *
- * This translation instantiates the generic optimizer with `DynamicPredict`; typed programs are supported too
- * when they provide the same `Predictors` + `Runnable` capabilities. `compile(student, trainset)` returns an
+  * This translation instantiates the generic optimizer with `DynamicPredict`; typed programs are supported too when
+  * they provide the same `Predictors` + `ProgramRunner` capabilities. `compile(student, trainset)` returns an
  * `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
  * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
  */

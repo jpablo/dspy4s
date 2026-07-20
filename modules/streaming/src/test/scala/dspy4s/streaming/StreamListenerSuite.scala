@@ -26,6 +26,7 @@ import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -358,11 +359,13 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         for
           answer    <- predict1.apply(input)
           judgement <- predict2.apply(input.copy(
-                          inputs = input.inputs.updated(
+            input = input.input.updated(
                             "answer",
                             answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
                           )
@@ -451,7 +454,9 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig, name = Some("predict2"))
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         for
           _      <- predict1.apply(input)
           second <- predict2.apply(input)
@@ -502,7 +507,9 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val p1 = DynamicPredict(layout = sig, name = Some("p1"))
       private val p2 = DynamicPredict(layout = sig, name = Some("p2"))
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         for
           _ <- p1.apply(input)
           out <- p2.apply(input)
@@ -587,7 +594,9 @@ class StreamListenerSuite extends FunSuite:
 
     val opaqueProgram = new DynamicModule:
       override val moduleName: String = "opaque"
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         Right(dspy4s.core.contracts.DynamicPrediction(values = rec("answer" := "x")))
 
     given RuntimeContext = RuntimeEnvironment.current

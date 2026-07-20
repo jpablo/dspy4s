@@ -1,19 +1,17 @@
-/**
- * Language Models
+/** Language Models
  *
- * Source:   docs/docs/learn/programming/language_models.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/language_models.md
- * Status:   translated (LM setup, direct calls, use-with-modules, multiple LMs, generation config,
- *           usage/errors). dspy4s ships a single OpenAI-compatible provider ([[OpenAiLanguageModel]]), so
- *           the LiteLLM provider matrix collapses: OpenAI and any OpenAI-compatible endpoint (Azure / Ollama /
- *           vLLM / SGLang / OpenRouter) are supported via the `baseUrl` overload; Gemini / Anthropic / Vertex /
- *           Databricks (LiteLLM-only) are out of scope. Also out of scope: the Responses API (`model_type=
- *           "responses"` — dspy4s only has `LmMode.Chat`), and custom-LM save/load (`dump_state`/`load_state`/
+  * Source: docs/docs/learn/programming/language_models.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/language_models.md Status: translated (LM
+  * setup, direct calls, use-with-modules, multiple LMs, generation config, usage/errors). dspy4s ships a single
+  * OpenAI-compatible provider ([[OpenAiLanguageModel]]), so the LiteLLM provider matrix collapses: OpenAI and any
+  * OpenAI-compatible endpoint (Azure / Ollama / vLLM / SGLang / OpenRouter) are supported via the `baseUrl` overload;
+  * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. Also out of scope: the Responses API
+  * (`model_type= "responses"` — dspy4s only has `LmMode.Chat`), and custom-LM save/load (`dump_state`/`load_state`/
  *           `copy`, since dspy4s has no program persistence).
  *
  * Key shape differences:
- *   - `dspy.configure(lm=…)` → `RuntimeEnvironment.configure(RuntimeContext(lm = Some(lm), adapter = Some(…)))`;
- *     `with dspy.context(lm=…):` → `RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) { … }`.
+  *   - `dspy.configure(lm=…)` → `RuntimeEnvironment.configure(RuntimeContext(lm = Some(lm), adapter = Some(…)))`; `with
+  *     dspy.context(lm=…):` → `RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) { … }`.
  *   - dspy4s never throws on LM failure: `lm.call` / a program returns `Either[DspyError, …]`.
  *   - There is no global `lm.history`; per-call usage is on `LmResponse.usage`, and aggregate usage is via
  *     `ManagedLanguageModel` + `UsageTracking` (see tutorials/cache/Cache.scala).
@@ -27,7 +25,7 @@ import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, LmUsage, Message, MessageRole}
 import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
 import dspy4s.programs.ChainOfThought
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Signature
 
 object LanguageModels:
@@ -107,8 +105,9 @@ object LanguageModels:
   // `dspy.context(lm=…)` is `RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) { … }`: it overrides the
   // active context just for the block. Returns the question answered under each model.
   // --8<-- [start:scoped-override]
-  def askWithOverride(question: String, overrideModel: String)(using ctx: RuntimeContext)
-      : Either[DspyError, (String, String)] =
+  def askWithOverride(question: String, overrideModel: String)(using
+      ctx: RuntimeContext
+  ): Either[DspyError, (String, String)] =
     for
       base  <- ask(question) // current/global LM
       other <- OpenAiLanguageModel.fromEnv(overrideModel)
@@ -130,11 +129,12 @@ object LanguageModels:
 
   // | predict(question="What is 1 + 52?", config={"rollout_id": 5, "temperature": 1.0})
   // Per-call: pass an `options`/config bag for provider params (`temperature`, …), and use the typed `rolloutId`
-  // for cache-busting — in dspy4s `rollout_id` is a first-class field on `TypedCall`, not a magic config key.
+  // for cache-busting — in dspy4s `rollout_id` is a first-class field on `ProgramCall`, not a magic config key.
   // --8<-- [start:lm-config]
-  def askWithConfig(question: String, temperature: Double, rolloutId: Int)(using RuntimeContext)
-      : Either[DspyError, String] =
-    qa.apply(TypedCall(
+  def askWithConfig(question: String, temperature: Double, rolloutId: Int)(using
+      RuntimeContext
+  ): Either[DspyError, String] =
+    qa.apply(ProgramCall(
       input     = (question = question),
       config    = DynamicValues.record("temperature" := temperature),
       rolloutId = Some(rolloutId)

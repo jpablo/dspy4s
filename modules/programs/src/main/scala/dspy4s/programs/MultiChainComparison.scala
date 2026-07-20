@@ -17,9 +17,10 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The call argument for [[MultiChainComparison]]: the base typed input `I` **plus** the candidate completions to
-  * compare. Unlike a plain `TypedCall`, MCC's real input includes the `attempts`, mirroring Python's
-  * `forward(completions, **kwargs)`. Carrying them in the call object means the real work flows through the
-  * wrapped `Module.apply` (callbacks / trace / history) rather than a side method that bypasses it. */
+  * compare. Unlike a plain `ProgramCall`, MCC's real input includes the `attempts`, mirroring Python's
+  * `forward(completions, **kwargs)`. Carrying them in the call object means the real work flows through the wrapped
+  * `Module.apply` (callbacks / trace / history) rather than a side method that bypasses it.
+  */
 final case class MultiChainCall[I](
     input: I,
     attempts: Vector[DynamicPrediction],
@@ -27,7 +28,7 @@ final case class MultiChainCall[I](
     traceEnabled: Boolean = true,
     rolloutId: Option[Int] = None
 ):
-  // Same per-call encode memo as TypedCall (see there): Module.apply's callInputs and forward both need the
+  // Same per-call encode memo as ProgramCall (see there): Module.apply's callInputs and forward both need the
   // encoded input; cache it so the pure encode runs once per call.
   @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
 
@@ -39,24 +40,24 @@ final case class MultiChainCall[I](
       cachedEncoding = (shape, computed)
       computed
 
-/** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected
-  * reasoning + final answer. Typed port of Python DSPy's `dspy.MultiChainComparison`. The flow:
+/** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected reasoning +
+  * final answer. Typed port of Python DSPy's `dspy.MultiChainComparison`. The flow:
   *
-  *   1. Take the user's `baseSignature` (e.g. `question -> answer`).
-  *   2. Append `m` `reasoning_attempt_i` input fields to its layout.
-  *   3. Prepend a `rationale` output field for the corrected reasoning.
-  *   4. Render each candidate completion as
-  *      `«I'm trying to <rationale>. I'm not sure but my prediction is <answer>»` and feed them as the new
-  *      attempt inputs.
-  *   5. Run the augmented predict, then decode the reply into `Prediction[WithRationale[O]]` — the base output
-  *      with a typed `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
+  *   1. Take the user's `baseSignature` (e.g. `question -> answer`). 2. Append `m` `reasoning_attempt_i` input fields
+  *      to its layout. 3. Prepend a `rationale` output field for the corrected reasoning. 4. Render each candidate
+  *      completion as `«I'm trying to <rationale>. I'm not sure but my prediction is <answer>»` and feed them as the
+  *      new attempt inputs. 5. Run the augmented predict, then decode the reply into `Prediction[WithRationale[O]]` —
+  *      the base output with a typed `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
   *
-  * `MultiChainComparison[I, O]` is a `Module[MultiChainCall[I], Prediction[WithRationale[O]]]`. Callers normally
-  * use the [[compare]] convenience, which builds the call.
+  * `MultiChainComparison[I, O]` is a `Module[MultiChainCall[I], Prediction[WithRationale[O]]]`. Callers normally use
+  * the [[compare]] convenience, which builds the call.
   *
-  * @param baseSignature the original task signature
-  * @param m number of expected attempts (validated against `attempts.length`)
-  * @param temperature temperature for the comparison call (Python's default 0.7)
+  * @param baseSignature
+  *   the original task signature
+  * @param m
+  *   number of expected attempts (validated against `attempts.length`)
+  * @param temperature
+  *   temperature for the comparison call (Python's default 0.7)
   */
 final case class MultiChainComparison[I, O](
     baseSignature: Signature[I, O],
@@ -67,8 +68,9 @@ final case class MultiChainComparison[I, O](
     attemptDescription: String = "${reasoning attempt}",
     answerFieldOverride: Option[String] = None,
     /** Optional override for the comparison predict. When `None` (the default), it is built from
-      * [[augmentedSignatureLayout]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable
-      * sub-predict addressable + immutably replaceable (see the `Predictors[MultiChainComparison]` instance). */
+      * [[augmentedSignatureLayout]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable sub-predict
+      * addressable + immutably replaceable (see the `Predictors[MultiChainComparison]` instance).
+      */
     comparePredictOverride: Option[DynamicPredict] = None
 )(using
     prepend: OutputAugmentation.PrependField.Aux["rationale", String, O, MultiChainComparison.WithRationale[O]]
@@ -79,13 +81,15 @@ final case class MultiChainComparison[I, O](
 
   override val moduleName: String = "multi_chain_comparison"
 
-  /** The output field used to render the "prediction" part of each attempt line. Defaults to the last output
-    * field in `baseSignature`. */
+  /** The output field used to render the "prediction" part of each attempt line. Defaults to the last output field in
+    * `baseSignature`.
+    */
   private val lastOutputName: Option[String] =
     answerFieldOverride.orElse(baseSignature.layout.outputFields.lastOption.map(_.name))
 
-  /** The augmented layout: `baseSignature` plus `m` attempt-input fields appended, plus a `rationale` output
-    * field prepended (idempotent; matches Python field ordering). */
+  /** The augmented layout: `baseSignature` plus `m` attempt-input fields appended, plus a `rationale` output field
+    * prepended (idempotent; matches Python field ordering).
+    */
   val augmentedSignatureLayout: SignatureLayout =
     val withAttempts = (1 to m).foldLeft(baseSignature.layout) { (sig, idx) =>
       sig.appendInput(FieldSpec(
@@ -103,8 +107,9 @@ final case class MultiChainComparison[I, O](
     ))
 
   /** The comparison predict, built once from [[augmentedSignatureLayout]] (mirrors Python's `self.compare =
-    * Predict(...)` in `__init__`). Addressable + tunable via [[comparePredictOverride]]; `forward` uses this
-    * member rather than rebuilding a local each call. Left unnamed to preserve the prior on-the-wire behaviour. */
+    * Predict(...)` in `__init__`). Addressable + tunable via [[comparePredictOverride]]; `forward` uses this member
+    * rather than rebuilding a local each call. Left unnamed to preserve the prior on-the-wire behaviour.
+    */
   val comparePredict: DynamicPredict =
     comparePredictOverride.getOrElse(DynamicPredict(layout = augmentedSignatureLayout))
 
@@ -127,18 +132,23 @@ final case class MultiChainComparison[I, O](
       val augmentedInputs = DynamicValue.Record(Chunk.from(baseInputs.fields.iterator.toSeq ++ appended))
       for
         raw <- comparePredict.apply(ProgramCall(
-                 inputs       = augmentedInputs,
+          input = augmentedInputs,
                  config       = call.config.updated("temperature", DynamicValues.fromAny(temperature)),
                  traceEnabled = call.traceEnabled,
                  rolloutId    = call.rolloutId
                ))
         augmented <- OutputAugmentation.decodePrepended(
-                       raw.values, baseSignature.outputShape, MultiChainComparison.rationaleName, "comparison", baseSignature.name
+          raw.values,
+          baseSignature.outputShape,
+          MultiChainComparison.rationaleName,
+          "comparison",
+          baseSignature.name
                      )
       yield Prediction(augmented, raw)
 
   /** Convenience entry: supply the base input and the candidate completions directly. Mirrors Python's
-    * `compare_answers(completions, question=...)`. */
+    * `compare_answers(completions, question=...)`.
+    */
   def compare(
       input: I,
       attempts: Vector[DynamicPrediction],
@@ -148,7 +158,8 @@ final case class MultiChainComparison[I, O](
     apply(MultiChainCall(input, attempts, config, traceEnabled))
 
   /** Renders a single attempt verbatim as Python does (no period after the rationale, matching
-    * `multi_chain_comparison.py`): `«I'm trying to {rationale} I'm not sure but my prediction is {answer}»`. */
+    * `multi_chain_comparison.py`): `«I'm trying to {rationale} I'm not sure but my prediction is {answer}»`.
+    */
   private def formatAttempt(attempt: DynamicPrediction): String =
     val row       = attempt.values
     val rationale = firstNonEmpty(row, Seq("rationale", "reasoning"))

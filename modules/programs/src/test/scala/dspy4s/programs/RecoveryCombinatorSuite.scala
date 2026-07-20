@@ -12,7 +12,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -29,14 +29,18 @@ class RecoveryCombinatorSuite extends FunSuite:
       result: Either[DspyError, String],
       predict: DynamicPredict,
       runs: ArrayBuffer[String]
-  ) extends Module[TypedCall[Int], Prediction[String]]:
+  ) extends Module[ProgramCall[Int], Prediction[String]]:
     override val moduleName: String                                              = name
-    override protected def callInputs(call: TypedCall[Int]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[Int]): Boolean       = call.traceEnabled
+    override protected def callInputs(call: ProgramCall[Int]): DynamicValue.Record  = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: ProgramCall[Int]): Boolean        = call.traceEnabled
     override protected def tracePayload(p: Prediction[String]): DynamicValue.Record = p.raw.values
-    override protected def forward(call: TypedCall[Int])(using RuntimeContext): Either[DspyError, Prediction[String]] =
+    override protected def forward(call: ProgramCall[Int])(using
+        RuntimeContext
+    ): Either[DspyError, Prediction[String]] =
       runs += name
-      result.map(value => Prediction(value, DynamicPrediction(DynamicValues.record("source" -> DynamicValues.fromAny(name)))))
+      result.map(value =>
+        Prediction(value, DynamicPrediction(DynamicValues.record("source" -> DynamicValues.fromAny(name))))
+      )
 
   private object Attempt:
     given attemptPredictor: Predictor[Attempt] with
@@ -57,7 +61,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary  = Attempt("primary", Right("primary"), predictor("p"), runs)
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
 
-    val result = primary.recoverWith(RecoveryPolicy.Always)(fallback)(TypedCall(1))
+    val result = primary.recoverWith(RecoveryPolicy.Always)(fallback)(ProgramCall(1))
     assertEquals(result.map(_.output), Right("primary"))
     assertEquals(runs.toVector, Vector("primary"))
   }
@@ -68,16 +72,19 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary  = Attempt("primary", Left(error), predictor("p"), runs)
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
 
-    assertEquals(primary.recoverWith(RecoveryPolicy.Never)(fallback)(TypedCall(1)), Left(error))
+    assertEquals(primary.recoverWith(RecoveryPolicy.Never)(fallback)(ProgramCall(1)), Left(error))
     assertEquals(runs.toVector, Vector("primary"))
     runs.clear()
     assertEquals(
-      primary.recoverWith(RecoveryPolicy.Always)(fallback)(TypedCall(1)).map(_.output),
+      primary.recoverWith(RecoveryPolicy.Always)(fallback)(ProgramCall(1)).map(_.output),
       Right("fallback")
     )
     assertEquals(runs.toVector, Vector("primary", "fallback"))
     runs.clear()
-    assertEquals(Compose.recover(primary, fallback, RecoveryPolicy.Always)(TypedCall(1)).map(_.output), Right("fallback"))
+    assertEquals(
+      Compose.recover(primary, fallback, RecoveryPolicy.Always)(ProgramCall(1)).map(_.output),
+      Right("fallback")
+    )
     assertEquals(runs.toVector, Vector("primary", "fallback"))
   }
 
@@ -88,7 +95,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
 
     assertEquals(
-      primary.recoverWith(RecoveryPolicy.onCodes("validation_error"))(fallback)(TypedCall(1)),
+      primary.recoverWith(RecoveryPolicy.onCodes("validation_error"))(fallback)(ProgramCall(1)),
       Left(error)
     )
     runs.clear()
@@ -96,7 +103,7 @@ class RecoveryCombinatorSuite extends FunSuite:
       primary.recoverWith(RecoveryPolicy.when {
         case RuntimeError(component, _) => component == "rate_limit"
         case _                          => false
-      })(fallback)(TypedCall(1)).map(_.output),
+      })(fallback)(ProgramCall(1)).map(_.output),
       Right("fallback")
     )
     assertEquals(runs.toVector, Vector("primary", "fallback"))
@@ -109,7 +116,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary       = Attempt("primary", Left(primaryError), predictor("p"), runs)
     val fallback      = Attempt("fallback", Left(fallbackError), predictor("f"), runs)
 
-    assertEquals(primary.recoverWith(RecoveryPolicy.Always)(fallback)(TypedCall(1)), Left(fallbackError))
+    assertEquals(primary.recoverWith(RecoveryPolicy.Always)(fallback)(ProgramCall(1)), Left(fallbackError))
   }
 
   test("a throwing policy is normalized into the typed error channel") {
@@ -119,7 +126,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val policy   = RecoveryPolicy.when(_ => throw IllegalStateException("policy boom"))
 
     assertEquals(
-      primary.recoverWith(policy)(fallback)(TypedCall(1)),
+      primary.recoverWith(policy)(fallback)(ProgramCall(1)),
       Left(RuntimeError("program_recovery_policy", "policy boom"))
     )
     assertEquals(runs.toVector, Vector("primary"))
@@ -149,7 +156,7 @@ class RecoveryCombinatorSuite extends FunSuite:
         case _                       => ()
 
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
-      val _ = primary.recoverWith(RecoveryPolicy.Always)(fallback)(TypedCall(1))
+      val _ = primary.recoverWith(RecoveryPolicy.Always)(fallback)(ProgramCall(1))
     }
 
     assertEquals(starts.toVector, Vector("primary", "fallback"))

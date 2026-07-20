@@ -89,7 +89,10 @@ class PredictSuite extends FunSuite:
             LmOutput(
               text = "Need tool",
               metadata = DynamicValues.record("score" := 0.5),
-              toolCalls = Vector(ToolCall(name = "search", args = DynamicValues.recordFromEntries(Seq("query" := "capital of belgium"))))
+              toolCalls = Vector(ToolCall(
+                name = "search",
+                args = DynamicValues.recordFromEntries(Seq("query" := "capital of belgium"))
+              ))
             )
           )
         )
@@ -116,7 +119,7 @@ class PredictSuite extends FunSuite:
     ) {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(signature).apply(ProgramCall(inputs = rec("question" := "Capital of France?")))
+        val result = DynamicPredict(signature).apply(ProgramCall(input = rec("question" := "Capital of France?")))
 
         assert(result.isRight)
         val prediction = result.toOption.get
@@ -155,7 +158,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).apply(ProgramCall(inputs = rec("question" := "x")))
+      val result           = DynamicPredict(signature).apply(ProgramCall(input = rec("question" := "x")))
 
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
@@ -172,7 +175,7 @@ class PredictSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(signature).apply(ProgramCall(inputs = rec("question" := "x")))
+      val result           = DynamicPredict(signature).apply(ProgramCall(input = rec("question" := "x")))
 
       assert(result.isRight)
       val toolCalls = lookup(result.toOption.get.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]]

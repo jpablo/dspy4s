@@ -5,10 +5,12 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, SignatureLayout}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
-import dspy4s.optimize.{COPROConfig, Runnable, QAInput, QAOutput}
-import dspy4s.optimize.para.ParaCompile.{*, given}
+import dspy4s.optimize.{COPROConfig, QAInput, QAOutput}
+import dspy4s.programs.ProgramRunner
+import dspy4s.programs.RecordCodec
+import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.Predict
-import dspy4s.programs.para.{ParaCategory, Program, RecordCodec}
+import dspy4s.programs.para.{ParaCategory, Program}
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -144,8 +146,8 @@ class ParaCompileSuite extends FunSuite:
 
   // ── 3. The closed loop, part 1: the upcast that used to fail now works ───────────────────────────────────
 
-  test("copro works on an UPCAST Program[I, O] (the packaged decoder closed the Runnable gap)") {
-    // The earlier revision pinned (via compileErrors) that this exact shape could NOT compile: Runnable had
+  test("copro works on an UPCAST Program[I, O] (the packaged decoder closed the ProgramRunner gap)") {
+    // The earlier revision pinned (via compileErrors) that this exact shape could NOT compile: ProgramRunner had
     // to be summoned against the packaging-refined Rep. With decodeInput packaged, both optimizer
     // capabilities are uniform over Program[I, O], so the erased type is fully optimizable.
     val erased: Program[QAInput, QAOutput] = Program.of(Predict[QAInput, QAOutput](taskSignature))
@@ -176,8 +178,8 @@ class ParaCompileSuite extends FunSuite:
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       // Uniform record-based evaluation on a composite: decode via the threaded first-leg decoder, run both
-      // stages. Bare user composites need a hand-written Runnable for exactly this (Runnable's scaladoc).
-      val ran = summon[Runnable[Program[QAInput, QAInput]]].run(pipeline, rec("question" := "q1"))
+      // stages. Bare user composites need a hand-written ProgramRunner for exactly this (ProgramRunner's scaladoc).
+      val ran = summon[ProgramRunner[Program[QAInput, QAInput]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the composed pipeline failed: ${ran.left.toOption}")
       // And the whole pipeline is optimizable: COPRO sees both predicts through the packaged evidence.
       val result = pipeline.copro(pipelineConfig, trainset)
@@ -198,7 +200,7 @@ class ParaCompileSuite extends FunSuite:
     val pipeline: Program[QAInput, QAOutput] = C.id[QAInput] >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran              = summon[Runnable[Program[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
+      val ran              = summon[ProgramRunner[Program[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
       val report = pipeline.copro(config(), trainset).toOption.get
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))

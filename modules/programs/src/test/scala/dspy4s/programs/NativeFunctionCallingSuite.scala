@@ -36,10 +36,12 @@ class NativeFunctionCallingSuite extends FunSuite:
     override def supportsFunctionCalling: Boolean   = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       lastOptions = Some(request.options)
-      Right(LmResponse(outputs = Vector(LmOutput(
+      Right(LmResponse(outputs =
+        Vector(LmOutput(
         text      = "",
         toolCalls = Vector(ToolCall("search", DynamicValues.record("query" := "capital of belgium")))
-      ))))
+        ))
+      ))
 
   private val layout: SignatureLayout =
     SignatureLayout.create(
@@ -52,8 +54,11 @@ class NativeFunctionCallingSuite extends FunSuite:
     ).toOption.get
 
   private val tools: Vector[ToolSpec] = Vector(
-    ToolSpec("search", Some("Search the web"),
-      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true)))
+    ToolSpec(
+      "search",
+      Some("Search the web"),
+      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+    )
   )
 
   test("DynamicPredict drives native function-calling end to end through ChatAdapter") {
@@ -64,7 +69,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict.apply(ProgramCall(inputs = DynamicValues.record("question" := "capital of belgium?")))
+      val result = predict.apply(ProgramCall(input = DynamicValues.record("question" := "capital of belgium?")))
 
       assert(result.isRight, s"expected success, got: $result")
       val pred = result.toOption.get

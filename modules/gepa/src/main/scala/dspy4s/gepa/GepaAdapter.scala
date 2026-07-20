@@ -11,7 +11,7 @@ import dspy4s.programs.IdentifiedPredictor
 import dspy4s.programs.PredictorId
 import dspy4s.programs.Predictors
 import dspy4s.programs.runtime.ParallelExecutor
-import dspy4s.optimize.Runnable
+import dspy4s.programs.ProgramRunner
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the search
   * through this object: it applies a [[Candidate]] to the program, evaluates it, and (next) builds the reflective
@@ -28,7 +28,7 @@ final class GepaAdapter[P](
     val program: P,
     val metric: FeedbackMetric,
     val failureScore: Double = 0.0
-)(using ps: Predictors[P], runner: Runnable[P]):
+)(using ps: Predictors[P], runner: ProgramRunner[P]):
 
   /** Stable predictor ID → its traversal entry and trace index. Display names never participate in lookup. */
   private val componentsById: Map[PredictorId, (IdentifiedPredictor, Int)] =

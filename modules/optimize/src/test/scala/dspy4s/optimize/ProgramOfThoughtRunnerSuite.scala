@@ -1,8 +1,16 @@
 package dspy4s.optimize
 
+import dspy4s.programs.ProgramRunner
+
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  CodeInterpreter, CodeResult, DspyError, DynamicValues, RuntimeContext, SignatureLayout, :=
+  CodeInterpreter,
+  CodeResult,
+  DspyError,
+  DynamicValues,
+  RuntimeContext,
+  SignatureLayout,
+  :=
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -14,10 +22,10 @@ import zio.blocks.schema.Schema
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
-private final case class ProgramOfThoughtRunnableInput(question: String) derives Schema
-private final case class ProgramOfThoughtRunnableOutput(answer: String) derives Schema
+private final case class ProgramOfThoughtRunnerInput(question: String) derives Schema
+private final case class ProgramOfThoughtRunnerOutput(answer: String) derives Schema
 
-class ProgramOfThoughtRunnableSuite extends FunSuite:
+class ProgramOfThoughtRunnerSuite extends FunSuite:
 
   private object ScriptedAdapter extends Adapter:
     val name: String = "program-of-thought-runnable"
@@ -51,10 +59,10 @@ class ProgramOfThoughtRunnableSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
-  test("Runnable decodes ProgramOfThought input, executes it, and returns the final raw prediction") {
+  test("ProgramRunner decodes ProgramOfThought input, executes it, and returns the final raw prediction") {
     val interpreter = new RecordingInterpreter
     val program = ProgramOfThought(
-      baseSignature = Signature.derived[ProgramOfThoughtRunnableInput, ProgramOfThoughtRunnableOutput]("PoTRunnable"),
+      baseSignature = Signature.derived[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]("PoTRunner"),
       interpreter = interpreter
     )
     val inputs = DynamicValues.recordFromEntries(Vector("question" := "What is six times seven?"))
@@ -66,10 +74,10 @@ class ProgramOfThoughtRunnableSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = summon[Runnable[ProgramOfThought[ProgramOfThoughtRunnableInput, ProgramOfThoughtRunnableOutput]]]
+      val result = summon[ProgramRunner[ProgramOfThought[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]]]
         .run(program, inputs)
 
-      assert(result.isRight, result.left.toOption.map(_.message).getOrElse("Runnable failed"))
+      assert(result.isRight, result.left.toOption.map(_.message).getOrElse("ProgramRunner failed"))
       val raw = result.toOption.get.values
       assertEquals(DynamicValues.recordGet(raw, "answer").map(DynamicValues.renderText), Some("42"))
       assertEquals(

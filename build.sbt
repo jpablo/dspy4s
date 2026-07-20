@@ -50,7 +50,7 @@ lazy val root = (project in file("."))
 
 // `core` owns the contract layer that everything else builds on. We pull in
 // zio-blocks-schema here because `DynamicValue` is the spine type carried
-// through `Example.values`, `ProgramCall.inputs`, `DynamicPrediction.values`,
+// through `Example.values`, `ProgramCall.input`, `DynamicPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
 // programs, evaluate, and the typed surface.
 lazy val core = (project in file("modules/core"))
@@ -134,8 +134,8 @@ lazy val optimize = (project in file("modules/optimize"))
 
 // GEPA — Genetic-Pareto reflective prompt optimizer (PORT_GAPS G-12). A self-contained port of the external
 // Python `gepa` engine (a stdlib-only genetic-Pareto algorithm) plus the dspy4s adapter that bridges programs
-// into it. Depends on `optimize` for the predictor-introspection spine (`Predictors`/`Runnable`/`Teleprompter`)
-// it shares with COPRO/MIPROv2; that transitively brings programs/evaluate/adapters/lm/core.
+// into it. Depends on `optimize` for optimizer contracts and shares the programs-layer `Predictors` / `ProgramRunner`
+// capabilities with COPRO/MIPROv2; the dependencies below make that whole substrate explicit.
 lazy val gepa = (project in file("modules/gepa"))
   .dependsOn(core, programs, evaluate, optimize)
   .settings(commonSettings)
@@ -167,4 +167,3 @@ lazy val examples = (project in file("modules/examples"))
   .settings(
     publish / skip := true
   )
-

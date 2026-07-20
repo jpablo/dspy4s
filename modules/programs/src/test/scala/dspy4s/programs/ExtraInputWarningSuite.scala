@@ -11,9 +11,10 @@ import munit.FunSuite
 
 import java.io.{ByteArrayOutputStream, PrintStream}
 
-/** Mirrors upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: passing input kwargs whose keys are not
-  * in the signature's `input_fields` is tolerated (the extras are ignored, not an error), but a warning is
-  * emitted naming the unexpected keys and the expected input fields. */
+/** Mirrors upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: passing input kwargs whose keys are not in the
+  * signature's `input_fields` is tolerated (the extras are ignored, not an error), but a warning is emitted naming the
+  * unexpected keys and the expected input fields.
+  */
 class ExtraInputWarningSuite extends FunSuite:
 
   private object EchoQuestionAdapter extends Adapter:
@@ -22,7 +23,9 @@ class ExtraInputWarningSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text, "score" := 0.5)))
 
   private object FixedLm extends LanguageModel:
@@ -50,7 +53,7 @@ class ExtraInputWarningSuite extends FunSuite:
       RuntimeEnvironment.withSettings(defaultSettings) {
         given RuntimeContext = RuntimeEnvironment.current
         val result = DynamicPredict(sig).apply(
-          ProgramCall(inputs = rec("question" := "x", "bogus" := "y", "extra" := "z"))
+          ProgramCall(input = rec("question" := "x", "bogus" := "y", "extra" := "z"))
         )
         assert(result.isRight, s"extra inputs must NOT fail the call, got: $result")
         assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
@@ -67,7 +70,7 @@ class ExtraInputWarningSuite extends FunSuite:
     val err = captureErr {
       RuntimeEnvironment.withSettings(defaultSettings) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(sig).apply(ProgramCall(inputs = rec("question" := "x")))
+        val result           = DynamicPredict(sig).apply(ProgramCall(input = rec("question" := "x")))
         assert(result.isRight)
       }
     }

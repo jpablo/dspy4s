@@ -236,7 +236,7 @@ Tracks:
   resume; live-model validated); **`InferRules`** (G-11, 81ffec1) — trainset-derived
   natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
   per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
-  (`Predictors` introspection, `Runnable` typed spine, instruction editing) + `Evaluate`.
+  (`Predictors` introspection, `ProgramRunner` typed spine, instruction editing) + `Evaluate`.
   **Still deferred:** `SIMBA` (G-13), `BetterTogether` (G-15),
   `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
   remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative

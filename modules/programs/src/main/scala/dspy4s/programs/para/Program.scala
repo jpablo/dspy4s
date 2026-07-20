@@ -7,9 +7,12 @@ import dspy4s.programs.Both
 import dspy4s.programs.PredictorState
 import dspy4s.programs.PredictorView
 import dspy4s.programs.Identity
+import dspy4s.programs.ProgramInput
+import dspy4s.programs.ProgramRunner
 import dspy4s.programs.Predictors
+import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import zio.blocks.schema.DynamicValue
 
@@ -26,7 +29,7 @@ import zio.blocks.schema.DynamicValue
   * semantic output and lifecycle but identity supplies an empty final raw envelope.
   */
 sealed trait Program[I, O]:
-  type Rep <: Module[TypedCall[I], Prediction[O]]
+  type Rep <: Module[ProgramCall[I], Prediction[O]]
   val program: Rep
   val addressable: Predictors[Rep]
 
@@ -34,12 +37,12 @@ sealed trait Program[I, O]:
   val decodeInput: DynamicValue.Record => Either[DspyError, I]
 
   /** Run the packaged program through the module's wrapped `apply`. */
-  def apply(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+  def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     program.apply(call)
 
 object Program:
 
-  private def packageWith[I, O, F <: Module[TypedCall[I], Prediction[O]]](
+  private def packageWith[I, O, F <: Module[ProgramCall[I], Prediction[O]]](
       f: F,
       decode: DynamicValue.Record => Either[DspyError, I]
   )(using ev: Predictors[F]): Program[I, O] { type Rep = F } =
@@ -55,14 +58,14 @@ object Program:
     * the source object's [[RecordCodec]]. An incoherent decoder remains runnable, but falls outside the observational
     * equality under which the category laws hold.
     */
-  def unsafeOf[I, O, F <: Module[TypedCall[I], Prediction[O]]](
+  def unsafeOf[I, O, F <: Module[ProgramCall[I], Prediction[O]]](
       f: F,
       decode: DynamicValue.Record => Either[DspyError, I]
   )(using ev: Predictors[F]): Program[I, O] { type Rep = F } =
     packageWith(f, decode)
 
   /** Package a program whose input decoder is derivable from [[ProgramInput]]. */
-  def of[I, O, F <: Module[TypedCall[I], Prediction[O]]](f: F)(using
+  def of[I, O, F <: Module[ProgramCall[I], Prediction[O]]](f: F)(using
       ev: Predictors[F],
       codec: ProgramInput[F, I]
   ): Program[I, O] { type Rep = F } =
@@ -80,6 +83,13 @@ object Program:
 
     override def inspectNamed(program: Program[I, O]): Vector[(String, PredictorView)] =
       program.addressable.inspectNamed(program.program)
+
+  /** Uniform record-boundary execution uses the decoder captured by the existential package. */
+  given programRunner[I, O]: ProgramRunner[Program[I, O]] with
+    def run(program: Program[I, O], call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, dspy4s.core.contracts.DynamicPrediction] =
+      program.decodeInput(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
 
   /** The Para category over packaged programs.
     *

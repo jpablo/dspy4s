@@ -98,7 +98,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   `BootstrapFewShot`. Delta: returns a `KNNFewShotProgram` wrapper module (Python monkey-patches `forward`;
   dspy4s programs are immutable), so it is not a `Teleprompter`.
 - All of the above build on the **G-1** enablers (`Predictors`/`Predictor` introspection — relocated to
-  `programs` for G-5 v2 — `Runnable` typed spine, instruction editing) + `Evaluate`. **Still deferred:**
+  `programs` for G-5 v2 — `ProgramRunner` typed spine, instruction editing) + `Evaluate`. **Still deferred:**
   `SIMBA` (G-13), `BetterTogether` (G-15), `GRPO`/`BootstrapFinetune` (G-16),
   `BootstrapFewShotWithOptuna` (G-17), and the remaining `propose` pieces (G-18).
   `AvatarOptimizer` is **Won't fix (by design)** — see G-14.

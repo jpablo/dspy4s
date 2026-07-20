@@ -53,7 +53,9 @@ class StreamifySuite extends FunSuite:
     override val name: String = "passthrough"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
-    override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec(signature.outputFields.map(_.name := output.text)*)))
 
   override def beforeEach(context: BeforeEach): Unit =
@@ -167,7 +169,9 @@ class StreamifySuite extends FunSuite:
   test("streamify emits error event when program fails") {
     val failing = new DynamicModule:
       override val moduleName: String = "failing"
-      override protected def forward(input: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
     given RuntimeContext = RuntimeEnvironment.current

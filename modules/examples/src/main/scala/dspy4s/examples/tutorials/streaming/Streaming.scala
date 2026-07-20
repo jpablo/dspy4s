@@ -1,27 +1,24 @@
-/**
- * Streaming
+/** Streaming
  *
- * Source:   docs/docs/tutorials/streaming/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/streaming/index.md
- * Status:   translated (the streamify surface + listeners + status provider, snippets 1–9).
+  * Source: docs/docs/tutorials/streaming/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/streaming/index.md Status: translated (the
+  * streamify surface + listeners + status provider, snippets 1–9).
  *
- * The big shape difference: dspy4s `streamify` is *synchronous*. It returns a
- * `DynamicValue.Record => ClosableIterator[StreamEvent]`, so there is no `asyncio` / `async for`
- * and no `async_streaming` flag — every snippet's "consume the stream" loop is the same `while
- * iterator.hasNext` over a sealed `StreamEvent` ADT (`TokenEvent` / `StatusEvent` / `PredictionEvent`
- * / `ErrorEvent`) rather than Python's `isinstance(chunk, StreamResponse | Prediction | StatusMessage)`.
- * Snippets 1/2/3/9 therefore collapse onto one example, as do the async/sync variants.
+  * The big shape difference: dspy4s `streamify` is *synchronous*. It returns a `DynamicValue.Record =>
+  * ClosableIterator[StreamEvent]`, so there is no `asyncio` / `async for` and no `async_streaming` flag — every
+  * snippet's "consume the stream" loop is the same `while iterator.hasNext` over a sealed `StreamEvent` ADT
+  * (`TokenEvent` / `StatusEvent` / `PredictionEvent` / `ErrorEvent`) rather than Python's `isinstance(chunk,
+  * StreamResponse | Prediction | StatusMessage)`. Snippets 1/2/3/9 therefore collapse onto one example, as do the
+  * async/sync variants.
  *
- * `dspy.streaming.StreamListener(signature_field_name=..., predict=..., predict_name=..., allow_reuse=...)`
- * becomes `StreamListener(signatureFieldName, predictName, allowReuse)` (the predictor is selected by name,
- * not by object identity). A composite `dspy.Module` becomes a `DynamicModule` whose `forward` threads
- * named `DynamicPredict`s. The LM must be a `StreamingLanguageModel` (the OpenAI provider is one).
+  * `dspy.streaming.StreamListener(signature_field_name=..., predict=..., predict_name=..., allow_reuse=...)` becomes
+  * `StreamListener(signatureFieldName, predictName, allowReuse)` (the predictor is selected by name, not by object
+  * identity). A composite `dspy.Module` becomes a `DynamicModule` whose `forward` threads named `DynamicPredict`s. The
+  * LM must be a `StreamingLanguageModel` (the OpenAI provider is one).
  */
 package dspy4s.examples.tutorials.streaming
 
-import dspy4s.core.contracts.{
-  ClosableIterator, DspyError, DynamicPrediction, DynamicValues, RuntimeContext, :=
-}
+import dspy4s.core.contracts.{ClosableIterator, DspyError, DynamicPrediction, DynamicValues, RuntimeContext, :=}
 import dspy4s.examples.Demo
 import dspy4s.programs.{DynamicPredict, ReAct}
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
@@ -76,11 +73,13 @@ object Streaming:
     private val predict2 =
       DynamicPredict(Signature.fromString("answer -> simplified_answer").layout, name = Some("predict2"))
 
-    override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, DynamicPrediction] =
       for
         step1 <- predict1.apply(call)
         answer = textField(step1.values, "answer")
-        step2 <- predict2.apply(ProgramCall(inputs = DynamicValues.recordFromEntries(Vector("answer" := answer))))
+        step2 <- predict2.apply(ProgramCall(input = DynamicValues.recordFromEntries(Vector("answer" := answer))))
       yield step2
   // --8<-- [end:compose-module]
 
@@ -128,12 +127,14 @@ object Streaming:
     private val predict2 =
       DynamicPredict(Signature.fromString("question, draft -> answer, score").layout, name = Some("predict2"))
 
-    override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+    override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, DynamicPrediction] =
       for
         step1 <- predict1.apply(call)
-        question = textField(call.inputs, "question")
+        question = textField(call.input, "question")
         answer   = textField(step1.values, "answer")
-        step2 <- predict2.apply(ProgramCall(inputs =
+        step2 <- predict2.apply(ProgramCall(input =
                    DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
                  ))
       yield step2
@@ -169,12 +170,16 @@ object Streaming:
       override val moduleName: String = "reasoning_module"
       private val predict =
         DynamicPredict(Signature.fromString("question, doubled -> reasoning, answer").layout, name = Some("predict"))
-      override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+      override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, DynamicPrediction] =
         for
           doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
-          out <- predict.apply(ProgramCall(inputs = DynamicValues.recordFromEntries(
+          out <- predict.apply(ProgramCall(input =
+            DynamicValues.recordFromEntries(
                    Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
-                 )))
+            )
+          ))
         yield out
 
     val streamPredict = Streamify.streamify(

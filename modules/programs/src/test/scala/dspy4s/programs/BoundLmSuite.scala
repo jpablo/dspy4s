@@ -23,7 +23,9 @@ class BoundLmSuite extends FunSuite:
     override val name: String = "echo"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text)))
 
   private final class FixedLm(id0: String, reply: String) extends LanguageModel:
@@ -47,14 +49,14 @@ class BoundLmSuite extends FunSuite:
   test("DynamicPredict: a bound lm overrides the ambient RuntimeContext lm") {
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val module = DynamicPredict(layout = layout, lm = Some(boundLm))
-    val out = underAmbient(module.apply(ProgramCall(inputs = rec("question" := "x"))))
+    val out    = underAmbient(module.apply(ProgramCall(input = rec("question" := "x"))))
     assertEquals(lookupString(out.toOption.get.values, "answer"), "BOUND")
   }
 
   test("DynamicPredict: no bound lm falls back to the ambient RuntimeContext lm") {
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val module = DynamicPredict(layout = layout)
-    val out = underAmbient(module.apply(ProgramCall(inputs = rec("question" := "x"))))
+    val out    = underAmbient(module.apply(ProgramCall(input = rec("question" := "x"))))
     assertEquals(lookupString(out.toOption.get.values, "answer"), "AMBIENT")
   }
 

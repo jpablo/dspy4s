@@ -166,7 +166,7 @@ modules remain fully instrumented. `ComposeLawSuite` pins this with a final leaf
 The remaining carrier limitation is explicit: sequential Category equality observes the threaded value and
 lifecycle, but not the final `Prediction.raw` envelope (`p >>> id` ends with id's empty raw). A later carrier
 split must put semantic output and accumulated run evidence in separate types; until then this is a quotient,
-not structural equality on `Module[TypedCall[I], Prediction[O]]`.
+not structural equality on `Module[ProgramCall[I], Prediction[O]]`.
 
 The load-bearing facts, all executable:
 
@@ -267,7 +267,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
     `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
     `Program` packages addressability + the input decoder (threaded through composition), giving uniform
-    `Predictors[Program]` + `Runnable[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
+    `Predictors[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
     values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Signature-backed `ProgramInput` instances cover Predict / ChainOfThought / ReAct / CodeAct even when their input

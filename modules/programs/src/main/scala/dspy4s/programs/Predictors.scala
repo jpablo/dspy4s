@@ -31,10 +31,20 @@ object Predictor:
     * implicit scope wherever a `Predictor[DynamicPredict]` (or its `NotGiven`) is sought.
     */
   given Predictor[DynamicPredict] with
-    def get(program: DynamicPredict): PredictorState         = program.predictorState
-    def metadata(program: DynamicPredict): PredictorMetadata = program.predictorView.metadata
+    def get(program: DynamicPredict): PredictorState =
+      PredictorState(program.layout.instructions, program.demos, program.config)
+
+    def metadata(program: DynamicPredict): PredictorMetadata =
+      PredictorMetadata.from(program.layout, program.moduleName)
+
     def set(program: DynamicPredict, updated: PredictorState): DynamicPredict =
-      program.withPredictorState(updated)
+      if updated == get(program) then program
+      else
+        program.copy(
+          layout = program.layout.withInstructions(updated.instructions),
+          demos = updated.demos,
+          config = updated.config
+        )
 
   /** Leaf [[Predictor]] for the typed single-predictor program [[Predict]]. A `Predict` field inside a user composite
     * resolves here (via [[Predictors.fromPredictor]], 1 element) rather than being structurally torn apart by
@@ -96,6 +106,14 @@ object Predictor:
           config = updated.config,
           signature = program.signature.withInstructions(updated.instructions)
         )
+
+/** Uniform syntax derived from the lawful [[Predictor]] lens. No predictor class needs to duplicate state/view/update
+  * methods; every current and third-party leaf receives the same operations from its typeclass instance.
+  */
+extension [P](program: P)(using predictor: Predictor[P])
+  def predictorState: PredictorState                 = predictor.get(program)
+  def predictorView: PredictorView                   = predictor.inspect(program)
+  def withPredictorState(updated: PredictorState): P = predictor.set(program, updated)
 
 /** The general optimizer traversal -- the typed analogue of Python's `named_predictors` / `map_named_predictors`.
   *
@@ -165,11 +183,10 @@ object Predictors extends LowPriority:
   /** Hand-written [[Predictors]] instances for the composite typed programs whose learnable sub-predicts are hoisted to
     * stable, `copy`-reachable members ([[ReAct]], [[CodeAct]], [[RLM]], [[ProgramOfThought]], and
     * [[MultiChainComparison]]; the evidence-parameterized wrappers [[BestOfN]] / [[Refine]] carry theirs in their
-    * companions). They live in the
-    * [[Predictors]] companion so they are in implicit scope without an explicit import (and so a user composite
-    * containing such a program resolves them; strict derivation rejects missing field evidence). They are concrete
-    * `Predictors[ConcreteType]` instances; being strictly more specific than [[derived]] (and there being no
-    * `Predictor` leaf for these types, so [[derived]] is even eligible), the compiler selects them.
+    * companions). They live in the [[Predictors]] companion so they are in implicit scope without an explicit import
+    * (and so a user composite containing such a program resolves them; strict derivation rejects missing field
+    * evidence). They are concrete `Predictors[ConcreteType]` instances; being strictly more specific than [[derived]]
+    * (and there being no `Predictor` leaf for these types, so [[derived]] is even eligible), the compiler selects them.
     *
     * `replace` writes state through each current executable predictor. An unchanged state preserves the existing
     * override field exactly; a changed state creates an override with the same signature structure and execution

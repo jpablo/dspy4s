@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TransparentModule
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 
 /** Explicit classification of which typed program failures may activate a fallback.
@@ -31,19 +31,19 @@ object RecoveryPolicy:
 
 /** Try `primary`; on an allowed failure, run `fallback` on the same input and call controls.
   *
-  * Both branches remain concrete fields, so optimizer addressability is structural: primary predictors precede
-  * fallback predictors. A fallback failure is returned as-is; a denied primary failure remains the original result.
+  * Both branches remain concrete fields, so optimizer addressability is structural: primary predictors precede fallback
+  * predictors. A fallback failure is returned as-is; a denied primary failure remains the original result.
   */
 final case class RecoverWith[
     I,
     O,
-    P <: Module[TypedCall[I], Prediction[O]],
-    F <: Module[TypedCall[I], Prediction[O]]
+    P <: Module[ProgramCall[I], Prediction[O]],
+    F <: Module[ProgramCall[I], Prediction[O]]
 ](primary: P, fallback: F, policy: RecoveryPolicy)
-    extends TransparentModule[TypedCall[I], Prediction[O]]:
+    extends TransparentModule[ProgramCall[I], Prediction[O]]:
   override val moduleName: String = "recover_with"
 
-  override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+  override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     primary.apply(call) match
       case success @ Right(_) => success
       case denied @ Left(error) =>
@@ -55,8 +55,8 @@ object RecoverWith:
   given recoverWithPredictors[
       I,
       O,
-      P <: Module[TypedCall[I], Prediction[O]],
-      F <: Module[TypedCall[I], Prediction[O]]
+      P <: Module[ProgramCall[I], Prediction[O]],
+      F <: Module[ProgramCall[I], Prediction[O]]
   ](using primary: Predictors[P], fallback: Predictors[F]): Predictors[RecoverWith[I, O, P, F]] with
     def inspect(program: RecoverWith[I, O, P, F]): Vector[PredictorView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
@@ -75,8 +75,8 @@ object RecoverWith:
         (if sub == "self" then "fallback" else s"fallback.$sub") -> view
       }
 
-extension [I, O, P <: Module[TypedCall[I], Prediction[O]]](self: P)
+extension [I, O, P <: Module[ProgramCall[I], Prediction[O]]](self: P)
   /** Add a fixed, optimizer-addressable fallback under an explicit failure-selection policy. */
-  def recoverWith[F <: Module[TypedCall[I], Prediction[O]]](policy: RecoveryPolicy)(
+  def recoverWith[F <: Module[ProgramCall[I], Prediction[O]]](policy: RecoveryPolicy)(
       fallback: F
   ): RecoverWith[I, O, P, F] = RecoverWith(self, fallback, policy)

@@ -29,7 +29,7 @@ immutably replace the learnable predictors of an arbitrary composite (`replace(p
 
 - `30420f3` P1 typeclasses + derivation · `25d7e8d` P2 retarget optimizers + drop
   `LabeledSampleProgram` · `9bcf99f` P3 hoist ReAct/CodeAct/MCC sub-predicts to fields ·
-  `dd466be` P4 leaf instances for typed `Predict`/`ChainOfThought` · `c459d07` P5 **`Runnable`
+  `dd466be` P4 leaf instances for typed `Predict`/`ChainOfThought` · `c459d07` P5 **`ProgramRunner`
   spine unification** (optimizers now target typed programs/user composites end-to-end) ·
   `1657f9c` P6 remove `PredictOps` (`Predictors` is the sole introspection typeclass).
 

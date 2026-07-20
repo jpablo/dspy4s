@@ -1,5 +1,7 @@
 package dspy4s.programs.para
 
+import dspy4s.programs.{predictorState, predictorView, withPredictorState}
+
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
@@ -22,9 +24,11 @@ import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predictor
 import dspy4s.programs.PredictorMetadata
 import dspy4s.programs.PredictorState
+import dspy4s.programs.ProgramInput
 import dspy4s.programs.ReAct
+import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import dspy4s.typed.Shape
 import dspy4s.typed.Signature
@@ -56,12 +60,12 @@ class ParaCategoryLawSuite extends FunSuite:
 
   /** A typed program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
-      extends Module[TypedCall[I], Prediction[O]]:
+      extends Module[ProgramCall[I], Prediction[O]]:
     override val moduleName: String                                            = s"step_$tag"
-    override protected def callInputs(call: TypedCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[I]): Boolean       = call.traceEnabled
+    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
     override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
-    override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
   private object Step:
@@ -79,12 +83,12 @@ class ParaCategoryLawSuite extends FunSuite:
   /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove the
     * construction gate below.
     */
-  private final class Opaque extends Module[TypedCall[Int], Prediction[Int]]:
+  private final class Opaque extends Module[ProgramCall[Int], Prediction[Int]]:
     override val moduleName: String                                              = "opaque"
-    override protected def callInputs(call: TypedCall[Int]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[Int]): Boolean       = call.traceEnabled
+    override protected def callInputs(call: ProgramCall[Int]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: ProgramCall[Int]): Boolean       = call.traceEnabled
     override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record = p.raw.values
-    override protected def forward(call: TypedCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
+    override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, DynamicPrediction.empty))
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
@@ -117,7 +121,7 @@ class ParaCategoryLawSuite extends FunSuite:
         case _                       => ()
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val output            = program(TypedCall(input)).map(_.output)
+      val output           = program(ProgramCall(input)).map(_.output)
       ProgramObservation(
         output,
         starts.result(),
@@ -151,13 +155,13 @@ class ParaCategoryLawSuite extends FunSuite:
     val g = pack(step[String, String]("g", "s -> t")(s => s + s))
     val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
     assertObsEq(C.associativity(a, g, h), 3, DynamicValue.Record.empty)
-    assertEquals(((a >>> g) >>> h)(TypedCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
+    assertEquals(((a >>> g) >>> h)(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
   test("right identity preserves the Category observation but not the final raw envelope") {
     val f      = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val direct = f(TypedCall(Boxed(7)))
-    val viaId  = (f >>> C.id[Wrapped])(TypedCall(Boxed(7)))
+    val direct = f(ProgramCall(Boxed(7)))
+    val viaId  = (f >>> C.id[Wrapped])(ProgramCall(Boxed(7)))
 
     assertEquals(viaId.map(_.output), direct.map(_.output))
     assertEquals(viaId.map(_.raw), Right(DynamicPrediction.empty))
@@ -178,17 +182,17 @@ class ParaCategoryLawSuite extends FunSuite:
     )
     assertIsEq(C.reparamWriteBack(ab, fresh))
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
-    assertEquals(ab.reparam(ab.params)(TypedCall(5)).map(_.output), ab(TypedCall(5)).map(_.output))
-    assertEquals(ab.reparam(fresh)(TypedCall(5)).map(_.output), Right(2))
+    assertEquals(ab.reparam(ab.params)(ProgramCall(5)).map(_.output), ab(ProgramCall(5)).map(_.output))
+    assertEquals(ab.reparam(fresh)(ProgramCall(5)).map(_.output), Right(2))
   }
 
   // ── fanout: behavior, its params law, and the copy NON-law ───────────────────────────────────────────────
   test("fanout runs both legs on the same input and satisfies paramsFanout") {
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
-    assertEquals(C.fanout(f, g)(TypedCall(4)).map(_.output), Right(("v4", 5)))
+    assertEquals(C.fanout(f, g)(ProgramCall(4)).map(_.output), Right(("v4", 5)))
     assertIsEq(C.paramsFanout(f, g))
-    assertEquals(C.parallel(f, g)(TypedCall(4)), C.fanout(f, g)(TypedCall(4)))
+    assertEquals(C.parallel(f, g)(ProgramCall(4)), C.fanout(f, g)(ProgramCall(4)))
     assertIsEq(C.paramsParallel(f, g))
   }
 
@@ -204,10 +208,10 @@ class ParaCategoryLawSuite extends FunSuite:
     val copied = C.fanout(h >>> f, h >>> g)
 
     runs.set(0)
-    val sharedOut = shared(TypedCall(3)).map(_.output)
+    val sharedOut = shared(ProgramCall(3)).map(_.output)
     assertEquals(runs.get(), 1) // h ran once (the whole point of sharing)
     runs.set(0)
-    val copiedOut = copied(TypedCall(3)).map(_.output)
+    val copiedOut = copied(ProgramCall(3)).map(_.output)
     assertEquals(runs.get(), 2) // h ran twice
 
     // With a DETERMINISTIC h the outputs coincide; with an effectful (LLM) h they need not — which is why
@@ -327,7 +331,7 @@ class ParaCategoryLawSuite extends FunSuite:
     // summoned and Program.of is a compile error. In the ambient Module world the same program runs fine but is
     // silently un-addressable; in the packaged category it cannot exist.
     val opaque = new Opaque
-    assertEquals(opaque.apply(TypedCall(3)).map(_.output), Right(3)) // valid ambient program
+    assertEquals(opaque.apply(ProgramCall(3)).map(_.output), Right(3)) // valid ambient program
     val errors = compileErrors("Program.of(new Opaque)")
     assert(errors.nonEmpty, "expected Program.of(new Opaque) to fail compilation")
     assert(errors.contains("Predictors"), s"expected a missing-Predictors error, got:\n$errors")

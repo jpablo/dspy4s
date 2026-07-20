@@ -1,33 +1,26 @@
-/**
- * Signatures
+/** Signatures
  *
- * Source:   docs/docs/learn/programming/signatures.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md
- * Status:   translated (8/8 python snippets)
+  * Source: docs/docs/learn/programming/signatures.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md Status: translated (8/8
+  * python snippets)
  *
  * Translation rule:
- *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`,
- *     `dspy.ChainOfThought("a -> b")`, or `dspy.Signature("a -> b")`)
- *     become Scala **function signatures** via
- *     `Signature.fromType[(in: I) => (out: O)]`.
- *   - Python **class-based** signatures (`class X(dspy.Signature): ...`)
- *     become Scala **spec traits** with `InputField[T]` / `OutputField[T]`
- *     members and `Signature.of[T <: Spec]`.
+  *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`, `dspy.ChainOfThought("a -> b")`, or
+  *     `dspy.Signature("a -> b")`) become Scala **function signatures** via `Signature.fromType[(in: I) => (out: O)]`.
+  *   - Python **class-based** signatures (`class X(dspy.Signature): ...`) become Scala **spec traits** with
+  *     `InputField[T]` / `OutputField[T]` members and `Signature.of[T <: Spec]`.
  *
- * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named
- * tuples, so call sites get typed dot-access:
+  * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named tuples, so call sites get typed dot-access:
  *
  *   Predict(sig).apply((field = "...")).map(_.output.field)
  *
- * `ChainOfThought` augments the output named tuple with `reasoning: String`
- * and delegates through typed `Predict`. Snippets 3, 4, and 6 use it directly.
+  * `ChainOfThought` augments the output named tuple with `reasoning: String` and delegates through typed `Predict`.
+  * Snippets 3, 4, and 6 use it directly.
  *
- * Structure note: each snippet is a self-contained block — heading
- * comment + python original + supporting types (when any) + example
- * object. Supporting types (enums, case classes, spec traits)
- * must stay at the package level for zio-blocks-schema / Mirror derivation and
- * for the trait-spec macro to see them, so the per-snippet block places
- * them immediately above the example object that uses them.
+  * Structure note: each snippet is a self-contained block — heading comment + python original + supporting types (when
+  * any) + example object. Supporting types (enums, case classes, spec traits) must stay at the package level for
+  * zio-blocks-schema / Mirror derivation and for the trait-spec macro to see them, so the per-snippet block places them
+  * immediately above the example object that uses them.
  */
 package dspy4s.examples.learn.programming
 
@@ -134,9 +127,9 @@ object SummarizeExample:
 // | classify = dspy.Predict(Emotion)
 // | classify(sentence=sentence)
 
-/** Python's `Literal[...]` becomes a top-level Scala enum. `derives Schema`
-  * gives it a flat-string wire form (the enum case name) at both the
-  * top-level OutputField boundary and inside nested products. */
+/** Python's `Literal[...]` becomes a top-level Scala enum. `derives Schema` gives it a flat-string wire form (the enum
+  * case name) at both the top-level OutputField boundary and inside nested products.
+  */
 // --8<-- [start:emotion]
 enum Emotion derives Schema:
   case sadness, joy, love, anger, fear, surprise
@@ -194,10 +187,9 @@ object FaithfulnessExample:
 // | classify = dspy.Predict(DogPictureSignature)
 // | classify(image_1=dspy.Image.from_url(image_url))
 
-/** Placeholder for `dspy.Image`. dspy4s does not yet ship a built-in
-  * `Image` value type with adapter support; this local case class keeps
-  * the spec trait compilable. Replace with a real Image type when one
-  * lands. */
+/** Placeholder for `dspy.Image`. dspy4s does not yet ship a built-in `Image` value type with adapter support; this
+  * local case class keeps the spec trait compilable. Replace with a real Image type when one lands.
+  */
 case class Image(url: String) derives Schema
 
 trait DogPictureSpec extends Spec:
@@ -255,9 +247,8 @@ object CustomTypesExample:
     ]
 // --8<-- [end:custom-types]
 
-
 // ═══════════════════════════════════════════════════════════════════════════
-// Runnable entrypoint
+// ProgramRunner entrypoint
 // ═══════════════════════════════════════════════════════════════════════════
 // The example objects above only declare programs; running them needs a
 // `RuntimeContext` carrying a live LM + adapter. This wires the real OpenAI

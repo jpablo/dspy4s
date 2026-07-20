@@ -1,5 +1,7 @@
 package dspy4s.optimize
 
+import dspy4s.programs.{predictorState, predictorView}
+
 import dspy4s.programs.Predictors
 
 import dspy4s.core.contracts.SignatureLayout

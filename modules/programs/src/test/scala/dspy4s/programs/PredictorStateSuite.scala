@@ -44,6 +44,10 @@ class PredictorStateSuite extends FunSuite:
     val original = leaf.get(program)
     val metadata = leaf.metadata(program)
 
+    assertEquals(program.predictorState, original)
+    assertEquals(program.predictorView, leaf.inspect(program))
+    assertEquals(program.withPredictorState(first).predictorState, first)
+
     assert(leaf.set(program, original).equals(program), "Get-Put must be an exact no-op")
     assertEquals(leaf.get(leaf.set(program, first)), first)
     assert(

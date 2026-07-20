@@ -26,6 +26,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -57,11 +58,15 @@ class ProgramRuntimeSuite extends FunSuite:
 
   private final class EchoProgram extends DynamicModule:
     override val moduleName: String = "echo"
-    override protected def forward(call: ProgramCall)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
-      Right(DynamicPrediction(values = call.inputs.updated(
+    override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, DynamicPrediction] =
+      Right(DynamicPrediction(values =
+        call.input.updated(
         "answer",
         zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))
-      )))
+        )
+      ))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
@@ -96,7 +101,7 @@ class ProgramRuntimeSuite extends FunSuite:
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = EchoProgram()
-      val output = program.apply(ProgramCall(inputs = rec("question" := "hello")))
+      val output           = program.apply(ProgramCall(input = rec("question" := "hello")))
 
       assert(output.isRight)
       assertEquals(lookupString(output.toOption.get.values, "answer"), "ok")
@@ -110,7 +115,7 @@ class ProgramRuntimeSuite extends FunSuite:
   test("base predict program respects traceEnabled=false") {
     given RuntimeContext = RuntimeEnvironment.current
     val program = EchoProgram()
-    val output = program.apply(ProgramCall(inputs = rec("question" := "hello"), traceEnabled = false))
+    val output           = program.apply(ProgramCall(input = rec("question" := "hello"), traceEnabled = false))
 
     assert(output.isRight)
     assertEquals(RuntimeEnvironment.current.trace.size, 0)

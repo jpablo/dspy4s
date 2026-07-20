@@ -2,17 +2,14 @@ package dspy4s.programs
 
 import zio.blocks.schema.Schema
 
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{
-  DspyError, RuntimeContext, SignatureLayout
-}
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput, ToolSpec}
+import dspy4s.core.contracts.{DspyError, Example, RuntimeContext, SignatureLayout}
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{
-  LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
-  Message, MessageRole
-}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
+import dspy4s.programs.contracts.ProgramCall
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature}
 import munit.FunSuite
 
@@ -42,19 +39,23 @@ class TypedPredictSuite extends FunSuite:
   private object EchoQuestionAdapter extends Adapter:
     override val name: String = "echo-question"
 
-    override def format(invocation: AdapterInvocation)(using RuntimeContext)
-        : Either[DspyError, FormattedPrompt] =
+    override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val q = lookupString(invocation.inputs.values, "question")
-      Right(FormattedPrompt(messages = Vector(
+      Right(FormattedPrompt(messages =
+        Vector(
         Message(role = MessageRole.User, text = Some(q))
-      )))
+        )
+      ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
-        : Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
+      Right(ParsedOutput(values =
+        rec(
         "answer" := output.text,
         "score"  -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
-      )))
+        )
+      ))
 
   private object FixedLm extends LanguageModel:
     override val id: String   = "fixed-lm"
@@ -133,14 +134,18 @@ class TypedPredictSuite extends FunSuite:
       override val name = "capturing"
       override def format(invocation: AdapterInvocation)(using RuntimeContext) =
         capturedInputs += dspy4s.core.contracts.DynamicValues.recordToMap(invocation.inputs.values)
-        Right(FormattedPrompt(messages = Vector(
+        Right(FormattedPrompt(messages =
+          Vector(
           Message(role = MessageRole.User, text = Some("hi"))
-        )))
+          )
+        ))
       override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
-        Right(ParsedOutput(values = rec(
+        Right(ParsedOutput(values =
+          rec(
           "answer" := "x",
           "score"  := 0.5
-        )))
+          )
+        ))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(RuntimeContext(
@@ -164,6 +169,45 @@ class TypedPredictSuite extends FunSuite:
       val result = Predict(sig).apply(P4QAInput("Capital of France?")).toOption.get
       assertEquals(result.raw.completions.map(_.size), Some(2))
       assertEquals(result.raw.lmUsage.map(_.totalTokens), Some(12L))
+    }
+  }
+
+  test("Predict.erase preserves engine state and commutes with valid typed execution") {
+    val sig     = Signature.derived[P4QAInput, P4QAOutput]("QA")
+    val runtime = new SettingsProgramRuntime {}
+    val demos = Vector(
+      Example("question" := "Capital of Germany?", "answer" := "Berlin", "score" := 1.0)
+        .withInputs(Set("question"))
+    )
+    val config = DynamicValues.record("temperature" := 0.2)
+    val tools  = Vector(ToolSpec("search", description = Some("Search the corpus")))
+    val program = Predict(
+      signature = sig,
+      demos = demos,
+      name = Some("typed_qa"),
+      runtime = runtime,
+      config = config,
+      lm = Some(FixedLm),
+      tools = tools
+    )
+    val erased = program.erase
+    val input  = P4QAInput("Capital of France?")
+
+    assertEquals(erased.layout, sig.layout)
+    assertEquals(erased.demos, demos)
+    assertEquals(erased.name, program.name)
+    assert(erased.runtime eq runtime)
+    assertEquals(erased.outputJsonSchema, sig.outputShape.jsonSchemaString)
+    assertEquals(erased.config, config)
+    assert(erased.lm.exists(_ eq FixedLm))
+    assertEquals(erased.tools, tools)
+
+    RuntimeEnvironment.withSettings(defaultSettings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val typedResult      = program.apply(input).map(_.raw)
+      val erasedResult     = erased.apply(ProgramCall(sig.inputShape.encode(input)))
+
+      assertEquals(erasedResult, typedResult)
     }
   }
 
@@ -255,7 +299,7 @@ class TypedPredictSuite extends FunSuite:
   // ── Decode-failure / trace consistency ──────────────────────────────────
 
   test("decode failures: no trace/history is recorded (typed decode runs inside the wrapped forward)") {
-    // `Predict[I, O]` is now a `Module[TypedCall[I], Prediction[O]]` whose `forward` does the typed decode
+    // `Predict[I, O]` is now a `Module[ProgramCall[I], Prediction[O]]` whose `forward` does the typed decode
     // *inside* the lifecycle wrapping. So a decode failure makes `forward` return `Left`, and `Module.apply`
     // appends neither a trace nor a history entry -- the observability layer and the return value agree.
     // (This replaces the earlier "known limitation" where execution crossed a separately wrapped dynamic
@@ -274,11 +318,10 @@ class TypedPredictSuite extends FunSuite:
 
   test("the DynamicPredict sibling surface still works directly") {
     import dspy4s.core.signatures.SignatureDsl
-    import dspy4s.programs.contracts.ProgramCall
     val sig = SignatureDsl.parse("question -> answer, score").toOption.get
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(sig).apply(ProgramCall(inputs = rec("question" := "x")))
+      val result           = DynamicPredict(sig).apply(ProgramCall(input = rec("question" := "x")))
       assert(result.isRight)
       assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
     }

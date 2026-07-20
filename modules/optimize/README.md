@@ -49,7 +49,7 @@ program class:
   metadata plus writable state), `read` projects the `PredictorState`s, and `replace` writes an edited state vector
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
-- **`Runnable[P]`** — run `P` on a record of inputs, yielding the untyped `DynamicPrediction` that `Evaluate`
+- **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the untyped `DynamicPrediction` that `Evaluate`
   consumes. This is the "spine unification": it lets the optimizers target **typed** programs (`Predict[I, O]`,
   `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the untyped `DynamicModule` spine, with no
   `asInstanceOf`.
@@ -120,7 +120,7 @@ compatibility policy.
 | File | Contents |
 |------|----------|
 | `contracts/OptimizeContracts.scala` | `Teleprompter`, `OptimizationReport`, `CandidateProgram` |
-| `Runnable.scala` | the `Runnable[P]` spine (typed + untyped run) |
+| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` spine (typed + untyped run) |
 | `OptimizerSupport.scala` | shared instruction-edit, seed→rolloutId, and scoring helpers |
 | `LabeledFewShot.scala`, `BootstrapFewShot*.scala`, `KNNFewShot.scala` | demo optimizers |
 | `COPRO.scala`, `MIPROv2.scala`, `InferRules.scala` | instruction (and demo) optimizers |

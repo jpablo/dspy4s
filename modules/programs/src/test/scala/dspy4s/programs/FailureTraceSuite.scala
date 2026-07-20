@@ -14,9 +14,11 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 /** G-12 P-a: under `RuntimeContext.captureFailureTraces`, a failed `Module.apply` records a failure trace entry
-  * (carrying the raw model response from a parse error); otherwise a failure leaves the trace untouched. */
+  * (carrying the raw model response from a parse error); otherwise a failure leaves the trace untouched.
+  */
 class FailureTraceSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -31,7 +33,8 @@ class FailureTraceSuite extends FunSuite:
 
   // Two outputs → no single-output text fallback, so a marker-less response is a genuine parse failure.
   private val layout: SignatureLayout = SignatureLayout.parse("question -> answer, confidence").toOption.get
-  private val call: ProgramCall = ProgramCall(inputs = DynamicValues.record("question" := "capital of France?"))
+  private val call: ProgramCall[DynamicValue.Record] =
+    ProgramCall(input = DynamicValues.record("question" := "capital of France?"))
 
   test("captureFailureTraces records a failure entry with the raw response") {
     RuntimeEnvironment.withSettings(

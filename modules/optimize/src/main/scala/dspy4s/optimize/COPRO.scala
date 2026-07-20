@@ -1,5 +1,7 @@
 package dspy4s.optimize
 
+import dspy4s.programs.ProgramRunner
+
 import dspy4s.programs.Predictors
 
 import dspy4s.core.contracts.:=
@@ -21,15 +23,21 @@ import scala.collection.mutable
 
 /** Knobs for [[COPRO]], mirroring upstream's `COPRO(metric, breadth, depth, init_temperature)`.
   *
-  * @param metric            task metric used to score whole-program candidates
-  * @param breadth           number of candidate instructions generated per predictor per round (must be > 1)
-  * @param depth             number of refinement rounds (round 0 seeds from the current instruction; rounds
-  *                          `1..depth-1` refine using past `(instruction, score)` attempts)
-  * @param initTemperature   sampling temperature for instruction generation (forwarded to the LM option bag)
-  * @param seed              RNG seed; deterministic for a fixed seed
-  * @param instructionMarker a stable sentinel woven into the instruction-generation signature's instructions so
-  *                          a generation prompt is distinguishable from a task prompt (also lets offline scripted
-  *                          LMs branch). Defaults to the human-readable upstream-style preamble.
+  * @param metric
+  *   task metric used to score whole-program candidates
+  * @param breadth
+  *   number of candidate instructions generated per predictor per round (must be > 1)
+  * @param depth
+  *   number of refinement rounds (round 0 seeds from the current instruction; rounds `1..depth-1` refine using past
+  *   `(instruction, score)` attempts)
+  * @param initTemperature
+  *   sampling temperature for instruction generation (forwarded to the LM option bag)
+  * @param seed
+  *   RNG seed; deterministic for a fixed seed
+  * @param instructionMarker
+  *   a stable sentinel woven into the instruction-generation signature's instructions so a generation prompt is
+  *   distinguishable from a task prompt (also lets offline scripted LMs branch). Defaults to the human-readable
+  *   upstream-style preamble.
   */
 final case class COPROConfig(
     metric: Metric,
@@ -47,39 +55,38 @@ final case class COPROConfig(
   *
   * '''Algorithm.''' For each learnable predictor exposed by [[Predictors.read]]:
   *   1. Seed `breadth - 1` candidate instructions with an instruction-generation [[DynamicPredict]] (the
-  *      `BasicGenerateInstruction` analogue: `basic_instruction -> proposed_instruction`), seeded with the
-  *      predictor's current instruction and its signature's field names. Distinct candidates are sampled by
-  *      varying the call's `rolloutId` (and temperature in `config`), mirroring upstream's `n = breadth`. The
-  *      predictor's own current instruction is added as the `breadth`-th candidate (matches upstream).
-  *   2. Evaluate the WHOLE program with each candidate instruction applied to THIS predictor (via
-  *      [[Predictors.replace]]) on the valset (falling back to the trainset) using [[dspy4s.evaluate.Evaluate]] + the metric.
-  *   3. Keep the best-scoring instruction for this predictor, then run `depth - 1` further rounds that refine
-  *      using the accumulated `(instruction, score)` attempts (the `GenerateInstructionGivenAttempts` analogue).
-  *   4. Lock in the predictor's best instruction before moving to the next predictor (greedy coordinate ascent).
+  *      `BasicGenerateInstruction` analogue: `basic_instruction -> proposed_instruction`), seeded with the predictor's
+  *      current instruction and its signature's field names. Distinct candidates are sampled by varying the call's
+  *      `rolloutId` (and temperature in `config`), mirroring upstream's `n = breadth`. The predictor's own current
+  *      instruction is added as the `breadth`-th candidate (matches upstream). 2. Evaluate the WHOLE program with each
+  *      candidate instruction applied to THIS predictor (via [[Predictors.replace]]) on the valset (falling back to the
+  *      trainset) using [[dspy4s.evaluate.Evaluate]] + the metric. 3. Keep the best-scoring instruction for this
+  *      predictor, then run `depth - 1` further rounds that refine using the accumulated `(instruction, score)`
+  *      attempts (the `GenerateInstructionGivenAttempts` analogue). 4. Lock in the predictor's best instruction before
+  *      moving to the next predictor (greedy coordinate ascent).
   *
   * '''Deltas from Python.'''
-  *   - '''Multi-predictor strategy is greedy/sequential, not joint.''' Python re-evaluates every predictor's
-  *     candidates against the current best of the others within each depth round (an interleaved joint search).
-  *     This v1 fully optimizes one predictor's instruction (all depth rounds) with the others fixed, then moves
-  *     on. Single-predictor programs — the primary tested path — are unaffected; multi-predictor results may be a
-  *     local optimum of the joint search.
+  *   - '''Multi-predictor strategy is greedy/sequential, not joint.''' Python re-evaluates every predictor's candidates
+  *     against the current best of the others within each depth round (an interleaved joint search). This v1 fully
+  *     optimizes one predictor's instruction (all depth rounds) with the others fixed, then moves on. Single-predictor
+  *     programs — the primary tested path — are unaffected; multi-predictor results may be a local optimum of the joint
+  *     search.
   *   - '''Prefix optimization is dropped.''' Python's signatures also emit `proposed_prefix_for_output_field` and
   *     mutate the last output field's prefix. dspy4s applies only the instruction; the output-field prefix is left
-  *     untouched. (`SignatureLayout` supports per-field prefixes, but instruction-only keeps v1 tractable and is
-  *     the dominant lever.)
-  *   - '''`track_stats` is omitted.''' No per-depth min/max/avg/std bookkeeping; the [[OptimizationReport]] carries
-  *     the scored candidate list and summary metadata instead.
-  *   - '''Candidate sampling uses one `rolloutId`-varied call per candidate''' rather than a single `n=breadth`
-  *     batch completion (dspy4s `Predict` returns one completion per call); the effect (distinct proposals) is the
-  *     same.
+  *     untouched. (`SignatureLayout` supports per-field prefixes, but instruction-only keeps v1 tractable and is the
+  *     dominant lever.)
+  *   - '''`track_stats` is omitted.''' No per-depth min/max/avg/std bookkeeping; the [[OptimizationReport]] carries the
+  *     scored candidate list and summary metadata instead.
+  *   - '''Candidate sampling uses one `rolloutId`-varied call per candidate''' rather than a single `n=breadth` batch
+  *     completion (dspy4s `Predict` returns one completion per call); the effect (distinct proposals) is the same.
   *   - '''De-duplication is by instruction string''', not Python's `(instruction, prefix)` + last-field equality.
   */
-final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprompter[P]:
+final class COPRO[P: Predictors: ProgramRunner](config: COPROConfig) extends Teleprompter[P]:
 
   override val name: String = "copro"
 
   private val ps: Predictors[P]  = summon[Predictors[P]]
-  private val runner: Runnable[P] = summon[Runnable[P]]
+  private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
 
   override def compile(
       student: P,
@@ -91,8 +98,11 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     val predictorCount           = ps.read(student).size
 
     if predictorCount == 0 then
-      Right(OptimizationReport(bestProgram = student, candidates = Vector.empty,
-        metadata = Map("no_predictors" -> true)))
+      Right(OptimizationReport(
+        bestProgram = student,
+        candidates = Vector.empty,
+        metadata = Map("no_predictors" -> true)
+      ))
     else
       // Greedy coordinate ascent: optimize each predictor's instruction in turn, keeping the others fixed.
       var current      = student
@@ -120,9 +130,9 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
         )
       )
 
-  /** Optimize a single predictor's instruction (all depth rounds) with the rest of the program held fixed.
-    * Returns the program with that predictor's best instruction applied, plus every whole-program candidate
-    * scored along the way. */
+  /** Optimize a single predictor's instruction (all depth rounds) with the rest of the program held fixed. Returns the
+    * program with that predictor's best instruction applied, plus every whole-program candidate scored along the way.
+    */
   private def optimizePredictor(program: P, idx: Int, evalset: Vector[Example])(using
       RuntimeContext
   ): (P, Vector[CandidateProgram[P]]) =
@@ -140,8 +150,11 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       // real 0.0 that would corrupt selection (a genuinely-0-scoring instruction could then look "as good").
       scoreProgram(applied, evalset).foreach { score =>
         if evaluated.get(instruction).forall(score > _) then evaluated.update(instruction, score)
-        candidates += CandidateProgram(program = applied, score = score,
-          metadata = Map("predictor" -> idx, "instruction" -> instruction))
+        candidates += CandidateProgram(
+          program = applied,
+          score = score,
+          metadata = Map("predictor" -> idx, "instruction" -> instruction)
+        )
       }
       applied
 
@@ -165,18 +178,20 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
     val updated = OptimizerSupport.applyInstruction(program, idx, bestInstruction)
     (updated, candidates.toVector)
 
-  /** Run the whole program on the evalset and return the aggregate metric score (0..100), or `None` when the
-    * whole evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call
-    * sites that select the best candidate — a failed eval is "unknown", not "scored zero". */
+  /** Run the whole program on the evalset and return the aggregate metric score (0..100), or `None` when the whole
+    * evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call sites that select
+    * the best candidate — a failed eval is "unknown", not "scored zero".
+    */
   private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Option[Double] =
     OptimizerSupport.evalScore(program, evalset, config.metric, runner)
 
   // ── Instruction generation sub-program ──────────────────────────────────
 
   /** The instruction-generation signature. Round 0 (`BasicGenerateInstruction`): `basic_instruction ->
-    * proposed_instruction`. Refinement rounds (`GenerateInstructionGivenAttempts`): add an
-    * `attempted_instructions` input. `instructionMarker` is set as the signature instructions so generation
-    * prompts are distinguishable from task prompts. */
+    * proposed_instruction`. Refinement rounds (`GenerateInstructionGivenAttempts`): add an `attempted_instructions`
+    * input. `instructionMarker` is set as the signature instructions so generation prompts are distinguishable from
+    * task prompts.
+    */
   private def instructionGenLayout(withAttempts: Boolean): SignatureLayout =
     val inputs =
       Vector(FieldSpec(name = "basic_instruction", role = FieldRole.Input)) ++
@@ -188,9 +203,10 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       instructions = Some(config.instructionMarker)
     )
 
-  /** Generate up to `count` distinct candidate instructions by running the generation [[DynamicPredict]] once
-    * per candidate, varying `rolloutId` (and seeding temperature into the option bag) so the LM yields distinct
-    * proposals. `attempts` (ascending by score) seed the refinement variant when non-empty. */
+  /** Generate up to `count` distinct candidate instructions by running the generation [[DynamicPredict]] once per
+    * candidate, varying `rolloutId` (and seeding temperature into the option bag) so the LM yields distinct proposals.
+    * `attempts` (ascending by score) seed the refinement variant when non-empty.
+    */
   private def generateInstructions(
       predictorIdx: Int,
       baseInstruction: String,
@@ -223,7 +239,7 @@ final class COPRO[P: Predictors: Runnable](config: COPROConfig) extends Teleprom
       val results = (0 until count).iterator.flatMap { i =>
         val rolloutId = base + i
         val call = ProgramCall(
-          inputs    = DynamicValues.recordFromEntries(baseInputs),
+          input = DynamicValues.recordFromEntries(baseInputs),
           config    = DynamicValues.recordFromEntries(Vector("temperature" := config.initTemperature)),
           rolloutId = Some(rolloutId)
         )

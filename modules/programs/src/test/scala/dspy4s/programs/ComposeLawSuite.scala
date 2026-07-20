@@ -11,7 +11,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.TypedCall
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -36,23 +36,25 @@ class ComposeLawSuite extends FunSuite:
     * exposes `predict` as its single learnable leaf (for the addressability laws).
     */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
-      extends Module[TypedCall[I], Prediction[O]]:
+      extends Module[ProgramCall[I], Prediction[O]]:
     override val moduleName: String                                            = s"step_$tag"
-    override protected def callInputs(call: TypedCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[I]): Boolean       = call.traceEnabled
+    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
     override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
-    override protected def forward(call: TypedCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
   /** A leaf that makes lifecycle structure semantically observable by returning the trace size at its forward boundary.
     * Associativity requires both syntax trees to have run the same leaves before reaching it.
     */
-  private final case class TraceSize(predict: DynamicPredict) extends Module[TypedCall[String], Prediction[Int]]:
+  private final case class TraceSize(predict: DynamicPredict) extends Module[ProgramCall[String], Prediction[Int]]:
     override val moduleName: String                                                 = "trace_size"
-    override protected def callInputs(call: TypedCall[String]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: TypedCall[String]): Boolean       = call.traceEnabled
+    override protected def callInputs(call: ProgramCall[String]): DynamicValue.Record = DynamicValue.Record.empty
+    override protected def callTraceEnabled(call: ProgramCall[String]): Boolean       = call.traceEnabled
     override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record    = p.raw.values
-    override protected def forward(call: TypedCall[String])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
+    override protected def forward(call: ProgramCall[String])(using
+        RuntimeContext
+    ): Either[DspyError, Prediction[Int]] =
       Right(Prediction(RuntimeEnvironment.current.trace.size, DynamicPrediction.empty))
 
   private object Step:
@@ -81,14 +83,14 @@ class ComposeLawSuite extends FunSuite:
     val a  = step[Int, String]("a", "i -> s")(i => s"v$i")
     val b  = step[String, Int]("b", "s -> n")(s => s.length)
     val ab = a >>> b // expected AndThen[Int, String, Int, Step[Int,String], Step[String,Int]]
-    assertEquals(ab.apply(TypedCall(5)).map(_.output), Right(2)) // "v5".length
+    assertEquals(ab.apply(ProgramCall(5)).map(_.output), Right(2)) // "v5".length
   }
 
   // ── Category: identity ───────────────────────────────────────────────────────────────────────────────────
   test("id >>> p = p (left unit, full prediction)") {
     val p      = step[Int, String]("p", "i -> s")(i => s"v$i")
-    val viaId  = (Compose.id[Int] >>> p).apply(TypedCall(7))
-    val direct = p.apply(TypedCall(7))
+    val viaId  = (Compose.id[Int] >>> p).apply(ProgramCall(7))
+    val direct = p.apply(ProgramCall(7))
     assertEquals(viaId.map(_.output), direct.map(_.output))
     // The left unit contributes nothing: even the raw envelope matches p's.
     assertEquals(viaId.map(_.raw.values), direct.map(_.raw.values))
@@ -97,9 +99,9 @@ class ComposeLawSuite extends FunSuite:
   test("p >>> id = p on the threaded value and lifecycle (raw remains outside the category observation)") {
     val p = step[Int, String]("p", "i -> s")(i => s"v$i")
 
-    def run(program: Module[TypedCall[Int], Prediction[String]]) =
+    def run(program: Module[ProgramCall[Int], Prediction[String]]) =
       RuntimeEnvironment.resetForTests()
-      val result = program.apply(TypedCall(7))
+      val result = program.apply(ProgramCall(7))
       (result, RuntimeEnvironment.current.trace.map(_.component))
 
     val viaId  = run(p >>> Compose.id[String])
@@ -115,8 +117,8 @@ class ComposeLawSuite extends FunSuite:
     val a     = step[Int, String]("a", "i -> s")(i => s"<$i>")
     val b     = step[String, String]("b", "s -> t")(s => s + s)
     val c     = step[String, Int]("c", "t -> n")(s => s.length)
-    val left  = ((a >>> b) >>> c).apply(TypedCall(3)).map(_.output)
-    val right = (a >>> (b >>> c)).apply(TypedCall(3)).map(_.output)
+    val left  = ((a >>> b) >>> c).apply(ProgramCall(3)).map(_.output)
+    val right = (a >>> (b >>> c)).apply(ProgramCall(3)).map(_.output)
     assertEquals(left, right)
     assertEquals(left, Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
@@ -126,9 +128,9 @@ class ComposeLawSuite extends FunSuite:
     val b = step[String, String]("b", "s -> t")(identity)
     val c = TraceSize(predict("t -> n"))
 
-    def run(program: Module[TypedCall[Int], Prediction[Int]]): (Either[DspyError, Int], Vector[String]) =
+    def run(program: Module[ProgramCall[Int], Prediction[Int]]): (Either[DspyError, Int], Vector[String]) =
       RuntimeEnvironment.resetForTests()
-      val output = program.apply(TypedCall(1)).map(_.output)
+      val output = program.apply(ProgramCall(1)).map(_.output)
       output -> RuntimeEnvironment.current.trace.map(_.component)
 
     val left  = run((a >>> b) >>> c)
@@ -167,7 +169,7 @@ class ComposeLawSuite extends FunSuite:
     val c = step[String, Int]("c", "t -> n")(_.length)
 
     RuntimeEnvironment.withCallbacks(Vector(handler)) {
-      val _ = ((a >>> b) >>> c).apply(TypedCall(1))
+      val _ = ((a >>> b) >>> c).apply(ProgramCall(1))
     }
 
     assertEquals(starts.toVector, Vector("step_a", "step_b", "step_c"))
@@ -177,7 +179,7 @@ class ComposeLawSuite extends FunSuite:
   test("parallel(a, b) runs both on the same input and tuples the outputs") {
     val a      = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b      = step[Int, Int]("b", "i -> n")(i => i * 10)
-    val result = Compose.parallel(a, b).apply(TypedCall(4))
+    val result = Compose.parallel(a, b).apply(ProgramCall(4))
     assertEquals(result.map(_.output), Right(("s4", 40)))
     // raw merges both sub-predictions' value records (second wins on key collision; here both write "tag").
     assertEquals(
@@ -190,8 +192,8 @@ class ComposeLawSuite extends FunSuite:
     val a           = step[Int, String]("a", "i -> s")(i => s"a$i")
     val b           = step[Int, String]("b", "i -> s")(i => s"b$i")
     val c           = step[Int, String]("c", "i -> s")(i => s"c$i")
-    val leftNested  = Compose.parallel(Compose.parallel(a, b), c).apply(TypedCall(1)).map(_.output)
-    val rightNested = Compose.parallel(a, Compose.parallel(b, c)).apply(TypedCall(1)).map(_.output)
+    val leftNested  = Compose.parallel(Compose.parallel(a, b), c).apply(ProgramCall(1)).map(_.output)
+    val rightNested = Compose.parallel(a, Compose.parallel(b, c)).apply(ProgramCall(1)).map(_.output)
     // ((x, y), z)  reassociates to  (x, (y, z))
     val reassociated = leftNested.map { case ((x, y), z) => (x, (y, z)) }
     assertEquals(reassociated, rightNested)
@@ -228,19 +230,19 @@ class ComposeLawSuite extends FunSuite:
   test("tensor(a, b) runs INDEPENDENT programs on independent inputs and pairs them") {
     val a      = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b      = step[Boolean, Int]("b", "p -> n")(p => if p then 1 else 0)
-    val result = Compose.tensor(a, b).apply(TypedCall((4, true)))
+    val result = Compose.tensor(a, b).apply(ProgramCall((4, true)))
     assertEquals(result.map(_.output), Right(("s4", 1)))
   }
 
   test("copy(Δ) duplicates its input") {
-    assertEquals(Compose.copy[Int].apply(TypedCall(7)).map(_.output), Right((7, 7)))
+    assertEquals(Compose.copy[Int].apply(ProgramCall(7)).map(_.output), Right((7, 7)))
   }
 
   test("parallel(a, b) = copy >>> tensor(a, b)  (fan-out is copy-then-tensor)") {
     val a             = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b             = step[Int, Int]("b", "i -> n")(i => i * 10)
-    val viaFanout     = Compose.parallel(a, b).apply(TypedCall(4)).map(_.output)
-    val viaCopyTensor = (Compose.copy[Int] >>> Compose.tensor(a, b)).apply(TypedCall(4)).map(_.output)
+    val viaFanout     = Compose.parallel(a, b).apply(ProgramCall(4)).map(_.output)
+    val viaCopyTensor = (Compose.copy[Int] >>> Compose.tensor(a, b)).apply(ProgramCall(4)).map(_.output)
     assertEquals(viaFanout, viaCopyTensor)
     assertEquals(viaFanout, Right(("s4", 40)))
   }
@@ -260,8 +262,8 @@ class ComposeLawSuite extends FunSuite:
   // in ParaCategoryLawSuite. This is a useful classifier, not a law of unrestricted executable programs.
   test("copy is natural for a deterministic morphism: h >>> copy = copy >>> tensor(h, h)") {
     val h   = step[Int, String]("h", "i -> s")(i => s"v$i")
-    val lhs = (h >>> Compose.copy[String]).apply(TypedCall(5)).map(_.output)
-    val rhs = (Compose.copy[Int] >>> Compose.tensor(h, h)).apply(TypedCall(5)).map(_.output)
+    val lhs = (h >>> Compose.copy[String]).apply(ProgramCall(5)).map(_.output)
+    val rhs = (Compose.copy[Int] >>> Compose.tensor(h, h)).apply(ProgramCall(5)).map(_.output)
     assertEquals(lhs, rhs)
     assertEquals(lhs, Right(("v5", "v5")))
   }

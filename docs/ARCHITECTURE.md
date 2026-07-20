@@ -102,29 +102,30 @@ graph TD
    - `runtime/PredictEngine` — the shared execute body (private)
    - `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
      does the module-level callback + trace wrapping over an abstract `forward`.
-     `DynamicModule` is the untyped-spine alias (`Module[ProgramCall, DynamicPrediction]`,
+     `DynamicModule` is the untyped-spine alias (`Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`,
      with the bag projection hooks defaulted)
    - `DynamicPredict` — erased predict, extends `DynamicModule`
-   - `Predict[I, O]` — typed predict, a `Module[TypedCall[I], Prediction[O]]`; a *sibling*
-     of `DynamicPredict` over the shared `PredictEngine` (not a wrapper around it)
+   - `Predict[I, O]` — typed predict, a `Module[ProgramCall[I], Prediction[O]]`; a *sibling*
+     of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
    - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
-   - All other programs are typed `Module[TypedCall[I], Prediction[…]]` too:
+   - All other programs are typed `Module[ProgramCall[I], Prediction[…]]` too:
      `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
      data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainCall[I]`; `WithField[O,"rationale",String]`), and `BestOfN[I,O]` / `Refine[I,O]`
      (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
      `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the only program on the untyped spine.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
-   - `contracts/ProgramContracts.scala` — `ProgramCall`, `TypedCall` (typed call object: input +
-     `config` / `traceEnabled` / `rolloutId`), `ProgramRuntime`, `ToolFunction`
+   - `contracts/ProgramContracts.scala` — generic `ProgramCall[I]` (input + `config` /
+     `traceEnabled` / `rolloutId`), `ProgramRuntime`, `ToolFunction`
+   - `ProgramInput`, `RecordCodec`, `ProgramRunner` — coherent dynamic-to-typed decoding and uniform execution
 
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
 7. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
    Uses `Predictors[P]` to inspect read-only predictor metadata, read/write
    `PredictorState` (instructions, demos, config), and rebuild candidates;
-   `Runnable[P]` supplies uniform typed/untyped execution.
+   `ProgramRunner[P]` supplies uniform typed/untyped execution.
 
 8. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
    `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
@@ -192,7 +193,7 @@ to scalars). `fromStringDynamic` is the runtime escape hatch for a DSL string on
 When `Predict[I, O].apply(input)` fires:
 
 1. **Build the typed call** — the convenience overload creates a
-   `TypedCall(input, config, traceEnabled)` and dispatches through the final
+   `ProgramCall(input, config, traceEnabled)` and dispatches through the final
    `Module.apply`. Its lifecycle input projection encodes `input` through
    `signature.inputShape` into a memoized `DynamicValue.Record`.
 2. **`Module.apply` wraps** —
@@ -267,7 +268,7 @@ code:
   construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
   `MultiChainComparison` are the templates.
 - **New optimizer** — use `Predictors[P].inspect` for layout/name metadata,
-  `read` / `replace` for writable `PredictorState`, and `Runnable[P]` for
+  `read` / `replace` for writable `PredictorState`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.
 - **New stream listener** — implement `StreamListener[A]`, pass to
   `Streamify.streamify`. The streaming wrapper routes via

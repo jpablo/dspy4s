@@ -15,7 +15,7 @@ Programs live on two layers that share one engine:
 
 - **The typed surface** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind static input/output
   types and encode/decode at the boundary.
-- **The untyped spine** — `DynamicModule = Module[ProgramCall, DynamicPrediction]`, where programs can build and
+- **The untyped spine** — `DynamicModule = Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`, where programs can build and
   augment signatures at runtime. `DynamicPredict` is the executable prediction leaf on this spine. The typed
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
@@ -31,7 +31,7 @@ an arity-matched state vector back through `replace`. This is what the [`optimiz
 | Type | Role |
 |------|------|
 | `Predict[I, O]` | The fundamental typed predictor: encode `I`, run its `PredictEngine` against the LM, decode into `Prediction[O]`. |
-| `DynamicPredict` | The untyped predictor for runtime-known layouts: accept a `ProgramCall`, run the shared engine, return a `DynamicPrediction`. |
+| `DynamicPredict` | The untyped predictor for runtime-known layouts: accept a `ProgramCall[DynamicValue.Record]`, run the shared engine, return a `DynamicPrediction`. |
 | `PredictorState` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
 | `PredictorView` | A non-executable snapshot pairing `PredictorState` with read-only signature structure and module name. |
 | `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
@@ -61,7 +61,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | Type | Role |
 |------|------|
 | `Module[I, O]` | Base trait: pure `forward`, `final` lifecycle `apply`. `DynamicModule` is the untyped specialization. |
-| `ProgramCall` / `TypedCall[I]` | The untyped / typed call arguments: inputs, config bag, `traceEnabled`, `rolloutId`. |
+| `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
+| `ProgramRunner[P]` | Runs typed or dynamic `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
 | `Prediction[O]` | Typed output `O` + the raw `DynamicPrediction` (completions, usage). |
 | `Predictors[P]` / `Predictor[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
@@ -73,9 +74,10 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 - **Module purity.** `forward` is side-effect-free; trace, history, and callbacks are a transparent `final`
   wrapper, so every program is observed identically with no subclass boilerplate. (The
   [module-purity memory](../../README.md): runtime owns bookkeeping, no `ProgramMeta`/`BaseModule`/`Parameter`.)
-- **Two layers, neither wraps the other.** `Predict[I, O]` and `DynamicPredict` each own a `PredictEngine` built
+- **Two sibling layers with explicit erasure.** `Predict[I, O]` and `DynamicPredict` each own a `PredictEngine` built
   from their signature representation, so a typed call emits one `predict` module lifecycle rather than a
-  wrapper-over-dynamic pair. Programs that need a runtime-known layout construct `DynamicPredict` directly.
+  wrapper-over-dynamic pair. `Predict.erase` creates a one-way dynamic snapshot with the same engine state;
+  programs that start with a runtime-known layout construct `DynamicPredict` directly.
 - **`Predictors` is the optimizer backbone.** Optimizers never special-case program types — they read the
   predictor genome through `Predictors`, build edited copies, and `replace`. This is why one optimizer codepath
   covers a bare `Predict` and an arbitrary composite.
@@ -95,7 +97,9 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
 | `Predictors.scala` | the `Predictors`/`Predictor` introspection type-classes |
-| `contracts/Module.scala`, `ProgramContracts.scala` | `Module`/`DynamicModule`, `ProgramCall`/`TypedCall`, `ToolFunction` |
+| `contracts/Module.scala`, `ProgramContracts.scala` | `Module`/`DynamicModule`, generic `ProgramCall[I]`, `ToolFunction` |
+| `ProgramRunner.scala` | the shared typed/dynamic record-running capability |
+| `ProgramInput.scala`, `RecordCodec.scala` | coherent decoding capabilities for the dynamic-to-typed input boundary |
 | `retrievers/KNN.scala`, `EmbeddingsRetriever.scala` | in-memory retrieval |
 | `runtime/PredictEngine.scala`, `SettingsProgramRuntime.scala`, `ParallelExecutor.scala`, `ToolExecutor.scala` | the shared execution body, model/adapter resolution, concurrency, tool dispatch |
 | `internal/ToolMacro.scala` | the `ToolFunction.fromMethod` derivation macro |

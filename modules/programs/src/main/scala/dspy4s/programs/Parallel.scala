@@ -7,6 +7,7 @@ import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.ParallelExecutionResult
 import dspy4s.programs.runtime.ParallelExecutor
+import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
@@ -25,14 +26,14 @@ final case class Parallel(
     )
 
   def run(
-      tasks: Vector[(DynamicModule, ProgramCall)]
+      tasks: Vector[(DynamicModule, ProgramCall[DynamicValue.Record])]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[DynamicPrediction]] =
-    resolvedExecutor.executeEither[(DynamicModule, ProgramCall), DynamicPrediction](
-      task = (pair: (DynamicModule, ProgramCall)) => pair._1.apply(pair._2),
+    resolvedExecutor.executeEither[(DynamicModule, ProgramCall[DynamicValue.Record]), DynamicPrediction](
+      task = (pair: (DynamicModule, ProgramCall[DynamicValue.Record])) => pair._1.apply(pair._2),
       data = tasks
     )
 
   def apply(
-      tasks: Vector[(DynamicModule, ProgramCall)]
+      tasks: Vector[(DynamicModule, ProgramCall[DynamicValue.Record])]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[DynamicPrediction]] =
     run(tasks)

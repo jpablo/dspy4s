@@ -1,5 +1,7 @@
 package dspy4s.optimize
 
+import dspy4s.programs.predictorState
+
 import dspy4s.programs.Predictors
 
 import dspy4s.core.contracts.:=
@@ -18,8 +20,9 @@ import zio.blocks.schema.DynamicValue
 
 class ProgramPredictorsSuite extends FunSuite:
 
-  /** Resolves the right [[Predictors]] instance from the program's *static* type, so the `[I, O]` of the given
-    * are inferred at the call site (accessing the `given ... with` object directly would pin them to `Nothing`). */
+  /** Resolves the right [[Predictors]] instance from the program's *static* type, so the `[I, O]` of the given are
+    * inferred at the call site (accessing the `given ... with` object directly would pin them to `Nothing`).
+    */
   private def predictorsOf[P](@annotation.unused program: P)(using ps: Predictors[P]): Predictors[P] = ps
 
   private val qaSignature = Signature.fromString("question -> answer")

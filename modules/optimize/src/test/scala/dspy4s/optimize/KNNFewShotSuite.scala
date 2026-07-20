@@ -13,7 +13,8 @@ import scala.collection.mutable.ArrayBuffer
 
 /** Offline KNNFewShot suite: a trainset with two clusters (x-axis questions / y-axis questions) and a deterministic
   * embedder. For a query near cluster A, the compiled program must bootstrap ONLY cluster-A neighbors as demos —
-  * asserted from the final task prompt (which carries demo answers a1/a2 but not a3/a4). */
+  * asserted from the final task prompt (which carries demo answers a1/a2 but not a3/a4).
+  */
 class KNNFewShotSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -34,7 +35,8 @@ class KNNFewShotSuite extends FunSuite:
   }
 
   /** Answers gold questions (the bootstrap-teacher calls); for the final query it answers "guided" iff its prompt
-    * carries a cluster-A demo answer. Records every prompt so the test can inspect what the demos rendered. */
+    * carries a cluster-A demo answer. Records every prompt so the test can inspect what the demos rendered.
+    */
   private final class ScriptedLm extends LanguageModel:
     val prompts: ArrayBuffer[String] = ArrayBuffer.empty
     override val id: String          = "scripted-knn"
@@ -65,7 +67,7 @@ class KNNFewShotSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
 
       val compiled = new KNNFewShot[DynamicPredict](k = 2, trainset, embedder).compile(student).toOption.get
-      val result   = compiled.apply(ProgramCall(inputs = DynamicValues.record("question" := "query")))
+      val result   = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       // The final answer proves the demos steered the call (the LM answers "guided" only when a1 is in its prompt).
       assertEquals(result.toOption.flatMap(_.asString("answer").toOption), Some("guided"))
@@ -73,7 +75,10 @@ class KNNFewShotSuite extends FunSuite:
       // The final task prompt carries the cluster-A demos (q1/q2 with the teacher's answers) and no cluster-B ones.
       val finalPrompt = lm.prompts.last
       assert(finalPrompt.contains("a1") && finalPrompt.contains("a2"), s"cluster-A demos expected:\n$finalPrompt")
-      assert(!finalPrompt.contains("a3") && !finalPrompt.contains("a4"), s"cluster-B demos must be absent:\n$finalPrompt")
+      assert(
+        !finalPrompt.contains("a3") && !finalPrompt.contains("a4"),
+        s"cluster-B demos must be absent:\n$finalPrompt"
+      )
 
       // Bootstrap ran the teacher on exactly the 2 neighbors before the final call.
       assertEquals(lm.prompts.size, 3)
@@ -95,10 +100,13 @@ class KNNFewShotSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val compiled = new KNNFewShot[DynamicPredict](k = 2, trainset, embedderB).compile(student).toOption.get
-      val _        = compiled.apply(ProgramCall(inputs = DynamicValues.record("question" := "query")))
+      val _                = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       val finalPrompt = lm.prompts.last
       assert(finalPrompt.contains("a3") && finalPrompt.contains("a4"), s"cluster-B demos expected:\n$finalPrompt")
-      assert(!finalPrompt.contains("a1") && !finalPrompt.contains("a2"), s"cluster-A demos must be absent:\n$finalPrompt")
+      assert(
+        !finalPrompt.contains("a1") && !finalPrompt.contains("a2"),
+        s"cluster-A demos must be absent:\n$finalPrompt"
+      )
     }
   }

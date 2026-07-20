@@ -20,7 +20,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.Predictors
 import dspy4s.programs.PredictorId
-import dspy4s.optimize.Runnable
+import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
@@ -33,14 +33,14 @@ final case class Pipeline(hinter: DynamicPredict, answerer: DynamicPredict)
 
 object Pipeline:
   /** Run hinter → feed its hint into answerer. Two Module calls → two trace entries (in this order). */
-  given Runnable[Pipeline] with
-    def run(program: Pipeline, inputs: DynamicValue.Record)(using
+  given ProgramRunner[Pipeline] with
+    def run(program: Pipeline, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, DynamicPrediction] =
-      program.hinter.apply(ProgramCall(inputs = inputs)).flatMap { hintPred =>
+      program.hinter.apply(call).flatMap { hintPred =>
         val hint         = DynamicValues.recordGet(hintPred.values, "hint").getOrElse(DynamicValue.Null)
-        val answerInputs = inputs.updated("hint", hint)
-        program.answerer.apply(ProgramCall(inputs = answerInputs))
+        val answerInputs = call.input.updated("hint", hint)
+        program.answerer.apply(call.mapInput(_ => answerInputs))
       }
 
 class GepaMultiPredictorSuite extends FunSuite:

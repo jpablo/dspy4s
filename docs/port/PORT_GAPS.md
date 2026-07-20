@@ -39,12 +39,12 @@ override-backed composites state last-write-wins observationally through `read`.
 hand-written instances and had their sub-predicts **hoisted to stable fields**
 (closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
 `PredictOps` assumption onto `Predictors` (the `LabeledSampleProgram` glue was deleted),
-and a `Runnable[P]` capability (`Runnable.scala`) dropped the `P <: DynamicModule` bound
+and a `ProgramRunner[P]` capability (`programs/ProgramRunner.scala`) dropped the `P <: DynamicModule` bound
 so **typed** programs and user composites are now optimizable end-to-end. The legacy
 `PredictOps` typeclass and its bridge were removed in P6 — `Predictors` is the sole
 introspection typeclass. Writable state is uniformly instructions + demos + module config;
-`MultiChainComparison` has no `Runnable` (its `MultiChainCall` shape has no inputs-only
-run); arbitrary user composites supply their own `Runnable`.
+`MultiChainComparison` has no `ProgramRunner` (its `MultiChainCall` shape has no inputs-only
+run); arbitrary user composites supply their own `ProgramRunner`.
 
 **Summary (original).** dspy4s had no way to enumerate (and transform) the `Predict`s
 inside an arbitrary composite program. Python's optimizers rely on exactly
@@ -157,7 +157,7 @@ get the wrapping; `BestOfN` accordingly records its own trace entry. See
 [PORT_MODULE_HIERARCHY.md](PORT_MODULE_HIERARCHY.md).
 
 **Note (commit 42671c2).** `Module` later became generic again — `Module[I, O]`, instantiated at the untyped spine
-`DynamicModule = Module[ProgramCall, DynamicPrediction]` and the typed surface `Module[TypedCall[I], Prediction[O]]`
+`DynamicModule = Module[ProgramCall[DynamicValue.Record], DynamicPrediction]` and the typed surface `Module[ProgramCall[I], Prediction[O]]`
 that `Predict` / `ChainOfThought` now extend. This reopened only the `[In,Out]` type params (whose earlier removal
 was justified by there being a single instantiation — no longer true once the typed layer joined). `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.
@@ -638,7 +638,7 @@ dependencies to replace** (unlike SIMBA/GRPO/Optuna). The "dependency" is just t
 ### dspy4s current state — what we have, and the prerequisites the spike found
 
 Already shipped (enablers): `Predictors[P]`/`Predictor.set` (G-1 — the candidate↔program mapping, dspy's
-`named_predictors()` + `with_instructions()`), `Runnable[P]` + `Evaluate` (batch scoring), per-module trace
+`named_predictors()` + `with_instructions()`), `ProgramRunner[P]` + `Evaluate` (batch scoring), per-module trace
 (`TraceEntry`), bound/reflection LM (G-3). A **single-predictor** program already traces cleanly.
 
 A verification spike (trace + failure capture) surfaced four bounded prerequisites:
@@ -666,7 +666,7 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **v1:** add P-c (named predictors) → multi-predictor programs; closes Refine per-module advice as a freebie.
 - **v2:** merge proposer (crossover), multi-objective frontier types, eval cache, run_dir resume, wandb/mlflow.
 
-Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `Predictors`/`Runnable`/`Teleprompter`
+Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `Predictors`/`ProgramRunner`/`Teleprompter`
 spine). Tier 2.
 
 ---
@@ -697,7 +697,7 @@ Part of the exported optimizer surface; the demo+rule dual strategy is distinct 
 
 ### Proposed direction
 
-Port on the existing spine (`Predictors`, `Runnable`, `Evaluate`, per-module trace). The trajectory
+Port on the existing spine (`Predictors`, `ProgramRunner`, `Evaluate`, per-module trace). The trajectory
 capture GEPA added (failure traces, per-component association) covers SIMBA's introspection needs; the
 numpy softmax is a few lines of Scala. Tier 2.
 
