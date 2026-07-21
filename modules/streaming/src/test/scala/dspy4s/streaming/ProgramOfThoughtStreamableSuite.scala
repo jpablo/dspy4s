@@ -27,9 +27,9 @@ class ProgramOfThoughtStreamableSuite extends FunSuite:
     assertEquals(
       known,
       Vector(
-        program.generatorPredict.moduleName   -> program.generatorPredict.layout,
-        program.regeneratorPredict.moduleName -> program.regeneratorPredict.layout,
-        program.answererPredict.moduleName    -> program.answererPredict.layout
+        program.generatorPredict.moduleName   -> program.generatorPredict.signature.layout,
+        program.regeneratorPredict.moduleName -> program.regeneratorPredict.signature.layout,
+        program.answererPredict.moduleName    -> program.answererPredict.signature.layout
       )
     )
   }

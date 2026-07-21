@@ -71,7 +71,7 @@ object Streamable:
         (program.reactProgramName, program.reactSignature),
         // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
         // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
-        (program.extractorProgramName, program.extractorPredict.layout)
+        (program.extractorProgramName, program.extractorPredict.signature.layout)
       )
     }
 
@@ -84,7 +84,7 @@ object Streamable:
         (program.codeActProgramName, program.codeActSignature),
         // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
         // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
-        (program.extractorProgramName, program.extractorPredict.layout)
+        (program.extractorProgramName, program.extractorPredict.signature.layout)
       )
     }
 
@@ -94,8 +94,8 @@ object Streamable:
   given programOfThought[I, O](using ProgramRunner[ProgramOfThought[I, O]]): Streamable[ProgramOfThought[I, O]] =
     from { program =>
       Vector(
-        program.generatorPredict.moduleName   -> program.generatorPredict.layout,
-        program.regeneratorPredict.moduleName -> program.regeneratorPredict.layout,
-        program.answererPredict.moduleName    -> program.answererPredict.layout
+        program.generatorPredict.moduleName   -> program.generatorPredict.signature.layout,
+        program.regeneratorPredict.moduleName -> program.regeneratorPredict.signature.layout,
+        program.answererPredict.moduleName    -> program.answererPredict.signature.layout
       )
     }
