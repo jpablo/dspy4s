@@ -374,9 +374,16 @@ fields) and either a derived shape (fully synthetic inputs: RLM, the critic) or 
 shape that mirrors the prior dynamic reads exactly (missing strings render empty, `finished` coerces
 bool-or-"true", tool args accept record / JSON-string / nothing); reasoning-prepended extractors decode inside
 the predict via `OutputAugmentation.prependedStringShape` (extracted from ChainOfThought's hand-written shape).
-The remaining `DynamicPredict` constructors in the framework are exactly the principled residue: runtime-arity
-layouts (`MultiChainComparison`'s numbered attempts, COPRO / GroundedProposer / InferRules attempt injection),
-the evaluation judge, `Predict.erase`, and user `fromStringDynamic` signatures.
+**Runtime arity rides a static carrier (the class-B bridge).** `MultiChainComparison` — whose field COUNT is the
+constructor parameter `m` — converts too: `InputAugmentation.appendedStringInputs` gives
+`Shape[(I, Vector[String])]`, a static type with runtime length, and the per-instance shape (built where `m` is
+known, exactly like the loop programs' instruction strings) expands the vector into the `m` numbered
+`reasoning_attempt_i` fields. The wire format is unchanged; the honest cost is that the arity invariant
+(`attempts.size == m`) stays a runtime check (the program's existing validation), since a list's length, unlike
+its type, is not compile-time. The remaining `DynamicPredict` constructors in the framework are exactly the
+principled residue: layouts that exist only as runtime VALUES (COPRO / GroundedProposer / InferRules attempt
+injection over optimizer-assembled layouts, the evaluation judge), `Predict.erase`, and user
+`fromStringDynamic` signatures.
 
 ## Deferred items (recorded, not lost — additive, no consumer yet)
 
