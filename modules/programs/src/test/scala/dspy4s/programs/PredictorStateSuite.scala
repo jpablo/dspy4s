@@ -1,7 +1,8 @@
 package dspy4s.programs
 
 import dspy4s.adapters.contracts.ToolSpec
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, Example, RuntimeContext, RuntimeError, ValidationError}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, RuntimeError, ValidationError}
+import dspy4s.core.data.Example
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest, LmResponse}
 import dspy4s.programs.runtime.SettingsProgramRuntime

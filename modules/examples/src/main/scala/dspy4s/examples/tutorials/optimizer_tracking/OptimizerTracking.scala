@@ -15,7 +15,8 @@
  */
 package dspy4s.examples.tutorials.optimizer_tracking
 
-import dspy4s.core.contracts.{:=, CallbackEvent, CallbackHandler, DspyError, Example, LmEndEvent, RuntimeContext}
+import dspy4s.core.contracts.{:=, CallbackEvent, CallbackHandler, DspyError, LmEndEvent, RuntimeContext}
+import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch

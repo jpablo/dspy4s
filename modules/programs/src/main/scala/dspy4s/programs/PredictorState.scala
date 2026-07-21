@@ -1,6 +1,7 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, Example, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
+import dspy4s.core.data.Example
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 

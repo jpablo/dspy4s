@@ -1,7 +1,7 @@
 package dspy4s.optimize
 
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl

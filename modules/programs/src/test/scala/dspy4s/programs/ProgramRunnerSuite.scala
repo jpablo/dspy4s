@@ -1,6 +1,7 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{:=, DspyError, DynamicPrediction, DynamicValues, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.programs.contracts.{DynamicModule, Module, ProgramCall}
 import dspy4s.typed.Prediction
 import munit.FunSuite

@@ -3,7 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.AdapterConstraints
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext

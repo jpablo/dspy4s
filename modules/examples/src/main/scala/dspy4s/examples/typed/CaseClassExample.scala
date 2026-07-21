@@ -9,7 +9,8 @@ package dspy4s.examples.typed
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{DspyError, DynamicPrediction, RuntimeContext, :=}
+import dspy4s.core.contracts.{DspyError, RuntimeContext, :=}
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.examples.Demo
 import dspy4s.typed.{Prediction, Signature}
 

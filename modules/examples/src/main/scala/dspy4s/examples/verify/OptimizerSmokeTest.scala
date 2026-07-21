@@ -26,7 +26,8 @@
 package dspy4s.examples.verify
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DynamicValues, Example, LmEndEvent, RuntimeContext}
+import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DynamicValues, LmEndEvent, RuntimeContext}
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl

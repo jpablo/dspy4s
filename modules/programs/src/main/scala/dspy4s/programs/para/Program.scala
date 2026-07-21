@@ -88,7 +88,7 @@ object Program:
   given programRunner[I, O]: ProgramRunner[Program[I, O]] with
     def run(program: Program[I, O], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, dspy4s.core.contracts.DynamicPrediction] =
+    ): Either[DspyError, dspy4s.core.data.DynamicPrediction] =
       program.decodeInput(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
 
   /** The Para category over packaged programs.

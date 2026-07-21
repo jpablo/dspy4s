@@ -250,7 +250,7 @@ Goal: improve the untyped foundation before adding the typed layer.
 Current `Prediction` has `value` and `asDouble`. Add a small primitive accessor
 ladder so typed decoding does not duplicate ad hoc conversions.
 
-API additions in `modules/core/src/main/scala/dspy4s/core/contracts/Data.scala`:
+API additions now live in `modules/core/src/main/scala/dspy4s/core/data/DynamicPrediction.scala`:
 
 ```scala
 trait Prediction extends Record:
@@ -279,7 +279,7 @@ Acceptance criteria:
 
 ### Outcomes (executed 2026-05-24)
 
-Implemented in `modules/core/src/main/scala/dspy4s/core/contracts/Data.scala`;
+Implemented in `modules/core/src/main/scala/dspy4s/core/data/DynamicPrediction.scala`;
 tests appended to `DataSuite.scala` (DataSuite is now 20 tests, all passing;
 project-wide `sbt test` remains at 318 / 318).
 

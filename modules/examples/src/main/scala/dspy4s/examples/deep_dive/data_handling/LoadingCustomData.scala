@@ -14,7 +14,8 @@
  */
 package dspy4s.examples.deep_dive.data_handling
 
-import dspy4s.core.contracts.{Example, :=}
+import dspy4s.core.contracts.:=
+import dspy4s.core.data.Example
 
 object LoadingCustomData:
 

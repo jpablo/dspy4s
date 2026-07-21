@@ -11,7 +11,8 @@
   */
 package dspy4s.examples.tutorials.talk_to_your_data
 
-import dspy4s.core.contracts.{:=, DspyError, DynamicPrediction, DynamicValues, Example, RuntimeContext, TraceEntry}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, TraceEntry}
+import dspy4s.core.data.{DynamicPrediction, Example}
 import dspy4s.gepa.{Gepa, GepaConfig}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.contracts.LanguageModel

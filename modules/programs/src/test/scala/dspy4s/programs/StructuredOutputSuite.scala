@@ -2,7 +2,8 @@ package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, :=}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.typed.Signature

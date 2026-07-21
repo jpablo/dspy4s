@@ -3,8 +3,8 @@ package dspy4s.optimize
 import dspy4s.programs.ProgramRunner
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
 import dspy4s.programs.Predictors

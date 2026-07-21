@@ -215,7 +215,7 @@ merged under the per-call override. Tier 0.
 so a single typed or dynamic predictor and an arbitrary composite share one code path.
 New primitives:
 
-- `Example.dumpState` / `Example.fromState` (`modules/core/.../contracts/Data.scala`) —
+- `Example.dumpState` / `Example.fromState` (`modules/core/.../data/Example.scala`) —
   `{ "values": <record>, "inputKeys": [..], "augmented": <bool> }`.
 - `PredictorState.dumpState` / `PredictorState.fromState`
   (`modules/programs/.../PredictorState.scala`) —

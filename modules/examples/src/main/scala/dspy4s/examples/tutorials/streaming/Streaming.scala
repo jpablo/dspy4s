@@ -18,7 +18,8 @@
  */
 package dspy4s.examples.tutorials.streaming
 
-import dspy4s.core.contracts.{ClosableIterator, DspyError, DynamicPrediction, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.contracts.{ClosableIterator, DspyError, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.examples.Demo
 import dspy4s.programs.{DynamicPredict, ReAct}
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}

@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric

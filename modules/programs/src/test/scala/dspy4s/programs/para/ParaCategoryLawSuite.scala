@@ -8,7 +8,7 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.IsEq

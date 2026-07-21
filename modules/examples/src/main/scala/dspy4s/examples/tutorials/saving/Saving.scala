@@ -17,7 +17,8 @@
  */
 package dspy4s.examples.tutorials.saving
 
-import dspy4s.core.contracts.{:=, DspyError, Example, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, RuntimeContext}
+import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, ProgramPersistence}
 import dspy4s.programs.{DynamicPredict, Predictors}

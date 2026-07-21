@@ -12,7 +12,8 @@
  */
 package dspy4s.examples
 
-import dspy4s.core.contracts.{:=, DspyError, DynamicPrediction, DynamicValues, Example, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
+import dspy4s.core.data.{DynamicPrediction, Example}
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric

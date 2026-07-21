@@ -1,7 +1,8 @@
 package dspy4s.programs
 
 import dspy4s.adapters.contracts.ToolSpec
-import dspy4s.core.contracts.{DspyError, DynamicValues, Example, NotFoundError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext}
+import dspy4s.core.data.Example
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}

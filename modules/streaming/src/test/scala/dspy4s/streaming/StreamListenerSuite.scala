@@ -9,7 +9,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.typed.Signature
@@ -597,7 +597,7 @@ class StreamListenerSuite extends FunSuite:
       override protected def forward(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
-        Right(dspy4s.core.contracts.DynamicPrediction(values = rec("answer" := "x")))
+        Right(dspy4s.core.data.DynamicPrediction(values = rec("answer" := "x")))
 
     given RuntimeContext = RuntimeEnvironment.current
     // We don't actually invoke the stream — validation runs eagerly when

@@ -11,7 +11,8 @@
  */
 package dspy4s.examples.learn.optimization
 
-import dspy4s.core.contracts.{:=, DspyError, Example, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, RuntimeContext}
+import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo

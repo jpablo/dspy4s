@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.Module

@@ -1,7 +1,7 @@
 package dspy4s.programs.contracts
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry

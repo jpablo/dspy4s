@@ -1,6 +1,7 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, DynamicPrediction}
+import dspy4s.core.contracts.DspyError
+import dspy4s.core.data.DynamicPrediction
 
 /** A `DynamicPrediction` whose output fields have been decoded into a typed case
   * class instance `O`. Constructed only after every required output field

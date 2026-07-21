@@ -2,7 +2,7 @@ package dspy4s.programs.retrievers
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
 import munit.FunSuite

@@ -19,7 +19,8 @@ package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation}
-import dspy4s.core.contracts.{DspyError, DynamicValues, Example, RuntimeContext, RuntimeError, :=}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
+import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}

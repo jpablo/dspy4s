@@ -12,7 +12,8 @@
  */
 package dspy4s.examples.learn.evaluation
 
-import dspy4s.core.contracts.{:=, DynamicValues, Example}
+import dspy4s.core.contracts.{:=, DynamicValues}
+import dspy4s.core.data.Example
 
 object Data:
 

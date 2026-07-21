@@ -1,7 +1,7 @@
 package dspy4s.streaming.contracts
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 
 import java.time.Instant
 

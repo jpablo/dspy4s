@@ -75,7 +75,8 @@ Four abstractions anchor the framework:
 
 | File / package | Contents |
 |----------------|----------|
-| `contracts/Data.scala`, `Usage.scala` | `Example`, `Completions`, `DynamicPrediction`, `LmUsage`, `TokenCategory` |
+| `data/` | Individual `Example`, `Completions`, and `DynamicPrediction` data aggregates |
+| `contracts/Usage.scala` | `LmUsage` and `TokenCategory` execution metadata |
 | `contracts/DynamicValues.scala` | spine helpers + `:=` / `updated` extensions |
 | `contracts/Runtime.scala` | Cycle-breaking LM/adapter reference traits |
 | `contracts/RuntimeContext.scala` | `RuntimeContext`, services/config/scope partitions, and the flat compatibility surface |

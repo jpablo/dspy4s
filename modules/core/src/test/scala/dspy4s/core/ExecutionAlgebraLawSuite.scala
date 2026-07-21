@@ -1,6 +1,6 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry

@@ -1,7 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.programs.Predictors

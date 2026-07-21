@@ -2,9 +2,8 @@ package dspy4s.typed
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{
-  DspyError, DynamicPrediction, FieldRole, NotFoundError, ValidationError, :=
-}
+import dspy4s.core.contracts.{DspyError, FieldRole, NotFoundError, ValidationError, :=}
+import dspy4s.core.data.DynamicPrediction
 import munit.FunSuite
 
 // Top-level: Schema/Mirror derivation does not work for path-dependent types

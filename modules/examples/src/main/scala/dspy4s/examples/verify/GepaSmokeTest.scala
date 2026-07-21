@@ -17,13 +17,12 @@ import dspy4s.core.contracts.{
   CallbackEvent,
   CallbackHandler,
   DspyError,
-  DynamicPrediction,
   DynamicValues,
-  Example,
   LmEndEvent,
   RuntimeContext,
   TraceEntry
 }
+import dspy4s.core.data.{DynamicPrediction, Example}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl

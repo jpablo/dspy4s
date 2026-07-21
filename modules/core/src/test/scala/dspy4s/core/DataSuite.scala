@@ -1,9 +1,9 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.Completions
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.Completions
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.:=
 import munit.FunSuite

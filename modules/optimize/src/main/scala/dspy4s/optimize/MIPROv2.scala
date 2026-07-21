@@ -5,7 +5,7 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.{PredictorState, Predictors}
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram

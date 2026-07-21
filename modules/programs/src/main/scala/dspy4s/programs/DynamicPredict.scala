@@ -1,8 +1,8 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.adapters.contracts.ToolSpec
@@ -17,7 +17,7 @@ import zio.blocks.schema.DynamicValue
 /** The untyped prediction module: the data-bag counterpart to typed [[Predict]]. Given a
   * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (field names, roles, and wire types known only at
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
-  * [[dspy4s.core.contracts.DynamicPrediction DynamicPrediction]] (a `DynamicValue.Record` of output fields plus raw
+  * [[dspy4s.core.data.DynamicPrediction DynamicPrediction]] (a `DynamicValue.Record` of output fields plus raw
   * completions and LM usage). The actual execution lives in [[dspy4s.programs.runtime.PredictEngine PredictEngine]];
   * the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and history. Mirrors DSPy's
   * `dspy.Predict` at the dynamic boundary.

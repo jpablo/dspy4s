@@ -70,7 +70,7 @@ explicitly establish a context with `given RuntimeContext = RuntimeEnvironment.c
 | Python | dspy4s | Where |
 |---|---|---|
 | `def __call__(self, **kwargs)` | `final case class ProgramCall(inputs: Map[String, Any], config: Map[String, Any] = Map.empty, traceEnabled: Boolean = true)` | `programs/contracts/ProgramContracts.scala` |
-| `prediction.answer`, `prediction["answer"]`, `prediction.get("answer", default)` | `prediction.values: Map[String, Any]` — accessed as `prediction.values("answer")` or via `Option`. No attribute sugar. | `core/contracts/Data.scala` |
+| `prediction.answer`, `prediction["answer"]`, `prediction.get("answer", default)` | `prediction.values: Map[String, Any]` — accessed as `prediction.values("answer")` or via `Option`. No attribute sugar. | `core/data/DynamicPrediction.scala` |
 | `**signature_fields_as_kwargs` | explicit `Map[String, Any]` construction at call sites | call sites throughout |
 
 **Cost of the delta:** every Python test that does
@@ -102,7 +102,7 @@ serialization for free. The cost is that anything Python expresses as
 | Python | dspy4s | Where |
 |---|---|---|
 | `if isinstance(value, StreamResponse): ... elif isinstance(value, StatusMessage): ...` | `sealed trait StreamEvent` with case classes `TokenEvent`, `StatusEvent`, `PredictionEvent`, `ErrorEvent`; consumed via `match`. | `streaming/contracts/StreamingContracts.scala` |
-| `if isinstance(result, dict): ... elif isinstance(result, list): ...` | sealed ADTs for typed payloads; `Map[String, Any]` for the genuinely dynamic ones. | `core/contracts/Data.scala`, `lm/contracts/LmContracts.scala` |
+| `if isinstance(result, dict): ... elif isinstance(result, list): ...` | sealed ADTs for typed payloads; `Map[String, Any]` for the genuinely dynamic ones. | `core/data/`, `lm/contracts/LmContracts.scala` |
 | `Exception` hierarchy with `isinstance` checks | `sealed trait DspyError` ADT with `match`/`asInstanceOf`. | `core/contracts/Errors.scala` |
 
 Pattern matching also gives exhaustiveness — the compiler tells us when a

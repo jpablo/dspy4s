@@ -3,7 +3,7 @@ package dspy4s.optimize
 import dspy4s.programs.{Predictor, Predictors}
 
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.Example
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict
 import dspy4s.typed.Signature

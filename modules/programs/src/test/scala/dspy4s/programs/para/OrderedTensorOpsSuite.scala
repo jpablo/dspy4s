@@ -1,7 +1,7 @@
 package dspy4s.programs.para
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicPrediction
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment

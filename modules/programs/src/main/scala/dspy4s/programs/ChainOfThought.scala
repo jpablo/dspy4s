@@ -1,15 +1,7 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{
-  DspyError,
-  DynamicValues,
-  Example,
-  FieldRole,
-  FieldSpec,
-  RuntimeContext,
-  SignatureLayout,
-  TypeRef
-}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldRole, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ProgramRuntime, ProgramCall}
 import dspy4s.programs.runtime.SettingsProgramRuntime

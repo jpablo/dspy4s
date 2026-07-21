@@ -1,7 +1,7 @@
 package dspy4s.gepa
 
-import dspy4s.core.contracts.DynamicPrediction
-import dspy4s.core.contracts.Example
+import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.Example
 import dspy4s.core.contracts.TraceEntry
 
 /** One example's captured trajectory — the unit GEPA reflects on: the program's per-predictor [[TraceEntry]] trace

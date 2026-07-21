@@ -2,9 +2,8 @@ package dspy4s.typed
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{
-  NotFoundError, DynamicPrediction, SignatureLayout, TypeRef, :=
-}
+import dspy4s.core.contracts.{NotFoundError, SignatureLayout, TypeRef, :=}
+import dspy4s.core.data.DynamicPrediction
 import munit.FunSuite
 
 // Top-level fixtures (Phase 0 finding: Mirror derivation needs top-level types,
