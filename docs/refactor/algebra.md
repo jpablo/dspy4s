@@ -310,3 +310,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `CDCategory`. `OrderedTensorOpsSuite` pins the fail-fast interchange counterexample (`g1` versus `f2`),
     while `ComposeLawSuite` pins lifecycle-transparent association. The abstract `CDCategory` target remains
     available for a future commutative denotational carrier.
+  - **Typed inner predicts** (the class-A conversion): every composite whose internal signatures are statically
+    shaped (Refine's critic, ReAct, CodeAct, RLM, ProgramOfThought) now runs typed inner `Predict`s — hand-built
+    layouts kept verbatim, `InputAugmentation.appendedStringInput` for the appended input fields, lenient
+    hand-written or derived shapes on the output side (`OutputAugmentation.prependedStringShape` for the
+    reasoning-prepended extractors). Only genuinely runtime layouts still construct a `DynamicPredict` inside the
+    framework: `MultiChainComparison`'s runtime-arity attempts, the optimizers' own helper generations, the
+    evaluation judge, and `Predict.erase`. See `algebra-2-program-composition.md` for the recipe.

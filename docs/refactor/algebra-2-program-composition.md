@@ -99,9 +99,11 @@ AgentLoop.run[St, R](state, maxIterations)(onExhausted)(step) : M[R]          //
 //   ReAct / CodeAct / RLM / PoT. CODE-TRUTH CORRECTION: the env.step/classify/render decomposition below was
 //   NOT adopted — see the correction under the acceptance table. Each module keeps its own `step` closure.
 
-TrajectoryAgent.runAndExtract[S](...)(step) : M[(DynamicPrediction, String)]  // ReAct/CodeAct  [IMPLEMENTED 6.3]
-//   bounded loop building a Vector[S] trajectory (via AgentLoop.run), then the extractor with
-//   overflow-truncation; the module does the final decodePrepended into WithReasoning[O]. (= ReAct, CodeAct)
+TrajectoryAgent.runAndExtract[S, E](...)(step)(extract) : M[(E, String)]      // ReAct/CodeAct  [IMPLEMENTED 6.3]
+//   bounded loop building a Vector[S] trajectory (via AgentLoop.run), then the extract closure with
+//   overflow-truncation. E is the extractor's result: since the typed-inner-predict conversion the extractors
+//   are typed Predicts, so E = Prediction[WithReasoning[O]] and the reasoning-prepended decode happens INSIDE
+//   the extractor (OutputAugmentation.prependedStringShape) rather than in the module. (= ReAct, CodeAct)
 
 // retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
 //   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
@@ -361,6 +363,20 @@ law-tested on the branch; every composite reduces to a combinator expression and
 recurring discipline was to extract the genuinely shared core and correct the spec against code-truth where the
 grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `parallel` is new, not the batch
 `Parallel`; `agentLoop`'s env/classify/render seam does not fit).
+
+**Typed inner predicts (the class-A conversion).** Every composite whose internal signatures are statically
+shaped now runs TYPED inner `Predict`s instead of `DynamicPredict`s: Refine's OfferFeedback critic, ReAct's
+loop + extractor, CodeAct's generator + extractor, RLM's action + extract, and ProgramOfThought's
+generator / regenerator / answerer. The recipe is uniform: keep the hand-built layout verbatim (prompt
+rendering unchanged), pair it with `InputAugmentation.appendedStringInput` on the input side (the pair carrier
+`(I, String)` delegates base encoding to the base shape, appending the declared field — apply twice for two
+fields) and either a derived shape (fully synthetic inputs: RLM, the critic) or a hand-written LENIENT output
+shape that mirrors the prior dynamic reads exactly (missing strings render empty, `finished` coerces
+bool-or-"true", tool args accept record / JSON-string / nothing); reasoning-prepended extractors decode inside
+the predict via `OutputAugmentation.prependedStringShape` (extracted from ChainOfThought's hand-written shape).
+The remaining `DynamicPredict` constructors in the framework are exactly the principled residue: runtime-arity
+layouts (`MultiChainComparison`'s numbered attempts, COPRO / GroundedProposer / InferRules attempt injection),
+the evaluation judge, `Predict.erase`, and user `fromStringDynamic` signatures.
 
 ## Deferred items (recorded, not lost — additive, no consumer yet)
 
