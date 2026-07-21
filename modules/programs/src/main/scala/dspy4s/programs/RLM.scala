@@ -22,7 +22,8 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.ParallelExecutor
-import dspy4s.typed.{Prediction, Signature}
+import dspy4s.typed.{Prediction, Shape, Signature}
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
@@ -82,10 +83,14 @@ final case class RLM[I, O](
     interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
     actionProgramName: String = "rlm_action",
     extractProgramName: String = "rlm_extract",
-    /** Optional override for the per-iteration action predict (tunable; see ReAct/CodeAct's same pattern). */
-    actionPredictOverride: Option[DynamicPredict] = None,
-    /** Optional override for the max-iterations extract-fallback predict. */
-    extractPredictOverride: Option[DynamicPredict] = None
+    /** Optional override for the per-iteration action predict (tunable; see ReAct/CodeAct's same pattern) — a TYPED
+      * `Predict` over the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
+      */
+    actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
+    /** Optional override for the max-iterations extract-fallback predict — a TYPED `Predict` over the two declared
+      * meta inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
+      */
+    extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None
 ) extends Module[ProgramCall[I], Prediction[O]]:
 
   override val moduleName: String = "rlm"
@@ -125,18 +130,8 @@ final case class RLM[I, O](
           typeRef = TypeRef.string,
           description = Some("Current iteration number (1-indexed) out of max_iterations")
         ),
-        FieldSpec(
-          "reasoning",
-          FieldRole.Output,
-          typeRef = TypeRef.string,
-          description = Some("Think step-by-step: what do you know? What remains? Plan your next action.")
-        ),
-        FieldSpec(
-          "code",
-          FieldRole.Output,
-          typeRef = TypeRef.string,
-          description = Some("Python code to execute. Use markdown code block format: ```python\\n<code>\\n```")
-        )
+        RLM.reasoningField,
+        RLM.codeField
       ))
       .withInstructions(Some(buildActionInstructions))
 
@@ -159,13 +154,35 @@ final case class RLM[I, O](
       ) ++ baseLayout.outputFields)
       .withInstructions(Some(buildExtractInstructions))
 
-  /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`). */
-  val actionPredict: DynamicPredict =
-    actionPredictOverride.getOrElse(DynamicPredict(layout = actionSignature, name = Some(actionProgramName)))
+  /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a TYPED
+    * `Predict[ActionInputs, ActionStep]`: the action signature's I/O is fully synthetic (base inputs reach the LM
+    * only as REPL variable metadata), so both shapes are static. Output decode is lenient (see
+    * [[RLM.actionStepShape]]).
+    */
+  val actionPredict: Predict[RLM.ActionInputs, RLM.ActionStep] =
+    actionPredictOverride.getOrElse(Predict(
+      signature = Signature(
+        name        = baseSignature.name,
+        layout      = actionSignature,
+        inputShape  = Shape.derivedWithRole[RLM.ActionInputs](FieldRole.Input),
+        outputShape = RLM.actionStepShape
+      ),
+      name = Some(actionProgramName)
+    ))
 
-  /** The extract-fallback predict. */
-  val extractPredict: DynamicPredict =
-    extractPredictOverride.getOrElse(DynamicPredict(layout = extractSignature, name = Some(extractProgramName)))
+  /** The extract-fallback predict — a TYPED `Predict[ExtractInputs, O]`: synthetic meta inputs, base outputs `O`
+    * decoded through the base output shape (the same decode the dynamic path ran on `extracted.values`).
+    */
+  val extractPredict: Predict[RLM.ExtractInputs, O] =
+    extractPredictOverride.getOrElse(Predict(
+      signature = Signature(
+        name        = baseSignature.name,
+        layout      = extractSignature,
+        inputShape  = Shape.derivedWithRole[RLM.ExtractInputs](FieldRole.Input),
+        outputShape = baseSignature.outputShape
+      ),
+      name = Some(extractProgramName)
+    ))
 
   private def buildActionInstructions: String =
     val inputs           = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
@@ -205,13 +222,12 @@ final case class RLM[I, O](
     val variablesMeta = baseLayout.inputFields.map { f =>
       RLM.ReplVariable.fromValue(f.name, inputVars(f.name), Some(f))
     }
-    val baseCall = call.encoded(baseSignature.inputShape)
 
     val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ CodeAct.sandboxTools(tools)
     val outputFields =
       baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, RLM.pythonTypeOf(f.typeRef)))
     val interpreter  = interpreterFactory(sandboxTools, outputFields)
-    try iterate(baseCall, interpreter, inputVars, variablesMeta)
+    try iterate(call, interpreter, inputVars, variablesMeta)
     finally interpreter.close()
 
   /** Convenience entry mirroring the typed caller signature. */
@@ -227,7 +243,7 @@ final case class RLM[I, O](
     * out, [[extractFallback]] produces the outputs from the trajectory.
     */
   private def iterate(
-      call: ProgramCall[DynamicValue.Record],
+      call: ProgramCall[I],
       interpreter: ReplCodeInterpreter,
       inputVars: Map[String, DynamicValue],
       variablesMeta: Vector[RLM.ReplVariable]
@@ -238,7 +254,7 @@ final case class RLM[I, O](
 
   /** One REPL iteration as an [[AgentLoop]] step. */
   private def rlmStep(
-      call: ProgramCall[DynamicValue.Record],
+      call: ProgramCall[I],
       interpreter: ReplCodeInterpreter,
       inputVars: Map[String, DynamicValue],
       variablesMeta: Vector[RLM.ReplVariable]
@@ -247,14 +263,14 @@ final case class RLM[I, O](
   ): (Vector[RLM.ReplEntry], Int) => Either[DspyError, AgentLoop.Step[Vector[RLM.ReplEntry], Prediction[O]]] =
     (history, iteration) =>
       // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
-      val actionInputs = DynamicValues.recordFromEntries(Vector(
-        "variables_info" -> DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")),
-        "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)),
-        "iteration"      -> DynamicValues.fromAny(s"${iteration + 1}/$maxIterations")
-      ))
-      actionPredict.apply(call.copy(input = actionInputs)).flatMap { action =>
-        val reasoning = action.get("reasoning").map(DynamicValues.renderText).getOrElse("")
-        val rawCode   = action.get("code").map(DynamicValues.renderText).getOrElse("")
+      val actionInputs = RLM.ActionInputs(
+        variables_info = variablesMeta.map(_.format).mkString("\n\n"),
+        repl_history   = RLM.renderHistory(history, maxOutputChars),
+        iteration      = s"${iteration + 1}/$maxIterations"
+      )
+      actionPredict.apply(ProgramCall(actionInputs, call.config, call.traceEnabled, call.rolloutId)).flatMap { action =>
+        val reasoning = action.output.reasoning
+        val rawCode   = action.output.code
         if verbose then
           Console.err.println(
             s"RLM iteration ${iteration + 1}/$maxIterations\nReasoning: $reasoning\nCode:\n$rawCode"
@@ -323,30 +339,71 @@ final case class RLM[I, O](
     * `_extract_fallback`).
     */
   private def extractFallback(
-      call: ProgramCall[DynamicValue.Record],
+      call: ProgramCall[I],
       variablesMeta: Vector[RLM.ReplVariable],
       history: Vector[RLM.ReplEntry]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     // Unconditional like upstream's `logger.warning` — not gated on `verbose`.
     Console.err.println("WARN [dspy4s] RLM reached max iterations, using extract to get final output")
     // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
-    val extractInputs = DynamicValues.recordFromEntries(Vector(
-      "variables_info" -> DynamicValues.fromAny(variablesMeta.map(_.format).mkString("\n\n")),
-      "repl_history"   -> DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars))
-    ))
-    for
-      extracted <- extractPredict.apply(call.copy(input = extractInputs))
-      output    <- baseSignature.outputShape.decode(extracted.values)
-    yield Prediction(
-      output = output,
-      raw = DynamicPrediction(values =
-        extracted.values
-          .updated("trajectory", DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)))
-          .updated("final_reasoning", DynamicValues.fromAny("Extract forced final output"))
-      )
+    val extractInputs = RLM.ExtractInputs(
+      variables_info = variablesMeta.map(_.format).mkString("\n\n"),
+      repl_history   = RLM.renderHistory(history, maxOutputChars)
     )
+    extractPredict.apply(ProgramCall(extractInputs, call.config, call.traceEnabled, call.rolloutId)).map { extracted =>
+      Prediction(
+        output = extracted.output,
+        raw = DynamicPrediction(values =
+          extracted.raw.values
+            .updated("trajectory", DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)))
+            .updated("final_reasoning", DynamicValues.fromAny("Extract forced final output"))
+        )
+      )
+    }
 
 object RLM:
+
+  // ── The action signature's hand-declared output fields (static; shared by the layout and the typed shape) ──
+  private[programs] val reasoningField: FieldSpec = FieldSpec(
+    "reasoning",
+    FieldRole.Output,
+    typeRef = TypeRef.string,
+    description = Some("Think step-by-step: what do you know? What remains? Plan your next action.")
+  )
+  private[programs] val codeField: FieldSpec = FieldSpec(
+    "code",
+    FieldRole.Output,
+    typeRef = TypeRef.string,
+    description = Some("Python code to execute. Use markdown code block format: ```python\\n<code>\\n```")
+  )
+
+  /** The action predict's typed input: the three declared meta fields, names matching the layout exactly (base
+    * inputs reach the LM only as REPL variable metadata). */
+  final case class ActionInputs(variables_info: String, repl_history: String, iteration: String) derives Schema
+
+  /** The extract-fallback predict's typed input. */
+  final case class ExtractInputs(variables_info: String, repl_history: String) derives Schema
+
+  /** The typed output of one action step. */
+  final case class ActionStep(reasoning: String, code: String)
+
+  /** Hand-written LENIENT output shape mirroring the prior dynamic reads exactly: a missing `reasoning` / `code`
+    * renders as "" (an empty code snippet becomes a fence-error observation, not a failed call). Decode never
+    * fails; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction. */
+  private[programs] val actionStepShape: Shape[ActionStep] = new Shape[ActionStep]:
+    val fieldSpecs: Vector[FieldSpec] = Vector(reasoningField, codeField)
+
+    def encode(value: ActionStep): DynamicValue.Record =
+      DynamicValue.Record(Chunk.from(Seq(
+        "reasoning" -> DynamicValue.Primitive(PrimitiveValue.String(value.reasoning)),
+        "code"      -> DynamicValue.Primitive(PrimitiveValue.String(value.code))
+      )))
+
+    def decode(raw: DynamicValue.Record): Either[DspyError, ActionStep] =
+      Right(ActionStep(
+        reasoning = DynamicValues.recordGet(raw, "reasoning").map(DynamicValues.renderText).getOrElse(""),
+        code      = DynamicValues.recordGet(raw, "code").map(DynamicValues.renderText).getOrElse("")
+      ))
 
   /** Builds the per-forward REPL from the sandbox tools and the typed-SUBMIT output fields. */
   type InterpreterFactory =

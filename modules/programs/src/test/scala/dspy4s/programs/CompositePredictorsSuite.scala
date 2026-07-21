@@ -151,9 +151,9 @@ class CompositePredictorsSuite extends FunSuite:
     assertEquals(replaced.actionPredictOverride.map(_.predictorState), Some(tunedAction))
     assertEquals(replaced.extractPredictOverride, None)
     // `extractPredict` is an instance val, so the new RLM re-derives an equivalent default; compare the
-    // stable projection (layout/name), not the object (DynamicPredict's runtime field is reference-compared).
-    assertEquals(P.inspect(replaced)(1).layout, rlm.extractPredict.layout)
-    assertEquals(P.inspect(replaced)(1).moduleName, rlm.extractPredict.moduleName)
+    // stable projection (view layout/name), not the object (the predict's runtime field is reference-compared).
+    assertEquals(P.inspect(replaced)(1).layout, rlm.extractPredict.predictorView.layout)
+    assertEquals(P.inspect(replaced)(1).moduleName, rlm.extractPredict.predictorView.moduleName)
   }
 
   test("override-backed composites observe read-after-write and change-revert through state") {
