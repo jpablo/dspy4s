@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.contracts.ToolSpec
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, RuntimeError, ValidationError}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, IsEq, RuntimeContext, RuntimeError, ValidationError}
 import dspy4s.core.data.Example
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest, LmResponse}
@@ -39,6 +39,13 @@ class PredictorStateSuite extends FunSuite:
     def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Left(RuntimeError("bound-state-test", s"unexpected call to ${request.model}"))
 
+  /** Execute a stated `@Law` equation under structural equality (honest for these carriers: `set` short-circuits
+    * or `copy`s, sharing every execution binding by reference). */
+  private def holds[A](law: String, eq: IsEq[A]): Unit =
+    assert(eq.lhs.equals(eq.rhs), s"$law: ${eq.lhs} != ${eq.rhs}")
+
+  /** Runs the four `@Law` statements the [[Predictor]] lens carries (Get-Put / Put-Get / Put-Put inherited from
+    * `Lens`, plus the metadata frame), then the view/extension-syntax invariants. */
   private def assertLeafLaws[P](program: P, first: PredictorState, second: PredictorState)(using
       leaf: Predictor[P]
   ): Unit =
@@ -49,13 +56,10 @@ class PredictorStateSuite extends FunSuite:
     assertEquals(program.predictorView, leaf.inspect(program))
     assertEquals(program.withPredictorState(first).predictorState, first)
 
-    assert(leaf.set(program, original).equals(program), "Get-Put must be an exact no-op")
-    assertEquals(leaf.get(leaf.set(program, first)), first)
-    assert(
-      leaf.set(leaf.set(program, first), second).equals(leaf.set(program, second)),
-      "Put-Put must be last-write-wins"
-    )
-    assertEquals(leaf.metadata(leaf.set(program, first)), metadata)
+    holds("get-put", leaf.getPut(program))
+    holds("put-get", leaf.putGet(program, first))
+    holds("put-put", leaf.putPut(program, first, second))
+    holds("frame", leaf.frame(program, first))
 
     val view = leaf.inspect(program)
     assertEquals(view.state, original)

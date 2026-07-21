@@ -1,5 +1,9 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.IsEq
+import dspy4s.core.contracts.Law
+import dspy4s.core.contracts.Lens
+import dspy4s.core.contracts.<->
 import dspy4s.typed.OutputAugmentation
 import dspy4s.typed.OutputAugmentation.PrependField
 import scala.compiletime.error
@@ -10,22 +14,20 @@ import scala.util.NotGiven
 
 /** A program that is one learnable predictor (a leaf of the introspection tree).
   *
-  * This is a lens onto exactly the program's writable [[PredictorState]]. For all states `s`, `s1`, and `s2`, its
-  * intended laws are:
-  *
-  *   - Get-Put: `set(p, get(p)) == p`
-  *   - Put-Get: `get(set(p, s)) == s`
-  *   - Put-Put: `set(set(p, s1), s2) == set(p, s2)`
-  *   - Frame: `metadata(set(p, s)) == metadata(p)`
-  *
-  * The metadata frame is what excludes signature structure and execution resources from optimizer replacement.
+  * This is a lawful [[dspy4s.core.contracts.Lens Lens]] onto exactly the program's writable [[PredictorState]]: the
+  * Get-Put / Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins
+  * what makes the focus exact — writing state can never change the read-only [[PredictorMetadata]], which is what
+  * excludes signature structure and execution resources from optimizer replacement. `PredictorStateSuite` executes
+  * all four statements per instance.
   */
-trait Predictor[P]:
-  def get(program: P): PredictorState
+trait Predictor[P] extends Lens[P, PredictorState]:
   def metadata(program: P): PredictorMetadata
-  def set(program: P, updated: PredictorState): P
 
   final def inspect(program: P): PredictorView = PredictorView(metadata(program), get(program))
+
+  @Law("frame: writing state never changes the read-only metadata")
+  def frame(program: P, updated: PredictorState): IsEq[PredictorMetadata] =
+    metadata(set(program, updated)) <-> metadata(program)
 
 object Predictor:
   /** A [[DynamicPredict]] is itself a learnable predictor leaf. Defined in the [[Predictor]] companion so it is in
