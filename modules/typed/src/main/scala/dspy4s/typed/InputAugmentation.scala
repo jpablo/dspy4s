@@ -29,3 +29,33 @@ object InputAugmentation:
           i <- base.decode(raw)
           s <- DynamicValues.requireString(raw, field.name, label)
         yield (i, s)
+
+  /** `Shape[(I, Vector[String])]`: the base fields plus a RUNTIME-ARITY block of appended `String` fields — the
+    * bridge for layouts whose field COUNT is a constructor parameter (`MultiChainComparison`'s `m` numbered
+    * `reasoning_attempt_i` inputs). The static type carries the list; the field expansion is value-level:
+    * `fields` (built where the arity is known, at program construction) fixes both the specs and the encoding
+    * positions, so the wire format — numbered flat fields — is unchanged. The arity invariant
+    * (`values.size == fields.size`) is a runtime concern the CALLER enforces before the predict runs (the
+    * program's own `m`-validation), which is the honest cost of a runtime-arity signature: the list's length,
+    * unlike its type, cannot be pinned at compile time. Encode zips (extra values beyond `fields` are dropped,
+    * missing ones simply absent); decode requires every declared field. */
+  def appendedStringInputs[I](base: Shape[I], fields: Vector[FieldSpec], label: String): Shape[(I, Vector[String])] =
+    new Shape[(I, Vector[String])]:
+      val fieldSpecs: Vector[FieldSpec] = base.fieldSpecs ++ fields
+
+      def encode(value: (I, Vector[String])): DynamicValue.Record =
+        fields.iterator.zip(value._2).foldLeft(base.encode(value._1)) { case (acc, (field, s)) =>
+          acc.updated(field.name, DynamicValue.Primitive(PrimitiveValue.String(s)))
+        }
+
+      def decode(raw: DynamicValue.Record): Either[DspyError, (I, Vector[String])] =
+        val values = fields.foldLeft[Either[DspyError, Vector[String]]](Right(Vector.empty)) { (acc, field) =>
+          for
+            collected <- acc
+            s         <- DynamicValues.requireString(raw, field.name, label)
+          yield collected :+ s
+        }
+        for
+          i  <- base.decode(raw)
+          ss <- values
+        yield (i, ss)
