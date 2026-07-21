@@ -20,7 +20,8 @@ import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{OutputAugmentation, Prediction, Signature}
+import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Shape, Signature}
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
@@ -49,15 +50,17 @@ final case class ReAct[I, O](
     maxIterations: Int = 5,
     reactProgramName: String = ReActKeys.reactModule,
     extractorProgramName: String = ReActKeys.extractModule,
-    /** Optional override for the per-iteration react predict. When `None` (the default), the predict is built from
-      * [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable sub-predict
-      * addressable + immutably replaceable (see the `Predictors[ReAct]` instance).
+    /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the
+      * rendered trajectory, producing a lenient [[ReAct.ReactStep]]. When `None` (the default), the predict is built
+      * from [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable
+      * sub-predict addressable + immutably replaceable (see the `Predictors[ReAct]` instance).
       */
-    reactPredictOverride: Option[DynamicPredict] = None,
-    /** Optional override for the final extractor predict (CoT-augmented). When `None` (the default), it is built
-      * fail-fast from [[extractorSignature]] at construction; see [[extractorPredict]].
+    reactPredictOverride: Option[Predict[(I, String), ReAct.ReactStep]] = None,
+    /** Optional override for the final extractor predict (CoT-augmented, typed over the base input plus the rendered
+      * trajectory). When `None` (the default), it is built fail-fast from [[extractorSignature]] at construction; see
+      * [[extractorPredict]].
       */
-    extractorPredictOverride: Option[DynamicPredict] = None
+    extractorPredictOverride: Option[Predict[(I, String), ReAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of["reasoning", String, O]
 ) extends Module[ProgramCall[I], Prediction[ReAct.WithReasoning[O]]]:
@@ -79,67 +82,56 @@ final case class ReAct[I, O](
     */
   val reactSignature: SignatureLayout =
     baseLayout
-      .appendInput(
-        FieldSpec(
-          name = ReActKeys.trajectory,
-          role = FieldRole.Input,
-          typeRef = TypeRef.string,
-          description = Some("The sequence of thoughts, tool calls, and observations so far.")
-        )
-      )
-      .replaceOutputs(Vector(
-        FieldSpec(
-          name = ReActKeys.nextThought,
-          role = FieldRole.Output,
-          typeRef = TypeRef.string,
-          description = Some("Reasoning about the current situation and what to do next.")
-        ),
-        FieldSpec(
-          name = ReActKeys.nextToolName,
-          role = FieldRole.Output,
-          typeRef = TypeRef.string,
-          description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
-        ),
-        FieldSpec(
-          name = ReActKeys.nextToolArgs,
-          role = FieldRole.Output,
-          typeRef = TypeRef.json,
-          description = Some("Arguments for the next tool, as a JSON object.")
-        )
-      ))
+      .appendInput(ReAct.loopTrajectoryField)
+      .replaceOutputs(Vector(ReAct.nextThoughtField, ReAct.nextToolNameField, ReAct.nextToolArgsField))
       .withInstructions(Some(buildInstructions))
 
   /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. */
   val extractorSignature: SignatureLayout =
-    baseLayout.appendInput(
-      FieldSpec(
-        name = ReActKeys.trajectory,
-        role = FieldRole.Input,
-        typeRef = TypeRef.string,
-        description = Some("The completed sequence of thoughts, tool calls, and observations.")
-      )
-    )
+    baseLayout.appendInput(ReAct.extractTrajectoryField)
 
   /** The per-iteration react predict, built once from [[reactSignature]] (mirrors Python's `self.react = Predict(...)`
-    * in `__init__`). Addressable + tunable via [[reactPredictOverride]]; `forward` uses this member rather than
-    * rebuilding a local each call.
+    * in `__init__`) — a TYPED `Predict[(I, String), ReactStep]`: the base input plus the rendered trajectory in, a
+    * leniently-decoded [[ReAct.ReactStep]] out (see [[ReAct.reactStepShape]]). The layout (prompt rendering, field
+    * descriptions, tool-listing instructions) is unchanged. Addressable + tunable via [[reactPredictOverride]];
+    * `forward` uses this member rather than rebuilding a local each call.
     */
-  val reactPredict: DynamicPredict =
-    reactPredictOverride.getOrElse(DynamicPredict(layout = reactSignature, name = Some(reactProgramName)))
+  val reactPredict: Predict[(I, String), ReAct.ReactStep] =
+    reactPredictOverride.getOrElse(Predict(
+      signature = Signature(
+        name        = baseSignature.name,
+        layout      = reactSignature,
+        inputShape  = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.loopTrajectoryField, "ReAct"),
+        outputShape = ReAct.reactStepShape
+      ),
+      name = Some(reactProgramName)
+    ))
 
-  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]]. Built fail-fast at
-    * construction (mirroring `require`): if the augmentation fails the error surfaces deterministically here, so both
-    * sub-predicts are always present and addressable. Tunable via [[extractorPredictOverride]].
+  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
+    * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
+    * `prepend` evidence this class already carries). Built fail-fast at construction (mirroring `require`): if the
+    * augmentation fails the error surfaces deterministically here, so both sub-predicts are always present and
+    * addressable. Tunable via [[extractorPredictOverride]].
     */
-  val extractorPredict: DynamicPredict =
-    extractorPredictOverride.getOrElse(
-      DynamicPredict(
+  val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
+    extractorPredictOverride.getOrElse(Predict(
+      signature = Signature(
+        name   = baseSignature.name,
         layout = ChainOfThought
           .augmentLayout(extractorSignature)
           .fold(error => throw new IllegalArgumentException(error.message), identity),
-        name = Some(extractorProgramName)
-      )
-    )
+        inputShape = InputAugmentation
+          .appendedStringInput(baseSignature.inputShape, ReAct.extractTrajectoryField, "ReAct extractor"),
+        outputShape = OutputAugmentation.prependedStringShape(
+          baseSignature.outputShape,
+          ChainOfThought.reasoningField,
+          "reasoning",
+          "ReAct extractor",
+          baseSignature.name
+        )
+      ),
+      name = Some(extractorProgramName)
+    ))
 
   /** System-prompt instructions for the react step. Mirrors Python's shape: states the task I/O, explains the
     * next_thought / next_tool_name / next_tool_args protocol, and lists the selectable tools (name + description).
@@ -169,36 +161,26 @@ final case class ReAct[I, O](
   override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    val inputs = call.encodedInput(baseSignature.inputShape)
-    val baseCall = call.encoded(baseSignature.inputShape)
     for
       // Gather the trajectory (the react step truncates + may break on overflow) then run the extractor; the
-      // bounded loop + extractor truncation are the shared TrajectoryAgent flow (same as CodeAct).
-      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[ReAct.TrajectoryEntry](
-        baseCall,
-        inputs,
+      // bounded loop + extractor truncation are the shared TrajectoryAgent flow (same as CodeAct). Both inner
+      // predicts are typed: the trajectory pairs with the TYPED base input, and each predict encodes/decodes
+      // through its own signature (the reasoning-prepended decode happens inside the extractor).
+      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[ReAct.TrajectoryEntry, Prediction[Out]](
         maxIterations,
-        ReActKeys.trajectory,
-        ReAct.renderTrajectory,
-        extractorPredict
-                                )(reactStep(baseCall))
+        ReAct.renderTrajectory
+      )(reactStep(call)) { rendered =>
+        extractorPredict.apply(ProgramCall((call.input, rendered), call.config, call.traceEnabled, call.rolloutId))
+      }
       (extracted, rendered) = extractedAndTrajectory
-      // Decode the extractor's reply into the typed output: base `O` with `reasoning` prepended.
-      augmented <- OutputAugmentation.decodePrepended(
-        extracted.values,
-        baseSignature.outputShape,
-        "reasoning",
-        "ReAct extractor",
-        baseSignature.name
-                   )
     yield Prediction(
-      output = augmented,
+      output = extracted.output,
       // Attach the (complete) trajectory to the raw prediction so callers can inspect the agent's reasoning.
       raw = DynamicPrediction(
-        values =
-          extracted.values.updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))),
-        completions = extracted.completions,
-        lmUsage     = extracted.lmUsage
+        values = extracted.raw.values
+          .updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))),
+        completions = extracted.raw.completions,
+        lmUsage     = extracted.raw.lmUsage
       )
     )
 
@@ -216,21 +198,19 @@ final case class ReAct[I, O](
     * persistent context-window overflow), then run the chosen tool and append the observation. `finish` (or a step that
     * named no tool) ends the loop. The `AgentLoop` skeleton owns the iteration count + budget.
     */
-  private def reactStep(call: ProgramCall[DynamicValue.Record])(using
+  private def reactStep(call: ProgramCall[I])(using
       RuntimeContext
   ): (Vector[ReAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[ReAct.TrajectoryEntry]] =
     (view, iteration) =>
-      reactWithTruncation(call, reactPredict, view, remaining = 3).map {
+      reactWithTruncation(call, view, remaining = 3).map {
         case (None, truncated) =>
           // Persistent context-window overflow: upstream logs a warning and BREAKS the loop — the extractor
           // still runs over whatever (truncated) trajectory remains, rather than failing the call.
           AgentLoop.Step.Done(truncated)
-        case (Some(prediction), used) =>
-          val thought     = prediction.get(ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse("")
-          val toolName    = prediction.get(ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse("").trim
-          val toolArgs    = toolArgsRecord(prediction.get(ReActKeys.nextToolArgs))
-          val observation = runTool(toolName, toolArgs)
-          val entry       = ReAct.TrajectoryEntry(iteration, thought, toolName, toolArgs, observation)
+        case (Some(step), used) =>
+          val toolName    = step.nextToolName.trim
+          val observation = runTool(toolName, step.nextToolArgs)
+          val entry       = ReAct.TrajectoryEntry(iteration, step.nextThought, toolName, step.nextToolArgs, observation)
           // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
           if toolName == ReAct.FinishToolName || toolName.isEmpty then AgentLoop.Step.Done(used :+ entry)
           else AgentLoop.Step.Continue(used :+ entry)
@@ -238,26 +218,21 @@ final case class ReAct[I, O](
 
   /** Run the react predict over the trajectory, truncating the OLDEST step and retrying (up to `remaining` attempts
     * total) on a context-window overflow — Python's `_call_with_potential_trajectory_truncation` around `self.react`.
-    * Returns the prediction plus the (possibly truncated) view: truncation is DURABLE — later iterations and the
+    * Returns the typed step plus the (possibly truncated) view: truncation is DURABLE — later iterations and the
     * extractor build on the truncated trajectory, as upstream mutates the shared dict. `(None, view)` means the
     * overflow persisted (attempts exhausted, or nothing left to drop) — upstream's `ValueError` path, which the loop
     * converts into a break rather than a failure.
     */
   private def reactWithTruncation(
-      call: ProgramCall[DynamicValue.Record],
-      reactPredict: DynamicPredict,
+      call: ProgramCall[I],
       view: Vector[ReAct.TrajectoryEntry],
       remaining: Int
-  )(using RuntimeContext): Either[DspyError, (Option[DynamicPrediction], Vector[ReAct.TrajectoryEntry])] =
+  )(using RuntimeContext): Either[DspyError, (Option[ReAct.ReactStep], Vector[ReAct.TrajectoryEntry])] =
     val (result, used) = truncateOnOverflow(view, remaining)(ReAct.renderTrajectory) { rendered =>
-      reactPredict.apply(
-        call.copy(input =
-          call.input.updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered)))
-        )
-      )
+      reactPredict.apply(ProgramCall((call.input, rendered), call.config, call.traceEnabled, call.rolloutId))
     }
     result match
-      case Right(prediction)                   => Right((Some(prediction), used))
+      case Right(prediction)                   => Right((Some(prediction.output), used))
       case Left(_: ContextWindowExceededError) => Right((None, used))
       case Left(error)                         => Left(error)
 
@@ -275,20 +250,81 @@ final case class ReAct[I, O](
             case Left(error)  => s"Execution error in `$name`: ${error.message}"
         case Left(error) => s"Execution error in `$name`: ${error.message}"
 
+object ReAct:
+  val FinishToolName: String = "finish"
+
+  /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
+  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+
+  // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
+  private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
+    name        = ReActKeys.trajectory,
+    role        = FieldRole.Input,
+    typeRef     = TypeRef.string,
+    description = Some("The sequence of thoughts, tool calls, and observations so far.")
+  )
+  private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
+    name        = ReActKeys.trajectory,
+    role        = FieldRole.Input,
+    typeRef     = TypeRef.string,
+    description = Some("The completed sequence of thoughts, tool calls, and observations.")
+  )
+  private[programs] val nextThoughtField: FieldSpec = FieldSpec(
+    name        = ReActKeys.nextThought,
+    role        = FieldRole.Output,
+    typeRef     = TypeRef.string,
+    description = Some("Reasoning about the current situation and what to do next.")
+  )
+  private[programs] val nextToolNameField: FieldSpec = FieldSpec(
+    name        = ReActKeys.nextToolName,
+    role        = FieldRole.Output,
+    typeRef     = TypeRef.string,
+    description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
+  )
+  private[programs] val nextToolArgsField: FieldSpec = FieldSpec(
+    name        = ReActKeys.nextToolArgs,
+    role        = FieldRole.Output,
+    typeRef     = TypeRef.json,
+    description = Some("Arguments for the next tool, as a JSON object.")
+  )
+
+  /** The typed output of one react loop step. */
+  final case class ReactStep(
+      nextThought: String,
+      nextToolName: String,
+      nextToolArgs: DynamicValue.Record
+  )
+
+  /** Hand-written LENIENT output shape mirroring the prior dynamic reads EXACTLY: a missing `next_thought` /
+    * `next_tool_name` renders as "" (a step that names no tool ends the loop rather than failing the call), and
+    * `next_tool_args` accepts a JSON object (JSONAdapter), a JSON-object string (ChatAdapter has no `json`
+    * coercion), or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the
+    * prior direct `DynamicPredict` construction. */
+  private[programs] val reactStepShape: Shape[ReactStep] = new Shape[ReactStep]:
+    val fieldSpecs: Vector[FieldSpec] = Vector(nextThoughtField, nextToolNameField, nextToolArgsField)
+
+    def encode(value: ReactStep): DynamicValue.Record =
+      DynamicValue.Record(Chunk.from(Seq(
+        ReActKeys.nextThought  -> DynamicValue.Primitive(PrimitiveValue.String(value.nextThought)),
+        ReActKeys.nextToolName -> DynamicValue.Primitive(PrimitiveValue.String(value.nextToolName)),
+        ReActKeys.nextToolArgs -> (value.nextToolArgs: DynamicValue)
+      )))
+
+    def decode(raw: DynamicValue.Record): Either[DspyError, ReactStep] =
+      Right(ReactStep(
+        nextThought  = DynamicValues.recordGet(raw, ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse(""),
+        nextToolName = DynamicValues.recordGet(raw, ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse(""),
+        nextToolArgs = toolArgsRecord(DynamicValues.recordGet(raw, ReActKeys.nextToolArgs))
+      ))
+
   /** Normalize the `next_tool_args` output into the `Record` a tool receives. JSONAdapter yields a `Record` directly;
     * ChatAdapter yields the raw JSON text as a `String` (it has no `json` coercion), so parse that.
     */
   private def toolArgsRecord(value: Option[DynamicValue]): DynamicValue.Record =
     value match
       case Some(rec: DynamicValue.Record)                         => rec
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => ReAct.parseJsonRecord(s)
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => parseJsonRecord(s)
       case _                                                      => DynamicValue.Record.empty
-
-object ReAct:
-  val FinishToolName: String = "finish"
-
-  /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
-  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
 
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 

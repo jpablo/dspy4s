@@ -183,14 +183,14 @@ final case class CodeAct[I, O](
     for
       // Bounded loop building the code/observation trajectory, then the extractor — the shared TrajectoryAgent
       // flow (same as ReAct); only the per-iteration step (generate + execute) and the entry type differ.
-      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[CodeAct.TrajectoryEntry](
-        baseCall,
-        inputs,
+      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[CodeAct.TrajectoryEntry, DynamicPrediction](
         maxIterations,
-        "trajectory",
-        CodeAct.renderTrajectory,
-        extractorPredict
-                                )(codeActStep(baseCall))
+        CodeAct.renderTrajectory
+      )(codeActStep(baseCall)) { rendered =>
+        extractorPredict.apply(baseCall.copy(
+          input = inputs.updated("trajectory", DynamicValue.Primitive(PrimitiveValue.String(rendered)))
+        ))
+      }
       (extracted, rendered) = extractedAndTrajectory
       augmented <- OutputAugmentation.decodePrepended(
         extracted.values,

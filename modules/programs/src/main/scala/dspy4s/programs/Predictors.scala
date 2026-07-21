@@ -278,11 +278,11 @@ object Predictors extends LowPriority:
       val nextCompare = updateOverride(program.comparePredict, program.comparePredictOverride, updates(0))
       program.copy(comparePredictOverride = nextCompare)
 
-  private def updateOverride(
-      current: DynamicPredict,
-      existing: Option[DynamicPredict],
+  private def updateOverride[P](
+      current: P,
+      existing: Option[P],
       updated: PredictorState
-  ): Option[DynamicPredict] =
+  )(using Predictor[P]): Option[P] =
     if updated == current.predictorState then existing else Some(current.withPredictorState(updated))
 
   /** Identity instance for types intentionally known to contain no predictors.
