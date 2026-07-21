@@ -1,13 +1,12 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldRole, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldRole, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ProgramRuntime, ProgramCall}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Shape, Signature}
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
 /** ChainOfThought, defined as a small signature transformation on top of [[Predict]]. Wraps a `Signature[I, O]` and
@@ -93,39 +92,16 @@ final case class ChainOfThought[I, O](
   private def augmentedLayout: Either[DspyError, SignatureLayout] =
     ChainOfThought.augmentLayout(signature.layout)
 
-  private def augmentedOutputShape: Shape[Out] = new Shape[Out]:
-    // Idempotent, like the type-level WithReasoning and the layout's prependOutput: when O already declares
-    // `reasoning`, Out = O and its arity matches the base specs — an unconditional prepend would desync
-    // encode's fieldSpecs.zip(values), mislabeling every field and dropping the last.
-    val fieldSpecs: Vector[FieldSpec] =
-      if signature.outputShape.fieldSpecs.exists(_.name == ChainOfThought.reasoningField.name) then
-        signature.outputShape.fieldSpecs
-      else ChainOfThought.reasoningField +: signature.outputShape.fieldSpecs
-
-    // Reuse the base output's JSON schema so the structured (nested) field shapes still reach the adapter
-    // (and thus the LM). The prepended `reasoning` field is a plain String already covered by the adapter's
-    // field markers, so omitting it from the schema is harmless; the schema's only job here is to convey the
-    // nested shapes of the structured output fields.
-    override lazy val jsonSchemaString: Option[String] = signature.outputShape.jsonSchemaString
-
-    def encode(value: Out): DynamicValue.Record =
-      val product: Product = value match
-        case p: Product => p
-        case _ =>
-          throw new IllegalArgumentException(
-            "ChainOfThought output must be a named-tuple value (a Product); got a non-Product. " +
-            "This shape is built only from the augmented Signature, which supplies named tuples."
-          )
-      val values = product.productIterator.toVector
-      val entries = fieldSpecs.zip(values).map { (field, raw) =>
-        field.name -> DynamicValues.fromAny(raw)
-      }
-      DynamicValue.Record(Chunk.from(entries))
-
-    def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
-      // `prepend` builds the augmented named tuple via `NamedTuple.build` for products (named tuples and
-      // case classes); only the fieldless `DynamicValue.Record` output yields a structured error.
-      OutputAugmentation.decodePrepended(raw, signature.outputShape, "reasoning", "ChainOfThought", signature.name)
+  // The shared opening-position augmentation shape (idempotent prepend, decodePrepended, base JSON schema
+  // passthrough) — see [[OutputAugmentation.prependedStringShape]].
+  private def augmentedOutputShape: Shape[Out] =
+    OutputAugmentation.prependedStringShape(
+      signature.outputShape,
+      ChainOfThought.reasoningField,
+      "reasoning",
+      "ChainOfThought",
+      signature.name
+    )
 
 object ChainOfThought:
 

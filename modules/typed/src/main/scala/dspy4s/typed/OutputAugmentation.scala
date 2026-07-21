@@ -128,6 +128,43 @@ object OutputAugmentation:
       readField = (record, field, lbl) => DynamicValues.requireString(record, field, lbl)
     )
 
+  /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands
+    * its inner typed `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
+    * `ProgramOfThought`'s CoT-augmented steps). `field` is prepended to `base`'s specs idempotently by name
+    * (matching the type-level [[WithField]] and the layout's `prependOutput` — an unconditional prepend would
+    * desync `encode`'s `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base JSON schema passes
+    * through so structured base-field shapes still reach the adapter (the prepended field is a plain `String`
+    * already covered by the adapter's field markers). */
+  def prependedStringShape[Name <: String & Singleton, O, Out](
+      base: Shape[O],
+      field: dspy4s.core.contracts.FieldSpec,
+      fieldName: Name,
+      label: String,
+      signatureName: String
+  )(using prepend: PrependField.Aux[Name, String, O, Out]): Shape[Out] = new Shape[Out]:
+    val fieldSpecs: Vector[dspy4s.core.contracts.FieldSpec] =
+      if base.fieldSpecs.exists(_.name == field.name) then base.fieldSpecs
+      else field +: base.fieldSpecs
+
+    override lazy val jsonSchemaString: Option[String] = base.jsonSchemaString
+
+    def encode(value: Out): DynamicValue.Record =
+      val product: Product = value match
+        case p: Product => p
+        case _ =>
+          throw new IllegalArgumentException(
+            s"$label output must be a named-tuple value (a Product); got a non-Product. " +
+              "This shape is built only from an augmented Signature, which supplies named tuples."
+          )
+      val values = product.productIterator.toVector
+      val entries = fieldSpecs.zip(values).map { (spec, raw) =>
+        spec.name -> DynamicValues.fromAny(raw)
+      }
+      DynamicValue.Record(zio.blocks.chunk.Chunk.from(entries))
+
+    def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
+      decodePrepended[O, Name, Out](raw, base, fieldName, label, signatureName)(using prepend)
+
   /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no
     * static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a
     * prepended field, so the augmentation is unsupported. */
