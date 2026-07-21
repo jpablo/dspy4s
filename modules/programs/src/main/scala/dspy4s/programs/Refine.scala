@@ -14,12 +14,15 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
+import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.typed.Prediction
+import dspy4s.typed.Shape
+import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
 
@@ -29,7 +32,7 @@ import zio.blocks.schema.Schema
   * that attempt's trajectory and injects it as a `hint_` input into the next attempt via a
   * [[Refine.HintInjectingAdapter]]. A port of DSPy 3.x's `dspy.Refine` (`OfferFeedback` iterative feedback loop).
   *
-  * The advice is produced by an [[Refine.offerFeedbackLayout OfferFeedback]] sub-program (a [[DynamicPredict]])
+  * The advice is produced by an [[Refine.offerFeedbackSignature OfferFeedback]] sub-program (a typed [[Predict]])
   * grounded in the attempt's runtime trace plus the program I/O, the reward value, and the threshold. It is run with
   * the ambient LM/adapter (NOT under the hint adapter), and yields a per-module advice map (component name -> advice)
   * that is routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
@@ -64,10 +67,11 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     threshold: Double,
     failCount: Option[Int] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
-      * [[Refine.offerFeedbackLayout]]. Carrying it as a defaulted, `copy`-reachable field makes the critic addressable
-      * + immutably replaceable (see [[Refine.refinePredictors]]), mirroring the ReAct/CodeAct override pattern.
+      * [[Refine.offerFeedbackSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
+      * addressable + immutably replaceable (see [[Refine.refinePredictors]]), mirroring the ReAct/CodeAct override
+      * pattern.
       */
-    criticPredictOverride: Option[DynamicPredict] = None
+    criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
     predictors: Predictors[P]
 ) extends Module[ProgramCall[I], Prediction[O]]:
@@ -75,12 +79,13 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
 
   override val moduleName: String = "refine"
 
-  /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern). The feedback hook runs this
-    * member rather than rebuilding a predict per attempt, so optimizers can tune the critic's instructions/demos like
-    * any other learnable. Tunable via [[criticPredictOverride]].
+  /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern) — a TYPED [[Predict]] over
+    * [[Refine.offerFeedbackSignature]] (the critic's shape is fully static). The feedback hook runs this member rather
+    * than rebuilding a predict per attempt, so optimizers can tune the critic's instructions/demos like any other
+    * learnable. Tunable via [[criticPredictOverride]].
     */
-  val criticPredict: DynamicPredict =
-    criticPredictOverride.getOrElse(DynamicPredict(layout = Refine.offerFeedbackLayout, name = Some("offer_feedback")))
+  val criticPredict: Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] =
+    criticPredictOverride.getOrElse(Predict(signature = Refine.offerFeedbackSignature, name = Some("offer_feedback")))
 
   override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record        = DynamicValue.Record.empty
   override protected def callTraceEnabled(call: ProgramCall[I]): Boolean              = call.traceEnabled
@@ -265,6 +270,48 @@ object Refine:
       )
     ).getOrElse(throw new IllegalStateException("OfferFeedback layout failed to construct"))
 
+  /** The critic's typed input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout
+    * exactly. */
+  private[programs] final case class OfferFeedbackInputs(
+      program_inputs: String,
+      program_trajectory: String,
+      program_outputs: String,
+      reward_value: Double,
+      target_threshold: Double,
+      module_names: String
+  ) derives Schema
+
+  /** The critic's typed output. `discussion` is prompt-guidance only ([[generateAdvice]] never reads it), which the
+    * lenient shape below reflects. */
+  private[programs] final case class OfferFeedbackAdvice(discussion: String, advice: String)
+
+  /** Hand-written LENIENT output shape mirroring the prior dynamic consumption exactly: `advice` is required (with
+    * `DynamicPrediction.asString`'s primitive coercion, the accessor the dynamic path used), `discussion` tolerates
+    * absence (defaults to ""). A derived shape would reject completions that omit `discussion`, which today's critic
+    * consumers accept; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict`
+    * construction. */
+  private val offerFeedbackOutputShape: Shape[OfferFeedbackAdvice] = new Shape[OfferFeedbackAdvice]:
+    val fieldSpecs: Vector[FieldSpec] = offerFeedbackLayout.outputFields
+    def encode(value: OfferFeedbackAdvice): DynamicValue.Record =
+      DynamicValues.record("discussion" := value.discussion, "advice" := value.advice)
+    def decode(raw: DynamicValue.Record): Either[DspyError, OfferFeedbackAdvice] =
+      DynamicPrediction(values = raw).asString("advice").map { advice =>
+        OfferFeedbackAdvice(
+          discussion = DynamicValues.recordGet(raw, "discussion").map(DynamicValues.renderText).getOrElse(""),
+          advice     = advice
+        )
+      }
+
+  /** The critic's typed signature: the hand-built [[offerFeedbackLayout]] (descriptions + instructions preserved
+    * verbatim, so prompt rendering is unchanged) paired with a derived input shape and the lenient output shape. */
+  private[programs] val offerFeedbackSignature: Signature[OfferFeedbackInputs, OfferFeedbackAdvice] =
+    Signature(
+      name        = "OfferFeedback",
+      layout      = offerFeedbackLayout,
+      inputShape  = Shape.derivedWithRole[OfferFeedbackInputs](FieldRole.Input),
+      outputShape = offerFeedbackOutputShape
+    )
+
   /** Render an attempt's runtime [[TraceEntry]] vector as a readable text block — dspy4s's stand-in for Python's
     * source-grounded trajectory. One block per component: `component: <inputs> -> <outputs>`.
     */
@@ -284,7 +331,7 @@ object Refine:
     * `moduleNames` for a non-JSON output.
     */
   private[programs] def generateAdvice[I, O](
-      critic: DynamicPredict,
+      critic: Predict[OfferFeedbackInputs, OfferFeedbackAdvice],
       input: I,
       prediction: Prediction[O],
       trace: Vector[TraceEntry],
@@ -296,16 +343,14 @@ object Refine:
       .map(e => DynamicValues.renderText(e.inputs))
       .getOrElse(input.toString)
     val programOutputs = DynamicValues.renderText(prediction.raw.values)
-    critic.apply(ProgramCall(input =
-      DynamicValues.record(
-      "program_inputs"     := programInputs,
-      "program_trajectory" := renderTrajectory(trace),
-      "program_outputs"    := programOutputs,
-      "reward_value"       := reward,
-      "target_threshold"   := threshold,
-      "module_names"       := moduleNames.mkString(", ")
-      )
-    )).flatMap(_.asString("advice")).map(parseAdvice(_, moduleNames))
+    critic.apply(ProgramCall(input = OfferFeedbackInputs(
+      program_inputs     = programInputs,
+      program_trajectory = renderTrajectory(trace),
+      program_outputs    = programOutputs,
+      reward_value       = reward,
+      target_threshold   = threshold,
+      module_names       = moduleNames.mkString(", ")
+    ))).map(result => parseAdvice(result.output.advice, moduleNames))
 
   /** Parse the OfferFeedback `advice` output into a per-module advice map. Faithful path: the output is a JSON object
     * `{module_name: advice}`, decoded leniently (an embedded object is extracted first, tolerating prose or code fences

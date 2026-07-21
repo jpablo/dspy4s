@@ -113,7 +113,7 @@ class CompositePredictorsSuite extends FunSuite:
 
     assertEquals(P.read(r), Vector(leaf.predict.predictorState, r.criticPredict.predictorState))
     assertEquals(P.inspectNamed(r).map(_._1), Vector("self", "critic"))
-    assertEquals(r.criticPredict.layout.name, "OfferFeedback")
+    assertEquals(r.criticPredict.signature.name, "OfferFeedback")
     assertEquals(r.criticPredict.name, Some("offer_feedback"))
   }
 
