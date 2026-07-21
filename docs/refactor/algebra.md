@@ -298,7 +298,12 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Category`. Algebra 1's two
     commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
-    every monoid in the codebase is a named instance, none left implicit.
+    every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
+    `core.contracts.Lens[S, A]` states get-put / put-get / put-put on the trait, and `Predictor[P] extends
+    Lens[P, PredictorState]` inherits them, adding only the `frame` law (writing state never changes the
+    read-only `PredictorMetadata`). The focus had to be carved down to exactly the writable triple
+    (instructions / demos / config) before these laws could hold; `PredictorStateSuite` executes all four
+    statements per leaf instance (`DynamicPredict`, `Predict`, `ChainOfThought`).
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
     audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and
     `fanout = copy >>> split`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not
