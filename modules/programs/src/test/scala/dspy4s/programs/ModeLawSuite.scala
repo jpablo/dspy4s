@@ -10,6 +10,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
@@ -35,9 +36,8 @@ class ModeLawSuite extends FunSuite:
   private final case class Recorder(predict: DynamicPredict) extends Module[ProgramCall[Int], Prediction[Int]]:
     val seen: ArrayBuffer[Mode.Controls] = ArrayBuffer.empty
     override val moduleName: String = "recorder"
-    override protected def callInputs(call: ProgramCall[Int]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[Int]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record       = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Int], Prediction[Int]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       seen += Mode.Controls(call.config, call.traceEnabled, call.rolloutId)
       Right(Prediction(call.input, DynamicPrediction.empty))

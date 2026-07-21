@@ -13,6 +13,7 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.TrajectoryAgent
@@ -172,10 +173,8 @@ final case class CodeAct[I, O](
          |$library""".stripMargin
     ) ++ toolLines).mkString("\n")
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record =
-    call.encodedInput(baseSignature.inputShape)
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean                = call.traceEnabled
-  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[Out]] =
+    ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     for

@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
 import dspy4s.core.data.DynamicPrediction
-import dspy4s.programs.contracts.{DynamicModule, Module, ProgramCall}
+import dspy4s.programs.contracts.{DynamicModule, Module, ModuleLifecycle, ProgramCall}
 import dspy4s.typed.Prediction
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, Schema}
@@ -25,12 +25,8 @@ class ProgramRunnerSuite extends FunSuite:
     var observed: Option[ProgramCall[RunnerInput]] = None
     val moduleName                                 = "capturing_typed"
 
-    protected def callInputs(call: ProgramCall[RunnerInput]): DynamicValue.Record =
-      DynamicValues.record("value" := call.input.value)
-
-    protected def callTraceEnabled(call: ProgramCall[RunnerInput]): Boolean = call.traceEnabled
-
-    protected def tracePayload(prediction: Prediction[String]): DynamicValue.Record = prediction.raw.values
+    protected val lifecycle: ModuleLifecycle[ProgramCall[RunnerInput], Prediction[String]] =
+      ModuleLifecycle.typed(call => DynamicValues.record("value" := call.input.value))
 
     protected def forward(call: ProgramCall[RunnerInput])(using
         RuntimeContext

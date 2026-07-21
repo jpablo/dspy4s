@@ -18,6 +18,7 @@ import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.typed.Prediction
@@ -87,9 +88,8 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
   val criticPredict: Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] =
     criticPredictOverride.getOrElse(Predict(signature = Refine.offerFeedbackSignature, name = Some("offer_feedback")))
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record        = DynamicValue.Record.empty
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean              = call.traceEnabled
-  override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+    ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val baseContext  = RuntimeEnvironment.current

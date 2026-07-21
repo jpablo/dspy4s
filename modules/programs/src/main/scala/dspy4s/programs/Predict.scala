@@ -4,7 +4,7 @@ import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.lm.contracts.LanguageModel
-import dspy4s.programs.contracts.{Module, ProgramCall, ProgramRuntime}
+import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
 import dspy4s.typed.{Prediction, Signature}
 import zio.blocks.schema.DynamicValue
@@ -89,13 +89,8 @@ final case class Predict[I, O](
       tools = tools
     )
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record =
-    call.encodedInput(signature.inputShape)
-
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean = call.traceEnabled
-
-  override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record =
-    prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+    ModuleLifecycle.typed(signature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputRecord = call.encodedInput(signature.inputShape)

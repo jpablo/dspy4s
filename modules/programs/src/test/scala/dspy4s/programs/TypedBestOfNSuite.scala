@@ -21,6 +21,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
@@ -50,9 +51,8 @@ class TypedBestOfNSuite extends FunSuite:
     val calls: AtomicInteger         = AtomicInteger(0)
     private val counter              = AtomicInteger(0)
     override val moduleName: String  = "typed_stub"
-    override protected def callInputs(call: ProgramCall[Q]): DynamicValue.Record  = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[Q]): Boolean        = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Cand]): DynamicValue.Record = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Q], Prediction[Cand]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       calls.incrementAndGet()
       rolloutIds += call.rolloutId.getOrElse(-1)
@@ -292,9 +292,8 @@ class TypedBestOfNSuite extends FunSuite:
     val layout: SignatureLayout =
       SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(state.instructions)
     override val moduleName: String = "inner_predict"
-    override protected def callInputs(call: ProgramCall[Q]): DynamicValue.Record  = rec("q" := call.input.q)
-    override protected def callTraceEnabled(call: ProgramCall[Q]): Boolean        = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Cand]): DynamicValue.Record = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Q], Prediction[Cand]] =
+      ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       val ctx     = RuntimeEnvironment.current

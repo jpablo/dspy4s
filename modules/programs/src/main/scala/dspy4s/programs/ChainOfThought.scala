@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.{DspyError, FieldRole, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureOps.*
-import dspy4s.programs.contracts.{Module, ProgramRuntime, ProgramCall}
+import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{OutputAugmentation, Prediction, Shape, Signature}
@@ -50,13 +50,8 @@ final case class ChainOfThought[I, O](
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record =
-    call.encodedInput(signature.inputShape)
-
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean = call.traceEnabled
-
-  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record =
-    prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[Out]] =
+    ModuleLifecycle.typed(signature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predictor.flatMap(_.apply(call))

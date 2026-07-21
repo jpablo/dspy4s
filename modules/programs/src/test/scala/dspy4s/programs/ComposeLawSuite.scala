@@ -11,6 +11,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
@@ -37,10 +38,9 @@ class ComposeLawSuite extends FunSuite:
     */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[ProgramCall[I], Prediction[O]]:
-    override val moduleName: String                                            = s"step_$tag"
-    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
+    override val moduleName: String = s"step_$tag"
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
@@ -48,10 +48,9 @@ class ComposeLawSuite extends FunSuite:
     * Associativity requires both syntax trees to have run the same leaves before reaching it.
     */
   private final case class TraceSize(predict: DynamicPredict) extends Module[ProgramCall[String], Prediction[Int]]:
-    override val moduleName: String                                                 = "trace_size"
-    override protected def callInputs(call: ProgramCall[String]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[String]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record    = p.raw.values
+    override val moduleName: String = "trace_size"
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[String], Prediction[Int]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[String])(using
         RuntimeContext
     ): Either[DspyError, Prediction[Int]] =

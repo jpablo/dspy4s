@@ -18,6 +18,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
@@ -49,9 +50,8 @@ class RefinePerModuleAdviceSuite extends FunSuite:
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
       extends Module[ProgramCall[Q], Prediction[Cand]]:
     override val moduleName: String = "hint_then_answer"
-    override protected def callInputs(call: ProgramCall[Q]): DynamicValue.Record  = rec("q" := call.input.q)
-    override protected def callTraceEnabled(call: ProgramCall[Q]): Boolean        = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Cand]): DynamicValue.Record = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Q], Prediction[Cand]] =
+      ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       for

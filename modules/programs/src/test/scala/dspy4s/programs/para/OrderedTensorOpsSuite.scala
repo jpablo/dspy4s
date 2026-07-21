@@ -6,10 +6,10 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -32,26 +32,23 @@ class OrderedTensorOpsSuite extends FunSuite:
 
   private final case class Fn[I, O](f: I => O) extends Module[ProgramCall[I], Prediction[O]]:
     override val moduleName: String = "fn"
-    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction.empty))
 
   private final case class Fail[I, O](label: String) extends Module[ProgramCall[I], Prediction[O]]:
     override val moduleName: String = s"fail_$label"
-    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Left(ValidationError(label))
 
   private final class Counting extends Module[ProgramCall[Int], Prediction[String]]:
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "counting"
-    override protected def callInputs(call: ProgramCall[Int]): DynamicValue.Record  = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[Int]): Boolean        = call.traceEnabled
-    override protected def tracePayload(p: Prediction[String]): DynamicValue.Record = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Int], Prediction[String]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =

@@ -18,6 +18,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.AgentLoop
@@ -210,10 +211,8 @@ final case class RLM[I, O](
       "Based on the REPL trajectory, extract the final outputs now.\n\n" +
       "Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs."
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record =
-    call.encodedInput(baseSignature.inputShape)
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean              = call.traceEnabled
-  override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+    ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputs = call.encodedInput(baseSignature.inputShape)

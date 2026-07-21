@@ -12,10 +12,10 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -30,10 +30,9 @@ class RecoveryCombinatorSuite extends FunSuite:
       predict: DynamicPredict,
       runs: ArrayBuffer[String]
   ) extends Module[ProgramCall[Int], Prediction[String]]:
-    override val moduleName: String                                              = name
-    override protected def callInputs(call: ProgramCall[Int]): DynamicValue.Record  = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[Int]): Boolean        = call.traceEnabled
-    override protected def tracePayload(p: Prediction[String]): DynamicValue.Record = p.raw.values
+    override val moduleName: String = name
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Int], Prediction[String]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =

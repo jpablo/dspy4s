@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.typed.Prediction
@@ -16,8 +17,8 @@ import zio.blocks.schema.DynamicValue
   * `ChainOfThought`, …). The repeated samples are made distinct by a per-attempt `rolloutId` (cache-busting);
   * `failCount` bounds tolerated failures before giving up (defaults to `n`).
   *
-  * `callInputs` is empty: a generic wrapper has no `Signature` to encode `I` for its own trace entry, so the meaningful
-  * inputs live on the nested inner program's event. The best-of-`n` selection loop lives in
+  * Its lifecycle observation records empty inputs: a generic wrapper has no `Signature` to encode `I` for its own trace
+  * entry, so the meaningful inputs live on the nested inner program's event. The best-of-`n` selection loop lives in
   * [[dspy4s.programs.runtime.AttemptSelection.bestOf]] (generic over the attempt result), shared with [[Refine]];
   * `BestOfN` is its independent-samples instance (no inter-attempt feedback).
   *
@@ -37,9 +38,8 @@ final case class BestOfN[P <: Module[ProgramCall[I], Prediction[O]], I, O](
 
   override val moduleName: String = "best_of_n"
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record        = DynamicValue.Record.empty
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean              = call.traceEnabled
-  override protected def tracePayload(prediction: Prediction[O]): DynamicValue.Record = prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+    ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val rolloutStart = call.rolloutId.getOrElse(0)

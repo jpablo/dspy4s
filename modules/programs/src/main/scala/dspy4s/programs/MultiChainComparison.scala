@@ -11,6 +11,7 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Signature}
@@ -28,7 +29,7 @@ final case class MultiChainCall[I](
     traceEnabled: Boolean = true,
     rolloutId: Option[Int] = None
 ):
-  // Same per-call encode memo as ProgramCall (see there): Module.apply's callInputs and forward both need the
+  // Same per-call encode memo as ProgramCall (see there): Module's lifecycle observation and forward both need the
   // encoded input; cache it so the pure encode runs once per call.
   @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
 
@@ -140,10 +141,12 @@ final case class MultiChainComparison[I, O](
       )
     ))
 
-  override protected def callInputs(call: MultiChainCall[I]): DynamicValue.Record =
-    call.encodedInput(baseSignature.inputShape)
-  override protected def callTraceEnabled(call: MultiChainCall[I]): Boolean = call.traceEnabled
-  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[MultiChainCall[I], Prediction[Out]] =
+    ModuleLifecycle.observed(
+      call => call.encodedInput(baseSignature.inputShape),
+      _.traceEnabled,
+      _.raw.values
+    )
 
   override protected def forward(call: MultiChainCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     if call.attempts.size != m then

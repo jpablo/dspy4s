@@ -28,6 +28,7 @@ import dspy4s.programs.ProgramInput
 import dspy4s.programs.ReAct
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import dspy4s.typed.Shape
@@ -61,10 +62,9 @@ class ParaCategoryLawSuite extends FunSuite:
   /** A typed program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[ProgramCall[I], Prediction[O]]:
-    override val moduleName: String                                            = s"step_$tag"
-    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record = p.raw.values
+    override val moduleName: String = s"step_$tag"
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
@@ -84,10 +84,9 @@ class ParaCategoryLawSuite extends FunSuite:
     * construction gate below.
     */
   private final class Opaque extends Module[ProgramCall[Int], Prediction[Int]]:
-    override val moduleName: String                                              = "opaque"
-    override protected def callInputs(call: ProgramCall[Int]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[Int]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[Int]): DynamicValue.Record = p.raw.values
+    override val moduleName: String = "opaque"
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[Int], Prediction[Int]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, DynamicPrediction.empty))
 

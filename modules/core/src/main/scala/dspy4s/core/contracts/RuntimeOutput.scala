@@ -6,10 +6,10 @@ import java.time.Instant
 
 /** A single observed module call -- one entry per `Module.apply` (or any other module that records itself). `component`
   * is the module's `moduleName` (`"predict"`, `"chain_of_thought"`, ...), `inputs` is the encoded `ProgramCall.input`
-  * record, `outputs` is the module's `tracePayload(prediction)` (defaults to `prediction.values`).
+  * record, and `outputs` is the successful result projected by the module's lifecycle observation.
   *
   * Appended to [[RuntimeContext.trace]] when the underlying `ProgramCall.traceEnabled` is `true`. A successful call
-  * records `failure = None` and `outputs = tracePayload(...)`. A FAILED call is recorded only when
+  * records `failure = None`. A FAILED call is recorded only when
   * [[RuntimeContext.captureFailureTraces]] is set (e.g. by GEPA's reflective evaluation): `failure` carries the error
   * message and `outputs` carries the raw model response (`raw_response`) when the error is a parse failure. See
   * PORT_GAPS G-12 (P-a).

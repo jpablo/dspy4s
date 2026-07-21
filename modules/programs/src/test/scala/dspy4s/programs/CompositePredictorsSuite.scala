@@ -7,10 +7,11 @@ import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.{Prediction, Signature}
 import munit.FunSuite
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.Schema
 
 // Top-level fixtures (Schema derivation requires top-level types) for the RLM signature.
 final case class RlmIn(question: String) derives Schema
@@ -36,9 +37,8 @@ class CompositePredictorsSuite extends FunSuite:
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
       extends Module[ProgramCall[I], Prediction[O]]:
     override val moduleName: String = "leaf"
-    override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record = DynamicValue.Record.empty
-    override protected def callTraceEnabled(call: ProgramCall[I]): Boolean       = call.traceEnabled
-    override protected def tracePayload(p: Prediction[O]): DynamicValue.Record       = p.raw.values
+    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+      ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction.empty))
 

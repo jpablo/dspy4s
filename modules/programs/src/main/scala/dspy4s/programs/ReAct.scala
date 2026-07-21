@@ -12,6 +12,7 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
@@ -155,10 +156,8 @@ final case class ReAct[I, O](
        |next_tool_name must be one of:
        |$toolList""".stripMargin
 
-  override protected def callInputs(call: ProgramCall[I]): DynamicValue.Record =
-    call.encodedInput(baseSignature.inputShape)
-  override protected def callTraceEnabled(call: ProgramCall[I]): Boolean                = call.traceEnabled
-  override protected def tracePayload(prediction: Prediction[Out]): DynamicValue.Record = prediction.raw.values
+  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[Out]] =
+    ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     for
