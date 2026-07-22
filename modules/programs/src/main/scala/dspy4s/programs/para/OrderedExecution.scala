@@ -4,6 +4,8 @@ import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.Law
 import dspy4s.core.contracts.<->
 import dspy4s.programs.Compose
+import dspy4s.programs.andThen
+import dspy4s.programs.***
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
@@ -77,10 +79,10 @@ given orderedProgram: OrderedTensorOps[ModuleHom] with
 
   extension [A, B](f: ModuleHom[A, B])
     infix def >>>[C](g: ModuleHom[B, C]): ModuleHom[A, C] =
-      Compose.andThen(f, g)
+      f.andThen(g)
 
   def tensor[A, B, C, D](f: ModuleHom[A, C], g: ModuleHom[B, D]): ModuleHom[(A, B), (C, D)] =
-    Compose.split(f, g)
+    f *** g
 
   def swap[A, B]: ModuleHom[(A, B), (B, A)] = Compose.swap[A, B]
   def copy[A]: ModuleHom[A, (A, A)]         = Compose.copy[A]

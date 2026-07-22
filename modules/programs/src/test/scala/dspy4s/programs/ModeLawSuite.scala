@@ -57,7 +57,7 @@ class ModeLawSuite extends FunSuite:
 
   test("mode applies the control transform — the temperature reaches the wrapped program") {
     val r = Recorder(predict("a -> b"))
-    val _ = Compose.mode(Mode.temperature(0.7))(r).apply(ProgramCall(1))
+    val _ = r.mode(Mode.temperature(0.7)).apply(ProgramCall(1))
     assertEquals(r.seen.size, 1)
     assertEquals(temp(r.seen.head), Some("0.7"))
   }

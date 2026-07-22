@@ -100,8 +100,8 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     // via a HintInjectingAdapter. Selection / failure-budget / trace propagation are the shared `bestOf` loop.
     AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
       runAttempt = idx =>
-        Compose
-          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(module)
+        module
+          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))
           .apply(call),
       reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction)),
       feedback = Some { (prediction, trace, score) =>

@@ -84,6 +84,7 @@ class ComposeLawSuite extends FunSuite:
     val b  = step[String, Int]("b", "s -> n")(s => s.length)
     val ab = a >>> b // expected AndThen[Int, String, Int, Step[Int,String], Step[String,Int]]
     assertEquals(ab.apply(ProgramCall(5)).map(_.output), Right(2)) // "v5".length
+    assertEquals(a.andThen(b).apply(ProgramCall(5)), ab.apply(ProgramCall(5)))
   }
 
   // ── Category: identity ───────────────────────────────────────────────────────────────────────────────────

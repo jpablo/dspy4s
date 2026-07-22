@@ -144,6 +144,8 @@ class TransformCombinatorSuite extends FunSuite:
     assertEquals(order.toVector, Vector("first", "second"))
     assertEquals(result, Compose.parallel(first, second)(ProgramCall(4)))
     assertEquals(result, first.fanout(second)(ProgramCall(4)))
+    assertEquals(result, first.parallel(second)(ProgramCall(4)))
+    assertEquals(result, (first &&& second)(ProgramCall(4)))
   }
 
   test("split is ordered independent-input pairing and fails before running the second leg") {
@@ -162,4 +164,6 @@ class TransformCombinatorSuite extends FunSuite:
     val expectedStates = Vector(first.predict.predictorState, second.predict.predictorState)
     assertEquals(params(Compose.split(first, second)), expectedStates)
     assertEquals(params(first.split(second)), expectedStates)
+    assertEquals(params(first.tensor(second)), expectedStates)
+    assertEquals(params(first *** second), expectedStates)
   }

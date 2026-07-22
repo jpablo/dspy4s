@@ -44,8 +44,8 @@ final case class BestOfN[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     val rolloutStart = call.rolloutId.getOrElse(0)
     AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
       runAttempt = idx =>
-        Compose
-          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(module)
+        module
+          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))
           .apply(call),
       reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction))
     )

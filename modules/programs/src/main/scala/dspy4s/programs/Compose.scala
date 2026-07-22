@@ -307,13 +307,37 @@ object Compose:
   * scope (or via `import dspy4s.programs.*`).
   */
 extension [I, X, A <: Module[ProgramCall[I], Prediction[X]]](self: A)
-  infix def >>>[O, B <: Module[ProgramCall[X], Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
+  /** Named form of sequential composition. */
+  def andThen[O, B <: Module[ProgramCall[X], Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
     Compose.andThen(self, next)
+
+  /** Operator form of [[andThen]]. */
+  infix def >>>[O, B <: Module[ProgramCall[X], Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
+    self.andThen(next)
 
   /** Fluent ordered shared-input fanout. */
   def fanout[O, B <: Module[ProgramCall[I], Prediction[O]]](other: B): Both[I, X, O, A, B] =
     Compose.fanout(self, other)
 
+  /** Arrow operator for ordered shared-input [[fanout]]. */
+  infix def &&&[O, B <: Module[ProgramCall[I], Prediction[O]]](other: B): Both[I, X, O, A, B] =
+    self.fanout(other)
+
+  /** Compatibility name for [[fanout]]. */
+  def parallel[O, B <: Module[ProgramCall[I], Prediction[O]]](other: B): Both[I, X, O, A, B] =
+    self.fanout(other)
+
   /** Fluent ordered independent-input split. */
   def split[J, O, B <: Module[ProgramCall[J], Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
     Compose.split(self, other)
+
+  /** Arrow operator for ordered independent-input [[split]]. */
+  infix def ***[J, O, B <: Module[ProgramCall[J], Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
+    self.split(other)
+
+  /** Compatibility name for [[split]]. */
+  def tensor[J, O, B <: Module[ProgramCall[J], Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
+    self.split(other)
+
+  /** Apply non-learnable control middleware to this program. */
+  def mode(value: Mode): Moded[I, X, A] = Compose.mode(value)(self)

@@ -5,6 +5,8 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.AndThen
 import dspy4s.programs.Both
 import dspy4s.programs.Compose
+import dspy4s.programs.andThen
+import dspy4s.programs.&&&
 import dspy4s.programs.predictors.PredictorState
 import dspy4s.programs.predictors.PredictorView
 import dspy4s.programs.ProgramInput
@@ -102,13 +104,13 @@ object Program:
       Program.packageWith(Compose.id[A], summon[RecordCodec[A]].decode)
 
     def fanout[I, A, B](f: Program[I, A], g: Program[I, B]): Program[I, (A, B)] =
-      Program.packageWith(Compose.fanout(f.program, g.program), f.decodeInput)(using
+      Program.packageWith(f.program &&& g.program, f.decodeInput)(using
         Both.bothPredictors[I, A, B, f.Rep, g.Rep](using f.addressable, g.addressable)
       )
 
     extension [A, B](f: Program[A, B])
       infix def >>>[C](g: Program[B, C]): Program[A, C] =
-        Program.packageWith(Compose.andThen(f.program, g.program), f.decodeInput)(using
+        Program.packageWith(f.program.andThen(g.program), f.decodeInput)(using
           AndThen.andThenPredictors[A, B, C, f.Rep, g.Rep](using f.addressable, g.addressable)
         )
 
