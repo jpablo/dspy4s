@@ -16,23 +16,37 @@ private[dspy4s] object SignatureOps:
       * exists (idempotent). For an output-role field this is the prior `ChainOfThought.augmentLayout`
       * (`insert(0, _)`) and the `MultiChainComparison` guarded `prepend`, generalized off the hard-coded
       * field: both reconstruct the layout as `inputs ++ (field +: outputs)`.
+      *
+      * Requires an Output-role field: a wrong-role spec would silently land in the wrong cohort and break
+      * L1a (cohort isolation), so the precondition fails fast instead. The laws are total over the guarded
+      * carrier.
       */
     def prependOutput(field: FieldSpec): SignatureLayout =
+      require(field.role == FieldRole.Output, s"prependOutput requires an Output-role field, got: $field")
       if layout.outputFields.exists(_.name == field.name) then layout
       else layout.prepend(field)
 
     /** Append `field` to the end of the input cohort, unless an input field of the same name already exists
       * (idempotent).
+      *
+      * Requires an Input-role field, for the same reason as `prependOutput` (a wrong role breaks L1b).
       */
     def appendInput(field: FieldSpec): SignatureLayout =
+      require(field.role == FieldRole.Input, s"appendInput requires an Input-role field, got: $field")
       if layout.inputFields.exists(_.name == field.name) then layout
       else layout.append(field)
 
     /** Keep the inputs, replace every output field with `fields`. The loop-step signatures of `ReAct` and
       * `CodeAct` use this to drop the base outputs (which their extractor produces) in favor of the
       * per-iteration control outputs.
+      *
+      * Requires Output-role fields: an Input-role spec here would corrupt both cohorts at once (L4b/L4c).
       */
     def replaceOutputs(fields: Vector[FieldSpec]): SignatureLayout =
+      require(
+        fields.forall(_.role == FieldRole.Output),
+        s"replaceOutputs requires Output-role fields, got: ${fields.filterNot(_.role == FieldRole.Output)}"
+      )
       layout.withFields(layout.inputFields ++ fields)
 
   /** The signature-algebra laws stated ON the structure as `@Law` methods returning [[IsEq]] (the
@@ -40,7 +54,11 @@ private[dspy4s] object SignatureOps:
     * EXECUTES these over generated layouts, checking each under the honest observation: layout equations by
     * observational equality (`in` / `out` / `instructions` / `name`, since cross-cohort commutativity reorders
     * the underlying field vector while leaving every observation identical), field-cohort equations by
-    * `sameElements`. The equations are the contract; the suite is how they run. */
+    * `sameElements`. The equations are the contract; the suite is how they run.
+    *
+    * Carrier note: the laws quantify over role-correct fields, and since the ops now `require` the role, that
+    * subset is enforced at the operation rather than assumed by the suite's generators. A wrong-role field is
+    * an `IllegalArgumentException` at the call site, not a silent law violation. */
   private[dspy4s] object laws:
 
     // L1 — cohort isolation: each combinator touches exactly one cohort.

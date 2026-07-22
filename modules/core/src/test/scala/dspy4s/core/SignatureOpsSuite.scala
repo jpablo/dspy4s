@@ -59,3 +59,19 @@ class SignatureOpsSuite extends munit.FunSuite:
   test("create rejects duplicate field names at the boundary") {
     assert(SignatureLayout.create("test", Vector(in("q"), out("q"))).isLeft)
   }
+
+  // The ops require role-correct fields: a wrong-role spec would land in the wrong cohort and silently
+  // violate the cohort-isolation laws (L1), so it fails fast instead. This pins the guarded carrier: the
+  // laws are total over what the ops accept.
+  test("cohort ops reject wrong-role fields fast") {
+    val base = layout(in("question"), out("answer"))
+
+    val prependErr = intercept[IllegalArgumentException](base.prependOutput(in("sneaky_input")))
+    assert(prependErr.getMessage.contains("prependOutput requires an Output-role field"))
+
+    val appendErr = intercept[IllegalArgumentException](base.appendInput(out("sneaky_output")))
+    assert(appendErr.getMessage.contains("appendInput requires an Input-role field"))
+
+    val replaceErr = intercept[IllegalArgumentException](base.replaceOutputs(Vector(out("ok"), in("sneaky"))))
+    assert(replaceErr.getMessage.contains("replaceOutputs requires Output-role fields"))
+  }
