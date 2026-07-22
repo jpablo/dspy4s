@@ -62,6 +62,13 @@ of the wrapped transform (not `==`), executed in `SignatureOpsLawSuite`. Within 
 idempotent by name but order-sensitive (two `prependOutput`s do not commute), which is the signature of an
 insertion-ordered, name-keyed map.
 
+**Carrier note (from the lawfulness review).** The laws quantify over role-correct fields, but `FieldSpec`
+itself carries no role restriction: a wrong-role field passed to a cohort op would land in the wrong cohort
+and silently violate L1. The ops now `require` the role (an `IllegalArgumentException` at the call site), so
+the lawful subset is enforced at the operation rather than assumed by the law suite's generators. A
+role-indexed `FieldSpec` would move the guard to compile time, but the ops are `private[dspy4s]` and the
+fail-fast check is proportionate to that internal surface.
+
 **Design critique, resolved.** `SignatureLayout` used to enforce uniqueness with a runtime
 `require(distinct names)`. In ADD terms an invariant is a feature of the implementation, not the design:
 the `require` is the tell that uniqueness should hold by construction. The first instinct was to model the
