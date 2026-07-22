@@ -7,9 +7,9 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
-import dspy4s.programs.IdentifiedPredictor
-import dspy4s.programs.PredictorId
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.IdentifiedPredictor
+import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.ProgramRunner
 

@@ -1,9 +1,10 @@
-package dspy4s.programs
+package dspy4s.programs.predictors
 
 import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.Law
 import dspy4s.core.contracts.Lens
 import dspy4s.core.contracts.<->
+import dspy4s.programs.{ChainOfThought, CodeAct, DynamicPredict, MultiChainComparison, Predict, ProgramOfThought, ReAct, RLM}
 import dspy4s.typed.OutputAugmentation
 import dspy4s.typed.OutputAugmentation.PrependField
 import scala.compiletime.error

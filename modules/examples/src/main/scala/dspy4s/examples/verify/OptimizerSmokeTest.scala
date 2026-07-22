@@ -37,7 +37,7 @@ import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config}
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 
 import java.util.concurrent.atomic.AtomicInteger
 

@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictorState
+import dspy4s.programs.predictors.predictorState
 
-import dspy4s.programs.{PredictorState, Predictors}
+import dspy4s.programs.predictors.{PredictorState, Predictors}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -73,7 +73,7 @@ class PredictorsSuite extends FunSuite:
   test("derived rejects a field without Predictors evidence instead of silently treating it as empty") {
     val errors = compileErrors("""
       import dspy4s.programs.DynamicPredict
-      import dspy4s.programs.Predictors
+      import dspy4s.programs.predictors.Predictors
 
       final class Opaque
       final case class Broken(predict: DynamicPredict, opaque: Opaque)
@@ -88,17 +88,17 @@ class PredictorsSuite extends FunSuite:
     // A leaf type (DynamicPredict has Predictor and is a Product) -> fromPredictor.
     assertEquals(
       summon[Predictors[DynamicPredict]].getClass.getName,
-      "dspy4s.programs.Predictors$fromPredictor"
+      "dspy4s.programs.predictors.Predictors$fromPredictor"
     )
     // A single-predictor program with a Predictor leaf instance -> fromPredictor (not torn into fields).
     assertEquals(
       summon[Predictors[ScriptedPredictProgram]].getClass.getName,
-      "dspy4s.programs.Predictors$fromPredictor"
+      "dspy4s.programs.predictors.Predictors$fromPredictor"
     )
     // A plain composite with no leaf instance -> structural derivation.
     assertEquals(
       summon[Predictors[Pipe]].getClass.getName,
-      "dspy4s.programs.Predictors$DerivedPredictors"
+      "dspy4s.programs.predictors.Predictors$DerivedPredictors"
     )
   }
 

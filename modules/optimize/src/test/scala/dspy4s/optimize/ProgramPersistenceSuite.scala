@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictorState
+import dspy4s.programs.predictors.predictorState
 
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
@@ -11,7 +11,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predict
-import dspy4s.programs.PredictorId
+import dspy4s.programs.predictors.PredictorId
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.Signature
 import munit.FunSuite

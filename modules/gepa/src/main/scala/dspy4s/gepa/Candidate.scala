@@ -1,7 +1,7 @@
 package dspy4s.gepa
 
-import dspy4s.programs.PredictorId
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.predictors.Predictors
 
 /** A GEPA candidate program: a map from stable predictor identity to optional instruction text — the genome the
   * optimizer mutates. `None` (no instructions) and `Some("")` (explicitly empty instructions) are distinct states.

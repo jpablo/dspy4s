@@ -1,4 +1,4 @@
-package dspy4s.programs
+package dspy4s.programs.predictors
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
 import dspy4s.core.data.Example

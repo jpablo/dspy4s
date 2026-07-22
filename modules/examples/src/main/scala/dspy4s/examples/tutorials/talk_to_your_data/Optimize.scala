@@ -17,7 +17,7 @@ import dspy4s.gepa.{Gepa, GepaConfig}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.PredictorId
+import dspy4s.programs.predictors.PredictorId
 import dspy4s.programs.contracts.ProgramCall
 
 object Optimize:

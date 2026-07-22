@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictorState
+import dspy4s.programs.predictors.predictorState
 
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CodeInterpreter

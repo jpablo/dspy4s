@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.Module

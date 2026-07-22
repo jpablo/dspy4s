@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.programs.predictors.*
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt

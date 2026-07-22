@@ -4,9 +4,9 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.PredictorId
+import dspy4s.programs.predictors.PredictorId
 import munit.FunSuite
 
 private final case class CandidatePair(first: DynamicPredict, second: DynamicPredict)

@@ -16,8 +16,8 @@ import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.PredictorView
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.PredictorView
+import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.contracts.ProgramCall
 
 import scala.collection.mutable

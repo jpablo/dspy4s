@@ -7,7 +7,7 @@ import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.retrievers.KNN

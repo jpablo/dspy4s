@@ -1,12 +1,12 @@
 package dspy4s.optimize
 
-import dspy4s.programs.{predictorState, predictorView}
+import dspy4s.programs.predictors.{predictorState, predictorView}
 
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.PredictorId
+import dspy4s.programs.predictors.PredictorId
 import munit.FunSuite
 
 /** Top-level so its Mirror (and `MirroredElemLabels`) are available to `Predictors.derived`. */
@@ -52,7 +52,7 @@ class PredictorsNamedSuite extends FunSuite:
     val misleading = predict("misleading").predictorView
     val ps = new Predictors[Unit]:
       def inspect(program: Unit) = Vector(canonical)
-      def replace(program: Unit, updates: Vector[dspy4s.programs.PredictorState]) = program
+      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.PredictorState]) = program
       override def inspectNamed(program: Unit) = Vector("leaf" -> misleading)
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
@@ -65,7 +65,7 @@ class PredictorsNamedSuite extends FunSuite:
     val canonical = predict("canonical").predictorView
     val ps = new Predictors[Unit]:
       def inspect(program: Unit) = Vector(canonical)
-      def replace(program: Unit, updates: Vector[dspy4s.programs.PredictorState]) = program
+      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.PredictorState]) = program
       override def inspectNamed(program: Unit) = Vector.empty
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))

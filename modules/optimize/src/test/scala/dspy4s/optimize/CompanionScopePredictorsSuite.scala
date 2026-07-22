@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.{PredictorState, Predictors}
+import dspy4s.programs.predictors.{PredictorState, Predictors}
 
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict

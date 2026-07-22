@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.Predictors
-import dspy4s.programs.PredictorId
-import dspy4s.programs.PredictorState
+import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.predictors.PredictorState
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues

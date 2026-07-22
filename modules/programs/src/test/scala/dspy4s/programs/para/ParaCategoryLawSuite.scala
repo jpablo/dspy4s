@@ -1,6 +1,6 @@
 package dspy4s.programs.para
 
-import dspy4s.programs.{predictorState, predictorView, withPredictorState}
+import dspy4s.programs.predictors.{predictorState, predictorView, withPredictorState}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
@@ -21,9 +21,9 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.Predictor
-import dspy4s.programs.PredictorMetadata
-import dspy4s.programs.PredictorState
+import dspy4s.programs.predictors.Predictor
+import dspy4s.programs.predictors.PredictorMetadata
+import dspy4s.programs.predictors.PredictorState
 import dspy4s.programs.ProgramInput
 import dspy4s.programs.ReAct
 import dspy4s.programs.RecordCodec

@@ -9,9 +9,9 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.PredictorView
+import dspy4s.programs.predictors.PredictorView
 import dspy4s.programs.contracts.ProgramCall
 
 /** Knobs for [[GroundedProposer]], mirroring the relevant slice of upstream's

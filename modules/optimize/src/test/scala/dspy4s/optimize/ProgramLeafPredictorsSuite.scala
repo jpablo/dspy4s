@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.{Predictor, Predictors}
+import dspy4s.programs.predictors.{Predictor, Predictors}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -117,7 +117,7 @@ class ProgramLeafPredictorsSuite extends FunSuite:
     val predict = Predict(qaSignature, name = Some("ask"))
     assertEquals(
       predictorsOf(predict).getClass.getName,
-      "dspy4s.programs.Predictors$fromPredictor"
+      "dspy4s.programs.predictors.Predictors$fromPredictor"
     )
   }
 
@@ -125,7 +125,7 @@ class ProgramLeafPredictorsSuite extends FunSuite:
     val cot = ChainOfThought(qaSignature, name = Some("think"))
     assertEquals(
       predictorsOf(cot).getClass.getName,
-      "dspy4s.programs.Predictors$fromPredictor"
+      "dspy4s.programs.predictors.Predictors$fromPredictor"
     )
   }
 

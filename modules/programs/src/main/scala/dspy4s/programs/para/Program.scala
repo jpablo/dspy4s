@@ -4,12 +4,12 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.AndThen
 import dspy4s.programs.Both
-import dspy4s.programs.PredictorState
-import dspy4s.programs.PredictorView
+import dspy4s.programs.predictors.PredictorState
+import dspy4s.programs.predictors.PredictorView
 import dspy4s.programs.Identity
 import dspy4s.programs.ProgramInput
 import dspy4s.programs.ProgramRunner
-import dspy4s.programs.Predictors
+import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall

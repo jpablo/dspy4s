@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.{Predictor, PredictorMetadata, PredictorState}
+import dspy4s.programs.predictors.{Predictor, PredictorMetadata, PredictorState}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError

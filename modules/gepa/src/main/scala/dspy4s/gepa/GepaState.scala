@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.programs.PredictorId
+import dspy4s.programs.predictors.PredictorId
 
 import scala.util.Random
 

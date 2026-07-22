@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError

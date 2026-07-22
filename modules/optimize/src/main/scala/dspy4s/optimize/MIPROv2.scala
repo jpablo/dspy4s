@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.{PredictorState, Predictors}
+import dspy4s.programs.predictors.{PredictorState, Predictors}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example

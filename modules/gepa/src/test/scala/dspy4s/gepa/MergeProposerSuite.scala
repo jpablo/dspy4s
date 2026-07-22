@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.PredictorId
+import dspy4s.programs.predictors.PredictorId
 import munit.FunSuite
 
 import scala.util.Random
