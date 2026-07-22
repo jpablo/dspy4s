@@ -17,7 +17,8 @@ package dspy4s.examples.tutorials.async
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, Predict}
+import dspy4s.programs.*
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Signature
 
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -46,16 +47,14 @@ object Async:
   final class SimplifierModule:
     private val predict1 = ChainOfThought(Signature.fromString("question -> answer"))
     private val predict2 = ChainOfThought(Signature.fromString("answer -> simplified_answer"))
+    private val pipeline =
+      (predict1.mapOutput(result => (answer = result.answer)) >>> predict2)
+        .mapOutput(_.simplified_answer)
 
-    /** Sequential-but-asynchronous, like Python's `aforward`: the two predicts run in order inside one
-      * off-thread computation (the for-comprehension threads the `Either`), returned as a `Future`. */
+    /** Sequential-but-asynchronous, like Python's `aforward`: `>>>` builds the typed two-stage program, which runs
+      * inside one context-propagating off-thread computation and returns a `Future`. */
     def aforward(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
-      ContextPropagation.future {
-        for
-          step1 <- predict1.apply((question = question))
-          step2 <- predict2.apply((answer = step1.output.answer))
-        yield step2.output.simplified_answer
-      }
+      ContextPropagation.future(pipeline.apply(ProgramCall((question = question))).map(_.output))
   // --8<-- [end:simplifier-module]
 
   // ── Snippets 2 / 3 — async tools (`dspy.Tool(async_fn)`, `tool.acall`, async→sync conversion) ──

@@ -3,12 +3,7 @@ package dspy4s.programs.para
 import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.Law
 import dspy4s.core.contracts.<->
-import dspy4s.programs.AndThen
-import dspy4s.programs.Copy
-import dspy4s.programs.Discard
-import dspy4s.programs.Identity
-import dspy4s.programs.Swap
-import dspy4s.programs.Tensor
+import dspy4s.programs.Compose
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
@@ -78,15 +73,15 @@ trait CDCategory[Hom[_, _]] extends OrderedTensorOps[Hom]:
   * therefore deliberately has no interchange law.
   */
 given orderedProgram: OrderedTensorOps[ModuleHom] with
-  def id[A: AnyObject]: ModuleHom[A, A] = Identity[A]()
+  def id[A: AnyObject]: ModuleHom[A, A] = Compose.id[A]
 
   extension [A, B](f: ModuleHom[A, B])
     infix def >>>[C](g: ModuleHom[B, C]): ModuleHom[A, C] =
-      AndThen[A, B, C, ModuleHom[A, B], ModuleHom[B, C]](f, g)
+      Compose.andThen(f, g)
 
   def tensor[A, B, C, D](f: ModuleHom[A, C], g: ModuleHom[B, D]): ModuleHom[(A, B), (C, D)] =
-    Tensor[A, B, C, D, ModuleHom[A, C], ModuleHom[B, D]](f, g)
+    Compose.split(f, g)
 
-  def swap[A, B]: ModuleHom[(A, B), (B, A)] = Swap[A, B]()
-  def copy[A]: ModuleHom[A, (A, A)]         = Copy[A]()
-  def discard[A]: ModuleHom[A, Unit]        = Discard[A]()
+  def swap[A, B]: ModuleHom[(A, B), (B, A)] = Compose.swap[A, B]
+  def copy[A]: ModuleHom[A, (A, A)]         = Compose.copy[A]
+  def discard[A]: ModuleHom[A, Unit]        = Compose.discard[A]

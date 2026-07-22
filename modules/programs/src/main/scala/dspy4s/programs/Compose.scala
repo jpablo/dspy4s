@@ -243,6 +243,15 @@ object Compose:
   /** The Category unit at type `I`. */
   def id[I]: Identity[I] = Identity[I]()
 
+  /** Sequentially compose two programs, threading the first program's output value into the second. */
+  def andThen[I, X, O, A <: Module[ProgramCall[I], Prediction[X]], B <: Module[
+    ProgramCall[X],
+    Prediction[O]
+  ]](
+      first: A,
+      second: B
+  ): AndThen[I, X, O, A, B] = AndThen(first, second)
+
   /** Lift a total Scala function into a transparent, parameter-free program. */
   def lift[I, O](f: I => O): Lift[I, O] = Lift(f)
 
@@ -299,12 +308,12 @@ object Compose:
   */
 extension [I, X, A <: Module[ProgramCall[I], Prediction[X]]](self: A)
   infix def >>>[O, B <: Module[ProgramCall[X], Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
-    AndThen[I, X, O, A, B](self, next)
+    Compose.andThen(self, next)
 
   /** Fluent ordered shared-input fanout. */
   def fanout[O, B <: Module[ProgramCall[I], Prediction[O]]](other: B): Both[I, X, O, A, B] =
-    Both(self, other)
+    Compose.fanout(self, other)
 
   /** Fluent ordered independent-input split. */
   def split[J, O, B <: Module[ProgramCall[J], Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
-    Tensor(self, other)
+    Compose.split(self, other)

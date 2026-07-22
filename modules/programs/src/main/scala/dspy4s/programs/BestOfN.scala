@@ -2,9 +2,7 @@ package dspy4s.programs
 
 import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -46,10 +44,9 @@ final case class BestOfN[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     val rolloutStart = call.rolloutId.getOrElse(0)
     AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
       runAttempt = idx =>
-        module.apply(call.copy(
-          rolloutId = Some(rolloutStart + idx),                                  // framework cache-busting selector
-          config    = call.config.updated("temperature", DynamicValues.fromAny(1.0d))  // provider knob
-        )),
+        Compose
+          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(module)
+          .apply(call),
       reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction))
     )
 

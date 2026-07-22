@@ -4,9 +4,9 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.AndThen
 import dspy4s.programs.Both
+import dspy4s.programs.Compose
 import dspy4s.programs.predictors.PredictorState
 import dspy4s.programs.predictors.PredictorView
-import dspy4s.programs.Identity
 import dspy4s.programs.ProgramInput
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.predictors.Predictors
@@ -99,16 +99,16 @@ object Program:
     */
   given paraCategoryProgram: ParaCategory[RecordCodec, Program] with
     def id[A: RecordCodec]: Program[A, A] =
-      Program.packageWith(Identity[A](), summon[RecordCodec[A]].decode)
+      Program.packageWith(Compose.id[A], summon[RecordCodec[A]].decode)
 
     def fanout[I, A, B](f: Program[I, A], g: Program[I, B]): Program[I, (A, B)] =
-      Program.packageWith(Both[I, A, B, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
+      Program.packageWith(Compose.fanout(f.program, g.program), f.decodeInput)(using
         Both.bothPredictors[I, A, B, f.Rep, g.Rep](using f.addressable, g.addressable)
       )
 
     extension [A, B](f: Program[A, B])
       infix def >>>[C](g: Program[B, C]): Program[A, C] =
-        Program.packageWith(AndThen[A, B, C, f.Rep, g.Rep](f.program, g.program), f.decodeInput)(using
+        Program.packageWith(Compose.andThen(f.program, g.program), f.decodeInput)(using
           AndThen.andThenPredictors[A, B, C, f.Rep, g.Rep](using f.addressable, g.addressable)
         )
 
