@@ -199,7 +199,22 @@ decoder; `reparam` preserves it). `ProgramInput` has signature-backed instances 
 `ReAct`, and `CodeAct`, plus a low-priority `RecordCodec` fallback for third-party typed modules. `Program.of` is
 the only public constructor: a custom decoder is supplied as an explicit `ProgramInput` instance, whose documented
 coherence law (the instance must agree with the program's typed input boundary) is the condition under which the
-category laws hold, the standard typeclass contract. Both optimizer capabilities are then
+category laws hold, the standard typeclass contract.
+
+**The `DynamicSignature` bundle (prototype): fresh types for runtime signatures.** The reason the coherence law
+exists at all is that every `fromStringDynamic` program shares the input type `DynamicValue.Record` while needing
+its own field-validating decoder, so the type cannot determine the decoder. `DynamicSignature.parse` removes that
+collapse for programs that enter the category: each parse mints fresh abstract `In` / `Out` type members (fresh
+per value, the path-dependent freshness the compiler enforces) and carries the matching `RecordCodec`s, born from
+the same parse behind the abstraction. Identity and any program over the bundle then decode identically as a
+consequence of abstraction: the unit laws hold on bundle objects with NO coherence caveat, and re-parsing the
+same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
+`ParaCategoryLawSuite`). This canonicalizes decoder IDENTITY only; cardinality-shaped value dependence
+(`MultiChainComparison`'s `m`, reparameterization arity) gains nothing from freshness. Plain `fromStringDynamic`
+remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
+evaluation judge). A possible second step, held until the bundle proves out: if every category-entering program
+is typed or bundled, `decodeInput` could leave the `Program` package entirely and the `ProgramInput` law would
+dissolve at the category level. Both optimizer capabilities are then
 uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
 projection/reparameterization) and `ProgramRunner[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
