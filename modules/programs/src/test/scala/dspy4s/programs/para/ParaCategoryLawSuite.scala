@@ -21,6 +21,8 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.DynamicSignature
+import dspy4s.programs.Predict
 import dspy4s.programs.predictors.Predictor
 import dspy4s.programs.predictors.PredictorMetadata
 import dspy4s.programs.predictors.PredictorState
@@ -96,6 +98,16 @@ class ParaCategoryLawSuite extends FunSuite:
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
   private val C = summon[ParaCategory[RecordCodec, Program]]
+
+  // ── Bundle-tagged dynamic objects: fresh types minted per parse (DynamicSignature) ─────────────────────────
+  // Suite-level so the freshness compile gate can reference them from compileErrors snippets.
+  private val qaBundle: DynamicSignature =
+    DynamicSignature.parse("question -> answer").toOption.get
+  // Referenced only inside the freshness compile gate's compileErrors snippet, which the unused checker
+  // cannot see.
+  @annotation.unused
+  private val qaBundleAgain: DynamicSignature =
+    DynamicSignature.parse("question -> answer").toOption.get
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
@@ -283,6 +295,33 @@ class ParaCategoryLawSuite extends FunSuite:
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), p.decodeInput(boxedRecord))
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
     assertEquals((p >>> C.id[Wrapped]).decodeInput(boxedRecord), Right(Boxed(5)))
+  }
+
+  test("a bundle-tagged dynamic object restores one-decoder-per-type: unit laws need no coherence caveat") {
+    // The bundle's codec and signature are born from one parse behind the abstract In/Out members, so
+    // identity's decoder and the program's decoder cannot disagree: the left unit holds on the decode
+    // observation with no ProgramInput-law condition. Contrast with the unlawful-instance counterexample
+    // below, which needs the (removable-only-by-this-pattern) coherence obligation.
+    import qaBundle.given
+    val record = DynamicValues.record("question" := "hi")
+    val p      = Program.of(Predict(qaBundle.signature))
+
+    assert(p.decodeInput(record).isRight)
+    assertEquals(C.id[qaBundle.In].decodeInput(record), p.decodeInput(record))
+    assertEquals((C.id[qaBundle.In] >>> p).decodeInput(record), p.decodeInput(record))
+    // Out is codec-equipped too, so the right unit's object exists and threads the same decoder.
+    assertEquals((p >>> C.id[qaBundle.Out]).decodeInput(record), p.decodeInput(record))
+    // The validating entry rejects a record missing a declared field, at the boundary.
+    assert(qaBundle.input(DynamicValue.Record.empty).isLeft)
+  }
+
+  test("freshness: re-parsing the SAME string mints a DISTINCT object (cross-bundle composition is a type error)") {
+    // Two parses are two fibers that happen to agree; the compiler keeps them apart. Aliasing a bundle value
+    // (val t = qaBundle) would share the type, which is exactly the right equivalence: same parse, same object.
+    val errors = compileErrors(
+      "Program.of(Predict(qaBundle.signature)) >>> Program.of(Predict(qaBundleAgain.signature))"
+    )
+    assert(errors.nonEmpty, "expected cross-bundle composition to fail compilation")
   }
 
   test("an UNLAWFUL ProgramInput instance breaks the left unit (the coherence law is the boundary)") {
