@@ -196,9 +196,10 @@ type, so it died under upcasts and did not exist for composed pipelines (`AndThe
 The close: `Program` now also packages `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at
 `Program.of` time via the `ProgramInput` capability typeclass and threaded through composition (`f >>> g` keeps `f`'s
 decoder; `reparam` preserves it). `ProgramInput` has signature-backed instances for `Predict`, `ChainOfThought`,
-`ReAct`, and `CodeAct`, plus a low-priority `RecordCodec` fallback for third-party typed modules. `Program.unsafeOf`
-is the explicitly named escape hatch for a hand-supplied decoder; such a decoder must satisfy the documented
-coherence condition to participate in record-evaluation equality. Both optimizer capabilities are then
+`ReAct`, and `CodeAct`, plus a low-priority `RecordCodec` fallback for third-party typed modules. `Program.of` is
+the only public constructor: a custom decoder is supplied as an explicit `ProgramInput` instance, whose documented
+coherence law (the instance must agree with the program's typed input boundary) is the condition under which the
+category laws hold, the standard typeclass contract. Both optimizer capabilities are then
 uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
 projection/reparameterization) and `ProgramRunner[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
@@ -232,8 +233,8 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   `ParaCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
   observation (structural `==` for parameter vectors; typed output + params + coherent decoder + lifecycle for
   `Program` morphisms). Final `Prediction.raw` is deliberately outside Category equality: `p >>> id` retains the
-  typed output and lifecycle but ends with identity's empty envelope. Both that counterexample and an incoherent
-  `unsafeOf` decoder counterexample are executable. The deliberate split from the formalization library: there the
+  typed output and lifecycle but ends with identity's empty envelope. Both that counterexample and the
+  unlawful-`ProgramInput`-instance counterexample (the left unit failing on the decode observation) are executable. The deliberate split from the formalization library: there the
   equations are the deliverable, here they are executable specifications.
 - **`params` as a functor value.** `ParaCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
   parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`

@@ -278,7 +278,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Signature-backed `ProgramInput` instances cover Predict / ChainOfThought / ReAct / CodeAct even when their input
-    type has no `RecordCodec`; `Program.unsafeOf` names the custom-decoder escape hatch and its coherence obligation.
+    type has no `RecordCodec`; a custom decoder is an explicitly supplied `ProgramInput` instance carrying the
+    trait's coherence law (from the lawfulness review: `unsafeOf` was removed, so decoder coherence is a
+    conventional typeclass-instance obligation rather than a constructor-naming convention).
     `Predictors.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `Predictors.empty`, so an omitted learnable subtree can no longer disappear silently.
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
