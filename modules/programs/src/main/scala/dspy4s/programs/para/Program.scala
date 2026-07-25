@@ -22,9 +22,10 @@ import zio.blocks.schema.DynamicValue
   *
   * The package hides a concrete module representation while retaining its [[Predictors]] evidence and input decoder.
   * Consequently, the binary type `Program[I, O]` supports parameter projection, reparameterization, and record-based
-  * evaluation without knowing the representation. Construction through [[Program.of]] is the coherent gate;
-  * [[Program.unsafeOf]] is the explicitly named custom-decoder escape hatch. Neither admits a representation without
-  * `Predictors` evidence.
+  * evaluation without knowing the representation. Construction through [[Program.of]] is the only public gate: it
+  * requires [[ProgramInput]] evidence, so the decoder-coherence obligation sits on the instance (the `ProgramInput`
+  * law), the conventional typeclass shape. A caller needing a custom decoder supplies its own instance explicitly
+  * and thereby assumes that law. No constructor admits a representation without `Predictors` evidence.
   *
   * The category laws use typed output, parameters, coherent record decoding, and lifecycle as their observation. They
   * do not use structural equality of this existential package or final `Prediction.raw`: right identity preserves the
@@ -36,7 +37,7 @@ sealed trait Program[I, O]:
   val addressable: Predictors[Rep]
 
   /** The input decoder captured at packaging time and threaded through composition. */
-  val decodeInput: DynamicValue.Record => Either[DspyError, I]
+  val decodeInput: DynamicValue.Record => Either[DspyError, I] // why not require a ProgramInput instead?
 
   /** Run the packaged program through the module's wrapped `apply`. */
   def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -54,19 +55,9 @@ object Program:
       val addressable: Predictors[F]                               = ev
       val decodeInput: DynamicValue.Record => Either[DspyError, I] = decode
 
-  /** Package a module with an explicitly supplied input decoder.
-    *
-    * Prefer [[of]]: this escape hatch cannot prove that `decode` agrees with the module's typed-call boundary or with
-    * the source object's [[RecordCodec]]. An incoherent decoder remains runnable, but falls outside the observational
-    * equality under which the category laws hold.
-    */
-  def unsafeOf[I, O, F <: Module[ProgramCall[I], Prediction[O]]](
-      f: F,
-      decode: DynamicValue.Record => Either[DspyError, I]
-  )(using ev: Predictors[F]): Program[I, O] { type Rep = F } =
-    packageWith(f, decode)
-
-  /** Package a program whose input decoder is derivable from [[ProgramInput]]. */
+  /** Package a program whose input decoder comes from [[ProgramInput]] evidence (derived for the framework's
+    * signature-backed programs and codec-equipped input types; supplied explicitly, under the `ProgramInput`
+    * coherence law, by anything else). */
   def of[I, O, F <: Module[ProgramCall[I], Prediction[O]]](f: F)(using
       ev: Predictors[F],
       codec: ProgramInput[F, I]
@@ -97,7 +88,9 @@ object Program:
     *
     * Identity synthesizes a decoder from the object's [[RecordCodec]]. Composition and fan-out retain the structural
     * `Predictors` evidence of their children and thread the shared input decoder from the first leg. Decoder equality
-    * assumes packages were built through coherent [[ProgramInput]] evidence; [[unsafeOf]] documents the escape hatch.
+    * holds given LAWFUL [[ProgramInput]] instances (the trait's coherence law): the category is lawful conditional on
+    * its instances, the standard typeclass contract. The law suite pins the counterexample an unlawful instance
+    * produces.
     */
   given paraCategoryProgram: ParaCategory[RecordCodec, Program] with
     def id[A: RecordCodec]: Program[A, A] =

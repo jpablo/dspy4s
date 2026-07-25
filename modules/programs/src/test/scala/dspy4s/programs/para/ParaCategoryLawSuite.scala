@@ -62,9 +62,12 @@ class ParaCategoryLawSuite extends FunSuite:
   /** A typed program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[ProgramCall[I], Prediction[O]]:
+
     override val moduleName: String = s"step_$tag"
+
     override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
       ModuleLifecycle.typedWithoutInputs
+
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
 
@@ -100,8 +103,15 @@ class ParaCategoryLawSuite extends FunSuite:
   private def noCodec[I]: DynamicValue.Record => Either[DspyError, I] =
     _ => Left(ValidationError("test stub: no input codec"))
 
-  /** Package a Step with the stub decoder (Step has no signature, so no ProgramInput instance applies). */
-  private def pack[I, O](m: Step[I, O]): Program[I, O] = Program.unsafeOf(m, noCodec[I])
+  /** An explicitly supplied ProgramInput instance: the caller assumes the trait's coherence law (or, in the
+    * counterexample below, deliberately violates it). */
+  private def suppliedInput[F, I](decode: DynamicValue.Record => Either[DspyError, I]): ProgramInput[F, I] =
+    (_: F) => decode
+
+  /** Package a Step with the stub decoder (Step has no signature, so no ProgramInput instance is derivable). */
+  private def pack[I, O](m: Step[I, O]): Program[I, O] =
+    given ProgramInput[Step[I, O], I] = suppliedInput(noCodec[I])
+    Program.of(m)
 
   private final case class ProgramObservation[O](
       output: Either[DspyError, O],
@@ -255,8 +265,8 @@ class ParaCategoryLawSuite extends FunSuite:
 
   // ── The packaged evaluation capability: decoder threading through composition ───────────────────────────
   test(">>> threads the FIRST leg's input decoder (the composite's input is the first leg's input)") {
-    val dec7: DynamicValue.Record => Either[DspyError, Int] = _ => Right(7)
-    val a = Program.unsafeOf(step[Int, String]("a", "i -> s")(i => s"v$i"), dec7)
+    given ProgramInput[Step[Int, String], Int] = suppliedInput(_ => Right(7))
+    val a = Program.of(step[Int, String]("a", "i -> s")(i => s"v$i"))
     val b = pack(step[String, Int]("b", "s -> n")(s => s.length)) // b's decoder is the failing stub
     assertEquals((a >>> b).decodeInput(DynamicValue.Record.empty), Right(7))
     // reparam preserves the decoder too.
@@ -275,12 +285,14 @@ class ParaCategoryLawSuite extends FunSuite:
     assertEquals((p >>> C.id[Wrapped]).decodeInput(boxedRecord), Right(Boxed(5)))
   }
 
-  test("unsafeOf makes decoder incoherence explicit and keeps it outside the Category claim") {
+  test("an UNLAWFUL ProgramInput instance breaks the left unit (the coherence law is the boundary)") {
+    // The coherence obligation sits on the instance (see the ProgramInput scaladoc): this instance violates it
+    // (its decoder ignores the record and disagrees with Boxed's codec), and the left unit fails on the decode
+    // observation exactly as the instance law predicts. The category claim is conditional on lawful instances,
+    // the standard typeclass contract.
     val boxedRecord = DynamicValues.record("n" := 5)
-    val p = Program.unsafeOf(
-      step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")),
-      _ => Right(Boxed(99))
-    )
+    given ProgramInput[Step[Boxed, Wrapped], Boxed] = suppliedInput(_ => Right(Boxed(99)))
+    val p = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
 
     assertEquals(p.decodeInput(boxedRecord), Right(Boxed(99)))
     assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
