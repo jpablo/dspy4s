@@ -24,6 +24,7 @@ import dspy4s.programs.predictors.PredictorMetadata
 import dspy4s.programs.predictors.PredictorState
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
+import dspy4s.programs.RecordObject
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -39,6 +40,9 @@ import java.util.concurrent.atomic.AtomicInteger
 // Top-level fixtures (Schema derivation requires top-level types): codec-equipped objects for the id laws.
 final case class Boxed(n: Int) derives Schema
 final case class Wrapped(s: String) derives Schema
+final case class NestedValue(n: Int) derives Schema
+final case class NestedBox(value: NestedValue) derives Schema
+final case class ArrayBox(values: Array[Int]) derives Schema
 
 /** Executes the `@Law` statements of the Para prototype's structures ([[Category]] / [[ParaCategory]] over [[Program]],
   * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
@@ -97,6 +101,12 @@ class ParaCategoryLawSuite extends FunSuite:
   @annotation.unused
   private val qaBundleAgain: DynamicSignature =
     DynamicSignature.parse("question -> answer").toOption.get
+
+  private val shiftedBoxSchema =
+    Schema.derived[Boxed].transform(box => Boxed(box.n + 1), box => Boxed(box.n - 1))
+  private val shiftedBoxObject = RecordObject.fromSchema(shiftedBoxSchema)
+  @annotation.unused
+  private val shiftedBoxObjectAgain = RecordObject.fromSchema(shiftedBoxSchema)
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
@@ -299,6 +309,69 @@ class ParaCategoryLawSuite extends FunSuite:
       "new RecordCodec[Boxed] { def decode(record: DynamicValue.Record) = Right(Boxed(99)) }"
     )
     assert(rogueCodec.nonEmpty, "expected RecordCodec to reject application-defined competing instances")
+    val schemaFactory = compileErrors("RecordCodec.fromSchema[Boxed](using summon[Schema[Boxed]])")
+    assert(schemaFactory.nonEmpty, "expected the arbitrary-Schema RecordCodec factory to be gone")
+    val arrayCodec = compileErrors("summon[RecordCodec[ArrayBox]]")
+    assert(arrayCodec.nonEmpty, "array objects must not reopen canonical derivation through ambient ClassTag")
+  }
+
+  test("canonical object decoding ignores top-level and nested ambient schemas") {
+    val boxedWire        = DynamicValues.record("n" := 5)
+    val shiftedBoxSchema = Schema.derived[Boxed].transform(box => Boxed(box.n + 1), box => Boxed(box.n - 1))
+
+    locally {
+      given Schema[Boxed] = shiftedBoxSchema
+
+      // The open Shape API intentionally honors an explicit custom schema.
+      assertEquals(Shape.derivedWithRole[Boxed](FieldRole.Input).decode(boxedWire), Right(Boxed(6)))
+      // Category-object derivation is closed and therefore remains a function of Boxed alone.
+      assertEquals(summon[RecordCodec[Boxed]].decode(boxedWire), Right(Boxed(5)))
+      assertEquals(
+        Signature.derived[Boxed, Wrapped]("CanonicalTopLevel").inputShape.decode(boxedWire),
+        Right(Boxed(5))
+      )
+    }
+
+    val canonicalNested = Signature.derived[NestedBox, Wrapped]("CanonicalNested")
+    val nestedWire      = canonicalNested.inputShape.encode(NestedBox(NestedValue(7)))
+    val shiftedNestedSchema =
+      Schema.derived[NestedValue].transform(value => NestedValue(value.n + 1), value => NestedValue(value.n - 1))
+
+    locally {
+      given Schema[NestedValue] = shiftedNestedSchema
+
+      val ambientOuterSchema = Schema.derived[NestedBox]
+      assertEquals(
+        Shape.derivedWithRole[NestedBox](FieldRole.Input)(using ambientOuterSchema).decode(nestedWire),
+        Right(NestedBox(NestedValue(8)))
+      )
+      assertEquals(
+        summon[RecordCodec[NestedBox]].decode(nestedWire),
+        Right(NestedBox(NestedValue(7)))
+      )
+      assertEquals(
+        Signature.derived[NestedBox, Wrapped]("CanonicalNestedShadowed").inputShape.decode(nestedWire),
+        Right(NestedBox(NestedValue(7)))
+      )
+    }
+  }
+
+  test("custom schemas mint fresh object types instead of competing codecs") {
+    val decoded = shiftedBoxObject.decode(DynamicValues.record("n" := 5)).map(shiftedBoxObject.unwrap)
+    assertEquals(decoded, Right(Boxed(6)))
+    assertEquals(summon[RecordCodec[Boxed]].decode(DynamicValues.record("n" := 5)), Right(Boxed(5)))
+
+    val same = shiftedBoxObject.stable
+    val again = same
+    val branded: shiftedBoxObject.Value = shiftedBoxObject.wrap(Boxed(1))
+    val captured: same.Value = branded
+    val aliased: again.Value = captured
+    assertEquals(again.unwrap(aliased), Boxed(1))
+
+    val crossing = compileErrors(
+      "shiftedBoxObjectAgain.unwrap(shiftedBoxObject.wrap(Boxed(1)))"
+    )
+    assert(crossing.nonEmpty, "separate custom-schema bundles must mint separate object types")
   }
 
   test("a bundle-tagged dynamic object is a codec-equipped category object (packaged in one step)") {

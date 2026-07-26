@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout, TypeRef}
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.DynamicValue
 
 /** A signature with compile-time knowledge of its input (`I`) and output
   * (`O`) shapes. Wraps an untyped `SignatureLayout` for compatibility with the
@@ -56,7 +56,8 @@ object Signature:
   /** Derives a `Signature[I, O]` from two case classes. The resulting
     * untyped signature has all input fields followed by all output fields
     * (matching the `inputFields ++ outputFields` ordering used everywhere
-    * else in dspy4s).
+    * else in dspy4s). Derivation is structural and closed: ambient custom
+    * `Schema[I]` / `Schema[O]` instances cannot change a type's boundary meaning.
     *
     * Routed through `SignatureLayout.create` so fields are normalized
     * (inferred prefix + description) and standard validations apply.
@@ -68,12 +69,10 @@ object Signature:
       instructions: String = ""
   )(using
       mi: scala.deriving.Mirror.ProductOf[I],
-      mo: scala.deriving.Mirror.ProductOf[O],
-      inputSchema: Schema[I],
-      outputSchema: Schema[O]
+      mo: scala.deriving.Mirror.ProductOf[O]
   ): Signature[I, O] =
-    val inShape  = Shape.derivedWithRole[I](FieldRole.Input)
-    val outShape = Shape.derivedWithRole[O](FieldRole.Output)
+    val inShape  = Shape.canonicalDerivedWithRole[I](FieldRole.Input)
+    val outShape = Shape.canonicalDerivedWithRole[O](FieldRole.Output)
     val fields   = inShape.fieldSpecs ++ outShape.fieldSpecs
     val sig = SignatureLayout
       .create(

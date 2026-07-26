@@ -30,6 +30,70 @@ trait Shape[A]:
 
 object Shape:
 
+  /** Derive the structural schema determined by `A` itself, without allowing ambient `Schema` instances to
+    * replace the schema of `A` or any nested field. This is the canonical path used wherever a Scala type is
+    * treated as an object at the record boundary.
+    *
+    * zio-blocks' `Schema.derived` deliberately reuses schemas found in the expansion scope. The two ambiguous
+    * generic blockers below make those open-world searches fail, causing the derivation macro to recurse
+    * structurally instead. Exact schemas for the closed primitive leaf set remain available; the
+    * `DynamicValue.Record` exception is the framework's canonical narrowing of zio-blocks' dynamic schema.
+    * Array-like types are deliberately excluded because their schema derivation consumes an open `ClassTag`;
+    * custom array semantics belong behind an explicitly branded shape. Consequently ambient evidence cannot
+    * change the meaning of the same object type.
+    */
+  transparent inline def canonicalSchema[A]: Schema[A] =
+    @annotation.unused given Schema[DynamicValue]        = Schema.dynamic
+    @annotation.unused given Schema[DynamicValue.Record] = dspy4s.core.contracts.recordSchema
+    @annotation.unused given Schema[Unit]                = Schema.unit
+    @annotation.unused given Schema[Boolean]             = Schema.boolean
+    @annotation.unused given Schema[Byte]                = Schema.byte
+    @annotation.unused given Schema[Short]               = Schema.short
+    @annotation.unused given Schema[Int]                 = Schema.int
+    @annotation.unused given Schema[Long]                = Schema.long
+    @annotation.unused given Schema[Float]               = Schema.float
+    @annotation.unused given Schema[Double]              = Schema.double
+    @annotation.unused given Schema[Char]                = Schema.char
+    @annotation.unused given Schema[String]              = Schema.string
+    @annotation.unused given Schema[BigInt]              = Schema.bigInt
+    @annotation.unused given Schema[BigDecimal]          = Schema.bigDecimal
+    @annotation.unused given Schema[java.time.DayOfWeek] = Schema.dayOfWeek
+    @annotation.unused given Schema[java.time.Duration]  = Schema.duration
+    @annotation.unused given Schema[java.time.Instant]   = Schema.instant
+    @annotation.unused given Schema[java.time.LocalDate] = Schema.localDate
+    @annotation.unused given Schema[java.time.LocalDateTime] = Schema.localDateTime
+    @annotation.unused given Schema[java.time.LocalTime]      = Schema.localTime
+    @annotation.unused given Schema[java.time.Month]          = Schema.month
+    @annotation.unused given Schema[java.time.MonthDay]       = Schema.monthDay
+    @annotation.unused given Schema[java.time.OffsetDateTime] = Schema.offsetDateTime
+    @annotation.unused given Schema[java.time.OffsetTime]     = Schema.offsetTime
+    @annotation.unused given Schema[java.time.Period]         = Schema.period
+    @annotation.unused given Schema[java.time.Year]           = Schema.year
+    @annotation.unused given Schema[java.time.YearMonth]      = Schema.yearMonth
+    @annotation.unused given Schema[java.time.ZoneId]         = Schema.zoneId
+    @annotation.unused given Schema[java.time.ZoneOffset]     = Schema.zoneOffset
+    @annotation.unused given Schema[java.time.ZonedDateTime]  = Schema.zonedDateTime
+    @annotation.unused given Schema[java.util.Currency]       = Schema.currency
+    @annotation.unused given Schema[java.util.UUID]           = Schema.uuid
+
+    // Both definitions are intentionally applicable. An ambient Schema[T] is therefore not selected by
+    // zio-blocks' nested implicit search; its macro falls back to structural derivation for T instead.
+    @annotation.unused given blockAmbientSchema1[T]: Schema[T] =
+      throw new IllegalStateException("canonical schema blocker must never be evaluated")
+    @annotation.unused given blockAmbientSchema2[T]: Schema[T] =
+      throw new IllegalStateException("canonical schema blocker must never be evaluated")
+    @annotation.unused given blockAmbientClassTag1[T]: scala.reflect.ClassTag[T] =
+      throw new IllegalStateException("canonical class-tag blocker must never be evaluated")
+    @annotation.unused given blockAmbientClassTag2[T]: scala.reflect.ClassTag[T] =
+      throw new IllegalStateException("canonical class-tag blocker must never be evaluated")
+
+    Schema.derived[A]
+
+  /** Canonical case-class/product shape. Unlike [[derivedWithRole]], this path is closed over structural
+    * derivation and therefore suitable for type-indexed record-boundary objects. */
+  inline def canonicalDerivedWithRole[A](role: FieldRole): Shape[A] =
+    ZioSchemaCodec.derivedFromZioSchema[A](role)(using canonicalSchema[A])
+
   /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
     * static schema so the "typed" value stays at the spine type. `encode` is the identity; `decode` only
     * validates that every field listed in `fieldSpecs` is present in the raw record (no per-field coercion --
@@ -78,7 +142,3 @@ object Shape:
     * that need inputs invoke this explicitly. */
   inline def derivedWithRole[A <: Product](role: FieldRole)(using schema: Schema[A]): Shape[A] =
     ZioSchemaCodec.derivedFromZioSchema[A](role)
-
-  private[typed] inline def derivedProductWithRole[A](role: FieldRole)(using schema: Schema[A]): Shape[A] =
-    ZioSchemaCodec.derivedFromZioSchema[A](role)
-

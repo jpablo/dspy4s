@@ -139,8 +139,8 @@ private[typed] object SpecMacro:
         '{
           // Shapes are fully schema-backed; their `fieldSpecs` (names, wire typeRefs) come from the
           // derived `Reflect`, with the role stamped per side. The layout is assembled from them.
-          val inputShape  = new Shape.SchemaTupleShape[i](FieldRole.Input,  Schema.derived[i])
-          val outputShape = new Shape.SchemaTupleShape[o](FieldRole.Output, Schema.derived[o])
+          val inputShape  = new Shape.SchemaTupleShape[i](FieldRole.Input,  Shape.canonicalSchema[i])
+          val outputShape = new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o])
           val sig = SignatureLayout
             .create(
               name         = ${ sigNameExpr },
