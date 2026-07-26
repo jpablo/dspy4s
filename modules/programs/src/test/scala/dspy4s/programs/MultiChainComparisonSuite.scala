@@ -18,6 +18,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -109,6 +110,21 @@ class MultiChainComparisonSuite extends FunSuite:
       // typed dot-access on the augmented named tuple
       assertEquals(pred.output.rationale, "my rationale")
       assertEquals(pred.output.answer,    "blue")
+    }
+  }
+
+  test("MultiChainComparison: uses the uniform ProgramCall envelope") {
+    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
+    val input = MultiChainInput(
+      baseInput = (question = "What is the color of the sky?"),
+      attempts = Vector.fill(3)(DynamicPrediction.empty)
+    )
+
+    RuntimeEnvironment.withSettings(settings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result = mcc.apply(ProgramCall(input, traceEnabled = false, rolloutId = Some(7)))
+      assert(result.isRight, s"comparison failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
+      assertEquals(RuntimeEnvironment.current.trace, Vector.empty)
     }
   }
 

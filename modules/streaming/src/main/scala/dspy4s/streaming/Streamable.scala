@@ -15,7 +15,7 @@ import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 
 /** What [[Streamify]] needs of a program in order to stream it, captured as a typeclass so that both untyped
-  * `DynamicModule`s and typed `Module[ProgramCall[I], …]` programs (which don't share a single callable base) can be
+  * `DynamicModule`s and typed `Module[I, …]` programs (which don't share a single callable base) can be
   * streamed through the same entry point. `Streamify` requires exactly two things of a program:
   *
   *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding the raw `DynamicPrediction`

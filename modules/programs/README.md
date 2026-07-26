@@ -15,7 +15,7 @@ Programs live on two layers that share one engine:
 
 - **The typed surface** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind static input/output
   types and encode/decode at the boundary.
-- **The untyped spine** — `DynamicModule = Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`, where programs can build and
+- **The untyped spine** — `DynamicModule = Module[DynamicValue.Record, DynamicPrediction]`, where programs can build and
   augment signatures at runtime. `DynamicPredict` is the executable prediction leaf on this spine. The typed
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 

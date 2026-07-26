@@ -300,7 +300,7 @@ class TypedPredictSuite extends FunSuite:
   // ── Decode-failure / trace consistency ──────────────────────────────────
 
   test("decode failures: no trace/history is recorded (typed decode runs inside the wrapped forward)") {
-    // `Predict[I, O]` is now a `Module[ProgramCall[I], Prediction[O]]` whose `forward` does the typed decode
+    // `Predict[I, O]` is now a `Module[I, Prediction[O]]` whose `forward` does the typed decode
     // *inside* the lifecycle wrapping. So a decode failure makes `forward` return `Left`, and `Module.apply`
     // appends neither a trace nor a history entry -- the observability layer and the return value agree.
     // (This replaces the earlier "known limitation" where execution crossed a separately wrapped dynamic

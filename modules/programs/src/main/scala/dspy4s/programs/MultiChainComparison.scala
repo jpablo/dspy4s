@@ -18,29 +18,15 @@ import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.DynamicValue
 
-/** The call argument for [[MultiChainComparison]]: the base typed input `I` **plus** the candidate completions to
-  * compare. Unlike a plain `ProgramCall`, MCC's real input includes the `attempts`, mirroring Python's
-  * `forward(completions, **kwargs)`. Carrying them in the call object means the real work flows through the wrapped
-  * `Module.apply` (callbacks / trace / history) rather than a side method that bypasses it.
+/** The semantic input to [[MultiChainComparison]]: the base typed input `I` plus the candidate completions to compare.
+  * Invocation controls live in the enclosing [[ProgramCall]], just as they do for every other [[Module]] boundary.
+  * Keeping `attempts` here reflects that changing them changes the comparison result; they are input data rather than
+  * execution metadata.
   */
-final case class MultiChainCall[I](
-    input: I,
-    attempts: Vector[DynamicPrediction],
-    config: DynamicValue.Record = DynamicValue.Record.empty,
-    traceEnabled: Boolean = true,
-    rolloutId: Option[Int] = None
-):
-  // Same per-call encode memo as ProgramCall (see there): Module's lifecycle observation and forward both need the
-  // encoded input; cache it so the pure encode runs once per call.
-  @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
-
-  private[dspy4s] def encodedInput(shape: dspy4s.typed.Shape[I]): DynamicValue.Record =
-    val cached = cachedEncoding
-    if (cached ne null) && (cached._1 eq shape) then cached._2
-    else
-      val computed = shape.encode(input)
-      cachedEncoding = (shape, computed)
-      computed
+final case class MultiChainInput[I](
+    baseInput: I,
+    attempts: Vector[DynamicPrediction]
+)
 
 /** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected reasoning +
   * final answer. Typed port of Python DSPy's `dspy.MultiChainComparison`. The flow:
@@ -51,8 +37,8 @@ final case class MultiChainCall[I](
   *      new attempt inputs. 5. Run the augmented predict, then decode the reply into `Prediction[WithRationale[O]]` —
   *      the base output with a typed `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
   *
-  * `MultiChainComparison[I, O]` is a `Module[MultiChainCall[I], Prediction[WithRationale[O]]]`. Callers normally use
-  * the [[compare]] convenience, which builds the call.
+  * `MultiChainComparison[I, O]` is a `Module[MultiChainInput[I], Prediction[WithRationale[O]]]`. Callers normally use
+  * the [[compare]] convenience, which builds the semantic input and its uniform [[ProgramCall]] envelope.
   *
   * @param baseSignature
   *   the original task signature
@@ -76,7 +62,7 @@ final case class MultiChainComparison[I, O](
     comparePredictStateOverride: Option[PredictorState] = None
 )(using
     prepend: PrependField.Of["rationale", String, O]
-) extends Module[MultiChainCall[I], Prediction[MultiChainComparison.WithRationale[O]]]:
+) extends Module[MultiChainInput[I], Prediction[MultiChainComparison.WithRationale[O]]]:
 
   /** The output type — `rationale: String` prepended to `O`'s named-tuple view (always a named tuple). */
   type Out = MultiChainComparison.WithRationale[O]
@@ -141,26 +127,29 @@ final case class MultiChainComparison[I, O](
     )
     comparePredictStateOverride.fold(base)(base.withPredictorState)
 
-  override protected val lifecycle: ModuleLifecycle[MultiChainCall[I], Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Prediction[Out]] =
     ModuleLifecycle.observed(
-      call => call.encodedInput(baseSignature.inputShape),
+      // Preserve the existing observation surface: attempts affect execution but are not copied into trace inputs.
+      call => baseSignature.inputShape.encode(call.input.baseInput),
       _.traceEnabled,
       _.raw.values
     )
 
-  override protected def forward(call: MultiChainCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+  override protected def forward(
+      call: ProgramCall[MultiChainInput[I]]
+  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
+    val input = call.input
     attemptInputs
-      .validate(call.attempts.map(formatAttempt))
+      .validate(input.attempts.map(formatAttempt))
       .left.map(_ => ValidationError(
-        s"Number of attempts (${call.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
+        s"Number of attempts (${input.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
       ))
       .flatMap { attempts =>
-        comparePredict.apply(ProgramCall(
-          input        = (call.input, attempts),
-          config       = call.config.updated("temperature", DynamicValues.fromAny(temperature)),
-          traceEnabled = call.traceEnabled,
-          rolloutId    = call.rolloutId
-        ))
+        comparePredict.apply(
+          call
+            .mapInput(_ => (input.baseInput, attempts))
+            .copy(config = call.config.updated("temperature", DynamicValues.fromAny(temperature)))
+        )
       }
       .map(result => Prediction(result.output, result.raw))
 
@@ -173,7 +162,7 @@ final case class MultiChainComparison[I, O](
       config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    apply(MultiChainCall(input, attempts, config, traceEnabled))
+    apply(ProgramCall(MultiChainInput(input, attempts), config, traceEnabled))
 
   /** Renders a single attempt verbatim as Python does (no period after the rationale, matching
     * `multi_chain_comparison.py`): `«I'm trying to {rationale} I'm not sure but my prediction is {answer}»`.

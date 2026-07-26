@@ -21,11 +21,11 @@ class ProgramRunnerSuite extends FunSuite:
       observed = Some(call)
       Right(DynamicPrediction(DynamicValues.record("value" := "dynamic")))
 
-  private final class CapturingTyped extends Module[ProgramCall[RunnerInput], Prediction[String]]:
+  private final class CapturingTyped extends Module[RunnerInput, Prediction[String]]:
     var observed: Option[ProgramCall[RunnerInput]] = None
     val moduleName                                 = "capturing_typed"
 
-    protected val lifecycle: ModuleLifecycle[ProgramCall[RunnerInput], Prediction[String]] =
+    protected val lifecycle: ModuleLifecycle[RunnerInput, Prediction[String]] =
       ModuleLifecycle.typed(call => DynamicValues.record("value" := call.input.value))
 
     protected def forward(call: ProgramCall[RunnerInput])(using

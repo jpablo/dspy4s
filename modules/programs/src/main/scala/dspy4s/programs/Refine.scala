@@ -62,7 +62,7 @@ import zio.blocks.schema.Schema
   *   the inner program type; a typed module (so `I`/`O` infer from it) that is also introspectable for its named
   *   predictors ([[predictors]]).
   */
-final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
+final case class Refine[P <: Module[I, Prediction[O]], I, O](
     module: P,
     n: AttemptCount,
     rewardFn: (I, Prediction[O]) => Double,
@@ -76,7 +76,7 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
     predictors: Predictors[P]
-) extends Module[ProgramCall[I], Prediction[O]]:
+) extends Module[I, Prediction[O]]:
   override val moduleName: String = "refine"
 
   /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern) — a TYPED [[Predict]] over
@@ -87,7 +87,7 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
   val criticPredict: Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] =
     criticPredictOverride.getOrElse(Predict(signature = Refine.offerFeedbackSignature, name = Some("offer_feedback")))
 
-  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+  override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
     ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -137,7 +137,7 @@ object Refine:
     * the leading states to the inner program and the trailing state to the critic. An unchanged critic state retains
     * the existing override exactly; a changed state preserves the critic's execution bindings.
     */
-  given refinePredictors[P <: Module[ProgramCall[I], Prediction[O]], I, O](using
+  given refinePredictors[P <: Module[I, Prediction[O]], I, O](using
       inner: Predictors[P]
   ): Predictors[Refine[P, I, O]] with
     def inspect(program: Refine[P, I, O]): Vector[PredictorView] =

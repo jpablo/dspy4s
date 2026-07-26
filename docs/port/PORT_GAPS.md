@@ -43,8 +43,8 @@ and a `ProgramRunner[P]` capability (`programs/ProgramRunner.scala`) dropped the
 so **typed** programs and user composites are now optimizable end-to-end. The legacy
 `PredictOps` typeclass and its bridge were removed in P6 — `Predictors` is the sole
 introspection typeclass. Writable state is uniformly instructions + demos + module config;
-`MultiChainComparison` has no `ProgramRunner` (its `MultiChainCall` shape has no inputs-only
-run); arbitrary user composites supply their own `ProgramRunner`.
+`MultiChainComparison` has no `ProgramRunner` because its `MultiChainInput` includes candidate
+predictions in addition to the base record input; arbitrary user composites supply their own `ProgramRunner`.
 
 **Summary (original).** dspy4s had no way to enumerate (and transform) the `Predict`s
 inside an arbitrary composite program. Python's optimizers rely on exactly
@@ -157,7 +157,7 @@ get the wrapping; `BestOfN` accordingly records its own trace entry. See
 [PORT_MODULE_HIERARCHY.md](PORT_MODULE_HIERARCHY.md).
 
 **Note (commit 42671c2).** `Module` later became generic again — `Module[I, O]`, instantiated at the untyped spine
-`DynamicModule = Module[ProgramCall[DynamicValue.Record], DynamicPrediction]` and the typed surface `Module[ProgramCall[I], Prediction[O]]`
+`DynamicModule = Module[DynamicValue.Record, DynamicPrediction]` and the typed surface `Module[I, Prediction[O]]`
 that `Predict` / `ChainOfThought` now extend. This reopened only the `[In,Out]` type params (whose earlier removal
 was justified by there being a single instantiation — no longer true once the typed layer joined). `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.

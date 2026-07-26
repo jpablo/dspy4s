@@ -34,10 +34,10 @@ class ModeLawSuite extends FunSuite:
   /** A typed program stub that records the per-call controls it received and echoes its input; `predict` is its single
     * learnable leaf (for the addressability law).
     */
-  private final case class Recorder(predict: DynamicPredict) extends Module[ProgramCall[Int], Prediction[Int]]:
+  private final case class Recorder(predict: DynamicPredict) extends Module[Int, Prediction[Int]]:
     val seen: ArrayBuffer[Mode.Controls] = ArrayBuffer.empty
     override val moduleName: String = "recorder"
-    override protected val lifecycle: ModuleLifecycle[ProgramCall[Int], Prediction[Int]] =
+    override protected val lifecycle: ModuleLifecycle[Int, Prediction[Int]] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       seen += Mode.Controls(call.config, call.traceEnabled, call.rolloutId)

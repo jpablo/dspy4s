@@ -104,7 +104,7 @@ becomes `DynamicPrediction` + `Prediction[O]` (the typed one keeps the
 erased prediction on `.raw`), and `Predict` becomes `DynamicPredict` +
 `Predict[I, O]`. The two `Predict`s are **siblings** — thin `Module`s
 over the shared `PredictEngine`, not wrapper-and-wrapped. The typed
-programs are themselves `Module`s (`Module[ProgramCall[I], Prediction[O]]`),
+programs are themselves `Module`s (`Module[I, Prediction[O]]`),
 so the runtime stack sees them like any other program; `ChainOfThought`
 is a typed signature augmentation that *composes* an inner `Predict[I, O]`
 (its `forward` delegates to it).
@@ -302,10 +302,11 @@ parity. Documented in [PORT_MAP §2a](PORT_MAP.md#2a-programs-per-file-port-stat
 **Convention.**
 
 Python's `MultiChainComparison.__call__(attempts, **inputs)` mixes the `attempts` parameter with input kwargs.
-dspy4s models the dual input faithfully as a bespoke call object, `MultiChainCall[I]` (the typed base input `I`
-plus the candidate `attempts`), so `MultiChainComparison[I, O]` is a `Module[MultiChainCall[I], …]` and the real
-work flows through the wrapped `apply` (callbacks/trace), not a side method. The `compare(input, attempts)`
-convenience builds the call. (Earlier this was an untyped `runWithAttempts` that side-stepped the wrapping.)
+dspy4s models both result-determining values as `MultiChainInput[I]` (the typed base input plus candidate attempts)
+inside the same `ProgramCall` envelope used by every module. Consequently `MultiChainComparison[I, O]` is a
+`Module[MultiChainInput[I], …]`, and the real work flows through the wrapped `apply` (callbacks/trace), not a side
+method. The `compare(input, attempts)` convenience builds the semantic input and envelope. (Earlier this was an
+untyped `runWithAttempts` that side-stepped the wrapping.)
 
 ## 13. Recent: typed/dynamic split inside `programs/`
 
@@ -318,9 +319,9 @@ doesn't have:
   (`private[dspy4s]`).
 - `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
   does the module-level callback + trace wrapping over an abstract `forward`.
-  `DynamicModule` is the untyped-spine alias (`Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`).
+  `DynamicModule` is the untyped-spine alias (`Module[DynamicValue.Record, DynamicPrediction]`).
 - `DynamicPredict` — erased predict, extends `DynamicModule`.
-- `Predict[I, O]` — typed predict, a `Module[ProgramCall[I], Prediction[O]]`; a
+- `Predict[I, O]` — typed predict, a `Module[I, Prediction[O]]`; a
   *sibling* of `DynamicPredict` over `PredictEngine` (not a wrapper).
 
 `ChainOfThought` is itself a `Module` that composes an inner typed `Predict`.
@@ -330,7 +331,7 @@ adapter/LM/callback dance that Python has spread across
 `Predict.__call__` and its helpers.
 
 **Every program is now typed.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
-`ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[ProgramCall[I], …]` —
+`ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
 `DynamicPredict` is the only program left on the untyped spine: it executes runtime-built signatures while typed
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 typed programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:

@@ -17,12 +17,13 @@ import zio.blocks.schema.DynamicValue
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
-/** The base type for every dspy4s program — a port of Python DSPy's `dspy.Module`. It is generic in the call input `I`
-  * and result `O` so the *same* base serves both layers of dspy4s:
+/** The base type for every dspy4s program — a port of Python DSPy's `dspy.Module`. It is generic in the semantic input
+  * `I` and result `O`; the uniform public/forward boundary is always `ProgramCall[I]`. The *same* base serves both
+  * layers of dspy4s:
   *
-  *   - the untyped spine, `Module[ProgramCall[DynamicValue.Record], DynamicPrediction]` (see [[DynamicModule]]), which
+  *   - the untyped spine, `Module[DynamicValue.Record, DynamicPrediction]` (see [[DynamicModule]]), which
   *     every engine program (`DynamicPredict`, `ReAct`, `CodeAct`, ...) extends; and
-  *   - the typed surface, `Module[ProgramCall[I], Prediction[O]]`, which `Predict[I, O]` / `ChainOfThought[I, O]`
+  *   - the typed surface, `Module[I, Prediction[O]]`, which `Predict[I, O]` / `ChainOfThought[I, O]`
   *     extend — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
   *
   * A program implements [[forward]]; [[apply]] is the `final` caller entry (Scala's `__call__`) that wraps `forward`
@@ -51,16 +52,16 @@ trait Module[I, O]:
   /** The program's actual computation, minus the module lifecycle. Subclasses implement this; callers invoke [[apply]]
     * (or [[applyAsync]]), never `forward`.
     */
-  protected def forward(input: I)(using RuntimeContext): Either[DspyError, O]
+  protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, O]
 
-  final def apply(input: I)(using RuntimeContext): Either[DspyError, O] =
+  final def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, O] =
     lifecycle match
-      case ModuleLifecycle.Transparent() => forward(input)
+      case ModuleLifecycle.Transparent() => forward(call)
       case ModuleLifecycle.Observed(observation) =>
-        val inputBag = observation.inputs(input)
+        val inputBag = observation.inputs(call)
         CallbackDispatcher.withModule(moduleName, inputBag) {
-          val result = forward(input)
-          if observation.traceEnabled(input) then
+          val result = forward(call)
+          if observation.traceEnabled(call) then
             result match
               case Right(output) =>
                 val outputs = observation.outputs(output)
@@ -95,12 +96,12 @@ trait Module[I, O]:
   /** Async value-only compatibility entry. Worker trace/history is isolated; use [[applyAsyncExecuted]] when the
     * observable runtime output must be retained and explicitly joined into another execution.
     */
-  def applyAsync(input: I)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, O]] =
-    applyAsyncExecuted(input).map(_.value)(using ExecutionContext.parasitic)
+  def applyAsync(call: ProgramCall[I])(using RuntimeContext, ExecutionContext): Future[Either[DspyError, O]] =
+    applyAsyncExecuted(call).map(_.value)(using ExecutionContext.parasitic)
 
   /** Async writer entry: returns the program result together with the worker-produced runtime delta. */
-  def applyAsyncExecuted(input: I)(using RuntimeContext, ExecutionContext): Future[Executed[Either[DspyError, O]]] =
-    ContextPropagation.futureExecuted(apply(input))
+  def applyAsyncExecuted(call: ProgramCall[I])(using RuntimeContext, ExecutionContext): Future[Executed[Either[DspyError, O]]] =
+    ContextPropagation.futureExecuted(apply(call))
 
 /** A structural program node whose own identity is not part of execution observability. Its children remain ordinary
   * [[Module]]s and therefore still emit callbacks, trace, and history. Keeping this distinction in the base lifecycle
@@ -110,15 +111,15 @@ trait Module[I, O]:
 private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   final override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.transparent
 
-/** The untyped program spine: `Module[ProgramCall[DynamicValue.Record], DynamicPrediction]` with a lifecycle strategy
+/** The untyped program spine: `Module[DynamicValue.Record, DynamicPrediction]` with a lifecycle strategy
   * for the spine record shapes (`call.input` / `prediction.values`).
   * [[dspy4s.programs.DynamicPredict DynamicPredict]] is the untyped prediction module on this spine; user-defined
   * data-bag programs may extend it too. The typed [[dspy4s.programs.Predict Predict]] is a sibling module over the
   * shared `PredictEngine`, not a wrapper around `DynamicPredict`. Subclasses implement only `forward` + `moduleName`;
   * `lifecycle` stays overridable for programs that need a different observation. (The typed programs — `Predict` /
   * `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` / `MultiChainComparison` / `BestOfN` / `Refine` —
-  * instead extend `Module[ProgramCall[I], Prediction[…]]`.)
+  * instead extend `Module[I, Prediction[…]]`.)
   */
-trait DynamicModule extends Module[ProgramCall[DynamicValue.Record], DynamicPrediction]:
-  override protected val lifecycle: ModuleLifecycle[ProgramCall[DynamicValue.Record], DynamicPrediction] =
+trait DynamicModule extends Module[DynamicValue.Record, DynamicPrediction]:
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicPrediction] =
     ModuleLifecycle.dynamic

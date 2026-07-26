@@ -16,7 +16,7 @@ import zio.blocks.schema.DynamicValue
   * majority vote (`dspy.majority` upstream), which is the default here via [[Aggregation.majority]].
   *
   * Shape choice: dspy4s splits programs into a typed surface (`Predict[I, O]`, `ChainOfThought[I, O]`, ...) and an
-  * untyped spine (`DynamicModule = Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`). An ensemble is
+  * untyped spine (`DynamicModule = Module[DynamicValue.Record, DynamicPrediction]`). An ensemble is
   * inherently heterogeneous and generic over its members — Python's `EnsembledProgram` just forwards `*args, **kwargs`
   * to each member and reduces a list of arbitrary outputs. A faithful generic typed shape would require all members to
   * share an exact `Module[I, O]` and a typed reducer; that's both more restrictive than upstream and awkward. So we

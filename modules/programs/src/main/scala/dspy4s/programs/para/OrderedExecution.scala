@@ -7,11 +7,10 @@ import dspy4s.programs.Compose
 import dspy4s.programs.andThen
 import dspy4s.programs.***
 import dspy4s.programs.contracts.Module
-import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 
 /** Plain executable program morphisms without optimizer-addressability or decoder evidence. */
-type ModuleHom[I, O] = Module[ProgramCall[I], Prediction[O]]
+type ModuleHom[I, O] = Module[I, Prediction[O]]
 
 /** A category with ordered independent-input execution and structural swap/copy/discard operations.
   *

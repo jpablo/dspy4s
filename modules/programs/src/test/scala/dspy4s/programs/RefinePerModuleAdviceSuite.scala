@@ -48,9 +48,9 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     * `DynamicPredict`s, so `Predictors` is structurally derived with field-label names ("hinter", "answerer").
     */
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
-      extends Module[ProgramCall[Q], Prediction[Cand]]:
+      extends Module[Q, Prediction[Cand]]:
     override val moduleName: String = "hint_then_answer"
-    override protected val lifecycle: ModuleLifecycle[ProgramCall[Q], Prediction[Cand]] =
+    override protected val lifecycle: ModuleLifecycle[Q, Prediction[Cand]] =
       ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =

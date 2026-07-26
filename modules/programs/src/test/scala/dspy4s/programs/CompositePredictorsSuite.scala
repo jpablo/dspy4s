@@ -36,9 +36,9 @@ class CompositePredictorsSuite extends FunSuite:
 
   /** A typed program stub with one learnable leaf (same pattern as ComposeLawSuite's Step). */
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
-      extends Module[ProgramCall[I], Prediction[O]]:
+      extends Module[I, Prediction[O]]:
     override val moduleName: String = "leaf"
-    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+    override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction.empty))

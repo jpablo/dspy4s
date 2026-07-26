@@ -77,8 +77,8 @@ object Mode:
   * trace, or history event of its own, so a chain of modes collapses to the wrapped program's single lifecycle scope
   * and the monoid law holds on runtime observations.
   */
-final case class Moded[I, O, P <: Module[ProgramCall[I], Prediction[O]]](mode: Mode, program: P)
-    extends TransparentModule[ProgramCall[I], Prediction[O]]:
+final case class Moded[I, O, P <: Module[I, Prediction[O]]](mode: Mode, program: P)
+    extends TransparentModule[I, Prediction[O]]:
   override val moduleName: String = s"mode(${program.moduleName})"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -91,7 +91,7 @@ final case class Moded[I, O, P <: Module[ProgramCall[I], Prediction[O]]](mode: M
 
 object Moded:
   /** `mode` is non-learnable, so addressability passes straight through to the wrapped program (fork 4). */
-  given modedPredictors[I, O, P <: Module[ProgramCall[I], Prediction[O]]](using
+  given modedPredictors[I, O, P <: Module[I, Prediction[O]]](using
       inner: Predictors[P]
   ): Predictors[Moded[I, O, P]] with
     def inspect(program: Moded[I, O, P]): Vector[PredictorView] = inner.inspect(program.program)

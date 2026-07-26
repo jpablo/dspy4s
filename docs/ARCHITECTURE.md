@@ -102,17 +102,18 @@ graph TD
    - `runtime/PredictEngine` — the shared execute body (private)
    - `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
      does the module-level callback + trace wrapping over an abstract `forward`.
-     `DynamicModule` is the untyped-spine alias (`Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`,
+     `DynamicModule` is the untyped-spine alias (`Module[DynamicValue.Record, DynamicPrediction]`,
      with the bag projection hooks defaulted)
    - `DynamicPredict` — erased predict, extends `DynamicModule`
-   - `Predict[I, O]` — typed predict, a `Module[ProgramCall[I], Prediction[O]]`; a *sibling*
+   - `Predict[I, O]` — typed predict, a `Module[I, Prediction[O]]`; a *sibling*
      of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
    - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
-   - All other programs are typed `Module[ProgramCall[I], Prediction[…]]` too:
+   - All other programs are typed `Module[I, Prediction[…]]` too:
      `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
      data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
-     (`MultiChainCall[I]`; `WithField[O,"rationale",String]`), and `BestOfN[I,O]` / `Refine[I,O]`
+     (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
+     `BestOfN[I,O]` / `Refine[I,O]`
      (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
      `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the only program on the untyped spine.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).

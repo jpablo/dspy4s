@@ -28,7 +28,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *      `previous_code` + `error` and emits a fix. Loops up to `maxIterations`. 3. **answer** — inputs +
   *      `final_generated_code` + `code_output` → original outputs declared in `baseSignature`.
   *
-  * `ProgramOfThought[I, O]` is a `Module[ProgramCall[I], Prediction[WithReasoning[O]]]`: it encodes the typed input,
+  * `ProgramOfThought[I, O]` is a `Module[I, Prediction[WithReasoning[O]]]`: it encodes the typed input,
   * runs the three passes internally over the data-bag layer, and decodes the final answer step into the base outputs
   * `O` with `reasoning: String` prepended (see [[OutputAugmentation]]).
   *
@@ -60,7 +60,7 @@ final case class ProgramOfThought[I, O](
     answererPredictOverride: Option[Predict[((I, String), String), ProgramOfThought.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of["reasoning", String, O]
-) extends Module[ProgramCall[I], Prediction[ProgramOfThought.WithReasoning[O]]]:
+) extends Module[I, Prediction[ProgramOfThought.WithReasoning[O]]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ProgramOfThought.WithReasoning[O]
@@ -180,7 +180,7 @@ final case class ProgramOfThought[I, O](
       runtime = ProgramOfThought.SignatureProgramRuntime
     ))
 
-  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[I, Prediction[Out]] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =

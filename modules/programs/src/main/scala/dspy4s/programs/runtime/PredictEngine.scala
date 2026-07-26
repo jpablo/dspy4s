@@ -30,8 +30,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *
   * This is the raw engine -- module-level lifecycle (the `withModule` callback scope and trace/history recording) is
   * added by `Module.apply`. Two sibling `Module`s call this engine in their `forward`: the untyped `DynamicPredict`
-  * (`Module[ProgramCall[DynamicValue.Record], DynamicPrediction]`) and the typed `Predict[I, O]`
-  * (`Module[ProgramCall[I], Prediction[O]]`, which encodes/decodes around `execute`). Neither wraps the other, so a
+  * (`Module[DynamicValue.Record, DynamicPrediction]`) and the typed `Predict[I, O]`
+  * (`Module[I, Prediction[O]]`, which encodes/decodes around `execute`). Neither wraps the other, so a
   * call emits exactly one module event.
   */
 private[dspy4s] final case class PredictEngine(

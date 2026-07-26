@@ -61,11 +61,11 @@ class ParaCategoryLawSuite extends FunSuite:
 
   /** A typed program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
-      extends Module[ProgramCall[I], Prediction[O]]:
+      extends Module[I, Prediction[O]]:
 
     override val moduleName: String = s"step_$tag"
 
-    override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =
+    override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
       ModuleLifecycle.typedWithoutInputs
 
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -81,9 +81,9 @@ class ParaCategoryLawSuite extends FunSuite:
   /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove the
     * construction gate below.
     */
-  private final class Opaque extends Module[ProgramCall[Int], Prediction[Int]]:
+  private final class Opaque extends Module[Int, Prediction[Int]]:
     override val moduleName: String = "opaque"
-    override protected val lifecycle: ModuleLifecycle[ProgramCall[Int], Prediction[Int]] =
+    override protected val lifecycle: ModuleLifecycle[Int, Prediction[Int]] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, DynamicPrediction.empty))

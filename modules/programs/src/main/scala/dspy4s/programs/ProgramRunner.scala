@@ -28,7 +28,7 @@ trait ProgramRunner[P]:
 private[programs] trait LowPriorityProgramRunner:
   /** Any typed module whose input type carries a [[RecordCodec]] (user composites without a hand-written
     * runner). Lower priority than the signature-backed instances in the companion. */
-  given fromRecordCodec[I, O, P <: Module[ProgramCall[I], Prediction[O]]](using
+  given fromRecordCodec[I, O, P <: Module[I, Prediction[O]]](using
       codec: RecordCodec[I]
   ): ProgramRunner[P] with
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
@@ -47,7 +47,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
     ): Either[DspyError, DynamicPrediction] =
       program.apply(call)
 
-  private def signatureBacked[I, O, P <: Module[ProgramCall[I], Prediction[O]]](
+  private def signatureBacked[I, O, P <: Module[I, Prediction[O]]](
       inputShapeOf: P => Shape[I]
   ): ProgramRunner[P] = new ProgramRunner[P]:
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using

@@ -33,7 +33,7 @@ import scala.util.matching.Regex
   *      snippet + observation to `trajectory`. Exit early if the LM set `finished=true`.
   *
   * After the loop, a reasoning-augmented [[DynamicPredict]] extractor reads the full trajectory and produces the
-  * user-visible outputs declared in `baseSignature`. `CodeAct[I, O]` is a `Module[ProgramCall[I],
+  * user-visible outputs declared in `baseSignature`. `CodeAct[I, O]` is a `Module[I,
   * Prediction[WithReasoning[O]]]`: it encodes the typed input, runs the loop + extractor internally over the data-bag
   * layer, and decodes the reply into the base outputs `O` with `reasoning: String` prepended (see
   * [[OutputAugmentation]]). The rendered `trajectory` is kept on `.raw`.
@@ -83,7 +83,7 @@ final case class CodeAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), CodeAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of["reasoning", String, O]
-) extends Module[ProgramCall[I], Prediction[CodeAct.WithReasoning[O]]]:
+) extends Module[I, Prediction[CodeAct.WithReasoning[O]]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = CodeAct.WithReasoning[O]
@@ -172,7 +172,7 @@ final case class CodeAct[I, O](
          |$library""".stripMargin
     ) ++ toolLines).mkString("\n")
 
-  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[I, Prediction[Out]] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =

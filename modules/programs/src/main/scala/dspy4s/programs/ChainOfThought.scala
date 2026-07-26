@@ -43,14 +43,14 @@ final case class ChainOfThought[I, O](
       */
     config: DynamicValue.Record = DynamicValue.Record.empty
 )(using prepend: PrependField.Of["reasoning", String, O])
-    extends Module[ProgramCall[I], Prediction[ChainOfThought.WithReasoning[O]]]:
+    extends Module[I, Prediction[ChainOfThought.WithReasoning[O]]]:
 
   /** The augmented output type — always a named tuple. See [[ChainOfThought.WithReasoning]]. */
   type Out = ChainOfThought.WithReasoning[O]
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
-  override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[I, Prediction[Out]] =
     ModuleLifecycle.typed(signature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
