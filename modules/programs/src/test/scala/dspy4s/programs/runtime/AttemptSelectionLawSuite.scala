@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.programs.AttemptCount
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -17,16 +18,21 @@ class AttemptSelectionLawSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
 
+  private def attemptCount(value: Int): AttemptCount =
+    AttemptCount.either(value) match
+      case Right(count) => count
+      case Left(error)  => fail(error.toString)
+
   /** Run `n` attempts returning the scripted reward at each index; reward is the value itself. */
   private def scripted(rewards: Vector[Double], threshold: Double, failCount: Option[Int] = None) =
-    AttemptSelection.bestOf[Double](rewards.size, threshold, failCount, "law")(
+    AttemptSelection.bestOf[Double](attemptCount(rewards.size), threshold, failCount, "law")(
       runAttempt = idx => Right(rewards(idx)),
       reward     = d => Right(d)
     )
 
   test("the reducer returns its only successful attempt, regardless of threshold") {
     val calls = AtomicInteger(0)
-    val result = AttemptSelection.bestOf[Double](1, threshold = 0.9, None, "law")(
+    val result = AttemptSelection.bestOf[Double](AttemptCount(1), threshold = 0.9, None, "law")(
       runAttempt = _ => { calls.incrementAndGet(); Right(0.2) }, // below threshold
       reward     = d => Right(d)
     )
@@ -54,7 +60,7 @@ class AttemptSelectionLawSuite extends FunSuite:
   // ── threshold short-circuit: the first attempt at/above threshold ends the loop ───────────────────────────
   test("short-circuits at the first attempt that reaches the threshold") {
     val calls = AtomicInteger(0)
-    val result = AttemptSelection.bestOf[Double](3, threshold = 0.9, None, "law")(
+    val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.9, None, "law")(
       runAttempt = idx => { calls.incrementAndGet(); Right(Vector(0.95, 0.1, 0.99)(idx)) },
       reward     = d => Right(d)
     )
@@ -64,7 +70,7 @@ class AttemptSelectionLawSuite extends FunSuite:
 
   // ── failCount budget: tolerate exactly failCount failures, then surface the next error ────────────────────
   test("surfaces the last error after exhausting the default fail budget") {
-    val result = AttemptSelection.bestOf[Double](3, threshold = 0.0, None, "law")(
+    val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.0, None, "law")(
       runAttempt = idx => Left(RuntimeError("law", s"f$idx")),
       reward     = d => Right(d)
     )
@@ -73,7 +79,7 @@ class AttemptSelectionLawSuite extends FunSuite:
 
   test("a custom fail budget aborts earlier and keeps no best when all attempts failed") {
     val calls = AtomicInteger(0)
-    val result = AttemptSelection.bestOf[Double](3, threshold = 0.0, failCount = Some(1), "law")(
+    val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.0, failCount = Some(1), "law")(
       runAttempt = idx => { calls.incrementAndGet(); Left(RuntimeError("law", s"f$idx")) },
       reward     = d => Right(d)
     )
@@ -82,7 +88,7 @@ class AttemptSelectionLawSuite extends FunSuite:
   }
 
   test("keeps a sub-threshold best when a later failure stays within budget") {
-    val result = AttemptSelection.bestOf[Double](4, threshold = 1.0, failCount = Some(1), "law")(
+    val result = AttemptSelection.bestOf[Double](AttemptCount(4), threshold = 1.0, failCount = Some(1), "law")(
       runAttempt = idx => idx match
         case 3 => Left(RuntimeError("law", "boom"))
         case other => Right(Vector(0.1, 0.7, 0.3)(other)),
@@ -97,7 +103,7 @@ class AttemptSelectionLawSuite extends FunSuite:
 
     // The attempt's value is whether the marker adapter is in scope; reward rewards its presence.
     def runWithFeedback(feedback: Option[(Boolean, Vector[dspy4s.core.contracts.TraceEntry], Double) => Either[DspyError, Option[AdapterRef]]]) =
-      AttemptSelection.bestOf[Boolean](2, threshold = 1.0, None, "law")(
+      AttemptSelection.bestOf[Boolean](AttemptCount(2), threshold = 1.0, None, "law")(
         runAttempt = _ => Right(summon[RuntimeContext].adapter.contains(AttemptSelectionLawSuite.MarkerAdapter)),
         reward     = sawMarker => Right(if sawMarker then 1.0 else 0.2),
         feedback   = feedback

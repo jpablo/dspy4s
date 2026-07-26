@@ -115,7 +115,11 @@ class ProgramOfThoughtSuite extends FunSuite:
       "```python\nprint('ok')\n```",  // regenerated good code
       "ok"                            // answer extraction
     ))
-    val program = ProgramOfThought(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+    val program = ProgramOfThought(
+      baseSignature = signature,
+      interpreter = interpreter,
+      maxIterations = IterationLimit(3)
+    )
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -143,7 +147,11 @@ class ProgramOfThoughtSuite extends FunSuite:
       "```python\nprint(x)\n```",
       "```python\nprint(x)\n```"
     ))
-    val program = ProgramOfThought(baseSignature = signature, interpreter = interpreter, maxIterations = 2)
+    val program = ProgramOfThought(
+      baseSignature = signature,
+      interpreter = interpreter,
+      maxIterations = IterationLimit(2)
+    )
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(

@@ -76,7 +76,7 @@ class TypedBestOfNSuite extends FunSuite:
     ))
     val bestOfN = BestOfN[TypedStub, Q, Cand](
       module    = stub,
-      n         = 3,
+      n         = AttemptCount(3),
       rewardFn  = (_, pred) => pred.output.score,
       threshold = 1.0
     )
@@ -101,7 +101,12 @@ class TypedBestOfNSuite extends FunSuite:
       Right(candidate("A", 0.95)),   // >= threshold -> stop after the first attempt
       Right(candidate("B", 0.10))
     ))
-    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, p) => p.output.score, threshold = 0.9)
+    val bestOfN = BestOfN[TypedStub, Q, Cand](
+      stub,
+      n = AttemptCount(3),
+      rewardFn = (_, p) => p.output.score,
+      threshold = 0.9
+    )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = bestOfN.apply(ProgramCall(Q("x")))
@@ -115,7 +120,7 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f2")),
       Left(RuntimeError("typed_stub", "f3"))
     ))
-    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0)
+    val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = AttemptCount(3), rewardFn = (_, _) => 1.0, threshold = 0.0)
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = bestOfN.apply(ProgramCall(Q("x")))
@@ -130,7 +135,13 @@ class TypedBestOfNSuite extends FunSuite:
       Right(candidate("ok", 1.0))
     ))
     val bestOfN =
-      BestOfN[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
+      BestOfN[TypedStub, Q, Cand](
+        stub,
+        n = AttemptCount(3),
+        rewardFn = (_, _) => 1.0,
+        threshold = 0.0,
+        failCount = Some(1)
+      )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = bestOfN.apply(ProgramCall(Q("x")))
@@ -150,7 +161,13 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f5"))
     ))
     val bestOfN =
-      BestOfN[TypedStub, Q, Cand](stub, n = 5, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(3))
+      BestOfN[TypedStub, Q, Cand](
+        stub,
+        n = AttemptCount(5),
+        rewardFn = (_, _) => 1.0,
+        threshold = 0.0,
+        failCount = Some(3)
+      )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = bestOfN.apply(ProgramCall(Q("x")))
@@ -171,7 +188,7 @@ class TypedBestOfNSuite extends FunSuite:
     ))
     val bestOfN = BestOfN[TypedStub, Q, Cand](
       stub,
-      n = 5,
+      n = AttemptCount(5),
       rewardFn = (_, p) => p.output.score,
       threshold = 1.0,
       failCount = Some(2)
@@ -190,7 +207,12 @@ class TypedBestOfNSuite extends FunSuite:
       Right(candidate("A", 0.8)),
       Right(candidate("B", 0.2))
     ))
-    val refine = Refine[TypedStub, Q, Cand](stub, n = 2, rewardFn = (_, p) => p.output.score, threshold = 0.5)
+    val refine = Refine[TypedStub, Q, Cand](
+      stub,
+      n = AttemptCount(2),
+      rewardFn = (_, p) => p.output.score,
+      threshold = 0.5
+    )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = refine.apply(ProgramCall(Q("x")))
@@ -328,7 +350,7 @@ class TypedBestOfNSuite extends FunSuite:
     val lm      = ScriptingLm()
     val refine  = Refine[InnerPredict, Q, Cand](
       module    = InnerPredict(),
-      n         = 2,
+      n         = AttemptCount(2),
       rewardFn  = (_, p) => p.output.score,
       threshold = 1.0
     )
@@ -354,7 +376,12 @@ class TypedBestOfNSuite extends FunSuite:
     val adapter = ScriptingAdapter()
     val lm      = ScriptingLm()
     val refine =
-      Refine[InnerPredict, Q, Cand](InnerPredict(), n = 3, rewardFn = (_, p) => p.output.score, threshold = 0.0)
+      Refine[InnerPredict, Q, Cand](
+        InnerPredict(),
+        n = AttemptCount(3),
+        rewardFn = (_, p) => p.output.score,
+        threshold = 0.0
+      )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -373,7 +400,12 @@ class TypedBestOfNSuite extends FunSuite:
     val adapter = ScriptingAdapter()
     val lm      = AdviceFailingLm()
     val refine =
-      Refine[InnerPredict, Q, Cand](InnerPredict(), n = 2, rewardFn = (_, p) => p.output.score, threshold = 1.0)
+      Refine[InnerPredict, Q, Cand](
+        InnerPredict(),
+        n = AttemptCount(2),
+        rewardFn = (_, p) => p.output.score,
+        threshold = 1.0
+      )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -391,7 +423,13 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f2")),
       Right(candidate("ok", 1.0))
     ))
-    val refine = Refine[TypedStub, Q, Cand](stub, n = 3, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(1))
+    val refine = Refine[TypedStub, Q, Cand](
+      stub,
+      n = AttemptCount(3),
+      rewardFn = (_, _) => 1.0,
+      threshold = 0.0,
+      failCount = Some(1)
+    )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = refine.apply(ProgramCall(Q("x")))
@@ -409,7 +447,13 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f4")),
       Left(RuntimeError("typed_stub", "f5"))
     ))
-    val refine = Refine[TypedStub, Q, Cand](stub, n = 5, rewardFn = (_, _) => 1.0, threshold = 0.0, failCount = Some(3))
+    val refine = Refine[TypedStub, Q, Cand](
+      stub,
+      n = AttemptCount(5),
+      rewardFn = (_, _) => 1.0,
+      threshold = 0.0,
+      failCount = Some(3)
+    )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = refine.apply(ProgramCall(Q("x")))

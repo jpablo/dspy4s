@@ -64,7 +64,7 @@ import zio.blocks.schema.Schema
   */
 final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     module: P,
-    n: Int,
+    n: AttemptCount,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
     failCount: Option[Int] = None,
@@ -77,8 +77,6 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
 )(using
     predictors: Predictors[P]
 ) extends Module[ProgramCall[I], Prediction[O]]:
-  require(n > 0, "n must be greater than 0")
-
   override val moduleName: String = "refine"
 
   /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern) — a TYPED [[Predict]] over

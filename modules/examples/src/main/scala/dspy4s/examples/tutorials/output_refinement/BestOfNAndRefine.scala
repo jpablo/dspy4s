@@ -13,7 +13,7 @@ package dspy4s.examples.tutorials.output_refinement
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.{BestOfN, ChainOfThought, Refine}
+import dspy4s.programs.{AttemptCount, BestOfN, ChainOfThought, Refine}
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
 // Snippet 5 judge signature (top-level for Mirror derivation).
@@ -39,7 +39,12 @@ object BestOfNAndRefine:
   // | best_of_3(question="What is the capital of Belgium?").answer  # Brussels
   object OneWordBestOfN:
     // --8<-- [start:best-of-n]
-    val bestOf3 = BestOfN(module = qa, n = 3, rewardFn = (_, pred) => oneWord(pred.output.answer), threshold = 1.0)
+    val bestOf3 = BestOfN(
+      module = qa,
+      n = AttemptCount(3),
+      rewardFn = (_, pred) => oneWord(pred.output.answer),
+      threshold = 1.0
+    )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
       bestOf3.apply((question = question)).map(_.output.answer)
@@ -49,7 +54,7 @@ object BestOfNAndRefine:
   // | best_of_3 = dspy.BestOfN(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0, fail_count=1)
   object BestOfNWithFailCount:
     // --8<-- [start:fail-count]
-    val bestOf3 = BestOfN(module = qa, n = 3, rewardFn = (_, pred) => oneWord(pred.output.answer),
+    val bestOf3 = BestOfN(module = qa, n = AttemptCount(3), rewardFn = (_, pred) => oneWord(pred.output.answer),
                           threshold = 1.0, failCount = Some(1))
     // --8<-- [end:fail-count]
 
@@ -57,9 +62,20 @@ object BestOfNAndRefine:
   // | refine = dspy.Refine(module=dspy.ChainOfThought("question -> answer"), N=3,
   // |                      reward_fn=one_word_answer, threshold=1.0[, fail_count=1])
   object OneWordRefine:
-    val refine = Refine(module = qa, n = 3, rewardFn = (_, pred) => oneWord(pred.output.answer), threshold = 1.0)
+    val refine = Refine(
+      module = qa,
+      n = AttemptCount(3),
+      rewardFn = (_, pred) => oneWord(pred.output.answer),
+      threshold = 1.0
+    )
     val refineStopOnFirstError =
-      Refine(module = qa, n = 3, rewardFn = (_, pred) => oneWord(pred.output.answer), threshold = 1.0, failCount = Some(1))
+      Refine(
+        module = qa,
+        n = AttemptCount(3),
+        rewardFn = (_, pred) => oneWord(pred.output.answer),
+        threshold = 1.0,
+        failCount = Some(1)
+      )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
       refine.apply((question = question)).map(_.output.answer)
@@ -79,7 +95,12 @@ object BestOfNAndRefine:
     def call(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
       def reward(answer: String): Double =
         judge.apply((statement = answer)).map(r => if r.output.is_factual then 1.0 else 0.0).getOrElse(0.0)
-      val refinedQa = Refine(module = qa, n = 3, rewardFn = (_, pred) => reward(pred.output.answer), threshold = 1.0)
+      val refinedQa = Refine(
+        module = qa,
+        n = AttemptCount(3),
+        rewardFn = (_, pred) => reward(pred.output.answer),
+        threshold = 1.0
+      )
       refinedQa.apply((question = question)).map(_.output.answer)
     // --8<-- [end:llm-judge]
 
@@ -96,7 +117,12 @@ object BestOfNAndRefine:
       math.max(0.0, 1.0 - distance / 125.0)
 
     val optimizedSummarizer =
-      BestOfN(module = summarizer, n = 50, rewardFn = (_, pred) => idealLength(pred.output.summary), threshold = 0.9)
+      BestOfN(
+        module = summarizer,
+        n = AttemptCount(50),
+        rewardFn = (_, pred) => idealLength(pred.output.summary),
+        threshold = 0.9
+      )
 
     def call(text: String)(using RuntimeContext): Either[DspyError, String] =
       optimizedSummarizer.apply((text = text)).map(_.output.summary)

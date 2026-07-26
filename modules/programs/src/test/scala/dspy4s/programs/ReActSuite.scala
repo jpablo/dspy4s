@@ -83,7 +83,7 @@ class ReActSuite extends FunSuite:
       "I have what I need||finish||", // step 2 -> finish
       "Brussels" // extractor -> answer
     ))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
       val result = react.apply((question = "What is the capital of Belgium?"))
@@ -101,7 +101,7 @@ class ReActSuite extends FunSuite:
   test("react can finish on the first step without calling any tool") {
     val search = new SearchTool
     val lm = new ScriptedLm(Vector("I already know||finish||", "42"))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
       val result = react.apply((question = "2+2 doubled?"))
@@ -118,7 +118,7 @@ class ReActSuite extends FunSuite:
       "keep going||search||query=b",
       "extracted-after-cap" // extractor, reached after the 2 capped react steps
     ))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 2)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(2))
 
     withReact(lm) {
       val result = react.apply((question = "x"))
@@ -136,7 +136,7 @@ class ReActSuite extends FunSuite:
       "ok now finish||finish||",
       "done"
     ))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
       val result = react.apply((question = "x"))
@@ -155,7 +155,7 @@ class ReActSuite extends FunSuite:
 
     val search = new SearchTool
     val lm = new ScriptedLm(Vector("look||search||query=x", "done||finish||", "Brussels"))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
@@ -213,7 +213,7 @@ class ReActSuite extends FunSuite:
       Right("Brussels")
     ))
     val probe = new ExtractProbeAdapter
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, probe) {
       val result = react.apply((question = "capital?"))
@@ -239,7 +239,7 @@ class ReActSuite extends FunSuite:
       Right("done||finish||"),
       Right("42")
     ))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, new ExtractProbeAdapter) {
       val result = react.apply((question = "q?"))
@@ -257,7 +257,7 @@ class ReActSuite extends FunSuite:
     // ValueError path -> break. The extractor then runs over the empty trajectory.
     val lm = new EitherLm(Vector(Left(cwError), Right("best guess")))
     val probe = new ExtractProbeAdapter
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = 5)
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, probe) {
       val result = react.apply((question = "q?"))

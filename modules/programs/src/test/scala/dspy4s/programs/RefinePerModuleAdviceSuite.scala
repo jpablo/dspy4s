@@ -120,7 +120,7 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     val lm      = TaskAndFeedbackLm()
     val refine  = Refine[HintThenAnswer, Q, Cand](
       module    = program,
-      n         = 2,
+      n         = AttemptCount(2),
       rewardFn  = (_, p) => if p.output.answer == "Paris" then 1.0 else 0.0,
       threshold = 1.0
     )

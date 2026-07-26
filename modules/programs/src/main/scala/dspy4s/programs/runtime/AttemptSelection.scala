@@ -7,6 +7,7 @@ import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.programs.AttemptCount
 
 import scala.util.control.NonFatal
 
@@ -42,7 +43,7 @@ object AttemptSelection:
     *                   carried adapter is retained), mirroring the module-failure path. Omitted (`None`) for
     *                   best-of-`n` without carried feedback. */
   private[programs] def bestOf[A](
-      n: Int,
+      n: AttemptCount,
       threshold: Double,
       failCount: Option[Int],
       label: String

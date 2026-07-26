@@ -61,7 +61,10 @@ class RLMSuite extends FunSuite:
       body(using RuntimeEnvironment.current)
     }
 
-  private def rlm(repl: ScriptedRepl, maxIterations: Int = 5): RLM[(context: String, query: String), (answer: String)] =
+  private def rlm(
+      repl: ScriptedRepl,
+      maxIterations: IterationLimit = IterationLimit(5)
+  ): RLM[(context: String, query: String), (answer: String)] =
     RLM(baseSignature = qaSignature, maxIterations = maxIterations, interpreterFactory = (_, _) => repl)
 
   test("SUBMIT terminates the loop: outputs decode, trajectory + final_reasoning ride on .raw, repl is closed") {
@@ -141,7 +144,7 @@ class RLMSuite extends FunSuite:
       "fallback answer" // extract step
     ))
     val probe = new ProbeAdapter
-    val program = rlm(repl, maxIterations = 2)
+    val program = rlm(repl, maxIterations = IterationLimit(2))
 
     withRlm(lm, probe) {
       val result = program.apply((context = "c", query = "q"))
@@ -181,7 +184,7 @@ class RLMSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext()) {
       given ctx: RuntimeContext = RuntimeEnvironment.current
-      val tools = RLM.makeLlmTools(maxLlmCalls = 3, subLm = Some(subLm), ctx)
+      val tools = RLM.makeLlmTools(maxLlmCalls = LlmCallLimit(3), subLm = Some(subLm), ctx)
       val query = tools.find(_.name == "llm_query").get
       val batched = tools.find(_.name == "llm_query_batched").get
 
@@ -233,7 +236,7 @@ class RLMSuite extends FunSuite:
       "explore||```python\nprint(context[:10])\n```",
       "FALLBACK"
     ))
-    val program = rlm(repl, maxIterations = 1)
+    val program = rlm(repl, maxIterations = IterationLimit(1))
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
       Console.withErr(captured) {
@@ -260,7 +263,7 @@ class RLMSuite extends FunSuite:
         else Left(RuntimeError("lm", "boom"))
     val program = RLM(
       baseSignature = qaSignature,
-      maxIterations = 5,
+      maxIterations = IterationLimit(5),
       verbose = true,
       interpreterFactory = (_, _) => repl
     )
@@ -280,7 +283,7 @@ class RLMSuite extends FunSuite:
   test("max-iterations fallback warns on stderr unconditionally; per-step logs only appear with verbose") {
     val repl = new ScriptedRepl(Vector(Right(CodeResult("x\n", "", 0))))
     val lm = new ScriptedLm(Vector("look||```python\nprint(1)\n```", "FALLBACK"))
-    val program = rlm(repl, maxIterations = 1)
+    val program = rlm(repl, maxIterations = IterationLimit(1))
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
       Console.withErr(captured) {

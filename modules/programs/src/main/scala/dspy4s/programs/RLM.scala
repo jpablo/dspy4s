@@ -75,9 +75,9 @@ import java.util.concurrent.atomic.AtomicInteger
   */
 final case class RLM[I, O](
     baseSignature: Signature[I, O],
-    maxIterations: Int = 20,
-    maxLlmCalls: Int = 50,
-    maxOutputChars: Int = 10_000,
+    maxIterations: IterationLimit = IterationLimit(20),
+    maxLlmCalls: LlmCallLimit = LlmCallLimit(50),
+    maxOutputChars: OutputCharLimit = OutputCharLimit(10_000),
     verbose: Boolean = false,
     tools: Vector[ToolFunction] = Vector.empty,
     subLm: Option[LanguageModel] = None,
@@ -95,8 +95,6 @@ final case class RLM[I, O](
 ) extends Module[ProgramCall[I], Prediction[O]]:
 
   override val moduleName: String = "rlm"
-  require(maxIterations > 0, "maxIterations must be greater than 0")
-  require(maxLlmCalls > 0, "maxLlmCalls must be greater than 0")
   tools.foreach { tool =>
     require(
       !RLM.ReservedToolNames.contains(tool.name),
@@ -420,7 +418,7 @@ object RLM:
       inputs: String,
       outputFields: String,
       finalOutputNames: String,
-      maxLlmCalls: Int
+      maxLlmCalls: LlmCallLimit
   ): String =
     s"""You are tasked with producing the following outputs given the inputs $inputs:
        |$outputFields
@@ -487,17 +485,17 @@ object RLM:
 
   /** One REPL interaction (upstream `REPLEntry`). */
   final case class ReplEntry(reasoning: String, code: String, output: String):
-    def format(index: Int, maxOutputChars: Int): String =
+    def format(index: Int, maxOutputChars: OutputCharLimit): String =
       val reasoningLine = if reasoning.nonEmpty then s"Reasoning: $reasoning\n" else ""
       s"=== Step ${index + 1} ===\n${reasoningLine}Code:\n```python\n$code\n```\n${formatOutputBlock(output, maxOutputChars)}"
 
   /** Upstream `REPLHistory.format`. */
-  private[programs] def renderHistory(entries: Vector[ReplEntry], maxOutputChars: Int): String =
+  private[programs] def renderHistory(entries: Vector[ReplEntry], maxOutputChars: OutputCharLimit): String =
     if entries.isEmpty then "You have not interacted with the REPL environment yet."
     else entries.zipWithIndex.map { case (entry, i) => entry.format(i, maxOutputChars) }.mkString("\n")
 
   /** Upstream `REPLEntry.format_output`: head+tail truncation with the true length in the header. */
-  private[programs] def formatOutputBlock(output: String, maxOutputChars: Int): String =
+  private[programs] def formatOutputBlock(output: String, maxOutputChars: OutputCharLimit): String =
     val rawLen = output.length
     val body =
       if rawLen > maxOutputChars then
@@ -570,7 +568,7 @@ object RLM:
     * exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`).
     */
   private[programs] def makeLlmTools(
-      maxLlmCalls: Int,
+      maxLlmCalls: LlmCallLimit,
       subLm: Option[LanguageModel],
       ctx: RuntimeContext
   ): Vector[SandboxTool] =

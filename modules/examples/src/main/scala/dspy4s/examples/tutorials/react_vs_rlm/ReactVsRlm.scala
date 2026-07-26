@@ -41,7 +41,7 @@ package dspy4s.examples.tutorials.react_vs_rlm
 import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DspyError, DynamicValues, LmStartEvent, RuntimeContext, TypeRef}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.programs.{ReAct, RLM}
+import dspy4s.programs.{IterationLimit, ReAct, RLM}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
@@ -206,7 +206,7 @@ object ReactVsRlm:
   /** A generous ceiling, not a target: ReAct *could* check all 21 pairs + 14 contraindications within this budget,
     * so any under-coverage reflects its own heuristic tool selection — not an artificial cap. Each turn re-reads
     * the growing trajectory (O(N²) tokens), which is exactly the cost the EFFORT metric below surfaces. */
-  val ReActMaxIterations: Int = 40
+  val ReActMaxIterations: IterationLimit = IterationLimit(40)
 
   final case class RunResult(
       label: String,
@@ -262,7 +262,7 @@ object ReactVsRlm:
     val agent = RLM(
       baseSignature = signature,
       tools = DrugSafetyTools.build(recorder),
-      maxIterations = 12
+      maxIterations = IterationLimit(12)
     )
     // --8<-- [end:rlm-agent]
     val (prediction, lmCalls, ms) = measured {

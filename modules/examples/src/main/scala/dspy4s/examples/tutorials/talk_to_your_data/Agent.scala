@@ -17,7 +17,7 @@
 package dspy4s.examples.tutorials.talk_to_your_data
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
-import dspy4s.programs.{Predict, RLM}
+import dspy4s.programs.{IterationLimit, LlmCallLimit, Predict, RLM}
 import dspy4s.typed.Signature
 import zio.blocks.schema.Schema
 
@@ -65,8 +65,8 @@ object Agent:
   val executor: RLM[ActInput, AnalysisResult] =
     RLM(
       baseSignature = Signature.derived[ActInput, AnalysisResult](name = "AnalystExecutor", instructions = actInstructions),
-      maxIterations = 8,
-      maxLlmCalls = 1
+      maxIterations = IterationLimit(8),
+      maxLlmCalls = LlmCallLimit(1)
     )
 
   // ── stages ──────────────────────────────────────────────────────────────────────────────────────────────

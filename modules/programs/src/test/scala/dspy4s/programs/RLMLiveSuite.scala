@@ -64,7 +64,7 @@ class RLMLiveSuite extends FunSuite:
 
     val program = RLM(
       baseSignature = Signature.fromString("context -> answer"),
-      maxIterations = 5,
+      maxIterations = IterationLimit(5),
       verbose = true, // step-by-step stderr log — this suite doubles as a by-hand diagnostic run
       subLm = Some(subLm)
     )

@@ -13,7 +13,7 @@ import dspy4s.adapters.{ChatAdapter, JSONAdapter}
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.ReAct
+import dspy4s.programs.{IterationLimit, ReAct}
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 
@@ -53,7 +53,7 @@ object Tools:
     val reactAgent = ReAct(
       baseSignature = Signature.fromString("question -> answer"),
       tools         = Vector(getWeather, searchWeb),
-      maxIterations = 5
+      maxIterations = IterationLimit(5)
     )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =

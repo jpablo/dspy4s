@@ -36,6 +36,7 @@ import dspy4s.optimize.{
   RandomSearchConfig
 }
 import dspy4s.programs.{
+  AttemptCount,
   BestOfN,
   ChainOfThought,
   CodeAct,
@@ -263,7 +264,7 @@ object Cheatsheet:
     val qa = ChainOfThought(Signature.of[BasicQA])
     BestOfN(
       module = qa,
-      n = 3,
+      n = AttemptCount(3),
       rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
       threshold = 1.0
     ).apply((question = question)).map(_.output.answer)
@@ -275,7 +276,7 @@ object Cheatsheet:
     val qa = ChainOfThought(Signature.of[BasicQA])
     Refine(
       module = qa,
-      n = 3,
+      n = AttemptCount(3),
       rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
       threshold = 1.0,
       failCount = Some(failCount)

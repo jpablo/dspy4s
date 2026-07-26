@@ -20,7 +20,7 @@ import dspy4s.core.contracts.{DspyError, ModuleEndEvent, RuntimeContext}
 import dspy4s.core.contracts.{CallbackEvent, CallbackHandler}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.programs.ReAct
+import dspy4s.programs.{IterationLimit, ReAct}
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 
@@ -37,7 +37,7 @@ object Observability:
   def agent = ReAct(
     baseSignature = Signature.fromString("question -> answer"),
     tools         = Vector(ToolFunction.fromMethod(retrieve)),
-    maxIterations = 3
+    maxIterations = IterationLimit(3)
   )
 
   // ── Snippet 6 (lines 211–231) — a custom logging callback ──

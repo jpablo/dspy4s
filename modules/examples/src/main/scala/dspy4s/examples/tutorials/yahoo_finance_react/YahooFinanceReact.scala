@@ -17,7 +17,7 @@ package dspy4s.examples.tutorials.yahoo_finance_react
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.ReAct
+import dspy4s.programs.{IterationLimit, ReAct}
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 import zio.blocks.schema.Schema
@@ -61,7 +61,7 @@ object YahooFinanceReact:
         ToolFunction.fromMethod(FinanceTools.compare_stocks)
         // NOTE: the LangChain Yahoo Finance News tool has no dspy4s bridge and is omitted.
       ),
-      maxIterations = 6
+      maxIterations = IterationLimit(6)
     )
 
     def forward(financialQuery: String)(using RuntimeContext): Either[DspyError, String] =

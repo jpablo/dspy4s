@@ -47,8 +47,9 @@ import scala.util.matching.Regex
   * functions; the dspy4s bridge is RPC, so Scala-implemented tools work too.)
   *
   * '''Per-call iteration override.''' Python accepts `max_iters` as a call kwarg; the dspy4s idiom is the immutable
-  * copy — `program.copy(maxIterations = n).apply(...)` — rather than a magic key in the per-call config bag (which is
-  * reserved for provider options).
+  * copy — `program.copy(maxIterations = IterationLimit(3)).apply(...)` — rather than a magic key in the per-call
+  * config bag (which is reserved for provider options). Runtime values cross the boundary through
+  * `IterationLimit.either(n)`.
   *
   * '''Persistent REPL state.''' The default [[dspy4s.core.runtime.SubprocessPythonInterpreter]] is stateless across
   * snippets; the trajectory carries earlier code/output as PROMPT context, so the LM regenerates what it needs. On the
@@ -66,7 +67,7 @@ final case class CodeAct[I, O](
       * actually execute) — same vector, both sides.
       */
     tools: Vector[dspy4s.programs.contracts.ToolFunction] = Vector.empty,
-    maxIterations: Int = 5,
+    maxIterations: IterationLimit = IterationLimit(5),
     codeActProgramName: String = "codeact",
     extractorProgramName: String = "codeact_extract",
     /** Optional override for the per-iteration code-generator predict — a TYPED `Predict` over the base input plus
@@ -88,8 +89,6 @@ final case class CodeAct[I, O](
   type Out = CodeAct.WithReasoning[O]
 
   override val moduleName: String = "code_act"
-  require(maxIterations > 0, "maxIterations must be greater than 0")
-
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   /** SignatureLayout for the per-iteration code generator. Mirrors Python: inputs: baseSignature.inputs ∪ {trajectory}

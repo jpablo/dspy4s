@@ -78,7 +78,7 @@ class CodeActSuite extends FunSuite:
     val extractorOutput = "42"
     val lm = new ScriptedLm(Vector(codeActOutput, extractorOutput))
 
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -113,7 +113,7 @@ class CodeActSuite extends FunSuite:
       "final" // extractor
     ))
 
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -138,7 +138,7 @@ class CodeActSuite extends FunSuite:
       "extracted"
     ))
 
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 2)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(2))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -161,7 +161,7 @@ class CodeActSuite extends FunSuite:
       Right(CodeResult(stdout = "ok", stderr = "", exitCode = 0))
     ))
     val lm = new ScriptedLm(Vector("```python\nprint('ok')\n```||true", "ok"))
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 1)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(1))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -185,7 +185,7 @@ class CodeActSuite extends FunSuite:
       "```python\nprint(sum(range(10)))\n```||true",
       "45"
     ))
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 1)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(1))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -267,7 +267,7 @@ class CodeActSuite extends FunSuite:
     val interpreter = new RecordingInterpreter(Vector(Right(CodeResult(stdout = "ok\n", stderr = "", exitCode = 0))))
     // Iteration 1: empty code WITH finished=true — must NOT stop. Iteration 2: real code, finished=true.
     val lm = new ScriptedLm(Vector("||true", "```python\nprint('ok')\n```||true", "done"))
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -323,7 +323,7 @@ class CodeActSuite extends FunSuite:
           case 2 => Left(dspy4s.core.contracts.ContextWindowExceededError(model = Some("cw-lm")))
           case _ => Right(LmResponse(outputs = Vector(LmOutput(text = "final"))))
 
-    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = 3)
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new CwFailingLm), adapter = Some(TruncationAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = program.apply((q = "x"))

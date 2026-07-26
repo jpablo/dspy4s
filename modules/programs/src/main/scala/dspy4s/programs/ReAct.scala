@@ -48,7 +48,7 @@ import java.nio.charset.StandardCharsets
 final case class ReAct[I, O](
     baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
-    maxIterations: Int = 5,
+    maxIterations: IterationLimit = IterationLimit(5),
     reactProgramName: String = ReActKeys.reactModule,
     extractorProgramName: String = ReActKeys.extractModule,
     /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the
@@ -70,8 +70,6 @@ final case class ReAct[I, O](
   type Out = ReAct.WithReasoning[O]
 
   override val moduleName: String = ReActKeys.reactModule
-  require(maxIterations > 0, "maxIterations must be greater than 0")
-
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */

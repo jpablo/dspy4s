@@ -28,13 +28,11 @@ import zio.blocks.schema.DynamicValue
   */
 final case class BestOfN[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     module: P,
-    n: Int,
+    n: AttemptCount,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
     failCount: Option[Int] = None
 ) extends Module[ProgramCall[I], Prediction[O]]:
-  require(n > 0, "n must be greater than 0")
-
   override val moduleName: String = "best_of_n"
 
   override protected val lifecycle: ModuleLifecycle[ProgramCall[I], Prediction[O]] =

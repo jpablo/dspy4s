@@ -4,6 +4,7 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
 import dspy4s.programs.ChainOfThought
+import dspy4s.programs.IterationLimit
 import dspy4s.programs.ReAct
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
@@ -320,7 +321,7 @@ class StreamListenerSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val react = ReAct(baseSignature = signature, tools = Vector.empty, maxIterations = 2)
+      val react = ReAct(baseSignature = signature, tools = Vector.empty, maxIterations = IterationLimit(2))
       val stream = Streamify.streamify(
         program = react,
         streamListeners = Vector(StreamListener("answer"))

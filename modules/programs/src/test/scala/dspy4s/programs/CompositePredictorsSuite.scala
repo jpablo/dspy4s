@@ -79,7 +79,7 @@ class CompositePredictorsSuite extends FunSuite:
 
   test("BestOfN read/inspectNamed pass through to the inner program; replace round-trips") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
-    val b    = BestOfN[Leaf[Int, Int], Int, Int](leaf, n = 2, rewardFn = (_, _) => 1.0, threshold = 1.0)
+    val b    = BestOfN[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
     val P    = summon[Predictors[BestOfN[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.read(b), Vector(leaf.predict.predictorState))
@@ -96,7 +96,7 @@ class CompositePredictorsSuite extends FunSuite:
     val composed = AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]](first, second)
     val b = BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int](
       composed,
-      n = 2,
+      n = AttemptCount(2),
       rewardFn = (_, _) => 1.0,
       threshold = 1.0
     )
@@ -109,7 +109,7 @@ class CompositePredictorsSuite extends FunSuite:
 
   test("Refine read = read(inner) :+ critic; the default critic is the OfferFeedback predict") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
-    val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = 2, rewardFn = (_, _) => 1.0, threshold = 1.0)
+    val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
     val P    = summon[Predictors[Refine[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.read(r), Vector(leaf.predict.predictorState, r.criticPredict.predictorState))
@@ -120,7 +120,7 @@ class CompositePredictorsSuite extends FunSuite:
 
   test("Refine replace round-trips; a genuine critic replace writes back (and only the critic)") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
-    val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = 2, rewardFn = (_, _) => 1.0, threshold = 1.0)
+    val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
     val P    = summon[Predictors[Refine[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.replace(r, P.read(r)), r) // exact no-op state round-trip

@@ -43,7 +43,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 final case class ProgramOfThought[I, O](
     baseSignature: Signature[I, O],
     interpreter: CodeInterpreter,
-    maxIterations: Int = 3,
+    maxIterations: IterationLimit = IterationLimit(3),
     /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing
       * an explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
       * Carrying it as a defaulted, `copy`-reachable field makes this learnable sub-predict addressable + immutably
@@ -66,8 +66,6 @@ final case class ProgramOfThought[I, O](
   type Out = ProgramOfThought.WithReasoning[O]
 
   override val moduleName: String = "program_of_thought"
-  require(maxIterations > 0, "maxIterations must be greater than 0")
-
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   import ProgramOfThought.{codeOutputField, errorField, finalGeneratedCodeField, generatedCodeField, previousCodeField}
