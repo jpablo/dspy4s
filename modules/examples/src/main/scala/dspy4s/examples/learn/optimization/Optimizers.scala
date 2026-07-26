@@ -28,7 +28,7 @@ object Optimizers:
   // | teleprompter = BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
   // | optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
   // --8<-- [start:optimize-bootstrap]
-  def optimize[P: Predictors: ProgramRunner](
+  def optimize[P: {Predictors, ProgramRunner}](
       metric: Metric,
       program: P,
       trainset: Vector[Example]
