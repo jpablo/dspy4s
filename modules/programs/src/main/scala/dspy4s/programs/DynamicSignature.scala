@@ -1,6 +1,9 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ValidationError
+import dspy4s.core.data.Example
+import dspy4s.programs.para.Program
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 
@@ -49,6 +52,17 @@ sealed trait DynamicSignature:
   final def input(record: DynamicValue.Record): Either[DspyError, In] =
     signature.inputShape.decode(record)
 
+  /** Build a typed [[Predict]] over this bundle's signature. A path-dependent constructor, so `In` / `Out`
+    * line up without threading `signature` at call sites: `val p = s.predict()` is the runtime-string
+    * counterpart of `Predict(Signature.derived[Q, A](...))`. Outputs are read from the prediction's `raw`
+    * envelope (the wire record), the same surface the dynamic layer always exposed. */
+  final def predict(
+      demos: Vector[Example] = Vector.empty,
+      name: Option[String] = None,
+      config: DynamicValue.Record = DynamicValue.Record.empty
+  ): Predict[In, Out] =
+    Predict(signature, demos = demos, name = name, config = config)
+
 object DynamicSignature:
 
   /** Parse a DSPy-style DSL string at runtime, minting a fresh pair of input/output types for it. The declared
@@ -63,3 +77,23 @@ object DynamicSignature:
         given inputCodec: RecordCodec[In]   = record => parsed.inputShape.decode(record)
         given outputCodec: RecordCodec[Out] = record => parsed.outputShape.decode(record)
     }
+
+  /** The reindexing morphism across fibers: a parameter-free program converting one bundle's outputs into
+    * another's inputs by factoring through the wire (encode, then the target's validating entry). Distinct
+    * parses mint distinct types, so direct cross-bundle composition is a compile error by design; a bridge is
+    * the only crossing, and it is failable where the direct composition was silently wrong.
+    *
+    * Fails EAGERLY when the target's input fields are not covered by the source's output fields; that
+    * name-set condition is the base-level compatibility arrow this bridge lifts. At run time the validating
+    * entry rejects records whose declared fields are absent. Parameter-free ([[LiftEither]]), so it
+    * contributes nothing to `params` and pipelines optimize exactly as before. */
+  def bridge(from: DynamicSignature, to: DynamicSignature): Either[DspyError, Program[from.Out, to.In]] =
+    val provided = from.signature.layout.outputFields.map(_.name).toSet
+    val missing  = to.signature.layout.inputFields.map(_.name).filterNot(provided.contains)
+    if missing.nonEmpty then
+      Left(ValidationError(
+        s"bridge: target inputs not covered by source outputs; missing: ${missing.mkString(", ")}"
+      ))
+    else
+      import from.outputCodec
+      Right(Program.of(LiftEither[from.Out, to.In](value => to.input(from.signature.outputShape.encode(value)))))
