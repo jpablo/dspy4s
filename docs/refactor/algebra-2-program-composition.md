@@ -226,8 +226,16 @@ when the target's input names are not covered by the source's output names (that
 base compatibility arrow the bridge lifts), and contributes nothing to `params`. One correction to the earlier
 fibration sketch: the bridge's base arrow crosses cohorts (source OUTPUT fields to target INPUT fields), so
 objects properly sit over (signature, cohort) pairs and no identity-lift law (`bridge(s, s) = id`) arises; the
-lawful statement is exactly "bridges are lifts of base compatibility arrows". Remaining before the prototype
-label comes off: a migrated real consumer (stage 3). Both optimizer capabilities are then
+lawful statement is exactly "bridges are lifts of base compatibility arrows".
+
+Stage 3 landed and the prototype label is off: `ParaCompileSuite` drives COPRO through a packaged bundle
+program (the runtime-string student finds the winning instruction exactly like the typed one, through the same
+`Predictors` + `ProgramRunner` entry point, no dynamic-specific plumbing), and the learn/optimization example
+runs its main through `DynamicSignature.parse` + `predict()` with the doc snippet generalized to the capability
+constraints. The declared stance: `DynamicSignature` is the user path for runtime-string signatures;
+`DynamicPredict` is the untyped substrate for framework-internal generations (its scaladoc now points users to
+the bundle). The stage-4 endgame (dropping `decodeInput` from `Program`, dissolving the `ProgramInput` law,
+which needs named-tuple `RecordCodec` derivation) stays batched with the CIO-phase API break. Both optimizer capabilities are then
 uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
 projection/reparameterization) and `ProgramRunner[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
