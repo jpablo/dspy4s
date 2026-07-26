@@ -21,7 +21,7 @@ import dspy4s.lm.contracts.Embedder
 final class EmbeddingsRetriever private (
     val corpus: Vector[String],
     embedder: Embedder,
-    val k: Int,
+    val k: NeighborCount,
     normalize: Boolean,
     corpusVectors: Vector[Vector[Float]]
 ):
@@ -45,10 +45,14 @@ object EmbeddingsRetriever:
   final case class Result(passages: Vector[String], indices: Vector[Int], scores: Vector[Double])
 
   /** Embed the corpus and assemble the retriever. */
-  def create(corpus: Vector[String], embedder: Embedder, k: Int = 5, normalize: Boolean = true)(using
+  def create(
+      corpus: Vector[String],
+      embedder: Embedder,
+      k: NeighborCount = NeighborCount(5),
+      normalize: Boolean = true
+  )(using
       RuntimeContext
   ): Either[DspyError, EmbeddingsRetriever] =
-    require(k > 0, "EmbeddingsRetriever k must be > 0")
     require(corpus.nonEmpty, "EmbeddingsRetriever needs a non-empty corpus")
     embedder.embed(corpus).map { rows =>
       val vectors = if normalize then rows.map(Similarity.normalize) else rows

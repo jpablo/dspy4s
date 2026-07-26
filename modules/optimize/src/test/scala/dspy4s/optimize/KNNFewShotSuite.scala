@@ -7,6 +7,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{Embedder, LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.programs.DynamicPredict
+import dspy4s.programs.retrievers.NeighborCount
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 
@@ -67,7 +68,8 @@ class KNNFewShotSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
 
-      val compiled = new KNNFewShot[DynamicPredict](k = 2, trainset, embedder).compile(student).toOption.get
+      val compiled =
+        new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedder).compile(student).toOption.get
       val result   = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       // The final answer proves the demos steered the call (the LM answers "guided" only when a1 is in its prompt).
@@ -100,7 +102,8 @@ class KNNFewShotSuite extends FunSuite:
     val lm = new ScriptedLm
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val compiled = new KNNFewShot[DynamicPredict](k = 2, trainset, embedderB).compile(student).toOption.get
+      val compiled =
+        new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedderB).compile(student).toOption.get
       val _                = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       val finalPrompt = lm.prompts.last

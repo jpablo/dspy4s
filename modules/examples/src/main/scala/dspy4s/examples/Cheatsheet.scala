@@ -48,7 +48,7 @@ import dspy4s.programs.{
   Refine
 }
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
-import dspy4s.programs.retrievers.KNN
+import dspy4s.programs.retrievers.{KNN, NeighborCount}
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.DynamicValue
 
@@ -95,7 +95,7 @@ object Cheatsheet:
   // embedding-retrieval track IS (PORT_GAPS G-10): `Embedder`/`OpenAiEmbedder` (lm), `KNN`/`EmbeddingsRetriever`
   // (programs.retrievers), `KNNFewShot` (optimize). A KNN retriever over a trainset, given an embedder:
   def knnRetriever(trainset: Vector[Example], embedder: Embedder)(using RuntimeContext): Either[DspyError, KNN] =
-    KNN.create(k = 3, trainset = trainset, embedder = embedder)
+    KNN.create(k = NeighborCount(3), trainset = trainset, embedder = embedder)
 
   // ── Snippet 7 (lines 86–98) — CodeAct ──
   // | def factorial(n): ...; act = CodeAct("n -> factorial", tools=[factorial]); act(n=5)  # 120
@@ -219,7 +219,7 @@ object Cheatsheet:
   def knnFewShot(student: DynamicPredict, trainset: Vector[Example], embedder: Embedder)(using
       RuntimeContext
   ): Either[DspyError, DynamicModule] =
-    new KNNFewShot[DynamicPredict](k = 3, trainset = trainset, embedder = embedder).compile(student)
+    new KNNFewShot[DynamicPredict](k = NeighborCount(3), trainset = trainset, embedder = embedder).compile(student)
   // --8<-- [end:opt-knn]
 
   // ── Snippets 20/25/26 — optimizers still not ported ──
