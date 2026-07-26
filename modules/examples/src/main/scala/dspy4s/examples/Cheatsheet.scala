@@ -26,6 +26,7 @@ import dspy4s.optimize.{
   BootstrapFewShotWithRandomSearch,
   COPRO,
   COPROConfig,
+  DemoCount,
   Ensemble,
   KNNFewShot,
   LabeledFewShot,
@@ -154,7 +155,9 @@ object Cheatsheet:
   def labeledFewShot(student: DynamicPredict, trainset: Vector[Example])(using
       RuntimeContext
   ): Either[DspyError, DynamicPredict] =
-    new LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 8)).compile(student, trainset).map(_.bestProgram)
+    new LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(8)))
+      .compile(student, trainset)
+      .map(_.bestProgram)
   // --8<-- [end:opt-labeled]
 
   // | BootstrapFewShot(metric=..., max_bootstrapped_demos=4, max_labeled_demos=16, max_rounds=1, max_errors=10).compile(...)
@@ -164,8 +167,8 @@ object Cheatsheet:
   ): Either[DspyError, DynamicPredict] =
     new BootstrapFewShot[DynamicPredict](BootstrapFewShotConfig(
       metric = Some(metric),
-      maxBootstrappedDemos = 4,
-      maxLabeledDemos = 16,
+      maxBootstrappedDemos = DemoCount(4),
+      maxLabeledDemos = DemoCount(16),
       maxRounds = 1,
       maxErrors = 10
     )).compile(student, trainset).map(_.bestProgram)
@@ -182,7 +185,7 @@ object Cheatsheet:
   ): Either[DspyError, DynamicPredict] =
     new BootstrapFewShotWithRandomSearch[DynamicPredict](RandomSearchConfig(
       metric = metric,
-      maxBootstrappedDemos = 2,
+      maxBootstrappedDemos = DemoCount(2),
       numCandidates = 8
     )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 

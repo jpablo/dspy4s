@@ -18,10 +18,17 @@ class LabeledFewShotSuite extends FunSuite:
 
   private val signature = SignatureDsl.parse("question: str -> answer: str").toOption.get
 
+  test("DemoCount accepts zero and rejects negative values") {
+    assert(compileErrors("dspy4s.optimize.DemoCount(-1)").nonEmpty)
+    assertEquals(DemoCount.either(0).map(_.toInt), Right(0))
+    assertEquals(DemoCount.either(4).map(_.toInt), Right(4))
+    assert(DemoCount.either(-1).isLeft)
+  }
+
   test("LabeledFewShot samples k demos from trainset with seed-based determinism") {
     val trainset = (1 to 20).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
     val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 5, seed = 42L))
+    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(5), seed = 42L))
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = optimizer.compile(student, trainset)
@@ -47,7 +54,7 @@ class LabeledFewShotSuite extends FunSuite:
   test("LabeledFewShot with sample=false takes the first k examples in input order") {
     val trainset = (1 to 10).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
     val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 3, sample = false))
+    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(3), sample = false))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
@@ -58,7 +65,7 @@ class LabeledFewShotSuite extends FunSuite:
   test("LabeledFewShot caps demo count at trainset size when k exceeds it") {
     val trainset = Vector(Example(rec("question" := "only", "answer" := "one")))
     val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 10))
+    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(10)))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
@@ -71,7 +78,7 @@ class LabeledFewShotSuite extends FunSuite:
       Example(rec("question" := "q1", "answer" := "a1")),
       Example(rec("question" := "q2", "answer" := "a2"))
     )
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = 1, sample = false))
+    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(1), sample = false))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram

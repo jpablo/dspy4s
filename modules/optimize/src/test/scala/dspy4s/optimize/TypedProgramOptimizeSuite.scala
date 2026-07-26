@@ -94,8 +94,8 @@ class TypedProgramOptimizeSuite extends FunSuite:
     val optimizer = new BootstrapFewShot[Predict[QAInput, QAOutput]](
       BootstrapFewShotConfig(
         metric = Some(new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")),
-        maxBootstrappedDemos = 3,
-        maxLabeledDemos = 0
+        maxBootstrappedDemos = DemoCount(3),
+        maxLabeledDemos = DemoCount(0)
       )
     )
     RuntimeEnvironment.withSettings(settings(answers)) {
@@ -116,7 +116,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
       classify = Predict[QAInput, QAOutput](sig, name = Some("classify")),
       answer   = Predict[QAInput, QAOutput](sig, name = Some("answer"))
     )
-    val optimizer = LabeledFewShot[TwoStageQA](LabeledFewShotConfig(k = 2, seed = 7L))
+    val optimizer = LabeledFewShot[TwoStageQA](LabeledFewShotConfig(k = DemoCount(2), seed = 7L))
     RuntimeEnvironment.withSettings(settings(Map.empty)) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = optimizer.compile(student, trainset)
@@ -141,8 +141,8 @@ class TypedProgramOptimizeSuite extends FunSuite:
     val optimizer = new BootstrapFewShot[TwoStageQA](
       BootstrapFewShotConfig(
         metric = Some(new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")),
-        maxBootstrappedDemos = 2,
-        maxLabeledDemos = 0
+        maxBootstrappedDemos = DemoCount(2),
+        maxLabeledDemos = DemoCount(0)
       )
     )
     RuntimeEnvironment.withSettings(settings(answers)) {

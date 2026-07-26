@@ -34,7 +34,7 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.optimize.{COPRO, COPROConfig, MIPROv2, MIPROv2Config}
+import dspy4s.optimize.{COPRO, COPROConfig, DemoCount, MIPROv2, MIPROv2Config}
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.Predictors
@@ -178,8 +178,8 @@ object OptimizerSmokeTest:
             metric = metric,
             numCandidates = breadth,
             numTrials = trials,
-            maxBootstrappedDemos = 2,
-            maxLabeledDemos = 2
+            maxBootstrappedDemos = DemoCount(2),
+            maxLabeledDemos = DemoCount(2)
           )
         )
         mipro.compile(student, trainset, teacher = Some(student), valset = Some(valset)) match

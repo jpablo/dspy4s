@@ -10,11 +10,10 @@ import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 
 final case class LabeledFewShotConfig(
-    k: Int = 16,
+    k: DemoCount = DemoCount(16),
     sample: Boolean = true,
     seed: Long = 0L
-):
-  require(k >= 0, "k must be non-negative")
+)
 
 final class LabeledFewShot[P: Predictors](
     config: LabeledFewShotConfig = LabeledFewShotConfig()

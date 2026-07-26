@@ -17,7 +17,7 @@ import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
-import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, ProgramPersistence, RandomSearchConfig}
+import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, DemoCount, ProgramPersistence, RandomSearchConfig}
 import dspy4s.programs.{DynamicPredict, DynamicSignature, ProgramRunner}
 import dspy4s.programs.predictors.Predictors
 
@@ -35,8 +35,8 @@ object Optimizers:
   )(using RuntimeContext): Either[DspyError, P] =
     val teleprompter = BootstrapFewShotWithRandomSearch[P](RandomSearchConfig(
       metric               = metric,
-      maxBootstrappedDemos = 4,
-      maxLabeledDemos      = 4,
+      maxBootstrappedDemos = DemoCount(4),
+      maxLabeledDemos      = DemoCount(4),
       numCandidates        = 10,
       numThreads           = Some(4)
     ))

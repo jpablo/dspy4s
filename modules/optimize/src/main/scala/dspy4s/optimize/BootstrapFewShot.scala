@@ -20,14 +20,12 @@ import scala.util.control.NonFatal
 final case class BootstrapFewShotConfig(
     metric: Option[dspy4s.evaluate.contracts.Metric] = None,
     metricThreshold: Option[Double] = None,
-    maxBootstrappedDemos: Int = 4,
-    maxLabeledDemos: Int = 16,
+    maxBootstrappedDemos: DemoCount = DemoCount(4),
+    maxLabeledDemos: DemoCount = DemoCount(16),
     maxRounds: Int = 1,
     maxErrors: Int = 10,
     seed: Long = 0L
 ):
-  require(maxBootstrappedDemos >= 0, "maxBootstrappedDemos must be non-negative")
-  require(maxLabeledDemos >= 0, "maxLabeledDemos must be non-negative")
   require(maxRounds >= 1, "maxRounds must be at least 1")
   require(maxErrors > 0, "maxErrors must be > 0")
 

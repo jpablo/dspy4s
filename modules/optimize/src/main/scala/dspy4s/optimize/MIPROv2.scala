@@ -40,8 +40,8 @@ final case class MIPROv2Config(
     metric: Metric,
     numCandidates: Int = 5,
     numTrials: Int = 10,
-    maxBootstrappedDemos: Int = 4,
-    maxLabeledDemos: Int = 4,
+    maxBootstrappedDemos: DemoCount = DemoCount(4),
+    maxLabeledDemos: DemoCount = DemoCount(4),
     seed: Long = 0L,
     proposerConfig: GroundedProposerConfig = GroundedProposerConfig()
 ):

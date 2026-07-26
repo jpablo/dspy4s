@@ -38,8 +38,8 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
       RandomSearchConfig(
         metric = metric,
         numCandidates = 3,
-        maxBootstrappedDemos = 2,
-        maxLabeledDemos = 2,
+        maxBootstrappedDemos = DemoCount(2),
+        maxLabeledDemos = DemoCount(2),
         maxErrors = 20
       )
     )
@@ -66,8 +66,8 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
       RandomSearchConfig(
         metric = metric,
         numCandidates = 20,
-        maxBootstrappedDemos = 4,
-        maxLabeledDemos = 4,
+        maxBootstrappedDemos = DemoCount(4),
+        maxLabeledDemos = DemoCount(4),
         maxErrors = 50,
         stopAtScore = Some(100.0)
       )

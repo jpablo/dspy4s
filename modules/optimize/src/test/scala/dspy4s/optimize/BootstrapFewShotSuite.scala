@@ -37,7 +37,11 @@ class BootstrapFewShotSuite extends FunSuite:
     )
     val student = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(maxBootstrappedDemos = 2, maxLabeledDemos = 1, maxRounds = 1)
+      BootstrapFewShotConfig(
+        maxBootstrappedDemos = DemoCount(2),
+        maxLabeledDemos = DemoCount(1),
+        maxRounds = 1
+      )
     )
     given RuntimeContext = RuntimeEnvironment.current
 
@@ -64,8 +68,8 @@ class BootstrapFewShotSuite extends FunSuite:
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
       BootstrapFewShotConfig(
         metric = Some(exactMatch),
-        maxBootstrappedDemos = 10,
-        maxLabeledDemos = 0
+        maxBootstrappedDemos = DemoCount(10),
+        maxLabeledDemos = DemoCount(0)
       )
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -88,7 +92,7 @@ class BootstrapFewShotSuite extends FunSuite:
       failsWith = Some(new RuntimeException("boom"))
     )
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(maxErrors = 2, maxBootstrappedDemos = 10)
+      BootstrapFewShotConfig(maxErrors = 2, maxBootstrappedDemos = DemoCount(10))
     )
     given RuntimeContext = RuntimeEnvironment.current
 
@@ -107,7 +111,12 @@ class BootstrapFewShotSuite extends FunSuite:
 
     val student = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(maxBootstrappedDemos = 1, maxLabeledDemos = 2, maxErrors = 100, seed = 7L)
+      BootstrapFewShotConfig(
+        maxBootstrappedDemos = DemoCount(1),
+        maxLabeledDemos = DemoCount(2),
+        maxErrors = 100,
+        seed = 7L
+      )
     )
     given RuntimeContext = RuntimeEnvironment.current
 

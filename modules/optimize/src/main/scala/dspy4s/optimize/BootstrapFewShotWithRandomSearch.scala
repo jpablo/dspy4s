@@ -20,8 +20,8 @@ import scala.util.boundary.break
 final case class RandomSearchConfig(
     metric: Metric,
     numCandidates: Int = 16,
-    maxBootstrappedDemos: Int = 4,
-    maxLabeledDemos: Int = 16,
+    maxBootstrappedDemos: DemoCount = DemoCount(4),
+    maxLabeledDemos: DemoCount = DemoCount(16),
     maxRounds: Int = 1,
     numThreads: Option[Int] = None,
     maxErrors: Int = 10,
@@ -65,7 +65,7 @@ final class BootstrapFewShotWithRandomSearch[P: {Predictors, ProgramRunner}](
     val bootstrapConfig = BootstrapFewShotConfig(
       metric = Some(config.metric),
       metricThreshold = config.metricThreshold,
-      maxBootstrappedDemos = math.min(config.maxBootstrappedDemos, math.max(1, trainset.size)),
+      maxBootstrappedDemos = config.maxBootstrappedDemos,
       maxLabeledDemos = config.maxLabeledDemos,
       maxRounds = config.maxRounds,
       maxErrors = config.maxErrors,
@@ -91,7 +91,7 @@ final class BootstrapFewShotWithRandomSearch[P: {Predictors, ProgramRunner}](
         BootstrapFewShotConfig(
           metric = Some(config.metric),
           metricThreshold = config.metricThreshold,
-          maxBootstrappedDemos = math.min(targetSize, config.maxBootstrappedDemos),
+          maxBootstrappedDemos = config.maxBootstrappedDemos,
           maxLabeledDemos = config.maxLabeledDemos,
           maxRounds = config.maxRounds,
           maxErrors = config.maxErrors,

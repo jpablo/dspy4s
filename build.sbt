@@ -133,7 +133,10 @@ lazy val optimize = (project in file("modules/optimize"))
   .settings(commonSettings)
   .settings(name := "dspy4s-optimize")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies ++= Seq(
+      "io.github.iltotore" %% "iron"  % ironVersion,
+      "org.scalameta"      %% "munit" % munitVersion % Test
+    )
   )
 
 // GEPA — Genetic-Pareto reflective prompt optimizer (PORT_GAPS G-12). A self-contained port of the external
