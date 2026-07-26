@@ -41,14 +41,13 @@ import scala.collection.mutable
   */
 final case class COPROConfig(
     metric: Metric,
-    breadth: Int = 10,
-    depth: Int = 3,
+    breadth: CoproBreadth = CoproBreadth(10),
+    depth: RoundCount = RoundCount(3),
     initTemperature: Double = 1.4,
     seed: Long = 0L,
     instructionMarker: String =
       "You are an instruction optimizer for large language models. Propose an improved instruction."
-):
-  require(breadth > 1, "COPRO breadth must be greater than 1")
+)
 
 /** COPRO — Coordinate-ascent Prompt Optimizer. A v1 port of DSPy's `dspy.teleprompt.COPRO`
   * (`dspy/teleprompt/copro_optimizer.py`).

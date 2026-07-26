@@ -15,14 +15,13 @@ enum BatchSamplerKind derives CanEqual:
 
 object MinibatchSampler:
 
-  def of(kind: BatchSamplerKind, minibatchSize: Int, seed: Long): MinibatchSampler = kind match
+  def of(kind: BatchSamplerKind, minibatchSize: MinibatchSize, seed: Long): MinibatchSampler = kind match
     case BatchSamplerKind.EpochShuffled => new EpochShuffled(minibatchSize, seed)
     case BatchSamplerKind.RandomDraw    => new RandomDraw(minibatchSize, seed)
 
   /** Independent random draw (without replacement within a draw) each iteration — GEPA v0's sampler. Simple, but
     * a given example can be starved or over-sampled across iterations since draws are independent. */
-  final class RandomDraw(minibatchSize: Int, seed: Long) extends MinibatchSampler:
-    require(minibatchSize > 0, "minibatchSize must be > 0")
+  final class RandomDraw(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
     private val rng = new Random(seed)
     def sample(trainsetSize: Int, iteration: Int): Vector[Int] =
       require(trainsetSize > 0, "cannot sample from an empty trainset")
@@ -37,8 +36,7 @@ object MinibatchSampler:
     * Deltas from gepa: the iteration index starts at 0 (gepa's at 1, a harmless one-window offset), and padding
     * ties break by smallest id (gepa uses `Counter` insertion order) — both change only WHICH example fills a pad
     * slot, not the coverage guarantee. Deterministic for a given `seed`. */
-  final class EpochShuffled(minibatchSize: Int, seed: Long) extends MinibatchSampler:
-    require(minibatchSize > 0, "minibatchSize must be > 0")
+  final class EpochShuffled(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
     private val rng                   = new Random(seed)
     private var shuffled: Vector[Int] = Vector.empty
     private var epoch                 = -1

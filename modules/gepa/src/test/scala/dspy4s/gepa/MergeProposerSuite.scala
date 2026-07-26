@@ -134,12 +134,17 @@ class MergeProposerSuite extends FunSuite:
     val cand1    = Map(first -> Some("Use TOKEN1 to produce a good_hint."), second -> Some("Stage two."))
     val cand2    = Map(first -> Some("Stage one."), second -> Some("Use TOKEN2 with the good_hint to answer."))
     val state = GepaState(
-      candidates = Vector(seedCand, cand1, cand2),
+      candidates = CandidatePool.applyUnsafe(Vector(seedCand, cand1, cand2)),
       valSubscores = Vector(Vector(0.0, 0.0), Vector(1.0, 0.0), Vector(0.0, 1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0)),
-      totalMetricCalls = 0
+      totalMetricCalls = MetricCallCount(0)
     )
-    val merger = new MergeProposer[Pipeline](valset, maxMergeInvocations = 5, new Random(0), new GepaEvalCache(adapter))
+    val merger = new MergeProposer[Pipeline](
+      valset,
+      maxMergeInvocations = MergeInvocationLimit(5),
+      new Random(0),
+      new GepaEvalCache(adapter)
+    )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -159,15 +164,20 @@ class MergeProposerSuite extends FunSuite:
   test("propose returns None when there are fewer than three candidates (no ancestor to merge over)") {
     val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
     val state = GepaState(
-      candidates = Vector(
+      candidates = CandidatePool.applyUnsafe(Vector(
         Map(first -> Some("a"), second -> Some("b")),
         Map(first -> Some("c"), second -> Some("d"))
-      ),
+      )),
       valSubscores = Vector(Vector(1.0), Vector(1.0)),
       parents = Vector(Vector.empty, Vector(0)),
-      totalMetricCalls = 0
+      totalMetricCalls = MetricCallCount(0)
     )
-    val merger = new MergeProposer[Pipeline](valset, maxMergeInvocations = 5, new Random(0), new GepaEvalCache(adapter))
+    val merger = new MergeProposer[Pipeline](
+      valset,
+      maxMergeInvocations = MergeInvocationLimit(5),
+      new Random(0),
+      new GepaEvalCache(adapter)
+    )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       assertEquals(merger.propose(state), None)

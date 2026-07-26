@@ -1,7 +1,9 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.runtime.ParallelExecutor
 import munit.FunSuite
@@ -16,9 +18,9 @@ class ParallelExecutorSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("worker threads inherit captured runtime context") {
-    RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(ThreadCount(42)))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val executor = ParallelExecutor(numThreads = 3, maxErrors = 3)
+      val executor = ParallelExecutor(numThreads = ThreadCount(3), maxErrors = ErrorLimit(3))
 
       val result = executor.execute(
         task = (_: Int) => RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"),
@@ -33,7 +35,7 @@ class ParallelExecutorSuite extends FunSuite:
 
   test("max errors not met keeps execution result with failed indices") {
     given RuntimeContext = RuntimeEnvironment.current
-    val executor = ParallelExecutor(numThreads = 3, maxErrors = 2)
+    val executor = ParallelExecutor(numThreads = ThreadCount(3), maxErrors = ErrorLimit(2))
 
     val result = executor.execute(
       task = (item: Int) =>
@@ -51,7 +53,7 @@ class ParallelExecutorSuite extends FunSuite:
 
   test("max errors met returns cancellation error") {
     given RuntimeContext = RuntimeEnvironment.current
-    val executor = ParallelExecutor(numThreads = 3, maxErrors = 1)
+    val executor = ParallelExecutor(numThreads = ThreadCount(3), maxErrors = ErrorLimit(1))
 
     val result = executor.execute(
       task = (item: Int) =>
@@ -69,8 +71,8 @@ class ParallelExecutorSuite extends FunSuite:
   test("fromSettings uses runtime numThreads and maxErrors values") {
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          numThreads = Some(2),
-          maxErrors = Some(1)
+          numThreads = Some(ThreadCount(2)),
+          maxErrors = Some(ErrorLimit(1))
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -91,7 +93,7 @@ class ParallelExecutorSuite extends FunSuite:
   test("max errors stops scheduling additional work") {
     given RuntimeContext = RuntimeEnvironment.current
     val started = AtomicInteger(0)
-    val executor = ParallelExecutor(numThreads = 2, maxErrors = 1)
+    val executor = ParallelExecutor(numThreads = ThreadCount(2), maxErrors = ErrorLimit(1))
 
     val result = executor.execute(
       task = (item: Int) =>

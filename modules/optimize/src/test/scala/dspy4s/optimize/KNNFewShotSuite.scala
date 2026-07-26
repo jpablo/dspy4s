@@ -8,6 +8,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{Embedder, LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.retrievers.NeighborCount
+import dspy4s.programs.retrievers.NonEmptyTrainset
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 
@@ -60,7 +61,7 @@ class KNNFewShotSuite extends FunSuite:
   private def ex(q: String): Example =
     Example(DynamicValues.record("question" := q, "answer" := gold(q)), inputKeys = Set("question"))
 
-  private val trainset = Vector(ex("q1"), ex("q2"), ex("q3"), ex("q4"))
+  private val trainset = NonEmptyTrainset.applyUnsafe(Vector(ex("q1"), ex("q2"), ex("q3"), ex("q4")))
   private val student  = DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get)
 
   test("each call bootstraps the query's OWN nearest neighbors as demos (cluster A in, cluster B out)") {

@@ -16,7 +16,7 @@ import zio.blocks.schema.DynamicValue
   * Construction embeds eagerly (like upstream's `__init__`), so it is effectful — build via [[KNN.create]]. */
 final class KNN private (
     val k: NeighborCount,
-    val trainset: Vector[Example],
+    val trainset: NonEmptyTrainset,
     embedder: Embedder,
     trainVectors: Vector[Vector[Float]]
 ):
@@ -32,10 +32,9 @@ final class KNN private (
 
 object KNN:
   /** Embed every trainset example's input fields and assemble the retriever. */
-  def create(k: NeighborCount, trainset: Vector[Example], embedder: Embedder)(using
+  def create(k: NeighborCount, trainset: NonEmptyTrainset, embedder: Embedder)(using
       RuntimeContext
   ): Either[DspyError, KNN] =
-    require(trainset.nonEmpty, "KNN needs a non-empty trainset")
     embedder.embed(trainset.map(ex => serialize(ex.inputs))).map(new KNN(k, trainset, embedder, _))
 
   /** Upstream's example-to-text casting: `"key: value | key2: value2"` over the record's fields, in field order.

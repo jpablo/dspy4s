@@ -67,7 +67,7 @@ final case class Refine[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     n: AttemptCount,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
-    failCount: Option[Int] = None,
+    failCount: Option[FailureCount] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
       * [[Refine.offerFeedbackSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
       * addressable + immutably replaceable (see [[Refine.refinePredictors]]), mirroring the ReAct/CodeAct override

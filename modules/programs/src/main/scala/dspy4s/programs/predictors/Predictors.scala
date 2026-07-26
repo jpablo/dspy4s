@@ -166,7 +166,7 @@ trait Predictors[P]:
   final def readIdentified(program: P): Vector[IdentifiedPredictor] =
     val (views, displayNames) = alignedNamed(program)
     displayNames.zip(views).zipWithIndex.map { case ((displayName, view), ordinal) =>
-      IdentifiedPredictor(PredictorId(ordinal), displayName, view)
+      IdentifiedPredictor(PredictorId.fromOrdinal(PredictorOrdinal.assume(ordinal)), displayName, view)
     }
 
 object Predictors extends LowPriority:

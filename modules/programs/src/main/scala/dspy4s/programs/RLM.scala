@@ -1,12 +1,14 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.SignatureLayout
@@ -622,7 +624,10 @@ object RLM:
           checkAndIncrement(prompts.size).flatMap { _ =>
             // Concurrent, as the tool's own instruction promises the model ("much faster") — upstream uses an
             // 8-worker thread pool. Per-prompt failures become [ERROR] items, like upstream.
-            val executor = ParallelExecutor(numThreads = math.min(8, prompts.size), maxErrors = prompts.size)
+            val executor = ParallelExecutor(
+              numThreads = ThreadCount.applyUnsafe(math.min(8, prompts.size)),
+              maxErrors = ErrorLimit.applyUnsafe(prompts.size)
+            )
             executor
               .execute(
                 task = (p: String) => queryLm(p).fold(err => s"[ERROR] ${err.message}", identity),

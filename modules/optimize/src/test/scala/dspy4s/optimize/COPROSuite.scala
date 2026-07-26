@@ -119,7 +119,11 @@ class COPROSuite extends FunSuite:
 
   private def metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
-  private def config(breadth: Int = 5, depth: Int = 1, seed: Long = 0L): COPROConfig =
+  private def config(
+      breadth: CoproBreadth = CoproBreadth(5),
+      depth: RoundCount = RoundCount(1),
+      seed: Long = 0L
+  ): COPROConfig =
     COPROConfig(metric = metric, breadth = breadth, depth = depth, seed = seed, instructionMarker = instrGenMarker)
 
   // ── 1. Happy path: single-Predict student, COPRO selects the winner ───────
@@ -162,7 +166,7 @@ class COPROSuite extends FunSuite:
 
   test("COPRO with depth>1 refines via past attempts and keeps the best") {
     val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new COPRO[DynamicPredict](config(breadth = 5, depth = 3))
+    val optimizer = new COPRO[DynamicPredict](config(breadth = CoproBreadth(5), depth = RoundCount(3)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = optimizer.compile(student, trainset)
@@ -200,8 +204,7 @@ class COPROSuite extends FunSuite:
 
   // ── 5. breadth <= 1 is rejected ───────────────────────────────────────────
 
-  test("COPROConfig requires breadth > 1") {
-    intercept[IllegalArgumentException] {
-      val _ = COPROConfig(metric = metric, breadth = 1)
-    }
+  test("CoproBreadth requires more than one candidate") {
+    assert(compileErrors("dspy4s.optimize.CoproBreadth(1)").nonEmpty)
+    assert(CoproBreadth.either(1).isLeft)
   }

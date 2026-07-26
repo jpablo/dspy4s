@@ -12,7 +12,7 @@
  */
 package dspy4s.examples
 
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, ErrorLimit, RuntimeContext, ThreadCount}
 import dspy4s.core.data.{DynamicPrediction, Example}
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
@@ -34,7 +34,9 @@ import dspy4s.optimize.{
   MIPROv2,
   MIPROv2Config,
   ProgramPersistence,
-  RandomSearchConfig
+  RandomSearchConfig,
+  RoundCount,
+  SearchCandidateCount
 }
 import dspy4s.programs.{
   AttemptCount,
@@ -42,6 +44,7 @@ import dspy4s.programs.{
   ChainOfThought,
   CodeAct,
   DynamicPredict,
+  FailureCount,
   Parallel,
   Predict,
   ProgramOfThought,
@@ -49,7 +52,7 @@ import dspy4s.programs.{
   Refine
 }
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
-import dspy4s.programs.retrievers.{KNN, NeighborCount}
+import dspy4s.programs.retrievers.{KNN, NeighborCount, NonEmptyTrainset}
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.DynamicValue
 
@@ -95,7 +98,7 @@ object Cheatsheet:
   // The legacy `dspy.ColBERTv2` / `dspy.Retrieve` global-RM path is deliberately not ported; the modern
   // embedding-retrieval track IS (PORT_GAPS G-10): `Embedder`/`OpenAiEmbedder` (lm), `KNN`/`EmbeddingsRetriever`
   // (programs.retrievers), `KNNFewShot` (optimize). A KNN retriever over a trainset, given an embedder:
-  def knnRetriever(trainset: Vector[Example], embedder: Embedder)(using RuntimeContext): Either[DspyError, KNN] =
+  def knnRetriever(trainset: NonEmptyTrainset, embedder: Embedder)(using RuntimeContext): Either[DspyError, KNN] =
     KNN.create(k = NeighborCount(3), trainset = trainset, embedder = embedder)
 
   // ── Snippet 7 (lines 86–98) — CodeAct ──
@@ -114,7 +117,7 @@ object Cheatsheet:
   // --8<-- [start:parallel]
   def parallel(using RuntimeContext): Either[DspyError, Vector[Option[DynamicPrediction]]] =
     val predict = DynamicPredict(Signature.fromString("question -> answer").layout)
-    Parallel(numThreads = Some(2)).apply(Vector(
+    Parallel(numThreads = Some(ThreadCount(2))).apply(Vector(
       predict -> ProgramCall(input = rec("question" := "1+1")),
       predict -> ProgramCall(input = rec("question" := "2+2"))
     )).map(_.results)
@@ -144,7 +147,7 @@ object Cheatsheet:
     new Evaluate(EvaluateConfig(
       devset = devset,
       metric = metric,
-      numThreads = Some(4),
+      numThreads = Some(ThreadCount(4)),
       displayProgress = true,
       displayTable = Right(5)
     ))
@@ -169,8 +172,8 @@ object Cheatsheet:
       metric = Some(metric),
       maxBootstrappedDemos = DemoCount(4),
       maxLabeledDemos = DemoCount(16),
-      maxRounds = 1,
-      maxErrors = 10
+      maxRounds = RoundCount(1),
+      maxErrors = ErrorLimit(10)
     )).compile(student, trainset).map(_.bestProgram)
   // --8<-- [end:opt-bootstrap]
 
@@ -186,7 +189,7 @@ object Cheatsheet:
     new BootstrapFewShotWithRandomSearch[DynamicPredict](RandomSearchConfig(
       metric = metric,
       maxBootstrappedDemos = DemoCount(2),
-      numCandidates = 8
+      numCandidates = SearchCandidateCount(8)
     )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 
   // ── Snippets 16/17 — save / load ──
@@ -219,7 +222,7 @@ object Cheatsheet:
 
   // | knn = KNN(k=3, trainset, embedder); KNNFewShot(KNN=knn).compile(student)
   // --8<-- [start:opt-knn]
-  def knnFewShot(student: DynamicPredict, trainset: Vector[Example], embedder: Embedder)(using
+  def knnFewShot(student: DynamicPredict, trainset: NonEmptyTrainset, embedder: Embedder)(using
       RuntimeContext
   ): Either[DspyError, DynamicModule] =
     new KNNFewShot[DynamicPredict](k = NeighborCount(3), trainset = trainset, embedder = embedder).compile(student)
@@ -275,7 +278,7 @@ object Cheatsheet:
 
   // ── Snippets 34/35 (lines 509–522) — Refine with fail_count ──
   // | refine = dspy.Refine(module=qa, N=3, reward_fn=..., threshold=1.0, fail_count=1)  # raise after 1 failure
-  def refine(question: String, failCount: Int)(using RuntimeContext): Either[DspyError, String] =
+  def refine(question: String, failCount: FailureCount)(using RuntimeContext): Either[DspyError, String] =
     val qa = ChainOfThought(Signature.of[BasicQA])
     Refine(
       module = qa,

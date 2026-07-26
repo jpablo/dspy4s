@@ -25,26 +25,22 @@ object RetryPolicies:
   val never: RetryPolicy = new RetryPolicy:
     override def shouldRetry(attempt: Int, error: DspyError): Boolean = false
 
-  def maxRetries(maxRetries: Int, retryOn: DspyError => Boolean = _ => true): RetryPolicy =
-    require(maxRetries >= 0, "maxRetries must be non-negative")
+  def maxRetries(maxRetries: RetryCount, retryOn: DspyError => Boolean = _ => true): RetryPolicy =
     new RetryPolicy:
       override def shouldRetry(attempt: Int, error: DspyError): Boolean =
         attempt < maxRetries && retryOn(error)
 
-  def maxRetriesOnCodes(maxRetries: Int, retryableCodes: Set[String]): RetryPolicy =
+  def maxRetriesOnCodes(maxRetries: RetryCount, retryableCodes: Set[String]): RetryPolicy =
     this.maxRetries(maxRetries, error => retryableCodes.contains(error.code))
 
   def exponentialBackoff(
-      maxRetries: Int,
-      baseDelayMillis: Long = 200L,
-      maxDelayMillis: Long = 4000L,
-      jitterFactor: Double = 0.0,
+      maxRetries: RetryCount,
+      baseDelayMillis: RetryDelayMillis = RetryDelayMillis(200L),
+      maxDelayMillis: RetryDelayMillis = RetryDelayMillis(4000L),
+      jitterFactor: JitterFactor = JitterFactor(0.0),
       retryOn: DspyError => Boolean = _ => true
   ): RetryPolicy =
-    require(maxRetries >= 0, "maxRetries must be non-negative")
-    require(baseDelayMillis >= 0L, "baseDelayMillis must be non-negative")
     require(maxDelayMillis >= baseDelayMillis, "maxDelayMillis must be >= baseDelayMillis")
-    require(jitterFactor >= 0.0 && jitterFactor <= 1.0, "jitterFactor must be in [0.0, 1.0]")
 
     new RetryPolicy:
       override def shouldRetry(attempt: Int, error: DspyError): Boolean =

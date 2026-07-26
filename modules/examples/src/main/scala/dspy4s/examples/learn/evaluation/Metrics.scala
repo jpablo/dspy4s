@@ -15,7 +15,7 @@
  */
 package dspy4s.examples.learn.evaluation
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, ThreadCount, :=}
 import dspy4s.core.data.{DynamicPrediction, Example}
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
@@ -85,7 +85,7 @@ object Metrics:
     new Evaluate(EvaluateConfig(
       devset          = devset,
       metric          = metric,
-      numThreads      = Some(1),
+      numThreads      = Some(ThreadCount(1)),
       displayProgress = true,
       displayTable    = Right(5)
     ))

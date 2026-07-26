@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.programs.predictors.{PredictorId, PredictorOrdinal}
 import munit.FunSuite
 
 class ProgramLimitsSuite extends FunSuite:
@@ -17,4 +18,17 @@ class ProgramLimitsSuite extends FunSuite:
     assert(LlmCallLimit.either(-1).isLeft)
     assertEquals(OutputCharLimit.either(100).map(_.toInt), Right(100))
     assert(OutputCharLimit.either(0).isLeft)
+    assertEquals(FailureCount.either(0).map(_.toInt), Right(0))
+    assert(FailureCount.either(-1).isLeft)
+  }
+
+  test("negative failure-count literals are rejected") {
+    assert(compileErrors("dspy4s.programs.FailureCount(-1)").nonEmpty)
+  }
+
+  test("predictor ordinals reject negative values before constructing an id") {
+    assert(compileErrors("dspy4s.programs.predictors.PredictorId(-1)").nonEmpty)
+    assertEquals(PredictorOrdinal.either(2).map(PredictorId.fromOrdinal), Right(PredictorId(2)))
+    assert(PredictorOrdinal.either(-1).isLeft)
+    assert(PredictorId.parse("predictor--1").isLeft)
   }

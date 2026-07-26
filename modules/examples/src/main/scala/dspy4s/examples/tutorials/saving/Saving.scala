@@ -20,7 +20,7 @@ package dspy4s.examples.tutorials.saving
 import dspy4s.core.contracts.{:=, DspyError, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
-import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence}
+import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence, RoundCount}
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.Predictors
 import dspy4s.typed.Signature
@@ -51,7 +51,7 @@ object Saving:
       metric = Some(metric),
       maxBootstrappedDemos = DemoCount(4),
       maxLabeledDemos = DemoCount(4),
-      maxRounds = 5
+      maxRounds = RoundCount(5)
     )).compile(student, trainset).map(_.bestProgram)
   // --8<-- [end:compile]
 

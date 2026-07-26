@@ -51,8 +51,15 @@ object GepaStatePersistence:
         yield parsed :+ candidate
       }
       candidates.flatMap { parsed =>
-        scala.util.Try(GepaState(parsed, s.valSubscores, s.parents, s.totalMetricCalls)).toEither.left
-          .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
+        for
+          pool <- CandidatePool.either(parsed).left.map(_ => "invalid GEPA state snapshot: candidate pool is empty")
+          calls <- MetricCallCount
+            .either(s.totalMetricCalls)
+            .left
+            .map(_ => "invalid GEPA state snapshot: totalMetricCalls must be non-negative")
+          state <- scala.util.Try(GepaState(pool, s.valSubscores, s.parents, calls)).toEither.left
+            .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
+        yield state
       }
     }
 

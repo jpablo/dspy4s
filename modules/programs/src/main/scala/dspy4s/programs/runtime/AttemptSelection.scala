@@ -8,6 +8,7 @@ import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.AttemptCount
+import dspy4s.programs.FailureCount
 
 import scala.util.control.NonFatal
 
@@ -45,7 +46,7 @@ object AttemptSelection:
   private[programs] def bestOf[A](
       n: AttemptCount,
       threshold: Double,
-      failCount: Option[Int],
+      failCount: Option[FailureCount],
       label: String
   )(
       runAttempt: Int => (RuntimeContext ?=> Either[DspyError, A]),

@@ -76,7 +76,9 @@ class InferRulesSuite extends FunSuite:
 
   test("InferRules induces rules, appends them to the instruction, and the rule-augmented program wins") {
     val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new InferRules[DynamicPredict](InferRulesConfig(metric = metric, numCandidates = 2, numRules = 5))
+    val optimizer = new InferRules[DynamicPredict](
+      InferRulesConfig(metric = metric, numCandidates = CandidateCount(2), numRules = RuleCount(5))
+    )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2")), valset = Some(Vector(ex("q3"), ex("q4"))))
@@ -93,7 +95,9 @@ class InferRulesSuite extends FunSuite:
 
   test("InferRules splits the trainset 50/50 when no valset is given") {
     val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new InferRules[DynamicPredict](InferRulesConfig(metric = metric, numCandidates = 1, numRules = 3))
+    val optimizer = new InferRules[DynamicPredict](
+      InferRulesConfig(metric = metric, numCandidates = CandidateCount(1), numRules = RuleCount(3))
+    )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2"), ex("q3"), ex("q4")))

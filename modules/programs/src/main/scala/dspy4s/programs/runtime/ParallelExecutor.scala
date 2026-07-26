@@ -1,8 +1,10 @@
 package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 
@@ -23,12 +25,10 @@ final case class ParallelExecutionResult[+A](
 )
 
 final class ParallelExecutor(
-    numThreads: Int = 8,
-    maxErrors: Int = 10,
+    numThreads: ThreadCount = ThreadCount(8),
+    maxErrors: ErrorLimit = ErrorLimit(10),
     timeout: FiniteDuration = 120.seconds
 ):
-  require(numThreads > 0, "numThreads must be greater than 0")
-  require(maxErrors > 0, "maxErrors must be greater than 0")
 
   def execute[A, B](
       task: A => B,
@@ -149,7 +149,7 @@ object ParallelExecutor:
   def fromSettings(timeout: FiniteDuration = 120.seconds)(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
-      numThreads = ctx.numThreads.getOrElse(8),
-      maxErrors  = ctx.maxErrors.getOrElse(10),
+      numThreads = ctx.numThreads.getOrElse(ThreadCount(8)),
+      maxErrors  = ctx.maxErrors.getOrElse(ErrorLimit(10)),
       timeout    = timeout
     )

@@ -12,12 +12,18 @@
  */
 package dspy4s.examples.learn.optimization
 
-import dspy4s.core.contracts.{:=, DspyError, RuntimeContext}
+import dspy4s.core.contracts.{:=, DspyError, RuntimeContext, ThreadCount}
 import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
-import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, DemoCount, ProgramPersistence, RandomSearchConfig}
+import dspy4s.optimize.{
+  BootstrapFewShotWithRandomSearch,
+  DemoCount,
+  ProgramPersistence,
+  RandomSearchConfig,
+  SearchCandidateCount
+}
 import dspy4s.programs.{DynamicPredict, DynamicSignature, ProgramRunner}
 import dspy4s.programs.predictors.Predictors
 
@@ -37,8 +43,8 @@ object Optimizers:
       metric               = metric,
       maxBootstrappedDemos = DemoCount(4),
       maxLabeledDemos      = DemoCount(4),
-      numCandidates        = 10,
-      numThreads           = Some(4)
+      numCandidates        = SearchCandidateCount(10),
+      numThreads           = Some(ThreadCount(4))
     ))
     teleprompter.compile(program, trainset).map(_.bestProgram)
   // --8<-- [end:optimize-bootstrap]

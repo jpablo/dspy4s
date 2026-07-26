@@ -59,9 +59,10 @@ lazy val core = (project in file("modules/core"))
   .settings(name := "dspy4s-core")
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
-      "org.scalameta" %% "munit"             % munitVersion % Test,
-      "org.scalameta" %% "munit-scalacheck"  % munitScalacheckVersion % Test
+      "dev.zio"           %% "zio-blocks-schema" % zioBlocksVersion,
+      "io.github.iltotore" %% "iron"             % ironVersion,
+      "org.scalameta"     %% "munit"             % munitVersion % Test,
+      "org.scalameta"     %% "munit-scalacheck"  % munitScalacheckVersion % Test
     ),
     Test / parallelExecution := false
   )
@@ -86,6 +87,7 @@ lazy val lm = (project in file("modules/lm"))
   .settings(name := "dspy4s-lm")
   .settings(
     libraryDependencies ++= Seq(
+      "io.github.iltotore" %% "iron" % ironVersion,
       "org.scalameta" %% "munit" % munitVersion % Test,
       "com.lihaoyi" %% "ujson" % ujsonVersion,
       "io.github.cdimascio" % "dotenv-java" % dotenvVersion % Test
@@ -148,7 +150,10 @@ lazy val gepa = (project in file("modules/gepa"))
   .settings(commonSettings)
   .settings(name := "dspy4s-gepa")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies ++= Seq(
+      "io.github.iltotore" %% "iron"  % ironVersion,
+      "org.scalameta"      %% "munit" % munitVersion % Test
+    )
   )
 
 lazy val streaming = (project in file("modules/streaming"))

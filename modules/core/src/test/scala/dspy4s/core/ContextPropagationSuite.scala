@@ -4,6 +4,7 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -27,24 +28,24 @@ class ContextPropagationSuite extends FunSuite:
   test("plain future does not inherit thread-local runtime context") {
     val base = ExecutionContext.global
 
-    val observed = RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
+    val observed = RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(ThreadCount(42)))) {
       Await.result(Future(RuntimeEnvironment.current.numThreads)(using base), 3.seconds)
     }
 
-    assertNotEquals(observed, Some(42))
+    assertNotEquals(observed, Some(ThreadCount(42)))
   }
 
   test("context propagation wraps execution context with captured runtime context") {
     val base = ExecutionContext.global
 
-    val observed = RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
+    val observed = RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(ThreadCount(42)))) {
       Await.result(
         ContextPropagation.future(RuntimeEnvironment.current.numThreads)(using base),
         3.seconds
       )
     }
 
-    assertEquals(observed, Some(42))
+    assertEquals(observed, Some(ThreadCount(42)))
   }
 
   test("context propagation assigns distinct async task ids across futures") {

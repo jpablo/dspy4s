@@ -27,11 +27,11 @@ final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accep
   */
 final class MergeProposer[P](
     valset: Vector[Example],
-    maxMergeInvocations: Int,
+    maxMergeInvocations: MergeInvocationLimit,
     rng: Random,
     cache: GepaEvalCache[P],
-    maxAttempts: Int = 10,
-    subsampleSize: Int = 5
+    maxAttempts: MergeInvocationLimit = MergeInvocationLimit(10),
+    subsampleSize: MergeSubsampleSize = MergeSubsampleSize(5)
 ):
   import MergeProposer.*
 

@@ -5,8 +5,10 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.predictors.Predictors
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
@@ -19,12 +21,12 @@ import scala.util.boundary.break
 
 final case class RandomSearchConfig(
     metric: Metric,
-    numCandidates: Int = 16,
+    numCandidates: SearchCandidateCount = SearchCandidateCount(16),
     maxBootstrappedDemos: DemoCount = DemoCount(4),
     maxLabeledDemos: DemoCount = DemoCount(16),
-    maxRounds: Int = 1,
-    numThreads: Option[Int] = None,
-    maxErrors: Int = 10,
+    maxRounds: RoundCount = RoundCount(1),
+    numThreads: Option[ThreadCount] = None,
+    maxErrors: ErrorLimit = ErrorLimit(10),
     stopAtScore: Option[Double] = None,
     metricThreshold: Option[Double] = None,
     seed: Long = 0L

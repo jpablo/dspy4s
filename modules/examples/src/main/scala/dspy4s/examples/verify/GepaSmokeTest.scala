@@ -26,7 +26,7 @@ import dspy4s.core.data.{DynamicPrediction, Example}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.gepa.{Gepa, GepaConfig}
+import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.DynamicPredict
@@ -132,8 +132,8 @@ object GepaSmokeTest:
           metric,
           reflectionLm = lm,
           GepaConfig(
-            maxMetricCalls = metricCalls,
-            reflectionMinibatchSize = minibatchSize,
+            maxMetricCalls = MetricCallCount.applyUnsafe(metricCalls),
+            reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatchSize),
             stopOnPerfectScore = true,
             seed = 0L
           )

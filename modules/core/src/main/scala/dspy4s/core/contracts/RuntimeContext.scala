@@ -19,9 +19,9 @@ final case class RuntimeServices(
   * dependencies; unlike [[RuntimeDelta]], they are inputs to execution rather than outputs accumulated by it.
   */
 final case class RuntimeConfig(
-    numThreads: Option[Int] = None,
-    maxErrors: Option[Int] = None,
-    maxHistorySize: Option[Int] = None,
+    numThreads: Option[ThreadCount] = None,
+    maxErrors: Option[ErrorLimit] = None,
+    maxHistorySize: Option[HistoryLimit] = None,
     disableHistory: Option[Boolean] = None,
     trackUsage: Option[Boolean] = None,
     callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty,
@@ -69,9 +69,9 @@ final class RuntimeContext private (
   def lm: Option[LanguageModelRef]          = services.lm
   def adapter: Option[AdapterRef]           = services.adapter
   def callbacks: Vector[CallbackHandler]    = services.callbacks
-  def numThreads: Option[Int]               = config.numThreads
-  def maxErrors: Option[Int]                = config.maxErrors
-  def maxHistorySize: Option[Int]           = config.maxHistorySize
+  def numThreads: Option[ThreadCount]       = config.numThreads
+  def maxErrors: Option[ErrorLimit]         = config.maxErrors
+  def maxHistorySize: Option[HistoryLimit]  = config.maxHistorySize
   def disableHistory: Option[Boolean]       = config.disableHistory
   def trackUsage: Option[Boolean]           = config.trackUsage
   def callbackMetadata: DynamicValue.Record = config.callbackMetadata
@@ -98,9 +98,9 @@ final class RuntimeContext private (
       lm: Option[LanguageModelRef] = this.lm,
       adapter: Option[AdapterRef] = this.adapter,
       callbacks: Vector[CallbackHandler] = this.callbacks,
-      numThreads: Option[Int] = this.numThreads,
-      maxErrors: Option[Int] = this.maxErrors,
-      maxHistorySize: Option[Int] = this.maxHistorySize,
+      numThreads: Option[ThreadCount] = this.numThreads,
+      maxErrors: Option[ErrorLimit] = this.maxErrors,
+      maxHistorySize: Option[HistoryLimit] = this.maxHistorySize,
       disableHistory: Option[Boolean] = this.disableHistory,
       trackUsage: Option[Boolean] = this.trackUsage,
       callbackMetadata: DynamicValue.Record = this.callbackMetadata,
@@ -155,9 +155,9 @@ object RuntimeContext:
       lm: Option[LanguageModelRef] = None,
       adapter: Option[AdapterRef] = None,
       callbacks: Vector[CallbackHandler] = Vector.empty,
-      numThreads: Option[Int] = None,
-      maxErrors: Option[Int] = None,
-      maxHistorySize: Option[Int] = None,
+      numThreads: Option[ThreadCount] = None,
+      maxErrors: Option[ErrorLimit] = None,
+      maxHistorySize: Option[HistoryLimit] = None,
       disableHistory: Option[Boolean] = None,
       trackUsage: Option[Boolean] = None,
       callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty,

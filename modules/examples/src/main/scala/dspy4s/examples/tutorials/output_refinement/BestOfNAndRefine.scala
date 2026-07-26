@@ -13,7 +13,7 @@ package dspy4s.examples.tutorials.output_refinement
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.{AttemptCount, BestOfN, ChainOfThought, Refine}
+import dspy4s.programs.{AttemptCount, BestOfN, ChainOfThought, FailureCount, Refine}
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
 // Snippet 5 judge signature (top-level for Mirror derivation).
@@ -55,7 +55,7 @@ object BestOfNAndRefine:
   object BestOfNWithFailCount:
     // --8<-- [start:fail-count]
     val bestOf3 = BestOfN(module = qa, n = AttemptCount(3), rewardFn = (_, pred) => oneWord(pred.output.answer),
-                          threshold = 1.0, failCount = Some(1))
+                          threshold = 1.0, failCount = Some(FailureCount(1)))
     // --8<-- [end:fail-count]
 
   // ── Snippets 3 + 4 (lines 53–83) — Refine (same shape; sequential refinement) ──
@@ -74,7 +74,7 @@ object BestOfNAndRefine:
         n = AttemptCount(3),
         rewardFn = (_, pred) => oneWord(pred.output.answer),
         threshold = 1.0,
-        failCount = Some(1)
+        failCount = Some(FailureCount(1))
       )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =

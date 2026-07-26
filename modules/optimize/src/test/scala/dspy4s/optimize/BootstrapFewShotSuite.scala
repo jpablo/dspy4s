@@ -1,6 +1,7 @@
 package dspy4s.optimize
 
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -40,7 +41,7 @@ class BootstrapFewShotSuite extends FunSuite:
       BootstrapFewShotConfig(
         maxBootstrappedDemos = DemoCount(2),
         maxLabeledDemos = DemoCount(1),
-        maxRounds = 1
+        maxRounds = RoundCount(1)
       )
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -92,7 +93,7 @@ class BootstrapFewShotSuite extends FunSuite:
       failsWith = Some(new RuntimeException("boom"))
     )
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(maxErrors = 2, maxBootstrappedDemos = DemoCount(10))
+      BootstrapFewShotConfig(maxErrors = ErrorLimit(2), maxBootstrappedDemos = DemoCount(10))
     )
     given RuntimeContext = RuntimeEnvironment.current
 
@@ -114,7 +115,7 @@ class BootstrapFewShotSuite extends FunSuite:
       BootstrapFewShotConfig(
         maxBootstrappedDemos = DemoCount(1),
         maxLabeledDemos = DemoCount(2),
-        maxErrors = 100,
+        maxErrors = ErrorLimit(100),
         seed = 7L
       )
     )

@@ -11,8 +11,8 @@ import scala.util.Random
   * multi-objective frontiers and run-dir resume are deferred (PORT_GAPS G-12). */
 final case class GepaConfig(
     /** Budget: total metric (evaluation) calls before stopping. Reflection-LM calls do NOT count, matching gepa. */
-    maxMetricCalls: Int,
-    reflectionMinibatchSize: Int = 3,
+    maxMetricCalls: MetricCallCount,
+    reflectionMinibatchSize: MinibatchSize = MinibatchSize(3),
     candidateSelector: CandidateSelector = CandidateSelector.Pareto,
     componentSelector: ComponentSelector = ComponentSelector.RoundRobin,
     /** Minibatch sampling strategy. Default `EpochShuffled` (gepa's default): walk a per-epoch shuffle so every
@@ -23,7 +23,7 @@ final case class GepaConfig(
       * programs (which can't satisfy the merge triplet's "desirable predictor" requirement). */
     useMerge: Boolean = true,
     /** Cap on accepted merge attempts over a run (gepa's `max_merge_invocations`). */
-    maxMergeInvocations: Int = 5,
+    maxMergeInvocations: MergeInvocationLimit = MergeInvocationLimit(5),
     skipPerfectScore: Boolean = true,
     perfectScore: Double = 1.0,
     failureScore: Double = 0.0,
@@ -40,8 +40,8 @@ final case class GepaResult[P](
     bestCandidate: Candidate,
     bestProgram: P,
     bestScore: Double,
-    numCandidates: Int,
-    totalMetricCalls: Int
+    numCandidates: GepaCandidateCount,
+    totalMetricCalls: MetricCallCount
 )
 
 /** The GEPA engine: genetic-Pareto reflective prompt evolution. Each iteration selects a parent candidate from the
@@ -58,8 +58,6 @@ final class GepaEngine[P](
     reflectionLm: LanguageModel,
     config: GepaConfig
 ):
-
-  require(config.maxMetricCalls >= 0, "maxMetricCalls must be non-negative")
 
   def optimize(seedCandidate: Candidate, trainset: Vector[Example], valset: Vector[Example], runDir: Option[Path] = None)(using
       RuntimeContext
@@ -119,7 +117,7 @@ final class GepaEngine[P](
             state = state.add(proposal.candidate, subscores, proposal.parents, proposal.metricCalls + evals)
             mp.onMergeAccepted()
           else
-            state = state.copy(totalMetricCalls = state.totalMetricCalls + proposal.metricCalls)
+            state = state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, proposal.metricCalls))
           true
         }
       }.getOrElse(false)
@@ -142,7 +140,7 @@ final class GepaEngine[P](
       bestCandidate = state.candidates(best),
       bestProgram = adapter.applyCandidate(state.candidates(best)),
       bestScore = state.aggregateScore(best),
-      numCandidates = state.candidates.size,
+      numCandidates = GepaCandidateCount.assume(state.candidates.size),
       totalMetricCalls = state.totalMetricCalls
     )
 
@@ -173,7 +171,7 @@ final class GepaEngine[P](
 
     // Nothing to learn from a perfect minibatch.
     if config.skipPerfectScore && parentEval.scores.nonEmpty && parentEval.scores.forall(_ >= config.perfectScore) then
-      return (state.copy(totalMetricCalls = state.totalMetricCalls + calls), newPointers, false)
+      return (state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, calls)), newPointers, false)
 
     val reflective   = adapter.makeReflectiveDataset(parent, parentEval, components)
     val newCandidate = components.foldLeft(parent) { (cand, component) =>
@@ -197,7 +195,7 @@ final class GepaEngine[P](
         calls += evals
         state.add(newCandidate, newSubscores, parents = Vector(parentIdx), metricCalls = calls)
       else
-        state.copy(totalMetricCalls = state.totalMetricCalls + calls)
+        state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, calls))
     (nextState, newPointers, accepted)
 
   /** Full validation scores for a candidate, via the shared eval cache: returns the per-instance scores and the

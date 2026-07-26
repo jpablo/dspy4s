@@ -19,7 +19,7 @@ import dspy4s.lm.contracts.Embedder
   *
   * Construction embeds eagerly — build via [[EmbeddingsRetriever.create]]. */
 final class EmbeddingsRetriever private (
-    val corpus: Vector[String],
+    val corpus: NonEmptyCorpus,
     embedder: Embedder,
     val k: NeighborCount,
     normalize: Boolean,
@@ -46,14 +46,13 @@ object EmbeddingsRetriever:
 
   /** Embed the corpus and assemble the retriever. */
   def create(
-      corpus: Vector[String],
+      corpus: NonEmptyCorpus,
       embedder: Embedder,
       k: NeighborCount = NeighborCount(5),
       normalize: Boolean = true
   )(using
       RuntimeContext
   ): Either[DspyError, EmbeddingsRetriever] =
-    require(corpus.nonEmpty, "EmbeddingsRetriever needs a non-empty corpus")
     embedder.embed(corpus).map { rows =>
       val vectors = if normalize then rows.map(Similarity.normalize) else rows
       new EmbeddingsRetriever(corpus, embedder, k, normalize, vectors)

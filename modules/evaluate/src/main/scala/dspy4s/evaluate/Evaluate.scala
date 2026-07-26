@@ -1,10 +1,12 @@
 package dspy4s.evaluate
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
@@ -19,8 +21,8 @@ import scala.concurrent.duration.DurationInt
 final case class EvaluateConfig(
     devset: Vector[Example],
     metric: Metric,
-    numThreads: Option[Int] = None,
-    maxErrors: Option[Int] = None,
+    numThreads: Option[ThreadCount] = None,
+    maxErrors: Option[ErrorLimit] = None,
     failureScore: Double = 0.0,
     displayProgress: Boolean = false,
     displayTable: Either[Boolean, Int] = Left(false),
@@ -38,8 +40,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
   def apply(
       metric: Option[Metric] = None,
       devset: Option[Vector[Example]] = None,
-      numThreads: Option[Int] = None,
-      maxErrors: Option[Int] = None,
+      numThreads: Option[ThreadCount] = None,
+      maxErrors: Option[ErrorLimit] = None,
       failureScore: Option[Double] = None,
       saveAsCsv: Option[String] = None,
       saveAsJson: Option[String] = None,
@@ -168,11 +170,11 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
   private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]
-    val resolvedNumThreads = cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(8))
-    val resolvedMaxErrors  = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(10))
+    val resolvedNumThreads = cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8)))
+    val resolvedMaxErrors  = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10)))
     ParallelExecutor(
       numThreads = resolvedNumThreads,
-      maxErrors = math.max(1, resolvedMaxErrors),
+      maxErrors = resolvedMaxErrors,
       timeout = cfg.timeout
     )
 
@@ -180,8 +182,8 @@ object Evaluate:
   def apply(
       devset: Vector[Example],
       metric: Metric,
-      numThreads: Option[Int] = None,
-      maxErrors: Option[Int] = None,
+      numThreads: Option[ThreadCount] = None,
+      maxErrors: Option[ErrorLimit] = None,
       failureScore: Double = 0.0,
       displayProgress: Boolean = false,
       displayTable: Int = 0,

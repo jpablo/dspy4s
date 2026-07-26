@@ -7,6 +7,7 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.HistoryRenderer
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
@@ -168,7 +169,7 @@ object RuntimeEnvironment:
   def appendHistory(entry: HistoryEntry): Unit =
     val effective = current
     val historyDisabled = effective.disableHistory.getOrElse(false)
-    val cap = effective.maxHistorySize.getOrElse(10000)
+    val cap = effective.maxHistorySize.getOrElse(HistoryLimit(10000))
     if !historyDisabled && cap > 0 then
       val base = localContext
       val nextHistory = (base.history :+ entry).takeRight(cap)

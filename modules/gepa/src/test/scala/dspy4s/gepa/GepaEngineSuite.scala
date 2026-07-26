@@ -71,7 +71,11 @@ class GepaEngineSuite extends FunSuite:
   test("GEPA discovers a better instruction and improves the program's validation score") {
     val adapter = new GepaAdapter(program, metric)
     val engine =
-      new GepaEngine(adapter, new ReflectionLm, GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L))
+      new GepaEngine(
+        adapter,
+        new ReflectionLm,
+        GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+      )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -99,7 +103,12 @@ class GepaEngineSuite extends FunSuite:
       val stopping = new GepaEngine(
         adapter,
         new ReflectionLm,
-        GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, stopOnPerfectScore = true, seed = 1L)
+        GepaConfig(
+          maxMetricCalls = MetricCallCount(40),
+          reflectionMinibatchSize = MinibatchSize(2),
+          stopOnPerfectScore = true,
+          seed = 1L
+        )
       )
       val stopped = stopping.optimize(seedCandidate, trainset = dataset, valset = dataset)
       assertEquals(stopped.bestScore, 1.0)
@@ -109,7 +118,7 @@ class GepaEngineSuite extends FunSuite:
       val running = new GepaEngine(
         adapter,
         new ReflectionLm,
-        GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L)
+        GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
       )
       val ranToBudget = running.optimize(seedCandidate, trainset = dataset, valset = dataset)
       assertEquals(ranToBudget.bestScore, 1.0)
@@ -135,7 +144,11 @@ class GepaEngineSuite extends FunSuite:
     val dir = java.nio.file.Files.createTempDirectory("gepa-resume")
     // Budget == valset size: the seed full-eval (one LM call per val example) exactly exhausts it, so each run does
     // its seed eval (or skips it on resume) and then zero iterations.
-    val cfg           = GepaConfig(maxMetricCalls = dataset.size, reflectionMinibatchSize = 2, seed = 1L)
+    val cfg = GepaConfig(
+      maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size),
+      reflectionMinibatchSize = MinibatchSize(2),
+      seed = 1L
+    )
     val seedCandidate = Candidate.seed(program)
 
     val lm1 = new CountingTaskLm
@@ -166,7 +179,11 @@ class GepaEngineSuite extends FunSuite:
       new GepaEngine(
         new GepaAdapter(program, metric),
         new ReflectionLm,
-        GepaConfig(maxMetricCalls = dataset.size + 1, reflectionMinibatchSize = 2, seed = 1L)
+        GepaConfig(
+          maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size + 1),
+          reflectionMinibatchSize = MinibatchSize(2),
+          seed = 1L
+        )
       ).optimize(Candidate.seed(program), dataset, dataset)
     }
 
@@ -183,7 +200,11 @@ class GepaEngineSuite extends FunSuite:
         new GepaEngine(
           new GepaAdapter(program, metric),
           new ReflectionLm,
-          GepaConfig(maxMetricCalls = dataset.size - 1, reflectionMinibatchSize = 2, seed = 1L)
+          GepaConfig(
+            maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size - 1),
+            reflectionMinibatchSize = MinibatchSize(2),
+            seed = 1L
+          )
         ).optimize(Candidate.seed(program), dataset, dataset)
       }
     }
@@ -205,7 +226,11 @@ class GepaEngineSuite extends FunSuite:
           new GepaEngine(
             new GepaAdapter(program, metric),
             new ReflectionLm,
-            GepaConfig(maxMetricCalls = dataset.size, reflectionMinibatchSize = 2, seed = 1L)
+            GepaConfig(
+              maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size),
+              reflectionMinibatchSize = MinibatchSize(2),
+              seed = 1L
+            )
           ).optimize(Candidate.seed(program), dataset, dataset, runDir = Some(dir))
         }
       }
@@ -222,7 +247,7 @@ class GepaEngineSuite extends FunSuite:
     val gepa = new Gepa[DynamicPredict](
       metric,
       new ReflectionLm,
-      GepaConfig(maxMetricCalls = 40, reflectionMinibatchSize = 2, seed = 1L)
+      GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
     )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current

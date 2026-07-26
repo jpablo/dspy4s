@@ -20,11 +20,10 @@ final case class OpenAiEmbedder(
     apiKey: String,
     baseUrl: String = OpenAiClient.defaultBaseUrl,
     transport: HttpTransport = HttpTransport.jdk(),
-    batchSize: Int = 200,
+    batchSize: BatchSize = BatchSize(200),
     options: DynamicValue.Record = DynamicValue.Record.empty,
     embeddingsEndpoint: String = "/embeddings"
 ) extends Embedder:
-  require(batchSize > 0, "batchSize must be > 0")
 
   override def id: String = model
 

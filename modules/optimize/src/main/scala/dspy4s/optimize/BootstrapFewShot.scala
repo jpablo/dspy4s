@@ -5,6 +5,7 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.predictors.Predictors
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -22,12 +23,10 @@ final case class BootstrapFewShotConfig(
     metricThreshold: Option[Double] = None,
     maxBootstrappedDemos: DemoCount = DemoCount(4),
     maxLabeledDemos: DemoCount = DemoCount(16),
-    maxRounds: Int = 1,
-    maxErrors: Int = 10,
+    maxRounds: RoundCount = RoundCount(1),
+    maxErrors: ErrorLimit = ErrorLimit(10),
     seed: Long = 0L
-):
-  require(maxRounds >= 1, "maxRounds must be at least 1")
-  require(maxErrors > 0, "maxErrors must be > 0")
+)
 
 final class BootstrapFewShot[P: {Predictors, ProgramRunner}](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()

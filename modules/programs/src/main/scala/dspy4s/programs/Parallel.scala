@@ -1,8 +1,10 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.ParallelExecutionResult
@@ -13,15 +15,15 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 
 final case class Parallel(
-    numThreads: Option[Int] = None,
-    maxErrors: Option[Int] = None,
+    numThreads: Option[ThreadCount] = None,
+    maxErrors: Option[ErrorLimit] = None,
     timeout: FiniteDuration = 120.seconds
 ):
   private def resolvedExecutor(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
-      numThreads = numThreads.getOrElse(ctx.numThreads.getOrElse(8)),
-      maxErrors = maxErrors.getOrElse(ctx.maxErrors.getOrElse(10)),
+      numThreads = numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8))),
+      maxErrors = maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10))),
       timeout = timeout
     )
 

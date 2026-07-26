@@ -12,13 +12,11 @@ import scala.util.Random
   * score on each validation example (aligned by validation index).
   */
 final case class GepaState(
-    candidates: Vector[Candidate],
+    candidates: CandidatePool,
     valSubscores: Vector[Vector[Double]],
     parents: Vector[Vector[Int]],
-    totalMetricCalls: Int
+    totalMetricCalls: MetricCallCount
 ):
-  require(candidates.nonEmpty, "GepaState needs at least the seed candidate")
-  require(totalMetricCalls >= 0, "GepaState totalMetricCalls must be non-negative")
   require(
     valSubscores.length == candidates.length && parents.length == candidates.length,
     "GepaState candidates, valSubscores, and parents must be aligned by index"
@@ -59,10 +57,10 @@ final case class GepaState(
     */
   def add(candidate: Candidate, subscores: Vector[Double], parents: Vector[Int], metricCalls: Int): GepaState =
     copy(
-      candidates = candidates :+ candidate,
+      candidates = CandidatePool.assume(candidates :+ candidate),
       valSubscores = valSubscores :+ subscores,
       parents = this.parents :+ parents,
-      totalMetricCalls = totalMetricCalls + metricCalls
+      totalMetricCalls = MetricCallCount.add(totalMetricCalls, metricCalls)
     )
 
   /** Instance-type Pareto frontier: for each validation-example index, the set of candidate indices achieving the max
@@ -79,7 +77,12 @@ final case class GepaState(
 object GepaState:
   /** Initialize from the seed candidate's full-validation evaluation. */
   def seed(candidate: Candidate, subscores: Vector[Double], metricCalls: Int): GepaState =
-    GepaState(Vector(candidate), Vector(subscores), Vector(Vector.empty), metricCalls)
+    GepaState(
+      CandidatePool.assume(Vector(candidate)),
+      Vector(subscores),
+      Vector(Vector.empty),
+      MetricCallCount.applyUnsafe(metricCalls)
+    )
 
 /** Picks which existing candidate to mutate next (gepa's CandidateSelector). */
 trait CandidateSelector:

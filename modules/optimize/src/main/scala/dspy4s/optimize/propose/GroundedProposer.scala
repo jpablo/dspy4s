@@ -9,6 +9,8 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
+import dspy4s.optimize.CandidateCount
+import dspy4s.optimize.DatasetSampleSize
 import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.PredictorView
@@ -40,18 +42,17 @@ import dspy4s.programs.contracts.ProgramCall
   *   distinguishable from a task prompt (lets offline scripted LMs branch)
   */
 final case class GroundedProposerConfig(
-    numInstructions: Int = 5,
+    numInstructions: CandidateCount = CandidateCount(5),
     useDatasetSummary: Boolean = true,
     useTips: Boolean = true,
-    datasetSampleSize: Int = 10,
+    datasetSampleSize: DatasetSampleSize = DatasetSampleSize(10),
     initTemperature: Double = 1.0,
     seed: Long = 0L,
     summaryMarker: String =
       "You are a dataset analyst. Summarize the observations that hold across the dataset samples.",
     instructionMarker: String =
       "You are an instruction proposer for large language models. Propose a new instruction grounded in the context."
-):
-  require(numInstructions > 0, "GroundedProposer numInstructions must be greater than 0")
+)
 
 /** GroundedProposer — Phase A of a MIPROv2 port. A reusable component that proposes candidate INSTRUCTIONS per
   * predictor, grounded in the task data and (optionally) bootstrapped demos. A v1 port of the proposer slice of DSPy's
@@ -144,7 +145,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
   private def datasetSummary(trainset: Vector[Example])(using RuntimeContext): Either[DspyError, Option[String]] =
     if !config.useDatasetSummary || trainset.isEmpty then Right(None)
     else
-      val sample   = trainset.take(math.max(1, config.datasetSampleSize))
+      val sample   = trainset.take(config.datasetSampleSize)
       val rendered = sample.iterator.map(renderExample).mkString("\n\n")
       val gen      = DynamicPredict(layout = summaryLayout, name = Some("grounded_summary"))
       val call = ProgramCall(

@@ -92,8 +92,7 @@ object RequestHash:
     val digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))
     digest.map(byte => f"$byte%02x").mkString
 
-final class InMemoryLmCache(maxEntries: Int = 1024) extends LmCache:
-  require(maxEntries > 0, "maxEntries must be greater than 0")
+final class InMemoryLmCache(maxEntries: CacheCapacity = CacheCapacity(1024)) extends LmCache:
 
   private val store = new LinkedHashMap[String, LmResponse](16, 0.75f, true):
     override def removeEldestEntry(eldest: java.util.Map.Entry[String, LmResponse]): Boolean =
@@ -166,9 +165,8 @@ private object DiskCacheModel:
       details: java.util.Map[String, java.lang.Long]
   ) extends Serializable
 
-final class DiskLmCache(directory: Path, maxEntries: Int = 200000) extends LmCache:
+final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapacity(200000)) extends LmCache:
   import DiskCacheModel.*
-  require(maxEntries > 0, "maxEntries must be greater than 0")
   Files.createDirectories(directory)
 
   override def get(request: LmRequest): Option[LmResponse] =
@@ -345,12 +343,10 @@ final case class LmCacheConfig(
     enableDiskCache: Boolean = true,
     enableMemoryCache: Boolean = true,
     diskCacheDir: Path = CacheDefaults.defaultDiskDir,
-    diskMaxEntries: Int = 200000,
-    memoryMaxEntries: Int = 1000000,
+    diskMaxEntries: CacheCapacity = CacheCapacity(200000),
+    memoryMaxEntries: CacheCapacity = CacheCapacity(1000000),
     fallbackToMemoryOnDiskFailure: Boolean = true
-):
-  require(!enableMemoryCache || memoryMaxEntries > 0, "memoryMaxEntries must be positive when memory cache is enabled")
-  require(!enableDiskCache || diskMaxEntries > 0, "diskMaxEntries must be positive when disk cache is enabled")
+)
 
 object LmCaches:
   def build(config: LmCacheConfig): LmCache =

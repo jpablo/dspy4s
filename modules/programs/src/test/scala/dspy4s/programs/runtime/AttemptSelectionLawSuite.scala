@@ -6,6 +6,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.AttemptCount
+import dspy4s.programs.FailureCount
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -24,7 +25,7 @@ class AttemptSelectionLawSuite extends FunSuite:
       case Left(error)  => fail(error.toString)
 
   /** Run `n` attempts returning the scripted reward at each index; reward is the value itself. */
-  private def scripted(rewards: Vector[Double], threshold: Double, failCount: Option[Int] = None) =
+  private def scripted(rewards: Vector[Double], threshold: Double, failCount: Option[FailureCount] = None) =
     AttemptSelection.bestOf[Double](attemptCount(rewards.size), threshold, failCount, "law")(
       runAttempt = idx => Right(rewards(idx)),
       reward     = d => Right(d)
@@ -79,7 +80,12 @@ class AttemptSelectionLawSuite extends FunSuite:
 
   test("a custom fail budget aborts earlier and keeps no best when all attempts failed") {
     val calls = AtomicInteger(0)
-    val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.0, failCount = Some(1), "law")(
+    val result = AttemptSelection.bestOf[Double](
+      AttemptCount(3),
+      threshold = 0.0,
+      failCount = Some(FailureCount(1)),
+      "law"
+    )(
       runAttempt = idx => { calls.incrementAndGet(); Left(RuntimeError("law", s"f$idx")) },
       reward     = d => Right(d)
     )
@@ -88,7 +94,12 @@ class AttemptSelectionLawSuite extends FunSuite:
   }
 
   test("keeps a sub-threshold best when a later failure stays within budget") {
-    val result = AttemptSelection.bestOf[Double](AttemptCount(4), threshold = 1.0, failCount = Some(1), "law")(
+    val result = AttemptSelection.bestOf[Double](
+      AttemptCount(4),
+      threshold = 1.0,
+      failCount = Some(FailureCount(1)),
+      "law"
+    )(
       runAttempt = idx => idx match
         case 3 => Left(RuntimeError("law", "boom"))
         case other => Right(Vector(0.1, 0.7, 0.3)(other)),

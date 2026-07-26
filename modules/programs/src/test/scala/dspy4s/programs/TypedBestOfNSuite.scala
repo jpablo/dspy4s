@@ -140,7 +140,7 @@ class TypedBestOfNSuite extends FunSuite:
         n = AttemptCount(3),
         rewardFn = (_, _) => 1.0,
         threshold = 0.0,
-        failCount = Some(1)
+        failCount = Some(FailureCount(1))
       )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -166,7 +166,7 @@ class TypedBestOfNSuite extends FunSuite:
         n = AttemptCount(5),
         rewardFn = (_, _) => 1.0,
         threshold = 0.0,
-        failCount = Some(3)
+        failCount = Some(FailureCount(3))
       )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -191,7 +191,7 @@ class TypedBestOfNSuite extends FunSuite:
       n = AttemptCount(5),
       rewardFn = (_, p) => p.output.score,
       threshold = 1.0,
-      failCount = Some(2)
+      failCount = Some(FailureCount(2))
     )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -428,7 +428,7 @@ class TypedBestOfNSuite extends FunSuite:
       n = AttemptCount(3),
       rewardFn = (_, _) => 1.0,
       threshold = 0.0,
-      failCount = Some(1)
+      failCount = Some(FailureCount(1))
     )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -452,7 +452,7 @@ class TypedBestOfNSuite extends FunSuite:
       n = AttemptCount(5),
       rewardFn = (_, _) => 1.0,
       threshold = 0.0,
-      failCount = Some(3)
+      failCount = Some(FailureCount(3))
     )
 
     given RuntimeContext = RuntimeEnvironment.current

@@ -1,9 +1,11 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
@@ -38,7 +40,7 @@ class ParallelSuite extends FunSuite:
       program -> ProgramCall(input = rec("value" := value))
     }
 
-    val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
+    val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
 
     assert(result.isRight)
     val outputs = result.toOption.get.results.map(p => lookup(p.get.values, "output").get)
@@ -56,7 +58,7 @@ class ParallelSuite extends FunSuite:
       program -> ProgramCall(input = rec("value" := value))
     }
 
-    val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
+    val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
 
     assert(result.isRight)
     val output = result.toOption.get
@@ -76,7 +78,7 @@ class ParallelSuite extends FunSuite:
       program -> ProgramCall(input = rec("value" := value))
     }
 
-    val result = Parallel(numThreads = Some(2), maxErrors = Some(1)).run(tasks)
+    val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(1))).run(tasks)
 
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[RuntimeError])
@@ -92,8 +94,8 @@ class ParallelSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          numThreads = Some(2),
-          maxErrors = Some(1)
+          numThreads = Some(ThreadCount(2)),
+          maxErrors = Some(ErrorLimit(1))
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -114,9 +116,9 @@ class ParallelSuite extends FunSuite:
     )
     val tasks = Vector.fill(4)(program -> ProgramCall(input = rec("value" := 1)))
 
-    RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(42))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(ThreadCount(42)))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
+      val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
       assert(result.isRight)
       val values = result.toOption.get.results.flatten.map(p => lookupString(p.values, "sample"))
       assertEquals(values, Vector("42", "42", "42", "42"))
@@ -140,7 +142,7 @@ class ParallelSuite extends FunSuite:
     )
     val tasks = Vector(1, 2).map(value => program -> ProgramCall(input = rec("value" := value)))
 
-    val result = Parallel(numThreads = Some(2), maxErrors = Some(2)).run(tasks)
+    val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
 
     assert(result.isRight)
     val outputs = result.toOption.get.results.flatten

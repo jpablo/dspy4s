@@ -1,6 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.predictors.PredictorOrdinal
 import munit.FunSuite
 
 import scala.util.Random
@@ -9,10 +10,12 @@ class GepaStateSuite extends FunSuite:
 
   private def state(subscores: Vector[Double]*): GepaState =
     GepaState(
-      candidates = subscores.indices.map(i => Map(PredictorId(0) -> Some(s"instr$i"))).toVector,
+      candidates = CandidatePool.applyUnsafe(
+        subscores.indices.map(i => Map(PredictorId(0) -> Some(s"instr$i"))).toVector
+      ),
       valSubscores = subscores.toVector,
       parents = subscores.indices.map(_ => Vector.empty[Int]).toVector,
-      totalMetricCalls = 0
+      totalMetricCalls = MetricCallCount(0)
     )
 
   test("aggregateScore is the mean and bestIndex picks the highest mean") {
@@ -36,10 +39,12 @@ class GepaStateSuite extends FunSuite:
   test("GepaState rejects ragged valSubscores up front (instead of an IndexOutOfBounds in paretoFrontier)") {
     intercept[IllegalArgumentException] {
       val _ = GepaState(
-        candidates = Vector(Map(PredictorId(0) -> Some("a")), Map(PredictorId(0) -> Some("b"))),
+        candidates = CandidatePool.applyUnsafe(
+          Vector(Map(PredictorId(0) -> Some("a")), Map(PredictorId(0) -> Some("b")))
+        ),
         valSubscores = Vector(Vector(1.0, 0.0), Vector(1.0)), // second row is shorter — would crash paretoFrontier
         parents = Vector(Vector.empty[Int], Vector.empty[Int]),
-        totalMetricCalls = 0
+        totalMetricCalls = MetricCallCount(0)
       )
     }
   }
@@ -62,16 +67,16 @@ class GepaStateSuite extends FunSuite:
     assertEquals(s1.candidates.size, 2)
     assertEquals(s1.bestIndex, 1)
     assertEquals(s1.parents(1), Vector(0))
-    assertEquals(s1.totalMetricCalls, 4)
+    assertEquals(s1.totalMetricCalls, MetricCallCount(4))
   }
 
   test("ancestors walks the full lineage, including a merge's two branches up to a common ancestor") {
     // Lineage: 0 (seed) -> 1, 0 -> 2; then 3 is a MERGE of 1 and 2 (two parents).
     val s = GepaState(
-      candidates = Vector.tabulate(4)(i => Map(PredictorId(0) -> Some(i.toString))),
+      candidates = CandidatePool.applyUnsafe(Vector.tabulate(4)(i => Map(PredictorId(0) -> Some(i.toString)))),
       valSubscores = Vector.fill(4)(Vector(1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(1, 2)),
-      totalMetricCalls = 0
+      totalMetricCalls = MetricCallCount(0)
     )
     assertEquals(s.ancestors(0), Set.empty[Int])
     assertEquals(s.ancestors(1), Set(0))
@@ -85,7 +90,10 @@ class GepaStateSuite extends FunSuite:
       val (chosen, next) = ComponentSelector.RoundRobin.select(cs, ptr)
       (acc :+ chosen.head, next)
     }
-    assertEquals(picks, Vector(0, 1, 2, 0, 1, 2).map(PredictorId(_)))
+    assertEquals(
+      picks,
+      Vector(0, 1, 2, 0, 1, 2).map(i => PredictorId.fromOrdinal(PredictorOrdinal.assume(i)))
+    )
   }
 
   test("RoundRobin normalizes an out-of-range pointer") {

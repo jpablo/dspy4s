@@ -44,7 +44,7 @@ class EnsembleSuite extends FunSuite:
   test("Ensemble size-sampling is seeded and deterministic; sample respects size") {
     // 5 programs answering distinct values; size=3 selects a fixed seeded subset.
     val programs = Vector("A", "B", "C", "D", "E").map(fixedAnswer)
-    val optimizer = Ensemble(size = Some(3), seed = 42L)
+    val optimizer = Ensemble(size = Some(EnsembleSize(3)), seed = 42L)
     given RuntimeContext = RuntimeEnvironment.current
 
     val first = lookupString(optimizer.compile(programs).apply(call).toOption.get.values, "answer")

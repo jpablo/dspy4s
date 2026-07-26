@@ -31,7 +31,7 @@ final case class BestOfN[P <: Module[ProgramCall[I], Prediction[O]], I, O](
     n: AttemptCount,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
-    failCount: Option[Int] = None
+    failCount: Option[FailureCount] = None
 ) extends Module[ProgramCall[I], Prediction[O]]:
   override val moduleName: String = "best_of_n"
 

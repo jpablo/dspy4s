@@ -4,6 +4,7 @@ import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.Monoid
 import dspy4s.core.contracts.RuntimeConfig
@@ -110,7 +111,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     val metadata = DynamicValues.record("run" := "abc")
     val delta    = RuntimeDelta(Vector(trace("step")), Vector(history("lm")))
     val context = RuntimeContext(
-      numThreads = Some(4),
+      numThreads = Some(ThreadCount(4)),
       callbackMetadata = metadata,
       captureFailureTraces = true,
       asyncTaskId = Some("task"),
@@ -120,16 +121,16 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
 
     assertEquals(
       context.config,
-      RuntimeConfig(numThreads = Some(4), callbackMetadata = metadata, captureFailureTraces = true)
+      RuntimeConfig(numThreads = Some(ThreadCount(4)), callbackMetadata = metadata, captureFailureTraces = true)
     )
     assertEquals(context.scope, RuntimeScope(asyncTaskId = Some("task")))
     assertEquals(context.delta, delta)
-    assertEquals(context.copy(numThreads = Some(8)).config.numThreads, Some(8))
+    assertEquals(context.copy(numThreads = Some(ThreadCount(8))).config.numThreads, Some(ThreadCount(8)))
   }
 
   test("fillFrom inherits environment inputs but never an accumulated delta") {
     val defaults = RuntimeContext(
-      numThreads = Some(8),
+      numThreads = Some(ThreadCount(8)),
       asyncTaskId = Some("global-task"),
       trace = Vector(trace("global")),
       history = Vector(history("global"))
@@ -137,7 +138,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     val local  = RuntimeContext(trace = Vector(trace("local")))
     val filled = local.fillFrom(defaults)
 
-    assertEquals(filled.numThreads, Some(8))
+    assertEquals(filled.numThreads, Some(ThreadCount(8)))
     assertEquals(filled.asyncTaskId, Some("global-task"))
     assertEquals(filled.trace.map(_.component), Vector("local"))
     assertEquals(filled.history, Vector.empty[HistoryEntry])

@@ -37,10 +37,9 @@ import zio.blocks.schema.DynamicValue
   */
 final case class Ensemble(
     reduceFn: Vector[DynamicValue.Record] => Either[DspyError, DynamicPrediction] = Ensemble.majorityVote,
-    size: Option[Int] = None,
+    size: Option[EnsembleSize] = None,
     seed: Long = 0L
 ):
-  require(size.forall(_ > 0), "size must be positive when set")
 
   val name: String = "ensemble"
 
@@ -58,7 +57,7 @@ object Ensemble:
   private final case class EnsembledProgram(
       programs: Vector[DynamicModule],
       reduceFn: Vector[DynamicValue.Record] => Either[DspyError, DynamicPrediction],
-      size: Option[Int],
+      size: Option[EnsembleSize],
       seed: Long
   ) extends DynamicModule:
     override val moduleName: String = "ensemble"

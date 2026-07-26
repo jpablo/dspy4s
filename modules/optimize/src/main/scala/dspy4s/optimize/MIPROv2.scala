@@ -38,15 +38,13 @@ import scala.util.Random
   */
 final case class MIPROv2Config(
     metric: Metric,
-    numCandidates: Int = 5,
-    numTrials: Int = 10,
+    numCandidates: CandidateCount = CandidateCount(5),
+    numTrials: TrialCount = TrialCount(10),
     maxBootstrappedDemos: DemoCount = DemoCount(4),
     maxLabeledDemos: DemoCount = DemoCount(4),
     seed: Long = 0L,
     proposerConfig: GroundedProposerConfig = GroundedProposerConfig()
-):
-  require(numCandidates > 0, "MIPROv2 numCandidates must be greater than 0")
-  require(numTrials > 0, "MIPROv2 numTrials must be greater than 0")
+)
 
 /** MIPROv2 — Multiprompt Instruction PRoposal Optimizer (v2). A v1 port of DSPy's `dspy.teleprompt.MIPROv2`
   * (`dspy/teleprompt/mipro_optimizer_v2.py`).

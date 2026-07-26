@@ -2,6 +2,7 @@ package dspy4s.evaluate
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.data.Example
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -102,7 +103,7 @@ class EvaluateSuite extends FunSuite:
       Thread.sleep(5)
       Right(DynamicPrediction(rec("answer" := s"a${q.stripPrefix("q")}")))
 
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), numThreads = Some(4))
+    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), numThreads = Some(ThreadCount(4)))
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = evaluator()(program)

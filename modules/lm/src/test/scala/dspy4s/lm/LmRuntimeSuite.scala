@@ -16,6 +16,7 @@ import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.lm.runtime.CompositeLmCache
+import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.DiskLmCache
 import dspy4s.lm.runtime.InMemoryLmCache
 import dspy4s.lm.runtime.LmCacheConfig
@@ -23,6 +24,9 @@ import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.NoopLmCache
 import dspy4s.lm.runtime.RequestHash
+import dspy4s.lm.runtime.RetryCount
+import dspy4s.lm.runtime.RetryDelayMillis
+import dspy4s.lm.runtime.JitterFactor
 import dspy4s.lm.runtime.RetryPolicies
 import dspy4s.lm.runtime.UsageTracker
 import dspy4s.lm.runtime.UsageTracking
@@ -109,7 +113,7 @@ class LmRuntimeSuite extends FunSuite:
   }
 
   test("in-memory cache returns cache hit response without usage") {
-    val cache = new InMemoryLmCache(maxEntries = 8)
+    val cache = new InMemoryLmCache(maxEntries = CacheCapacity(8))
     cache.put(baseRequest, baseResponse)
 
     val cached = cache.get(baseRequest)
@@ -120,7 +124,7 @@ class LmRuntimeSuite extends FunSuite:
 
   test("managed language model caches by typed rolloutId and keeps it out of provider options") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse), Right(baseResponse)))
-    val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(16)))
+    val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
     val request = baseRequest.copy(rolloutId = Some(1))
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -149,7 +153,7 @@ class LmRuntimeSuite extends FunSuite:
         Right(baseResponse)
       )
     )
-    val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = RetryPolicies.maxRetries(2))
+    val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = RetryPolicies.maxRetries(RetryCount(2)))
 
     given RuntimeContext = RuntimeEnvironment.current
     val result = managed.call(baseRequest)
@@ -168,10 +172,10 @@ class LmRuntimeSuite extends FunSuite:
     )
     val delays = ArrayBuffer.empty[Long]
     val retryPolicy = RetryPolicies.exponentialBackoff(
-      maxRetries = 2,
-      baseDelayMillis = 5L,
-      maxDelayMillis = 20L,
-      jitterFactor = 0.0
+      maxRetries = RetryCount(2),
+      baseDelayMillis = RetryDelayMillis(5L),
+      maxDelayMillis = RetryDelayMillis(20L),
+      jitterFactor = JitterFactor(0.0)
     )
     val managed = ManagedLanguageModel(
       delegate = delegate,
@@ -190,10 +194,10 @@ class LmRuntimeSuite extends FunSuite:
   test("exponential backoff saturates instead of overflowing large delays") {
     val base = Long.MaxValue / 2L + 1L
     val policy = RetryPolicies.exponentialBackoff(
-      maxRetries = 30,
-      baseDelayMillis = base,
-      maxDelayMillis = Long.MaxValue,
-      jitterFactor = 0.0
+      maxRetries = RetryCount(30),
+      baseDelayMillis = RetryDelayMillis.applyUnsafe(base),
+      maxDelayMillis = RetryDelayMillis.applyUnsafe(Long.MaxValue),
+      jitterFactor = JitterFactor(0.0)
     )
     val error = RuntimeError("lm", "temporary")
 
@@ -210,7 +214,7 @@ class LmRuntimeSuite extends FunSuite:
       )
     )
     val retryPolicy = RetryPolicies.maxRetriesOnCodes(
-      maxRetries = 3,
+      maxRetries = RetryCount(3),
       retryableCodes = Set("runtime_error")
     )
     val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = retryPolicy)
@@ -225,7 +229,7 @@ class LmRuntimeSuite extends FunSuite:
 
   test("usage tracking records only non-cached usage entries") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse)))
-    val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(16)))
+    val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
     val tracker = new UsageTracker
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -262,11 +266,11 @@ class LmRuntimeSuite extends FunSuite:
   test("disk cache persists values across cache instances") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache")
     try
-      val first = new DiskLmCache(tempDir, maxEntries = 8)
+      val first = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       first.put(baseRequest, baseResponse)
       assertEquals(first.size, 1)
 
-      val second = new DiskLmCache(tempDir, maxEntries = 8)
+      val second = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       val cached = second.get(baseRequest)
       assert(cached.isDefined)
       assertEquals(cached.get.cacheHit, true)
@@ -284,10 +288,10 @@ class LmRuntimeSuite extends FunSuite:
           args = DynamicValues.recordFromEntries(Seq("query" := "belgium", "top_k" := 3))
         ))
       )))
-      val first = new DiskLmCache(tempDir, maxEntries = 8)
+      val first = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       first.put(baseRequest, toolResponse)
 
-      val second = new DiskLmCache(tempDir, maxEntries = 8)
+      val second = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       val args   = DynamicValues.recordToMap(second.get(baseRequest).get.outputs.head.toolCalls.head.args)
 
       assertEquals(args("query"), "belgium": Any)
@@ -303,8 +307,8 @@ class LmRuntimeSuite extends FunSuite:
   test("composite cache warms memory cache on disk hit") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-composite-cache")
     try
-      val disk = new DiskLmCache(tempDir, maxEntries = 8)
-      val memory = new InMemoryLmCache(maxEntries = 8)
+      val disk = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
+      val memory = new InMemoryLmCache(maxEntries = CacheCapacity(8))
       disk.put(baseRequest, baseResponse)
 
       val composite = CompositeLmCache(memory = Some(memory), disk = Some(disk))
@@ -326,7 +330,7 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(disabled.get(baseRequest), None)
 
     val memoryOnly = LmCacheRegistry.configure(
-      LmCacheConfig(enableDiskCache = false, enableMemoryCache = true, memoryMaxEntries = 4)
+      LmCacheConfig(enableDiskCache = false, enableMemoryCache = true, memoryMaxEntries = CacheCapacity(4))
     )
     memoryOnly.put(baseRequest, baseResponse)
     val cached = memoryOnly.get(baseRequest)

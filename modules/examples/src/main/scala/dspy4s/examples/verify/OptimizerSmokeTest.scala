@@ -34,7 +34,17 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.optimize.{COPRO, COPROConfig, DemoCount, MIPROv2, MIPROv2Config}
+import dspy4s.optimize.{
+  COPRO,
+  COPROConfig,
+  CandidateCount,
+  CoproBreadth,
+  DemoCount,
+  MIPROv2,
+  MIPROv2Config,
+  RoundCount,
+  TrialCount
+}
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.Predictors
@@ -162,7 +172,11 @@ object OptimizerSmokeTest:
 
         // ── COPRO ──
         println("\n[smoke] running COPRO ...")
-        val copro = new COPRO[DynamicPredict](COPROConfig(metric = metric, breadth = breadth, depth = 1))
+        val copro = new COPRO[DynamicPredict](COPROConfig(
+          metric = metric,
+          breadth = CoproBreadth.applyUnsafe(breadth),
+          depth = RoundCount(1)
+        ))
         copro.compile(student, trainset, valset = Some(valset)) match
           case Right(report) =>
             val best  = report.bestProgram
@@ -176,8 +190,8 @@ object OptimizerSmokeTest:
         val mipro = new MIPROv2[DynamicPredict](
           MIPROv2Config(
             metric = metric,
-            numCandidates = breadth,
-            numTrials = trials,
+            numCandidates = CandidateCount.applyUnsafe(breadth),
+            numTrials = TrialCount.applyUnsafe(trials),
             maxBootstrappedDemos = DemoCount(2),
             maxLabeledDemos = DemoCount(2)
           )

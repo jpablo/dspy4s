@@ -6,6 +6,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, FieldRole, FieldSpec, Ru
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
+import dspy4s.optimize.CandidateCount
 import dspy4s.programs.DynamicPredict
 import munit.FunSuite
 
@@ -103,7 +104,7 @@ class GroundedProposerSuite extends FunSuite:
   )
 
   private def config(
-      numInstructions: Int,
+      numInstructions: CandidateCount,
       useDatasetSummary: Boolean = true,
       useTips: Boolean = true,
       seed: Long = 0L
@@ -121,7 +122,7 @@ class GroundedProposerSuite extends FunSuite:
 
   test("proposeInstructions returns N non-empty, distinct candidates for a single-predictor program") {
     val program  = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
-    val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = 5))
+    val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = CandidateCount(5)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = proposer.proposeInstructions(program, trainset)
@@ -139,7 +140,9 @@ class GroundedProposerSuite extends FunSuite:
 
   test("the dataset summary is incorporated into the proposals (grounding is wired)") {
     val program  = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
-    val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = 3, useDatasetSummary = true))
+    val proposer = new GroundedProposer[DynamicPredict](
+      config(numInstructions = CandidateCount(3), useDatasetSummary = true)
+    )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val candidates = proposer.proposeInstructions(program, trainset).toOption.get.head
@@ -155,7 +158,9 @@ class GroundedProposerSuite extends FunSuite:
 
   test("useDatasetSummary = false skips the summary LM call and the grounding") {
     val program  = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
-    val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = 3, useDatasetSummary = false))
+    val proposer = new GroundedProposer[DynamicPredict](
+      config(numInstructions = CandidateCount(3), useDatasetSummary = false)
+    )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val candidates = proposer.proposeInstructions(program, trainset).toOption.get.head
@@ -176,7 +181,7 @@ class GroundedProposerSuite extends FunSuite:
       first = DynamicPredict(layout = taskLayout("First", "INSTR_FIRST")),
       second = DynamicPredict(layout = taskLayout("Second", "INSTR_SECOND"))
     )
-    val proposer = new GroundedProposer[TwoStage](config(numInstructions = 4))
+    val proposer = new GroundedProposer[TwoStage](config(numInstructions = CandidateCount(4)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = proposer.proposeInstructions(program, trainset)
@@ -193,7 +198,7 @@ class GroundedProposerSuite extends FunSuite:
   test("proposeInstructions is deterministic for a fixed seed") {
     val program = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
     def run(): Vector[String] =
-      val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = 4, seed = 42L))
+      val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = CandidateCount(4), seed = 42L))
       RuntimeEnvironment.withSettings(settings) {
         given RuntimeContext = RuntimeEnvironment.current
         proposer.proposeInstructions(program, trainset).toOption.get.head
@@ -203,10 +208,9 @@ class GroundedProposerSuite extends FunSuite:
 
   // ── 6. numInstructions <= 0 is rejected ───────────────────────────────────
 
-  test("GroundedProposerConfig requires numInstructions > 0") {
-    intercept[IllegalArgumentException] {
-      val _ = GroundedProposerConfig(numInstructions = 0)
-    }
+  test("CandidateCount rejects non-positive instruction counts") {
+    assert(compileErrors("dspy4s.optimize.CandidateCount(0)").nonEmpty)
+    assert(CandidateCount.either(0).isLeft)
   }
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =

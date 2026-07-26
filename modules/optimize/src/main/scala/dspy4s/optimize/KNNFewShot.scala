@@ -4,7 +4,6 @@ import dspy4s.programs.ProgramRunner
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.DynamicPrediction
-import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
 import dspy4s.programs.predictors.Predictors
@@ -12,6 +11,7 @@ import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.retrievers.KNN
 import dspy4s.programs.retrievers.NeighborCount
+import dspy4s.programs.retrievers.NonEmptyTrainset
 import zio.blocks.schema.DynamicValue
 
 /** KNNFewShot — dynamic per-query few-shot selection (a port of `dspy.teleprompt.KNNFewShot`, PORT_GAPS G-10). At each
@@ -27,7 +27,7 @@ import zio.blocks.schema.DynamicValue
   */
 final class KNNFewShot[P: {Predictors, ProgramRunner}](
     k: NeighborCount,
-    trainset: Vector[Example],
+    trainset: NonEmptyTrainset,
     embedder: Embedder,
     bootstrapConfig: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ):

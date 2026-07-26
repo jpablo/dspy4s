@@ -43,15 +43,13 @@ import scala.collection.mutable
   */
 final case class InferRulesConfig(
     metric: Metric,
-    numCandidates: Int = 10,
-    numRules: Int = 10,
+    numCandidates: CandidateCount = CandidateCount(10),
+    numRules: RuleCount = RuleCount(10),
     initTemperature: Double = 1.0,
     bootstrap: BootstrapFewShotConfig = BootstrapFewShotConfig(),
     seed: Long = 0L,
     inductionMarker: String = "You are inducing natural-language rules from labeled examples."
-):
-  require(numCandidates > 0, "InferRules numCandidates must be > 0")
-  require(numRules > 0, "InferRules numRules must be > 0")
+)
 
 /** InferRules — induce explicit natural-language RULES from the trainset and append them to each predictor's
   * instructions. A v1 port of DSPy's `dspy.teleprompt.InferRules` (`dspy/teleprompt/infer_rules.py`).

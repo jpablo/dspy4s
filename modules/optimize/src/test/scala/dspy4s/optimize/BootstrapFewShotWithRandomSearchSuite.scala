@@ -1,6 +1,7 @@
 package dspy4s.optimize
 
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -37,10 +38,10 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
     val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
       RandomSearchConfig(
         metric = metric,
-        numCandidates = 3,
+        numCandidates = SearchCandidateCount(3),
         maxBootstrappedDemos = DemoCount(2),
         maxLabeledDemos = DemoCount(2),
-        maxErrors = 20
+        maxErrors = ErrorLimit(20)
       )
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -65,10 +66,10 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
     val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
       RandomSearchConfig(
         metric = metric,
-        numCandidates = 20,
+        numCandidates = SearchCandidateCount(20),
         maxBootstrappedDemos = DemoCount(4),
         maxLabeledDemos = DemoCount(4),
-        maxErrors = 50,
+        maxErrors = ErrorLimit(50),
         stopAtScore = Some(100.0)
       )
     )
@@ -84,7 +85,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
   test("BootstrapFewShotWithRandomSearch handles empty trainset gracefully") {
     val metric = new ExactMatch(answerField = "answer")
     val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
-      RandomSearchConfig(metric = metric, numCandidates = 2)
+      RandomSearchConfig(metric = metric, numCandidates = SearchCandidateCount(2))
     )
     given RuntimeContext = RuntimeEnvironment.current
 

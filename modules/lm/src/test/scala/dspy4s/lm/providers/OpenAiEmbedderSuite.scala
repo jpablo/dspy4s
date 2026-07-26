@@ -26,7 +26,7 @@ class OpenAiEmbedderSuite extends FunSuite:
     val data = rows.map { case (i, v) => s"""{"object":"embedding","index":$i,"embedding":[${v.mkString(",")}]}""" }
     s"""{"object":"list","data":[${data.mkString(",")}],"model":"text-embedding-3-small"}"""
 
-  private def embedder(transport: HttpTransport, batchSize: Int = 200): OpenAiEmbedder =
+  private def embedder(transport: HttpTransport, batchSize: BatchSize = BatchSize(200)): OpenAiEmbedder =
     OpenAiEmbedder(model = "text-embedding-3-small", apiKey = "sk-test", transport = transport, batchSize = batchSize)
 
   test("embeds a batch: request carries model+input, response rows are ordered by index") {
@@ -46,7 +46,7 @@ class OpenAiEmbedderSuite extends FunSuite:
       Right(HttpResponse(200, Map.empty, okBody(0 -> Seq(3.0), 1 -> Seq(4.0)))),
       Right(HttpResponse(200, Map.empty, okBody(0 -> Seq(5.0))))
     ))
-    val result = embedder(transport, batchSize = 2).embed(Vector("a", "b", "c", "d", "e"))
+    val result = embedder(transport, batchSize = BatchSize(2)).embed(Vector("a", "b", "c", "d", "e"))
     assertEquals(result, Right(Vector(Vector(1.0f), Vector(2.0f), Vector(3.0f), Vector(4.0f), Vector(5.0f))))
     assertEquals(transport.sent.size, 3) // 5 inputs at batchSize=2 -> 2+2+1
   }

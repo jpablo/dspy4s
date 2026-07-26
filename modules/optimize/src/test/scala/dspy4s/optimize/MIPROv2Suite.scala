@@ -132,8 +132,8 @@ class MIPROv2Suite extends FunSuite:
   private def metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
   private def config(
-      numCandidates: Int = 5,
-      numTrials: Int = 30,
+      numCandidates: CandidateCount = CandidateCount(5),
+      numTrials: TrialCount = TrialCount(30),
       seed: Long = 0L
   ): MIPROv2Config =
     MIPROv2Config(
@@ -231,14 +231,12 @@ class MIPROv2Suite extends FunSuite:
 
   // ── 5. Config guards ───────────────────────────────────────────────────────
 
-  test("MIPROv2Config requires numCandidates > 0") {
-    intercept[IllegalArgumentException] {
-      val _ = MIPROv2Config(metric = metric, numCandidates = 0)
-    }
+  test("CandidateCount rejects non-positive candidate counts") {
+    assert(compileErrors("dspy4s.optimize.CandidateCount(0)").nonEmpty)
+    assert(CandidateCount.either(0).isLeft)
   }
 
-  test("MIPROv2Config requires numTrials > 0") {
-    intercept[IllegalArgumentException] {
-      val _ = MIPROv2Config(metric = metric, numTrials = 0)
-    }
+  test("TrialCount rejects non-positive trial counts") {
+    assert(compileErrors("dspy4s.optimize.TrialCount(0)").nonEmpty)
+    assert(TrialCount.either(0).isLeft)
   }

@@ -21,7 +21,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
-import dspy4s.optimize.{DemoCount, MIPROv2, MIPROv2Config, ProgramPersistence}
+import dspy4s.optimize.{CandidateCount, DemoCount, MIPROv2, MIPROv2Config, ProgramPersistence, TrialCount}
 import dspy4s.programs.DynamicPredict
 import dspy4s.typed.Signature
 
@@ -73,8 +73,8 @@ object OptimizerTracking:
       given RuntimeContext = RuntimeEnvironment.current
       new MIPROv2[DynamicPredict](MIPROv2Config(
         metric = metric,
-        numCandidates = 3,
-        numTrials = 4,
+        numCandidates = CandidateCount(3),
+        numTrials = TrialCount(4),
         maxBootstrappedDemos = DemoCount(2),
         maxLabeledDemos = DemoCount(2)
       ))

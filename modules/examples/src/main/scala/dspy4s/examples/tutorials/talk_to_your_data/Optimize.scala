@@ -13,7 +13,7 @@ package dspy4s.examples.tutorials.talk_to_your_data
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, TraceEntry}
 import dspy4s.core.data.{DynamicPrediction, Example}
-import dspy4s.gepa.{Gepa, GepaConfig}
+import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.DynamicPredict
@@ -111,7 +111,12 @@ object Optimize:
     val gepa = new Gepa[DynamicPredict](
       metric,
       reflectionLm = reflectionLm,
-      GepaConfig(maxMetricCalls = budget, reflectionMinibatchSize = minibatch, stopOnPerfectScore = true, seed = 0L)
+      GepaConfig(
+        maxMetricCalls = MetricCallCount.applyUnsafe(budget),
+        reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatch),
+        stopOnPerfectScore = true,
+        seed = 0L
+      )
     )
     val result = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
     val optInstr = result.bestCandidate

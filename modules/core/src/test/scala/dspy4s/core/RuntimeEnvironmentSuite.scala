@@ -5,8 +5,10 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
@@ -108,23 +110,23 @@ class RuntimeEnvironmentSuite extends FunSuite:
 
   test("configure is allowed repeatedly within the same async task id") {
     val result = RuntimeEnvironment.withAsyncTask("task-a") {
-      val first = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(1)))
-      val second = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(2)))
+      val first = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(1))))
+      val second = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(2))))
       (first, second, RuntimeEnvironment.current.numThreads)
     }
 
     assertEquals(result._1, Right(()))
     assertEquals(result._2, Right(()))
-    assertEquals(result._3, Some(2))
+    assertEquals(result._3, Some(ThreadCount(2)))
   }
 
   test("configure is rejected from different async task ids on the same thread") {
     RuntimeEnvironment.withAsyncTask("task-a") {
-      assertEquals(RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(1))), Right(()))
+      assertEquals(RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(1)))), Right(()))
     }
 
     val second = RuntimeEnvironment.withAsyncTask("task-b") {
-      RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(2)))
+      RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(2))))
     }
 
     assert(second.isLeft)
@@ -158,7 +160,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
   }
 
   test("appendHistory honors max history size and disable history settings") {
-    RuntimeEnvironment.withSettings(RuntimeContext(maxHistorySize = Some(2))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(maxHistorySize = Some(HistoryLimit(2)))) {
       RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 1)))
       RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 2)))
       RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 3)))

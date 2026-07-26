@@ -5,7 +5,7 @@ import munit.FunSuite
 class MinibatchSamplerSuite extends FunSuite:
 
   test("EpochShuffled covers every train example once per epoch and pads the final window") {
-    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = 2, seed = 1L)
+    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = MinibatchSize(2), seed = 1L)
     val size    = 5 // 5 % 2 != 0 -> padded to 6 (three windows of 2)
     val windows = (0 until 3).map(i => sampler.sample(size, i))
 
@@ -18,7 +18,7 @@ class MinibatchSamplerSuite extends FunSuite:
   }
 
   test("EpochShuffled reshuffles per epoch (no example starved across epochs) and walks sequential windows") {
-    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = 2, seed = 3L)
+    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = MinibatchSize(2), seed = 3L)
     val size    = 4 // exact multiple -> no padding; two windows per epoch
     val epoch0  = (0 until 2).flatMap(i => sampler.sample(size, i))
     val epoch1  = (2 until 4).flatMap(i => sampler.sample(size, i))
@@ -27,7 +27,7 @@ class MinibatchSamplerSuite extends FunSuite:
   }
 
   test("EpochShuffled handles a trainset smaller than the minibatch by padding up") {
-    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = 3, seed = 0L)
+    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = MinibatchSize(3), seed = 0L)
     val mb      = sampler.sample(trainsetSize = 1, iteration = 0)
     assertEquals(mb.size, 3)
     assertEquals(mb.toSet, Set(0)) // only id 0 exists; padded to fill the window
@@ -35,13 +35,13 @@ class MinibatchSamplerSuite extends FunSuite:
 
   test("EpochShuffled is deterministic for a given seed") {
     def run() =
-      val s = new MinibatchSampler.EpochShuffled(2, 7L)
+      val s = new MinibatchSampler.EpochShuffled(MinibatchSize(2), 7L)
       (0 until 6).map(i => s.sample(5, i)).toVector
     assertEquals(run(), run())
   }
 
   test("RandomDraw returns minibatch-sized in-range draws") {
-    val sampler = new MinibatchSampler.RandomDraw(minibatchSize = 2, seed = 1L)
+    val sampler = new MinibatchSampler.RandomDraw(minibatchSize = MinibatchSize(2), seed = 1L)
     val mb      = sampler.sample(trainsetSize = 5, iteration = 0)
     assertEquals(mb.size, 2)
     assertEquals(mb.distinct.size, 2, "a single draw is without replacement")
@@ -49,6 +49,14 @@ class MinibatchSamplerSuite extends FunSuite:
   }
 
   test("MinibatchSampler.of selects the configured strategy") {
-    assert(MinibatchSampler.of(BatchSamplerKind.EpochShuffled, 2, 0L).isInstanceOf[MinibatchSampler.EpochShuffled])
-    assert(MinibatchSampler.of(BatchSamplerKind.RandomDraw, 2, 0L).isInstanceOf[MinibatchSampler.RandomDraw])
+    assert(
+      MinibatchSampler
+        .of(BatchSamplerKind.EpochShuffled, MinibatchSize(2), 0L)
+        .isInstanceOf[MinibatchSampler.EpochShuffled]
+    )
+    assert(
+      MinibatchSampler
+        .of(BatchSamplerKind.RandomDraw, MinibatchSize(2), 0L)
+        .isInstanceOf[MinibatchSampler.RandomDraw]
+    )
   }

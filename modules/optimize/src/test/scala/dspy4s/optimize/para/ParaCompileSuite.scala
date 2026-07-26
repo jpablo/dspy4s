@@ -6,7 +6,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, Signatur
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
-import dspy4s.optimize.{COPROConfig, QAInput, QAOutput}
+import dspy4s.optimize.{COPROConfig, CoproBreadth, QAInput, QAOutput, RoundCount}
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.optimize.para.ParaCompile.*
@@ -107,8 +107,8 @@ class ParaCompileSuite extends FunSuite:
   private def config(seed: Long = 0L): COPROConfig =
     COPROConfig(
       metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer"),
-      breadth = 5,
-      depth = 1,
+      breadth = CoproBreadth(5),
+      depth = RoundCount(1),
       seed = seed,
       instructionMarker = instrGenMarker
     )
@@ -172,8 +172,8 @@ class ParaCompileSuite extends FunSuite:
     // (record-run + optimization over a composite), not instruction discovery, so zero scores are fine.
     val pipelineConfig = COPROConfig(
       metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "question"),
-      breadth = 5,
-      depth = 1,
+      breadth = CoproBreadth(5),
+      depth = RoundCount(1),
       seed = 0L,
       instructionMarker = instrGenMarker
     )
