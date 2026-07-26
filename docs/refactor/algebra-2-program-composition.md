@@ -214,7 +214,20 @@ same string mints a distinct object (cross-bundle composition is a compile error
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
 evaluation judge). A possible second step, held until the bundle proves out: if every category-entering program
 is typed or bundled, `decodeInput` could leave the `Program` package entirely and the `ProgramInput` law would
-dissolve at the category level. Both optimizer capabilities are then
+dissolve at the category level.
+
+Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)` is the path-dependent
+constructor (the runtime-string counterpart of `Predict(Signature.derived(...))`, outputs read from the raw
+envelope as always), and the optimizer surface (`Predictors` read/replace + the record-boundary
+`ProgramRunner`) holds over a packaged bundle program. Cross-fiber pipelines are expressed through
+`DynamicSignature.bridge(from, to): Either[_, Program[from.Out, to.In]]`, the reindexing morphism: it factors
+through the wire (encode, then the target's validating entry, a parameter-free `LiftEither`), fails EAGERLY
+when the target's input names are not covered by the source's output names (that name-set condition is the
+base compatibility arrow the bridge lifts), and contributes nothing to `params`. One correction to the earlier
+fibration sketch: the bridge's base arrow crosses cohorts (source OUTPUT fields to target INPUT fields), so
+objects properly sit over (signature, cohort) pairs and no identity-lift law (`bridge(s, s) = id`) arises; the
+lawful statement is exactly "bridges are lifts of base compatibility arrows". Remaining before the prototype
+label comes off: a migrated real consumer (stage 3). Both optimizer capabilities are then
 uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
 projection/reparameterization) and `ProgramRunner[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
