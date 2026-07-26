@@ -57,13 +57,13 @@ final case class MultiChainCall[I](
   * @param baseSignature
   *   the original task signature
   * @param m
-  *   number of expected attempts (validated against `attempts.length`)
+  *   positive number of expected attempts (validated against `attempts.length`)
   * @param temperature
   *   temperature for the comparison call (Python's default 0.7)
   */
 final case class MultiChainComparison[I, O](
     baseSignature: Signature[I, O],
-    m: Int = 3,
+    m: AttemptCount = AttemptCount(3),
     temperature: Double = 0.7,
     rationalePrefix: String = "Accurate Reasoning: Thank you everyone. Let's now holistically",
     rationaleDescription: String = "${corrected reasoning}",

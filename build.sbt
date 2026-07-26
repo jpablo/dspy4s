@@ -8,6 +8,7 @@ lazy val zioBlocksVersion = "0.0.41"
 lazy val ujsonVersion     = "4.4.3"
 lazy val dotenvVersion    = "3.2.0"
 lazy val scalaXmlVersion  = "2.4.0"
+lazy val ironVersion      = "3.3.2"
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -110,7 +111,10 @@ lazy val programs = (project in file("modules/programs"))
   .settings(commonSettings)
   .settings(name := "dspy4s-modules")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+    libraryDependencies ++= Seq(
+      "io.github.iltotore" %% "iron"  % ironVersion,
+      "org.scalameta"      %% "munit" % munitVersion % Test
+    )
   )
 
 lazy val evaluate = (project in file("modules/evaluate"))

@@ -55,8 +55,21 @@ class MultiChainComparisonSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
 
+  test("AttemptCount: rejects non-positive literals at compile time") {
+    val zeroErrors     = compileErrors("dspy4s.programs.AttemptCount(0)")
+    val negativeErrors = compileErrors("dspy4s.programs.AttemptCount(-1)")
+    assert(zeroErrors.nonEmpty, "expected zero to be rejected")
+    assert(negativeErrors.nonEmpty, "expected a negative count to be rejected")
+  }
+
+  test("AttemptCount: validates values obtained at runtime") {
+    assertEquals(AttemptCount.either(3).map(_.toInt), Right(3))
+    assert(AttemptCount.either(0).isLeft)
+    assert(AttemptCount.either(-1).isLeft)
+  }
+
   test("MultiChainComparison: augments the layout with M reasoning_attempt inputs and a rationale output") {
-    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = 3)
+    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     val sig = mcc.augmentedSignatureLayout
 
     val inputNames = sig.inputFields.map(_.name)
@@ -71,7 +84,7 @@ class MultiChainComparisonSuite extends FunSuite:
   }
 
   test("MultiChainComparison: runs the augmented predict and returns the corrected reasoning + answer") {
-    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = 3)
+    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
 
     val completions = Vector(
       DynamicPrediction(values = rec(
@@ -100,7 +113,7 @@ class MultiChainComparisonSuite extends FunSuite:
   }
 
   test("MultiChainComparison: rejects an attempt count that doesn't match M") {
-    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = 3)
+    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result = mcc.compare((question = "?"), Vector(DynamicPrediction.empty))
@@ -113,7 +126,7 @@ class MultiChainComparisonSuite extends FunSuite:
   }
 
   test("MultiChainComparison: its path-branded attempt carrier only admits the configured arity") {
-    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = 3)
+    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     assert(mcc.attemptInputs.validate(Vector("one", "two")).isLeft)
 
     val attempts = mcc.attemptInputs.validate(Vector("one", "two", "three")).toOption.get

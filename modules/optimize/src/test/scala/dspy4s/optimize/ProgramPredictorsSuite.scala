@@ -9,6 +9,7 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
+import dspy4s.programs.AttemptCount
 import dspy4s.programs.CodeAct
 import dspy4s.programs.MultiChainComparison
 import dspy4s.programs.ReAct
@@ -113,7 +114,7 @@ class ProgramPredictorsSuite extends FunSuite:
   // ── MultiChainComparison ─────────────────────────────────────────────────
 
   test("MultiChainComparison: inspect returns the single hoisted compare predictor view") {
-    val mcc  = MultiChainComparison(baseSignature = qaSignature, m = 3)
+    val mcc  = MultiChainComparison(baseSignature = qaSignature, m = AttemptCount(3))
     val ps   = predictorsOf(mcc)
     val views = ps.inspect(mcc)
     assertEquals(views.size, 1)
@@ -121,7 +122,7 @@ class ProgramPredictorsSuite extends FunSuite:
   }
 
   test("MultiChainComparison: replace(p, read(p)) round-trips to identity") {
-    val mcc  = MultiChainComparison(baseSignature = qaSignature, m = 3)
+    val mcc  = MultiChainComparison(baseSignature = qaSignature, m = AttemptCount(3))
     val ps   = predictorsOf(mcc)
     val back = ps.replace(mcc, ps.read(mcc))
     assertEquals(back.comparePredictStateOverride, None)
@@ -129,7 +130,7 @@ class ProgramPredictorsSuite extends FunSuite:
   }
 
   test("MultiChainComparison: replace with a demo-edited predict is reflected via the override field") {
-    val mcc    = MultiChainComparison(baseSignature = qaSignature, m = 3)
+    val mcc    = MultiChainComparison(baseSignature = qaSignature, m = AttemptCount(3))
     val ps     = predictorsOf(mcc)
     val edited = ps.read(mcc).head.copy(demos = demo)
     val out    = ps.replace(mcc, Vector(edited))
