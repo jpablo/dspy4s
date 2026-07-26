@@ -25,7 +25,7 @@ import zio.blocks.schema.DynamicValue
   * `P`): [[compile]] instead returns a [[KNNFewShotProgram]] — a wrapper [[DynamicModule]] with the same per-call
   * behavior.
   */
-final class KNNFewShot[P: Predictors: ProgramRunner](
+final class KNNFewShot[P: {Predictors, ProgramRunner}](
     k: NeighborCount,
     trainset: Vector[Example],
     embedder: Embedder,
@@ -38,7 +38,7 @@ final class KNNFewShot[P: Predictors: ProgramRunner](
 /** The compiled artifact of [[KNNFewShot]]: a module that, per call, retrieves the query's nearest trainset neighbors,
   * bootstraps them onto the student as demos, and runs the result.
   */
-final class KNNFewShotProgram[P: Predictors: ProgramRunner] private[optimize] (
+final class KNNFewShotProgram[P: {Predictors, ProgramRunner}] private[optimize] (
     val student: P,
     teacher: Option[P],
     knn: KNN,

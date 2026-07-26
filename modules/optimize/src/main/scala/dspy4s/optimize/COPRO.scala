@@ -81,7 +81,7 @@ final case class COPROConfig(
   *     completion (dspy4s `Predict` returns one completion per call); the effect (distinct proposals) is the same.
   *   - '''De-duplication is by instruction string''', not Python's `(instruction, prefix)` + last-field equality.
   */
-final class COPRO[P: Predictors: ProgramRunner](config: COPROConfig) extends Teleprompter[P]:
+final class COPRO[P: {Predictors, ProgramRunner}](config: COPROConfig) extends Teleprompter[P]:
 
   override val name: String = "copro"
 

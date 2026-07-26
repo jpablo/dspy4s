@@ -30,7 +30,7 @@ final case class RandomSearchConfig(
     seed: Long = 0L
 )
 
-final class BootstrapFewShotWithRandomSearch[P: Predictors: ProgramRunner](
+final class BootstrapFewShotWithRandomSearch[P: {Predictors, ProgramRunner}](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 

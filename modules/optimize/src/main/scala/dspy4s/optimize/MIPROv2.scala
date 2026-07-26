@@ -90,7 +90,7 @@ final case class MIPROv2Config(
   *   - '''`track_stats`, `log_dir`, LM-call estimation, and program persistence are omitted.''' The
   *     [[OptimizationReport]] carries the scored candidate list and summary metadata instead.
   */
-final class MIPROv2[P: Predictors: ProgramRunner](config: MIPROv2Config) extends Teleprompter[P]:
+final class MIPROv2[P: {Predictors, ProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
 
   override val name: String = "mipro_v2"
 

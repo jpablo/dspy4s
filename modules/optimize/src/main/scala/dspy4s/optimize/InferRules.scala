@@ -73,7 +73,7 @@ final case class InferRulesConfig(
   *   - '''Context-window fallback narrows on [[ContextWindowExceededError]]''' specifically (upstream also accepts
   *     `ValueError`/`BadRequestError`), dropping the last example and retrying down to a single example.
   */
-final class InferRules[P: Predictors: ProgramRunner](config: InferRulesConfig) extends Teleprompter[P]:
+final class InferRules[P: {Predictors, ProgramRunner}](config: InferRulesConfig) extends Teleprompter[P]:
 
   override val name: String = "infer_rules"
 

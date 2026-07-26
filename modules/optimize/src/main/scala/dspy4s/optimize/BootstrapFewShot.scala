@@ -31,7 +31,7 @@ final case class BootstrapFewShotConfig(
   require(maxRounds >= 1, "maxRounds must be at least 1")
   require(maxErrors > 0, "maxErrors must be > 0")
 
-final class BootstrapFewShot[P: Predictors: ProgramRunner](
+final class BootstrapFewShot[P: {Predictors, ProgramRunner}](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 
