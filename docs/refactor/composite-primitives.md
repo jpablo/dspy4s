@@ -42,7 +42,8 @@ shrank net while the duplication was removed.
 `Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent` unifying ReAct/CodeAct/RLM and PoT's `retryUntil`),
 6.4 (typed `augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
 middleware monoid) are all landed and law-tested. Remaining is optional/additive: the kyo-compat CIO substrate
-migration, usage-merge on `>>>`, `augment` closing position, execution-wrapping modes. The authoritative
+migration, `augment` closing position, execution-wrapping modes. Sequential usage merge now ships as part of the
+lawful `DynamicPrediction.followedBy` envelope operation. The authoritative
 contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
 
 ## Why

@@ -43,6 +43,25 @@ final case class DynamicPrediction(
   def withRawValue[A](key: String, value: A)(using schema: Schema[A]): DynamicPrediction =
     withValue(key, schema.toDynamicValue(value))
 
+  /** Sequentially accumulate the observable evidence of two program stages.
+    *
+    * Field values and completions come from the rightmost stage that produced them; a lifecycle-transparent stage
+    * contributes [[DynamicPrediction.empty]] and therefore preserves its predecessor's envelope. Token usage is a
+    * writer and combines pointwise. These component operations are associative and [[DynamicPrediction.empty]] is
+    * their identity, so sequential composition retains the complete prediction without weakening Category equality.
+    */
+  def followedBy(next: DynamicPrediction): DynamicPrediction =
+    val combinedUsage = (lmUsage, next.lmUsage) match
+      case (None, None)                   => None
+      case (Some(left), None)             => Some(left)
+      case (None, Some(right))            => Some(right)
+      case (Some(left), Some(right))      => Some(left.combine(right))
+    DynamicPrediction(
+      values = if next.values.fields.nonEmpty then next.values else values,
+      completions = next.completions.orElse(completions),
+      lmUsage = combinedUsage
+    )
+
   def value(key: String): Either[DspyError, DynamicValue] =
     get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
 

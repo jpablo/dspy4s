@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, updated}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, ValidationError, updated}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Typed INPUT augmentation: the input-side dual of [[OutputAugmentation]], for the composite programs' loop
@@ -30,25 +30,35 @@ object InputAugmentation:
           s <- DynamicValues.requireString(raw, field.name, label)
         yield (i, s)
 
-  /** `Shape[(I, Vector[String])]`: the base fields plus a RUNTIME-ARITY block of appended `String` fields — the
-    * bridge for layouts whose field COUNT is a constructor parameter (`MultiChainComparison`'s `m` numbered
-    * `reasoning_attempt_i` inputs). The static type carries the list; the field expansion is value-level:
-    * `fields` (built where the arity is known, at program construction) fixes both the specs and the encoding
-    * positions, so the wire format — numbered flat fields — is unchanged. The arity invariant
-    * (`values.size == fields.size`) is a runtime concern the CALLER enforces before the predict runs (the
-    * program's own `m`-validation), which is the honest cost of a runtime-arity signature: the list's length,
-    * unlike its type, cannot be pinned at compile time. Encode zips (extra values beyond `fields` are dropped,
-    * missing ones simply absent); decode requires every declared field. */
-  def appendedStringInputs[I](base: Shape[I], fields: Vector[FieldSpec], label: String): Shape[(I, Vector[String])] =
-    new Shape[(I, Vector[String])]:
+  /** A runtime-sized input block whose value carrier is path-dependent on this validated shape bundle. The opaque
+    * [[Values]] type can only be obtained through [[validate]], so `shape.encode` cannot receive a short or oversized
+    * vector and its former truncating `zip` is unnecessary.
+    */
+  final class AppendedStringInputs[I] private[InputAugmentation] (
+      base: Shape[I],
+      fields: Vector[FieldSpec],
+      label: String
+  ):
+    opaque type Values = Vector[String]
+
+    def validate(values: Vector[String]): Either[DspyError, Values] =
+      if values.size == fields.size then Right(values)
+      else Left(ValidationError(
+        s"$label requires exactly ${fields.size} appended values, got ${values.size}"
+      ))
+
+    val shape: Shape[(I, Values)] = new Shape[(I, Values)]:
       val fieldSpecs: Vector[FieldSpec] = base.fieldSpecs ++ fields
 
-      def encode(value: (I, Vector[String])): DynamicValue.Record =
-        fields.iterator.zip(value._2).foldLeft(base.encode(value._1)) { case (acc, (field, s)) =>
-          acc.updated(field.name, DynamicValue.Primitive(PrimitiveValue.String(s)))
+      def encode(value: (I, Values)): DynamicValue.Record =
+        fields.indices.foldLeft(base.encode(value._1)) { (acc, index) =>
+          acc.updated(
+            fields(index).name,
+            DynamicValue.Primitive(PrimitiveValue.String(value._2(index)))
+          )
         }
 
-      def decode(raw: DynamicValue.Record): Either[DspyError, (I, Vector[String])] =
+      def decode(raw: DynamicValue.Record): Either[DspyError, (I, Values)] =
         val values = fields.foldLeft[Either[DspyError, Vector[String]]](Right(Vector.empty)) { (acc, field) =>
           for
             collected <- acc
@@ -59,3 +69,11 @@ object InputAugmentation:
           i  <- base.decode(raw)
           ss <- values
         yield (i, ss)
+
+  /** Build a path-branded, validated runtime-arity input block. */
+  def appendedStringInputs[I](
+      base: Shape[I],
+      fields: Vector[FieldSpec],
+      label: String
+  ): AppendedStringInputs[I] =
+    new AppendedStringInputs(base, fields, label)

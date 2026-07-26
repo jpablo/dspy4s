@@ -73,8 +73,8 @@ modules extensible despite that choice.
 - Reimplement ZIO, add fibers, or choose a new effect system as part of this change.
 - Turn every agentic module (`ReAct`, `CodeAct`, `RLM`, `ProgramOfThought`) into a core AST instruction immediately.
 - Serialize arbitrary modules, tools, interpreters, language-model clients, or functions captured by `Lift`.
-- Change the current `Prediction.raw` behavior while moving representation. In particular, `p >>> id` continues to
-  end with the identity node's empty raw prediction during a behavior-preserving migration.
+- Change the current lawful `Prediction.raw` accumulator while moving representation. In particular, `p >>> id`
+  preserves `p`'s envelope because the identity node contributes the accumulator identity.
 - Add dynamic program selection through monadic `flatMap`. The optimizer must know the complete learnable structure
   before execution.
 - Normalize trees merely because two expressions have the same typed output. Effects, failure order, lifecycle,
@@ -464,4 +464,3 @@ around existential leaves, GADT recursion, reconstruction, and extension-method 
 The proposal should not trigger an immediate rewrite. Its value is to define the boundary precisely:
 
 > Close the reusable structural language, keep executable modules open as atoms, and interpret structure centrally.
-

@@ -16,9 +16,8 @@ import dspy4s.typed.Prediction
   * Carrier (the grill's fork-1/5 decision): a program is `Module[ProgramCall[I], Prediction[O]]`. `>>>` threads the
   * plain typed value `O` (not the `Prediction[O]` envelope): it runs the first program, feeds its `prediction.output`
   * into a fresh `ProgramCall` that inherits the outer call's controls (`config` / `traceEnabled` / `rolloutId`), and
-  * runs the second. Each sub-program's own `apply` records its trace/history entry, so the intermediate
-  * `Prediction.raw` (reasoning / completions / per-step usage) is captured in the trace rather than carried onto the
-  * composite result.
+  * runs the second. Each sub-program's own `apply` records its trace/history entry, while the composite result
+  * accumulates both `Prediction.raw` envelopes with [[DynamicPrediction.followedBy]].
   *
   * Structural lifecycle. These nodes extend [[dspy4s.programs.contracts.TransparentModule]], so only their leaf
   * children emit callbacks, trace, and history. Association and identity syntax therefore cannot change the runtime
@@ -30,9 +29,8 @@ import dspy4s.typed.Prediction
   */
 
 /** `id[I]` — the Category unit: a pure passthrough that returns its input as the output, with an empty raw envelope.
-  * `id >>> p` is `p` (the left unit contributes nothing to the final prediction); `p >>> id` equals `p` on the threaded
-  * output value (the right unit's empty raw becomes the result raw — the carrier's value-vs-envelope split, see the law
-  * suite).
+  * Sequential composition accumulates envelopes through [[DynamicPrediction.followedBy]], for which the empty envelope
+  * is an identity, so both `id >>> p` and `p >>> id` preserve the complete prediction.
   */
 final case class Identity[I]() extends TransparentModule[ProgramCall[I], Prediction[I]]:
   override val moduleName: String = "id"
@@ -55,9 +53,10 @@ final case class AndThen[I, X, O, A <: Module[ProgramCall[I], Prediction[X]], B 
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     first.apply(call).flatMap { predX =>
-      // Map only the carrier; the outer call's controls pass through unchanged. The Prediction envelope of `predX`
-      // stays behind, recorded by `first.apply`'s own trace entry.
-      second.apply(call.mapInput(_ => predX.output))
+      // The outer call's controls pass through unchanged; combine the evidence envelopes after the carrier runs.
+      second
+        .apply(call.mapInput(_ => predX.output))
+        .map(predO => predO.copy(raw = predX.raw.followedBy(predO.raw)))
     }
 
 /** Shared `Predictors` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural `inspect(first)

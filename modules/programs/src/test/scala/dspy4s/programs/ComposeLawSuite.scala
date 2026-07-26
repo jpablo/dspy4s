@@ -20,11 +20,10 @@ import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
-/** Laws and operational semantics for `id` / `>>>` / ordered fan-out. Carrier note: `>>>` threads the plain output
-  * VALUE, so the Category laws are stated on `.output` (the threaded denotation), not on the full `Prediction` envelope
-  * — `p >>> id` keeps `p.output` but resets `.raw` (id's empty envelope), the documented value-vs-envelope split.
-  * Structural combinators are lifecycle-transparent, making output equality stable under association even when a leaf
-  * observes the live trace.
+/** Laws and operational semantics for `id` / `>>>` / ordered fan-out. `>>>` threads the typed value and accumulates the
+  * raw execution envelope with its lawful sequential operation, so Category identity and associativity hold on the full
+  * `Prediction`. Structural combinators are lifecycle-transparent, making equality stable under association even when a
+  * leaf observes the live trace.
   */
 class ComposeLawSuite extends FunSuite:
 
@@ -97,7 +96,7 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(viaId.map(_.raw.values), direct.map(_.raw.values))
   }
 
-  test("p >>> id = p on the threaded value and lifecycle (raw remains outside the category observation)") {
+  test("p >>> id = p on the complete prediction and lifecycle") {
     val p = step[Int, String]("p", "i -> s")(i => s"v$i")
 
     def run(program: Module[ProgramCall[Int], Prediction[String]]) =
@@ -107,21 +106,19 @@ class ComposeLawSuite extends FunSuite:
 
     val viaId  = run(p >>> Compose.id[String])
     val direct = run(p)
-    assertEquals(viaId._1.map(_.output), direct._1.map(_.output))
+    assertEquals(viaId._1, direct._1)
     assertEquals(viaId._2, direct._2)
-    assertEquals(viaId._1.map(_.raw), Right(DynamicPrediction.empty))
-    assertNotEquals(viaId._1.map(_.raw), direct._1.map(_.raw))
   }
 
   // ── Category: associativity ──────────────────────────────────────────────────────────────────────────────
-  test("(a >>> b) >>> c = a >>> (b >>> c) on the output value") {
+  test("(a >>> b) >>> c = a >>> (b >>> c) on the complete prediction") {
     val a     = step[Int, String]("a", "i -> s")(i => s"<$i>")
     val b     = step[String, String]("b", "s -> t")(s => s + s)
     val c     = step[String, Int]("c", "t -> n")(s => s.length)
-    val left  = ((a >>> b) >>> c).apply(ProgramCall(3)).map(_.output)
-    val right = (a >>> (b >>> c)).apply(ProgramCall(3)).map(_.output)
+    val left  = ((a >>> b) >>> c).apply(ProgramCall(3))
+    val right = (a >>> (b >>> c)).apply(ProgramCall(3))
     assertEquals(left, right)
-    assertEquals(left, Right(6)) // "<3>" -> "<3><3>" -> length 6
+    assertEquals(left.map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
   test("associativity remains observable when the final leaf reads the live trace") {

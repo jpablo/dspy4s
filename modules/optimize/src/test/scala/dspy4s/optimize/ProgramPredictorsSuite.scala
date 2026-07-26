@@ -117,14 +117,14 @@ class ProgramPredictorsSuite extends FunSuite:
     val ps   = predictorsOf(mcc)
     val views = ps.inspect(mcc)
     assertEquals(views.size, 1)
-    assertEquals(views.head.state, mcc.comparePredict.predictorState)
+    assertEquals(views.head.state, ps.read(mcc).head)
   }
 
   test("MultiChainComparison: replace(p, read(p)) round-trips to identity") {
     val mcc  = MultiChainComparison(baseSignature = qaSignature, m = 3)
     val ps   = predictorsOf(mcc)
     val back = ps.replace(mcc, ps.read(mcc))
-    assertEquals(back.comparePredictOverride, None)
+    assertEquals(back.comparePredictStateOverride, None)
     assertEquals(back, mcc)
   }
 
@@ -133,7 +133,7 @@ class ProgramPredictorsSuite extends FunSuite:
     val ps     = predictorsOf(mcc)
     val edited = ps.read(mcc).head.copy(demos = demo)
     val out    = ps.replace(mcc, Vector(edited))
-    assertEquals(out.comparePredict.demos, demo)
+    assertEquals(out.comparePredictStateOverride.map(_.demos), Some(demo))
     assertEquals(ps.read(out).head.demos, demo)
   }
 

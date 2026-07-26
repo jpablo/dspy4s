@@ -24,15 +24,16 @@ import zio.blocks.schema.DynamicValue
   * Construction through [[Program.of]] is the only gate, and it requires evidence at BOTH slots: `Predictors` for
   * the morphism (no addressability, no program) and [[RecordCodec]] for the domain OBJECT (no codec, no object).
   *
-  * Decoding is a property of the object, not the morphism: nothing per-program is packaged, identity and
-  * record-boundary evaluation both decode through `RecordCodec[I]`, and two programs at the same object cannot
-  * disagree. The per-package decoder, the `ProgramInput` capability that derived it, and its coherence law are
-  * GONE; an incoherent decoder is no longer representable. Runtime-string signatures participate through
+  * Decoding is a property of the object, not the morphism: nothing decode-related is packaged, and identity plus
+  * record-boundary evaluation resolve the sealed canonical `RecordCodec[I]` for that object. The old
+  * morphism-specific `ProgramInput` capability and its coherence law are GONE; an incoherent per-morphism decoder is
+  * no longer representable. Runtime-string signatures participate through
   * [[dspy4s.programs.DynamicSignature]], whose parse mints fresh codec-equipped types.
   *
-  * The category laws use typed output, parameters, and lifecycle as their observation. They do not use structural
-  * equality of this existential package or final `Prediction.raw`: right identity preserves the semantic output
-  * and lifecycle but identity supplies an empty final raw envelope.
+  * The category laws use the complete prediction, parameters, and lifecycle as their observation. Sequential raw
+  * evidence has an associative accumulator with the empty envelope as identity, so structural identity preserves the
+  * same public result observed by [[ProgramRunner]]. Equality is observational rather than structural equality of this
+  * existential package.
   */
 sealed trait Program[I, O]:
   type Rep <: Module[ProgramCall[I], Prediction[O]]
@@ -54,8 +55,7 @@ object Program:
       val addressable: Predictors[F] = ev
 
   /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate:
-    * every object reachable through `of` / `id` decodes through its own codec, which is what makes the unit
-    * laws unconditional (there is no per-program decoder left to disagree with). */
+    * every object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional. */
   def of[I, O, F <: Module[ProgramCall[I], Prediction[O]]](f: F)(using
       ev: Predictors[F],
       @annotation.unused codec: RecordCodec[I]
@@ -73,7 +73,7 @@ object Program:
     override def inspectNamed(program: Program[I, O]): Vector[(String, PredictorView)] =
       program.addressable.inspectNamed(program.program)
 
-  /** Record-boundary execution decodes through the domain OBJECT's codec (nothing per-program is involved). */
+  /** Record-boundary execution resolves the sealed canonical codec for the domain object. */
   given programRunner[I, O](using codec: RecordCodec[I]): ProgramRunner[Program[I, O]] with
     def run(program: Program[I, O], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
@@ -82,9 +82,9 @@ object Program:
 
   /** The Para category over packaged programs.
     *
-    * Identity exists at codec-equipped objects; composition and fan-out retain the structural `Predictors`
-    * evidence of their children and thread nothing else. Decoder equality between `id` and any program is
-    * definitional (both are the object's codec), so the unit laws hold with no coherence condition.
+    * Identity exists at codec-equipped objects; composition and fan-out retain only the structural `Predictors`
+    * evidence of their children. Decoder equality between `id` and any program is definitional on the sealed
+    * canonical object codec, so the unit laws hold with no morphism-specific coherence condition.
     */
   given paraCategoryProgram: ParaCategory[RecordCodec, Program] with
     def id[A](using @annotation.unused codec: RecordCodec[A]): Program[A, A] =

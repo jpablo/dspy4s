@@ -13,6 +13,7 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.programs.predictors.{PredictorState, withPredictorState}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.DynamicValue
@@ -68,13 +69,11 @@ final case class MultiChainComparison[I, O](
     rationaleDescription: String = "${corrected reasoning}",
     attemptDescription: String = "${reasoning attempt}",
     answerFieldOverride: Option[String] = None,
-    /** Optional override for the comparison predict — a TYPED `Predict` over the base input plus the `m` formatted
-      * attempt strings (the runtime-arity block rides the static `Vector[String]` carrier). When `None` (the
-      * default), it is built from [[augmentedSignatureLayout]]. Carrying it as a defaulted, `copy`-reachable field
-      * makes the learnable sub-predict addressable + immutably replaceable (see the
-      * `Predictors[MultiChainComparison]` instance).
+    /** Optional writable state for the comparison predictor. The executable predictor itself is built internally over
+      * this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it with a shape that
+      * accepts arbitrary vectors. Optimizer replacement writes only this lawful state surface.
       */
-    comparePredictOverride: Option[Predict[(I, Vector[String]), MultiChainComparison.WithRationale[O]]] = None
+    comparePredictStateOverride: Option[PredictorState] = None
 )(using
     prepend: PrependField.Of["rationale", String, O]
 ) extends Module[MultiChainCall[I], Prediction[MultiChainComparison.WithRationale[O]]]:
@@ -116,21 +115,21 @@ final case class MultiChainComparison[I, O](
   val augmentedSignatureLayout: SignatureLayout =
     attemptFields.foldLeft(baseSignature.layout)(_.appendInput(_)).prependOutput(rationaleField)
 
-  /** The comparison predict, built once from [[augmentedSignatureLayout]] (mirrors Python's `self.compare =
-    * Predict(...)` in `__init__`) — a TYPED `Predict[(I, Vector[String]), WithRationale[O]]`: the base input plus
-    * the formatted attempt strings in (the runtime-arity block encoded by
-    * [[dspy4s.typed.InputAugmentation.appendedStringInputs]] against [[attemptFields]]), the rationale-prepended
-    * base outputs decoded inside the predict (the `prepend` evidence this class already carries). Addressable +
-    * tunable via [[comparePredictOverride]]; `forward` uses this member rather than rebuilding a local each call.
-    * Left unnamed to preserve the prior on-the-wire behaviour.
+  private[programs] val attemptInputs =
+    InputAugmentation.appendedStringInputs(baseSignature.inputShape, attemptFields, "MultiChainComparison")
+
+  private[programs] type Attempts = attemptInputs.Values
+
+  /** The comparison predict, built once from [[augmentedSignatureLayout]] over this instance's opaque [[Attempts]]
+    * carrier. Only [[attemptInputs.validate]] can construct that carrier, so every typed input encodes exactly `m`
+    * numbered fields. Kept package-private for optimizer traversal; public execution goes through [[compare]].
     */
-  val comparePredict: Predict[(I, Vector[String]), MultiChainComparison.WithRationale[O]] =
-    comparePredictOverride.getOrElse(Predict(
+  private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
+    val base = Predict(
       signature = Signature(
         name   = baseSignature.name,
         layout = augmentedSignatureLayout,
-        inputShape =
-          InputAugmentation.appendedStringInputs(baseSignature.inputShape, attemptFields, "comparison"),
+        inputShape = attemptInputs.shape,
         outputShape = OutputAugmentation.prependedStringShape(
           baseSignature.outputShape,
           rationaleField,
@@ -139,7 +138,8 @@ final case class MultiChainComparison[I, O](
           baseSignature.name
         )
       )
-    ))
+    )
+    comparePredictStateOverride.fold(base)(base.withPredictorState)
 
   override protected val lifecycle: ModuleLifecycle[MultiChainCall[I], Prediction[Out]] =
     ModuleLifecycle.observed(
@@ -149,19 +149,20 @@ final case class MultiChainComparison[I, O](
     )
 
   override protected def forward(call: MultiChainCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    if call.attempts.size != m then
-      Left(ValidationError(
+    attemptInputs
+      .validate(call.attempts.map(formatAttempt))
+      .left.map(_ => ValidationError(
         s"Number of attempts (${call.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
       ))
-    else
-      comparePredict
-        .apply(ProgramCall(
-          input        = (call.input, call.attempts.map(formatAttempt)),
+      .flatMap { attempts =>
+        comparePredict.apply(ProgramCall(
+          input        = (call.input, attempts),
           config       = call.config.updated("temperature", DynamicValues.fromAny(temperature)),
           traceEnabled = call.traceEnabled,
           rolloutId    = call.rolloutId
         ))
-        .map(result => Prediction(result.output, result.raw))
+      }
+      .map(result => Prediction(result.output, result.raw))
 
   /** Convenience entry: supply the base input and the candidate completions directly. Mirrors Python's
     * `compare_answers(completions, question=...)`.

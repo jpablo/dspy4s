@@ -111,3 +111,16 @@ class MultiChainComparisonSuite extends FunSuite:
       )
     }
   }
+
+  test("MultiChainComparison: its path-branded attempt carrier only admits the configured arity") {
+    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = 3)
+    assert(mcc.attemptInputs.validate(Vector("one", "two")).isLeft)
+
+    val attempts = mcc.attemptInputs.validate(Vector("one", "two", "three")).toOption.get
+    val encoded = mcc.attemptInputs.shape.encode(((question = "?"), attempts))
+    val keys = DynamicValues.recordKeys(encoded)
+    assertEquals(
+      keys,
+      Vector("question", "reasoning_attempt_1", "reasoning_attempt_2", "reasoning_attempt_3")
+    )
+  }

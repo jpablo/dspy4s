@@ -64,6 +64,17 @@ class ProgramOfThoughtSuite extends FunSuite:
 
   // ── Single-shot success ────────────────────────────────────────────────
 
+  test("ProgramOfThought CodeOut models missing code explicitly and rejects a wrong wire type") {
+    val shape = ProgramOfThought.codeOutShape
+    assertEquals(shape.decode(DynamicValue.Record.empty), Right(ProgramOfThought.CodeOut(None)))
+    assertEquals(
+      shape.decode(rec("generated_code" := "print(1)")),
+      Right(ProgramOfThought.CodeOut(Some("print(1)")))
+    )
+    assert(shape.decode(rec("generated_code" := Vector("not", "code"))).isLeft)
+    assertEquals(shape.decode(shape.encode(ProgramOfThought.CodeOut(None))), Right(ProgramOfThought.CodeOut(None)))
+  }
+
   test("ProgramOfThought: successful first attempt — code generates, runs, answer extracted") {
     val signature = Signature.fromString("question -> answer")
     val interpreter = new RecordingInterpreter(Vector(

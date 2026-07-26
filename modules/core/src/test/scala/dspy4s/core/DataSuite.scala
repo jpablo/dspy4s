@@ -5,6 +5,7 @@ import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.:=
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
@@ -115,6 +116,24 @@ class DataSuite extends FunSuite:
     assertEquals(prediction.asDouble("score"), Right(3.0))
     assert(prediction.asDouble("label").isLeft)
     assert(prediction.value("missing").isLeft)
+  }
+
+  test("sequential prediction evidence has empty identity and is associative") {
+    val a = DynamicPrediction(
+      values = DynamicValues.record("stage" := "a"),
+      lmUsage = Some(LmUsage(totalTokens = 1, promptTokens = 1))
+    )
+    val b = DynamicPrediction(
+      values = DynamicValues.record("stage" := "b"),
+      lmUsage = Some(LmUsage(totalTokens = 2, completionTokens = 2))
+    )
+    val c = DynamicPrediction(values = DynamicValues.record("stage" := "c"))
+
+    assertEquals(DynamicPrediction.empty.followedBy(a), a)
+    assertEquals(a.followedBy(DynamicPrediction.empty), a)
+    assertEquals(a.followedBy(b).followedBy(c), a.followedBy(b.followedBy(c)))
+    assertEquals(a.followedBy(b).lmUsage, Some(LmUsage(totalTokens = 3, promptTokens = 1, completionTokens = 2)))
+    assertEquals(a.followedBy(b).asString("stage"), Right("b"))
   }
 
   // ── Primitive accessor ladder (asString/asInt/asDouble/asBoolean) ────────

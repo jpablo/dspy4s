@@ -168,12 +168,10 @@ denotational carrier such as stochastic kernels, but there is no `CDCategory[Mod
 
 Sequential association is made stable by lifecycle-transparent structural nodes: `Identity`, `AndThen`,
 `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, and `Moded` add no callbacks, trace, or history of their own. Leaf
-modules remain fully instrumented. `ComposeLawSuite` pins this with a final leaf that reads the live trace.
-
-The remaining carrier limitation is explicit: sequential Category equality observes the threaded value and
-lifecycle, but not the final `Prediction.raw` envelope (`p >>> id` ends with id's empty raw). A later carrier
-split must put semantic output and accumulated run evidence in separate types; until then this is a quotient,
-not structural equality on `Module[ProgramCall[I], Prediction[O]]`.
+modules remain fully instrumented. Raw prediction evidence composes with an associative `followedBy` operation:
+rightmost produced values/completions win, usage adds, and `DynamicPrediction.empty` is the identity. Consequently
+both unit laws and associativity hold on the complete `Prediction`, including the public `ProgramRunner`
+observation. `ComposeLawSuite` pins this plus a final leaf that reads the live trace.
 
 The load-bearing facts, all executable:
 
@@ -265,7 +263,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.5 done** (commit `dca35e9`): `Mode` (the `Controls => Controls` monoid) + `Moded` + `Compose.mode`;
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
-    usage-merge on `>>>`, `augment` closing position, execution-wrapping modes.
+    `augment` closing position, execution-wrapping modes. Usage accumulation on `>>>` is now part of the lawful
+    `DynamicPrediction.followedBy` envelope operation.
   - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
@@ -273,18 +272,19 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     metadata remains read-only). Prototyped as
     `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
     `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
-    `Program` packages addressability + the input decoder (threaded through composition), giving uniform
+    `Program` packages addressability while its domain object supplies a sealed canonical codec, giving uniform
     `Predictors[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
     values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Decoding is OBJECT-side (stage 4, after the lawfulness-review arc that first replaced `unsafeOf` with a
-    `ProgramInput` coherence law and then deleted `ProgramInput` outright): `Program.of` and the
-    record-boundary runner require `RecordCodec[I]` at the domain, nothing decode-related is packaged, and an
+    `ProgramInput` coherence law and then deleted `ProgramInput` outright): `Program.of` and the record-boundary
+    runner require `RecordCodec[I]` at the domain, nothing decode-related is packaged, and an
     incoherent per-program decoder is unrepresentable (compile gates pin both former vehicles). Named-tuple
     inputs derive their codec through the same `SchemaTupleShape` path the signature macros use; bare-module
     running is signature-backed `ProgramRunner` instances (no identity in sight, no coherence question);
     runtime-string signatures enter through the `DynamicSignature` bundle, whose parses mint fresh
-    codec-equipped types (see `algebra-2-program-composition.md`).
+    codec-equipped types and whose generic `stable` view preserves them across aliases (see
+    `algebra-2-program-composition.md`).
     `Predictors.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `Predictors.empty`, so an omitted learnable subtree can no longer disappear silently.
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
@@ -327,8 +327,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     inner `Predict`s — Refine's critic, ReAct, CodeAct, RLM, ProgramOfThought (statically-shaped layouts kept
     verbatim, `InputAugmentation.appendedStringInput` for appended input fields, lenient hand-written or derived
     shapes on the output side, `OutputAugmentation.prependedStringShape` for the reasoning-prepended extractors),
-    and `MultiChainComparison`, whose RUNTIME-ARITY attempt block rides the static carrier
-    `Shape[(I, Vector[String])]` (`appendedStringInputs`: the per-instance shape expands the vector into the `m`
-    numbered fields; the arity invariant stays a runtime check). Only layouts that exist purely as runtime values
+    and `MultiChainComparison`, whose runtime-arity attempt block rides a per-instance opaque carrier
+    (`appendedStringInputs`: validation constructs the path-branded value and the shape total-encodes the `m`
+    numbered fields). Only layouts that exist purely as runtime values
     still construct a `DynamicPredict` inside the framework: the optimizers' own helper generations, the
     evaluation judge, and `Predict.erase`. See `algebra-2-program-composition.md` for the recipe.

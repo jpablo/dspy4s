@@ -42,9 +42,8 @@ final case class Wrapped(s: String) derives Schema
 
 /** Executes the `@Law` statements of the Para prototype's structures ([[Category]] / [[ParaCategory]] over [[Program]],
   * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
-  * parameter vectors and delooping morphisms, observational equality (typed output / params / coherent decode /
-  * lifecycle) for `Program` morphisms. Final `Prediction.raw` is deliberately outside that equality and has an explicit
-  * counterexample below. Also pins the two construction gates (no `Predictors`, no `Program`; no `RecordCodec`, no
+  * parameter vectors and delooping morphisms, observational equality (complete prediction / params / coherent decode /
+  * lifecycle) for `Program` morphisms. Also pins the two construction gates (no `Predictors`, no `Program`; no `RecordCodec`, no
   * `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying is not natural for effectful
   * morphisms).
   */
@@ -104,8 +103,10 @@ class ParaCategoryLawSuite extends FunSuite:
   // ── Stub OBJECT codecs for the plain test carriers. Decoding is object-side now: a stub lives at the TYPE
   //    (these tests never exercise record decoding), not on any program — there is nowhere program-local to
   //    put a decoder anymore. ─────────────────────────────────────────────────────────────────────────────────
-  private given RecordCodec[Int]    = _ => Left(ValidationError("test stub: no input codec"))
-  private given RecordCodec[String] = _ => Left(ValidationError("test stub: no input codec"))
+  private given RecordCodec[Int] =
+    RecordCodec.fromDecoder(_ => Left(ValidationError("test stub: no input codec")))
+  private given RecordCodec[String] =
+    RecordCodec.fromDecoder(_ => Left(ValidationError("test stub: no input codec")))
 
   /** Package a Step at its (codec-equipped) domain object. */
   private def pack[I, O](m: Step[I, O])(using RecordCodec[I]): Program[I, O] = Program.of(m)
@@ -122,7 +123,7 @@ class ParaCategoryLawSuite extends FunSuite:
   )
 
   private final case class ProgramObservation[O](
-      output: Either[DspyError, O],
+      output: Either[DspyError, Prediction[O]],
       starts: Vector[String],
       trace: Vector[String],
       history: Vector[String]
@@ -138,7 +139,7 @@ class ParaCategoryLawSuite extends FunSuite:
         case _                       => ()
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val output           = program(ProgramCall(input)).map(_.output)
+      val output           = program(ProgramCall(input))
       ProgramObservation(
         output,
         starts.result(),
@@ -147,9 +148,8 @@ class ParaCategoryLawSuite extends FunSuite:
       )
     }
 
-  /** Execute an IsEq under the documented Program observation (params + executable semantics; decoding is a
-    * property of the object, so it no longer varies between the two sides by construction). `raw` is tested
-    * separately as an explicit non-law. */
+  /** Execute an IsEq under the documented Program observation (params + complete prediction + executable semantics;
+    * decoding is a property of the object, so it no longer varies between the two sides by construction). */
   private def assertObsEq[I, O](
       eq: IsEq[Program[I, O]],
       input: I
@@ -174,14 +174,17 @@ class ParaCategoryLawSuite extends FunSuite:
     assertEquals(((a >>> g) >>> h)(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
-  test("right identity preserves the Category observation but not the final raw envelope") {
+  test("identity preserves the complete prediction envelope through ProgramRunner") {
     val f      = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
     val direct = f(ProgramCall(Boxed(7)))
     val viaId  = (f >>> C.id[Wrapped])(ProgramCall(Boxed(7)))
 
-    assertEquals(viaId.map(_.output), direct.map(_.output))
-    assertEquals(viaId.map(_.raw), Right(DynamicPrediction.empty))
-    assertNotEquals(viaId.map(_.raw), direct.map(_.raw))
+    assertEquals(viaId, direct)
+
+    val record = DynamicValues.record("n" := 7)
+    val runner = summon[ProgramRunner[Program[Boxed, Wrapped]]]
+    assertEquals(runner.run(f >>> C.id[Wrapped], record), runner.run(f, record))
+    assertEquals(runner.run(C.id[Boxed] >>> f, record), runner.run(f, record))
   }
 
   // ── Para laws, executed from the @Law statements ─────────────────────────────────────────────────────────
@@ -292,6 +295,10 @@ class ParaCategoryLawSuite extends FunSuite:
     assert(viaArgument.nonEmpty, "expected the decoder-argument constructor to be gone")
     val viaInstance = compileErrors("summon[ProgramInput[Step[Boxed, Wrapped], Boxed]]")
     assert(viaInstance.nonEmpty, "expected the ProgramInput capability to be gone")
+    val rogueCodec = compileErrors(
+      "new RecordCodec[Boxed] { def decode(record: DynamicValue.Record) = Right(Boxed(99)) }"
+    )
+    assert(rogueCodec.nonEmpty, "expected RecordCodec to reject application-defined competing instances")
   }
 
   test("a bundle-tagged dynamic object is a codec-equipped category object (packaged in one step)") {
@@ -311,6 +318,15 @@ class ParaCategoryLawSuite extends FunSuite:
     // (val t = qaBundle) would share the type, which is exactly the right equivalence: same parse, same object.
     val errors = compileErrors("qaBundle.packaged() >>> qaBundleAgain.packaged()")
     assert(errors.nonEmpty, "expected cross-bundle composition to fail compilation")
+  }
+
+  test("stable preserves a bundle's fresh types across an ordinary inferred alias") {
+    val same = qaBundle.stable
+    val again = same
+    val input: qaBundle.In = qaBundle.input(DynamicValues.record("question" := "hi")).toOption.get
+    val aliased: same.In = input
+    val aliasedAgain: again.In = aliased
+    assertEquals(same.signature.inputShape.encode(aliasedAgain), qaBundle.signature.inputShape.encode(input))
   }
 
   test("a bare Record-input program no longer packages: bundles are the only dynamic gate") {

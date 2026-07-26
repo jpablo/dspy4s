@@ -276,8 +276,8 @@ object Predictors extends LowPriority:
 
     def replace(program: MultiChainComparison[I, O], updates: Vector[PredictorState]): MultiChainComparison[I, O] =
       require(updates.size == 1, s"MultiChainComparison expects exactly 1 update (compare), got ${updates.size}")
-      val nextCompare = updateOverride(program.comparePredict, program.comparePredictOverride, updates(0))
-      program.copy(comparePredictOverride = nextCompare)
+      if updates.head == program.comparePredict.predictorState then program
+      else program.copy(comparePredictStateOverride = Some(updates.head))
 
   private def updateOverride[P](
       current: P,

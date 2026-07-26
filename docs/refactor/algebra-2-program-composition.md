@@ -197,11 +197,12 @@ The close went through two forms. FIRST (historical): `Program` packaged a per-m
 `decodeInput`, captured through a `ProgramInput` capability typeclass and threaded through composition, with a
 documented coherence law (the packaged decoder must agree with the program's typed input boundary) as the
 condition under which the category laws held. SECOND (current, stage 4): decoding is a property of the OBJECT.
-`Program` packages nothing decode-related; `Program.of` requires `RecordCodec[I]` at the domain (the object
-gate) alongside `Predictors`; the record-boundary runner demands `RecordCodec[I]` at use; composition threads
-nothing. `ProgramInput`, the threaded decoder, and the coherence law are GONE: identity, every program at an
-object, and the runner all decode through the object's one codec, so the unit laws hold with no decode-side
-condition and an incoherent per-program decoder is UNREPRESENTABLE (compile gates pin both former vehicles).
+`Program` packages nothing decode-related; `Program.of` requires a sealed `RecordCodec[I]` at the domain (the
+object gate) alongside `Predictors`; the record-boundary runner demands `RecordCodec[I]` at use; composition
+threads nothing. `ProgramInput`, the morphism-specific decoder, and the coherence law are GONE: identity, every
+program at an object, and the runner all decode through the object's one canonical codec, so the unit laws hold
+with no decode-side condition and an incoherent per-morphism decoder is UNREPRESENTABLE (compile gates pin both
+former vehicles).
 Bare-module running is a separate concern with no coherence question (no identity morphism in sight):
 `ProgramRunner` carries signature-backed instances for the framework leaves and composites, plus a
 low-priority `RecordCodec` fallback for user composites. Typed named-tuple inputs (`fromString` / `fromType` /
@@ -213,12 +214,13 @@ use, so codec and signature decode cohere definitionally; `Record`-input program
 exists at all is that every `fromStringDynamic` program shares the input type `DynamicValue.Record` while needing
 its own field-validating decoder, so the type cannot determine the decoder. `DynamicSignature.parse` removes that
 collapse for programs that enter the category: each parse mints fresh abstract `In` / `Out` type members (fresh
-per value, the path-dependent freshness the compiler enforces) and carries the matching `RecordCodec`s, born from
+per stable path, the path-dependent freshness the compiler enforces) and carries the matching sealed `RecordCodec`s, born from
 the same parse behind the abstraction. Identity and any program over the bundle then decode identically as a
 consequence of abstraction: the unit laws hold on bundle objects with NO coherence caveat, and re-parsing the
 same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
-`ParaCategoryLawSuite`). This canonicalizes decoder IDENTITY only; cardinality-shaped value dependence
-(`MultiChainComparison`'s `m`, reparameterization arity) gains nothing from freshness. Plain `fromStringDynamic`
+`ParaCategoryLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
+parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
+`MultiChainComparison` owns a path-branded opaque attempt block validated against `m`. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
 evaluation judge). The second step this enabled LANDED as stage 4: with every category-entering program typed
 or bundled, `decodeInput` left the `Program` package entirely and the `ProgramInput` law dissolved at the
@@ -260,14 +262,14 @@ jpablo/math-with-scala, applied where it belongs: `ParaCategory` is now `ParaCat
 for `Program` at `P = RecordCodec` ("the object decodes from a record", built on the SAME
 `Shape.derivedWithRole(Input)` decode path `Signature.derived` uses, so codec- and signature-derived
 decoders cohere definitionally). Unlike a blanket Ok-style constrained category, the constraint appears
-ONLY where evaluation evidence must be synthesized rather than threaded: `id[A: RecordCodec]` builds its
-decoder from the object's codec; `>>>` stays unconstrained (packaged morphisms carry their own evidence).
+ONLY where object evidence is required: `id[A: RecordCodec]` is available at codec-equipped objects while
+`>>>` stays unconstrained and packages no decoder.
 Result, pinned by the suites: the left unit holds on the evaluation observation (after stage 4,
-definitionally: one codec per object is the only decode path); an id-headed pipeline optimizes end-to-end
+definitionally: one canonical codec per object is the only decode path); an id-headed pipeline optimizes end-to-end
 through COPRO; and `id` at a non-codec object is a compile error, the honest statement that over
 codec-equipped objects the structure is a genuine category while elsewhere it is a semicategory (morphisms
-compose, no unit). After stage 4 the object constraint also gates `Program.of` and the record-boundary
-runner, so "codec-equipped" is a property every packaged program's endpoints provably have.
+compose, no unit). After stage 4 the object constraint also gates `Program.of` and the record-boundary runner;
+no decoder evidence is stored in a morphism.
 
 **Law statements, the read functor, and fan-out (commit `446ccb6`, adopted from jpablo/math-with-scala).**
 Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
@@ -275,11 +277,11 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
 - **Laws as statements.** `core.contracts.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
   and the `@Law` annotation. The Para structures now state their laws as `@Law` methods ON the traits, and
   `ParaCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
-  observation (structural `==` for parameter vectors; typed output + params + lifecycle for `Program`
-  morphisms, decoding having moved to the objects in stage 4). Final `Prediction.raw` is deliberately outside
-  Category equality: `p >>> id` retains the typed output and lifecycle but ends with identity's empty
-  envelope; that counterexample stays executable, while the former unlawful-decoder counterexample became
-  UNREPRESENTABLE and is pinned as a pair of compile gates instead. The deliberate split from the
+  observation (structural `==` for parameter vectors; complete prediction + params + lifecycle for `Program`
+  morphisms, decoding having moved to the objects in stage 4). Sequential raw evidence has an associative
+  accumulator with the empty envelope as identity, so `p >>> id` is indistinguishable even through `ProgramRunner`.
+  The former unlawful-decoder counterexample is UNREPRESENTABLE: `RecordCodec` is sealed and its removal is pinned
+  by compile gates. The deliberate split from the
   formalization library: there the equations are the deliverable, here they are executable specifications.
 - **`params` as a functor value.** `ParaCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
   parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`
@@ -416,25 +418,24 @@ loop + extractor, CodeAct's generator + extractor, RLM's action + extract, and P
 generator / regenerator / answerer. The recipe is uniform: keep the hand-built layout verbatim (prompt
 rendering unchanged), pair it with `InputAugmentation.appendedStringInput` on the input side (the pair carrier
 `(I, String)` delegates base encoding to the base shape, appending the declared field — apply twice for two
-fields) and either a derived shape (fully synthetic inputs: RLM, the critic) or a hand-written LENIENT output
-shape that mirrors the prior dynamic reads exactly (missing strings render empty, `finished` coerces
+fields) and either a derived shape (fully synthetic inputs: RLM, the critic) or a hand-written explicit output
+shape that models tolerant reads algebraically (`ProgramOfThought.CodeOut` uses `Option[String]`; `finished` coerces
 bool-or-"true", tool args accept record / JSON-string / nothing); reasoning-prepended extractors decode inside
 the predict via `OutputAugmentation.prependedStringShape` (extracted from ChainOfThought's hand-written shape).
 **Runtime arity rides a static carrier (the class-B bridge).** `MultiChainComparison` — whose field COUNT is the
-constructor parameter `m` — converts too: `InputAugmentation.appendedStringInputs` gives
-`Shape[(I, Vector[String])]`, a static type with runtime length, and the per-instance shape (built where `m` is
-known, exactly like the loop programs' instruction strings) expands the vector into the `m` numbered
-`reasoning_attempt_i` fields. The wire format is unchanged; the honest cost is that the arity invariant
-(`attempts.size == m`) stays a runtime check (the program's existing validation), since a list's length, unlike
-its type, is not compile-time. The remaining `DynamicPredict` constructors in the framework are exactly the
+constructor parameter `m` — converts too: `InputAugmentation.appendedStringInputs` returns a bundle with a
+path-dependent opaque `Values` carrier and `Shape[(I, Values)]`. Its validating constructor is the only way to
+obtain `Values`, so the per-instance shape total-encodes exactly the `m` numbered `reasoning_attempt_i` fields
+without truncation or a representable wrong-length typed value. The wire format is unchanged. The remaining
+`DynamicPredict` constructors in the framework are exactly the
 principled residue: layouts that exist only as runtime VALUES (COPRO / GroundedProposer / InferRules attempt
 injection over optimizer-assembled layouts, the evaluation judge), `Predict.erase`, and user
 `fromStringDynamic` signatures.
 
 ## Deferred items (recorded, not lost — additive, no consumer yet)
 
-- **Usage-merge on `>>>`** (monoidal accumulation of per-step `lmUsage` onto the composite result): deferred;
-  non-breaking when wanted.
+- ~~**Usage-merge on `>>>`.**~~ Resolved by `DynamicPrediction.followedBy`: usage combines pointwise while the
+  rightmost produced values/completions win and the empty envelope is identity.
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).

@@ -70,8 +70,8 @@ trait CDCategory[Hom[_, _]] extends OrderedTensorOps[Hom]:
 
 /** Unrestricted executable programs with ordered tensor-like operations.
   *
-  * Sequential composition is categorical on the threaded value and lifecycle once structural wrappers are transparent.
-  * The final `Prediction.raw` envelope remains outside that observation. Independent-input execution stays ordered and
+  * Sequential composition is categorical on the complete prediction once structural wrappers are transparent and raw
+  * evidence uses its associative accumulator with an empty identity. Independent-input execution stays ordered and
   * therefore deliberately has no interchange law.
   */
 given orderedProgram: OrderedTensorOps[ModuleHom] with

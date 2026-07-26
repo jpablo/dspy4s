@@ -9,6 +9,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -44,7 +45,7 @@ final case class ProgramOfThought[I, O](
     interpreter: CodeInterpreter,
     maxIterations: Int = 3,
     /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing
-      * a lenient [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
+      * an explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
       * Carrying it as a defaulted, `copy`-reachable field makes this learnable sub-predict addressable + immutably
       * replaceable (see the `Predictors[ProgramOfThought]` instance).
       */
@@ -120,8 +121,8 @@ final case class ProgramOfThought[I, O](
       }))
 
   /** The initial code-generation predict, built once from the CoT-augmented [[generateSignature]] and exposed as
-    * stable optimizer state — a TYPED `Predict[I, CodeOut]` (the base input shape unchanged, a lenient
-    * [[ProgramOfThought.codeOutShape]] decode). Addressable + tunable via [[generatorPredictOverride]]; [[forward]]
+    * stable optimizer state — a TYPED `Predict[I, CodeOut]` (the base input shape unchanged, with missing code modeled
+    * explicitly by [[ProgramOfThought.codeOutShape]]). Addressable + tunable via [[generatorPredictOverride]]; [[forward]]
     * executes this member rather than rebuilding a local predictor for each call.
     */
   val generatorPredict: Predict[I, ProgramOfThought.CodeOut] =
@@ -245,33 +246,41 @@ final case class ProgramOfThought[I, O](
           ))
 
       generated.flatMap { prediction =>
-        val rawCode = prediction.output.generatedCode
-        // Shared with CodeAct — upstream's `_parse_code` is one function serving both programs, so both get
-        // the same LM-output tolerance (fence stripping, `---` truncation, trailing-assignment echo).
-        CodeAct.parseCode(rawCode) match
-          case Left(parseErr) =>
+        prediction.output.generatedCode match
+          case None =>
+            val missing = "The model response did not contain the required generated_code field."
             Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
-              rawCode,
-              parseErr,
-              s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
+              code = "",
+              error = missing,
+              exhaustionMessage = s"Max attempts ($maxIterations) reached. Last generation error: $missing"
             ))))
-          case Right(code) =>
-            interpreter.execute(code) match
-              case Right(result) if result.exitCode == 0 =>
-                // A SUBMIT-capable interpreter (DenoPyodideInterpreter) surfaces a structured early-exit in
-                // `finalOutput`; prefer it over printed stdout (Python-parity: upstream PoT reads SUBMIT).
-                // Print-based interpreters leave it None, so the print convention keeps working unchanged.
-                Right(AgentLoop.Step.Done(code -> result.finalOutput.getOrElse(result.stdout.stripTrailing)))
-              case Right(result) =>
-                val stderr = result.stderr.stripTrailing
+          case Some(rawCode) =>
+            // Shared with CodeAct — upstream's `_parse_code` is one function serving both programs, so both get
+            // the same LM-output tolerance (fence stripping, `---` truncation, trailing-assignment echo).
+            CodeAct.parseCode(rawCode) match
+              case Left(parseErr) =>
                 Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
-                  code,
-                  stderr,
-                  s"Max attempts ($maxIterations) reached. Last execution error: $stderr"
+                  rawCode,
+                  parseErr,
+                  s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
                 ))))
-              case Left(interpreterErr) =>
-                // Interpreter itself failed (process couldn't start, timed out, …). Don't retry — no LM fix.
-                Left(interpreterErr)
+              case Right(code) =>
+                interpreter.execute(code) match
+                  case Right(result) if result.exitCode == 0 =>
+                    // A SUBMIT-capable interpreter (DenoPyodideInterpreter) surfaces a structured early-exit in
+                    // `finalOutput`; prefer it over printed stdout (Python-parity: upstream PoT reads SUBMIT).
+                    // Print-based interpreters leave it None, so the print convention keeps working unchanged.
+                    Right(AgentLoop.Step.Done(code -> result.finalOutput.getOrElse(result.stdout.stripTrailing)))
+                  case Right(result) =>
+                    val stderr = result.stderr.stripTrailing
+                    Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
+                      code,
+                      stderr,
+                      s"Max attempts ($maxIterations) reached. Last execution error: $stderr"
+                    ))))
+                  case Left(interpreterErr) =>
+                    // Interpreter itself failed (process couldn't start, timed out, …). Don't retry — no LM fix.
+                    Left(interpreterErr)
       }
 
 object ProgramOfThought:
@@ -334,22 +343,30 @@ object ProgramOfThought:
     description = Some("The printed output of the final Python code.")
   ))
 
-  /** The typed output of a generate / regenerate step. The CoT-prepended `reasoning` is produced by the LM (it is
-    * in the layout) but was never consumed by the loop, which the lenient shape reflects. */
-  final case class CodeOut(generatedCode: String)
+  /** The typed output consumed by the generate / regenerate loop. The augmented layout also asks the LM for
+    * `reasoning`, but that field is execution evidence rather than part of this semantic output. Missing code is an
+    * explicit `None`, never a manufactured empty string.
+    */
+  final case class CodeOut(generatedCode: Option[String])
 
-  /** Hand-written LENIENT output shape mirroring the prior dynamic read exactly: a missing `generated_code`
-    * renders as "" (the parse-failure path records the attempt and retries). Decode never fails;
-    * `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction. */
+  /** Hand-written output shape for the one semantic field the loop consumes. Missing code decodes to `None` so the
+    * retry state can represent the failure honestly; a present non-string value is rejected in the ordinary error
+    * channel. `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
+    */
   private[programs] val codeOutShape: Shape[CodeOut] = new Shape[CodeOut]:
-    val fieldSpecs: Vector[FieldSpec] = Vector(ChainOfThought.reasoningField, generatedCodeField)
+    val fieldSpecs: Vector[FieldSpec] = Vector(generatedCodeField)
 
     def encode(value: CodeOut): DynamicValue.Record =
-      DynamicValue.Record(Chunk.from(Seq(
-        "generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(value.generatedCode))
-      )))
+      value.generatedCode match
+        case Some(code) => DynamicValue.Record(Chunk(
+          "generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(code))
+        ))
+        case None => DynamicValue.Record.empty
 
     def decode(raw: DynamicValue.Record): Either[DspyError, CodeOut] =
-      Right(CodeOut(
-        generatedCode = DynamicValues.recordGet(raw, "generated_code").map(DynamicValues.renderText).getOrElse("")
-      ))
+      DynamicValues.recordGet(raw, "generated_code") match
+        case None => Right(CodeOut(None))
+        case Some(DynamicValue.Primitive(PrimitiveValue.String(code))) => Right(CodeOut(Some(code)))
+        case Some(other) => Left(ValidationError(
+          s"ProgramOfThought generated_code must be a String, got: $other"
+        ))

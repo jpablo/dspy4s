@@ -15,19 +15,19 @@ import zio.blocks.schema.DynamicValue
   * `DynamicValue.Record`, while each needs its own field-validating decoder, so the type cannot determine the
   * decoder and the Para category's left unit holds only under the `ProgramInput` coherence law. The bundle
   * makes the fibration honest in the type system: each parse mints its own `In` / `Out` as abstract type
-  * members (fresh per VALUE, the path-dependent freshness the compiler enforces), and the codec and the
+  * members (fresh per stable path, the path-dependent freshness the compiler enforces), and the codec and the
   * signature are born from the same parse behind that abstraction. Outside, the only source of a
   * `RecordCodec[s.In]` is `s.inputCodec` and the only source of a `Signature[s.In, _]` is `s.signature`, so a
   * signature from one parse cannot be recombined with a codec from another: identity and any program over the
-  * bundle decode identically as a consequence of abstraction, not as an instance obligation.
+  * bundle decode identically as a consequence of abstraction, not as an instance obligation. `RecordCodec` is sealed,
+  * so application code cannot introduce a competing decoder for either fresh type.
   *
-  * Aliasing shares the type (the same signature, legitimately one object); re-parsing the same string mints a
-  * distinct object (two fibers that happen to agree). The residual caveat is the usual open-typeclass one: a
-  * caller can still shadow `s.inputCodec` with a rogue local given, so this is a theorem against accident, a
-  * contract against determination.
+  * Scala widens an ordinary `val alias = s` back to `DynamicSignature`, which gives the alias a new path projection.
+  * Use [[stable]] when a second binding must retain this bundle's exact `In` / `Out` types. Re-parsing the same string
+  * still mints a distinct object (two fibers that happen to agree).
   *
-  * Scope: this canonicalizes decoder IDENTITY only. Cardinality-shaped value dependence (MultiChainComparison's
-  * `m`, reparameterization arity) gains nothing from freshness and stays behind runtime checks.
+  * Cardinality-shaped value dependence uses the same boundary pattern separately: `MultiChainComparison`
+  * validates a vector against `m`, then hides it behind its own path-branded carrier before prediction.
   *
   * Status: the recommended user path for runtime-string signatures. `s.predict()` builds the typed program;
   * composition, optimization (`Predictors` + `ProgramRunner` over a packaged `Program`), and cross-fiber
@@ -49,6 +49,12 @@ sealed trait DynamicSignature:
 
   /** The canonical decoder for [[Out]]: definitionally the signature's own output decode. */
   given outputCodec: RecordCodec[Out]
+
+  /** Project this path-dependent bundle into an ordinary generic value. Unlike a direct alias, the generic type
+    * arguments survive Scala's value widening: `val same = signature.stable` gives
+    * `same.In = signature.In` and likewise for `Out`.
+    */
+  final def stable: DynamicSignature.Stable[In, Out] = new DynamicSignature.Stable(this)
 
   /** Validating entry: decode a raw record into the tagged input (field presence checked here, at the
     * boundary, rather than at call time). */
@@ -77,6 +83,33 @@ sealed trait DynamicSignature:
 
 object DynamicSignature:
 
+  /** Alias-safe generic view of a dynamic-signature bundle. Its type arguments capture the originating path once, then
+    * survive any number of ordinary `val` aliases.
+    */
+  final class Stable[I, O] private[DynamicSignature] (
+      underlying: DynamicSignature { type In = I; type Out = O }
+  ):
+    type In  = I
+    type Out = O
+
+    val signature: Signature[I, O] = underlying.signature
+    given inputCodec: RecordCodec[I] = underlying.inputCodec
+    given outputCodec: RecordCodec[O] = underlying.outputCodec
+
+    def input(record: DynamicValue.Record): Either[DspyError, I] = underlying.input(record)
+
+    def predict(
+        demos: Vector[Example] = Vector.empty,
+        name: Option[String] = None,
+        config: DynamicValue.Record = DynamicValue.Record.empty
+    ): Predict[I, O] = underlying.predict(demos, name, config)
+
+    def packaged(
+        demos: Vector[Example] = Vector.empty,
+        name: Option[String] = None,
+        config: DynamicValue.Record = DynamicValue.Record.empty
+    ): Program[I, O] = underlying.packaged(demos, name, config)
+
   /** Parse a DSPy-style DSL string at runtime, minting a fresh pair of input/output types for it. The declared
     * `DynamicSignature` return type is what seals the type members: the concrete representation (`In` and
     * `Out` are both `DynamicValue.Record` underneath) never escapes. */
@@ -86,8 +119,8 @@ object DynamicSignature:
         type In  = DynamicValue.Record
         type Out = DynamicValue.Record
         val signature: Signature[In, Out]   = parsed
-        given inputCodec: RecordCodec[In]   = record => parsed.inputShape.decode(record)
-        given outputCodec: RecordCodec[Out] = record => parsed.outputShape.decode(record)
+        given inputCodec: RecordCodec[In]   = RecordCodec.fromShape(parsed.inputShape)
+        given outputCodec: RecordCodec[Out] = RecordCodec.fromShape(parsed.outputShape)
     }
 
   /** The reindexing morphism across fibers: a parameter-free program converting one bundle's outputs into
