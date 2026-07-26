@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
 import dspy4s.programs.para.Program
+import dspy4s.programs.predictors.Predictors
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 
@@ -65,6 +66,15 @@ sealed trait DynamicSignature:
   ): Predict[In, Out] =
     Predict(signature, demos = demos, name = name, config = config)
 
+  /** Package this bundle's predict as a Para category object in one step: the object codec comes from the
+    * bundle itself, so no `import s.given` is needed at the call site. */
+  final def packaged(
+      demos: Vector[Example] = Vector.empty,
+      name: Option[String] = None,
+      config: DynamicValue.Record = DynamicValue.Record.empty
+  ): Program[In, Out] =
+    Program.of(predict(demos, name, config))(using summon[Predictors[Predict[In, Out]]], inputCodec)
+
 object DynamicSignature:
 
   /** Parse a DSPy-style DSL string at runtime, minting a fresh pair of input/output types for it. The declared
@@ -99,3 +109,7 @@ object DynamicSignature:
     else
       import from.outputCodec
       Right(Program.of(LiftEither[from.Out, to.In](value => to.input(from.signature.outputShape.encode(value)))))
+
+  // Note: `bridge` packages at the SOURCE bundle's output object (`import from.outputCodec` supplies the
+  // object codec `Program.of` now requires); the target side needs no codec, since only domains are objects
+  // a package is created at.

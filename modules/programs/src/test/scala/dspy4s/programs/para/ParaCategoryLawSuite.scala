@@ -5,8 +5,6 @@ import dspy4s.programs.predictors.{predictorState, predictorView, withPredictorS
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
-import dspy4s.core.contracts.CodeInterpreter
-import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.core.contracts.DynamicValues
@@ -19,15 +17,12 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.ChainOfThought
-import dspy4s.programs.CodeAct
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.DynamicSignature
-import dspy4s.programs.Predict
 import dspy4s.programs.predictors.Predictor
 import dspy4s.programs.predictors.PredictorMetadata
 import dspy4s.programs.predictors.PredictorState
-import dspy4s.programs.ProgramInput
-import dspy4s.programs.ReAct
+import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -80,11 +75,6 @@ class ParaCategoryLawSuite extends FunSuite:
       def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
         program.copy(predict = program.predict.withPredictorState(updated))
 
-  private object UnusedInterpreter extends CodeInterpreter:
-    def execute(code: String): Either[DspyError, CodeResult] =
-      throw new AssertionError(s"decoder test unexpectedly executed code: $code")
-    def close(): Unit = ()
-
   /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove the
     * construction gate below.
     */
@@ -111,19 +101,25 @@ class ParaCategoryLawSuite extends FunSuite:
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
-  /** Stub decoder for tests that do not exercise record-based evaluation. */
-  private def noCodec[I]: DynamicValue.Record => Either[DspyError, I] =
-    _ => Left(ValidationError("test stub: no input codec"))
+  // ── Stub OBJECT codecs for the plain test carriers. Decoding is object-side now: a stub lives at the TYPE
+  //    (these tests never exercise record decoding), not on any program — there is nowhere program-local to
+  //    put a decoder anymore. ─────────────────────────────────────────────────────────────────────────────────
+  private given RecordCodec[Int]    = _ => Left(ValidationError("test stub: no input codec"))
+  private given RecordCodec[String] = _ => Left(ValidationError("test stub: no input codec"))
 
-  /** An explicitly supplied ProgramInput instance: the caller assumes the trait's coherence law (or, in the
-    * counterexample below, deliberately violates it). */
-  private def suppliedInput[F, I](decode: DynamicValue.Record => Either[DspyError, I]): ProgramInput[F, I] =
-    (_: F) => decode
+  /** Package a Step at its (codec-equipped) domain object. */
+  private def pack[I, O](m: Step[I, O])(using RecordCodec[I]): Program[I, O] = Program.of(m)
 
-  /** Package a Step with the stub decoder (Step has no signature, so no ProgramInput instance is derivable). */
-  private def pack[I, O](m: Step[I, O]): Program[I, O] =
-    given ProgramInput[Step[I, O], I] = suppliedInput(noCodec[I])
-    Program.of(m)
+  // Fixture for the Record-input compile gate below (suite-level so compileErrors snippets can reference
+  // it; referenced only inside the snippet, which the unused checker cannot see).
+  private val recordLayout = SignatureLayout.parse("question -> s").toOption.get
+  @annotation.unused
+  private val recordSignature = Signature[DynamicValue.Record, Wrapped](
+    name = "RecordInput",
+    layout = recordLayout,
+    inputShape = Shape.MapShape(recordLayout.inputFields),
+    outputShape = Shape.derivedWithRole[Wrapped](FieldRole.Output)
+  )
 
   private final case class ProgramObservation[O](
       output: Either[DspyError, O],
@@ -151,14 +147,14 @@ class ParaCategoryLawSuite extends FunSuite:
       )
     }
 
-  /** Execute an IsEq under the documented Program observation. `raw` is tested separately as an explicit non-law. */
+  /** Execute an IsEq under the documented Program observation (params + executable semantics; decoding is a
+    * property of the object, so it no longer varies between the two sides by construction). `raw` is tested
+    * separately as an explicit non-law. */
   private def assertObsEq[I, O](
       eq: IsEq[Program[I, O]],
-      input: I,
-      record: DynamicValue.Record
+      input: I
   ): Unit =
     assertEquals(eq.lhs.params, eq.rhs.params)
-    assertEquals(eq.lhs.decodeInput(record), eq.rhs.decodeInput(record))
     assertEquals(observe(eq.lhs, input), observe(eq.rhs, input))
 
   /** Execute an IsEq whose carrier supports plain structural equality (parameter vectors). */
@@ -168,14 +164,13 @@ class ParaCategoryLawSuite extends FunSuite:
   // ── Category laws over Program, executed from the trait's @Law statements ───────────────────────────────────
   test("Category laws (identity left/right, associativity) hold observationally on Program") {
     val f = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val boxed7 = DynamicValues.record("n" := 7)
-    assertObsEq(C.identityLeft(f), Boxed(7), boxed7)
-    assertObsEq(C.identityRight(f), Boxed(7), boxed7)
+    assertObsEq(C.identityLeft(f), Boxed(7))
+    assertObsEq(C.identityRight(f), Boxed(7))
 
     val a = pack(step[Int, String]("a", "i -> s")(i => s"<$i>"))
     val g = pack(step[String, String]("g", "s -> t")(s => s + s))
     val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
-    assertObsEq(C.associativity(a, g, h), 3, DynamicValue.Record.empty)
+    assertObsEq(C.associativity(a, g, h), 3)
     assertEquals(((a >>> g) >>> h)(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
@@ -275,42 +270,38 @@ class ParaCategoryLawSuite extends FunSuite:
     assertIsEq(ReadFunctor.composition(a, b))
   }
 
-  // ── The packaged evaluation capability: decoder threading through composition ───────────────────────────
-  test(">>> threads the FIRST leg's input decoder (the composite's input is the first leg's input)") {
-    given ProgramInput[Step[Int, String], Int] = suppliedInput(_ => Right(7))
-    val a = Program.of(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b = pack(step[String, Int]("b", "s -> n")(s => s.length)) // b's decoder is the failing stub
-    assertEquals((a >>> b).decodeInput(DynamicValue.Record.empty), Right(7))
-    // reparam preserves the decoder too.
-    assertEquals((a >>> b).reparam((a >>> b).params).decodeInput(DynamicValue.Record.empty), Right(7))
-  }
-
-  test("id's decoder IS the object codec; the left unit holds on evaluation under coherent packaging") {
-    // With codec-equipped objects (RecordCodec, the CategoryTC P[_] slot) id synthesizes its decoder from
-    // the object's codec, and coherent packaging (p packaged via the same codec, through
-    // ProgramInput.fromRecordCodec) gives the left unit on the evaluation observation too.
+  // ── Object-side decoding: the coherence condition is gone because nothing per-program remains ───────────
+  test("decoding is object-side: one codec per object, shared by id, every program, and the runner") {
+    // There is no per-program decoder left to compare: RecordCodec[Boxed] is THE decode path for identity,
+    // for any program at Boxed, and for the record-boundary runner. The former coherence law has nothing to
+    // range over; the unit laws need no decode-side condition at all.
     val boxedRecord = DynamicValues.record("n" := 5)
-    val p = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}"))) // packaged via the codec
-    assertEquals(C.id[Boxed].decodeInput(boxedRecord), Right(Boxed(5)))
-    assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), p.decodeInput(boxedRecord))
-    assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
-    assertEquals((p >>> C.id[Wrapped]).decodeInput(boxedRecord), Right(Boxed(5)))
+    assertEquals(summon[RecordCodec[Boxed]].decode(boxedRecord), Right(Boxed(5)))
+    val p   = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val ran = summon[ProgramRunner[Program[Boxed, Wrapped]]].run(p, boxedRecord)
+    assert(ran.isRight, s"object-side record run failed: ${ran.left.toOption}")
   }
 
-  test("a bundle-tagged dynamic object restores one-decoder-per-type: unit laws need no coherence caveat") {
-    // The bundle's codec and signature are born from one parse behind the abstract In/Out members, so
-    // identity's decoder and the program's decoder cannot disagree: the left unit holds on the decode
-    // observation with no ProgramInput-law condition. Contrast with the unlawful-instance counterexample
-    // below, which needs the (removable-only-by-this-pattern) coherence obligation.
-    import qaBundle.given
-    val record = DynamicValues.record("question" := "hi")
-    val p      = Program.of(Predict(qaBundle.signature))
+  test("an incoherent per-program decoder is UNREPRESENTABLE (was: the ProgramInput coherence law)") {
+    // The former counterexample supplied a decoder disagreeing with the object's codec and broke the left
+    // unit. Both of its vehicles are gone: Program.of takes no decoder argument, and ProgramInput no longer
+    // exists. The unlawful value cannot be written down; its law dissolved rather than being discharged.
+    val viaArgument = compileErrors(
+      """Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped("v")), (_: DynamicValue.Record) => Right(Boxed(99)))"""
+    )
+    assert(viaArgument.nonEmpty, "expected the decoder-argument constructor to be gone")
+    val viaInstance = compileErrors("summon[ProgramInput[Step[Boxed, Wrapped], Boxed]]")
+    assert(viaInstance.nonEmpty, "expected the ProgramInput capability to be gone")
+  }
 
-    assert(p.decodeInput(record).isRight)
-    assertEquals(C.id[qaBundle.In].decodeInput(record), p.decodeInput(record))
-    assertEquals((C.id[qaBundle.In] >>> p).decodeInput(record), p.decodeInput(record))
-    // Out is codec-equipped too, so the right unit's object exists and threads the same decoder.
-    assertEquals((p >>> C.id[qaBundle.Out]).decodeInput(record), p.decodeInput(record))
+  test("a bundle-tagged dynamic object is a codec-equipped category object (packaged in one step)") {
+    // The bundle mints fresh In/Out types whose codec is born from the same parse as the signature; packaged()
+    // supplies that codec to the object gate, so the runtime-string program is an ordinary category citizen.
+    val p = qaBundle.packaged()
+    assertEquals(p.params.size, 1)
+    import qaBundle.given
+    assert(summon[RecordCodec[qaBundle.In]].decode(DynamicValues.record("question" := "hi")).isRight)
+    assertEquals(C.id[qaBundle.In].params, Vector.empty)
     // The validating entry rejects a record missing a declared field, at the boundary.
     assert(qaBundle.input(DynamicValue.Record.empty).isLeft)
   }
@@ -318,59 +309,31 @@ class ParaCategoryLawSuite extends FunSuite:
   test("freshness: re-parsing the SAME string mints a DISTINCT object (cross-bundle composition is a type error)") {
     // Two parses are two fibers that happen to agree; the compiler keeps them apart. Aliasing a bundle value
     // (val t = qaBundle) would share the type, which is exactly the right equivalence: same parse, same object.
-    val errors = compileErrors(
-      "Program.of(Predict(qaBundle.signature)) >>> Program.of(Predict(qaBundleAgain.signature))"
-    )
+    val errors = compileErrors("qaBundle.packaged() >>> qaBundleAgain.packaged()")
     assert(errors.nonEmpty, "expected cross-bundle composition to fail compilation")
   }
 
-  test("an UNLAWFUL ProgramInput instance breaks the left unit (the coherence law is the boundary)") {
-    // The coherence obligation sits on the instance (see the ProgramInput scaladoc): this instance violates it
-    // (its decoder ignores the record and disagrees with Boxed's codec), and the left unit fails on the decode
-    // observation exactly as the instance law predicts. The category claim is conditional on lawful instances,
-    // the standard typeclass contract.
-    val boxedRecord = DynamicValues.record("n" := 5)
-    given ProgramInput[Step[Boxed, Wrapped], Boxed] = suppliedInput(_ => Right(Boxed(99)))
-    val p = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
+  test("a bare Record-input program no longer packages: bundles are the only dynamic gate") {
+    // The old world derived a per-program decoder for these from the signature. Object-side decoding demands
+    // RecordCodec[DynamicValue.Record], which deliberately does not exist: the collapsed Record object is not
+    // a lawful category object, and DynamicSignature is the route in. BARE-module running is untouched (the
+    // signature-backed ProgramRunner below needs no codec and no category).
+    val gate = compileErrors("summon[RecordCodec[DynamicValue.Record]]")
+    assert(gate.nonEmpty, "the collapsed Record object must stay codec-less")
+    val errors = compileErrors("Program.of(ChainOfThought(recordSignature))")
+    assert(errors.nonEmpty, "expected packaging a Record-input program to fail compilation")
+    assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
+    val _ = summon[ProgramRunner[ChainOfThought[DynamicValue.Record, Wrapped]]]
 
-    assertEquals(p.decodeInput(boxedRecord), Right(Boxed(99)))
-    assertEquals((C.id[Boxed] >>> p).decodeInput(boxedRecord), Right(Boxed(5)))
-  }
-
-  test("signature-backed composite modules supply ProgramInput without a RecordCodec fallback") {
-    val layout = SignatureLayout.parse("question -> s").toOption.get
-    val signature = Signature[DynamicValue.Record, Wrapped](
-      name = "RecordInput",
-      layout = layout,
-      inputShape = Shape.MapShape(layout.inputFields),
-      outputShape = Shape.derivedWithRole[Wrapped](FieldRole.Output)
-    )
-    val input = DynamicValues.record("question" := "hello")
-
-    val chain = Program.of(ChainOfThought(signature))
-    val react = Program.of(ReAct(signature, tools = Vector.empty))
-    val code  = Program.of(CodeAct(signature, UnusedInterpreter))
-
-    assertEquals(chain.decodeInput(input), Right(input))
-    assertEquals(react.decodeInput(input), Right(input))
-    assertEquals(code.decodeInput(input), Right(input))
-    assertEquals(chain.params.size, 1)
-    assertEquals(react.params.size, 2)
-    assertEquals(code.params.size, 2)
-
-    val errors = compileErrors("summon[RecordCodec[DynamicValue.Record]]")
-    assert(errors.nonEmpty, "test requires an input type without the generic RecordCodec fallback")
-
-    // A direct signature-backed instance also wins unambiguously when the generic RecordCodec fallback is available.
+    // Codec-equipped typed composites package as before.
     val productChain = Program.of(ChainOfThought(Signature.derived[Boxed, Wrapped]("ProductInput")))
-    assertEquals(productChain.decodeInput(DynamicValues.record("n" := 3)), Right(Boxed(3)))
+    assertEquals(productChain.params.size, 1)
   }
 
   test("id at a non-codec object does not compile (the structure is only a semicategory there)") {
-    // Int is not a Product, so RecordCodec.fromSchema does not apply: id[Int] has no evaluation evidence to
-    // synthesize and is rejected at compile time. Morphisms touching Int still compose (their packaged
-    // decoders travel with them); only the unit is gated.
-    val errors = compileErrors("C.id[Int]")
+    // Opaque carries no RecordCodec: id[Opaque] has no evaluation evidence and is rejected at compile time.
+    // Morphisms touching such objects still compose; only the unit (and the record-boundary runner) is gated.
+    val errors = compileErrors("C.id[Opaque]")
     assert(errors.nonEmpty, "expected id at a non-codec object to fail compilation")
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }

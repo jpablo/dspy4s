@@ -199,7 +199,8 @@ class ParaCompileSuite extends FunSuite:
     // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (Predictors +
     // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.
     val bundle  = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
-    val student = Program.of(bundle.predict())
+    import bundle.given // the object codec, for the record-boundary runner `.copro` demands
+    val student = bundle.packaged()
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = student.copro(config(), trainset)

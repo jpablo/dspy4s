@@ -193,13 +193,21 @@ runnable)` and surfaced the finding: **Para evidence alone is not enough to opti
 `ProgramRunner` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
 type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.
 
-The close: `Program` now also packages `decodeInput : DynamicValue.Record => Either[DspyError, I]`, captured at
-`Program.of` time via the `ProgramInput` capability typeclass and threaded through composition (`f >>> g` keeps `f`'s
-decoder; `reparam` preserves it). `ProgramInput` has signature-backed instances for `Predict`, `ChainOfThought`,
-`ReAct`, and `CodeAct`, plus a low-priority `RecordCodec` fallback for third-party typed modules. `Program.of` is
-the only public constructor: a custom decoder is supplied as an explicit `ProgramInput` instance, whose documented
-coherence law (the instance must agree with the program's typed input boundary) is the condition under which the
-category laws hold, the standard typeclass contract.
+The close went through two forms. FIRST (historical): `Program` packaged a per-morphism
+`decodeInput`, captured through a `ProgramInput` capability typeclass and threaded through composition, with a
+documented coherence law (the packaged decoder must agree with the program's typed input boundary) as the
+condition under which the category laws held. SECOND (current, stage 4): decoding is a property of the OBJECT.
+`Program` packages nothing decode-related; `Program.of` requires `RecordCodec[I]` at the domain (the object
+gate) alongside `Predictors`; the record-boundary runner demands `RecordCodec[I]` at use; composition threads
+nothing. `ProgramInput`, the threaded decoder, and the coherence law are GONE: identity, every program at an
+object, and the runner all decode through the object's one codec, so the unit laws hold with no decode-side
+condition and an incoherent per-program decoder is UNREPRESENTABLE (compile gates pin both former vehicles).
+Bare-module running is a separate concern with no coherence question (no identity morphism in sight):
+`ProgramRunner` carries signature-backed instances for the framework leaves and composites, plus a
+low-priority `RecordCodec` fallback for user composites. Typed named-tuple inputs (`fromString` / `fromType` /
+`of[Spec]`) get their codec from a `RecordCodec` derivation over the same `SchemaTupleShape` path those macros
+use, so codec and signature decode cohere definitionally; `Record`-input programs no longer package at all
+(`DynamicSignature` is the dynamic gate into the category).
 
 **The `DynamicSignature` bundle (prototype): fresh types for runtime signatures.** The reason the coherence law
 exists at all is that every `fromStringDynamic` program shares the input type `DynamicValue.Record` while needing
@@ -212,9 +220,9 @@ same string mints a distinct object (cross-bundle composition is a compile error
 `ParaCategoryLawSuite`). This canonicalizes decoder IDENTITY only; cardinality-shaped value dependence
 (`MultiChainComparison`'s `m`, reparameterization arity) gains nothing from freshness. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
-evaluation judge). A possible second step, held until the bundle proves out: if every category-entering program
-is typed or bundled, `decodeInput` could leave the `Program` package entirely and the `ProgramInput` law would
-dissolve at the category level.
+evaluation judge). The second step this enabled LANDED as stage 4: with every category-entering program typed
+or bundled, `decodeInput` left the `Program` package entirely and the `ProgramInput` law dissolved at the
+category level (see "The close" above).
 
 Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)` is the path-dependent
 constructor (the runtime-string counterpart of `Predict(Signature.derived(...))`, outputs read from the raw
@@ -234,15 +242,16 @@ program (the runtime-string student finds the winning instruction exactly like t
 runs its main through `DynamicSignature.parse` + `predict()` with the doc snippet generalized to the capability
 constraints. The declared stance: `DynamicSignature` is the user path for runtime-string signatures;
 `DynamicPredict` is the untyped substrate for framework-internal generations (its scaladoc now points users to
-the bundle). The stage-4 endgame (dropping `decodeInput` from `Program`, dissolving the `ProgramInput` law,
-which needs named-tuple `RecordCodec` derivation) stays batched with the CIO-phase API break. Both optimizer capabilities are then
-uniform over the packaged type: `Predictors[Program[I, O]]` (Program companion; read/replace = the Para
-projection/reparameterization) and `ProgramRunner[Program[I, O]]` (ParaCompile; decode + run). So `Program[I, O]` is a
+the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
+decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
+unrepresentable. Both optimizer capabilities are uniform over the packaged type: `Predictors[Program[I, O]]`
+(Program companion; read/replace = the Para projection/reparameterization) and `ProgramRunner[Program[I, O]]`
+(Program companion; conditional on `RecordCodec[I]`, decode object-side + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
-does), the previously-uncompilable upcast case now optimizes, and a composed pipeline `a >>> b` is
-record-runnable and optimizable end-to-end, which the ambient `Module` world cannot do without a hand-written
-`ProgramRunner` (the gap `ProgramRunner`'s scaladoc documents). Pinned by `ParaCategoryLawSuite` (decoder threading) and
-`ParaCompileSuite` (upcast + composed-pipeline optimization).
+does), upcasts and composed pipelines `a >>> b` optimize end-to-end, and `.copro` demands exactly the runner,
+which exists exactly when the pipeline's input object is codec-equipped. Pinned by `ParaCategoryLawSuite`
+(object-side decoding + the unrepresentability gates) and `ParaCompileSuite` (upcast + composed-pipeline +
+bundle optimization).
 
 **Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:
 `id[A]` carried a failing decoder (nothing decodes an arbitrary `A` from a record), so the left unit
@@ -253,13 +262,12 @@ for `Program` at `P = RecordCodec` ("the object decodes from a record", built on
 decoders cohere definitionally). Unlike a blanket Ok-style constrained category, the constraint appears
 ONLY where evaluation evidence must be synthesized rather than threaded: `id[A: RecordCodec]` builds its
 decoder from the object's codec; `>>>` stays unconstrained (packaged morphisms carry their own evidence).
-Result, pinned by the suites: the left unit holds on the evaluation observation under coherent packaging
-(`id >>> p` decodes identically to `p`); an id-headed pipeline optimizes end-to-end through COPRO; and `id`
-at a non-codec object is a compile error, the honest statement that over codec-equipped objects the
-structure is a genuine category while elsewhere it is a semicategory (morphisms compose, no unit).
-`ProgramInput` also has a low-priority `RecordCodec`-based fallback, so any typed program with a codec-equipped input
-packages via `Program.of(f)` alone. Signature-backed instances cover non-`RecordCodec` inputs for `Predict`,
-`ChainOfThought`, `ReAct`, and `CodeAct` by using the exact `inputShape` the module executes.
+Result, pinned by the suites: the left unit holds on the evaluation observation (after stage 4,
+definitionally: one codec per object is the only decode path); an id-headed pipeline optimizes end-to-end
+through COPRO; and `id` at a non-codec object is a compile error, the honest statement that over
+codec-equipped objects the structure is a genuine category while elsewhere it is a semicategory (morphisms
+compose, no unit). After stage 4 the object constraint also gates `Program.of` and the record-boundary
+runner, so "codec-equipped" is a property every packaged program's endpoints provably have.
 
 **Law statements, the read functor, and fan-out (commit `446ccb6`, adopted from jpablo/math-with-scala).**
 Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
@@ -267,11 +275,12 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
 - **Laws as statements.** `core.contracts.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
   and the `@Law` annotation. The Para structures now state their laws as `@Law` methods ON the traits, and
   `ParaCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
-  observation (structural `==` for parameter vectors; typed output + params + coherent decoder + lifecycle for
-  `Program` morphisms). Final `Prediction.raw` is deliberately outside Category equality: `p >>> id` retains the
-  typed output and lifecycle but ends with identity's empty envelope. Both that counterexample and the
-  unlawful-`ProgramInput`-instance counterexample (the left unit failing on the decode observation) are executable. The deliberate split from the formalization library: there the
-  equations are the deliverable, here they are executable specifications.
+  observation (structural `==` for parameter vectors; typed output + params + lifecycle for `Program`
+  morphisms, decoding having moved to the objects in stage 4). Final `Prediction.raw` is deliberately outside
+  Category equality: `p >>> id` retains the typed output and lifecycle but ends with identity's empty
+  envelope; that counterexample stays executable, while the former unlawful-decoder counterexample became
+  UNREPRESENTABLE and is pinned as a pair of compile gates instead. The deliberate split from the
+  formalization library: there the equations are the deliverable, here they are executable specifications.
 - **`params` as a functor value.** `ParaCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
   parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`
   category to the parameter-monoid delooping) names what `Predictors.read` is categorically; its functor laws
@@ -433,12 +442,13 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
   `ModuleHom` implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or
   other commutative carrier could implement CD/Markov laws. A pair-input decoder would still be needed to lift
   ordered tensor into `ParaCategory`/`Program`.
-- **Full Para adoption**: promote the packaged `Program` (see the Para formalization above; the input decoder is
-  packaged, the entry-point loop is closed, objects are codec-equipped, the signature-backed `ProgramInput` boundary
-  covers Predict / ChainOfThought / ReAct / CodeAct, and the BestOfN / Refine / RLM `Predictors` instances are now in
-  place, so the prototype and its instance coverage are functionally complete) from prototype to the optimizer
-  entry-point API. The former Mirror silent-drop is already closed: structural
-  derivation now requires field evidence, with `Predictors.empty` as an explicit parameter-free opt-in. Best
-  done alongside the CIO phase so the API breaks once.
+- **Full Para adoption**: promote the packaged `Program` (see the Para formalization above; the entry-point
+  loop is closed, decoding is object-side with codec-equipped objects gating `of` / `id` / the runner, the
+  signature-backed `ProgramRunner` instances cover the framework leaves and composites for bare-module
+  running, and the BestOfN / Refine / RLM `Predictors` instances are in place, so the layer and its instance
+  coverage are functionally complete) to the DOCUMENTED public optimizer entry-point API (docs-site guide +
+  README surface). The former Mirror silent-drop is already closed: structural derivation now requires field
+  evidence, with `Predictors.empty` as an explicit parameter-free opt-in. The stage-4 API break already
+  happened in the no-users window, so what remains is documentation surface, not code.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.

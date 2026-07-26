@@ -277,13 +277,14 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `Predictors[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
     values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
-    Signature-backed `ProgramInput` instances cover Predict / ChainOfThought / ReAct / CodeAct even when their input
-    type has no `RecordCodec`; a custom decoder is an explicitly supplied `ProgramInput` instance carrying the
-    trait's coherence law (from the lawfulness review: `unsafeOf` was removed, so decoder coherence is a
-    conventional typeclass-instance obligation rather than a constructor-naming convention). For runtime-string
-    signatures the `DynamicSignature` bundle (prototype) goes further: each parse mints fresh abstract `In`/`Out`
-    types carrying their own codecs, so on bundle objects the unit laws hold with no coherence condition at all
-    (see `algebra-2-program-composition.md`).
+    Decoding is OBJECT-side (stage 4, after the lawfulness-review arc that first replaced `unsafeOf` with a
+    `ProgramInput` coherence law and then deleted `ProgramInput` outright): `Program.of` and the
+    record-boundary runner require `RecordCodec[I]` at the domain, nothing decode-related is packaged, and an
+    incoherent per-program decoder is unrepresentable (compile gates pin both former vehicles). Named-tuple
+    inputs derive their codec through the same `SchemaTupleShape` path the signature macros use; bare-module
+    running is signature-backed `ProgramRunner` instances (no identity in sight, no coherence question);
+    runtime-string signatures enter through the `DynamicSignature` bundle, whose parses mint fresh
+    codec-equipped types (see `algebra-2-program-composition.md`).
     `Predictors.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `Predictors.empty`, so an omitted learnable subtree can no longer disappear silently.
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is

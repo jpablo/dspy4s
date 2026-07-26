@@ -61,6 +61,7 @@ class DynamicSignatureSuite extends FunSuite:
   }
 
   test("the optimizer surface holds over a packaged bundle program (Predictors read/replace + record run)") {
+    import qa.given
     val packaged = Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
     val P        = summon[Predictors[Program[qa.In, qa.Out]]]
 
@@ -86,6 +87,8 @@ class DynamicSignatureSuite extends FunSuite:
   }
 
   test("a bridged cross-fiber pipeline composes, stays parameter-transparent, and runs end-to-end") {
+    import qa.given
+    import judge.given
     val b        = DynamicSignature.bridge(qa, judge).toOption.get
     val p1       = Program.of(qa.predict().withLm(new FixedLm("one", "yes")))
     val p2       = Program.of(judge.predict().withLm(new FixedLm("two", "valid")))
@@ -93,9 +96,9 @@ class DynamicSignatureSuite extends FunSuite:
 
     // The bridge is parameter-free: the pipeline's Para params are exactly the two predicts'.
     assertEquals(pipeline.params.size, 2)
-    // Decoder threading: the composite decodes through the FIRST leg (qa's codec).
-    assert(pipeline.decodeInput(DynamicValues.record("question" := "?")).isRight)
-    assert(pipeline.decodeInput(DynamicValue.Record.empty).isLeft)
+    // Decoding is object-side: the pipeline's record boundary is qa's codec (its domain object).
+    assert(summon[RecordCodec[qa.In]].decode(DynamicValues.record("question" := "?")).isRight)
+    assert(summon[RecordCodec[qa.In]].decode(DynamicValue.Record.empty).isLeft)
 
     val in  = qa.input(DynamicValues.record("question" := "?")).toOption.get
     val out = underAdapter(pipeline.apply(ProgramCall(in))).toOption.get
