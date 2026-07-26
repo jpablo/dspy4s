@@ -10,6 +10,7 @@ import dspy4s.optimize.{COPROConfig, QAInput, QAOutput}
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.optimize.para.ParaCompile.*
+import dspy4s.programs.DynamicSignature
 import dspy4s.programs.Predict
 import dspy4s.programs.para.{ParaCategory, Program}
 import dspy4s.typed.Signature
@@ -188,6 +189,24 @@ class ParaCompileSuite extends FunSuite:
       val report = result.toOption.get
       assertEquals(report.metadata.get("predictors"), Some(2))
       assertEquals(report.bestProgram.params.size, 2)
+    }
+  }
+
+  // ── 5a. Stage 3 of the bundle promotion: a runtime-string student through the same entry point ──────────
+
+  test("COPRO optimizes a DynamicSignature bundle program exactly like a typed student") {
+    // The runtime-string counterpart of test 1: the student's signature exists only as a parsed value, but the
+    // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (Predictors +
+    // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.
+    val bundle  = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
+    val student = Program.of(bundle.predict())
+    RuntimeEnvironment.withSettings(settings) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = student.copro(config(), trainset)
+      assert(result.isRight, s"compile failed: ${result.left.toOption}")
+      val report = result.toOption.get
+      assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
+      assertEquals(report.metadata.get("best_score"), Some(100.0))
     }
   }
 

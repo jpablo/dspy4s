@@ -31,6 +31,10 @@ import zio.blocks.schema.DynamicValue
   *     [[ProgramOfThought]], [[MultiChainComparison]], and the internal passes in [[ReAct]];
   *   - optimizer helper generations whose proposed signature exists only as a [[SignatureLayout]].
   *
+  * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it
+  * mints fresh input/output types with their decoder, so the program composes and optimizes through the same
+  * machinery as statically typed programs. `DynamicPredict` is the untyped substrate those helpers run on.
+  *
   * @param layout
   *   the signature whose input/output fields drive encoding, prompting, and parsing
   * @param demos

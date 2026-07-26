@@ -4,9 +4,10 @@
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md Status: translated
   * (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
  *
-  * This translation instantiates the generic optimizer with `DynamicPredict`; typed programs are supported too when
-  * they provide the same `Predictors` + `ProgramRunner` capabilities. `compile(student, trainset)` returns an
- * `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
+  * This translation states the optimizer generically over the two capabilities every student needs
+  * (`Predictors` + `ProgramRunner`); the main below drives it with a runtime-string student built through
+  * `DynamicSignature` (parse once, mint fresh types, build a typed `Predict` over them). `compile(student,
+  * trainset)` returns an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
  * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
  */
 package dspy4s.examples.learn.optimization
@@ -17,8 +18,8 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
 import dspy4s.optimize.{BootstrapFewShotWithRandomSearch, ProgramPersistence, RandomSearchConfig}
-import dspy4s.programs.DynamicPredict
-import dspy4s.typed.Signature
+import dspy4s.programs.{DynamicPredict, DynamicSignature, ProgramRunner}
+import dspy4s.programs.predictors.Predictors
 
 object Optimizers:
 
@@ -27,12 +28,12 @@ object Optimizers:
   // | teleprompter = BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
   // | optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
   // --8<-- [start:optimize-bootstrap]
-  def optimize(
+  def optimize[P: Predictors: ProgramRunner](
       metric: Metric,
-      program: DynamicPredict,
+      program: P,
       trainset: Vector[Example]
-  )(using RuntimeContext): Either[DspyError, DynamicPredict] =
-    val teleprompter = BootstrapFewShotWithRandomSearch[DynamicPredict](RandomSearchConfig(
+  )(using RuntimeContext): Either[DspyError, P] =
+    val teleprompter = BootstrapFewShotWithRandomSearch[P](RandomSearchConfig(
       metric               = metric,
       maxBootstrappedDemos = 4,
       maxLabeledDemos      = 4,
@@ -59,7 +60,11 @@ object Optimizers:
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.optimization.optimizersMain"
 // (Runs a small bootstrap+random-search over an LM — makes several LM calls.)
 @main def optimizersMain(): Unit = Demo.withLm {
-  val program  = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
+  // The runtime-string path: parse once (minting fresh input/output types with their codec), then build a
+  // typed Predict over the bundle. Optimizable through the same capabilities as any typed program.
+  val signature = DynamicSignature.parse("question -> answer")
+    .fold(error => throw new IllegalArgumentException(error.message), identity)
+  val program  = signature.predict()
   val trainset = Vector(
     Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question")),
     Example("question" := "What is 2+2?", "answer" := "4").withInputs(Set("question"))

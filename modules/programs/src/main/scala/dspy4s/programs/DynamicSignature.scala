@@ -7,8 +7,8 @@ import dspy4s.programs.para.Program
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 
-/** PROTOTYPE: a runtime-parsed signature whose input and output types are FRESH abstract types minted by the
-  * parse, restoring one-decoder-per-type for the dynamic layer.
+/** A runtime-parsed signature whose input and output types are FRESH abstract types minted by the parse,
+  * restoring one-decoder-per-type for the dynamic layer.
   *
   * The problem this solves: every `Signature.fromStringDynamic` program shares the input type
   * `DynamicValue.Record`, while each needs its own field-validating decoder, so the type cannot determine the
@@ -28,9 +28,11 @@ import zio.blocks.schema.DynamicValue
   * Scope: this canonicalizes decoder IDENTITY only. Cardinality-shaped value dependence (MultiChainComparison's
   * `m`, reparameterization arity) gains nothing from freshness and stays behind runtime checks.
   *
-  * Status: prototype, the category-facing gate for runtime-string signatures. `Signature.fromStringDynamic`
-  * remains the plain data-bag surface for consumers that never enter the category (optimizer helper
-  * generations, the evaluation judge).
+  * Status: the recommended user path for runtime-string signatures. `s.predict()` builds the typed program;
+  * composition, optimization (`Predictors` + `ProgramRunner` over a packaged `Program`), and cross-fiber
+  * pipelines (via [[DynamicSignature.bridge]]) all run through the same machinery as statically typed
+  * programs. `Signature.fromStringDynamic` remains the substrate, and the plain data-bag surface for
+  * consumers that never enter the category (optimizer helper generations, the evaluation judge).
   */
 sealed trait DynamicSignature:
   /** The fresh input type: externally abstract, so this bundle's codec and signature are its only sources. */
