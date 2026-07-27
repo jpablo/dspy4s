@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.TraceEntry
 
@@ -8,7 +8,7 @@ import dspy4s.core.contracts.TraceEntry
   * (including failure entries via G-12 P-a) plus the score it earned. The reflective-dataset builder reads these. */
 final case class Trajectory(
     example: Example,
-    prediction: DynamicPrediction,
+    prediction: RawPrediction,
     trace: Vector[TraceEntry],
     score: Double
 )
@@ -17,7 +17,7 @@ final case class Trajectory(
   * `Some` iff traces were captured (the reflective path) and `None` on the scores-only fast path. `outputs`,
   * `scores`, and (when present) `trajectories` are all aligned with the input batch order. */
 final case class EvaluationBatch(
-    outputs: Vector[DynamicPrediction],
+    outputs: Vector[RawPrediction],
     scores: Vector[Double],
     trajectories: Option[Vector[Trajectory]]
 )

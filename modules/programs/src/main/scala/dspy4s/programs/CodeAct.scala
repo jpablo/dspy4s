@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
@@ -190,7 +190,7 @@ final case class CodeAct[I, O](
       (extracted, rendered) = extractedAndTrajectory
     yield Prediction(
       output = extracted.output,
-      raw = DynamicPrediction(
+      raw = RawPrediction(
         values = extracted.raw.values
           .updated("trajectory", DynamicValue.Primitive(PrimitiveValue.String(rendered))),
         completions = extracted.raw.completions,

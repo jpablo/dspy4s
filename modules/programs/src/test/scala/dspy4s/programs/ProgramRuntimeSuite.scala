@@ -11,7 +11,7 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleEndEvent
 import dspy4s.core.contracts.ModuleStartEvent
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -60,8 +60,8 @@ class ProgramRuntimeSuite extends FunSuite:
     override val moduleName: String = "echo"
     override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
-      Right(DynamicPrediction(values =
+    ): Either[DspyError, RawPrediction] =
+      Right(RawPrediction(values =
         call.input.updated(
         "answer",
         zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))

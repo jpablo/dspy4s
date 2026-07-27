@@ -10,7 +10,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.typed.Signature
@@ -362,7 +362,7 @@ class StreamListenerSuite extends FunSuite:
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         for
           answer    <- predict1.apply(input)
           judgement <- predict2.apply(input.copy(
@@ -457,7 +457,7 @@ class StreamListenerSuite extends FunSuite:
       private val predict2 = DynamicPredict(layout = sig, name = Some("predict2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         for
           _      <- predict1.apply(input)
           second <- predict2.apply(input)
@@ -510,7 +510,7 @@ class StreamListenerSuite extends FunSuite:
       private val p2 = DynamicPredict(layout = sig, name = Some("p2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         for
           _ <- p1.apply(input)
           out <- p2.apply(input)
@@ -597,8 +597,8 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "opaque"
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
-        Right(dspy4s.core.data.DynamicPrediction(values = rec("answer" := "x")))
+      ): Either[DspyError, RawPrediction] =
+        Right(dspy4s.core.data.RawPrediction(values = rec("answer" := "x")))
 
     given RuntimeContext = RuntimeEnvironment.current
     // We don't actually invoke the stream — validation runs eagerly when

@@ -13,7 +13,7 @@
 package dspy4s.examples
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, ErrorLimit, RuntimeContext, ThreadCount}
-import dspy4s.core.data.{DynamicPrediction, Example}
+import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
@@ -115,7 +115,7 @@ object Cheatsheet:
   // ── Snippet 8 (lines 102–114) — Parallel ──
   // | parallel = dspy.Parallel(num_threads=2); parallel([(predict, ex1), (predict, ex2)])
   // --8<-- [start:parallel]
-  def parallel(using RuntimeContext): Either[DspyError, Vector[Option[DynamicPrediction]]] =
+  def parallel(using RuntimeContext): Either[DspyError, Vector[Option[RawPrediction]]] =
     val predict = DynamicPredict(Signature.fromString("question -> answer").layout)
     Parallel(numThreads = Some(ThreadCount(2))).apply(Vector(
       predict -> ProgramCall(input = rec("question" := "1+1")),

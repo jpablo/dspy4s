@@ -343,7 +343,7 @@ into `feedback` would have been the category error the grill set out to avoid.
 ### Code-truth correction: `agentLoop`'s env/classify/render decomposition does not fit
 
 The grilled `agentLoop(policy, extractor, env, classify, render)` with `env.step: Action => M[Observation]` and
-`classify : DynamicPrediction => Continue(Action) | Done(Result)` was too decomposed for the actual code:
+`classify : RawPrediction => Continue(Action) | Done(Result)` was too decomposed for the actual code:
 
 - **Done-detection is entangled with the action, not separable into `classify`.** CodeAct runs the *finishing*
   code (the `finished` flag is read alongside the executed snippet); RLM detects SUBMIT only *after* executing
@@ -434,7 +434,7 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
 
 ## Deferred items (recorded, not lost — additive, no consumer yet)
 
-- ~~**Usage-merge on `>>>`.**~~ Resolved by `DynamicPrediction.followedBy`: usage combines pointwise while the
+- ~~**Usage-merge on `>>>`.**~~ Resolved by `RawPrediction.followedBy`: usage combines pointwise while the
   rightmost produced values/completions win and the empty envelope is identity.
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.

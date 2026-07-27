@@ -6,7 +6,7 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -56,8 +56,8 @@ class AutoEvaluationSuite extends FunSuite:
   private def example(question: String, response: String): Example =
     Example(rec("question" := question, "response" := response)).withInputs(Set("question"))
 
-  private def prediction(response: String): DynamicPrediction =
-    DynamicPrediction(rec("response" := response))
+  private def prediction(response: String): RawPrediction =
+    RawPrediction(rec("response" := response))
 
   // f1_score(precision=0.5, recall=1.0) = 2*0.5*1.0/(0.5+1.0) = 1/1.5 ≈ 0.6667
   test("f1_score helper computes the clamped harmonic mean") {
@@ -103,7 +103,7 @@ class AutoEvaluationSuite extends FunSuite:
   test("CompleteAndGrounded combines completeness and groundedness via f1_score") {
     val metric = CompleteAndGrounded()
     val ex = example("What is the capital of France?", "Paris is the capital of France.")
-    val pred = DynamicPrediction(
+    val pred = RawPrediction(
       rec("response" := "Paris is the capital.", "context" := "France's capital city is Paris.")
     )
     // completeness=1.0, groundedness=0.5 -> f1_score(0.5, 1.0) ≈ 0.6667

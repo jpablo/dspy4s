@@ -7,7 +7,7 @@ import dspy4s.programs.predictors.Predictors
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.optimize.contracts.CandidateProgram
@@ -71,7 +71,7 @@ final class BootstrapFewShot[P: {Predictors, ProgramRunner}](
           var success = false
           while round < config.maxRounds && !success do
             try
-              val runOutcome: Either[DspyError, DynamicPrediction] =
+              val runOutcome: Either[DspyError, RawPrediction] =
                 dspy4s.core.runtime.RuntimeEnvironment.withGeneratedAsyncTask(s"bootstrap-round-$round") {
                   given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
                   summon[ProgramRunner[P]].run(teacherProgram, example.inputs)

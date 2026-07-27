@@ -4,7 +4,7 @@ import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.Module
@@ -41,7 +41,7 @@ class CompositePredictorsSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-      Right(Prediction(f(call.input), DynamicPrediction.empty))
+      Right(Prediction(f(call.input), RawPrediction.empty))
 
   private object Leaf:
     given leafPredictor[I, O]: Predictor[Leaf[I, O]] with

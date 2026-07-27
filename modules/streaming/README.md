@@ -30,7 +30,7 @@ events.foreach {
 |------|------|
 | `Streamify.streamify[P](program, …)` | Entry point: wraps a program (via the `Streamable` type-class) into a function returning `ClosableIterator[StreamEvent]`. Optional status-message provider, stream listeners, final-prediction toggle, queue capacity. |
 | `Streamable[P]` | Type-class that knows how to `run` a program from inputs and report its `knownSignatures` (for listener validation). Instances for `DynamicModule`, `ReAct`, `CodeAct`, `ProgramOfThought`. |
-| `StreamEvent` | Sealed root: `TokenEvent` (field-routed text), `StatusEvent` (callback-derived progress), `PredictionEvent` (final `DynamicPrediction`), `ErrorEvent` (`DspyError`). |
+| `StreamEvent` | Sealed root: `TokenEvent` (field-routed text), `StatusEvent` (callback-derived progress), `PredictionEvent` (final `RawPrediction`), `ErrorEvent` (`DspyError`). |
 | `StreamListener` | A subscription filter: a specific output field, optionally scoped to a named predictor, with `allowReuse` semantics (fire once per field cycle, or every time). |
 | `StatusMessageProvider` | Hooks (`moduleStart`/`lmStart`/`toolStart`/…) to customize status text; a default is provided. |
 | `StreamingLanguageModelWrapper` | Wraps a `StreamingLanguageModel`: feeds chunks into the queue while assembling a complete `LmResponse` for non-streaming callers, routing per-signature. |

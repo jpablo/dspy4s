@@ -1,7 +1,7 @@
 package dspy4s.gepa.contracts
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -20,7 +20,7 @@ class FeedbackMetricSuite extends FunSuite:
     override def name: String = "toy_exact"
     override def feedback(
         example: Example,
-        prediction: DynamicPrediction,
+        prediction: RawPrediction,
         trace: Vector[TraceEntry],
         component: Option[String],
         componentTrace: Vector[TraceEntry]
@@ -36,7 +36,7 @@ class FeedbackMetricSuite extends FunSuite:
   test("program-level feedback scores and explains, and Metric.score delegates to it") {
     given RuntimeContext = RuntimeContext()
     val ex   = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
-    val pred = DynamicPrediction(rec("answer" := "Paris"))
+    val pred = RawPrediction(rec("answer" := "Paris"))
 
     val fb = metric.feedback(ex, pred, Vector.empty, component = None, componentTrace = Vector.empty).toOption.get
     assertEquals(fb.score, 1.0)
@@ -49,7 +49,7 @@ class FeedbackMetricSuite extends FunSuite:
   test("predictor-level feedback targets the named component and reflects a wrong answer") {
     given RuntimeContext = RuntimeContext()
     val ex   = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
-    val pred = DynamicPrediction(rec("answer" := "Lyon"))
+    val pred = RawPrediction(rec("answer" := "Lyon"))
 
     val fb = metric.feedback(ex, pred, Vector.empty, component = Some("qa"), componentTrace = Vector.empty).toOption.get
     assertEquals(fb.score, 0.0)

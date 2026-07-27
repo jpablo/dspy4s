@@ -3,7 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{DspyError, FieldRole, NotFoundError, ValidationError, :=}
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import munit.FunSuite
 
 // Top-level: Schema/Mirror derivation does not work for path-dependent types
@@ -153,24 +153,24 @@ class Phase2TypedCoreSuite extends FunSuite:
 
   test("Prediction is never constructed when decode fails") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = DynamicPrediction(values = rec("sentiment" := "joy"))  // missing 'confidence'
+    val raw   = RawPrediction(values = rec("sentiment" := "joy"))  // missing 'confidence'
     val result = Prediction.from(raw, shape)
     assert(result.isLeft, s"expected failure but got: $result")
   }
 
   test("Prediction.from succeeds when all required outputs decode") {
     val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = DynamicPrediction(values = rec("sentiment" := "joy", "confidence" := 0.92))
+    val raw   = RawPrediction(values = rec("sentiment" := "joy", "confidence" := 0.92))
     val result = Prediction.from(raw, shape)
     result match
       case Right(tp) =>
         assertEquals(tp.output, P2ScoredSentiment("joy", 0.92))
-        assert(tp.raw eq raw, "Prediction must preserve the original raw DynamicPrediction")
+        assert(tp.raw eq raw, "Prediction must preserve the original RawPrediction")
       case Left(err) => fail(s"expected success but got: $err")
   }
 
   test("Prediction.dynamic uses the raw value record as its semantic output") {
-    val raw        = DynamicPrediction(values = rec("answer" := "Paris"))
+    val raw        = RawPrediction(values = rec("answer" := "Paris"))
     val prediction = Prediction.dynamic(raw)
 
     assertEquals(prediction.output, raw.values)
@@ -187,7 +187,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     val inputRec = sig.inputShape.encode(input)
     assertEquals(inputRec, rec("sentence" := "i started feeling vulnerable"))
 
-    // Decode output ← Record (what Predict will receive from DynamicPrediction)
+    // Decode output ← Record (what Predict will receive from RawPrediction)
     val outputRec = rec("sentiment" := "joy", "confidence" := 0.85)
     val output    = sig.outputShape.decode(outputRec)
     assertEquals(output, Right(P2ScoredSentiment("joy", 0.85)))

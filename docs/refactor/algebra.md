@@ -169,7 +169,7 @@ denotational carrier such as stochastic kernels, but there is no `CDCategory[Mod
 Sequential association is made stable by lifecycle-transparent structural nodes: `Identity`, `AndThen`,
 `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, and `Moded` add no callbacks, trace, or history of their own. Leaf
 modules remain fully instrumented. Raw prediction evidence composes with an associative `followedBy` operation:
-rightmost produced values/completions win, usage adds, and `DynamicPrediction.empty` is the identity. Consequently
+rightmost produced values/completions win, usage adds, and `RawPrediction.empty` is the identity. Consequently
 both unit laws and associativity hold on the complete `Prediction`, including the public `ProgramRunner`
 observation. `ComposeLawSuite` pins this plus a final leaf that reads the live trace.
 
@@ -264,7 +264,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
     `augment` closing position, execution-wrapping modes. Usage accumulation on `>>>` is now part of the lawful
-    `DynamicPrediction.followedBy` envelope operation.
+    `RawPrediction.followedBy` envelope operation.
   - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous

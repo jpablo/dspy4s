@@ -2,13 +2,13 @@ package dspy4s.programs
 
 import dspy4s.core.data.Completions
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.ValidationError
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** Aggregation utilities for collapsing multiple candidate completions into a single [[DynamicPrediction]]. Port
+/** Aggregation utilities for collapsing multiple candidate completions into a single [[RawPrediction]]. Port
   * of Python DSPy's `dspy.predict.aggregation`.
   *
   * The primary entry point is [[majority]], which picks the most-common value for a given output field across a
@@ -29,7 +29,7 @@ object Aggregation:
       Option(rendered).filter(_.nonEmpty)
   }
 
-  /** Returns a [[DynamicPrediction]] whose chosen completion's value for the given field is the majority across
+  /** Returns a [[RawPrediction]] whose chosen completion's value for the given field is the majority across
     * `rows`. Ties are broken by first occurrence.
     *
     *   - `field = None` picks the **last** key in the first row (matches Python's "last output field" default
@@ -40,7 +40,7 @@ object Aggregation:
       rows: Vector[DynamicValue.Record],
       field: Option[String] = None,
       normalize: DynamicValue => Option[String] = defaultNormalize
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     if rows.isEmpty then Left(ValidationError("Cannot compute majority over an empty set of completions"))
     else
       // "Last key" must skip the synthetic `tool_calls` value PredictEngine appends to every prediction —
@@ -77,16 +77,16 @@ object Aggregation:
           val winner = counted.iterator.collectFirst {
             case (row, Some(k)) if tally.getOrElse(k, 0) == maxCount => row
           }.getOrElse(rows.head)
-          DynamicPrediction.fromRows(Vector(winner))
+          RawPrediction.fromRows(Vector(winner))
       }
 
-  /** Run majority over the [[Completions]] embedded in a [[DynamicPrediction]], falling back to a single-row vote
+  /** Run majority over the [[Completions]] embedded in a [[RawPrediction]], falling back to a single-row vote
     * when the prediction has no completions attached. */
   def majorityOf(
-      prediction: DynamicPrediction,
+      prediction: RawPrediction,
       field: Option[String] = None,
       normalize: DynamicValue => Option[String] = defaultNormalize
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     prediction.completions match
       case Some(completions) => majorityOf(completions, field, normalize)
       case None              => majority(Vector(prediction.values), field, normalize)
@@ -96,7 +96,7 @@ object Aggregation:
       completions: Completions,
       field: Option[String],
       normalize: DynamicValue => Option[String]
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     if completions.size == 0 then
       Left(ValidationError("Cannot compute majority over an empty Completions"))
     else

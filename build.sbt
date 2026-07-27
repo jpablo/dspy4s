@@ -51,7 +51,7 @@ lazy val root = (project in file("."))
 
 // `core` owns the contract layer that everything else builds on. We pull in
 // zio-blocks-schema here because `DynamicValue` is the spine type carried
-// through `Example.values`, `ProgramCall.input`, `DynamicPrediction.values`,
+// through `Example.values`, `ProgramCall.input`, `RawPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
 // programs, evaluate, and the typed surface.
 lazy val core = (project in file("modules/core"))

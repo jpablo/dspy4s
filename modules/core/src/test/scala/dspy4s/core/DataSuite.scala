@@ -1,7 +1,7 @@
 package dspy4s.core
 
 import dspy4s.core.data.Completions
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.ValidationError
@@ -78,7 +78,7 @@ class DataSuite extends FunSuite:
         "score"  -> Vector(dbl(0.9))
       )
     )
-    val prediction = DynamicPrediction.fromCompletions(completions)
+    val prediction = RawPrediction.fromCompletions(completions)
 
     assert(prediction.isRight)
     val built = prediction.toOption.get
@@ -109,7 +109,7 @@ class DataSuite extends FunSuite:
   }
 
   test("prediction asDouble and withValue") {
-    val prediction = DynamicPrediction.empty
+    val prediction = RawPrediction.empty
       .withRawValue("score", 3)
       .withRawValue("label", "ok")
 
@@ -119,18 +119,18 @@ class DataSuite extends FunSuite:
   }
 
   test("sequential prediction evidence has empty identity and is associative") {
-    val a = DynamicPrediction(
+    val a = RawPrediction(
       values = DynamicValues.record("stage" := "a"),
       lmUsage = Some(LmUsage(totalTokens = 1, promptTokens = 1))
     )
-    val b = DynamicPrediction(
+    val b = RawPrediction(
       values = DynamicValues.record("stage" := "b"),
       lmUsage = Some(LmUsage(totalTokens = 2, completionTokens = 2))
     )
-    val c = DynamicPrediction(values = DynamicValues.record("stage" := "c"))
+    val c = RawPrediction(values = DynamicValues.record("stage" := "c"))
 
-    assertEquals(DynamicPrediction.empty.followedBy(a), a)
-    assertEquals(a.followedBy(DynamicPrediction.empty), a)
+    assertEquals(RawPrediction.empty.followedBy(a), a)
+    assertEquals(a.followedBy(RawPrediction.empty), a)
     assertEquals(a.followedBy(b).followedBy(c), a.followedBy(b.followedBy(c)))
     assertEquals(a.followedBy(b).lmUsage, Some(LmUsage(totalTokens = 3, promptTokens = 1, completionTokens = 2)))
     assertEquals(a.followedBy(b).asString("stage"), Right("b"))
@@ -139,12 +139,12 @@ class DataSuite extends FunSuite:
   // ── Primitive accessor ladder (asString/asInt/asDouble/asBoolean) ────────
 
   test("asString returns native strings unchanged") {
-    val p = DynamicPrediction.empty.withRawValue("s", "hello")
+    val p = RawPrediction.empty.withRawValue("s", "hello")
     assertEquals(p.asString("s"), Right("hello"))
   }
 
   test("asString stringifies primitive numerics and booleans") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("i", 7)
       .withRawValue("d", 1.5)
       .withRawValue("b", true)
@@ -154,16 +154,16 @@ class DataSuite extends FunSuite:
   }
 
   test("asString rejects non-scalar values") {
-    val p = DynamicPrediction.empty.withRawValue("m", Map("a" -> 1))
+    val p = RawPrediction.empty.withRawValue("m", Map("a" -> 1))
     assert(p.asString("m").isLeft)
   }
 
   test("asString fails for missing key") {
-    assert(DynamicPrediction.empty.asString("missing").isLeft)
+    assert(RawPrediction.empty.asString("missing").isLeft)
   }
 
   test("asInt accepts Int and Long that fits, rejects out-of-range Long") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("i", 42)
       .withRawValue("l", 42L)
       .withRawValue("huge", Long.MaxValue)
@@ -173,7 +173,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asInt parses integer strings, rejects non-integer strings") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("clean", "42")
       .withRawValue("padded", "  7  ")
       .withRawValue("garbage", "abc")
@@ -185,7 +185,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asInt rejects Double and Boolean to avoid silent truncation") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("d", 1.5)
       .withRawValue("b", true)
     assert(p.asInt("d").isLeft)
@@ -193,7 +193,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asDouble parses numeric strings as Phase-1 addition") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("clean", "1.5")
       .withRawValue("int-shaped", "42")
       .withRawValue("garbage", "abc")
@@ -203,7 +203,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asBoolean accepts true/false and conservative string forms") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("native-t", true)
       .withRawValue("native-f", false)
       .withRawValue("str-t", "true")
@@ -217,7 +217,7 @@ class DataSuite extends FunSuite:
   }
 
   test("asBoolean rejects ambiguous strings and other types") {
-    val p = DynamicPrediction.empty
+    val p = RawPrediction.empty
       .withRawValue("yes", "yes")
       .withRawValue("one", "1")
       .withRawValue("number", 1)
@@ -234,7 +234,7 @@ class DataSuite extends FunSuite:
   }
 
   test("prediction from empty rows fails") {
-    val prediction = DynamicPrediction.fromRows(Vector.empty)
+    val prediction = RawPrediction.fromRows(Vector.empty)
 
     assert(prediction.isLeft)
     assert(prediction.left.toOption.get.isInstanceOf[ValidationError])

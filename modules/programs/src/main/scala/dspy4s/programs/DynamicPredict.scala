@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -18,7 +18,7 @@ import zio.blocks.schema.DynamicValue
   * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (field names, roles, and wire types known only at
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
   * `Prediction[DynamicValue.Record]`. Its semantic output is the parsed value record; its `raw` field retains the
-  * [[dspy4s.core.data.DynamicPrediction DynamicPrediction]] with completions and LM usage. The actual execution lives
+  * [[dspy4s.core.data.RawPrediction RawPrediction]] with completions and LM usage. The actual execution lives
   * in [[dspy4s.programs.runtime.PredictEngine PredictEngine]]; [[DynamicModule]] lifts that engine result through
   * `Prediction.dynamic`, and the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and
   * history. Mirrors DSPy's `dspy.Predict` at the dynamic boundary.
@@ -83,5 +83,5 @@ final case class DynamicPredict(
 
   override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     engine.execute(call)

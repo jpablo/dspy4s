@@ -2,7 +2,7 @@ package dspy4s.gepa
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -36,7 +36,7 @@ object Pipeline:
   given ProgramRunner[Pipeline] with
     def run(program: Pipeline, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       program.hinter.apply(call).flatMap { hintPred =>
         val hint         = DynamicValues.recordGet(hintPred.output, "hint").getOrElse(DynamicValue.Null)
         val answerInputs = call.input.updated("hint", hint)
@@ -79,7 +79,7 @@ class GepaMultiPredictorSuite extends FunSuite:
     override def name: String = "exact_answer"
     override def feedback(
         example: Example,
-        prediction: DynamicPrediction,
+        prediction: RawPrediction,
         trace: Vector[TraceEntry],
         component: Option[String],
         componentTrace: Vector[TraceEntry]

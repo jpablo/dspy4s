@@ -20,8 +20,9 @@ larger module, exactly like a single `Predict`.
 
 - Each step is a named `DynamicPredict`. Naming matters when you later want to
   optimize or stream a specific step.
-- `forward` returns `Either[DspyError, DynamicPrediction]`, so a failure in any
-  step short-circuits the `for` comprehension.
+- `forwardDynamic` returns `Either[DspyError, RawPrediction]`, so a failure in
+  any step short-circuits the `for` comprehension. `DynamicModule` then lifts
+  that value into the uniform `Prediction[DynamicValue.Record]` boundary.
 - Nothing about composition is special-cased. A composite module is the same
   kind of value as the modules it contains.
 

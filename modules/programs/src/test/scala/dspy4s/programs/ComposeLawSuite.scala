@@ -5,7 +5,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
@@ -42,7 +42,7 @@ class ComposeLawSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-      Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
+      Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
   /** A leaf that makes lifecycle structure semantically observable by returning the trace size at its forward boundary.
     * Associativity requires both syntax trees to have run the same leaves before reaching it.
@@ -54,7 +54,7 @@ class ComposeLawSuite extends FunSuite:
     override protected def forward(call: ProgramCall[String])(using
         RuntimeContext
     ): Either[DspyError, Prediction[Int]] =
-      Right(Prediction(RuntimeEnvironment.current.trace.size, DynamicPrediction.empty))
+      Right(Prediction(RuntimeEnvironment.current.trace.size, RawPrediction.empty))
 
   private object Step:
     given stepPredictor[I, O]: Predictor[Step[I, O]] with

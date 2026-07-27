@@ -3,7 +3,7 @@ package dspy4s.typed
 import zio.blocks.schema.Schema
 
 import dspy4s.core.contracts.{NotFoundError, SignatureLayout, TypeRef, :=}
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import munit.FunSuite
 
 // Top-level fixtures (Phase 0 finding: Mirror derivation needs top-level types,
@@ -104,7 +104,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   test("decoded Prediction exposes case-class fields directly") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
-    val raw = DynamicPrediction(values = rec(
+    val raw = RawPrediction(values = rec(
       "toxic"      := false,
       "confidence" := 0.91
     ))

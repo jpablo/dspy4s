@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ThreadCount
@@ -19,11 +19,11 @@ class ParallelSuite extends FunSuite:
 
   private final case class StubProgram(
       override val moduleName: String = "stub",
-      behavior: Int => Either[DspyError, DynamicPrediction]
+      behavior: Int => Either[DspyError, RawPrediction]
   ) extends DynamicModule:
     override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       val value = lookup(input.input, "value").get.asInstanceOf[Int]
       behavior(value)
 
@@ -35,7 +35,7 @@ class ParallelSuite extends FunSuite:
 
   test("parallel executes programs and preserves task ordering") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(behavior = value => Right(DynamicPrediction(values = rec("output" := value * 2))))
+    val program = StubProgram(behavior = value => Right(RawPrediction(values = rec("output" := value * 2))))
     val tasks = (1 to 5).toVector.map { value =>
       program -> ProgramCall(input = rec("value" := value))
     }
@@ -52,7 +52,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 3 then Left(ValidationError("boom"))
-        else Right(DynamicPrediction(values = rec("output" := value)))
+        else Right(RawPrediction(values = rec("output" := value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
       program -> ProgramCall(input = rec("value" := value))
@@ -72,7 +72,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value % 2 == 0 then Left(ValidationError("fail"))
-        else Right(DynamicPrediction(values = rec("output" := value)))
+        else Right(RawPrediction(values = rec("output" := value)))
     )
     val tasks = (1 to 5).toVector.map { value =>
       program -> ProgramCall(input = rec("value" := value))
@@ -88,7 +88,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         if value == 2 then Left(ValidationError("boom"))
-        else Right(DynamicPrediction(values = rec("output" := value)))
+        else Right(RawPrediction(values = rec("output" := value)))
     )
     val tasks = Vector(1, 2, 3).map(value => program -> ProgramCall(input = rec("value" := value)))
 
@@ -109,7 +109,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = _ =>
         Right(
-          DynamicPrediction(
+          RawPrediction(
             values = rec("sample" := RuntimeEnvironment.current.numThreads.map(_.toString).getOrElse("missing"))
           )
         )
@@ -130,7 +130,7 @@ class ParallelSuite extends FunSuite:
     val program = StubProgram(
       behavior = value =>
         Right(
-          DynamicPrediction(
+          RawPrediction(
             values = rec(
               "answer" := s"answer-$value",
               "tool_calls" -> DynamicValues.fromAny(Vector(

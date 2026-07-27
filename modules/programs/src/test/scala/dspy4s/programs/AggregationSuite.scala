@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.data.Completions
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import munit.FunSuite
@@ -17,13 +17,13 @@ class AggregationSuite extends FunSuite:
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
     DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
 
-  test("majority with DynamicPrediction picks the most common answer") {
+  test("majority with RawPrediction picks the most common answer") {
     val rows = Vector(
       rec("answer" := "2"),
       rec("answer" := "2"),
       rec("answer" := "3")
     )
-    val prediction = DynamicPrediction.fromRows(rows).toOption.get
+    val prediction = RawPrediction.fromRows(rows).toOption.get
     val result = Aggregation.majorityOf(prediction).toOption.get
     assertEquals(lookup(result.values, "answer"), Some("2": Any))
   }

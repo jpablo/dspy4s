@@ -7,7 +7,7 @@ import dspy4s.programs.predictors.Predictors
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, SignatureLayout}
-import dspy4s.core.data.{DynamicPrediction, Example}
+import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
 import dspy4s.programs.Predict
@@ -39,7 +39,7 @@ object TwoStageQA:
   given ProgramRunner[TwoStageQA] with
     def run(program: TwoStageQA, call: ProgramCall[zio.blocks.schema.DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       for
         i  <- program.classify.signature.inputShape.decode(call.input)
         _  <- program.classify.apply(call.mapInput(_ => i))

@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.IsEq
 import dspy4s.core.contracts.Monoid
@@ -41,7 +41,7 @@ class ModeLawSuite extends FunSuite:
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       seen += Mode.Controls(call.config, call.traceEnabled, call.rolloutId)
-      Right(Prediction(call.input, DynamicPrediction.empty))
+      Right(Prediction(call.input, RawPrediction.empty))
 
   private object Recorder:
     given recorderPredictor: Predictor[Recorder] with

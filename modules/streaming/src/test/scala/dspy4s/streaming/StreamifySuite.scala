@@ -6,7 +6,7 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -171,7 +171,7 @@ class StreamifySuite extends FunSuite:
       override val moduleName: String = "failing"
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
     given RuntimeContext = RuntimeEnvironment.current

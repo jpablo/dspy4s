@@ -16,7 +16,7 @@ Programs live on two layers that share one engine:
 - **The typed surface** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind static input/output
   types and encode/decode at the boundary.
 - **The dynamic spine** — `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`, where programs can build
-  and augment signatures at runtime. Its raw `DynamicPrediction` is lifted through `Prediction.dynamic` at the module
+  and augment signatures at runtime. Its `RawPrediction` is lifted through `Prediction.dynamic` at the module
   boundary. `DynamicPredict` is the executable prediction leaf on this spine. The typed
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
@@ -64,7 +64,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `Module[I, O]` | Semantic program trait: `forward` returns `Prediction[O]`; `final apply` owns the lifecycle. `DynamicModule` specializes both sides to records. |
 | `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
 | `ProgramRunner[P]` | Runs typed or dynamic `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
-| `Prediction[O]` | Typed output `O` + the raw `DynamicPrediction` (completions, usage). |
+| `Prediction[O]` | Typed output `O` + its `RawPrediction` evidence (completions, usage). |
 | `Predictors[P]` / `Predictor[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
 | `Aggregation.majority` | Picks the most-common field value across candidate completions (ties to first). |

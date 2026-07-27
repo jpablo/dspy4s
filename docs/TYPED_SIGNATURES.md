@@ -3,7 +3,7 @@
 > **Status: design archive.** This document captures the original
 > design rationale (pre-implementation). The work has shipped, and the
 > nomenclature has since shifted — what this doc calls `Signature` is
-> now `SignatureLayout`, what it calls `Prediction` is `DynamicPrediction`,
+> now `SignatureLayout`, what it calls `Prediction` is `RawPrediction`,
 > and the typed surface is `Signature[I, O]` / `Prediction[O]` /
 > `Predict[I, O]`. For the current API see:
 >

@@ -41,7 +41,7 @@ instruction (`None`) and an explicitly empty instruction (`Some("")`).
 ```scala
 trait FeedbackMetric extends Metric:
   def feedback(
-      example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry],
+      example: Example, prediction: RawPrediction, trace: Vector[TraceEntry],
       component: Option[String], componentTrace: Vector[TraceEntry]
   )(using RuntimeContext): Either[DspyError, ScoreWithFeedback]
 ```

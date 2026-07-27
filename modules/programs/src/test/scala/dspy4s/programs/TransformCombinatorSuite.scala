@@ -5,7 +5,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
@@ -33,7 +33,7 @@ class TransformCombinatorSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-      run(call.input).map(output => Prediction(output, DynamicPrediction(DynamicValues.record("tag" := tag))))
+      run(call.input).map(output => Prediction(output, RawPrediction(DynamicValues.record("tag" := tag))))
 
   private object Step:
     given stepPredictor[I, O]: Predictor[Step[I, O]] with
@@ -101,7 +101,7 @@ class TransformCombinatorSuite extends FunSuite:
           : ModuleLifecycle[Int, (Int, DynamicValue.Record, Boolean, Option[Int])] =
         ModuleLifecycle.typedWithoutInputs
       protected def forward(call: ProgramCall[Int])(using RuntimeContext) =
-        Right(Prediction((call.input, call.config, call.traceEnabled, call.rolloutId), DynamicPrediction.empty))
+        Right(Prediction((call.input, call.config, call.traceEnabled, call.rolloutId), RawPrediction.empty))
     val adapted = controlAware.contramapInput[Vector[Int]](_.sum)
     assertEquals(adapted(controls).map(_.output), Right((1, controls.config, false, Some(7))))
   }

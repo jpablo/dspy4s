@@ -4,10 +4,15 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, NotFoundError, 
 import dspy4s.core.contracts.updated
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
-/** Result of a single `DynamicPredict.apply` (the erased predict path): the primary completion's field values, plus
-  * optional [[completions]] (when the underlying LM returned multiple candidates) and [[lmUsage]] (token accounting).
-  * Every module result retains a `DynamicPrediction` on [[dspy4s.typed.Prediction.raw]]; adapters, callbacks, trace,
-  * and history all see this same object. Dynamic modules use its [[values]] as their semantic record output.
+/** Adapter-parsed, schema-uninterpreted prediction data.
+  *
+  * "Raw" is relative to [[dspy4s.typed.Prediction]]: [[values]] have already been parsed by an adapter into a
+  * `DynamicValue.Record`, but have not been decoded against an output `Shape` into the semantic output type `O`.
+  * This is therefore not the unparsed text returned by an LM. It retains the primary completion's field values,
+  * optional [[completions]] (when the LM returned multiple candidates), and [[lmUsage]] (token accounting).
+  *
+  * Every module result retains a `RawPrediction` on [[dspy4s.typed.Prediction.raw]]. Dynamic modules also use
+  * [[values]] directly as their semantic `DynamicValue.Record` output.
   *
   * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that the typed layer's Schema-backed
   * decode performs (`dspy4s.typed.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction
@@ -26,7 +31,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   * Field missing from [[values]] is a [[NotFoundError]] from [[value]], propagated by the typed accessors. The
   * [[score]] helper is a thin alias for `asDouble("score")` used by metrics and optimizers.
   */
-final case class DynamicPrediction(
+final case class RawPrediction(
     values: DynamicValue.Record,
     completions: Option[Completions] = None,
     lmUsage: Option[LmUsage] = None
@@ -34,29 +39,29 @@ final case class DynamicPrediction(
   /** Field-value accessor by name. */
   def get(key: String): Option[DynamicValue] = DynamicValues.recordGet(values, key)
 
-  def withUsage(usage: LmUsage): DynamicPrediction = copy(lmUsage = Some(usage))
+  def withUsage(usage: LmUsage): RawPrediction = copy(lmUsage = Some(usage))
 
-  def withValue(key: String, value: DynamicValue): DynamicPrediction =
+  def withValue(key: String, value: DynamicValue): RawPrediction =
     copy(values = values.updated(key, value))
 
   /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. */
-  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): DynamicPrediction =
+  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): RawPrediction =
     withValue(key, schema.toDynamicValue(value))
 
   /** Sequentially accumulate the observable evidence of two program stages.
     *
     * Field values and completions come from the rightmost stage that produced them; a lifecycle-transparent stage
-    * contributes [[DynamicPrediction.empty]] and therefore preserves its predecessor's envelope. Token usage is a
-    * writer and combines pointwise. These component operations are associative and [[DynamicPrediction.empty]] is
+    * contributes [[RawPrediction.empty]] and therefore preserves its predecessor's envelope. Token usage is a
+    * writer and combines pointwise. These component operations are associative and [[RawPrediction.empty]] is
     * their identity, so sequential composition retains the complete prediction without weakening Category equality.
     */
-  def followedBy(next: DynamicPrediction): DynamicPrediction =
+  def followedBy(next: RawPrediction): RawPrediction =
     val combinedUsage = (lmUsage, next.lmUsage) match
       case (None, None)                   => None
       case (Some(left), None)             => Some(left)
       case (None, Some(right))            => Some(right)
       case (Some(left), Some(right))      => Some(left.combine(right))
-    DynamicPrediction(
+    RawPrediction(
       values = if next.values.fields.nonEmpty then next.values else values,
       completions = next.completions.orElse(completions),
       lmUsage = combinedUsage
@@ -66,16 +71,16 @@ final case class DynamicPrediction(
     get(key).toRight(NotFoundError("prediction_field", s"Prediction field '$key' does not exist"))
 
   def asString(key: String): Either[DspyError, String] =
-    value(key).flatMap(dv => DynamicPrediction.asString(key, dv))
+    value(key).flatMap(dv => RawPrediction.asString(key, dv))
 
   def asInt(key: String): Either[DspyError, Int] =
-    value(key).flatMap(dv => DynamicPrediction.asInt(key, dv))
+    value(key).flatMap(dv => RawPrediction.asInt(key, dv))
 
   def asDouble(key: String): Either[DspyError, Double] =
-    value(key).flatMap(dv => DynamicPrediction.asDouble(key, dv))
+    value(key).flatMap(dv => RawPrediction.asDouble(key, dv))
 
   def asBoolean(key: String): Either[DspyError, Boolean] =
-    value(key).flatMap(dv => DynamicPrediction.asBoolean(key, dv))
+    value(key).flatMap(dv => RawPrediction.asBoolean(key, dv))
 
   /** Convenience for the conventional `"score"` field used by metrics and optimizers. Equivalent to
     * `asDouble("score")`.
@@ -83,19 +88,19 @@ final case class DynamicPrediction(
   def score: Either[DspyError, Double] =
     asDouble("score")
 
-object DynamicPrediction:
-  def empty: DynamicPrediction = DynamicPrediction(values = DynamicValue.Record.empty)
+object RawPrediction:
+  def empty: RawPrediction = RawPrediction(values = DynamicValue.Record.empty)
 
-  /** Lift the primary completion (index 0) of a multi-candidate [[Completions]] into a `DynamicPrediction`, retaining
-    * the full completions on the result's [[DynamicPrediction.completions]] so callers can still reach the other
+  /** Lift the primary completion (index 0) of a multi-candidate [[Completions]] into a `RawPrediction`, retaining
+    * the full completions on the result's [[RawPrediction.completions]] so callers can still reach the other
     * candidates.
     */
-  def fromCompletions(completions: Completions): Either[DspyError, DynamicPrediction] =
+  def fromCompletions(completions: Completions): Either[DspyError, RawPrediction] =
     completions.at(0).map(_.copy(completions = Some(completions)))
 
   /** Row-form convenience: turns N rows into completions, then extracts the primary one as in [[fromCompletions]].
     */
-  def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, DynamicPrediction] =
+  def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, RawPrediction] =
     Completions.fromRows(rows).flatMap(fromCompletions)
 
   private def asString(key: String, dv: DynamicValue): Either[DspyError, String] = dv match

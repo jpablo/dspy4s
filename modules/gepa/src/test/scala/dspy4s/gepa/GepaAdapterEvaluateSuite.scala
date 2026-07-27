@@ -2,7 +2,7 @@ package dspy4s.gepa
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -41,7 +41,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     override def name: String = "exact_answer"
     override def feedback(
         example: Example,
-        prediction: DynamicPrediction,
+        prediction: RawPrediction,
         trace: Vector[TraceEntry],
         component: Option[String],
         componentTrace: Vector[TraceEntry]

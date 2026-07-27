@@ -16,7 +16,7 @@
 package dspy4s.examples.learn.evaluation
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, ThreadCount, :=}
-import dspy4s.core.data.{DynamicPrediction, Example}
+import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.{FunctionMetric, SemanticF1}
@@ -36,7 +36,7 @@ trait Assess extends Spec:
 
 object Metrics:
 
-  private def predField(pred: DynamicPrediction, key: String): String =
+  private def predField(pred: RawPrediction, key: String): String =
     pred.get(key).map(DynamicValues.renderText).getOrElse("")
   private def exField(example: Example, key: String): String =
     example.get(key).map(DynamicValues.renderText).getOrElse("")
@@ -70,7 +70,7 @@ object Metrics:
   def manualScores(
       devset: Vector[Example],
       metric: Metric,
-      program: Example => Either[DspyError, DynamicPrediction]
+      program: Example => Either[DspyError, RawPrediction]
   ): Vector[Either[DspyError, Double]] =
     // Offline example code: these metrics don't call an LM, so a default context suffices. A real
     // LM-judged metric would thread `RuntimeEnvironment.current` here instead.
@@ -91,7 +91,7 @@ object Metrics:
     ))
   // --8<-- [end:metric-evaluate]
   // Launch: `evaluator(devset, metric).apply()(program)(using RuntimeContext)` — the `using` is the
-  // ambient RuntimeContext; `program` is `Example => Either[DspyError, DynamicPrediction]`.
+  // ambient RuntimeContext; `program` is `Example => Either[DspyError, RawPrediction]`.
 
   // ── Snippet 6 (lines 101–116) — LLM-as-judge metric ──
   // Now runnable: `Metric.score` takes `(using RuntimeContext)` (PORT_GAPS G-6), so a metric can run a judge
@@ -115,8 +115,8 @@ object Metrics:
 @main def metricsMain(): Unit =
   given RuntimeContext = RuntimeContext()
   val ex      = Metrics.example("What is the capital of France?", "Paris")
-  def pred(answer: String): DynamicPrediction =
-    DynamicPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))
+  def pred(answer: String): RawPrediction =
+    RawPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))
   println("validate_answer('paris'): " + Metrics.validateAnswer.score(ex, pred("paris")))
   println("validate_answer('Lyon'):  " + Metrics.validateAnswer.score(ex, pred("Lyon")))
 
@@ -126,7 +126,7 @@ object Metrics:
   // SemanticF1 defaults: question on the example, ground truth + system response in the `response` field.
   val gold = Example("question" := "What is the capital of France?", "response" := "Paris is the capital of France.")
     .withInputs(Set("question"))
-  val pred = DynamicPrediction(values = DynamicValues.recordFromEntries(Seq(
+  val pred = RawPrediction(values = DynamicValues.recordFromEntries(Seq(
     "response" -> DynamicValues.fromAny("The capital of France is Paris.")
   )))
   println("SemanticF1 score: " + Metrics.semanticF1.score(gold, pred))

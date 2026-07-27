@@ -43,7 +43,7 @@ shrank net while the duplication was removed.
 6.4 (typed `augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
 middleware monoid) are all landed and law-tested. Remaining is optional/additive: the kyo-compat CIO substrate
 migration, `augment` closing position, execution-wrapping modes. Sequential usage merge now ships as part of the
-lawful `DynamicPrediction.followedBy` envelope operation. The authoritative
+lawful `RawPrediction.followedBy` envelope operation. The authoritative
 contract is [algebra-2-program-composition.md](algebra-2-program-composition.md).
 
 ## Why

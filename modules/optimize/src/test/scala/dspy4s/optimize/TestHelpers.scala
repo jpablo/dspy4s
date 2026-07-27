@@ -6,7 +6,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.DynamicModule
@@ -29,12 +29,12 @@ final case class ScriptedPredictProgram(
   override val moduleName: String = "scripted"
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     failsWith match
       case Some(err) => throw err
       case None =>
         val q = lookupString(input.input, "question")
-        Right(DynamicPrediction(rec("answer" := answers.getOrElse(q, "unknown"))))
+        Right(RawPrediction(rec("answer" := answers.getOrElse(q, "unknown"))))
 
 final case class DemoAwarePredictProgram(
     layout: SignatureLayout,
@@ -45,7 +45,7 @@ final case class DemoAwarePredictProgram(
   override val moduleName: String = "demo_aware"
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     val q = lookupString(input.input, "question")
     // Use answers map first; then demos; else "unknown"
     val answer = answers.get(q)
@@ -55,7 +55,7 @@ final case class DemoAwarePredictProgram(
           .flatMap(_.get("answer").map(DynamicValues.renderText))
       )
       .getOrElse("unknown")
-    Right(DynamicPrediction(rec("answer" := answer)))
+    Right(RawPrediction(rec("answer" := answer)))
 
 object DemoAwarePredictProgram:
   given demoAwarePredictor: Predictor[DemoAwarePredictProgram] with

@@ -1,7 +1,7 @@
 package dspy4s.programs.contracts
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
@@ -130,7 +130,7 @@ trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
 
   protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
-  ): Either[DspyError, DynamicPrediction]
+  ): Either[DspyError, RawPrediction]
 
   final override protected def forward(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

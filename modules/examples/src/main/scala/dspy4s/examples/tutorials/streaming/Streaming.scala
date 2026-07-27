@@ -19,7 +19,7 @@
 package dspy4s.examples.tutorials.streaming
 
 import dspy4s.core.contracts.{ClosableIterator, DspyError, DynamicValues, RuntimeContext, :=}
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.examples.Demo
 import dspy4s.programs.{DynamicPredict, ReAct}
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
@@ -34,8 +34,8 @@ object Streaming:
   // dspy4s streams synchronously, so this one sync loop replaces Python's asyncio variants. It prints
   // each token + status message and returns the final prediction (the lone `PredictionEvent`).
   // --8<-- [start:stream-consume]
-  def consume(stream: ClosableIterator[StreamEvent]): Option[DynamicPrediction] =
-    var finalPrediction: Option[DynamicPrediction] = None
+  def consume(stream: ClosableIterator[StreamEvent]): Option[RawPrediction] =
+    var finalPrediction: Option[RawPrediction] = None
     while stream.hasNext do
       stream.next() match
         case t: TokenEvent      => println(s"Output token of field ${t.fieldName}: ${t.chunk}")
@@ -53,7 +53,7 @@ object Streaming:
   // | stream_predict = dspy.streamify(predict, stream_listeners=[StreamListener(signature_field_name="answer")])
   // | output = stream_predict(question="why did a chicken cross the kitchen?")  # async or sync — same here
   // --8<-- [start:stream-basic]
-  def streamAnswer(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+  def streamAnswer(question: String)(using RuntimeContext): Option[RawPrediction] =
     val predict = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
     val streamPredict = Streamify.streamify(
       program         = predict,
@@ -76,7 +76,7 @@ object Streaming:
 
     override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       for
         step1 <- predict1.apply(call)
         answer = textField(step1.output, "answer")
@@ -84,7 +84,7 @@ object Streaming:
       yield step2.raw
   // --8<-- [end:compose-module]
 
-  def streamSimplify(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+  def streamSimplify(question: String)(using RuntimeContext): Option[RawPrediction] =
     val streamPredict = Streamify.streamify(
       program         = new SimplifyModule,
       streamListeners = Vector(StreamListener("answer"), StreamListener("simplified_answer"))
@@ -105,7 +105,7 @@ object Streaming:
   def get_sports_news(year: Int): String =
     if year == 2009 then "Usain Bolt broke the world record in the 100m race." else "No news found."
 
-  def streamReactThoughts(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+  def streamReactThoughts(question: String)(using RuntimeContext): Option[RawPrediction] =
     val react = ReAct(
       baseSignature = Signature.fromString("question -> answer"),
       tools         = Vector(ToolFunction.fromMethod(fetch_user_info), ToolFunction.fromMethod(get_sports_news))
@@ -130,7 +130,7 @@ object Streaming:
 
     override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       for
         step1 <- predict1.apply(call)
         question = textField(call.input, "question")
@@ -140,7 +140,7 @@ object Streaming:
                  ))
       yield step2.raw
 
-  def streamScoring(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+  def streamScoring(question: String)(using RuntimeContext): Option[RawPrediction] =
     val streamPredict = Streamify.streamify(
       program = new ScoringModule,
       streamListeners = Vector(
@@ -163,7 +163,7 @@ object Streaming:
   @description("Double the number.")
   def double_the_number(x: Int): Int = 2 * x
 
-  def streamReasoningWithTool(question: String)(using RuntimeContext): Option[DynamicPrediction] =
+  def streamReasoningWithTool(question: String)(using RuntimeContext): Option[RawPrediction] =
     // ChainOfThought's built-in `reasoning` field is modelled by naming it in the layout; the tool runs in
     // `forward`, so its start/end status messages flow through the custom provider.
     val tool = ToolFunction.fromMethod(double_the_number)
@@ -173,7 +173,7 @@ object Streaming:
         DynamicPredict(Signature.fromString("question, doubled -> reasoning, answer").layout, name = Some("predict"))
       override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         for
           doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
           out <- predict.apply(ProgramCall(input =

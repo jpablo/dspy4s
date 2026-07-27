@@ -1,7 +1,7 @@
 package dspy4s.programs.para
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -35,7 +35,7 @@ class OrderedTensorOpsSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-      Right(Prediction(f(call.input), DynamicPrediction.empty))
+      Right(Prediction(f(call.input), RawPrediction.empty))
 
   private final case class Fail[I, O](label: String) extends Module[I, O]:
     override val moduleName: String = s"fail_$label"
@@ -52,7 +52,7 @@ class OrderedTensorOpsSuite extends FunSuite:
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =
-      Right(Prediction(s"${call.input}-${calls.incrementAndGet()}", DynamicPrediction.empty))
+      Right(Prediction(s"${call.input}-${calls.incrementAndGet()}", RawPrediction.empty))
 
   test("ordered tensor is not bifunctorial for fail-fast programs") {
     val f1 = Fn[Int, Int](identity)

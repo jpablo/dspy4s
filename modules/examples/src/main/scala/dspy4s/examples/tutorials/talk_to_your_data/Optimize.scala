@@ -12,7 +12,7 @@
 package dspy4s.examples.tutorials.talk_to_your_data
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, TraceEntry}
-import dspy4s.core.data.{DynamicPrediction, Example}
+import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.contracts.LanguageModel
@@ -50,7 +50,7 @@ object Optimize:
     override def name: String = "answer_match"
     override def feedback(
         example: Example,
-        prediction: DynamicPrediction,
+        prediction: RawPrediction,
         trace: Vector[TraceEntry],
         component: Option[String],
         componentTrace: Vector[TraceEntry]

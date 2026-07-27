@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.{DynamicModule, Module, ProgramCall}
 import dspy4s.typed.Shape
 import zio.blocks.schema.DynamicValue
@@ -9,7 +9,7 @@ import zio.blocks.schema.DynamicValue
 /** Capability for evaluating a program from the dynamic record boundary.
   *
   * Optimizers, evaluation, and streaming all consume this same boundary: a record-valued [[ProgramCall]] goes in and
-  * the program's raw [[DynamicPrediction]] comes out. The capability is external to `Module` because record decoding is
+  * the program's [[RawPrediction]] comes out. The capability is external to `Module` because record decoding is
   * not available on every typed module representation; third-party programs can supply their own instance.
   *
   * For BARE typed modules the program's own signature is the canonical decode boundary (no identity morphism is
@@ -20,9 +20,9 @@ import zio.blocks.schema.DynamicValue
 trait ProgramRunner[P]:
   def run(program: P, call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
-  ): Either[DspyError, DynamicPrediction]
+  ): Either[DspyError, RawPrediction]
 
-  final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, RawPrediction] =
     run(program, ProgramCall(inputs))
 
 private[programs] trait LowPriorityProgramRunner:
@@ -33,7 +33,7 @@ private[programs] trait LowPriorityProgramRunner:
   ): ProgramRunner[P] with
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       codec.decode(call.input).flatMap { decoded =>
         program.apply(call.mapInput(_ => decoded)).map(_.raw)
       }
@@ -44,7 +44,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
   given fromDynamicModule[P <: DynamicModule]: ProgramRunner[P] with
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       program.apply(call).map(_.raw)
 
   private def signatureBacked[I, O, P <: Module[I, O]](
@@ -52,7 +52,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
   ): ProgramRunner[P] = new ProgramRunner[P]:
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       inputShapeOf(program).decode(call.input).flatMap { decoded =>
         program.apply(call.mapInput(_ => decoded)).map(_.raw)
       }

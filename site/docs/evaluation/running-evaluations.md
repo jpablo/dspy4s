@@ -19,7 +19,7 @@ You launch it by applying it to a program inside a runtime context:
 evaluator(devset, metric).apply()(program)
 ```
 
-The `program` is a function `Example => Either[DspyError, DynamicPrediction]`,
+The `program` is a function `Example => Either[DspyError, RawPrediction]`,
 and the result carries the aggregate score plus the per-example outcomes.
 
 ## The shape of evaluation

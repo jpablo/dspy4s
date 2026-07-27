@@ -6,7 +6,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.IsEq
@@ -69,7 +69,7 @@ class ParaCategoryLawSuite extends FunSuite:
       ModuleLifecycle.typedWithoutInputs
 
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-      Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
+      Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
   private object Step:
     given stepPredictor[I, O]: Predictor[Step[I, O]] with
@@ -86,7 +86,7 @@ class ParaCategoryLawSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[Int, Int] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
-      Right(Prediction(call.input, DynamicPrediction.empty))
+      Right(Prediction(call.input, RawPrediction.empty))
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 

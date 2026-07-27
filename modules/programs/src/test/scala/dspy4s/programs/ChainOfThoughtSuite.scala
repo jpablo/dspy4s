@@ -169,7 +169,7 @@ class ChainOfThoughtSuite extends FunSuite:
 
   // ── Raw prediction is preserved ─────────────────────────────────────────
 
-  test("ChainOfThought preserves the raw DynamicPrediction (including lmUsage)") {
+  test("ChainOfThought preserves the RawPrediction (including lmUsage)") {
     val sig = Signature.of[TcotSummarizeSpec]
     val adapter = new ScriptedAdapter(
       reasoning  = "short reasoning",

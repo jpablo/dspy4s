@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.Module
@@ -17,7 +17,7 @@ import dspy4s.typed.Prediction
   * plain typed value `O` (not the `Prediction[O]` envelope): it runs the first program, feeds its `prediction.output`
   * into a fresh `ProgramCall` that inherits the outer call's controls (`config` / `traceEnabled` / `rolloutId`), and
   * runs the second. Each sub-program's own `apply` records its trace/history entry, while the composite result
-  * accumulates both `Prediction.raw` envelopes with [[DynamicPrediction.followedBy]].
+  * accumulates both `Prediction.raw` envelopes with [[RawPrediction.followedBy]].
   *
   * Structural lifecycle. These nodes extend [[dspy4s.programs.contracts.TransparentModule]], so only their leaf
   * children emit callbacks, trace, and history. Association and identity syntax therefore cannot change the runtime
@@ -29,13 +29,13 @@ import dspy4s.typed.Prediction
   */
 
 /** `id[I]` — the Category unit: a pure passthrough that returns its input as the output, with an empty raw envelope.
-  * Sequential composition accumulates envelopes through [[DynamicPrediction.followedBy]], for which the empty envelope
+  * Sequential composition accumulates envelopes through [[RawPrediction.followedBy]], for which the empty envelope
   * is an identity, so both `id >>> p` and `p >>> id` preserve the complete prediction.
   */
 final case class Identity[I]() extends TransparentModule[I, I]:
   override val moduleName: String = "id"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[I]] =
-    Right(Prediction(call.input, DynamicPrediction.empty))
+    Right(Prediction(call.input, RawPrediction.empty))
 
 object Identity:
   given identityPredictors[I]: Predictors[Identity[I]] = Predictors.empty
@@ -114,7 +114,7 @@ final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
       predB <- second.apply(call)
     yield Prediction(
       output = (predA.output, predB.output),
-      raw = DynamicPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
+      raw = RawPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
     )
 
 object Both:
@@ -164,7 +164,7 @@ final case class Tensor[
       predB <- second.apply(call.mapInput(_._2))
     yield Prediction(
       output = (predA.output, predB.output),
-      raw = DynamicPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
+      raw = RawPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
     )
 
 object Tensor:
@@ -199,7 +199,7 @@ object Tensor:
 final case class Copy[I]() extends TransparentModule[I, (I, I)]:
   override val moduleName: String = "copy"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[(I, I)]] =
-    Right(Prediction((call.input, call.input), DynamicPrediction.empty))
+    Right(Prediction((call.input, call.input), RawPrediction.empty))
 
 object Copy:
   given copyPredictors[I]: Predictors[Copy[I]] = Predictors.empty
@@ -211,7 +211,7 @@ object Copy:
 final case class Discard[I]() extends TransparentModule[I, Unit]:
   override val moduleName: String = "discard"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Unit]] =
-    Right(Prediction((), DynamicPrediction.empty))
+    Right(Prediction((), RawPrediction.empty))
 
 object Discard:
   given discardPredictors[I]: Predictors[Discard[I]] = Predictors.empty
@@ -225,7 +225,7 @@ final case class Swap[I, J]() extends TransparentModule[(I, J), (J, I)]:
       RuntimeContext
   ): Either[DspyError, Prediction[(J, I)]] =
     val (i, j) = call.input
-    Right(Prediction((j, i), DynamicPrediction.empty))
+    Right(Prediction((j, i), RawPrediction.empty))
 
 object Swap:
   given swapPredictors[I, J]: Predictors[Swap[I, J]] = Predictors.empty

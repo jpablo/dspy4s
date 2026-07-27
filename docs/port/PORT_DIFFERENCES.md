@@ -99,7 +99,7 @@ The `Shape[A]` typeclass has three implementations
 (the product shape from `ZioSchemaCodec.derivedFromZioSchema` for
 case-class I/O via `zio-blocks-schema`, `TupleShape` for named-tuple
 I/O from the macros, `MapShape` for the string DSL).
-The representation pattern repeats at two levels: `DynamicPrediction` is the raw execution evidence retained by every
+The representation pattern repeats at two levels: `RawPrediction` is the raw execution evidence retained by every
 `Prediction[O]` on `.raw`, while `Predict` has dynamic and statically typed entry points, `DynamicPredict` and
 `Predict[I, O]`. The two `Predict`s are **siblings** — thin `Module`s
 over the shared `PredictEngine`, not wrapper-and-wrapped. The typed
@@ -318,7 +318,7 @@ doesn't have:
   (`private[dspy4s]`).
 - `contracts/Module` — the semantic program base `Module[I, O]`; `forward` returns `Prediction[O]` and its `final apply`
   adds module callbacks and tracing. `DynamicModule` specializes both semantic types to `DynamicValue.Record` and
-  lifts its raw `DynamicPrediction` through `Prediction.dynamic`.
+  lifts its `RawPrediction` through `Prediction.dynamic`.
 - `DynamicPredict` — record-valued predict, extends `DynamicModule`.
 - `Predict[I, O]` — typed predict, a `Module[I, O]`; a
   *sibling* of `DynamicPredict` over `PredictEngine` (not a wrapper).

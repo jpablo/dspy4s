@@ -1,7 +1,7 @@
 package dspy4s.evaluate.metrics
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldRole
@@ -30,7 +30,7 @@ import zio.blocks.schema.DynamicValue
   *     untyped data bags, so there is no static `I`/`O` to carry; the dynamic layer is the right substrate.
   *   - Field names are configurable. Defaults follow upstream's `example.question` / `example.response` (ground truth)
   *     / `pred.response` (system response). dspy4s has no attribute access, so the values are pulled by string key from
-  *     the [[Example]] and [[DynamicPrediction]] records.
+  *     the [[Example]] and [[RawPrediction]] records.
   *   - Python's `forward(..., trace=None)` returns the raw float during evaluation and `score >= threshold` (a bool)
   *     during bootstrapping. dspy4s metrics always return a `Double`; the `threshold` is retained as a configurable
   *     field for parity / future use but the score is returned as-is (callers apply thresholds at the optimizer layer,
@@ -130,7 +130,7 @@ final case class SemanticF1(
   // Built once per metric instance — the judge layout never changes between score() calls.
   private val judgePredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(layout)
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
   ): Either[DspyError, Double] =
     for
@@ -213,7 +213,7 @@ final case class CompleteAndGrounded(
   private val completenessPredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(completenessLayout)
   private val groundednessPredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(groundednessLayout)
 
-  override def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry])(using
+  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
   ): Either[DspyError, Double] =
     for

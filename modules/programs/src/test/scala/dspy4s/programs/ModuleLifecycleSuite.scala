@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{:=, CallbackEvent, CallbackHandler, DspyError, DynamicValues, RuntimeContext}
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall}
 import dspy4s.typed.Prediction
@@ -17,7 +17,7 @@ class ModuleLifecycleSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[Int, Int] = lifecycleStrategy
 
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
-      Right(Prediction(call.input, DynamicPrediction(DynamicValues.record("result" := call.input))))
+      Right(Prediction(call.input, RawPrediction(DynamicValues.record("result" := call.input))))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()

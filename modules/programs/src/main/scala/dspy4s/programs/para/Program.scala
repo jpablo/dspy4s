@@ -77,7 +77,7 @@ object Program:
   given programRunner[I, O](using codec: RecordCodec[I]): ProgramRunner[Program[I, O]] with
     def run(program: Program[I, O], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, dspy4s.core.data.DynamicPrediction] =
+    ): Either[DspyError, dspy4s.core.data.RawPrediction] =
       codec.decode(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
 
   /** The Para category over packaged programs.

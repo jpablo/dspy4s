@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -58,7 +58,7 @@ final class GepaAdapter[P](
         EvaluationBatch(result.results.map(_.prediction), result.results.map(_.score), trajectories = None)
       case Left(_) =>
         // Whole-batch eval failure (timeout / max-errors): degrade to per-example failure scores.
-        EvaluationBatch(batch.map(_ => DynamicPrediction.empty), batch.map(_ => failureScore), trajectories = None)
+        EvaluationBatch(batch.map(_ => RawPrediction.empty), batch.map(_ => failureScore), trajectories = None)
 
   private def withTraces(prog: P, batch: Vector[Example])(using RuntimeContext): EvaluationBatch =
     // Reflective runs are independent — runOne isolates its trace context per example — so they go through the
@@ -70,11 +70,11 @@ final class GepaAdapter[P](
       ) match
       case Right(outcome) =>
         batch.indices.toVector.map { i =>
-          outcome.results(i).getOrElse(Trajectory(batch(i), DynamicPrediction.empty, Vector.empty, failureScore))
+          outcome.results(i).getOrElse(Trajectory(batch(i), RawPrediction.empty, Vector.empty, failureScore))
         }
       case Left(_) =>
         // Whole-batch failure (timeout / max-errors): degrade to failure trajectories, mirroring scoresOnly.
-        batch.map(example => Trajectory(example, DynamicPrediction.empty, Vector.empty, failureScore))
+        batch.map(example => Trajectory(example, RawPrediction.empty, Vector.empty, failureScore))
     EvaluationBatch(
       outputs = trajectories.map(_.prediction),
       scores = trajectories.map(_.score),
@@ -140,5 +140,5 @@ final class GepaAdapter[P](
           Trajectory(example, prediction, trace, score)
         case Left(_) =>
           // The isolated trace already holds the failure entry (raw response) via captureFailureTraces.
-          Trajectory(example, DynamicPrediction.empty, RuntimeEnvironment.current.trace, failureScore)
+          Trajectory(example, RawPrediction.empty, RuntimeEnvironment.current.trace, failureScore)
     }

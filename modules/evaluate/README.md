@@ -8,7 +8,7 @@ auto-evaluation metrics, and CSV/JSON persistence of the per-example results.
 
 You have:
 
-- a **program** — any `Example => Either[DspyError, DynamicPrediction]`. This is just the call signature a
+- a **program** — any `Example => Either[DspyError, RawPrediction]`. This is just the call signature a
   dspy4s module exposes; the evaluator never sees module internals, only the function.
 - a **dev set** — a `Vector[Example]`, each example a data bag of input fields plus the ground-truth fields.
 - a **metric** — something that scores one prediction against its example and returns a `Double`.
@@ -46,7 +46,7 @@ val evaluator = Evaluate(devset = devset, metric = new ExactMatch())
 given RuntimeContext = RuntimeEnvironment.current
 
 val result = evaluator() { example =>
-  myProgram(example)   // Example => Either[DspyError, DynamicPrediction]
+  myProgram(example)   // Example => Either[DspyError, RawPrediction]
 }
 
 result.foreach { eval =>
@@ -100,7 +100,7 @@ A metric is:
 ```scala
 trait Metric:
   def name: String
-  def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
+  def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
       RuntimeContext): Either[DspyError, Double]
 ```
 
@@ -147,7 +147,7 @@ LM/adapter from the ambient `RuntimeContext`.
   (dspy4s has no retriever, so the program under evaluation must supply it).
 
 Field names are configurable; defaults follow upstream (`question` / `response`). Because dspy4s has no
-attribute access, values are pulled by string key from the `Example` / `DynamicPrediction` records.
+attribute access, values are pulled by string key from the `Example` / `RawPrediction` records.
 
 ## Persistence
 

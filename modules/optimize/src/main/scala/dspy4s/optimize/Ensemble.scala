@@ -1,7 +1,7 @@
 package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.Aggregation
@@ -36,7 +36,7 @@ import zio.blocks.schema.DynamicValue
   *   seed for the per-call sampling RNG, for reproducibility.
   */
 final case class Ensemble(
-    reduceFn: Vector[DynamicValue.Record] => Either[DspyError, DynamicPrediction] = Ensemble.majorityVote,
+    reduceFn: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction] = Ensemble.majorityVote,
     size: Option[EnsembleSize] = None,
     seed: Long = 0L
 ):
@@ -50,13 +50,13 @@ final case class Ensemble(
 object Ensemble:
 
   /** Default reducer: majority vote over the members' output rows (Python's `dspy.majority`). */
-  val majorityVote: Vector[DynamicValue.Record] => Either[DspyError, DynamicPrediction] =
+  val majorityVote: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction] =
     rows => Aggregation.majority(rows)
 
   /** The compiled ensemble: a [[DynamicModule]] that runs the (optionally sampled) members and reduces. */
   private final case class EnsembledProgram(
       programs: Vector[DynamicModule],
-      reduceFn: Vector[DynamicValue.Record] => Either[DspyError, DynamicPrediction],
+      reduceFn: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction],
       size: Option[EnsembleSize],
       seed: Long
   ) extends DynamicModule:
@@ -69,7 +69,7 @@ object Ensemble:
 
     override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       val selected = size match
         case Some(n) =>
           // `random.sample`-style selection without replacement: shuffle, then take n.

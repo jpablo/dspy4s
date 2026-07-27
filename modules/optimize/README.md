@@ -49,7 +49,7 @@ program class:
   metadata plus writable state), `read` projects the `PredictorState`s, and `replace` writes an edited state vector
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
-- **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the untyped `DynamicPrediction` that `Evaluate`
+- **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
   consumes. This is the "spine unification": it lets the optimizers target **typed** programs (`Predict[I, O]`,
   `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the untyped `DynamicModule` spine, with no
   `asInstanceOf`.

@@ -4,7 +4,7 @@ import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
@@ -39,7 +39,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     ): Either[DspyError, Prediction[String]] =
       runs += name
       result.map(value =>
-        Prediction(value, DynamicPrediction(DynamicValues.record("source" -> DynamicValues.fromAny(name))))
+        Prediction(value, RawPrediction(DynamicValues.record("source" -> DynamicValues.fromAny(name))))
       )
 
   private object Attempt:

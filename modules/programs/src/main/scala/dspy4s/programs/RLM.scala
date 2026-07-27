@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
@@ -326,7 +326,7 @@ final case class RLM[I, O](
     baseSignature.outputShape.decode(outputsRecord).map { output =>
       Prediction(
         output = output,
-        raw = DynamicPrediction(values =
+        raw = RawPrediction(values =
           outputsRecord
             .updated("trajectory", DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)))
             .updated("final_reasoning", DynamicValues.fromAny(finalReasoning))
@@ -352,7 +352,7 @@ final case class RLM[I, O](
     extractPredict.apply(ProgramCall(extractInputs, call.config, call.traceEnabled, call.rolloutId)).map { extracted =>
       Prediction(
         output = extracted.output,
-        raw = DynamicPrediction(values =
+        raw = RawPrediction(values =
           extracted.raw.values
             .updated("trajectory", DynamicValues.fromAny(RLM.renderHistory(history, maxOutputChars)))
             .updated("final_reasoning", DynamicValues.fromAny("Extract forced final output"))

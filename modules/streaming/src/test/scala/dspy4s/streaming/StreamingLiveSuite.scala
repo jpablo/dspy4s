@@ -5,7 +5,7 @@ import dspy4s.adapters.JSONAdapter
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -80,7 +80,7 @@ class StreamingLiveSuite extends FunSuite:
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         for
           answer    <- predict1.apply(input)
           judgement <- predict2.apply(input.copy(

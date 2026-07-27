@@ -1,6 +1,6 @@
 package dspy4s.core
 
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
@@ -144,7 +144,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     assertEquals(filled.history, Vector.empty[HistoryEntry])
   }
 
-  test("DynamicPrediction preserves typed provider usage without string conversion") {
+  test("RawPrediction preserves typed provider usage without string conversion") {
     val usage = LmUsage(
       totalTokens = 9,
       promptTokens = 4,
@@ -152,5 +152,5 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
       extras = Map(TokenCategory.Cached -> 2L, TokenCategory.Other("vendor_x") -> 3L)
     )
 
-    assertEquals(DynamicPrediction.empty.withUsage(usage).lmUsage, Some(usage))
+    assertEquals(RawPrediction.empty.withUsage(usage).lmUsage, Some(usage))
   }

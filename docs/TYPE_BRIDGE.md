@@ -219,7 +219,7 @@ A few wrinkles that don't have direct equivalents in JSON / SQL:
 
 2. **The other side is non-deterministic.** A SQL driver returning the wrong type for a column is a bug. An LM
    returning `"true!"` when you asked for a bool is a Tuesday. So dspy4s has to do **post-hoc coercive parsing**
-   ([[DynamicPrediction.asBoolean]], `FieldCodec` decoders that accept either the typed value or the string
+   ([[RawPrediction.asBoolean]], `FieldCodec` decoders that accept either the typed value or the string
    form) that JSON / SQL libraries don't bother with.
 
 3. **Allowed-values enforcement is hint-only.** For a Scala enum field you'd send `enum.cases = "joy,sadness"`

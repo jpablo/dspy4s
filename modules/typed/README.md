@@ -31,7 +31,7 @@ val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Ou
 | `Signature[I, O]` | The typed signature: `SignatureLayout` + `Shape[I]` + `Shape[O]`. Four entry points — `derived[I, O]` (case classes), `of[T <: Spec]` (trait spec), `from(method)` (method introspection), `fromType[F]`. |
 | `Shape[A]` | Holds a type's `fieldSpecs` (the dspy field metadata) plus encode (`A => Record`) and decode (`Record => A`). `SchemaTupleShape` is the schema-backed shape; `MapShape` is the dynamic fallback for raw records. |
 | `ZioSchemaCodec` | The bridge between a zio-blocks `Schema[A]`/`Reflect` and a dspy4s `Shape[A]`: derives `FieldSpec`s, maps wire `TypeRef`s (`typeRefFor`), and normalizes LM strings before decode. |
-| `Prediction[O]` | The typed output: the decoded `O` plus the raw `DynamicPrediction` (so token usage and the untyped reply stay inspectable). |
+| `Prediction[O]` | The typed output: decoded `O` plus its `RawPrediction` evidence, so token usage and schema-uninterpreted values stay inspectable. |
 | `SignatureBuilder` | A fluent, macro-free builder (`.input[T](name)` / `.output[T](name)`) for assembling a layout programmatically. |
 | `Spec` / `InputField[A]` / `OutputField[A]` | The declarative trait-spec surface: a `Spec` subclass declares fields as `InputField`/`OutputField` members. |
 | `OutputAugmentation` | Type-level machinery to prepend a named field to an output type (the `WithField[O, Name, T]` match type), idempotent and cast-free — how `ChainOfThought` adds `reasoning: String`. |

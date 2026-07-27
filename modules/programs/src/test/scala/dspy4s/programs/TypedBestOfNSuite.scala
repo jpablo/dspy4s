@@ -7,7 +7,7 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -62,7 +62,7 @@ class TypedBestOfNSuite extends FunSuite:
   private def candidate(answer: String, score: Double): Prediction[Cand] =
     Prediction(
       output = Cand(answer, score),
-      raw = DynamicPrediction(values = rec("answer" := answer, "score" := score))
+      raw = RawPrediction(values = rec("answer" := answer, "score" := score))
     )
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
@@ -332,9 +332,9 @@ class TypedBestOfNSuite extends FunSuite:
         prompt   <- adapter.format(invocation)
         response <- lm.call(invocation.request.copy(messages = prompt.messages))
         parsed   <- adapter.parse(layout, response.outputs.head)
-        answer   <- DynamicPrediction(values = parsed.values).asString("answer")
-        score    <- DynamicPrediction(values = parsed.values).asDouble("score")
-      yield Prediction(output = Cand(answer, score), raw = DynamicPrediction(values = parsed.values))
+        answer   <- RawPrediction(values = parsed.values).asString("answer")
+        score    <- RawPrediction(values = parsed.values).asDouble("score")
+      yield Prediction(output = Cand(answer, score), raw = RawPrediction(values = parsed.values))
 
   /** `InnerPredict` runs one LM call on a fixed layout; expose a lawful single state focus so Refine's advice can route
     * back to it without treating an executable `DynamicPredict` as optimizer state.

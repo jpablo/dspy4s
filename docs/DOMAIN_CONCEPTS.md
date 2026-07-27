@@ -370,7 +370,7 @@ The codebase uses concrete names for the concepts above:
 | Basic prediction program | `Predict` |
 | Internal erased prediction program | `DynamicPredict` |
 | Structured result | `Prediction` |
-| Runtime structured result | `DynamicPrediction` |
+| Schema-uninterpreted prediction evidence | `RawPrediction` |
 | Demonstration/example | `Example` |
 | Prompt/text translator | `Adapter` |
 | Model interface | `LanguageModel` |

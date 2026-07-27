@@ -3,7 +3,7 @@ package dspy4s.optimize
 import dspy4s.programs.ProgramRunner
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
 import dspy4s.programs.predictors.Predictors
@@ -49,7 +49,7 @@ final class KNNFewShotProgram[P: {Predictors, ProgramRunner}] private[optimize] 
 
   override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
-  ): Either[DspyError, DynamicPrediction] =
+  ): Either[DspyError, RawPrediction] =
     for
       neighbors <- knn.retrieve(call.input)
       report    <- new BootstrapFewShot[P](bootstrapConfig).compile(student, neighbors, teacher)

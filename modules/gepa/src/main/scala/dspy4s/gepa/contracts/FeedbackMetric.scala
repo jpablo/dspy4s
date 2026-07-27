@@ -1,7 +1,7 @@
 package dspy4s.gepa.contracts
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
@@ -38,7 +38,7 @@ trait FeedbackMetric extends Metric:
   /** Score + feedback for one example at the granularity selected by `component` (see the trait doc). */
   def feedback(
       example: Example,
-      prediction: DynamicPrediction,
+      prediction: RawPrediction,
       trace: Vector[TraceEntry],
       component: Option[String],
       componentTrace: Vector[TraceEntry]
@@ -48,7 +48,7 @@ trait FeedbackMetric extends Metric:
     * `Metric`. `final` so implementations define only [[name]] and [[feedback]]. */
   final override def score(
       example: Example,
-      prediction: DynamicPrediction,
+      prediction: RawPrediction,
       trace: Vector[TraceEntry]
   )(using RuntimeContext): Either[DspyError, Double] =
     feedback(example, prediction, trace, component = None, componentTrace = Vector.empty).map(_.score)

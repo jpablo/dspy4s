@@ -31,7 +31,7 @@ Module[I, O]                            # ONE semantic base (port of dspy.Module
   │                                     #   final apply wraps callbacks/trace/history -> abstract forward
   │
   ├─ DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]
-  │    │                                # forwardDynamic returns raw DynamicPrediction;
+  │    │                                # forwardDynamic returns RawPrediction;
   │    │                                # the base lifts it with Prediction.dynamic
   │    └─ DynamicPredict                # dynamic executable sibling over PredictEngine
   │
@@ -46,7 +46,7 @@ Module[I, O]                            # ONE semantic base (port of dspy.Module
 dspy4s has **one semantic base `Module[I, O]`** — the port of `dspy.Module` — whose uniform execution type is
 `ProgramCall[I] => Either[DspyError, Prediction[O]]`. Its `apply` is `final` (the lifecycle wrapping) over an abstract
 `forward`. The dynamic spine chooses `DynamicValue.Record` for both semantic parameters; **`DynamicModule`** adds a
-raw `forwardDynamic: ... => DynamicPrediction` hook and lifts it with `Prediction.dynamic`. Statically typed programs
+raw `forwardDynamic: ... => RawPrediction` hook and lifts it with `Prediction.dynamic`. Statically typed programs
 use their domain types directly — `Predict` / `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` /
 `MultiChainComparison` / `BestOfN` / `Refine`. **`DynamicPredict`** is the data-bag executable for runtime-built
 signatures; typed `Predict` is its sibling over `PredictEngine`, and
@@ -149,7 +149,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    untyped form: `Streamify` only accepted a `DynamicModule`. Rather than keep untyped twins, `Streamify` was
    generalized to take **any** program through a
    [`Streamable[P]`](../../modules/streaming/src/main/scala/dspy4s/streaming/Streamable.scala) typeclass that
-   captures its two real requirements — *run from a record → `DynamicPrediction`* and *best-effort sub-signatures
+   captures its two real requirements — *run from a record → `RawPrediction`* and *best-effort sub-signatures
    for listener validation*. Each typed agent provides a `Streamable` instance (decode the record → typed input →
    run → `.raw`), so it streams with no `DynamicModule` form and emits a single module event (no
    wrapper-over-untyped double event). Only `DynamicPredict` keeps the `dynamicModule` `Streamable` instance.

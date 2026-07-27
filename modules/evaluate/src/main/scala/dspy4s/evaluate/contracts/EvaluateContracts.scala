@@ -3,12 +3,12 @@ package dspy4s.evaluate.contracts
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.TraceEntry
 
 object Evaluator:
-  type PredictFn = Example => Either[DspyError, DynamicPrediction]
+  type PredictFn = Example => Either[DspyError, RawPrediction]
 
 trait Metric:
   def name: String
@@ -17,7 +17,7 @@ trait Metric:
     * evaluation; non-empty during bootstrapping, mirroring Python's `trace is None` branch). The ambient
     * [[RuntimeContext]] lets LM-judged metrics (e.g. `SemanticF1`) invoke a language model during scoring;
     * builtin string-comparison metrics ignore it. */
-  def score(example: Example, prediction: DynamicPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
+  def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
       RuntimeContext
   ): Either[DspyError, Double]
 
@@ -26,7 +26,7 @@ trait Metric:
   * traceback capture is disabled. */
 final case class ExampleEvaluation(
     example: Example,
-    prediction: DynamicPrediction,
+    prediction: RawPrediction,
     score: Double,
     error: Option[String] = None
 )

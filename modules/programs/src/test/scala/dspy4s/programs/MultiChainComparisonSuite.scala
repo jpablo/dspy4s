@@ -5,7 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -88,15 +88,15 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
 
     val completions = Vector(
-      DynamicPrediction(values = rec(
+      RawPrediction(values = rec(
         "rationale" := "I recall that during clear days, the sky often appears this color.",
         "answer"    := "blue"
       )),
-      DynamicPrediction(values = rec(
+      RawPrediction(values = rec(
         "rationale" := "Based on common knowledge, I believe the sky is typically seen as this color.",
         "answer"    := "green"
       )),
-      DynamicPrediction(values = rec(
+      RawPrediction(values = rec(
         "rationale" := "From images and depictions in media, the sky is frequently represented with this hue.",
         "answer"    := "blue"
       ))
@@ -117,7 +117,7 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     val input = MultiChainInput(
       baseInput = (question = "What is the color of the sky?"),
-      attempts = Vector.fill(3)(DynamicPrediction.empty)
+      attempts = Vector.fill(3)(RawPrediction.empty)
     )
 
     RuntimeEnvironment.withSettings(settings) {
@@ -132,7 +132,7 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = mcc.compare((question = "?"), Vector(DynamicPrediction.empty))
+      val result = mcc.compare((question = "?"), Vector(RawPrediction.empty))
       assert(result.isLeft)
       assert(
         result.left.toOption.get.message.contains("doesn't match the configured m"),

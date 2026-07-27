@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.{DynamicModule, Module, ModuleLifecycle, ProgramCall}
 import dspy4s.typed.Prediction
 import munit.FunSuite
@@ -17,9 +17,9 @@ class ProgramRunnerSuite extends FunSuite:
 
     protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
-    ): Either[DspyError, DynamicPrediction] =
+    ): Either[DspyError, RawPrediction] =
       observed = Some(call)
-      Right(DynamicPrediction(DynamicValues.record("value" := "dynamic")))
+      Right(RawPrediction(DynamicValues.record("value" := "dynamic")))
 
   private final class CapturingTyped extends Module[RunnerInput, String]:
     var observed: Option[ProgramCall[RunnerInput]] = None
@@ -32,7 +32,7 @@ class ProgramRunnerSuite extends FunSuite:
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =
       observed = Some(call)
-      val raw = DynamicPrediction(DynamicValues.record("value" := call.input.value))
+      val raw = RawPrediction(DynamicValues.record("value" := call.input.value))
       Right(Prediction(call.input.value, raw))
 
   private val call = ProgramCall(

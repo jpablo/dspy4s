@@ -8,7 +8,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in
   * declaration order, converts each to a `FieldSpec` for the untyped `SignatureLayout`, and encodes / decodes
   * typed values against the `DynamicValue.Record` spine carried through `ProgramCall`, adapters, and
-  * `DynamicPrediction`.
+  * `RawPrediction`.
   *
   * The codec spine is `DynamicValue.Record` end-to-end: `Shape.encode` produces one, `Shape.decode` consumes one,
   * and adapters speak the same intermediate. There is no `Map[String, Any]` round-trip.

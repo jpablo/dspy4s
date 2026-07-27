@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
@@ -25,7 +25,7 @@ import zio.blocks.schema.DynamicValue
   */
 final case class MultiChainInput[I](
     baseInput: I,
-    attempts: Vector[DynamicPrediction]
+    attempts: Vector[RawPrediction]
 )
 
 /** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected reasoning +
@@ -158,7 +158,7 @@ final case class MultiChainComparison[I, O](
     */
   def compare(
       input: I,
-      attempts: Vector[DynamicPrediction],
+      attempts: Vector[RawPrediction],
       config: DynamicValue.Record = DynamicValue.Record.empty,
       traceEnabled: Boolean = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
@@ -167,7 +167,7 @@ final case class MultiChainComparison[I, O](
   /** Renders a single attempt verbatim as Python does (no period after the rationale, matching
     * `multi_chain_comparison.py`): `«I'm trying to {rationale} I'm not sure but my prediction is {answer}»`.
     */
-  private def formatAttempt(attempt: DynamicPrediction): String =
+  private def formatAttempt(attempt: RawPrediction): String =
     val row       = attempt.values
     val rationale = firstNonEmpty(row, Seq("rationale", "reasoning"))
     val answer    = lastOutputName.flatMap(name => DynamicValues.recordGet(row, name))

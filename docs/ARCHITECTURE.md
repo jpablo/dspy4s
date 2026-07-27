@@ -7,7 +7,7 @@ A Scala 3 port of the Stanford DSPy framework. The defining design choices:
   adapters / language models flow through a single erased runtime contract
   (`SignatureLayout`).
 - **`zio.blocks.schema.DynamicValue.Record` is the codec spine**: a single
-  intermediate carried through `Example`, `ProgramCall`, `DynamicPrediction`,
+  intermediate carried through `Example`, `ProgramCall`, `RawPrediction`,
   `ParsedOutput`, and `Shape.encode/decode`. Adapters parse straight into
   Records; the typed surface encodes / decodes via `Schema.toDynamicValue` /
   `Schema.fromDynamicValue` with no `Map[String, Any]` round-trip.
@@ -54,7 +54,7 @@ graph TD
 1. **`core`** — contracts. Single external dependency: `zio-blocks-schema`
    (for `DynamicValue`, the codec spine type).
    - `SignatureLayout` and `FieldSpec` (erased runtime contract for adapters)
-   - `Example`, `DynamicPrediction`, `Completions` — all field-carrying types
+   - `Example`, `RawPrediction`, `Completions` — all field-carrying types
      hold a `DynamicValue.Record` for their values
    - `DynamicValues` — helpers (`fromAny`, `toAny`, `recordGet`,
      `recordUpdated`, `recordFromEntries`, `renderText`, `recordToMap`) used
@@ -103,7 +103,7 @@ graph TD
    - `contracts/Module` — the semantic program base `Module[I, O]`; its abstract `forward`
      consumes `ProgramCall[I]` and returns `Prediction[O]`, while `final apply` adds module callbacks and tracing.
      `DynamicModule` is the dynamic-spine specialization
-     (`Module[DynamicValue.Record, DynamicValue.Record]`); its raw `DynamicPrediction` is lifted through
+     (`Module[DynamicValue.Record, DynamicValue.Record]`); its `RawPrediction` is lifted through
      `Prediction.dynamic` at the module boundary.
    - `DynamicPredict` — record-valued predict, extends `DynamicModule`
    - `Predict[I, O]` — typed predict, a `Module[I, O]`; a *sibling*
@@ -146,7 +146,7 @@ graph TD
 
 ```
 SignatureLayout ──→ ProgramCall[Record] ──→ DynamicPredict ──→ Prediction[Record]
-                                                               └─ raw: DynamicPrediction
+                                                               └─ raw: RawPrediction
 ```
 
 `SignatureLayout` carries a name, optional instructions, and an ordered
@@ -169,7 +169,7 @@ Signature[I, O] ──→ Predict[I, O].apply(input: I) ──→ Prediction[O]
 
 `Predict[I, O].apply` encodes the input through `signature.inputShape`,
 runs the shared `PredictEngine` directly, then decodes the resulting
-`DynamicPrediction` through `signature.outputShape`. `Predict` and
+`RawPrediction` through `signature.outputShape`. `Predict` and
 `DynamicPredict` are sibling modules over that engine; neither calls the
 other. Decode failures surface as `Left(DspyError)` inside the typed
 module lifecycle, never via lazy field access.
@@ -213,7 +213,7 @@ When `Predict[I, O].apply(input)` fires:
    5. `adapter.parse(layout, output)` inside
       `CallbackDispatcher.withAdapter("parse")` for each output →
       `Vector[ParsedOutput]`.
-   6. Assemble `DynamicPrediction` from completions; attach LM usage
+   6. Assemble `RawPrediction` from completions; attach LM usage
       and tool-call payload.
 4. **Decode** — still inside `forward`,
    `Prediction.from(raw, signature.outputShape)` returns
@@ -311,7 +311,7 @@ For comparison with the upstream Python DSPy architecture:
 - `core/contracts/SignatureLayout.scala` — the layout case class +
   factories (`parse`, `create`, `fromState`). Mutation helpers are
   `private[dspy4s]`.
-- `core/data/` — individual `Example`, `DynamicPrediction`, and `Completions`
+- `core/data/` — individual `Example`, `RawPrediction`, and `Completions`
   files. All field values live in a `DynamicValue.Record`.
 - `core/contracts/DynamicValues.scala` — boundary helpers for lifting
   plain Scala values into `DynamicValue` (`fromAny`,

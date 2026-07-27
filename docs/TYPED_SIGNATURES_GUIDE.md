@@ -222,7 +222,7 @@ wrapper.
 
 Rare. Direct construction of a `SignatureLayout` value, bypassing the
 typed signature surface entirely. You hand it to `DynamicPredict` and get back
-`Prediction[DynamicValue.Record]`; its `.raw` retains the `DynamicPrediction` containing completions and usage. Use only
+`Prediction[DynamicValue.Record]`; its `.raw` retains the `RawPrediction` containing completions and usage. Use only
 when interoperating with code that already speaks the erased
 contract.
 
@@ -364,7 +364,7 @@ truncation.
 
 ---
 
-## Accessing the raw `DynamicPrediction`
+## Accessing `RawPrediction`
 
 The typed wrapper preserves the underlying prediction for callers
 that need completions, LM usage, or other adapter metadata:
@@ -375,10 +375,10 @@ val tp = Predict(sig).apply((question = "...")).toOption.get
 tp.output.answer        // typed access
 tp.raw.lmUsage          // Option[LmUsage] — typed core + provider-specific token counts
 tp.raw.completions      // Option[Completions] — multiple candidates
-tp.raw.value("answer")  // dynamic accessor on the raw DynamicPrediction
+tp.raw.value("answer")  // dynamic accessor on RawPrediction
 ```
 
-`tp.raw` is the `DynamicPrediction` assembled by the shared
+`tp.raw` is the `RawPrediction` assembled by the shared
 `PredictEngine`, before the typed output decode. `Predict[I, O]` and
 `DynamicPredict` are sibling modules over that engine; the typed module
 preserves the raw prediction while also decoding its values into

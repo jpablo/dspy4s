@@ -158,7 +158,7 @@ get the wrapping; `BestOfN` accordingly records its own trace entry. See
 
 **Evolution.** `Module` later became generic again and now uses semantic parameters throughout:
 `Module[I, O]#forward` returns `Prediction[O]`. The dynamic spine is
-`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`; its raw `DynamicPrediction` is lifted into the
+`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`; its `RawPrediction` is lifted into the
 uniform result by `Prediction.dynamic`. This removes the former typed/dynamic result asymmetry while `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.
 

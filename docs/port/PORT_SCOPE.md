@@ -29,7 +29,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
   composite programs use them while user code stays on the typed surface
 
 2. Core primitives and runtime
-- `Example`, `DynamicPrediction` (erased) / `Prediction[O]` (typed),
+- `Example`, `RawPrediction` (erased) / `Prediction[O]` (typed),
   `Completions`
 - `Module[I, O]` trait: semantic `I`/`O`, with `ProgramCall[I]` and `Prediction[O]` as the execution envelopes.
   (No nested parameter/predictor traversal — that's the

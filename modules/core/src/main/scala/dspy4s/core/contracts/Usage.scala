@@ -29,7 +29,7 @@ object TokenCategory:
   def fromWire(name: String): TokenCategory = byWireName.getOrElse(name, Other(name))
 
 /** Typed token accounting for one LM call. Usage is core execution metadata: both
-  * [[dspy4s.core.data.DynamicPrediction]] and the LM
+  * [[dspy4s.core.data.RawPrediction]] and the LM
   * boundary carry this exact value, so no string-map conversion separates the two layers.
   *
   * Pointwise addition forms a commutative monoid: universal counters add and provider-specific counters combine by

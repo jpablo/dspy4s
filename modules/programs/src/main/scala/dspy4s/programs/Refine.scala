@@ -15,7 +15,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
@@ -284,7 +284,7 @@ object Refine:
   private[programs] final case class OfferFeedbackAdvice(discussion: String, advice: String)
 
   /** Hand-written LENIENT output shape mirroring the prior dynamic consumption exactly: `advice` is required (with
-    * `DynamicPrediction.asString`'s primitive coercion, the accessor the dynamic path used), `discussion` tolerates
+    * `RawPrediction.asString`'s primitive coercion, the accessor the dynamic path used), `discussion` tolerates
     * absence (defaults to ""). A derived shape would reject completions that omit `discussion`, which today's critic
     * consumers accept; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict`
     * construction. */
@@ -293,7 +293,7 @@ object Refine:
     def encode(value: OfferFeedbackAdvice): DynamicValue.Record =
       DynamicValues.record("discussion" := value.discussion, "advice" := value.advice)
     def decode(raw: DynamicValue.Record): Either[DspyError, OfferFeedbackAdvice] =
-      DynamicPrediction(values = raw).asString("advice").map { advice =>
+      RawPrediction(values = raw).asString("advice").map { advice =>
         OfferFeedbackAdvice(
           discussion = DynamicValues.recordGet(raw, "discussion").map(DynamicValues.renderText).getOrElse(""),
           advice     = advice

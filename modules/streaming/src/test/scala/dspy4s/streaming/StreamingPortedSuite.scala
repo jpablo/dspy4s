@@ -7,7 +7,7 @@ import dspy4s.adapters.JsonStreamingState
 import dspy4s.adapters.XmlStreamingState
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -297,9 +297,9 @@ class StreamingPortedSuite extends FunSuite:
       override val moduleName: String = "my_program"
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
-      ): Either[DspyError, DynamicPrediction] =
+      ): Either[DspyError, RawPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>
-          DynamicPrediction(values = rec("answer" := "blue"))
+          RawPrediction(values = rec("answer" := "blue"))
         }
 
     given RuntimeContext = RuntimeEnvironment.current

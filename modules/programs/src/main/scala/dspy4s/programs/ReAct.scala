@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
@@ -173,7 +173,7 @@ final case class ReAct[I, O](
     yield Prediction(
       output = extracted.output,
       // Attach the (complete) trajectory to the raw prediction so callers can inspect the agent's reasoning.
-      raw = DynamicPrediction(
+      raw = RawPrediction(
         values = extracted.raw.values
           .updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))),
         completions = extracted.raw.completions,

@@ -1,7 +1,7 @@
 package dspy4s.streaming.contracts
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 
 import java.time.Instant
 
@@ -18,7 +18,7 @@ final case class TokenEvent(
 
 final case class StatusEvent(message: String, timestamp: Instant = Instant.now()) extends StreamEvent
 
-final case class PredictionEvent(prediction: DynamicPrediction, timestamp: Instant = Instant.now()) extends StreamEvent
+final case class PredictionEvent(prediction: RawPrediction, timestamp: Instant = Instant.now()) extends StreamEvent
 
 final case class ErrorEvent(error: DspyError, timestamp: Instant = Instant.now()) extends StreamEvent
 

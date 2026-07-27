@@ -3,7 +3,7 @@ package dspy4s.evaluate
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ThreadCount
@@ -46,7 +46,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       saveAsCsv: Option[String] = None,
       saveAsJson: Option[String] = None,
       callbackMetadata: Option[DynamicValue.Record] = None
-  )(program: Example => Either[DspyError, DynamicPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
+  )(program: Example => Either[DspyError, RawPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val mergedConfig = EvaluateConfig(
       devset = devset.getOrElse(config.devset),
       metric = metric.getOrElse(config.metric),
@@ -64,7 +64,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     applyInternal(program, mergedConfig)
 
   private def applyInternal(
-      fn: Example => Either[DspyError, DynamicPrediction],
+      fn: Example => Either[DspyError, RawPrediction],
       cfg: EvaluateConfig
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val dataset = cfg.devset
@@ -84,7 +84,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
     val execResultE = RuntimeEnvironment.withContext(evalCtx) {
       val executor = buildExecutor(cfg)(using evalCtx)
-      executor.executeEither[Example, (DynamicPrediction, Double)](
+      executor.executeEither[Example, (RawPrediction, Double)](
         task = (ex: Example) =>
           // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
           // there, so `RuntimeEnvironment.current` is the right `RuntimeContext` to hand the metric (so
@@ -107,7 +107,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
               if cfg.provideTraceback then
                 execResult.errors.get(idx).map(err => s"[${err.code}] ${err.message}")
               else None
-            ExampleEvaluation(dataset(idx), DynamicPrediction.empty, cfg.failureScore, error = capturedError)
+            ExampleEvaluation(dataset(idx), RawPrediction.empty, cfg.failureScore, error = capturedError)
       }.toVector
 
       val totalScore = evaluations.map(_.score).sum
@@ -148,7 +148,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     }
 
   override def evaluate(
-      predict: Example => Either[DspyError, DynamicPrediction],
+      predict: Example => Either[DspyError, RawPrediction],
       dataset: Vector[Example],
       metric: Metric
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =

@@ -29,9 +29,9 @@ Four abstractions anchor the framework:
 | Type | Role |
 |------|------|
 | `Example` | A training/demo data point: a `DynamicValue.Record` of fields plus the `inputKeys` partition marking inputs vs labels. |
-| `DynamicPrediction` | The result of one predict call: completion fields, optional multi-candidate `Completions`, and typed `LmUsage`. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
+| `RawPrediction` | Adapter-parsed prediction data before schema decoding into semantic output `O`: field values, optional multi-candidate `Completions`, and typed `LmUsage`. "Raw" does not mean unparsed LM text. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
 | `LmUsage` / `TokenCategory` | Typed token accounting shared by predictions and LM responses; pointwise addition is a commutative monoid. |
-| `Completions` | A column-oriented view of N candidate completions; `at(i)` reconstructs row `i` as a `DynamicPrediction`. |
+| `Completions` | A column-oriented view of N candidate completions; `at(i)` reconstructs row `i` as a `RawPrediction`. |
 | `DynamicValues` | The helper surface over the spine: `fromAny`, `recordFromEntries`, `recordGet`, `mergeRecords`, `renderText`, plus the `:=` and `updated` extensions. `fromAny` is reserved for user-facing edges. |
 
 ### Signature / fields
@@ -75,7 +75,7 @@ Four abstractions anchor the framework:
 
 | File / package | Contents |
 |----------------|----------|
-| `data/` | Individual `Example`, `Completions`, and `DynamicPrediction` data aggregates |
+| `data/` | Individual `Example`, `Completions`, and `RawPrediction` data aggregates |
 | `contracts/Usage.scala` | `LmUsage` and `TokenCategory` execution metadata |
 | `contracts/DynamicValues.scala` | spine helpers + `:=` / `updated` extensions |
 | `contracts/Runtime.scala` | Cycle-breaking LM/adapter reference traits |

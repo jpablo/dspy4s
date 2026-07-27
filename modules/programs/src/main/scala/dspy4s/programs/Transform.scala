@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.programs.predictors.*
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.programs.contracts.Module
@@ -42,7 +42,7 @@ final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:
   override val moduleName: String = "lift"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    TransformResult.guard("program_lift")(Right(Prediction(run(call.input), DynamicPrediction.empty)))
+    TransformResult.guard("program_lift")(Right(Prediction(run(call.input), RawPrediction.empty)))
 
 object Lift:
   given liftPredictors[I, O]: Predictors[Lift[I, O]] = Predictors.empty
@@ -53,7 +53,7 @@ final case class LiftEither[I, O](run: I => Either[DspyError, O])
   override val moduleName: String = "lift_either"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    TransformResult.guard("program_lift_either")(run(call.input).map(Prediction(_, DynamicPrediction.empty)))
+    TransformResult.guard("program_lift_either")(run(call.input).map(Prediction(_, RawPrediction.empty)))
 
 object LiftEither:
   given liftEitherPredictors[I, O]: Predictors[LiftEither[I, O]] = Predictors.empty

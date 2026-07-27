@@ -1,7 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.CodeAct
@@ -18,7 +18,7 @@ import zio.blocks.schema.DynamicValue
   * `Module[DynamicValue.Record, DynamicValue.Record]` values and statically typed `Module[I, O]` values can be
   * streamed through the same entry point. `Streamify` requires exactly two things of a program:
   *
-  *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding the raw `DynamicPrediction`
+  *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction`
   *      for the final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
   *      `StreamingLanguageModel` consulting `ActivePredictContext`, which each `PredictEngine` execution scopes for
   *      both typed and dynamic prediction modules — independent of how the outer program is invoked. 2.
@@ -29,7 +29,7 @@ trait Streamable[P]:
   protected def runner: ProgramRunner[P]
   def knownSignatures(program: P): Vector[(String, SignatureLayout)]
 
-  final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicPrediction] =
+  final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, RawPrediction] =
     runner.run(program, inputs)
 
 object Streamable:

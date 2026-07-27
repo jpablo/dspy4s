@@ -22,7 +22,7 @@ import dspy4s.core.contracts.{
   RuntimeContext,
   TraceEntry
 }
-import dspy4s.core.data.{DynamicPrediction, Example}
+import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -72,7 +72,7 @@ object GepaSmokeTest:
     override def name: String = "label_match"
     override def feedback(
         example: Example,
-        prediction: DynamicPrediction,
+        prediction: RawPrediction,
         trace: Vector[TraceEntry],
         component: Option[String],
         componentTrace: Vector[TraceEntry]

@@ -3,7 +3,7 @@ package dspy4s.evaluate
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.data.DynamicPrediction
+import dspy4s.core.data.RawPrediction
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.ExampleEvaluation
 import munit.FunSuite
@@ -26,17 +26,17 @@ class PersistenceSuite extends FunSuite:
       results = Vector(
         ExampleEvaluation(
           Example(rec("question" := "cap of France?", "answer" := "Paris")),
-          DynamicPrediction(rec("answer" := "Paris")),
+          RawPrediction(rec("answer" := "Paris")),
           score = 1.0
         ),
         ExampleEvaluation(
           Example(rec("question" := "cap of Italy?", "answer" := "Rome")),
-          DynamicPrediction(rec("answer" := "Naples")),
+          RawPrediction(rec("answer" := "Naples")),
           score = 0.0
         ),
         ExampleEvaluation(
           Example(rec("question" := "cap of Spain?", "answer" := "Madrid")),
-          DynamicPrediction(rec("answer" := "Madrid")),
+          RawPrediction(rec("answer" := "Madrid")),
           score = 1.0
         )
       ),
@@ -84,7 +84,7 @@ class PersistenceSuite extends FunSuite:
       results = Vector(
         ExampleEvaluation(
           Example(rec("answer" := "Paris")),
-          DynamicPrediction(rec("answer" := "Lyon")),
+          RawPrediction(rec("answer" := "Lyon")),
           score = 0.0
         )
       ),
@@ -105,7 +105,7 @@ class PersistenceSuite extends FunSuite:
       results = Vector(
         ExampleEvaluation(
           Example(rec("answer" := "Paris", "score" := 0.8)),
-          DynamicPrediction(rec("answer" := "Paris", "confidence" := 0.95)),
+          RawPrediction(rec("answer" := "Paris", "confidence" := 0.95)),
           score = 1.0
         )
       )

@@ -21,12 +21,12 @@ final case class Completions(fields: Map[String, Vector[DynamicValue]]):
 
   def size: Int = fields.values.headOption.map(_.size).getOrElse(0)
 
-  def at(index: Int): Either[DspyError, DynamicPrediction] =
+  def at(index: Int): Either[DspyError, RawPrediction] =
     if index < 0 || index >= size then
       Left(ValidationError(s"Completion index $index out of bounds for size $size"))
     else
       val row = DynamicValue.Record(Chunk.from(fields.iterator.map((k, vs) => k -> vs(index)).toSeq))
-      Right(DynamicPrediction(values = row))
+      Right(RawPrediction(values = row))
 
 object Completions:
   /** Convert N row-shaped records into the columnar layout. Fails if any row's key set differs from the first row's —

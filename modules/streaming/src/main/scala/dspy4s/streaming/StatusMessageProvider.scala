@@ -7,7 +7,7 @@ import scala.annotation.nowarn
 
 trait StatusMessageProvider:
   // Start hooks receive the observability input bag as a `DynamicValue.Record` (spine-typed, not free-form Map).
-  // End hooks still receive the raw domain result (`DynamicPrediction` / `LmResponse`) erased to `Any`.
+  // End hooks still receive the raw domain result (`RawPrediction` / `LmResponse`) erased to `Any`.
   def moduleStart(instanceName: String, inputs: DynamicValue.Record): Option[String] = None
   def moduleEnd(instanceName: String, output: Any): Option[String] = None
   def lmStart(modelId: String, inputs: DynamicValue.Record): Option[String] = None
