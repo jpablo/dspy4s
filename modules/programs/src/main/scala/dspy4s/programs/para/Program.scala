@@ -38,7 +38,7 @@ import zio.blocks.schema.DynamicValue
 sealed trait Program[I, O]:
   type Rep <: Module[I, O]
   val program: Rep
-  val predictors: OptimizableTraversal[Rep]
+  val optimizableParameters: OptimizableTraversal[Rep]
 
   /** Run the packaged program through the module's wrapped `apply`. */
   def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -51,8 +51,8 @@ object Program:
   )(using ev: OptimizableTraversal[F]): Program[I, O] { type Rep = F } =
     new Program[I, O]:
       type Rep = F
-      val program: F                        = f
-      val predictors: OptimizableTraversal[F] = ev
+      val program: F                                     = f
+      val optimizableParameters: OptimizableTraversal[F] = ev
 
   /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate:
     * every object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional. */
@@ -65,13 +65,15 @@ object Program:
   /** Addressability for packaged programs delegates to the evidence retained by the package. */
   given programOptimizableTraversal[I, O]: OptimizableTraversal[Program[I, O]] with
     def inspect(program: Program[I, O]): Vector[OptimizableView] =
-      program.predictors.inspect(program.program)
+      program.optimizableParameters.inspect(program.program)
 
     def replace(program: Program[I, O], updates: Vector[OptimizableParameters]): Program[I, O] =
-      Program.packageWith(program.predictors.replace(program.program, updates))(using program.predictors)
+      Program.packageWith(program.optimizableParameters.replace(program.program, updates))(using
+        program.optimizableParameters
+      )
 
     override def inspectNamed(program: Program[I, O]): Vector[(String, OptimizableView)] =
-      program.predictors.inspectNamed(program.program)
+      program.optimizableParameters.inspectNamed(program.program)
 
   /** Record-boundary execution resolves the sealed canonical codec for the domain object. */
   given programRunner[I, O](using codec: RecordCodec[I]): ProgramRunner[Program[I, O]] with
@@ -92,19 +94,25 @@ object Program:
 
     def fanout[I, A, B](f: Program[I, A], g: Program[I, B]): Program[I, (A, B)] =
       Program.packageWith(f.program &&& g.program)(using
-        Both.bothOptimizableTraversal[I, A, B, f.Rep, g.Rep](using f.predictors, g.predictors)
+        Both.bothOptimizableTraversal[I, A, B, f.Rep, g.Rep](using
+          f.optimizableParameters,
+          g.optimizableParameters
+        )
       )
 
     extension [A, B](f: Program[A, B])
       infix def >>>[C](g: Program[B, C]): Program[A, C] =
         Program.packageWith(f.program.andThen(g.program))(using
-          AndThen.andThenOptimizableTraversal[A, B, C, f.Rep, g.Rep](using f.predictors, g.predictors)
+          AndThen.andThenOptimizableTraversal[A, B, C, f.Rep, g.Rep](using
+            f.optimizableParameters,
+            g.optimizableParameters
+          )
         )
 
-      def params: Vector[OptimizableParameters] = f.predictors.read(f.program)
+      def params: Vector[OptimizableParameters] = f.optimizableParameters.read(f.program)
 
       def reparam(ps: Vector[OptimizableParameters]): Program[A, B] =
-        Program.packageWith(f.predictors.replace(f.program, ps))(using f.predictors)
+        Program.packageWith(f.optimizableParameters.replace(f.program, ps))(using f.optimizableParameters)
 
 /** Parameter projection as a functor from packaged programs into the delooped parameter monoid. */
 object ReadFunctor extends CategoryFunctor[RecordCodec, Program, AnyObject, ParamsHom]:
