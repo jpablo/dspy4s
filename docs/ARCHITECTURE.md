@@ -100,16 +100,16 @@ graph TD
 
 5. **`programs`** — orchestration.
    - `runtime/PredictEngine` — the shared execute body (private)
-   - `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
+   - `contracts/Module` — the generic program base `Module[I, Result]`; its `final apply`
      does the module-level callback + trace wrapping over an abstract `forward`.
      `DynamicModule` is the untyped-spine alias (`Module[DynamicValue.Record, DynamicPrediction]`,
      with the bag projection hooks defaulted)
    - `DynamicPredict` — erased predict, extends `DynamicModule`
-   - `Predict[I, O]` — typed predict, a `Module[I, Prediction[O]]`; a *sibling*
+   - `Predict[I, O]` — typed predict, a `PredictiveModule[I, O]`; a *sibling*
      of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
    - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
-   - All other programs are typed `Module[I, Prediction[…]]` too:
+   - All other programs are typed `PredictiveModule[I, …]` too:
      `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
      data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and

@@ -104,7 +104,7 @@ becomes `DynamicPrediction` + `Prediction[O]` (the typed one keeps the
 erased prediction on `.raw`), and `Predict` becomes `DynamicPredict` +
 `Predict[I, O]`. The two `Predict`s are **siblings** — thin `Module`s
 over the shared `PredictEngine`, not wrapper-and-wrapped. The typed
-programs are themselves `Module`s (`Module[I, Prediction[O]]`),
+programs are themselves `Module`s (`PredictiveModule[I, O]`),
 so the runtime stack sees them like any other program; `ChainOfThought`
 is a typed signature augmentation that *composes* an inner `Predict[I, O]`
 (its `forward` delegates to it).
@@ -317,11 +317,11 @@ doesn't have:
 
 - `runtime/PredictEngine` — the shared execute body
   (`private[dspy4s]`).
-- `contracts/Module` — the generic program base `Module[I, O]`; its `final apply`
+- `contracts/Module` — the generic program base `Module[I, Result]`; its `final apply`
   does the module-level callback + trace wrapping over an abstract `forward`.
   `DynamicModule` is the untyped-spine alias (`Module[DynamicValue.Record, DynamicPrediction]`).
 - `DynamicPredict` — erased predict, extends `DynamicModule`.
-- `Predict[I, O]` — typed predict, a `Module[I, Prediction[O]]`; a
+- `Predict[I, O]` — typed predict, a `PredictiveModule[I, O]`; a
   *sibling* of `DynamicPredict` over `PredictEngine` (not a wrapper).
 
 `ChainOfThought` is itself a `Module` that composes an inner typed `Predict`.

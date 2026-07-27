@@ -155,7 +155,7 @@ that the current combinators carry as type parameters:
 
 ```scala
 sealed trait Atom[I, O]:
-  type Repr <: Module[I, Prediction[O]]
+  type Repr <: PredictiveModule[I, O]
   val value: Repr
   val predictors: Predictors[Repr]
 ```

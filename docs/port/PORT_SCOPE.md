@@ -31,7 +31,8 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 2. Core primitives and runtime
 - `Example`, `DynamicPrediction` (erased) / `Prediction[O]` (typed),
   `Completions`
-- `Module[I, O]` trait. (No nested parameter/predictor traversal — that's the
+- `Module[I, Result]` trait, with `PredictiveModule[I, O] = Module[I, Prediction[O]]` for typed programs.
+  (No nested parameter/predictor traversal — that's the
   open **G-1** gap; the current mechanism is the `PredictOps[P]` typeclass over a
   single predictor, and composite traversal is tracked as G-1 in
   [PORT_GAPS.md](PORT_GAPS.md).)
