@@ -29,7 +29,7 @@
 **Status:** Resolved (P1–P6, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07 / 1657f9c)
 
 **Resolution.** Closed by a typed `Predictors[P]` / `Predictor[P]` typeclass pair
-with Scala 3 Mirror derivation (`modules/programs/.../Predictors.scala`). `inspect`
+with Scala 3 Mirror derivation (`modules/programs/.../predictors/`). `inspect`
 enumerates non-executable `PredictorView`s (read-only metadata + writable state),
 `read` projects their `PredictorState`s, and `replace` rebuilds the program immutably.
 Each `Predictor` leaf satisfies Get-Put, Put-Get, Put-Put, and the metadata frame exactly.
