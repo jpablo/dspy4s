@@ -13,7 +13,7 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.predictors.{PredictorState, withPredictorState}
+import dspy4s.programs.predictors.{OptimizableParameters, withOptimizableParameters}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.DynamicValue
@@ -55,11 +55,11 @@ final case class MultiChainComparison[I, O](
     rationaleDescription: String = "${corrected reasoning}",
     attemptDescription: String = "${reasoning attempt}",
     answerFieldOverride: Option[String] = None,
-    /** Optional writable state for the comparison predictor. The executable predictor itself is built internally over
-      * this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it with a shape that
-      * accepts arbitrary vectors. Optimizer replacement writes only this lawful state surface.
+    /** Optional optimizable parameters for the comparison predictor. The executable predictor itself is built
+      * internally over this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it
+      * with a shape that accepts arbitrary vectors. Optimizer replacement writes only this lawful parameter surface.
       */
-    comparePredictStateOverride: Option[PredictorState] = None
+    comparePredictParametersOverride: Option[OptimizableParameters] = None
 )(using
     prepend: PrependField.Of["rationale", String, O]
 ) extends Module[MultiChainInput[I], MultiChainComparison.WithRationale[O]]:
@@ -125,7 +125,7 @@ final case class MultiChainComparison[I, O](
         )
       )
     )
-    comparePredictStateOverride.fold(base)(base.withPredictorState)
+    comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
   override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] =
     ModuleLifecycle.observed(

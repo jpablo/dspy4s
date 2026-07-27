@@ -15,9 +15,9 @@ can be loaded at startup.
 architecture and runtime bindings were created normally in Scala, then returns a new
 immutable value with the saved predictor states applied.
 
-## The state contract
+## The optimizable-parameter contract
 
-Every optimizer-addressable leaf exposes the same writable `PredictorState`:
+Every optimizer-addressable leaf exposes the same writable `OptimizableParameters`:
 
 | Field | Meaning |
 |---|---|
@@ -26,27 +26,27 @@ Every optimizer-addressable leaf exposes the same writable `PredictorState`:
 | `config: DynamicValue.Record` | Module-level LM option defaults; per-call options still win. |
 
 This contract is shared by typed `Predict`, typed `ChainOfThought`, and
-`DynamicPredict`. Framework composites expose the same state for each stable
+`DynamicPredict`. Framework composites expose the same parameters for each stable
 leaf—for example, `ProgramOfThought` exposes its generator, regenerator, and
 answerer. The executable predictor is not used as a parameter carrier.
 
-`PredictorLens[P]` is a lens onto this state. Its instances obey:
+`PredictorLens[P]` is a lens onto these parameters. Its instances obey:
 
-- Get-Put: writing the state just read is a no-op.
-- Put-Get: reading after a write returns the written state.
-- Put-Put: only the last state written matters.
-- Frame: writing state does not change predictor metadata.
+- Get-Put: writing the parameters just read is a no-op.
+- Put-Get: reading after a write returns the written parameters.
+- Put-Put: only the last parameters written matter.
+- Frame: writing parameters does not change predictor metadata.
 
 At the composite level, `PredictorTraversal.replace(program, PredictorTraversal.read(program))`
 returns the original program, and an arity-matched replacement reads back as the
-same state vector.
+same parameter vector.
 
-Algebraically, `PredictorLens[P]` is a lawful lens focused on one `PredictorState`,
+Algebraically, `PredictorLens[P]` is a lawful lens focused on one `OptimizableParameters`,
 while `PredictorTraversal[P]` is an ordered finite traversal. Composition concatenates
 the child traversals, parameter-free structure contributes the empty vector, and
-`Vector[PredictorState]` forms the parameter monoid under concatenation. Named
+`Vector[OptimizableParameters]` forms the parameter monoid under concatenation. Named
 inspection is checked against the canonical traversal so labels cannot silently
-reorder or substitute states.
+reorder or substitute parameters.
 
 ## Metadata and execution resources
 

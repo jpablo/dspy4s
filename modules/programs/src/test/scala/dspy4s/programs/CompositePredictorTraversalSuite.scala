@@ -45,10 +45,10 @@ class CompositePredictorTraversalSuite extends FunSuite:
 
   private object Leaf:
     given leafPredictor[I, O]: PredictorLens[Leaf[I, O]] with
-      def get(program: Leaf[I, O]): PredictorState = program.predict.predictorState
+      def get(program: Leaf[I, O]): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Leaf[I, O]): PredictorMetadata = program.predict.predictorView.metadata
-      def set(program: Leaf[I, O], updated: PredictorState): Leaf[I, O] =
-        program.copy(predict = program.predict.withPredictorState(updated))
+      def set(program: Leaf[I, O], updated: OptimizableParameters): Leaf[I, O] =
+        program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   test("hand-written composite traversals expose logical predictor names") {
     val signature  = Signature.derived[RlmIn, RlmOut]("CompositeNames")
@@ -82,11 +82,11 @@ class CompositePredictorTraversalSuite extends FunSuite:
     val b    = BestOfN[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
     val P    = summon[PredictorTraversal[BestOfN[Leaf[Int, Int], Int, Int]]]
 
-    assertEquals(P.read(b), Vector(leaf.predict.predictorState))
+    assertEquals(P.read(b), Vector(leaf.predict.optimizableParameters))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("self"))
     assertEquals(P.replace(b, P.read(b)), b) // round-trip: replace(p, read(p)) == p
     // A genuine replace writes back through to the inner leaf.
-    val fresh = leaf.predict.predictorState.copy(instructions = Some("Use the tuned leaf."))
+    val fresh = leaf.predict.optimizableParameters.copy(instructions = Some("Use the tuned leaf."))
     assertEquals(P.read(P.replace(b, Vector(fresh))), Vector(fresh))
   }
 
@@ -101,7 +101,7 @@ class CompositePredictorTraversalSuite extends FunSuite:
       threshold = 1.0
     )
     val P = summon[PredictorTraversal[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
-    assertEquals(P.read(b), Vector(first.predict.predictorState, second.predict.predictorState))
+    assertEquals(P.read(b), Vector(first.predict.optimizableParameters, second.predict.optimizableParameters))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("first", "second"))
   }
 
@@ -112,7 +112,7 @@ class CompositePredictorTraversalSuite extends FunSuite:
     val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
     val P    = summon[PredictorTraversal[Refine[Leaf[Int, Int], Int, Int]]]
 
-    assertEquals(P.read(r), Vector(leaf.predict.predictorState, r.criticPredict.predictorState))
+    assertEquals(P.read(r), Vector(leaf.predict.optimizableParameters, r.criticPredict.optimizableParameters))
     assertEquals(P.inspectNamed(r).map(_._1), Vector("self", "critic"))
     assertEquals(r.criticPredict.signature.name, "OfferFeedback")
     assertEquals(r.criticPredict.name, Some("offer_feedback"))
@@ -125,14 +125,14 @@ class CompositePredictorTraversalSuite extends FunSuite:
 
     assertEquals(P.replace(r, P.read(r)), r) // exact no-op state round-trip
     // Swap only the critic: the inner leaf is untouched, the critic is written back.
-    val tunedCritic = r.criticPredict.predictorState.copy(instructions = Some("Give concrete feedback."))
-    val replaced    = P.replace(r, Vector(leaf.predict.predictorState, tunedCritic))
-    assertEquals(P.read(replaced), Vector(leaf.predict.predictorState, tunedCritic))
-    assertEquals(replaced.criticPredict.predictorState, tunedCritic)
+    val tunedCritic = r.criticPredict.optimizableParameters.copy(instructions = Some("Give concrete feedback."))
+    val replaced    = P.replace(r, Vector(leaf.predict.optimizableParameters, tunedCritic))
+    assertEquals(P.read(replaced), Vector(leaf.predict.optimizableParameters, tunedCritic))
+    assertEquals(replaced.criticPredict.optimizableParameters, tunedCritic)
     assertEquals(replaced.module, leaf)
     // Swap only the inner leaf: the critic stays the default.
-    val tunedLeaf = leaf.predict.predictorState.copy(instructions = Some("Tune the answer."))
-    val replaced2 = P.replace(r, Vector(tunedLeaf, r.criticPredict.predictorState))
+    val tunedLeaf = leaf.predict.optimizableParameters.copy(instructions = Some("Tune the answer."))
+    val replaced2 = P.replace(r, Vector(tunedLeaf, r.criticPredict.optimizableParameters))
     assertEquals(P.read(replaced2).head, tunedLeaf)
     assertEquals(replaced2.criticPredictOverride, None)
   }
@@ -143,13 +143,13 @@ class CompositePredictorTraversalSuite extends FunSuite:
     val rlm = RLM(baseSignature = Signature.derived[RlmIn, RlmOut]("RlmQA"))
     val P   = summon[PredictorTraversal[RLM[RlmIn, RlmOut]]]
 
-    assertEquals(P.read(rlm), Vector(rlm.actionPredict.predictorState, rlm.extractPredict.predictorState))
+    assertEquals(P.read(rlm), Vector(rlm.actionPredict.optimizableParameters, rlm.extractPredict.optimizableParameters))
     assertEquals(P.replace(rlm, P.read(rlm)), rlm) // round-trip: overrides stay None
     // A genuine replace lands in the override fields and is visible through read.
-    val tunedAction = rlm.actionPredict.predictorState.copy(instructions = Some("Use a tuned action."))
-    val replaced    = P.replace(rlm, Vector(tunedAction, rlm.extractPredict.predictorState))
+    val tunedAction = rlm.actionPredict.optimizableParameters.copy(instructions = Some("Use a tuned action."))
+    val replaced    = P.replace(rlm, Vector(tunedAction, rlm.extractPredict.optimizableParameters))
     assertEquals(P.read(replaced).head, tunedAction)
-    assertEquals(replaced.actionPredictOverride.map(_.predictorState), Some(tunedAction))
+    assertEquals(replaced.actionPredictOverride.map(_.optimizableParameters), Some(tunedAction))
     assertEquals(replaced.extractPredictOverride, None)
     // `extractPredict` is an instance val, so the new RLM re-derives an equivalent default; compare the
     // stable projection (view layout/name), not the object (the predict's runtime field is reference-compared).

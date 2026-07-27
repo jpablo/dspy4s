@@ -193,7 +193,7 @@ object Cheatsheet:
     )).compile(student, trainset, valset = Some(devset)).map(_.bestProgram)
 
   // ── Snippets 16/17 — save / load ──
-  // Ported (PORT_GAPS G-4): persist each leaf's `PredictorState` (instructions + demos + module config) as JSON.
+  // Ported (PORT_GAPS G-4): persist each leaf's `OptimizableParameters` (instructions + demos + module config) as JSON.
   // `load` applies it to a fresh program with the same predictor traversal/order; metadata/resources stay fresh.
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] = ProgramPersistence.save(program, path)
   def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =

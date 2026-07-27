@@ -268,7 +268,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
-    `PredictorState` parameters make `Vector` the exact, not approximate, parameter object, while layout/module
+    homogeneous `OptimizableParameters` values make `Vector` the exact, not approximate, parameter object, while layout/module
     metadata remains read-only). Prototyped as
     `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
     `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
@@ -305,7 +305,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParaCategory` pattern (an
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
-    `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[PredictorState]]`
+    `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[OptimizableParameters]]`
     (`d3be8e1`, the parameter monoid — codomain of the `PredictorTraversal` homomorphism). The delooping is generalized
     to `delooping[M](using Monoid[M]): Category[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
     `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Category`. Algebra 1's two
@@ -313,9 +313,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
     `core.contracts.Lens[S, A]` states get-put / put-get / put-put on the trait, and `PredictorLens[P] extends
-    Lens[P, PredictorState]` inherits them, adding only the `frame` law (writing state never changes the
+    Lens[P, OptimizableParameters]` inherits them, adding only the `frame` law (writing parameters never changes the
     read-only `PredictorMetadata`). The focus had to be carved down to exactly the writable triple
-    (instructions / demos / config) before these laws could hold; `PredictorStateSuite` executes all four
+    (instructions / demos / config) before these laws could hold; `OptimizableParametersSuite` executes all four
     statements per leaf instance (`DynamicPredict`, `Predict`, `ChainOfThought`).
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
     audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and

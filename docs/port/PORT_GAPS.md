@@ -30,11 +30,11 @@
 
 **Resolution.** Closed by a typed `PredictorTraversal[P]` / `PredictorLens[P]` typeclass pair
 with Scala 3 Mirror derivation (`modules/programs/.../predictors/`). `inspect`
-enumerates non-executable `PredictorView`s (read-only metadata + writable state),
-`read` projects their `PredictorState`s, and `replace` rebuilds the program immutably.
+enumerates non-executable `PredictorView`s (read-only metadata + optimizable parameters),
+`read` projects their `OptimizableParameters` values, and `replace` rebuilds the program immutably.
 Each `PredictorLens` leaf satisfies Get-Put, Put-Get, Put-Put, and the metadata frame exactly.
 Composite traversal satisfies exact no-op replacement, read-after-write, and stable metadata/order;
-override-backed composites state last-write-wins observationally through `read`. User composites derive it for free; framework composites
+override-backed composites satisfy last-write-wins observationally through `read`. User composites derive it for free; framework composites
 (`ReAct`, `CodeAct`, `MultiChainComparison`) get
 hand-written instances and had their sub-predicts **hoisted to stable fields**
 (closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
@@ -178,7 +178,7 @@ config is unchanged behavior.
 `lm.fold(runtime.resolveModel)(Right(_))` — a bound LM wins over the ambient `RuntimeContext`
 LM, so a program can pin different models to different predictors. `Predict.withLm(model)`
 (immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the typed accessors. The bound LM is
-an execution binding, not writable `PredictorState` (like `runtime`), so `ProgramPersistence` excludes it.
+an execution binding, not part of `OptimizableParameters` (like `runtime`), so `ProgramPersistence` excludes it.
 
 **Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
 binding. dspy4s only supported per-*call* config; there was no place to attach a
@@ -217,13 +217,13 @@ New primitives:
 
 - `Example.dumpState` / `Example.fromState` (`modules/core/.../data/Example.scala`) —
   `{ "values": <record>, "inputKeys": [..], "augmented": <bool> }`.
-- `PredictorState.dumpState` / `PredictorState.fromState`
-  (`modules/programs/.../PredictorState.scala`) —
+- `OptimizableParameters.dumpState` / `OptimizableParameters.fromState`
+  (`modules/programs/.../OptimizableParameters.scala`) —
   `{ "instructions": <string|null>, "demos": [<Example state>..], "config": <record> }`.
   This is the complete writable state for `DynamicPredict`, typed `Predict`, and typed `ChainOfThought`.
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
-  `PredictorTraversal`-based: `{ "predictors": { "predictor-0": <PredictorState>, ... } }`.
+  `PredictorTraversal`-based: `{ "predictors": { "predictor-0": <OptimizableParameters>, ... } }`.
   Ordinal IDs are validated on load. JSON via
   `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
   `RuntimeError`.

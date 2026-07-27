@@ -133,7 +133,7 @@ selectBest        ordered search: early stopping and ties preserve attempt order
 feedback          feedback is NOT permutation-invariant       // carried hint = order matters
 
 PredictorTraversal        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
-                  read(c) = inspect(c).map(_.state)                    // parameter projection
+                  read(c) = inspect(c).map(_.parameters)                    // parameter projection
                   replace(p, read(p)) = p                              // Get-Put
                   read(replace(p, states)) = states                    // Put-Get
                   inspect(replace(p, states)).map(_.metadata)
@@ -173,8 +173,8 @@ The addressability layer is an instance of the **Para construction** from catego
 ("Backprop as Functor", Fong/Spivak/Tuyeras; "Categorical Foundations of Gradient-Based Learning",
 Cruttwell et al.): a morphism is a pair (parameters, shape), composition tensors the parameters, and
 reparameterization is the 2-cell layer optimizers act on. dspy4s's writable parameters are homogeneous (every
-parameter is a `PredictorState` containing instructions, demos, and config), so the parameter tensor degenerates
-to the free monoid `Vector[PredictorState]`. `PredictorTraversal.read` / `replace` are exactly Para's projection and
+parameter block is an `OptimizableParameters` value containing instructions, demos, and config), so the parameter tensor degenerates
+to the free monoid `Vector[OptimizableParameters]`. `PredictorTraversal.read` / `replace` are exactly Para's projection and
 reparameterization; signature structure and module identity remain in the morphism's read-only metadata.
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
@@ -288,7 +288,7 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   category to the parameter-monoid delooping) names what `PredictorTraversal.read` is categorically; its functor laws
   (preserves id + composition), carried on the `CategoryFunctor` trait against the two `Category` instances, are exactly
   the Para projection laws. The
-  parameter monoid is now an explicit `given Monoid[Vector[PredictorState]]` and the delooping is generic
+  parameter monoid is now an explicit `given Monoid[Vector[OptimizableParameters]]` and the delooping is generic
   (`delooping[M](using Monoid[M]) : Category[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
   `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).
 - **`fanout`, named honestly.** Added to the `Program` layer as the ordered pairing: both legs share the

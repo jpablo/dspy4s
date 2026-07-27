@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.predictorState
+import dspy4s.programs.predictors.optimizableParameters
 
 import dspy4s.programs.predictors.PredictorTraversal
 
@@ -49,8 +49,8 @@ class ProgramPredictorTraversalSuite extends FunSuite:
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "react")
     assertEquals(views(1).moduleName, "react_extract")
-    assertEquals(views(0).state, react.reactPredict.predictorState)
-    assertEquals(views(1).state, react.extractorPredict.predictorState)
+    assertEquals(views(0).parameters, react.reactPredict.optimizableParameters)
+    assertEquals(views(1).parameters, react.extractorPredict.optimizableParameters)
   }
 
   test("ReAct: replace(p, read(p)) round-trips to identity") {
@@ -86,8 +86,8 @@ class ProgramPredictorTraversalSuite extends FunSuite:
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "codeact")
     assertEquals(views(1).moduleName, "codeact_extract")
-    assertEquals(views(0).state, codeAct.codeActPredict.predictorState)
-    assertEquals(views(1).state, codeAct.extractorPredict.predictorState)
+    assertEquals(views(0).parameters, codeAct.codeActPredict.optimizableParameters)
+    assertEquals(views(1).parameters, codeAct.extractorPredict.optimizableParameters)
   }
 
   test("CodeAct: replace(p, read(p)) round-trips to identity") {
@@ -118,14 +118,14 @@ class ProgramPredictorTraversalSuite extends FunSuite:
     val ps   = predictorsOf(mcc)
     val views = ps.inspect(mcc)
     assertEquals(views.size, 1)
-    assertEquals(views.head.state, ps.read(mcc).head)
+    assertEquals(views.head.parameters, ps.read(mcc).head)
   }
 
   test("MultiChainComparison: replace(p, read(p)) round-trips to identity") {
     val mcc  = MultiChainComparison(baseSignature = qaSignature, m = AttemptCount(3))
     val ps   = predictorsOf(mcc)
     val back = ps.replace(mcc, ps.read(mcc))
-    assertEquals(back.comparePredictStateOverride, None)
+    assertEquals(back.comparePredictParametersOverride, None)
     assertEquals(back, mcc)
   }
 
@@ -134,7 +134,7 @@ class ProgramPredictorTraversalSuite extends FunSuite:
     val ps     = predictorsOf(mcc)
     val edited = ps.read(mcc).head.copy(demos = demo)
     val out    = ps.replace(mcc, Vector(edited))
-    assertEquals(out.comparePredictStateOverride.map(_.demos), Some(demo))
+    assertEquals(out.comparePredictParametersOverride.map(_.demos), Some(demo))
     assertEquals(ps.read(out).head.demos, demo)
   }
 

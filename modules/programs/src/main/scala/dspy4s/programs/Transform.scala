@@ -33,7 +33,7 @@ private[programs] object UnaryPredictorTraversal:
   def passthrough[W, P](get: W => P)(replaceInner: (W, P) => W)(using inner: PredictorTraversal[P]): PredictorTraversal[W] =
     new PredictorTraversal[W]:
       def inspect(program: W): Vector[PredictorView] = inner.inspect(get(program))
-      def replace(program: W, updates: Vector[PredictorState]): W =
+      def replace(program: W, updates: Vector[OptimizableParameters]): W =
         replaceInner(program, inner.replace(get(program), updates))
       override def inspectNamed(program: W): Vector[(String, PredictorView)] = inner.inspectNamed(get(program))
 

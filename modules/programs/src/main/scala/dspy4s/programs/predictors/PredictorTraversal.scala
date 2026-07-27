@@ -6,15 +6,15 @@ import scala.deriving.Mirror
 /** The general optimizer traversal -- the typed analogue of Python's `named_predictors` / `map_named_predictors`.
   *
   * [[inspect]] enumerates non-executable [[PredictorView]] snapshots in stable order. [[read]] projects just their
-  * writable states, and [[replace]] writes an arity-matched state vector back while preserving metadata and execution
-  * resources. Exact no-op replacement satisfies `replace(p, read(p)) == p`; read-after-write satisfies `read(replace(p,
-  * states)) == states`. For override-backed composites, Put-Put is observational through `read` even when two source
-  * values use different internal `Option` representations.
+  * optimizable parameters, and [[replace]] writes an arity-matched parameter vector back while preserving metadata and
+  * execution resources. Exact no-op replacement satisfies `replace(p, read(p)) == p`; read-after-write satisfies
+  * `read(replace(p, parameters)) == parameters`. For override-backed composites, Put-Put is observational through
+  * `read` even when two source values use different internal `Option` representations.
   */
 trait PredictorTraversal[P]:
   def inspect(program: P): Vector[PredictorView]
-  final def read(program: P): Vector[PredictorState] = inspect(program).map(_.state)
-  def replace(program: P, updates: Vector[PredictorState]): P
+  final def read(program: P): Vector[OptimizableParameters] = inspect(program).map(_.parameters)
+  def replace(program: P, updates: Vector[OptimizableParameters]): P
 
   /** Each view paired with a human-readable structural name, analogous to Python's `named_predictors()`. Names are
     * dotted field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and
@@ -38,10 +38,10 @@ trait PredictorTraversal[P]:
     )
     views -> named.map(_._1)
 
-  /** Structural names paired with writable state, in [[read]] order. */
-  final def readNamed(program: P): Vector[(String, PredictorState)] =
+  /** Structural names paired with optimizable parameters, in [[read]] order. */
+  final def readNamed(program: P): Vector[(String, OptimizableParameters)] =
     val (views, displayNames) = alignedNamed(program)
-    displayNames.zip(views.map(_.state))
+    displayNames.zip(views.map(_.parameters))
 
   /** The canonical optimizer-facing traversal. IDs are derived once at the root from [[read]] order, so nested
     * combinators cannot reset or prefix them. This makes identity unique and invariant under reassociation while
@@ -62,7 +62,7 @@ object PredictorTraversal extends CompositePredictorTraversalInstances with LowP
     */
   given fromPredictorLens[P](using leaf: PredictorLens[P]): PredictorTraversal[P] with
     def inspect(program: P): Vector[PredictorView] = Vector(leaf.inspect(program))
-    def replace(program: P, updates: Vector[PredictorState]): P =
+    def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.size == 1, s"PredictorLens expects exactly 1 update, got ${updates.size}")
       leaf.set(program, updates.head)
     // A leaf contributes "self" to the name path (the dspy convention for a standalone predict); a composite
@@ -77,7 +77,7 @@ object PredictorTraversal extends CompositePredictorTraversalInstances with LowP
     */
   def empty[P]: PredictorTraversal[P] = new PredictorTraversal[P]:
     def inspect(program: P): Vector[PredictorView] = Vector.empty
-    def replace(program: P, updates: Vector[PredictorState]): P =
+    def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
       program
 
@@ -104,7 +104,7 @@ object PredictorTraversal extends CompositePredictorTraversalInstances with LowP
         }
       }.toVector
 
-    def replace(program: P, updates: Vector[PredictorState]): P =
+    def replace(program: P, updates: Vector[OptimizableParameters]): P =
       val arities = fieldInstances.zipWithIndex.map { case (inst, i) =>
         inst.read(program.productElement(i)).size
       }

@@ -7,7 +7,7 @@ import dspy4s.programs.Both
 import dspy4s.programs.Compose
 import dspy4s.programs.andThen
 import dspy4s.programs.&&&
-import dspy4s.programs.predictors.PredictorState
+import dspy4s.programs.predictors.OptimizableParameters
 import dspy4s.programs.predictors.PredictorView
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.predictors.PredictorTraversal
@@ -67,7 +67,7 @@ object Program:
     def inspect(program: Program[I, O]): Vector[PredictorView] =
       program.predictors.inspect(program.program)
 
-    def replace(program: Program[I, O], updates: Vector[PredictorState]): Program[I, O] =
+    def replace(program: Program[I, O], updates: Vector[OptimizableParameters]): Program[I, O] =
       Program.packageWith(program.predictors.replace(program.program, updates))(using program.predictors)
 
     override def inspectNamed(program: Program[I, O]): Vector[(String, PredictorView)] =
@@ -101,9 +101,9 @@ object Program:
           AndThen.andThenPredictorTraversal[A, B, C, f.Rep, g.Rep](using f.predictors, g.predictors)
         )
 
-      def params: Vector[PredictorState] = f.predictors.read(f.program)
+      def params: Vector[OptimizableParameters] = f.predictors.read(f.program)
 
-      def reparam(ps: Vector[PredictorState]): Program[A, B] =
+      def reparam(ps: Vector[OptimizableParameters]): Program[A, B] =
         Program.packageWith(f.predictors.replace(f.program, ps))(using f.predictors)
 
 /** Parameter projection as a functor from packaged programs into the delooped parameter monoid. */

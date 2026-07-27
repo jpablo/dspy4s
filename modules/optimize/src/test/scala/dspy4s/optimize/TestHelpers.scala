@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{PredictorLens, PredictorMetadata, PredictorState}
+import dspy4s.programs.predictors.{PredictorLens, PredictorMetadata, OptimizableParameters}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -59,11 +59,11 @@ final case class DemoAwarePredictProgram(
 
 object DemoAwarePredictProgram:
   given demoAwarePredictor: PredictorLens[DemoAwarePredictProgram] with
-    def get(program: DemoAwarePredictProgram): PredictorState =
-      PredictorState(program.layout.instructions, program.demos, program.config)
+    def get(program: DemoAwarePredictProgram): OptimizableParameters =
+      OptimizableParameters(program.layout.instructions, program.demos, program.config)
     def metadata(program: DemoAwarePredictProgram): PredictorMetadata =
       PredictorMetadata.from(program.layout, program.moduleName)
-    def set(program: DemoAwarePredictProgram, updated: PredictorState): DemoAwarePredictProgram =
+    def set(program: DemoAwarePredictProgram, updated: OptimizableParameters): DemoAwarePredictProgram =
       if updated == get(program) then program
       else
         program.copy(
@@ -74,11 +74,11 @@ object DemoAwarePredictProgram:
 
 object ScriptedPredictProgram:
   given scriptedPredictor: PredictorLens[ScriptedPredictProgram] with
-    def get(program: ScriptedPredictProgram): PredictorState =
-      PredictorState(program.layout.instructions, program.demos, program.config)
+    def get(program: ScriptedPredictProgram): OptimizableParameters =
+      OptimizableParameters(program.layout.instructions, program.demos, program.config)
     def metadata(program: ScriptedPredictProgram): PredictorMetadata =
       PredictorMetadata.from(program.layout, program.moduleName)
-    def set(program: ScriptedPredictProgram, updated: PredictorState): ScriptedPredictProgram =
+    def set(program: ScriptedPredictProgram, updated: OptimizableParameters): ScriptedPredictProgram =
       if updated == get(program) then program
       else
         program.copy(

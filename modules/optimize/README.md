@@ -46,7 +46,7 @@ Optimizers are generic over the program type `P`, working through two given inst
 program class:
 
 - **`PredictorTraversal[P]`** — introspection: `inspect` exposes non-executable `PredictorView`s (read-only signature/module
-  metadata plus writable state), `read` projects the `PredictorState`s, and `replace` writes an edited state vector
+  metadata plus optimizable parameters), `read` projects the `OptimizableParameters` values, and `replace` writes an edited parameter vector
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
 - **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
@@ -108,8 +108,8 @@ program is expected.
 
 ## Persistence
 
-`ProgramPersistence` saves/loads a program's writable `PredictorState` as JSON — the analogue of Python's
-`dump_state` / `load_state`. Every supported leaf has the same state: instructions, demos, and module-level config.
+`ProgramPersistence` saves/loads a program's `OptimizableParameters` as JSON — the analogue of Python's
+`dump_state` / `load_state`. Every supported leaf exposes the same parameters: instructions, demos, and module-level config.
 Loading applies those values to a freshly constructed program while preserving signature structure, module names,
 runtimes, output schemas, bound LMs, and tools. See the authoritative
 [state contract](../../site/docs/runtime/saving-and-loading.md) for the lens laws, ordinal-ID limitation, and format

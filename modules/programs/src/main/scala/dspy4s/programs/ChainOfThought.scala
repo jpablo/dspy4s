@@ -38,7 +38,7 @@ final case class ChainOfThought[I, O](
     demos: Vector[Example] = Vector.empty,
     runtime: ProgramRuntime = new SettingsProgramRuntime {},
     name: Option[String] = None,
-    /** Module-level LM defaults carried as writable [[PredictorState]], matching [[Predict]] and [[DynamicPredict]].
+    /** Module-level LM defaults carried in [[OptimizableParameters]], matching [[Predict]] and [[DynamicPredict]].
       * Per-call config still wins on key collisions.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty

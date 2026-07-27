@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.predictors.PredictorTraversal
 import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.PredictorState
+import dspy4s.programs.predictors.OptimizableParameters
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -19,8 +19,8 @@ import java.nio.file.Paths
   * `BaseModule.dump_state` / `load_state` and `save` / `load`.
   *
   * Built entirely on the [[PredictorTraversal]] traversal, so a single typed or dynamic predictor and an arbitrary
-  * composite use the same path: [[dumpState]] serializes every writable [[PredictorState]], and [[loadState]]
-  * writes those states into a fresh program through `PredictorTraversal.replace`.
+  * composite use the same path: [[dumpState]] serializes every writable [[OptimizableParameters]], and [[loadState]]
+  * writes those parameter values into a fresh program through `PredictorTraversal.replace`.
   *
   * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature
   * field structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the
@@ -36,32 +36,33 @@ object ProgramPersistence:
   /** JSON codec for the `DynamicValue`-shaped state, mirroring `SignatureLayout`'s private codec. */
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  /** Serialize a program's writable state to `{ "predictors": { "predictor-0": <PredictorState>, ... } }`.
-    * [[PredictorId]] keys make loading independent of JSON object order and detect missing/unknown ordinals. */
+  /** Serialize a program's optimizable parameters to
+    * `{ "predictors": { "predictor-0": <OptimizableParameters>, ... } }`. [[PredictorId]] keys make loading independent
+    * of JSON object order and detect missing/unknown ordinals. */
   def dumpState[P](program: P)(using predictors: PredictorTraversal[P]): DynamicValue.Record =
-    val states: Seq[(String, DynamicValue)] = predictors.readIdentified(program).map { identified =>
-      identified.id.render -> (identified.state.dumpState: DynamicValue)
+    val parameters: Seq[(String, DynamicValue)] = predictors.readIdentified(program).map { identified =>
+      identified.id.render -> (identified.parameters.dumpState: DynamicValue)
     }
     DynamicValue.Record(Chunk.from(Seq(
-      "predictors" -> DynamicValue.Record(Chunk.from(states))
+      "predictors" -> DynamicValue.Record(Chunk.from(parameters))
     )))
 
-  private def decodeState(raw: DynamicValue, at: String): Either[DspyError, PredictorState] = raw match
-    case rec: DynamicValue.Record => PredictorState.fromState(rec)
+  private def decodeParameters(raw: DynamicValue, at: String): Either[DspyError, OptimizableParameters] = raw match
+    case rec: DynamicValue.Record => OptimizableParameters.fromState(rec)
     case _                        => Left(ValidationError(s"Program state predictor '$at' must be a record"))
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
       predictors: PredictorTraversal[P]
   ): Either[DspyError, P] =
     val expectedIds = predictors.readIdentified(program).map(_.id)
-    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, PredictorState)]]](
+    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, OptimizableParameters)]]](
       Right(Vector.empty)
-    ) { case (acc, (rawId, rawState)) =>
+    ) { case (acc, (rawId, rawParameters)) =>
       for
         entries <- acc
         id <- PredictorId.parse(rawId).left.map(ValidationError.apply)
-        state <- decodeState(rawState, rawId)
-      yield entries :+ (id -> state)
+        parameters <- decodeParameters(rawParameters, rawId)
+      yield entries :+ (id -> parameters)
     }
 
     parsed.flatMap { entries =>

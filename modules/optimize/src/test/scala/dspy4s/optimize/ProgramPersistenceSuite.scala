@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.predictorState
+import dspy4s.programs.predictors.optimizableParameters
 
 import dspy4s.programs.predictors.PredictorTraversal
 
@@ -83,7 +83,7 @@ class ProgramPersistenceSuite extends FunSuite:
 
     val restored = ProgramPersistence.loadState(fresh, ProgramPersistence.dumpState(trained)).toOption.get
 
-    assertEquals(restored.predictorState, trained.predictorState)
+    assertEquals(restored.optimizableParameters, trained.optimizableParameters)
     assertEquals(restored.layout.name, freshLayout.name)
     assertEquals(restored.layout.fields, freshLayout.fields)
     assertEquals(restored.name, fresh.name)

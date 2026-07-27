@@ -52,7 +52,7 @@ object Optimizers:
   // ── Snippets 2 + 3 (lines 213–225) — save / load an optimized program ──
   // | optimized_program.save(YOUR_SAVE_PATH)
   // | loaded_program = YOUR_PROGRAM_CLASS(); loaded_program.load(path=YOUR_SAVE_PATH)
-  // Ported (PORT_GAPS G-4): `ProgramPersistence` writes/reads each leaf's `PredictorState`
+  // Ported (PORT_GAPS G-4): `ProgramPersistence` writes/reads each leaf's `OptimizableParameters`
   // (instructions + demos + module config) as JSON. `load` applies it to a fresh program with the same predictor
   // traversal/order while preserving that program's metadata and execution resources. See tutorials/saving.
   // --8<-- [start:save-load]

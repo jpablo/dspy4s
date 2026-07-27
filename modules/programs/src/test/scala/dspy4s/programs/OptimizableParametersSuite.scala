@@ -12,7 +12,7 @@ import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
-class PredictorStateSuite extends FunSuite:
+final class OptimizableParametersSuite extends FunSuite:
 
   private val layout =
     SignatureDsl.parse("question -> answer").toOption.get.withInstructions(Some("Be terse."))
@@ -22,13 +22,13 @@ class PredictorStateSuite extends FunSuite:
     Example("question" := "q2", "answer" := "a2").withInputs(Set("question")).withAugmented(true)
   )
 
-  private val firstState = PredictorState(
+  private val firstParameters = OptimizableParameters(
     instructions = Some("First instruction."),
     demos = demos.take(1),
     config = DynamicValues.record("temperature" := 0.3)
   )
 
-  private val secondState = PredictorState(
+  private val secondParameters = OptimizableParameters(
     instructions = Some("Second instruction."),
     demos = demos,
     config = DynamicValues.record("temperature" := 0.8, "top_p" := 0.9)
@@ -47,15 +47,15 @@ class PredictorStateSuite extends FunSuite:
 
   /** Runs the four `@Law` statements the [[PredictorLens]] lens carries (Get-Put / Put-Get / Put-Put inherited from
     * `Lens`, plus the metadata frame), then the view/extension-syntax invariants. */
-  private def assertLeafLaws[P](program: P, first: PredictorState, second: PredictorState)(using
+  private def assertLeafLaws[P](program: P, first: OptimizableParameters, second: OptimizableParameters)(using
       leaf: PredictorLens[P]
   ): Unit =
     val original = leaf.get(program)
     val metadata = leaf.metadata(program)
 
-    assertEquals(program.predictorState, original)
+    assertEquals(program.optimizableParameters, original)
     assertEquals(program.predictorView, leaf.inspect(program))
-    assertEquals(program.withPredictorState(first).predictorState, first)
+    assertEquals(program.withOptimizableParameters(first).optimizableParameters, first)
 
     holds("get-put", leaf.getPut(program))
     holds("put-get", leaf.putGet(program, first))
@@ -63,35 +63,35 @@ class PredictorStateSuite extends FunSuite:
     holds("frame", leaf.frame(program, first))
 
     val view = leaf.inspect(program)
-    assertEquals(view.state, original)
+    assertEquals(view.parameters, original)
     assertEquals(view.metadata, metadata)
     assertEquals(view.metadata.structure.instructions, None)
     assertEquals(view.layout.instructions, original.instructions)
 
-  test("PredictorState dumpState/fromState round-trips instructions, demos, and nested config") {
+  test("OptimizableParameters dumpState/fromState round-trips instructions, demos, and nested config") {
     val config = DynamicValues.record(
       "temperature" := 0.7,
       "provider"    -> DynamicValues.record("reasoning" := true, "budget" := 128)
     )
-    val state   = PredictorState(Some("Be precise."), demos, config)
-    val rebuilt = PredictorState.fromState(state.dumpState)
+    val parameters = OptimizableParameters(Some("Be precise."), demos, config)
+    val rebuilt    = OptimizableParameters.fromState(parameters.dumpState)
 
-    assertEquals(rebuilt, Right(state))
+    assertEquals(rebuilt, Right(parameters))
   }
 
-  test("PredictorState decoding requires every key and rejects invalid field types") {
-    val missing = PredictorState.fromState(DynamicValue.Record.empty)
-    val invalidInstructions = PredictorState.fromState(DynamicValues.record(
+  test("OptimizableParameters decoding requires every key and rejects invalid field types") {
+    val missing = OptimizableParameters.fromState(DynamicValue.Record.empty)
+    val invalidInstructions = OptimizableParameters.fromState(DynamicValues.record(
       "instructions" := 42,
       "demos"        -> DynamicValue.Sequence(Chunk.empty),
       "config"       -> DynamicValue.Record.empty
     ))
-    val invalidDemos = PredictorState.fromState(DynamicValues.record(
+    val invalidDemos = OptimizableParameters.fromState(DynamicValues.record(
       "instructions" -> DynamicValue.Null,
       "demos"        := "not-a-sequence",
       "config"       -> DynamicValue.Record.empty
     ))
-    val invalidConfig = PredictorState.fromState(DynamicValues.record(
+    val invalidConfig = OptimizableParameters.fromState(DynamicValues.record(
       "instructions" -> DynamicValue.Null,
       "demos"        -> DynamicValue.Sequence(Chunk.empty),
       "config"       := "not-a-record"
@@ -102,13 +102,13 @@ class PredictorStateSuite extends FunSuite:
     }
   }
 
-  test("PredictorState rejects the former signature-based executable predictor format") {
+  test("OptimizableParameters rejects the former signature-based executable predictor format") {
     val oldFormat = DynamicValues.record(
       "signature" -> layout.dumpState,
       "demos"     -> DynamicValue.Sequence(Chunk.empty),
       "config"    -> DynamicValue.Record.empty
     )
-    val result = PredictorState.fromState(oldFormat)
+    val result = OptimizableParameters.fromState(oldFormat)
 
     assert(result.isLeft)
     assert(result.left.toOption.exists(_.message.contains("missing 'instructions'")))
@@ -116,7 +116,7 @@ class PredictorStateSuite extends FunSuite:
 
   test("PredictorLens[DynamicPredict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
     val program = DynamicPredict(layout = layout, demos = demos, config = DynamicValues.record("seed" := 1))
-    assertLeafLaws(program, firstState, secondState)
+    assertLeafLaws(program, firstParameters, secondParameters)
   }
 
   test("PredictorLens[Predict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
@@ -127,10 +127,10 @@ class PredictorStateSuite extends FunSuite:
       name = Some("typed_predict"),
       config = DynamicValues.record("seed" := 1)
     )
-    assertLeafLaws(program, firstState, secondState)
+    assertLeafLaws(program, firstParameters, secondParameters)
   }
 
-  test("PredictorLens[ChainOfThought] satisfies the lens laws and includes config in writable state") {
+  test("PredictorLens[ChainOfThought] satisfies the lens laws and includes config in optimizable parameters") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Reason carefully."))
     val program = ChainOfThought(
       signature,
@@ -140,13 +140,13 @@ class PredictorStateSuite extends FunSuite:
     )
     val leaf = summon[PredictorLens[ChainOfThought[(question: String), (answer: String)]]]
 
-    assertLeafLaws(program, firstState, secondState)
+    assertLeafLaws(program, firstParameters, secondParameters)
     assertEquals(leaf.get(program).config, DynamicValues.record("seed" := 1))
     assertEquals(leaf.inspect(program).layout.outputFields.head.name, "reasoning")
     assertEquals(leaf.inspect(program).metadata.structure.instructions, None)
   }
 
-  test("DynamicPredict state replacement preserves every execution binding and signature structure") {
+  test("DynamicPredict parameter replacement preserves every execution binding and signature structure") {
     val runtime = new SettingsProgramRuntime {}
     val tools   = Vector(ToolSpec("search", description = Some("Search the corpus")))
     val program = DynamicPredict(
@@ -160,9 +160,9 @@ class PredictorStateSuite extends FunSuite:
       tools = tools
     )
 
-    val updated = program.withPredictorState(secondState)
+    val updated = program.withOptimizableParameters(secondParameters)
 
-    assertEquals(updated.predictorState, secondState)
+    assertEquals(updated.optimizableParameters, secondParameters)
     assertEquals(updated.layout.name, program.layout.name)
     assertEquals(updated.layout.fields, program.layout.fields)
     assertEquals(updated.name, program.name)
@@ -172,13 +172,13 @@ class PredictorStateSuite extends FunSuite:
     assertEquals(updated.tools, tools)
   }
 
-  test("PredictorTraversal.empty rejects non-empty state vectors") {
+  test("PredictorTraversal.empty rejects non-empty parameter vectors") {
     val empty = PredictorTraversal.empty[Int]
-    assertEquals(empty.read(42), Vector.empty[PredictorState])
+    assertEquals(empty.read(42), Vector.empty[OptimizableParameters])
     assertEquals(empty.replace(42, Vector.empty), 42)
 
     val error = intercept[IllegalArgumentException] {
-      empty.replace(42, Vector(PredictorState()))
+      empty.replace(42, Vector(OptimizableParameters()))
     }
     assert(error.getMessage.contains("expects 0 updates"))
   }

@@ -329,7 +329,7 @@ final case class SignatureLayout private (
     * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
     * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
     * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller
-    * `PredictorState` contract instead of serializing a whole layout. */
+    * `OptimizableParameters` contract instead of serializing a whole layout. */
   def dumpState: DynamicValue.Record =
     def str(s: String): DynamicValue        = DynamicValue.Primitive(PrimitiveValue.String(s))
     def opt(o: Option[Any]): DynamicValue   = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)

@@ -21,8 +21,8 @@ Programs live on two layers that share one engine:
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
 The bridge for optimization is `PredictorTraversal[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
-non-executable predictor views (`inspect` / `readIdentified`) and writable `PredictorState` values (`read`), then writes
-an arity-matched state vector back through `replace`. This is what the [`optimize`](../optimize/README.md) and
+non-executable predictor views (`inspect` / `readIdentified`) and `OptimizableParameters` values (`read`), then writes
+an arity-matched parameter vector back through `replace`. This is what the [`optimize`](../optimize/README.md) and
 [`gepa`](../gepa/README.md) modules drive.
 
 ## Key types
@@ -33,8 +33,8 @@ an arity-matched state vector back through `replace`. This is what the [`optimiz
 |------|------|
 | `Predict[I, O]` | The fundamental typed predictor: encode `I`, run its `PredictEngine` against the LM, decode into `Prediction[O]`. |
 | `DynamicPredict` | The dynamic predictor for runtime-known layouts: accept a `ProgramCall[DynamicValue.Record]`, run the shared engine, and return `Prediction[DynamicValue.Record]`. |
-| `PredictorState` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
-| `PredictorView` | A non-executable snapshot pairing `PredictorState` with read-only signature structure and module name. |
+| `OptimizableParameters` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
+| `PredictorView` | A non-executable snapshot pairing `OptimizableParameters` with read-only signature structure and module name. |
 | `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
 | `ReAct[I, O]` | Reasoning-and-acting agent: iterates over a tool set using a text protocol (`next_thought` / `next_tool_name` / `next_tool_args`), then a CoT-augmented extractor produces `O`. Learnable: `reactPredict`, `extractorPredict`. |
 | `CodeAct[I, O]` | Generates and executes Python via a `CodeInterpreter` in a loop, then extracts outputs. Supports user tools bridged into the sandbox. |

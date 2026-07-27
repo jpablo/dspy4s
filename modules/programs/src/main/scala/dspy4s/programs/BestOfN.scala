@@ -68,7 +68,7 @@ object BestOfN:
     def inspect(program: BestOfN[P, I, O]): Vector[PredictorView] =
       inner.inspect(program.module)
 
-    def replace(program: BestOfN[P, I, O], updates: Vector[PredictorState]): BestOfN[P, I, O] =
+    def replace(program: BestOfN[P, I, O], updates: Vector[OptimizableParameters]): BestOfN[P, I, O] =
       program.copy(module = inner.replace(program.module, updates))
 
     override def inspectNamed(program: BestOfN[P, I, O]): Vector[(String, PredictorView)] =

@@ -29,9 +29,9 @@ class ProgramOfThoughtPredictorTraversalSuite extends FunSuite:
     assertEquals(
       P.read(pot),
       Vector(
-        pot.generatorPredict.predictorState,
-        pot.regeneratorPredict.predictorState,
-        pot.answererPredict.predictorState
+        pot.generatorPredict.optimizableParameters,
+        pot.regeneratorPredict.optimizableParameters,
+        pot.answererPredict.optimizableParameters
       )
     )
     assertEquals(P.inspectNamed(pot).map(_._1), Vector("generator", "regenerator", "answerer"))
@@ -68,6 +68,6 @@ class ProgramOfThoughtPredictorTraversalSuite extends FunSuite:
     assert(updated.regeneratorPredict.runtime eq pot.regeneratorPredict.runtime)
     assert(updated.answererPredict.runtime eq pot.answererPredict.runtime)
     assertEquals(updated.generatorPredictOverride, None)
-    assertEquals(updated.regeneratorPredictOverride.map(_.predictorState), Some(tunedRegenerator))
+    assertEquals(updated.regeneratorPredictOverride.map(_.optimizableParameters), Some(tunedRegenerator))
     assertEquals(updated.answererPredictOverride, None)
   }

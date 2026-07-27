@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{predictorState, predictorView}
+import dspy4s.programs.predictors.{optimizableParameters, predictorView}
 
 import dspy4s.programs.predictors.PredictorTraversal
 
@@ -43,7 +43,10 @@ class PredictorTraversalNamedSuite extends FunSuite:
 
     assertEquals(entries.map(_.id), Vector(PredictorId(0), PredictorId(1)))
     assertEquals(entries.map(_.displayName), Vector("retrieve", "answer"))
-    assertEquals(entries.map(_.state), Vector(pipeline.retrieve.predictorState, pipeline.answer.predictorState))
+    assertEquals(
+      entries.map(_.parameters),
+      Vector(pipeline.retrieve.optimizableParameters, pipeline.answer.optimizableParameters)
+    )
     assertEquals(entries.map(_.layout), Vector(pipeline.retrieve.layout, pipeline.answer.layout))
   }
 
@@ -52,7 +55,7 @@ class PredictorTraversalNamedSuite extends FunSuite:
     val misleading = predict("misleading").predictorView
     val ps = new PredictorTraversal[Unit]:
       def inspect(program: Unit) = Vector(canonical)
-      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.PredictorState]) = program
+      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector("leaf" -> misleading)
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
@@ -65,7 +68,7 @@ class PredictorTraversalNamedSuite extends FunSuite:
     val canonical = predict("canonical").predictorView
     val ps = new PredictorTraversal[Unit]:
       def inspect(program: Unit) = Vector(canonical)
-      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.PredictorState]) = program
+      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector.empty
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))

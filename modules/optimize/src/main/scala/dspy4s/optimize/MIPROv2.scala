@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.{PredictorState, PredictorTraversal}
+import dspy4s.programs.predictors.{OptimizableParameters, PredictorTraversal}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
@@ -60,8 +60,9 @@ final case class MIPROv2Config(
   *      instruction is prepended as an extra candidate. 3. '''Search''' (Step 3, "find optimal prompt parameters"). For
   *      `numTrials` trials with a seeded RNG, randomly picks one demo-assignment index (applied whole-program) and, per
   *      predictor, one instruction-candidate index. The trial program is built with a single [[PredictorTraversal.replace]]
-  *      applying each chosen instruction (`state.copy(instructions = Some(instr))`) AND chosen demos (`.copy(demos =
-  *      ...)`). Each trial is scored on the valset (falling back to the trainset) via [[dspy4s.evaluate.Evaluate]] +
+  *      applying each chosen instruction (`parameters.copy(instructions = Some(instr))`) AND chosen demos
+  *      (`.copy(demos = ...)`). Each trial is scored on the valset (falling back to the trainset) via
+  *      [[dspy4s.evaluate.Evaluate]] +
   *      [[ProgramRunner]] + the metric. A baseline candidate (the unmodified student) is always scored too. The
   *      best-scoring candidate is returned as `bestProgram`; all scored candidates (trials + baseline) are returned
   *      sorted descending.
@@ -229,7 +230,7 @@ final class MIPROv2[P: {PredictorTraversal, ProgramRunner}](config: MIPROv2Confi
     * chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[PredictorTraversal.read]] order.
     */
   private def applyTrial(
-      leaves: Vector[PredictorState],
+      leaves: Vector[OptimizableParameters],
       student: P,
       instructions: Vector[String],
       demoAssignment: Vector[Vector[Example]]

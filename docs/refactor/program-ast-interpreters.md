@@ -305,7 +305,7 @@ not become materially simpler than traversing the current classes, the AST separ
 
 ### Persistence
 
-Current `ProgramPersistence` saves only `PredictorState`; it does not save program structure or executable resources.
+Current `ProgramPersistence` saves only `OptimizableParameters`; it does not save program structure or executable resources.
 That behavior should remain the default and becomes simpler through `PredictorTraversal[Program]`.
 
 Full AST persistence is a separate, explicitly partial capability. `Lift` functions, arbitrary atoms, tools, runtimes,

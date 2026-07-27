@@ -62,7 +62,7 @@ object RecoverWith:
     def inspect(program: RecoverWith[I, O, P, F]): Vector[PredictorView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
 
-    def replace(program: RecoverWith[I, O, P, F], updates: Vector[PredictorState]): RecoverWith[I, O, P, F] =
+    def replace(program: RecoverWith[I, O, P, F], updates: Vector[OptimizableParameters]): RecoverWith[I, O, P, F] =
       val (primaryUpdates, fallbackUpdates) = updates.splitAt(primary.read(program.primary).size)
       program.copy(
         primary = primary.replace(program.primary, primaryUpdates),

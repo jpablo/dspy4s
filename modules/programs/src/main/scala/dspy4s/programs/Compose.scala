@@ -65,7 +65,11 @@ private[programs] object PairPredictorTraversal:
   def inspect[A, B](pa: PredictorTraversal[A], pb: PredictorTraversal[B])(first: A, second: B): Vector[PredictorView] =
     pa.inspect(first) ++ pb.inspect(second)
 
-  def replace[A, B, P](pa: PredictorTraversal[A], pb: PredictorTraversal[B])(first: A, second: B, updates: Vector[PredictorState])(
+  def replace[A, B, P](pa: PredictorTraversal[A], pb: PredictorTraversal[B])(
+      first: A,
+      second: B,
+      updates: Vector[OptimizableParameters]
+  )(
       rebuild: (A, B) => P
   ): P =
     val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(first).size)
@@ -89,7 +93,7 @@ object AndThen:
     def inspect(program: AndThen[I, X, O, A, B]): Vector[PredictorView] =
       PairPredictorTraversal.inspect(pa, pb)(program.first, program.second)
 
-    def replace(program: AndThen[I, X, O, A, B], updates: Vector[PredictorState]): AndThen[I, X, O, A, B] =
+    def replace(program: AndThen[I, X, O, A, B], updates: Vector[OptimizableParameters]): AndThen[I, X, O, A, B] =
       PairPredictorTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
@@ -127,7 +131,7 @@ object Both:
     def inspect(program: Both[I, OA, OB, A, B]): Vector[PredictorView] =
       PairPredictorTraversal.inspect(pa, pb)(program.first, program.second)
 
-    def replace(program: Both[I, OA, OB, A, B], updates: Vector[PredictorState]): Both[I, OA, OB, A, B] =
+    def replace(program: Both[I, OA, OB, A, B], updates: Vector[OptimizableParameters]): Both[I, OA, OB, A, B] =
       PairPredictorTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
@@ -184,7 +188,10 @@ object Tensor:
     def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[PredictorView] =
       PairPredictorTraversal.inspect(pa, pb)(program.first, program.second)
 
-    def replace(program: Tensor[I, J, A, B, FA, FB], updates: Vector[PredictorState]): Tensor[I, J, A, B, FA, FB] =
+    def replace(
+        program: Tensor[I, J, A, B, FA, FB],
+        updates: Vector[OptimizableParameters]
+    ): Tensor[I, J, A, B, FA, FB] =
       PairPredictorTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )

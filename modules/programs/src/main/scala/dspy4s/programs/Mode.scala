@@ -95,7 +95,7 @@ object Moded:
       inner: PredictorTraversal[P]
   ): PredictorTraversal[Moded[I, O, P]] with
     def inspect(program: Moded[I, O, P]): Vector[PredictorView] = inner.inspect(program.program)
-    def replace(program: Moded[I, O, P], updates: Vector[PredictorState]): Moded[I, O, P] =
+    def replace(program: Moded[I, O, P], updates: Vector[OptimizableParameters]): Moded[I, O, P] =
       program.copy(program = inner.replace(program.program, updates))
     override def inspectNamed(program: Moded[I, O, P]): Vector[(String, PredictorView)] =
       inner.inspectNamed(program.program)

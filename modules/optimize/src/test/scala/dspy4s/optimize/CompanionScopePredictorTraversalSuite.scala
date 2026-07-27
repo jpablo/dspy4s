@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{PredictorState, PredictorTraversal}
+import dspy4s.programs.predictors.{OptimizableParameters, PredictorTraversal}
 
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict
@@ -77,7 +77,7 @@ class CompanionScopePredictorTraversalSuite extends FunSuite:
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps     = summon[PredictorTraversal[Agent]]
-    val tooFew = Vector.empty[PredictorState]
+    val tooFew = Vector.empty[OptimizableParameters]
     intercept[IllegalArgumentException](ps.replace(agent, tooFew))
   }
 

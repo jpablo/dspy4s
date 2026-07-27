@@ -57,9 +57,9 @@ object PredictorId:
         case None => Left(s"Invalid predictor id '$value': ordinal must be a non-negative integer")
 
 /** One focus of a [[PredictorTraversal]] traversal: stable machine identity, structural display name, and a non-executable
-  * snapshot of its read-only metadata plus writable state. */
+  * snapshot of its read-only metadata plus optimizable parameters. */
 final case class IdentifiedPredictor(id: PredictorId, displayName: String, view: PredictorView) derives CanEqual:
-  def state: PredictorState       = view.state
-  def metadata: PredictorMetadata = view.metadata
-  def layout: SignatureLayout     = view.layout
-  def moduleName: String          = view.moduleName
+  def parameters: OptimizableParameters = view.parameters
+  def metadata: PredictorMetadata         = view.metadata
+  def layout: SignatureLayout             = view.layout
+  def moduleName: String                  = view.moduleName

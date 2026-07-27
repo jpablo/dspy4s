@@ -123,16 +123,16 @@ recurses through nested modules, yields anything that looks like a
 
 Scala has no `__dict__`. The optimizer side uses **`PredictorLens[P]`** for
 one leaf and **`PredictorTraversal[P]`** for composite traversal. Each leaf exposes
-read-only metadata separately from the exact writable state:
+read-only metadata separately from the exact optimizable parameters:
 
 ```scala
 trait PredictorLens[P]:
-  def get(program: P): PredictorState
+  def get(program: P): OptimizableParameters
   def metadata(program: P): PredictorMetadata
-  def set(program: P, state: PredictorState): P
+  def set(program: P, parameters: OptimizableParameters): P
 ```
 
-`PredictorState` contains instructions, demos, and module config;
+`OptimizableParameters` contains instructions, demos, and module config;
 signature structure, names, runtimes, schemas, LMs, and tools cannot be
 replaced through the optimizer lens. Mirror derivation builds a
 `PredictorTraversal[P]` traversal for composites. The trade-off is explicit by design.
@@ -221,7 +221,7 @@ state currently contains its signature, demos, traces, training data, and bound
 LM. Only `save_program=True` serializes the whole architecture with
 `cloudpickle`.
 
-dspy4s `ProgramPersistence` serializes each leaf's `PredictorState`
+dspy4s `ProgramPersistence` serializes each leaf's `OptimizableParameters`
 (instructions, demos, config) into clean JSON keyed by traversal ordinal.
 It applies that state to a fresh program while preserving architecture and
 execution resources. The format is dspy4s-native and **deliberately not**

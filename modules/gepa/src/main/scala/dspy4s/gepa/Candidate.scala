@@ -15,7 +15,7 @@ object Candidate:
   /** The seed candidate: each predictor's current instruction, keyed by stable traversal identity. */
   def seed[P](program: P)(using ps: PredictorTraversal[P]): Candidate =
     ps.readIdentified(program).iterator.map { entry =>
-      entry.id -> entry.state.instructions
+      entry.id -> entry.parameters.instructions
     }.toMap
 
   /** Apply a candidate's instructions back onto the same traversal identities. PredictorTraversal absent from the candidate
@@ -23,8 +23,8 @@ object Candidate:
     */
   def applyTo[P](program: P, candidate: Candidate)(using ps: PredictorTraversal[P]): P =
     val updated = ps.readIdentified(program).map { entry =>
-      candidate.get(entry.id).fold(entry.state) { instructions =>
-        entry.state.copy(instructions = instructions)
+      candidate.get(entry.id).fold(entry.parameters) { instructions =>
+        entry.parameters.copy(instructions = instructions)
       }
     }
     ps.replace(program, updated)

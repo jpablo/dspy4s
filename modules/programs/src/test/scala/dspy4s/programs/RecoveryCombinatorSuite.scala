@@ -44,15 +44,16 @@ class RecoveryCombinatorSuite extends FunSuite:
 
   private object Attempt:
     given attemptPredictor: PredictorLens[Attempt] with
-      def get(program: Attempt): PredictorState = program.predict.predictorState
+      def get(program: Attempt): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Attempt): PredictorMetadata = program.predict.predictorView.metadata
-      def set(program: Attempt, updated: PredictorState): Attempt =
-        program.copy(predict = program.predict.withPredictorState(updated))
+      def set(program: Attempt, updated: OptimizableParameters): Attempt =
+        program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private def predictor(instruction: String): DynamicPredict =
     DynamicPredict(SignatureLayout.parse("i -> s").toOption.get.withInstructions(Some(instruction)))
 
-  private def params[P](program: P)(using predictors: PredictorTraversal[P]): Vector[PredictorState] = predictors.read(program)
+  private def params[P](program: P)(using predictors: PredictorTraversal[P]): Vector[OptimizableParameters] =
+    predictors.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
 
@@ -139,9 +140,12 @@ class RecoveryCombinatorSuite extends FunSuite:
     val recovered = primary.recoverWith(RecoveryPolicy.Always)(fallback)
     val P         = summon[PredictorTraversal[RecoverWith[Int, String, Attempt, Attempt]]]
 
-    assertEquals(params(recovered), Vector(primary.predict.predictorState, fallback.predict.predictorState))
+    assertEquals(
+      params(recovered),
+      Vector(primary.predict.optimizableParameters, fallback.predict.optimizableParameters)
+    )
     assertEquals(P.readNamed(recovered).map(_._1), Vector("primary", "fallback"))
-    val replacements = Vector(predictor("p2").predictorState, predictor("f2").predictorState)
+    val replacements = Vector(predictor("p2").optimizableParameters, predictor("f2").optimizableParameters)
     assertEquals(P.read(P.replace(recovered, replacements)), replacements)
   }
 

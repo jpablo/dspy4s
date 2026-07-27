@@ -6,19 +6,19 @@ import dspy4s.typed.OutputAugmentation.PrependField
 
 /** A program that is one learnable predictor (a leaf of the introspection tree).
   *
-  * This is a lawful [[dspy4s.core.contracts.Lens Lens]] onto exactly the program's writable [[PredictorState]]: the
+  * This is a lawful [[dspy4s.core.contracts.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the
   * Get-Put / Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins
-  * what makes the focus exact — writing state can never change the read-only [[PredictorMetadata]], which is what
-  * excludes signature structure and execution resources from optimizer replacement. `PredictorStateSuite` executes
-  * all four statements per instance.
+  * what makes the focus exact — writing parameters can never change the read-only [[PredictorMetadata]], which
+  * excludes signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite`
+  * executes all four statements per instance.
   */
-trait PredictorLens[P] extends Lens[P, PredictorState]:
+trait PredictorLens[P] extends Lens[P, OptimizableParameters]:
   def metadata(program: P): PredictorMetadata
 
   final def inspect(program: P): PredictorView = PredictorView(metadata(program), get(program))
 
-  @Law("frame: writing state never changes the read-only metadata")
-  def frame(program: P, updated: PredictorState): IsEq[PredictorMetadata] =
+  @Law("frame: writing parameters never changes the read-only metadata")
+  def frame(program: P, updated: OptimizableParameters): IsEq[PredictorMetadata] =
     metadata(set(program, updated)) <-> metadata(program)
 
 object PredictorLens:
@@ -26,13 +26,13 @@ object PredictorLens:
     * implicit scope wherever a `PredictorLens[DynamicPredict]` (or its `NotGiven`) is sought.
     */
   given PredictorLens[DynamicPredict] with
-    def get(program: DynamicPredict): PredictorState =
-      PredictorState(program.layout.instructions, program.demos, program.config)
+    def get(program: DynamicPredict): OptimizableParameters =
+      OptimizableParameters(program.layout.instructions, program.demos, program.config)
 
     def metadata(program: DynamicPredict): PredictorMetadata =
       PredictorMetadata.from(program.layout, program.moduleName)
 
-    def set(program: DynamicPredict, updated: PredictorState): DynamicPredict =
+    def set(program: DynamicPredict, updated: OptimizableParameters): DynamicPredict =
       if updated == get(program) then program
       else
         program.copy(
@@ -46,17 +46,18 @@ object PredictorLens:
     * by [[PredictorTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
     * [[PredictorLens]] companion so it is in implicit scope without an explicit import.
     *
-    * State is exactly instructions, demos, and module config. The signature field structure, output shape, name,
-    * runtime, bound LM, and tools remain on the original typed program and are exposed only as read-only metadata.
+    * Optimizable parameters are exactly instructions, demos, and module config. The signature field structure, output
+    * shape, name, runtime, bound LM, and tools remain on the original typed program and are exposed only as read-only
+    * metadata.
     */
   given predictPredictorLens[I, O]: PredictorLens[Predict[I, O]] with
-    def get(program: Predict[I, O]): PredictorState =
-      PredictorState(program.signature.layout.instructions, program.demos, program.config)
+    def get(program: Predict[I, O]): OptimizableParameters =
+      OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
 
     def metadata(program: Predict[I, O]): PredictorMetadata =
       PredictorMetadata.from(program.signature.layout, program.moduleName)
 
-    def set(program: Predict[I, O], updated: PredictorState): Predict[I, O] =
+    def set(program: Predict[I, O], updated: OptimizableParameters): Predict[I, O] =
       if updated == get(program) then program
       else
         program.copy(
@@ -70,8 +71,8 @@ object PredictorLens:
     * `ChainOfThought.augmentLayout` returns an `Either`; it is resolved fail-fast here (consistent with the P3
     * hand-written instances), and only fails for layouts that cannot be augmented.
     *
-    * State remains instructions, demos, and config. The augmented signature structure is metadata only; writing a state
-    * changes the base signature's instructions, from which the same augmented structure is rebuilt.
+    * Optimizable parameters remain instructions, demos, and config. The augmented signature structure is metadata only;
+    * writing parameters changes the base signature's instructions, from which the same augmented structure is rebuilt.
     */
   given chainOfThoughtPredictorLens[I, O](using
       prepend: PrependField.Of["reasoning", String, O]
@@ -87,13 +88,13 @@ object PredictorLens:
           identity
         )
 
-    def get(program: ChainOfThought[I, O]): PredictorState =
-      PredictorState(program.signature.layout.instructions, program.demos, program.config)
+    def get(program: ChainOfThought[I, O]): OptimizableParameters =
+      OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
 
     def metadata(program: ChainOfThought[I, O]): PredictorMetadata =
       PredictorMetadata.from(augmented(program), program.moduleName)
 
-    def set(program: ChainOfThought[I, O], updated: PredictorState): ChainOfThought[I, O] =
+    def set(program: ChainOfThought[I, O], updated: OptimizableParameters): ChainOfThought[I, O] =
       if updated == get(program) then program
       else
         program.copy(
@@ -102,10 +103,10 @@ object PredictorLens:
           signature = program.signature.withInstructions(updated.instructions)
         )
 
-/** Uniform syntax derived from the lawful [[PredictorLens]] lens. No predictor class needs to duplicate state/view/update
-  * methods; every current and third-party leaf receives the same operations from its typeclass instance.
+/** Uniform syntax derived from the lawful [[PredictorLens]] lens. Every current and third-party leaf receives the same
+  * parameter and inspection operations from its typeclass instance.
   */
 extension [P](program: P)(using predictorLens: PredictorLens[P])
-  def predictorState: PredictorState                 = predictorLens.get(program)
-  def predictorView: PredictorView                   = predictorLens.inspect(program)
-  def withPredictorState(updated: PredictorState): P = predictorLens.set(program, updated)
+  def optimizableParameters: OptimizableParameters = predictorLens.get(program)
+  def predictorView: PredictorView                  = predictorLens.inspect(program)
+  def withOptimizableParameters(updated: OptimizableParameters): P = predictorLens.set(program, updated)

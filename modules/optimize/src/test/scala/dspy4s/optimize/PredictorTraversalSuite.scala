@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.predictorState
+import dspy4s.programs.predictors.optimizableParameters
 
-import dspy4s.programs.predictors.{PredictorState, PredictorTraversal}
+import dspy4s.programs.predictors.{OptimizableParameters, PredictorTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -25,10 +25,10 @@ class PredictorTraversalSuite extends FunSuite:
     val p  = DynamicPredict(layout = sigA)
     val ps = summon[PredictorTraversal[DynamicPredict]]
     assertEquals(ps.read(p).size, 1)
-    assertEquals(ps.read(p).head, p.predictorState)
-    val updated = p.predictorState.copy(instructions = Some("updated"))
+    assertEquals(ps.read(p).head, p.optimizableParameters)
+    val updated = p.optimizableParameters.copy(instructions = Some("updated"))
     val replaced = ps.replace(p, Vector(updated))
-    assertEquals(replaced.predictorState, updated)
+    assertEquals(replaced.optimizableParameters, updated)
     assertEquals(replaced.layout.fields, sigA.fields)
   }
 
@@ -57,8 +57,8 @@ class PredictorTraversalSuite extends FunSuite:
     val pipe    = Pipe(a, b, 7)
     val ps      = summon[PredictorTraversal[Pipe]]
     val newDemo = Vector(Example(rec("question" := "q", "answer" := "x")))
-    val editedA = a.predictorState.copy(demos = newDemo)
-    val out     = ps.replace(pipe, Vector(editedA, b.predictorState))
+    val editedA = a.optimizableParameters.copy(demos = newDemo)
+    val out     = ps.replace(pipe, Vector(editedA, b.optimizableParameters))
     assertEquals(out.a.demos, newDemo)
     assertEquals(out.b, b)
     assertEquals(out.n, 7)
@@ -66,7 +66,7 @@ class PredictorTraversalSuite extends FunSuite:
 
   test("empty is the identity instance: reads nothing, replace returns the program") {
     val empty = PredictorTraversal.empty[Int]
-    assertEquals(empty.read(42), Vector.empty[PredictorState])
+    assertEquals(empty.read(42), Vector.empty[OptimizableParameters])
     assertEquals(empty.replace(42, Vector.empty), 42)
   }
 

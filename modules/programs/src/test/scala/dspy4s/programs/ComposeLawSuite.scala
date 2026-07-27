@@ -58,17 +58,17 @@ class ComposeLawSuite extends FunSuite:
 
   private object Step:
     given stepPredictor[I, O]: PredictorLens[Step[I, O]] with
-      def get(program: Step[I, O]): PredictorState = program.predict.predictorState
+      def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
-      def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
-        program.copy(predict = program.predict.withPredictorState(updated))
+      def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
+        program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private object TraceSize:
     given traceSizePredictor: PredictorLens[TraceSize] with
-      def get(program: TraceSize): PredictorState = program.predict.predictorState
+      def get(program: TraceSize): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: TraceSize): PredictorMetadata = program.predict.predictorView.metadata
-      def set(program: TraceSize, updated: PredictorState): TraceSize =
-        program.copy(predict = program.predict.withPredictorState(updated))
+      def set(program: TraceSize, updated: OptimizableParameters): TraceSize =
+        program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
@@ -205,13 +205,13 @@ class ComposeLawSuite extends FunSuite:
     val ab = a >>> b
     val P  = summon[PredictorTraversal[AndThen[Int, String, Int, Step[Int, String], Step[String, Int]]]]
 
-    assertEquals(P.read(ab), Vector(a.predict.predictorState, b.predict.predictorState))
+    assertEquals(P.read(ab), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(ab).map(_._1), Vector("first", "second"))
     // replace(p, read(p)) == p  (checked on the read projection — the meaningful invariant)
     assertEquals(P.read(P.replace(ab, P.read(ab))), P.read(ab))
     // a genuine replace swaps the addressed predict
-    val newSecond = b.predict.predictorState.copy(instructions = Some("Use the updated second step."))
-    val updates   = Vector(a.predict.predictorState, newSecond)
+    val newSecond = b.predict.optimizableParameters.copy(instructions = Some("Use the updated second step."))
+    val updates   = Vector(a.predict.optimizableParameters, newSecond)
     assertEquals(P.read(P.replace(ab, updates)), updates)
   }
 
@@ -220,7 +220,7 @@ class ComposeLawSuite extends FunSuite:
     val b   = step[Int, Int]("b", "i -> n")(i => i)
     val par = Compose.parallel(a, b)
     val P   = summon[PredictorTraversal[Both[Int, String, Int, Step[Int, String], Step[Int, Int]]]]
-    assertEquals(P.read(par), Vector(a.predict.predictorState, b.predict.predictorState))
+    assertEquals(P.read(par), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(par).map(_._1), Vector("first", "second"))
   }
 
@@ -250,7 +250,7 @@ class ComposeLawSuite extends FunSuite:
     val b  = step[Boolean, Int]("b", "p -> n")(_ => 0)
     val tn = Compose.tensor(a, b)
     val P  = summon[PredictorTraversal[Tensor[Int, Boolean, String, Int, Step[Int, String], Step[Boolean, Int]]]]
-    assertEquals(P.read(tn), Vector(a.predict.predictorState, b.predict.predictorState))
+    assertEquals(P.read(tn), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(tn).map(_._1), Vector("first", "second"))
   }
 

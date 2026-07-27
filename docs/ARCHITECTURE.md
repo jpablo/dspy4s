@@ -128,7 +128,7 @@ graph TD
 
 7. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
    Uses `PredictorTraversal[P]` to inspect read-only predictor metadata, read/write
-   `PredictorState` (instructions, demos, config), and rebuild candidates;
+   `OptimizableParameters` (instructions, demos, config), and rebuild candidates;
    `ProgramRunner[P]` supplies uniform static/dynamic execution.
 
 8. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
@@ -272,7 +272,7 @@ code:
   construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
   `MultiChainComparison` are the templates.
 - **New optimizer** — use `PredictorTraversal[P].inspect` for layout/name metadata,
-  `read` / `replace` for writable `PredictorState`, and `ProgramRunner[P]` for
+  `read` / `replace` for writable `OptimizableParameters`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.
 - **New stream listener** — implement `StreamListener[A]`, pass to
   `Streamify.streamify`. The streaming wrapper routes via
@@ -296,7 +296,7 @@ code:
    and typed argument schema from a plain method and decodes each call
    argument by name/type.
 5. **Python save / pickle compatibility.** Mitigation: a dspy4s-native,
-   state-only JSON format (`PredictorState` + `ProgramPersistence`);
+   state-only JSON format (`OptimizableParameters` + `ProgramPersistence`);
    explicit non-compat note.
 
 ## How this maps to Python DSPy

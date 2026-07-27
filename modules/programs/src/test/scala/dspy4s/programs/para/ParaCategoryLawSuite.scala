@@ -1,6 +1,6 @@
 package dspy4s.programs.para
 
-import dspy4s.programs.predictors.{predictorState, predictorView, withPredictorState}
+import dspy4s.programs.predictors.{optimizableParameters, predictorView, withOptimizableParameters}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
@@ -21,7 +21,7 @@ import dspy4s.programs.DynamicPredict
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.predictors.PredictorLens
 import dspy4s.programs.predictors.PredictorMetadata
-import dspy4s.programs.predictors.PredictorState
+import dspy4s.programs.predictors.OptimizableParameters
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.RecordObject
@@ -73,10 +73,10 @@ class ParaCategoryLawSuite extends FunSuite:
 
   private object Step:
     given stepPredictor[I, O]: PredictorLens[Step[I, O]] with
-      def get(program: Step[I, O]): PredictorState = program.predict.predictorState
+      def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
-      def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
-        program.copy(predict = program.predict.withPredictorState(updated))
+      def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
+        program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   /** A NON-product module: no `PredictorLens` leaf, no `Mirror`, hence no `PredictorTraversal` instance. Used to prove the
     * construction gate below.
@@ -206,8 +206,8 @@ class ParaCategoryLawSuite extends FunSuite:
     assertIsEq(C.paramsCompose(a, b))
     assertIsEq(C.reparamRoundTrip(ab))
     val fresh = Vector(
-      predict("i -> s").predictorState.copy(instructions = Some("first update")),
-      predict("s -> n").predictorState.copy(instructions = Some("second update"))
+      predict("i -> s").optimizableParameters.copy(instructions = Some("first update")),
+      predict("s -> n").optimizableParameters.copy(instructions = Some("second update"))
     )
     assertIsEq(C.reparamWriteBack(ab, fresh))
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
@@ -253,21 +253,21 @@ class ParaCategoryLawSuite extends FunSuite:
   }
 
   // ── The parameter monoid, and its delooping as a lawful Category instance (checked with real ==) ─────────
-  test("the parameter monoid Monoid[Vector[PredictorState]] satisfies the monoid laws") {
-    val M  = Monoid[Vector[PredictorState]]
-    val v1 = Vector(predict("a -> b").predictorState)
-    val v2 = Vector(predict("b -> c").predictorState)
-    val v3 = Vector(predict("c -> d").predictorState)
+  test("the parameter monoid Monoid[Vector[OptimizableParameters]] satisfies the monoid laws") {
+    val M  = Monoid[Vector[OptimizableParameters]]
+    val v1 = Vector(predict("a -> b").optimizableParameters)
+    val v2 = Vector(predict("b -> c").optimizableParameters)
+    val v3 = Vector(predict("c -> d").optimizableParameters)
     assertIsEq(M.associativity(v1, v2, v3))
     assertIsEq(M.identityLeft(v1))
     assertIsEq(M.identityRight(v1))
   }
 
   test("paramsDeloop is that monoid delooped: Category laws hold, and id delegates to the monoid's empty") {
-    val M  = Monoid[Vector[PredictorState]]
-    val v1 = Vector(predict("a -> b").predictorState)
-    val v2 = Vector(predict("b -> c").predictorState)
-    val v3 = Vector(predict("c -> d").predictorState)
+    val M  = Monoid[Vector[OptimizableParameters]]
+    val v1 = Vector(predict("a -> b").optimizableParameters)
+    val v2 = Vector(predict("b -> c").optimizableParameters)
+    val v3 = Vector(predict("c -> d").optimizableParameters)
     assertIsEq(paramsDeloop.identityLeft[Unit, Unit](v1))
     assertIsEq(paramsDeloop.identityRight[Unit, Unit](v1))
     assertIsEq(paramsDeloop.associativity[Unit, Unit, Unit, Unit](v1, v2, v3))

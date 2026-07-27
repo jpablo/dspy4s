@@ -310,10 +310,10 @@ class TypedBestOfNSuite extends FunSuite:
   /** Inner typed program that drives the AMBIENT adapter + LM (so an injected `hint_` actually reaches the prompt the
     * LM sees). Mirrors what a real `Predict[Q, Cand]` does, minus the static-Signature codec.
     */
-  private final case class InnerPredict(state: PredictorState = PredictorState())
+  private final case class InnerPredict(parameters: OptimizableParameters = OptimizableParameters())
       extends Module[Q, Cand]:
     val layout: SignatureLayout =
-      SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(state.instructions)
+      SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(parameters.instructions)
     override val moduleName: String = "inner_predict"
     override protected val lifecycle: ModuleLifecycle[Q, Cand] =
       ModuleLifecycle.typed(call => rec("q" := call.input.q))
@@ -324,9 +324,9 @@ class TypedBestOfNSuite extends FunSuite:
       val lm      = ctx.lm.collect { case m: LanguageModel => m }.get
       val invocation = AdapterInvocation(
         layout  = layout,
-        demos   = state.demos,
+        demos   = parameters.demos,
         inputs  = Example(values = rec("q" := call.input.q), inputKeys = Set("q")),
-        request = LmRequest(model = lm.id, options = state.config)
+        request = LmRequest(model = lm.id, options = parameters.config)
       )
       for
         prompt   <- adapter.format(invocation)
@@ -336,14 +336,14 @@ class TypedBestOfNSuite extends FunSuite:
         score    <- RawPrediction(values = parsed.values).asDouble("score")
       yield Prediction(output = Cand(answer, score), raw = RawPrediction(values = parsed.values))
 
-  /** `InnerPredict` runs one LM call on a fixed layout; expose a lawful single state focus so Refine's advice can route
-    * back to it without treating an executable `DynamicPredict` as optimizer state.
+  /** `InnerPredict` runs one LM call on a fixed layout; expose one lawful parameter focus so Refine's advice can route
+    * back to it without treating an executable `DynamicPredict` as optimizer parameters.
     */
   private given PredictorLens[InnerPredict] with
-    def get(program: InnerPredict): PredictorState = program.state
+    def get(program: InnerPredict): OptimizableParameters = program.parameters
     def metadata(program: InnerPredict): PredictorMetadata =
       PredictorMetadata.from(program.layout, program.moduleName)
-    def set(program: InnerPredict, updated: PredictorState): InnerPredict = program.copy(state = updated)
+    def set(program: InnerPredict, updated: OptimizableParameters): InnerPredict = program.copy(parameters = updated)
 
   test("Refine generates advice and injects it as a hint so a retry improves above threshold") {
     val adapter = ScriptingAdapter()

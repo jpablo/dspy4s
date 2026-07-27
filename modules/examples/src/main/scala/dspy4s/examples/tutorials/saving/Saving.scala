@@ -4,7 +4,7 @@
  * Source:   docs/docs/tutorials/saving/index.md
  * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md
  * Status:   translated — program state `save` / `load` is now ported (PORT_GAPS G-4,
- *           `dspy4s.optimize.ProgramPersistence`). dspy4s serializes each leaf's writable `PredictorState`
+ *           `dspy4s.optimize.ProgramPersistence`). dspy4s serializes each leaf's writable `OptimizableParameters`
  *           (instructions + demos + module config) to clean JSON — the analogue of Python's `save(...,
  *           save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset
  *           (no `dspy.datasets`, PORT_GAPS G-21).
@@ -31,7 +31,7 @@ object Saving:
 
   /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`.
     * This tutorial uses `DynamicPredict` for a compact runtime-layout example; typed `Predict` and
-    * `ChainOfThought` are supported through the same `PredictorTraversal` / `PredictorState` contract. */
+    * `ChainOfThought` are supported through the same `PredictorTraversal` / `OptimizableParameters` contract. */
   // --8<-- [start:program]
   def program(): DynamicPredict =
     DynamicPredict(Signature.fromString("question -> answer").layout)
@@ -58,7 +58,7 @@ object Saving:
   // ── Snippets 2/3 — save the compiled program's state to disk ──
   // | compiled_dspy_program.save("./dspy_program/program.json", save_program=False)
   // | compiled_dspy_program.save("./dspy_program/program.pkl", save_program=False)   # .pkl variant: N/A in dspy4s
-  // `ProgramPersistence.save` writes PredictorState keyed by traversal ordinals (`predictor-0`, ...) as JSON.
+  // `ProgramPersistence.save` writes OptimizableParameters keyed by traversal ordinals (`predictor-0`, ...) as JSON.
   // --8<-- [start:save]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)

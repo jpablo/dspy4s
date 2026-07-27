@@ -143,15 +143,15 @@ object Refine:
     def inspect(program: Refine[P, I, O]): Vector[PredictorView] =
       inner.inspect(program.module) :+ program.criticPredict.predictorView
 
-    def replace(program: Refine[P, I, O], updates: Vector[PredictorState]): Refine[P, I, O] =
+    def replace(program: Refine[P, I, O], updates: Vector[OptimizableParameters]): Refine[P, I, O] =
       val innerArity = inner.read(program.module).size
       require(
         updates.size == innerArity + 1,
         s"Refine expects ${innerArity + 1} updates (inner predicts ++ critic), got ${updates.size}"
       )
       val nextCritic =
-        if updates(innerArity) == program.criticPredict.predictorState then program.criticPredictOverride
-        else Some(program.criticPredict.withPredictorState(updates(innerArity)))
+        if updates(innerArity) == program.criticPredict.optimizableParameters then program.criticPredictOverride
+        else Some(program.criticPredict.withOptimizableParameters(updates(innerArity)))
       program.copy(
         module                = inner.replace(program.module, updates.take(innerArity)),
         criticPredictOverride = nextCritic

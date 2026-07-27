@@ -25,7 +25,7 @@ are generic over any program with `PredictorTraversal` evidence, including typed
 --8<-- "tutorials/saving/Saving.scala:save"
 ```
 
-`ProgramPersistence.save` writes each leaf's `PredictorState`: instructions, demos, and module-level config. It
+`ProgramPersistence.save` writes each leaf's `OptimizableParameters`: instructions, demos, and module-level config. It
 does not write signature field structure, module names, runtime bindings, tools, or program code.
 
 ## Recreate and load
