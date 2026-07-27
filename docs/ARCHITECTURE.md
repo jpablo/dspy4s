@@ -118,8 +118,10 @@ graph TD
      (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
      `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf on the dynamic spine.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
-   - `contracts/ProgramContracts.scala` — generic `ProgramCall[I]` (input + `config` /
-     `traceEnabled` / `rolloutId`), `ProgramRuntime`, `ToolFunction`
+   - `contracts/ProgramCall.scala` — generic `ProgramCall[I]` (input + `config` /
+     `traceEnabled` / `rolloutId`)
+   - `contracts/ProgramRuntime.scala` — model and adapter resolution
+   - `contracts/ToolFunction.scala` / `ToolCall.scala` — callable tools and their invocation messages
    - `ProgramInput`, `RecordCodec`, `ProgramRunner` — coherent dynamic-to-typed decoding and uniform execution
 
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.

@@ -69,7 +69,7 @@ explicitly establish a context with `given RuntimeContext = RuntimeEnvironment.c
 
 | Python | dspy4s | Where |
 |---|---|---|
-| `def __call__(self, **kwargs)` | `final case class ProgramCall(inputs: Map[String, Any], config: Map[String, Any] = Map.empty, traceEnabled: Boolean = true)` | `programs/contracts/ProgramContracts.scala` |
+| `def __call__(self, **kwargs)` | `final case class ProgramCall(inputs: Map[String, Any], config: Map[String, Any] = Map.empty, traceEnabled: Boolean = true)` | `programs/contracts/ProgramCall.scala` |
 | `prediction.answer`, `prediction["answer"]`, `prediction.get("answer", default)` | `prediction.values: Map[String, Any]` — accessed as `prediction.values("answer")` or via `Option`. No attribute sugar. | `core/data/RawPrediction.scala` |
 | `**signature_fields_as_kwargs` | explicit `Map[String, Any]` construction at call sites | call sites throughout |
 

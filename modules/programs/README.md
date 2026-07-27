@@ -98,7 +98,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
 | `Predictors.scala` | the `Predictors`/`Predictor` introspection type-classes |
-| `contracts/Module.scala`, `ProgramContracts.scala` | `Module`/`DynamicModule`, generic `ProgramCall[I]`, `ToolFunction` |
+| `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
+| `contracts/ToolFunction.scala`, `ToolCall.scala` | callable tools and their invocation messages |
 | `ProgramRunner.scala` | the shared typed/dynamic record-running capability |
 | `ProgramInput.scala`, `RecordCodec.scala` | coherent decoding capabilities for the dynamic-to-typed input boundary |
 | `retrievers/KNN.scala`, `EmbeddingsRetriever.scala` | in-memory retrieval |
