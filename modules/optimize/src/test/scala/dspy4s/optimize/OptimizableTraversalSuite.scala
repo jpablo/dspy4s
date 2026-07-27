@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.optimizableParameters
+import dspy4s.programs.optimization.optimizableParameters
 
-import dspy4s.programs.predictors.{OptimizableParameters, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableParameters, OptimizableTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -73,7 +73,7 @@ class OptimizableTraversalSuite extends FunSuite:
   test("derived rejects a field without OptimizableTraversal evidence instead of silently treating it as empty") {
     val errors = compileErrors("""
       import dspy4s.programs.DynamicPredict
-      import dspy4s.programs.predictors.OptimizableTraversal
+      import dspy4s.programs.optimization.OptimizableTraversal
 
       final class Opaque
       final case class Broken(predict: DynamicPredict, opaque: Opaque)
@@ -88,17 +88,17 @@ class OptimizableTraversalSuite extends FunSuite:
     // A leaf type (DynamicPredict has OptimizableLeaf and is a Product) -> fromOptimizableLeaf.
     assertEquals(
       summon[OptimizableTraversal[DynamicPredict]].getClass.getName,
-      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
+      "dspy4s.programs.optimization.OptimizableTraversal$fromOptimizableLeaf"
     )
     // A single-leaf program with an OptimizableLeaf instance -> fromOptimizableLeaf (not torn into fields).
     assertEquals(
       summon[OptimizableTraversal[ScriptedPredictProgram]].getClass.getName,
-      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
+      "dspy4s.programs.optimization.OptimizableTraversal$fromOptimizableLeaf"
     )
     // A plain composite with no leaf instance -> structural derivation.
     assertEquals(
       summon[OptimizableTraversal[Pipe]].getClass.getName,
-      "dspy4s.programs.predictors.OptimizableTraversal$DerivedOptimizableTraversal"
+      "dspy4s.programs.optimization.OptimizableTraversal$DerivedOptimizableTraversal"
     )
   }
 

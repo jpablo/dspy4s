@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.{OptimizableParameters, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableParameters, OptimizableTraversal}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
@@ -103,13 +103,13 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       valset: Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
-    val predictorCount           = ps.read(student).size
+    val leafCount                = ps.read(student).size
 
-    if predictorCount == 0 then
+    if leafCount == 0 then
       Right(OptimizationReport(
         bestProgram = student,
         candidates = Vector.empty,
-        metadata = Map("no_predictors" -> true)
+        metadata = Map("no_optimizable_leaves" -> true)
       ))
     else
       // ── Phase 1: demo-set candidates (whole-program demo assignments) ──
@@ -118,7 +118,7 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       // ── Phase 2: instruction candidates (per predictor) ──
       proposeInstructionCandidates(student, trainset, demoCandidates).map { instructionCandidates =>
         // ── Phase 3: random search over (demo-assignment, per-predictor instruction) ──
-        searchTrials(student, evalset, demoCandidates, instructionCandidates, predictorCount)
+        searchTrials(student, evalset, demoCandidates, instructionCandidates, leafCount)
       }
 
   // ── Phase 1 ─────────────────────────────────────────────────────────────
@@ -131,8 +131,8 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       trainset: Vector[Example],
       teacher: Option[P]
   )(using RuntimeContext): Vector[Vector[Vector[Example]]] =
-    val predictorCount = ps.read(student).size
-    val zeroShot       = Vector.fill(predictorCount)(Vector.empty[Example])
+    val leafCount = ps.read(student).size
+    val zeroShot  = Vector.fill(leafCount)(Vector.empty[Example])
 
     val bootstrapped = (0 until config.numCandidates).iterator.map { k =>
       val bootstrap = new BootstrapFewShot[P](
@@ -167,9 +167,9 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       ps.read(student).map(_.instructions.getOrElse(""))
 
     proposer.proposeInstructions(student, trainset, seedDemos).map { proposed =>
-      proposed.zipWithIndex.map { case (perPredictor, idx) =>
+      proposed.zipWithIndex.map { case (perLeaf, idx) =>
         val current = currentInstructions.lift(idx).getOrElse("")
-        (current +: perPredictor).filter(_.nonEmpty).distinct match
+        (current +: perLeaf).filter(_.nonEmpty).distinct match
           case Vector() => Vector(current) // never empty: keep the (possibly blank) baseline as the sole candidate
           case nonEmpty => nonEmpty
       }
@@ -186,7 +186,7 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       evalset: Vector[Example],
       demoCandidates: Vector[Vector[Vector[Example]]],
       instructionCandidates: Vector[Vector[String]],
-      predictorCount: Int
+      leafCount: Int
   )(using RuntimeContext): OptimizationReport[P] =
     val rng        = new Random(config.seed)
     val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
@@ -195,12 +195,12 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     val baselineScore = scoreProgram(student, evalset)
     candidates += CandidateProgram(student, baselineScore, metadata = Map("trial" -> -1, "baseline" -> true))
 
-    // `student` is immutable, so its predictor leaves are the same every trial — read them once.
+    // `student` is immutable, so its optimizable leaves are the same every trial — read them once.
     val leaves = ps.read(student)
     (0 until config.numTrials).foreach { trial =>
       val demoIdx       = rng.nextInt(demoCandidates.size)
       val demoAssignment = demoCandidates(demoIdx)
-      val instrIndices  = (0 until predictorCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
+      val instrIndices  = (0 until leafCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
       val chosenInstrs  = instrIndices.zipWithIndex.map { case (i, p) => instructionCandidates(p)(i) }
 
       val applied = applyTrial(leaves, student, chosenInstrs, demoAssignment)
@@ -222,7 +222,7 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
         "best_score"          -> best.score,
         "num_trials"          -> config.numTrials,
         "num_demo_candidates" -> demoCandidates.size,
-        "predictors"          -> predictorCount
+        "optimizable_leaves"  -> leafCount
       )
     )
 

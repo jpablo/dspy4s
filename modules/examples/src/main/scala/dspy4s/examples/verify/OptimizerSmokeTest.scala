@@ -47,7 +47,7 @@ import dspy4s.optimize.{
 }
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 import java.util.concurrent.atomic.AtomicInteger
 

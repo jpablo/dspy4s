@@ -1,12 +1,12 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{optimizableParameters, optimizableView}
+import dspy4s.programs.optimization.{optimizableParameters, optimizableView}
 
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 /** Top-level so its Mirror (and `MirroredElemLabels`) are available to `OptimizableTraversal.derived`. */
@@ -41,7 +41,7 @@ class OptimizableTraversalNamedSuite extends FunSuite:
     val pipeline = NamedPipeline(predict("a"), predict("b"))
     val entries  = summon[OptimizableTraversal[NamedPipeline]].readIdentified(pipeline)
 
-    assertEquals(entries.map(_.id), Vector(PredictorId(0), PredictorId(1)))
+    assertEquals(entries.map(_.id), Vector(OptimizableId(0), OptimizableId(1)))
     assertEquals(entries.map(_.displayName), Vector("retrieve", "answer"))
     assertEquals(
       entries.map(_.parameters),
@@ -55,7 +55,7 @@ class OptimizableTraversalNamedSuite extends FunSuite:
     val misleading = predict("misleading").optimizableView
     val ps = new OptimizableTraversal[Unit]:
       def inspect(program: Unit) = Vector(canonical)
-      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.OptimizableParameters]) = program
+      def replace(program: Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector("leaf" -> misleading)
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
@@ -68,7 +68,7 @@ class OptimizableTraversalNamedSuite extends FunSuite:
     val canonical = predict("canonical").optimizableView
     val ps = new OptimizableTraversal[Unit]:
       def inspect(program: Unit) = Vector(canonical)
-      def replace(program: Unit, updates: Vector[dspy4s.programs.predictors.OptimizableParameters]) = program
+      def replace(program: Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector.empty
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
@@ -77,7 +77,7 @@ class OptimizableTraversalNamedSuite extends FunSuite:
     assert(namedError.getMessage.contains("inspectNamed returned 0 entries but inspect returned 1"))
   }
 
-  test("predictor IDs are preserved by replace") {
+  test("optimizable IDs are preserved by replace") {
     val pipeline = NamedPipeline(predict("a"), predict("b"))
     val ps       = summon[OptimizableTraversal[NamedPipeline]]
     val before   = ps.readIdentified(pipeline).map(_.id)

@@ -7,7 +7,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.para.Program
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

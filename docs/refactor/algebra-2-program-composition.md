@@ -188,7 +188,7 @@ Intentionally parameter-free field types opt in with `OptimizableTraversal.empty
 so a learnable subtree cannot silently disappear from optimizer addressability.
 
 **Entry-point experiment (commit `8d7e009`), CLOSED (commit `d1d38d0`).** The first round drove COPRO through
-a packaged `Program` via the path-dependent instantiation `new COPRO[program.Rep](config)(using program.predictors,
+a packaged `Program` via the path-dependent instantiation `new COPRO[program.Rep](config)(using program.optimizableParameters,
 runnable)` and surfaced the finding: **Para evidence alone is not enough to optimize.** Optimizers also need
 `ProgramRunner` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
 type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.

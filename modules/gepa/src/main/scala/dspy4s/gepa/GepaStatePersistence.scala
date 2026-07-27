@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
@@ -45,7 +45,7 @@ object GepaStatePersistence:
           candidate <- raw.foldLeft[Either[String, Candidate]](Right(Map.empty)) { case (candidateAcc, (key, value)) =>
             for
               candidate <- candidateAcc
-              id        <- PredictorId.parse(key)
+              id        <- OptimizableId.parse(key)
             yield candidate.updated(id, value)
           }
         yield parsed :+ candidate

@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.optimizableParameters
+import dspy4s.programs.optimization.optimizableParameters
 
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
@@ -11,7 +11,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.Predict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.Signature
 import munit.FunSuite
@@ -131,20 +131,23 @@ class ProgramPersistenceSuite extends FunSuite:
     assertEquals(got.b.demos, trained.b.demos)
   }
 
-  test("dumpState keys predictor state by stable predictor id") {
+  test("dumpState keys optimizable state by stable optimizable id") {
     val program = Pipe2(
       a = Predict(qaSignature, demos = demo, name = Some("ask")),
       b = Predict(qaSignature, name = Some("answer"))
     )
 
-    val predictors = ProgramPersistence.dumpState(program).fields.toVector.collectFirst {
-      case ("predictors", record: DynamicValue.Record) => record
-    }.getOrElse(fail("expected a predictor-id record"))
+    val optimizableParameters = ProgramPersistence.dumpState(program).fields.toVector.collectFirst {
+      case ("optimizableParameters", record: DynamicValue.Record) => record
+    }.getOrElse(fail("expected an optimizable-id record"))
 
-    assertEquals(predictors.fields.toVector.map(_._1).toSet, Set(PredictorId(0).render, PredictorId(1).render))
+    assertEquals(
+      optimizableParameters.fields.toVector.map(_._1).toSet,
+      Set(OptimizableId(0).render, OptimizableId(1).render)
+    )
   }
 
-  test("keyed predictor state loads by id rather than JSON object order") {
+  test("keyed optimizable state loads by id rather than JSON object order") {
     val firstDemo  = demo.take(1)
     val secondDemo = demo.drop(1)
     val trained = Pipe2(
@@ -157,39 +160,39 @@ class ProgramPersistenceSuite extends FunSuite:
     )
     val dumped = ProgramPersistence.dumpState(trained)
     val keyed = dumped.fields.toVector.collectFirst {
-      case ("predictors", record: DynamicValue.Record) => record
-    }.getOrElse(fail("expected a predictor-id record"))
+      case ("optimizableParameters", record: DynamicValue.Record) => record
+    }.getOrElse(fail("expected an optimizable-id record"))
     val reversed = DynamicValue.Record(Chunk.from(keyed.fields.toVector.reverse))
-    val state    = DynamicValue.Record(Chunk.from(Seq("predictors" -> reversed)))
+    val state    = DynamicValue.Record(Chunk.from(Seq("optimizableParameters" -> reversed)))
 
     val restored = ProgramPersistence.loadState(fresh, state).toOption.get
     assertEquals(restored.a.demos, firstDemo)
     assertEquals(restored.b.demos, secondDemo)
   }
 
-  test("loadState rejects missing and unknown predictor ids") {
+  test("loadState rejects missing and unknown optimizable ids") {
     val program = Pipe2(
       a = Predict(qaSignature, name = Some("ask")),
       b = Predict(qaSignature, name = Some("answer"))
     )
     val oneState = summon[OptimizableTraversal[Pipe2]].read(program).head.dumpState
     val malformed = DynamicValue.Record(Chunk.from(Seq(
-      "predictors" -> DynamicValue.Record(Chunk.from(Seq(
-        PredictorId(0).render -> oneState,
-        PredictorId(2).render -> oneState
+      "optimizableParameters" -> DynamicValue.Record(Chunk.from(Seq(
+        OptimizableId(0).render -> oneState,
+        OptimizableId(2).render -> oneState
       )))
     )))
 
     val result = ProgramPersistence.loadState(program, malformed)
     assert(result.isLeft, s"expected Left, got $result")
-    assert(result.left.toOption.get.message.contains("predictor-1"))
-    assert(result.left.toOption.get.message.contains("predictor-2"))
+    assert(result.left.toOption.get.message.contains("optimizable-1"))
+    assert(result.left.toOption.get.message.contains("optimizable-2"))
   }
 
-  test("loadState rejects positional predictor arrays") {
+  test("loadState rejects positional optimizable arrays") {
     val program = Predict(qaSignature, name = Some("ask"))
     val positional = DynamicValue.Record(Chunk.from(Seq(
-      "predictors" -> DynamicValue.Sequence(Chunk.from(Seq(
+      "optimizableParameters" -> DynamicValue.Sequence(Chunk.from(Seq(
         DynamicValue.Record.empty: DynamicValue
       )))
     )))

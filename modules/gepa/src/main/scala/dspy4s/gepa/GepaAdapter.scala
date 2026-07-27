@@ -7,9 +7,9 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
-import dspy4s.programs.predictors.IdentifiedOptimizable
-import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.IdentifiedOptimizable
+import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.ProgramRunner
 
@@ -30,8 +30,8 @@ final class GepaAdapter[P](
     val failureScore: Double = 0.0
 )(using ps: OptimizableTraversal[P], runner: ProgramRunner[P]):
 
-  /** Stable predictor ID → its traversal entry and trace index. Display names never participate in lookup. */
-  private val componentsById: Map[PredictorId, (IdentifiedOptimizable, Int)] =
+  /** Stable optimizable ID → its traversal entry and trace index. Display names never participate in lookup. */
+  private val componentsById: Map[OptimizableId, (IdentifiedOptimizable, Int)] =
     ps.readIdentified(program).zipWithIndex.map { case (entry, index) => entry.id -> (entry -> index) }.toMap
 
   /** Apply `candidate` to the program and evaluate it over `batch`, returning per-example outputs + scores.
@@ -82,7 +82,7 @@ final class GepaAdapter[P](
     )
 
   /** Build the reflective dataset for each component to update: per trajectory, that component's rendered I/O plus the
-    * predictor-level feedback (gepa's `make_reflective_dataset`). The reflection LM reads these to rewrite the
+    * optimizable-level feedback (gepa's `make_reflective_dataset`). The reflection LM reads these to rewrite the
     * component's instruction.
     *
     * Requires `evalBatch` to carry trajectories (i.e. it came from [[evaluate]] with `captureTraces = true`).
@@ -94,12 +94,12 @@ final class GepaAdapter[P](
   def makeReflectiveDataset(
       @scala.annotation.unused candidate: Candidate, // kept for engine-contract parity
       evalBatch: EvaluationBatch,
-      components: Vector[PredictorId]
-  )(using RuntimeContext): Map[PredictorId, Vector[ReflectiveRecord]] =
+      components: Vector[OptimizableId]
+  )(using RuntimeContext): Map[OptimizableId, Vector[ReflectiveRecord]] =
     val trajectories = evalBatch.trajectories.getOrElse(Vector.empty)
     components.iterator.map(component => component -> trajectories.flatMap(traj => recordFor(component, traj))).toMap
 
-  private def recordFor(component: PredictorId, traj: Trajectory)(using RuntimeContext): Option[ReflectiveRecord] =
+  private def recordFor(component: OptimizableId, traj: Trajectory)(using RuntimeContext): Option[ReflectiveRecord] =
     // Positionally locate the component's trace entry (component index in read order). Exact for a
     // single-predictor program and for sequential composites; non-sequential matching is a refinement.
     componentsById.get(component).flatMap { case (identified, index) =>

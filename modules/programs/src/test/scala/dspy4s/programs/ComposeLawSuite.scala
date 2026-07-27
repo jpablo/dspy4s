@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.programs.predictors.*
+import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
@@ -57,14 +57,14 @@ class ComposeLawSuite extends FunSuite:
       Right(Prediction(RuntimeEnvironment.current.trace.size, RawPrediction.empty))
 
   private object Step:
-    given stepPredictor[I, O]: OptimizableLeaf[Step[I, O]] with
+    given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private object TraceSize:
-    given traceSizePredictor: OptimizableLeaf[TraceSize] with
+    given traceSizeOptimizable: OptimizableLeaf[TraceSize] with
       def get(program: TraceSize): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: TraceSize): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: TraceSize, updated: OptimizableParameters): TraceSize =
@@ -72,8 +72,8 @@ class ComposeLawSuite extends FunSuite:
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
-  private def identified[P](program: P)(using predictors: OptimizableTraversal[P]): Vector[IdentifiedOptimizable] =
-    predictors.readIdentified(program)
+  private def identified[P](program: P)(using traversal: OptimizableTraversal[P]): Vector[IdentifiedOptimizable] =
+    traversal.readIdentified(program)
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
@@ -138,7 +138,7 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(left, Right(2) -> Vector("step_a", "step_b", "trace_size"))
   }
 
-  test("predictor identity is invariant under composition reassociation; structural names are only labels") {
+  test("optimizable identity is invariant under composition reassociation; structural names are only labels") {
     val a = step[Int, String]("a", "i -> s")(_.toString)
     val b = step[String, String]("b", "s -> t")(identity)
     val c = step[String, Int]("c", "t -> n")(_.length)
@@ -149,7 +149,7 @@ class ComposeLawSuite extends FunSuite:
     val leftEntries  = identified(left)
     val rightEntries = identified(right)
 
-    assertEquals(leftEntries.map(_.id), Vector(PredictorId(0), PredictorId(1), PredictorId(2)))
+    assertEquals(leftEntries.map(_.id), Vector(OptimizableId(0), OptimizableId(1), OptimizableId(2)))
     assertEquals(rightEntries.map(_.id), leftEntries.map(_.id))
     assertEquals(leftEntries.map(_.view), rightEntries.map(_.view))
     assertNotEquals(leftEntries.map(_.displayName), rightEntries.map(_.displayName))

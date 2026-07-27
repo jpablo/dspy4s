@@ -18,15 +18,15 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 import scala.util.Random
 
 class MergeProposerSuite extends FunSuite:
 
-  private val first  = PredictorId(0)
-  private val second = PredictorId(1)
+  private val first  = OptimizableId(0)
+  private val second = OptimizableId(1)
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
@@ -98,16 +98,16 @@ class MergeProposerSuite extends FunSuite:
     assertEquals(merged(first), Some("A2")) // id2 scores higher
   }
 
-  test("hasDesirablePredictors requires a component changed by exactly one descendant") {
+  test("hasDesirableComponents requires a component changed by exactly one descendant") {
     val anc = Map(first -> Some("A0"), second -> Some("B0"))
-    assert(MergeProposer.hasDesirablePredictors(
+    assert(MergeProposer.hasDesirableComponents(
       anc,
       Map(first -> Some("A1"), second -> Some("B0")),
       Map(first -> Some("A0"), second -> Some("B1"))
     ))
     // Both descendants changed every component -> no component is "anchored" to the ancestor -> not desirable.
     assert(
-      !MergeProposer.hasDesirablePredictors(
+      !MergeProposer.hasDesirableComponents(
         Map(first -> Some("A0")),
         Map(first -> Some("A1")),
         Map(first -> Some("A2"))

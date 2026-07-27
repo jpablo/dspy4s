@@ -25,7 +25,7 @@ import dspy4s.optimize.{
   SearchCandidateCount
 }
 import dspy4s.programs.{DynamicPredict, DynamicSignature, ProgramRunner}
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 object Optimizers:
 

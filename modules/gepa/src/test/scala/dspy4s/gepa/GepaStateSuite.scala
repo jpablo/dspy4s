@@ -1,7 +1,7 @@
 package dspy4s.gepa
 
-import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.PredictorOrdinal
+import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.optimization.OptimizableOrdinal
 import munit.FunSuite
 
 import scala.util.Random
@@ -11,7 +11,7 @@ class GepaStateSuite extends FunSuite:
   private def state(subscores: Vector[Double]*): GepaState =
     GepaState(
       candidates = CandidatePool.applyUnsafe(
-        subscores.indices.map(i => Map(PredictorId(0) -> Some(s"instr$i"))).toVector
+        subscores.indices.map(i => Map(OptimizableId(0) -> Some(s"instr$i"))).toVector
       ),
       valSubscores = subscores.toVector,
       parents = subscores.indices.map(_ => Vector.empty[Int]).toVector,
@@ -40,7 +40,7 @@ class GepaStateSuite extends FunSuite:
     intercept[IllegalArgumentException] {
       val _ = GepaState(
         candidates = CandidatePool.applyUnsafe(
-          Vector(Map(PredictorId(0) -> Some("a")), Map(PredictorId(0) -> Some("b")))
+          Vector(Map(OptimizableId(0) -> Some("a")), Map(OptimizableId(0) -> Some("b")))
         ),
         valSubscores = Vector(Vector(1.0, 0.0), Vector(1.0)), // second row is shorter — would crash paretoFrontier
         parents = Vector(Vector.empty[Int], Vector.empty[Int]),
@@ -62,8 +62,8 @@ class GepaStateSuite extends FunSuite:
   }
 
   test("add appends a candidate and accrues metric calls") {
-    val s0 = GepaState.seed(Map(PredictorId(0) -> Some("seed")), Vector(0.5, 0.5), metricCalls = 2)
-    val s1 = s0.add(Map(PredictorId(0) -> Some("child")), Vector(1.0, 1.0), parents = Vector(0), metricCalls = 2)
+    val s0 = GepaState.seed(Map(OptimizableId(0) -> Some("seed")), Vector(0.5, 0.5), metricCalls = 2)
+    val s1 = s0.add(Map(OptimizableId(0) -> Some("child")), Vector(1.0, 1.0), parents = Vector(0), metricCalls = 2)
     assertEquals(s1.candidates.size, 2)
     assertEquals(s1.bestIndex, 1)
     assertEquals(s1.parents(1), Vector(0))
@@ -73,7 +73,7 @@ class GepaStateSuite extends FunSuite:
   test("ancestors walks the full lineage, including a merge's two branches up to a common ancestor") {
     // Lineage: 0 (seed) -> 1, 0 -> 2; then 3 is a MERGE of 1 and 2 (two parents).
     val s = GepaState(
-      candidates = CandidatePool.applyUnsafe(Vector.tabulate(4)(i => Map(PredictorId(0) -> Some(i.toString)))),
+      candidates = CandidatePool.applyUnsafe(Vector.tabulate(4)(i => Map(OptimizableId(0) -> Some(i.toString)))),
       valSubscores = Vector.fill(4)(Vector(1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(1, 2)),
       totalMetricCalls = MetricCallCount(0)
@@ -84,34 +84,34 @@ class GepaStateSuite extends FunSuite:
   }
 
   test("RoundRobin picks one component per call and cycles through, wrapping the pointer") {
-    val cs = Vector(PredictorId(0), PredictorId(1), PredictorId(2))
+    val cs = Vector(OptimizableId(0), OptimizableId(1), OptimizableId(2))
     // Thread the pointer through six calls; expect a, b, c, a, b, c.
-    val (picks, _) = (0 until 6).foldLeft((Vector.empty[PredictorId], 0)) { case ((acc, ptr), _) =>
+    val (picks, _) = (0 until 6).foldLeft((Vector.empty[OptimizableId], 0)) { case ((acc, ptr), _) =>
       val (chosen, next) = ComponentSelector.RoundRobin.select(cs, ptr)
       (acc :+ chosen.head, next)
     }
     assertEquals(
       picks,
-      Vector(0, 1, 2, 0, 1, 2).map(i => PredictorId.fromOrdinal(PredictorOrdinal.assume(i)))
+      Vector(0, 1, 2, 0, 1, 2).map(i => OptimizableId.fromOrdinal(OptimizableOrdinal.assume(i)))
     )
   }
 
   test("RoundRobin normalizes an out-of-range pointer") {
     // A pointer past the end (e.g. after the component list shrank) wraps via modulo.
     assertEquals(
-      ComponentSelector.RoundRobin.select(Vector(PredictorId(0), PredictorId(1)), 5),
-      (Vector(PredictorId(1)), 0)
+      ComponentSelector.RoundRobin.select(Vector(OptimizableId(0), OptimizableId(1)), 5),
+      (Vector(OptimizableId(1)), 0)
     )
   }
 
   test("RoundRobin on no components is a no-op that preserves the pointer") {
     assertEquals(
       ComponentSelector.RoundRobin.select(Vector.empty, 3),
-      (Vector.empty[PredictorId], 3)
+      (Vector.empty[OptimizableId], 3)
     )
   }
 
   test("All returns every component and leaves the pointer untouched") {
-    val cs = Vector(PredictorId(0), PredictorId(1), PredictorId(2))
+    val cs = Vector(OptimizableId(0), OptimizableId(1), OptimizableId(2))
     assertEquals(ComponentSelector.All.select(cs, 2), (cs, 2))
   }

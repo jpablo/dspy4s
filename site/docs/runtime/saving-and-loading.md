@@ -13,7 +13,7 @@ can be loaded at startup.
 
 `load` does not reconstruct an executable program. It takes a fresh program whose
 architecture and runtime bindings were created normally in Scala, then returns a new
-immutable value with the saved predictor states applied.
+immutable value with the saved optimizable parameters applied.
 
 ## The optimizable-parameter contract
 
@@ -73,7 +73,7 @@ IDs derived from the root `OptimizableTraversal` traversal:
 - Missing and unknown ordinals are rejected.
 - An equal-size reorder cannot be detected, because the IDs are not semantic names.
 
-Load only into a compatible program with the same predictor count and traversal
+Load only into a compatible program with the same optimizable-leaf count and traversal
 order. Structural display names are useful diagnostics, but they are not persisted
 identity.
 
@@ -81,8 +81,8 @@ Each entry has this shape:
 
 ```json
 {
-  "predictors": {
-    "predictor-0": {
+  "optimizableParameters": {
+    "optimizable-0": {
       "instructions": "Answer concisely.",
       "demos": [],
       "config": { "temperature": 0.2 }

@@ -16,8 +16,8 @@ import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.OptimizableView
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableView
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.contracts.ProgramCall
 
 import scala.collection.mutable
@@ -95,7 +95,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
       Right(OptimizationReport(
         bestProgram = student,
         candidates = Vector.empty,
-        metadata = Map("no_predictors" -> true)
+        metadata = Map("no_optimizable_leaves" -> true)
       ))
     else
       // 2) Bootstrap few-shot demos first; the rule-augmented search starts from that program.
@@ -105,7 +105,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
       new BootstrapFewShot[P](bootstrapConfig).compile(student, effTrain, teacher).map { bootstrapReport =>
         val base = bootstrapReport.bestProgram
 
-        // 3) Snapshot each predictor's original instruction (rules are appended to THIS, not cumulatively).
+        // 3) Snapshot each leaf's original instruction (rules are appended to THIS, not cumulatively).
         val originalInstructions = ps.read(base).map(_.instructions.getOrElse(""))
 
         // 4) Generate + score `numCandidates` rule-augmented candidates.
@@ -113,13 +113,13 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
         var best: Option[(P, Double)] = None
 
         (0 until config.numCandidates).foreach { candIdx =>
-          val candidate = ps.read(base).indices.foldLeft(base) { (prog, predIdx) =>
-            induceRules(ps.inspect(base)(predIdx), effTrain, candIdx, predIdx) match
+          val candidate = ps.read(base).indices.foldLeft(base) { (prog, leafIdx) =>
+            induceRules(ps.inspect(base)(leafIdx), effTrain, candIdx, leafIdx) match
               case Some(rules) =>
-                val augmented = s"${originalInstructions(predIdx)}\n\n" +
+                val augmented = s"${originalInstructions(leafIdx)}\n\n" +
                   s"Please adhere to the following rules when making your prediction:\n$rules"
-                OptimizerSupport.applyInstruction(prog, predIdx, augmented)
-              case None => prog // induction failed for this predictor; leave its instruction unchanged
+                OptimizerSupport.applyInstruction(prog, leafIdx, augmented)
+              case None => prog // induction failed for this leaf; leave its instruction unchanged
           }
           OptimizerSupport.evalScore(candidate, effVal, config.metric, runner).foreach { score =>
             candidates += CandidateProgram(candidate, score, metadata = Map("candidate" -> candIdx))
@@ -135,27 +135,27 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
             "optimizer"      -> name,
             "num_candidates" -> candidates.size,
             "best_score"     -> best.map(_._2).getOrElse(0.0),
-            "predictors"     -> ps.read(base).size
+            "optimizable_leaves" -> ps.read(base).size
           )
         )
       }
 
-  /** Induce rules for one predictor from the trainset, narrowing the example set on a context-window overflow. Returns
+  /** Induce rules for one leaf from the trainset, narrowing the example set on a context-window overflow. Returns
     * the induced rules text, or `None` if even a single example can't produce rules.
     */
-  private def induceRules(predictor: OptimizableView, trainset: Vector[Example], candIdx: Int, predIdx: Int)(using
+  private def induceRules(leaf: OptimizableView, trainset: Vector[Example], candIdx: Int, leafIdx: Int)(using
       RuntimeContext
   ): Option[String] =
     val gen = DynamicPredict(layout = ruleInductionLayout, name = Some("infer_rules_induction"))
-    // Deterministic, non-overlapping rolloutId per (candidate, predictor) so each candidate draws different rules.
-    val rolloutId = OptimizerSupport.seedBase(config.seed) + candIdx * 10000 + predIdx * 100
+    // Deterministic, non-overlapping rolloutId per (candidate, leaf) so each candidate draws different rules.
+    val rolloutId = OptimizerSupport.seedBase(config.seed) + candIdx * 10000 + leafIdx * 100
 
     @annotation.tailrec
     def attempt(demos: Vector[Example]): Option[String] =
       if demos.isEmpty then None
       else
         val call = ProgramCall(
-          input = DynamicValues.record("examples_text" := formatExamples(demos, predictor)),
+          input = DynamicValues.record("examples_text" := formatExamples(demos, leaf)),
           config    = DynamicValues.record("temperature" := config.initTemperature),
           rolloutId = Some(rolloutId)
         )
@@ -168,17 +168,17 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
 
     attempt(trainset)
 
-  /** Render demos as upstream's `format_examples` text, projecting each example to the predictor's own input/output
+  /** Render demos as upstream's `format_examples` text, projecting each example to the leaf's own input/output
     * fields.
     */
-  private def formatExamples(demos: Vector[Example], predictor: OptimizableView): String =
+  private def formatExamples(demos: Vector[Example], leaf: OptimizableView): String =
     def render(fields: Vector[FieldSpec], ex: Example): String =
       fields.flatMap(f =>
         DynamicValues.recordGet(ex.values, f.name).map(v => s"${f.name}: ${DynamicValues.renderText(v)}")
       ).mkString("\n")
     demos.map { ex =>
-      s"Input Fields:\n${render(predictor.layout.inputFields, ex)}\n\n=========\n" +
-        s"Output Fields:\n${render(predictor.layout.outputFields, ex)}\n"
+      s"Input Fields:\n${render(leaf.layout.inputFields, ex)}\n\n=========\n" +
+        s"Output Fields:\n${render(leaf.layout.outputFields, ex)}\n"
     }.mkString("\n")
 
   /** The rule-induction signature: `examples_text -> natural_language_rules`, instructed to extract `numRules` concise,

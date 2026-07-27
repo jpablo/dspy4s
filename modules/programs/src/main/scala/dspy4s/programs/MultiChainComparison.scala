@@ -13,7 +13,7 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.predictors.{OptimizableParameters, withOptimizableParameters}
+import dspy4s.programs.optimization.{OptimizableParameters, withOptimizableParameters}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Signature}
 import zio.blocks.schema.DynamicValue

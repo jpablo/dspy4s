@@ -1,4 +1,4 @@
-package dspy4s.programs.predictors
+package dspy4s.programs.optimization
 
 import scala.compiletime.{erasedValue, error, summonFrom}
 import scala.deriving.Mirror
@@ -50,7 +50,7 @@ trait OptimizableTraversal[P]:
   final def readIdentified(program: P): Vector[IdentifiedOptimizable] =
     val (views, displayNames) = alignedNamed(program)
     displayNames.zip(views).zipWithIndex.map { case ((displayName, view), ordinal) =>
-      IdentifiedOptimizable(PredictorId.fromOrdinal(PredictorOrdinal.assume(ordinal)), displayName, view)
+      IdentifiedOptimizable(OptimizableId.fromOrdinal(OptimizableOrdinal.assume(ordinal)), displayName, view)
     }
 
 object OptimizableTraversal extends CompositeOptimizableTraversalInstances with LowPriorityOptimizableTraversal:

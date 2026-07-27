@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.programs.predictors.*
+import dspy4s.programs.optimization.*
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
@@ -60,7 +60,7 @@ import zio.blocks.schema.Schema
   *
   * @tparam P
   *   the inner program type; a typed module (so `I`/`O` infer from it) that is also introspectable for its named
-  *   predictors ([[predictors]]).
+  *   optimizable leaves ([[optimization]]).
   */
 final case class Refine[P <: Module[I, O], I, O](
     module: P,
@@ -75,7 +75,7 @@ final case class Refine[P <: Module[I, O], I, O](
       */
     criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
-    predictors: OptimizableTraversal[P]
+    optimization: OptimizableTraversal[P]
 ) extends Module[I, O]:
   override val moduleName: String = "refine"
 
@@ -107,7 +107,7 @@ final case class Refine[P <: Module[I, O], I, O](
         // LM/adapter, NOT the hint adapter), then build the next attempt's adapter routing each predictor's OWN
         // advice into ITS `hint_`. Auxiliary: a generation failure charges the budget and keeps `best` (handled
         // by `bestOf`).
-        val named       = predictors.inspectNamed(module)
+        val named       = optimization.inspectNamed(module)
         val moduleNames = named.map(_._1)
         Refine.generateAdvice(criticPredict, call.input, prediction, trace, score, threshold, moduleNames)(using
           baseContext

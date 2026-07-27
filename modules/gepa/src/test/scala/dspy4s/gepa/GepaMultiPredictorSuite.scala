@@ -18,8 +18,8 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.programs.predictors.OptimizableTraversal
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
@@ -104,7 +104,7 @@ class GepaMultiPredictorSuite extends FunSuite:
   )
 
   test("the pipeline's two predictors have stable IDs and retain field labels for display") {
-    assertEquals(Candidate.seed(pipeline).keySet, Set(PredictorId(0), PredictorId(1)))
+    assertEquals(Candidate.seed(pipeline).keySet, Set(OptimizableId(0), OptimizableId(1)))
     assertEquals(Candidate.named(pipeline, Candidate.seed(pipeline)).map(_._1), Vector("hinter", "answerer"))
   }
 
@@ -128,7 +128,7 @@ class GepaMultiPredictorSuite extends FunSuite:
 
       assertEquals(result.bestScore, 1.0)
       // Both components were evolved to carry their required token (per-component reflection + association worked).
-      assert(result.bestCandidate(PredictorId(0)).exists(_.contains("TOKEN1")), result.bestCandidate(PredictorId(0)))
-      assert(result.bestCandidate(PredictorId(1)).exists(_.contains("TOKEN2")), result.bestCandidate(PredictorId(1)))
+      assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("TOKEN1")), result.bestCandidate(OptimizableId(0)))
+      assert(result.bestCandidate(OptimizableId(1)).exists(_.contains("TOKEN2")), result.bestCandidate(OptimizableId(1)))
     }
   }

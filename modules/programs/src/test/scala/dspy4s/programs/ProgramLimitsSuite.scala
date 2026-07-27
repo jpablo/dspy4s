@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.programs.predictors.{PredictorId, PredictorOrdinal}
+import dspy4s.programs.optimization.{OptimizableId, OptimizableOrdinal}
 import munit.FunSuite
 
 class ProgramLimitsSuite extends FunSuite:
@@ -26,9 +26,9 @@ class ProgramLimitsSuite extends FunSuite:
     assert(compileErrors("dspy4s.programs.FailureCount(-1)").nonEmpty)
   }
 
-  test("predictor ordinals reject negative values before constructing an id") {
-    assert(compileErrors("dspy4s.programs.predictors.PredictorId(-1)").nonEmpty)
-    assertEquals(PredictorOrdinal.either(2).map(PredictorId.fromOrdinal), Right(PredictorId(2)))
-    assert(PredictorOrdinal.either(-1).isLeft)
-    assert(PredictorId.parse("predictor--1").isLeft)
+  test("optimizable ordinals reject negative values before constructing an id") {
+    assert(compileErrors("dspy4s.programs.optimization.OptimizableId(-1)").nonEmpty)
+    assertEquals(OptimizableOrdinal.either(2).map(OptimizableId.fromOrdinal), Right(OptimizableId(2)))
+    assert(OptimizableOrdinal.either(-1).isLeft)
+    assert(OptimizableId.parse("optimizable--1").isLeft)
   }

@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{OptimizableLeaf, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableLeaf, OptimizableTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -117,7 +117,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
     val predict = Predict(qaSignature, name = Some("ask"))
     assertEquals(
       predictorsOf(predict).getClass.getName,
-      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
+      "dspy4s.programs.optimization.OptimizableTraversal$fromOptimizableLeaf"
     )
   }
 
@@ -125,7 +125,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
     val cot = ChainOfThought(qaSignature, name = Some("think"))
     assertEquals(
       predictorsOf(cot).getClass.getName,
-      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
+      "dspy4s.programs.optimization.OptimizableTraversal$fromOptimizableLeaf"
     )
   }
 

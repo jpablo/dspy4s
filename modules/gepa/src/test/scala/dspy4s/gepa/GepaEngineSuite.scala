@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 class GepaEngineSuite extends FunSuite:
@@ -84,12 +84,12 @@ class GepaEngineSuite extends FunSuite:
 
       // The seed instruction ("Answer.") scores 0 (no "CITY"); GEPA must find the improved one.
       assertEquals(result.bestScore, 1.0)
-      assert(result.bestCandidate(PredictorId(0)).exists(_.contains("CITY")), result.bestCandidate(PredictorId(0)))
+      assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("CITY")), result.bestCandidate(OptimizableId(0)))
       assert(result.numCandidates >= 2, "expected at least one accepted mutation beyond the seed")
       assert(result.totalMetricCalls <= 40, s"respected the budget: ${result.totalMetricCalls}")
 
       // The returned program actually carries the improved instruction.
-      assertEquals(result.bestProgram.layout.instructions, result.bestCandidate(PredictorId(0)))
+      assertEquals(result.bestProgram.layout.instructions, result.bestCandidate(OptimizableId(0)))
     }
   }
 
@@ -253,6 +253,6 @@ class GepaEngineSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result           = gepa.compile(program, trainset = dataset, valset = dataset)
       assertEquals(result.bestScore, 1.0)
-      assert(result.bestCandidate(PredictorId(0)).exists(_.contains("CITY")), result.bestCandidate(PredictorId(0)))
+      assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("CITY")), result.bestCandidate(OptimizableId(0)))
     }
   }

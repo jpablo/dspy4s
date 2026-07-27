@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.programs.predictors.*
+import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
@@ -44,7 +44,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
       Right(Prediction(f(call.input), RawPrediction.empty))
 
   private object Leaf:
-    given leafPredictor[I, O]: OptimizableLeaf[Leaf[I, O]] with
+    given leafOptimizable[I, O]: OptimizableLeaf[Leaf[I, O]] with
       def get(program: Leaf[I, O]): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Leaf[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Leaf[I, O], updated: OptimizableParameters): Leaf[I, O] =

@@ -1,6 +1,6 @@
 package dspy4s.programs.para
 
-import dspy4s.programs.predictors.{optimizableParameters, optimizableView, withOptimizableParameters}
+import dspy4s.programs.optimization.{optimizableParameters, optimizableView, withOptimizableParameters}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
@@ -19,9 +19,9 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.DynamicSignature
-import dspy4s.programs.predictors.OptimizableLeaf
-import dspy4s.programs.predictors.OptimizableMetadata
-import dspy4s.programs.predictors.OptimizableParameters
+import dspy4s.programs.optimization.OptimizableLeaf
+import dspy4s.programs.optimization.OptimizableMetadata
+import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.RecordObject
@@ -72,7 +72,7 @@ class ParaCategoryLawSuite extends FunSuite:
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
   private object Step:
-    given stepPredictor[I, O]: OptimizableLeaf[Step[I, O]] with
+    given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =

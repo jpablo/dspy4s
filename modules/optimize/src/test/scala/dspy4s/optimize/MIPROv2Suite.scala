@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
@@ -149,7 +149,7 @@ class MIPROv2Suite extends FunSuite:
       )
     )
 
-  private def predictors = summon[OptimizableTraversal[DynamicPredict]]
+  private def traversal = summon[OptimizableTraversal[DynamicPredict]]
 
   // ── 1. Happy path: single-predictor student, MIPROv2 finds the winning instruction ──
 
@@ -162,7 +162,7 @@ class MIPROv2Suite extends FunSuite:
       val result = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset))
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report  = result.toOption.get
-      val applied = predictors.read(report.bestProgram).head.instructions
+      val applied = traversal.read(report.bestProgram).head.instructions
       assertEquals(applied, Some(winningInstruction))
       // The winner scored 100% (gold on every val example).
       assertEquals(report.metadata.get("best_score"), Some(100.0))
@@ -194,7 +194,7 @@ class MIPROv2Suite extends FunSuite:
       RuntimeEnvironment.withSettings(settings) {
         given RuntimeContext = RuntimeEnvironment.current
         optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption
-          .flatMap(r => predictors.read(r.bestProgram).headOption)
+          .flatMap(r => traversal.read(r.bestProgram).headOption)
           .flatMap(_.instructions)
       }
     val a = run()
@@ -219,7 +219,7 @@ class MIPROv2Suite extends FunSuite:
       assertEquals(scores.head, 100.0)
       assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
       // The top candidate carries the winning instruction.
-      val topInstr = predictors.read(report.candidates.head.program).head.instructions
+      val topInstr = traversal.read(report.candidates.head.program).head.instructions
       assertEquals(topInstr, Some(winningInstruction))
       // Metadata is populated.
       assert(report.metadata.contains("best_score"))

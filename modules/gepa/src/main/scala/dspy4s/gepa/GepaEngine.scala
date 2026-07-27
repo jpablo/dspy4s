@@ -219,7 +219,7 @@ final class GepaEngine[P](
     }
     if mismatched.nonEmpty then
       throw IllegalStateException(
-        s"GEPA checkpoint predictor ids do not match the current program at candidates ${mismatched.map(_._1).mkString(", ")}"
+        s"GEPA checkpoint optimizable ids do not match the current program at candidates ${mismatched.map(_._1).mkString(", ")}"
       )
     val wrongRows = state.valSubscores.zipWithIndex.collect { case (scores, index) if scores.size != valset.size => index }
     if wrongRows.nonEmpty then

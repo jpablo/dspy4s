@@ -13,11 +13,11 @@ import scala.util.Random
 final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accepted: Boolean, metricCalls: Int)
 
 /** GEPA's merge proposer — the crossover ("genetic") half of Genetic-Pareto. It combines two Pareto-frontier
-  * descendants of a common ancestor: for each component (predictor), it takes the version from whichever descendant
+  * descendants of a common ancestor: for each component, it takes the version from whichever descendant
   * IMPROVED it relative to the ancestor, yielding a child that stacks the two lineages' complementary gains. A faithful
   * port of gepa's `MergeProposer` / `sample_and_attempt_merge_programs_by_common_predictors`.
   *
-  * Merge only fires for multi-component programs with branching lineage: the triplet must have a "desirable predictor"
+  * Merge only fires for multi-component programs with branching lineage: the triplet must have a desirable component
   * (a component exactly one descendant changed), which a single-component program can never satisfy, so merge is a safe
   * no-op there.
   *
@@ -113,7 +113,7 @@ final class MergeProposer[P](
             !performedTriplets.contains((i, j, a)) &&
             state.aggregateScore(a) <= state.aggregateScore(i) &&
             state.aggregateScore(a) <= state.aggregateScore(j) &&
-            hasDesirablePredictors(state.candidates(a), state.candidates(i), state.candidates(j))
+            hasDesirableComponents(state.candidates(a), state.candidates(i), state.candidates(j))
           }.toVector
           if common.nonEmpty then
             return Some((i, j, weightedPick(common, a => state.aggregateScore(a), rng)))
@@ -122,9 +122,9 @@ final class MergeProposer[P](
 object MergeProposer:
 
   /** A triplet is mergeable iff some component is unchanged in exactly one descendant (so the OTHER descendant's change
-    * is the one to carry forward). gepa's `does_triplet_have_desirable_predictors`.
+    * is the one to carry forward). Corresponds to gepa's `does_triplet_have_desirable_predictors`.
     */
-  private[gepa] def hasDesirablePredictors(ancestor: Candidate, cand1: Candidate, cand2: Candidate): Boolean =
+  private[gepa] def hasDesirableComponents(ancestor: Candidate, cand1: Candidate, cand2: Candidate): Boolean =
     ancestor.keys.exists { name =>
       val (anc, v1, v2) = (ancestor(name), cand1(name), cand2(name))
       (anc == v1 || anc == v2) && v1 != v2

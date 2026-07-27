@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 import java.nio.charset.StandardCharsets
@@ -11,9 +11,9 @@ class GepaStatePersistenceSuite extends FunSuite:
   test("toJson/fromJson round-trips a state (candidates, subscores, multi-parent lineage, call meter)") {
     val state = GepaState(
       candidates = CandidatePool.applyUnsafe(Vector(
-        Map(PredictorId(0) -> Some("x"), PredictorId(1) -> Some("y")),
-        Map(PredictorId(0) -> Some("z"), PredictorId(1) -> Some("w")),
-        Map(PredictorId(0) -> Some("p"), PredictorId(1) -> Some("q"))
+        Map(OptimizableId(0) -> Some("x"), OptimizableId(1) -> Some("y")),
+        Map(OptimizableId(0) -> Some("z"), OptimizableId(1) -> Some("w")),
+        Map(OptimizableId(0) -> Some("p"), OptimizableId(1) -> Some("q"))
       )),
       valSubscores = Vector(Vector(1.0, 0.5), Vector(0.0, 1.0), Vector(1.0, 1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0, 1)), // includes a two-parent (merge) node
@@ -28,7 +28,7 @@ class GepaStatePersistenceSuite extends FunSuite:
 
   test("checkpoint round-trip distinguishes absent from explicitly empty instructions") {
     val state = GepaState(
-      candidates = CandidatePool.applyUnsafe(Vector(Map(PredictorId(0) -> None, PredictorId(1) -> Some("")))),
+      candidates = CandidatePool.applyUnsafe(Vector(Map(OptimizableId(0) -> None, OptimizableId(1) -> Some("")))),
       valSubscores = Vector(Vector(1.0)),
       parents = Vector(Vector.empty),
       totalMetricCalls = MetricCallCount(1)
@@ -42,14 +42,14 @@ class GepaStatePersistenceSuite extends FunSuite:
     assert(GepaStatePersistence.fromJson("not json at all").isLeft)
   }
 
-  test("fromJson rejects malformed predictor IDs") {
+  test("fromJson rejects malformed optimizable IDs") {
     val valid = GepaState(
-      candidates = CandidatePool.applyUnsafe(Vector(Map(PredictorId(0) -> Some("x")))),
+      candidates = CandidatePool.applyUnsafe(Vector(Map(OptimizableId(0) -> Some("x")))),
       valSubscores = Vector(Vector(1.0)),
       parents = Vector(Vector.empty),
       totalMetricCalls = MetricCallCount(1)
     )
-    val malformed = GepaStatePersistence.toJson(valid).replace(PredictorId(0).render, "display-name")
+    val malformed = GepaStatePersistence.toJson(valid).replace(OptimizableId(0).render, "display-name")
     assert(GepaStatePersistence.fromJson(malformed).isLeft)
   }
 

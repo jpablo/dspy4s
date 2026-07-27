@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.optimizableParameters
+import dspy4s.programs.optimization.optimizableParameters
 
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CodeInterpreter

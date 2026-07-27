@@ -32,7 +32,7 @@ result.bestScore     // its mean validation score
 ```
 
 GEPA evolves **instructions only** — one per predictor (component). The program's structure (fields, demos,
-wiring) is fixed. A `Candidate` is therefore a `Map[PredictorId, Option[String]]` — the genome — and
+wiring) is fixed. A `Candidate` is therefore a `Map[OptimizableId, Option[String]]` — the genome — and
 the seed candidate is the program's current instructions. The option preserves the distinction between no
 instruction (`None`) and an explicitly empty instruction (`Some("")`).
 

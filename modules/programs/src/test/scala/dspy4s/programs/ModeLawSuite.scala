@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.programs.predictors.*
+import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
@@ -44,7 +44,7 @@ class ModeLawSuite extends FunSuite:
       Right(Prediction(call.input, RawPrediction.empty))
 
   private object Recorder:
-    given recorderPredictor: OptimizableLeaf[Recorder] with
+    given recorderOptimizable: OptimizableLeaf[Recorder] with
       def get(program: Recorder): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Recorder): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Recorder, updated: OptimizableParameters): Recorder =

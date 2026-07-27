@@ -11,9 +11,9 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.CandidateCount
 import dspy4s.optimize.DatasetSampleSize
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.OptimizableView
+import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.contracts.ProgramCall
 
 /** Knobs for [[GroundedProposer]], mirroring the relevant slice of upstream's
@@ -95,18 +95,18 @@ final case class GroundedProposerConfig(
   */
 final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: OptimizableTraversal[P]):
 
-  /** Propose `config.numInstructions` candidate instruction strings for EACH predictor of `program` (in
+  /** Propose `config.numInstructions` candidate instruction strings for EACH optimizable leaf of `program` (in
     * [[OptimizableTraversal.read]] order), grounded in `trainset` and (optionally) `demoCandidates`.
     *
     * @param program
-    *   the program whose predictors get fresh instruction proposals
+    *   the program whose optimizable leaves get fresh instruction proposals
     * @param trainset
     *   task data; a sample grounds the dataset-summary step
     * @param demoCandidates
-    *   per-predictor bootstrapped demo sets (outer index aligns with [[OptimizableTraversal.read]] order); empty (the default)
+    *   per-leaf bootstrapped demo sets (outer index aligns with [[OptimizableTraversal.read]] order); empty (the default)
     *   means no demos are rendered into proposals
     * @return
-    *   for each predictor (in read order) a vector of `numInstructions` candidate instruction strings, or the first
+    *   for each leaf (in read order) a vector of `numInstructions` candidate instruction strings, or the first
     *   [[DspyError]] encountered
     */
   def proposeInstructions(
@@ -114,14 +114,14 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
       trainset: Vector[Example],
       demoCandidates: Vector[Vector[Example]] = Vector.empty
   )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
-    val predictors = ps.inspect(program)
+    val leaves = ps.inspect(program)
     for
-      summary  <- datasetSummary(trainset)
-      perPred  <- traverse(predictors.zipWithIndex.toVector) { case (predictor, idx) =>
-                    val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
-                    proposeForPredictor(predictor, idx, summary, demoSet)
-                  }
-    yield perPred
+      summary <- datasetSummary(trainset)
+      perLeaf <- traverse(leaves.zipWithIndex.toVector) { case (leaf, idx) =>
+                   val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
+                   proposeForLeaf(leaf, idx, summary, demoSet)
+                 }
+    yield perLeaf
 
   // ── Dataset summary (the create_dataset_summary analogue) ──────────────────
 
@@ -165,7 +165,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
           )
         case Left(_) => Right(None)
 
-  // ── Per-predictor instruction generation (GenerateModuleInstruction analogue) ──
+  // ── Per-leaf instruction generation (GenerateModuleInstruction analogue) ──
 
   /** The instruction-generation signature. Inputs are gated by config + availability: `dataset_description?`,
     * `program_description`, `basic_instruction`, `task_demos?`, `tip?` -> `proposed_instruction`. `instructionMarker`
@@ -186,23 +186,23 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
       instructions = Some(config.instructionMarker)
     )
 
-  /** Generate `config.numInstructions` candidate instructions for one predictor, grounded in the (cached) dataset
-    * summary, the predictor's signature-derived description, the optional demo set, and a rotating tip.
+  /** Generate `config.numInstructions` candidate instructions for one leaf, grounded in the (cached) dataset summary,
+    * the leaf's signature-derived description, the optional demo set, and a rotating tip.
     */
-  private def proposeForPredictor(
-      predictor: OptimizableView,
+  private def proposeForLeaf(
+      leaf: OptimizableView,
       idx: Int,
       summary: Option[String],
       demoSet: Vector[Example]
   )(using RuntimeContext): Either[DspyError, Vector[String]] =
-    val basicInstruction   = predictor.layout.instructions.getOrElse("")
-    val programDescription = describeModule(predictor)
+    val basicInstruction   = leaf.layout.instructions.getOrElse("")
+    val programDescription = describeModule(leaf)
     val withSummary        = summary.isDefined
     val withDemos          = demoSet.nonEmpty
     val demosText          = if withDemos then demoSet.iterator.map(renderExample).mkString("\n\n") else ""
 
-    // Deterministic, contiguous rolloutId stream per predictor so candidate sampling is reproducible AND each
-    // predictor draws a distinct window (so distinct predictors need not collide). A scripted/temperature-driven
+    // Deterministic, contiguous rolloutId stream per leaf so candidate sampling is reproducible AND each leaf draws a
+    // distinct window (so distinct leaves need not collide). A scripted/temperature-driven
     // LM yields a distinct proposal per rolloutId.
     val base = OptimizerSupport.seedBase(config.seed) + (idx + 1) * 64
 
@@ -235,14 +235,14 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
       }
     }
 
-  /** The signature-derived module description (the `DescribeModule` analogue): the predictor's name plus a
+  /** The signature-derived module description (the `DescribeModule` analogue): the leaf's module name plus a
     * `Name(inputs) -> outputs` field-name rendering. dspy4s has no program source to introspect.
     */
-  private def describeModule(predictor: OptimizableView): String =
-    val layout  = predictor.layout
+  private def describeModule(leaf: OptimizableView): String =
+    val layout  = leaf.layout
     val inputs  = layout.inputFields.map(_.name).mkString(", ")
     val outputs = layout.outputFields.map(_.name).mkString(", ")
-    val name    = predictor.moduleName
+    val name    = leaf.moduleName
     s"$name($inputs) -> $outputs"
 
   /** Render an [[Example]] as a `field: value` block for grounding prompts. */

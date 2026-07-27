@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -59,8 +59,8 @@ class GepaEvalCacheSuite extends FunSuite:
     val lm      = new CountingLm
     val adapter = new GepaAdapter[DynamicPredict](program, metric)
     val cache   = new GepaEvalCache[DynamicPredict](adapter)
-    val candA   = Map(PredictorId(0) -> Some("Answer A."))
-    val candB   = Map(PredictorId(0) -> Some("Answer B."))
+    val candA   = Map(OptimizableId(0) -> Some("Answer A."))
+    val candB   = Map(OptimizableId(0) -> Some("Answer B."))
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -94,7 +94,7 @@ class GepaEvalCacheSuite extends FunSuite:
     val lm      = new CountingLm
     val adapter = new GepaAdapter[DynamicPredict](program, metric)
     val cache   = new GepaEvalCache[DynamicPredict](adapter)
-    val cand    = Map(PredictorId(0) -> Some("Answer A."))
+    val cand    = Map(OptimizableId(0) -> Some("Answer A."))
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -110,7 +110,7 @@ class GepaEvalCacheSuite extends FunSuite:
     val lm              = new CountingLm
     val adapter         = new GepaAdapter[DynamicPredict](program, metric)
     val cache           = new GepaEvalCache[DynamicPredict](adapter)
-    val cand            = Map(PredictorId(0) -> Some("Answer A."))
+    val cand            = Map(OptimizableId(0) -> Some("Answer A."))
     val original        = batch.head
     val differentInputs = original.copy(inputKeys = Set("answer"))
     val augmented       = original.copy(augmented = true)
@@ -128,7 +128,7 @@ class GepaEvalCacheSuite extends FunSuite:
     val lm      = new CountingLm
     val adapter = new GepaAdapter[DynamicPredict](program, metric)
     val cache   = new GepaEvalCache[DynamicPredict](adapter)
-    val cand    = Map(PredictorId(0) -> Some("Answer A."))
+    val cand    = Map(OptimizableId(0) -> Some("Answer A."))
 
     assertEquals(cache.restore(cand, batch, Vector(0.25, 0.75)), Right(()))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {

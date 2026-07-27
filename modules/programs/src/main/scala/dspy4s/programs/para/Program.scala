@@ -7,10 +7,10 @@ import dspy4s.programs.Both
 import dspy4s.programs.Compose
 import dspy4s.programs.andThen
 import dspy4s.programs.&&&
-import dspy4s.programs.predictors.OptimizableParameters
-import dspy4s.programs.predictors.OptimizableView
+import dspy4s.programs.optimization.OptimizableParameters
+import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.ProgramRunner
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall

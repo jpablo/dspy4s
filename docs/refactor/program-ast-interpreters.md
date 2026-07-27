@@ -157,7 +157,7 @@ that the current combinators carry as type parameters:
 sealed trait Atom[I, O]:
   type Repr <: Module[I, O]
   val value: Repr
-  val predictors: OptimizableTraversal[Repr]
+  val optimizableParameters: OptimizableTraversal[Repr]
 ```
 
 `Atom.of(module)` requires `OptimizableTraversal[module.type-or-concrete-type]`. A genuinely parameter-free custom module must
@@ -285,7 +285,7 @@ The existing laws remain the contract:
 - metadata is unchanged by state replacement
 - binary traversal order is left then right
 
-Human-readable structural paths can still be derived during traversal. Ordinal `PredictorId`s remain assigned once at
+Human-readable structural paths can still be derived during traversal. Ordinal `OptimizableId`s remain assigned once at
 the root from traversal order, keeping identity independent of nested nodes resetting their own counters. If stable
 identity across arbitrary graph rewrites is required later, it should be represented as an explicit leaf identity—not
 inferred from display paths.

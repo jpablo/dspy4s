@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{OptimizableParameters, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableParameters, OptimizableTraversal}
 
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict

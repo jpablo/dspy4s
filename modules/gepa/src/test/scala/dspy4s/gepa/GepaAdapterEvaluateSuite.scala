@@ -17,10 +17,10 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 class GepaAdapterEvaluateSuite extends FunSuite:
@@ -106,7 +106,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result = adapter.evaluate(
         batch.take(1),
-        Map(PredictorId(0) -> Some("Answer with the city name only.")),
+        Map(OptimizableId(0) -> Some("Answer with the city name only.")),
         captureTraces = true
       )
       assertEquals(result.scores, Vector(1.0))
@@ -117,10 +117,10 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val evalBatch        = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
-      val dataset          = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(PredictorId(0)))
+      val dataset          = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(OptimizableId(0)))
 
-      assertEquals(dataset.keySet, Set(PredictorId(0)))
-      val records = dataset(PredictorId(0))
+      assertEquals(dataset.keySet, Set(OptimizableId(0)))
+      val records = dataset(OptimizableId(0))
       assertEquals(records.size, 2)
       // inputs carry the question; generated outputs carry the model's answer; feedback explains the verdict.
       assert(records.head.inputs.contains("France"), records.head.inputs)

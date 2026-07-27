@@ -187,7 +187,7 @@ class ParaCompileSuite extends FunSuite:
       val result = pipeline.copro(pipelineConfig, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
-      assertEquals(report.metadata.get("predictors"), Some(2))
+      assertEquals(report.metadata.get("optimizable_leaves"), Some(2))
       assertEquals(report.bestProgram.params.size, 2)
     }
   }

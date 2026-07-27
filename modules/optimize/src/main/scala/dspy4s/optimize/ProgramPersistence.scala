@@ -1,8 +1,8 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.OptimizableTraversal
-import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.OptimizableParameters
+import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.optimization.OptimizableParameters
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -18,13 +18,13 @@ import java.nio.file.Paths
 /** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's
   * `BaseModule.dump_state` / `load_state` and `save` / `load`.
   *
-  * Built entirely on the [[OptimizableTraversal]] traversal, so a single typed or dynamic predictor and an arbitrary
+  * Built entirely on [[OptimizableTraversal]], so a single typed or dynamic prediction module and an arbitrary
   * composite use the same path: [[dumpState]] serializes every writable [[OptimizableParameters]], and [[loadState]]
   * writes those parameter values into a fresh program through `OptimizableTraversal.replace`.
   *
   * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature
   * field structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the
-  * fresh target program and are preserved during loading. Loading therefore requires the same predictor
+  * fresh target program and are preserved during loading. Loading therefore requires the same optimizable-leaf
   * traversal/order and a compatible architecture; ordinal IDs detect missing or extra entries, not a
   * same-cardinality reorder.
   *
@@ -37,30 +37,30 @@ object ProgramPersistence:
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Serialize a program's optimizable parameters to
-    * `{ "predictors": { "predictor-0": <OptimizableParameters>, ... } }`. [[PredictorId]] keys make loading independent
-    * of JSON object order and detect missing/unknown ordinals. */
-  def dumpState[P](program: P)(using predictors: OptimizableTraversal[P]): DynamicValue.Record =
-    val parameters: Seq[(String, DynamicValue)] = predictors.readIdentified(program).map { identified =>
+    * `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`. [[OptimizableId]] keys make
+    * loading independent of JSON object order and detect missing/unknown ordinals. */
+  def dumpState[P](program: P)(using traversal: OptimizableTraversal[P]): DynamicValue.Record =
+    val parameters: Seq[(String, DynamicValue)] = traversal.readIdentified(program).map { identified =>
       identified.id.render -> (identified.parameters.dumpState: DynamicValue)
     }
     DynamicValue.Record(Chunk.from(Seq(
-      "predictors" -> DynamicValue.Record(Chunk.from(parameters))
+      "optimizableParameters" -> DynamicValue.Record(Chunk.from(parameters))
     )))
 
   private def decodeParameters(raw: DynamicValue, at: String): Either[DspyError, OptimizableParameters] = raw match
     case rec: DynamicValue.Record => OptimizableParameters.fromState(rec)
-    case _                        => Left(ValidationError(s"Program state predictor '$at' must be a record"))
+    case _                        => Left(ValidationError(s"Program state optimizable '$at' must be a record"))
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
-      predictors: OptimizableTraversal[P]
+      traversal: OptimizableTraversal[P]
   ): Either[DspyError, P] =
-    val expectedIds = predictors.readIdentified(program).map(_.id)
-    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, OptimizableParameters)]]](
+    val expectedIds = traversal.readIdentified(program).map(_.id)
+    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(OptimizableId, OptimizableParameters)]]](
       Right(Vector.empty)
     ) { case (acc, (rawId, rawParameters)) =>
       for
         entries <- acc
-        id <- PredictorId.parse(rawId).left.map(ValidationError.apply)
+        id <- OptimizableId.parse(rawId).left.map(ValidationError.apply)
         parameters <- decodeParameters(rawParameters, rawId)
       yield entries :+ (id -> parameters)
     }
@@ -72,24 +72,24 @@ object ProgramPersistence:
       val missing       = (expectedSet -- actualIds).toVector.sorted
       val unknown       = (actualIds -- expectedSet).toVector.sorted
       if duplicateIds.nonEmpty then
-        Left(ValidationError(s"Program state has duplicate predictor ids: ${duplicateIds.mkString(", ")}"))
+        Left(ValidationError(s"Program state has duplicate optimizable ids: ${duplicateIds.mkString(", ")}"))
       else if missing.nonEmpty || unknown.nonEmpty then
         val details = Vector(
           Option.when(missing.nonEmpty)(s"missing: ${missing.mkString(", ")}"),
           Option.when(unknown.nonEmpty)(s"unknown: ${unknown.mkString(", ")}")
         ).flatten.mkString("; ")
-        Left(ValidationError(s"Program state predictor ids do not match the program ($details)"))
+        Left(ValidationError(s"Program state optimizable ids do not match the program ($details)"))
       else
         val byId = entries.toMap
-        Right(predictors.replace(program, expectedIds.map(byId)))
+        Right(traversal.replace(program, expectedIds.map(byId)))
     }
 
-  /** Rebuild a program from the state produced by [[dumpState]], matching state by stable predictor id. */
-  def loadState[P](program: P, state: DynamicValue.Record)(using predictors: OptimizableTraversal[P]): Either[DspyError, P] =
-    DynamicValues.recordGet(state, "predictors") match
+  /** Rebuild a program from the state produced by [[dumpState]], matching state by stable optimizable id. */
+  def loadState[P](program: P, state: DynamicValue.Record)(using traversal: OptimizableTraversal[P]): Either[DspyError, P] =
+    DynamicValues.recordGet(state, "optimizableParameters") match
       case Some(record: DynamicValue.Record) => loadById(program, record)
-      case Some(_) => Left(ValidationError("Program state 'predictors' must be an id-keyed record"))
-      case None    => Left(ValidationError("Program state is missing 'predictors'"))
+      case Some(_) => Left(ValidationError("Program state 'optimizableParameters' must be an id-keyed record"))
+      case None    => Left(ValidationError("Program state is missing 'optimizableParameters'"))
 
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
     * [[loadJson]]. */

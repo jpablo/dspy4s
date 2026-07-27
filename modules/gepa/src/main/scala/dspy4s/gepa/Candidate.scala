@@ -1,14 +1,14 @@
 package dspy4s.gepa
 
-import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.optimization.OptimizableTraversal
 
-/** A GEPA candidate program: a map from stable predictor identity to optional instruction text — the genome the
+/** A GEPA candidate program: a map from stable optimizable identity to optional instruction text — the genome the
   * optimizer mutates. `None` (no instructions) and `Some("")` (explicitly empty instructions) are distinct states.
   * Instructions are the only thing GEPA evolves; the program's structure (fields, demos, wiring) is fixed. Unlike
-  * upstream's attribute-path strings, [[PredictorId]] remains lawful for anonymous algebraic composition.
+  * upstream's attribute-path strings, [[OptimizableId]] remains lawful for anonymous algebraic composition.
   */
-type Candidate = Map[PredictorId, Option[String]]
+type Candidate = Map[OptimizableId, Option[String]]
 
 object Candidate:
 

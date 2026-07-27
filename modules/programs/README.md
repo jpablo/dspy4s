@@ -97,8 +97,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `Predict.scala`, `DynamicPredict.scala` | sibling statically typed and dynamic predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
-| `predictors/OptimizableLeaf.scala`, `OptimizableTraversal.scala` | leaf lens and composite optimizer-traversal typeclasses |
-| `predictors/CompositeOptimizableTraversalInstances.scala`, `OptimizableTraversalDerivation.scala` | built-in composite instances and strict Mirror derivation |
+| `optimization/OptimizableLeaf.scala`, `OptimizableTraversal.scala` | leaf lens and composite optimizer-traversal typeclasses |
+| `optimization/CompositeOptimizableTraversalInstances.scala`, `OptimizableTraversalDerivation.scala` | built-in composite instances and strict Mirror derivation |
 | `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
 | `contracts/ToolFunction.scala`, `ToolCall.scala` | callable tools and their invocation messages |
 | `ProgramRunner.scala` | the shared typed/dynamic record-running capability |

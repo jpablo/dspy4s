@@ -1,4 +1,4 @@
-package dspy4s.programs.predictors
+package dspy4s.programs.optimization
 
 import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
@@ -10,7 +10,7 @@ import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, 
   * override field exactly; changed parameters create an override with the same signature structure and execution
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
   */
-private[predictors] trait CompositeOptimizableTraversalInstances:
+private[optimization] trait CompositeOptimizableTraversalInstances:
   given reactOptimizableTraversal[I, O]: OptimizableTraversal[ReAct[I, O]] with
     def inspect(program: ReAct[I, O]): Vector[OptimizableView] =
       Vector(program.reactPredict.optimizableView, program.extractorPredict.optimizableView)

@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.programs.predictors.*
+import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
@@ -43,7 +43,7 @@ class RecoveryCombinatorSuite extends FunSuite:
       )
 
   private object Attempt:
-    given attemptPredictor: OptimizableLeaf[Attempt] with
+    given attemptOptimizable: OptimizableLeaf[Attempt] with
       def get(program: Attempt): OptimizableParameters = program.predict.optimizableParameters
       def metadata(program: Attempt): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Attempt, updated: OptimizableParameters): Attempt =
@@ -52,8 +52,8 @@ class RecoveryCombinatorSuite extends FunSuite:
   private def predictor(instruction: String): DynamicPredict =
     DynamicPredict(SignatureLayout.parse("i -> s").toOption.get.withInstructions(Some(instruction)))
 
-  private def params[P](program: P)(using predictors: OptimizableTraversal[P]): Vector[OptimizableParameters] =
-    predictors.read(program)
+  private def params[P](program: P)(using traversal: OptimizableTraversal[P]): Vector[OptimizableParameters] =
+    traversal.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
 

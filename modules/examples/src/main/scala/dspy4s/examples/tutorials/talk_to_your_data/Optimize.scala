@@ -17,7 +17,7 @@ import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.contracts.ProgramCall
 
 object Optimize:
@@ -120,7 +120,7 @@ object Optimize:
     )
     val result = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
     val optInstr = result.bestCandidate
-      .get(PredictorId(0))
+      .get(OptimizableId(0))
       .flatten
       .getOrElse(Agent.plannerInstructionsBaseline)
     OptimizationReport(baseline, accuracy(optInstr, valset), optInstr, result.numCandidates)

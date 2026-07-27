@@ -6,7 +6,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place so
   * the seed→rolloutId mapping and the Evaluate+ProgramRunner scoring wiring stay identical across optimizers.
@@ -14,7 +14,7 @@ import dspy4s.programs.predictors.OptimizableTraversal
 private[optimize] object OptimizerSupport:
 
   /** Apply `instruction` to the `idx`-th predictor of `program` (an instruction-only edit) via
-    * [[dspy4s.programs.predictors.OptimizableTraversal.replace]]. The single home for the per-leaf instruction rewrite shared by the
+    * [[dspy4s.programs.optimization.OptimizableTraversal.replace]]. The single home for the per-leaf instruction rewrite shared by the
     * positional instruction optimizers (COPRO, InferRules).
     */
   def applyInstruction[P](program: P, idx: Int, instruction: String)(using ps: OptimizableTraversal[P]): P =

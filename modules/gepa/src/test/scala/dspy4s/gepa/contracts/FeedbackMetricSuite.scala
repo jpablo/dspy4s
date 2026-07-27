@@ -46,7 +46,7 @@ class FeedbackMetricSuite extends FunSuite:
     assertEquals(metric.score(ex, pred).toOption.get, 1.0)
   }
 
-  test("predictor-level feedback targets the named component and reflects a wrong answer") {
+  test("optimizable-level feedback targets the named component and reflects a wrong answer") {
     given RuntimeContext = RuntimeContext()
     val ex   = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
     val pred = RawPrediction(rec("answer" := "Lyon"))

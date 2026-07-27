@@ -4,9 +4,9 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorId
+import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 private final case class CandidatePair(first: DynamicPredict, second: DynamicPredict)
@@ -33,24 +33,24 @@ class CandidateSuite extends FunSuite:
   private def predict(instruction: Option[String]): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get.withInstructions(instruction))
 
-  test("seed reads each predictor's current instruction keyed by stable predictor ID") {
-    assertEquals(Candidate.seed(predict("Answer the question.")), Map(PredictorId(0) -> Some("Answer the question.")))
+  test("seed reads each leaf's current instruction keyed by stable optimizable ID") {
+    assertEquals(Candidate.seed(predict("Answer the question.")), Map(OptimizableId(0) -> Some("Answer the question.")))
   }
 
   test("applyTo writes a candidate's instruction back onto the predictor") {
     val applied = Candidate.applyTo(
       predict("Answer the question."),
-      Map(PredictorId(0) -> Some("Be concise and precise."))
+      Map(OptimizableId(0) -> Some("Be concise and precise."))
     )
     assertEquals(applied.layout.instructions, Some("Be concise and precise."))
   }
 
-  test("applyTo leaves predictors absent from the candidate untouched") {
+  test("applyTo leaves optimizables absent from the candidate untouched") {
     val p = predict("Original.")
     assertEquals(Candidate.applyTo(p, Map.empty).layout.instructions, Some("Original."))
   }
 
-  test("applyTo(seed) preserves the exact predictor state") {
+  test("applyTo(seed) preserves the exact optimizable state") {
     val p = predict("Round trip me.").copy(
       demos = Vector(Example.empty),
       config = DynamicValues.record("temperature" := 0.3)
@@ -63,13 +63,13 @@ class CandidateSuite extends FunSuite:
     val absent = predict(None)
     val empty  = predict(Some(""))
 
-    assertEquals(Candidate.seed(absent), Map(PredictorId(0) -> None))
-    assertEquals(Candidate.seed(empty), Map(PredictorId(0) -> Some("")))
+    assertEquals(Candidate.seed(absent), Map(OptimizableId(0) -> None))
+    assertEquals(Candidate.seed(empty), Map(OptimizableId(0) -> Some("")))
     assertNotEquals(Candidate.seed(absent), Candidate.seed(empty))
     assertEquals(Candidate.applyTo(absent, Candidate.seed(absent)).layout.instructions, None)
     assertEquals(Candidate.applyTo(empty, Candidate.seed(empty)).layout.instructions, Some(""))
-    assertEquals(Candidate.applyTo(predict("Original."), Map(PredictorId(0) -> None)).layout.instructions, None)
-    assertEquals(Candidate.applyTo(absent, Map(PredictorId(0) -> Some(""))).layout.instructions, Some(""))
+    assertEquals(Candidate.applyTo(predict("Original."), Map(OptimizableId(0) -> None)).layout.instructions, None)
+    assertEquals(Candidate.applyTo(absent, Map(OptimizableId(0) -> Some(""))).layout.instructions, Some(""))
   }
 
   test("candidate identity survives structural reassociation even when display paths change") {

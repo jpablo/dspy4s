@@ -29,7 +29,7 @@
 **Status:** Resolved (P1–P6, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07 / 1657f9c)
 
 **Resolution.** Closed by a typed `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclass pair
-with Scala 3 Mirror derivation (`modules/programs/.../predictors/`). `inspect`
+with Scala 3 Mirror derivation (`modules/programs/.../optimization/`). `inspect`
 enumerates non-executable `OptimizableView`s (read-only metadata + optimizable parameters),
 `read` projects their `OptimizableParameters` values, and `replace` rebuilds the program immutably.
 Each `OptimizableLeaf` leaf satisfies Get-Put, Put-Get, Put-Put, and the metadata frame exactly.
@@ -223,7 +223,7 @@ New primitives:
   This is the complete writable state for `DynamicPredict`, typed `Predict`, and typed `ChainOfThought`.
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
-  `OptimizableTraversal`-based: `{ "predictors": { "predictor-0": <OptimizableParameters>, ... } }`.
+  `OptimizableTraversal`-based: `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`.
   Ordinal IDs are validated on load. JSON via
   `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
   `RuntimeError`.
@@ -231,7 +231,7 @@ New primitives:
 **Round-trip scope.** Instructions, demos, and module config round-trip for every supported leaf.
 Signature field structure and module name are read-only `OptimizableMetadata`; runtimes, output schemas,
 bound LMs, tools, callbacks, and history are execution resources. Loading state into a fresh program
-preserves all of them. The target must have the same predictor traversal/order: `predictor-N` IDs reject
+preserves all of them. The target must have the same optimizable traversal/order: `optimizable-N` IDs reject
 missing/unknown ordinals and ignore JSON object order, but cannot detect a same-cardinality reorder.
 The former layout-bearing entry format (`signature` + `demos` + `config`) is unsupported; regenerate artifacts.
 
@@ -586,7 +586,7 @@ prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureF
 candidate selection, `GepaEngine` (reflective-mutation loop), and the `Gepa` facade. A deterministic
 instruction-sensitive test shows GEPA discovering a better instruction (score 0 → 1.0 within budget).
 **P-c done:** `OptimizableTraversal.inspectNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
-field labels for a composite), while `readIdentified` assigns typed `PredictorId`s from the canonical traversal.
+field labels for a composite), while `readIdentified` assigns typed `OptimizableId`s from the canonical traversal.
 GEPA keys candidates and trace-index association by ID; labels remain display/prompt metadata and may reflect an
 anonymous composition tree's current association. The `inspectNamed` capability is also what Refine per-module advice
 (G-5 follow-up) needs — now **done** (G-5 v2;

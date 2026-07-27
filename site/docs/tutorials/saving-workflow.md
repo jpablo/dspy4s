@@ -34,7 +34,7 @@ does not write signature field structure, module names, runtime bindings, tools,
 --8<-- "tutorials/saving/Saving.scala:load"
 ```
 
-`load` takes a freshly built program with the same predictor traversal/order, then returns a new immutable program
+`load` takes a freshly built program with the same optimizable traversal/order, then returns a new immutable program
 with the saved instructions, demos, and config written into it. The fresh value keeps its signature structure,
 name, runtime, output schema, bound LM, and tools. For the complete contract and ordinal-ID caveat, see
 [Saving and loading](../runtime/saving-and-loading.md).

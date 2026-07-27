@@ -1,7 +1,7 @@
 package dspy4s.programs.para
 
 import dspy4s.core.contracts.Monoid
-import dspy4s.programs.predictors.OptimizableParameters
+import dspy4s.programs.optimization.OptimizableParameters
 
 /** The free monoid of homogeneous Para parameters under concatenation.
   *

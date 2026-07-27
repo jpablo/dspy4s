@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -94,26 +94,26 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
       valset: Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
-    val predictorCount           = ps.read(student).size
+    val leafCount                = ps.read(student).size
 
-    if predictorCount == 0 then
+    if leafCount == 0 then
       Right(OptimizationReport(
         bestProgram = student,
         candidates = Vector.empty,
-        metadata = Map("no_predictors" -> true)
+        metadata = Map("no_optimizable_leaves" -> true)
       ))
     else
-      // Greedy coordinate ascent: optimize each predictor's instruction in turn, keeping the others fixed.
+      // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
       var current      = student
       val allCandidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
 
-      (0 until predictorCount).foreach { idx =>
-        val (updated, candidates) = optimizePredictor(current, idx, evalset)
+      (0 until leafCount).foreach { idx =>
+        val (updated, candidates) = optimizeLeaf(current, idx, evalset)
         current = updated
         allCandidates ++= candidates
       }
 
-      // Score the final program (all predictors at their best) so the report's best reflects the applied state.
+      // Score the final program (all leaves at their best) so the report's best reflects the applied state.
       // A failed final eval reports as 0.0 in metadata (it's a summary number, not a selection input).
       val finalScore = scoreProgram(current, evalset).getOrElse(0.0)
       val sorted     = allCandidates.toVector.sortBy(-_.score)
@@ -124,22 +124,22 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
           metadata = Map(
             "num_candidates" -> sorted.size,
             "best_score"     -> finalScore,
-            "predictors"     -> predictorCount
+            "optimizable_leaves" -> leafCount
           )
         )
       )
 
-  /** Optimize a single predictor's instruction (all depth rounds) with the rest of the program held fixed. Returns the
-    * program with that predictor's best instruction applied, plus every whole-program candidate scored along the way.
+  /** Optimize a single leaf's instruction (all depth rounds) with the rest of the program held fixed. Returns the
+    * program with that leaf's best instruction applied, plus every whole-program candidate scored along the way.
     */
-  private def optimizePredictor(program: P, idx: Int, evalset: Vector[Example])(using
+  private def optimizeLeaf(program: P, idx: Int, evalset: Vector[Example])(using
       RuntimeContext
   ): (P, Vector[CandidateProgram[P]]) =
-    val predictor         = ps.inspect(program)(idx)
-    val baseInstruction   = predictor.layout.instructions.getOrElse("")
-    val fieldNames        = predictor.layout.fields.map(_.name)
+    val leaf              = ps.inspect(program)(idx)
+    val baseInstruction   = leaf.layout.instructions.getOrElse("")
+    val fieldNames        = leaf.layout.fields.map(_.name)
 
-    // (instruction -> best score) seen for this predictor, plus the whole-program candidates emitted.
+    // (instruction -> best score) seen for this leaf, plus the whole-program candidates emitted.
     val evaluated         = mutable.LinkedHashMap.empty[String, Double]
     val candidates        = mutable.ArrayBuffer.empty[CandidateProgram[P]]
 
@@ -152,12 +152,12 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
         candidates += CandidateProgram(
           program = applied,
           score = score,
-          metadata = Map("predictor" -> idx, "instruction" -> instruction)
+          metadata = Map("optimizable_leaf" -> idx, "instruction" -> instruction)
         )
       }
       applied
 
-    // ── Round 0: seed breadth-1 fresh candidates + the predictor's own current instruction ──
+    // ── Round 0: seed breadth-1 fresh candidates + the leaf's own current instruction ──
     val seedProposals =
       generateInstructions(idx, baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty, round = 0)
     val round0 = (seedProposals :+ baseInstruction).filter(_.nonEmpty).distinct
@@ -170,7 +170,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
       refined.filter(_.nonEmpty).distinct.foreach(scoreCandidate)
     }
 
-    // Lock in the best instruction for this predictor.
+    // Lock in the best instruction for this leaf.
     val bestInstruction =
       if evaluated.isEmpty then baseInstruction
       else evaluated.maxBy(_._2)._1
@@ -207,7 +207,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
     * `attempts` (ascending by score) seed the refinement variant when non-empty.
     */
   private def generateInstructions(
-      predictorIdx: Int,
+      leafIdx: Int,
       baseInstruction: String,
       fieldNames: Vector[String],
       count: Int,
@@ -231,10 +231,10 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
       // predictable window (a scripted/temperature-driven LM yields a distinct proposal per rolloutId). The
       // per-round salt gives EACH round (seed = round 0, plus every refinement round) its own non-overlapping
       // window of `count` ids, so successive refinement rounds don't re-draw the same window (which would yield
-      // byte-identical generations via the LM cache); the per-predictor offset likewise keeps HOMOGENEOUS
-      // predictors (identical baseInstruction/fields) from drawing the SAME window.
+      // byte-identical generations via the LM cache); the per-leaf offset likewise keeps HOMOGENEOUS
+      // leaves (identical baseInstruction/fields) from drawing the SAME window.
       val roundSalt = round * config.breadth
-      val base      = OptimizerSupport.seedBase(config.seed) + predictorIdx * 10000 + roundSalt
+      val base      = OptimizerSupport.seedBase(config.seed) + leafIdx * 10000 + roundSalt
       val results = (0 until count).iterator.flatMap { i =>
         val rolloutId = base + i
         val call = ProgramCall(
