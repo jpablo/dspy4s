@@ -5,7 +5,7 @@ import dspy4s.programs.predictors.OptimizableParameters
 
 /** The free monoid of homogeneous Para parameters under concatenation.
   *
-  * This is the codomain of the `PredictorTraversal` homomorphism and makes parameter composition explicit rather than encoding
+  * This is the codomain of the `OptimizableTraversal` homomorphism and makes parameter composition explicit rather than encoding
   * it in an ad-hoc category whose composition merely happens to be `++`.
   */
 given paramsMonoid: Monoid[Vector[OptimizableParameters]] with

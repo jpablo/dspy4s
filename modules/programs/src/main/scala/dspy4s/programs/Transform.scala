@@ -29,13 +29,13 @@ private[programs] object TransformResult:
         ))
 
 /** Shared optimizer traversal for a transparent unary wrapper. */
-private[programs] object UnaryPredictorTraversal:
-  def passthrough[W, P](get: W => P)(replaceInner: (W, P) => W)(using inner: PredictorTraversal[P]): PredictorTraversal[W] =
-    new PredictorTraversal[W]:
-      def inspect(program: W): Vector[PredictorView] = inner.inspect(get(program))
+private[programs] object UnaryOptimizableTraversal:
+  def passthrough[W, P](get: W => P)(replaceInner: (W, P) => W)(using inner: OptimizableTraversal[P]): OptimizableTraversal[W] =
+    new OptimizableTraversal[W]:
+      def inspect(program: W): Vector[OptimizableView] = inner.inspect(get(program))
       def replace(program: W, updates: Vector[OptimizableParameters]): W =
         replaceInner(program, inner.replace(get(program), updates))
-      override def inspectNamed(program: W): Vector[(String, PredictorView)] = inner.inspectNamed(get(program))
+      override def inspectNamed(program: W): Vector[(String, OptimizableView)] = inner.inspectNamed(get(program))
 
 /** Lift a total Scala function into a parameter-free, lifecycle-transparent program. */
 final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:
@@ -45,7 +45,7 @@ final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:
     TransformResult.guard("program_lift")(Right(Prediction(run(call.input), RawPrediction.empty)))
 
 object Lift:
-  given liftPredictorTraversal[I, O]: PredictorTraversal[Lift[I, O]] = PredictorTraversal.empty
+  given liftOptimizableTraversal[I, O]: OptimizableTraversal[Lift[I, O]] = OptimizableTraversal.empty
 
 /** Lift an explicitly fallible Scala function into a parameter-free, lifecycle-transparent program. */
 final case class LiftEither[I, O](run: I => Either[DspyError, O])
@@ -56,7 +56,7 @@ final case class LiftEither[I, O](run: I => Either[DspyError, O])
     TransformResult.guard("program_lift_either")(run(call.input).map(Prediction(_, RawPrediction.empty)))
 
 object LiftEither:
-  given liftEitherPredictorTraversal[I, O]: PredictorTraversal[LiftEither[I, O]] = PredictorTraversal.empty
+  given liftEitherOptimizableTraversal[I, O]: OptimizableTraversal[LiftEither[I, O]] = OptimizableTraversal.empty
 
 /** Covariantly transform a program's semantic output while preserving its raw prediction envelope. */
 final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
@@ -69,10 +69,10 @@ final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
     }
 
 object MapOutput:
-  given mapOutputPredictorTraversal[I, O, B, P <: Module[I, O]](using
-      inner: PredictorTraversal[P]
-  ): PredictorTraversal[MapOutput[I, O, B, P]] =
-    UnaryPredictorTraversal.passthrough[MapOutput[I, O, B, P], P](_.program)((wrapper, updated) =>
+  given mapOutputOptimizableTraversal[I, O, B, P <: Module[I, O]](using
+      inner: OptimizableTraversal[P]
+  ): OptimizableTraversal[MapOutput[I, O, B, P]] =
+    UnaryOptimizableTraversal.passthrough[MapOutput[I, O, B, P], P](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 
@@ -87,10 +87,10 @@ final case class ContramapInput[J, I, O, P <: Module[I, O]](program: P, contrama
     }
 
 object ContramapInput:
-  given contramapInputPredictorTraversal[J, I, O, P <: Module[I, O]](using
-      inner: PredictorTraversal[P]
-  ): PredictorTraversal[ContramapInput[J, I, O, P]] =
-    UnaryPredictorTraversal.passthrough[ContramapInput[J, I, O, P], P](_.program)((wrapper, updated) =>
+  given contramapInputOptimizableTraversal[J, I, O, P <: Module[I, O]](using
+      inner: OptimizableTraversal[P]
+  ): OptimizableTraversal[ContramapInput[J, I, O, P]] =
+    UnaryOptimizableTraversal.passthrough[ContramapInput[J, I, O, P], P](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 
@@ -110,10 +110,10 @@ final case class Dimap[J, I, O, B, P <: Module[I, O]](
     yield Prediction(output, prediction.raw)
 
 object Dimap:
-  given dimapPredictorTraversal[J, I, O, B, P <: Module[I, O]](using
-      inner: PredictorTraversal[P]
-  ): PredictorTraversal[Dimap[J, I, O, B, P]] =
-    UnaryPredictorTraversal.passthrough[Dimap[J, I, O, B, P], P](_.program)((wrapper, updated) =>
+  given dimapOptimizableTraversal[J, I, O, B, P <: Module[I, O]](using
+      inner: OptimizableTraversal[P]
+  ): OptimizableTraversal[Dimap[J, I, O, B, P]] =
+    UnaryOptimizableTraversal.passthrough[Dimap[J, I, O, B, P], P](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 

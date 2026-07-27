@@ -143,7 +143,7 @@ lazy val optimize = (project in file("modules/optimize"))
 
 // GEPA — Genetic-Pareto reflective prompt optimizer (PORT_GAPS G-12). A self-contained port of the external
 // Python `gepa` engine (a stdlib-only genetic-Pareto algorithm) plus the dspy4s adapter that bridges programs
-// into it. Depends on `optimize` for optimizer contracts and shares the programs-layer `PredictorTraversal` / `ProgramRunner`
+// into it. Depends on `optimize` for optimizer contracts and shares the programs-layer `OptimizableTraversal` / `ProgramRunner`
 // capabilities with COPRO/MIPROv2; the dependencies below make that whole substrate explicit.
 lazy val gepa = (project in file("modules/gepa"))
   .dependsOn(core, programs, evaluate, optimize)

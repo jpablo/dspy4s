@@ -10,14 +10,14 @@ type PredictorOrdinal = PredictorOrdinal.T
 
 object PredictorOrdinal extends RefinedSubtype[Int, Positive0]
 
-/** Stable identity of a learnable predictor within a program's [[PredictorTraversal]] traversal.
+/** Stable identity of a learnable predictor within a program's [[OptimizableTraversal]] traversal.
   *
-  * The identity is the predictor's zero-based ordinal in [[PredictorTraversal.read]] order. That order is the canonical
+  * The identity is the predictor's zero-based ordinal in [[OptimizableTraversal.read]] order. That order is the canonical
   * optimizer-facing structure: composition concatenates child traversals, while parameter-free structure contributes no
   * entries. Consequently IDs are unique within one program and remain unchanged by `replace`, category identity nodes,
   * and reassociation of ordered composition.
   *
-  * A [[PredictorId]] is deliberately not a display path. Human-readable paths come from [[PredictorTraversal.inspectNamed]] and
+  * A [[PredictorId]] is deliberately not a display path. Human-readable paths come from [[OptimizableTraversal.inspectNamed]] and
   * may reflect the current case-class/combinator syntax. Nor does an ID survive an arbitrary schema edit that inserts,
   * removes, or reorders predictors; such a change defines a different traversal.
   */
@@ -56,10 +56,10 @@ object PredictorId:
           )
         case None => Left(s"Invalid predictor id '$value': ordinal must be a non-negative integer")
 
-/** One focus of a [[PredictorTraversal]] traversal: stable machine identity, structural display name, and a non-executable
+/** One focus of a [[OptimizableTraversal]] traversal: stable machine identity, structural display name, and a non-executable
   * snapshot of its read-only metadata plus optimizable parameters. */
-final case class IdentifiedPredictor(id: PredictorId, displayName: String, view: PredictorView) derives CanEqual:
+final case class IdentifiedOptimizable(id: PredictorId, displayName: String, view: OptimizableView) derives CanEqual:
   def parameters: OptimizableParameters = view.parameters
-  def metadata: PredictorMetadata         = view.metadata
+  def metadata: OptimizableMetadata       = view.metadata
   def layout: SignatureLayout             = view.layout
   def moduleName: String                  = view.moduleName

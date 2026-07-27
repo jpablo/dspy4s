@@ -2,21 +2,21 @@ package dspy4s.programs.predictors
 
 import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
-/** Hand-written [[PredictorTraversal]] instances for composite typed programs whose learnable sub-predicts are hoisted to
-  * stable, `copy`-reachable members. Inheriting these instances into the [[PredictorTraversal]] companion keeps them in
+/** Hand-written [[OptimizableTraversal]] instances for composite typed programs whose learnable sub-predicts are hoisted to
+  * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion keeps them in
   * implicit scope without mixing concrete program traversal into the core typeclass definition.
   *
   * `replace` writes parameters through each current executable predictor. Unchanged parameters preserve the existing
   * override field exactly; changed parameters create an override with the same signature structure and execution
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
   */
-private[predictors] trait CompositePredictorTraversalInstances:
-  given reactPredictorTraversal[I, O]: PredictorTraversal[ReAct[I, O]] with
-    def inspect(program: ReAct[I, O]): Vector[PredictorView] =
-      Vector(program.reactPredict.predictorView, program.extractorPredict.predictorView)
+private[predictors] trait CompositeOptimizableTraversalInstances:
+  given reactOptimizableTraversal[I, O]: OptimizableTraversal[ReAct[I, O]] with
+    def inspect(program: ReAct[I, O]): Vector[OptimizableView] =
+      Vector(program.reactPredict.optimizableView, program.extractorPredict.optimizableView)
 
-    override def inspectNamed(program: ReAct[I, O]): Vector[(String, PredictorView)] =
-      Vector("react" -> program.reactPredict.predictorView, "extractor" -> program.extractorPredict.predictorView)
+    override def inspectNamed(program: ReAct[I, O]): Vector[(String, OptimizableView)] =
+      Vector("react" -> program.reactPredict.optimizableView, "extractor" -> program.extractorPredict.optimizableView)
 
     def replace(program: ReAct[I, O], updates: Vector[OptimizableParameters]): ReAct[I, O] =
       require(updates.size == 2, s"ReAct expects exactly 2 updates (react, extractor), got ${updates.size}")
@@ -24,12 +24,12 @@ private[predictors] trait CompositePredictorTraversalInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
 
-  given codeActPredictorTraversal[I, O]: PredictorTraversal[CodeAct[I, O]] with
-    def inspect(program: CodeAct[I, O]): Vector[PredictorView] =
-      Vector(program.codeActPredict.predictorView, program.extractorPredict.predictorView)
+  given codeActOptimizableTraversal[I, O]: OptimizableTraversal[CodeAct[I, O]] with
+    def inspect(program: CodeAct[I, O]): Vector[OptimizableView] =
+      Vector(program.codeActPredict.optimizableView, program.extractorPredict.optimizableView)
 
-    override def inspectNamed(program: CodeAct[I, O]): Vector[(String, PredictorView)] =
-      Vector("codeact" -> program.codeActPredict.predictorView, "extractor" -> program.extractorPredict.predictorView)
+    override def inspectNamed(program: CodeAct[I, O]): Vector[(String, OptimizableView)] =
+      Vector("codeact" -> program.codeActPredict.optimizableView, "extractor" -> program.extractorPredict.optimizableView)
 
     def replace(program: CodeAct[I, O], updates: Vector[OptimizableParameters]): CodeAct[I, O] =
       require(updates.size == 2, s"CodeAct expects exactly 2 updates (codeact, extractor), got ${updates.size}")
@@ -37,12 +37,12 @@ private[predictors] trait CompositePredictorTraversalInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
 
-  given rlmPredictorTraversal[I, O]: PredictorTraversal[RLM[I, O]] with
-    def inspect(program: RLM[I, O]): Vector[PredictorView] =
-      Vector(program.actionPredict.predictorView, program.extractPredict.predictorView)
+  given rlmOptimizableTraversal[I, O]: OptimizableTraversal[RLM[I, O]] with
+    def inspect(program: RLM[I, O]): Vector[OptimizableView] =
+      Vector(program.actionPredict.optimizableView, program.extractPredict.optimizableView)
 
-    override def inspectNamed(program: RLM[I, O]): Vector[(String, PredictorView)] =
-      Vector("action" -> program.actionPredict.predictorView, "extract" -> program.extractPredict.predictorView)
+    override def inspectNamed(program: RLM[I, O]): Vector[(String, OptimizableView)] =
+      Vector("action" -> program.actionPredict.optimizableView, "extract" -> program.extractPredict.optimizableView)
 
     def replace(program: RLM[I, O], updates: Vector[OptimizableParameters]): RLM[I, O] =
       require(updates.size == 2, s"RLM expects exactly 2 updates (action, extract), got ${updates.size}")
@@ -50,19 +50,19 @@ private[predictors] trait CompositePredictorTraversalInstances:
       val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
       program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
-  given programOfThoughtPredictorTraversal[I, O]: PredictorTraversal[ProgramOfThought[I, O]] with
-    def inspect(program: ProgramOfThought[I, O]): Vector[PredictorView] =
+  given programOfThoughtOptimizableTraversal[I, O]: OptimizableTraversal[ProgramOfThought[I, O]] with
+    def inspect(program: ProgramOfThought[I, O]): Vector[OptimizableView] =
       Vector(
-        program.generatorPredict.predictorView,
-        program.regeneratorPredict.predictorView,
-        program.answererPredict.predictorView
+        program.generatorPredict.optimizableView,
+        program.regeneratorPredict.optimizableView,
+        program.answererPredict.optimizableView
       )
 
-    override def inspectNamed(program: ProgramOfThought[I, O]): Vector[(String, PredictorView)] =
+    override def inspectNamed(program: ProgramOfThought[I, O]): Vector[(String, OptimizableView)] =
       Vector(
-        "generator"   -> program.generatorPredict.predictorView,
-        "regenerator" -> program.regeneratorPredict.predictorView,
-        "answerer"    -> program.answererPredict.predictorView
+        "generator"   -> program.generatorPredict.optimizableView,
+        "regenerator" -> program.regeneratorPredict.optimizableView,
+        "answerer"    -> program.answererPredict.optimizableView
       )
 
     def replace(program: ProgramOfThought[I, O], updates: Vector[OptimizableParameters]): ProgramOfThought[I, O] =
@@ -82,12 +82,12 @@ private[predictors] trait CompositePredictorTraversalInstances:
           answererPredictOverride = nextAnswerer
         )
 
-  given multiChainComparisonPredictorTraversal[I, O]: PredictorTraversal[MultiChainComparison[I, O]] with
-    def inspect(program: MultiChainComparison[I, O]): Vector[PredictorView] =
-      Vector(program.comparePredict.predictorView)
+  given multiChainComparisonOptimizableTraversal[I, O]: OptimizableTraversal[MultiChainComparison[I, O]] with
+    def inspect(program: MultiChainComparison[I, O]): Vector[OptimizableView] =
+      Vector(program.comparePredict.optimizableView)
 
-    override def inspectNamed(program: MultiChainComparison[I, O]): Vector[(String, PredictorView)] =
-      Vector("compare" -> program.comparePredict.predictorView)
+    override def inspectNamed(program: MultiChainComparison[I, O]): Vector[(String, OptimizableView)] =
+      Vector("compare" -> program.comparePredict.optimizableView)
 
     def replace(
         program: MultiChainComparison[I, O],
@@ -101,5 +101,5 @@ private[predictors] trait CompositePredictorTraversalInstances:
       current: P,
       existing: Option[P],
       updated: OptimizableParameters
-  )(using PredictorLens[P]): Option[P] =
+  )(using OptimizableLeaf[P]): Option[P] =
     if updated == current.optimizableParameters then existing else Some(current.withOptimizableParameters(updated))

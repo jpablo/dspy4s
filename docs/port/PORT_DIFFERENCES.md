@@ -121,21 +121,21 @@ Python `BaseModule.named_parameters()` walks `self.__dict__`,
 recurses through nested modules, yields anything that looks like a
 `Parameter`. Optimizers consume that iterator.
 
-Scala has no `__dict__`. The optimizer side uses **`PredictorLens[P]`** for
-one leaf and **`PredictorTraversal[P]`** for composite traversal. Each leaf exposes
+Scala has no `__dict__`. The optimizer side uses **`OptimizableLeaf[P]`** for
+one leaf and **`OptimizableTraversal[P]`** for composite traversal. Each leaf exposes
 read-only metadata separately from the exact optimizable parameters:
 
 ```scala
-trait PredictorLens[P]:
+trait OptimizableLeaf[P]:
   def get(program: P): OptimizableParameters
-  def metadata(program: P): PredictorMetadata
+  def metadata(program: P): OptimizableMetadata
   def set(program: P, parameters: OptimizableParameters): P
 ```
 
 `OptimizableParameters` contains instructions, demos, and module config;
 signature structure, names, runtimes, schemas, LMs, and tools cannot be
 replaced through the optimizer lens. Mirror derivation builds a
-`PredictorTraversal[P]` traversal for composites. The trade-off is explicit by design.
+`OptimizableTraversal[P]` traversal for composites. The trade-off is explicit by design.
 
 ## 4. `predict_name` resolution: frame introspection → explicit naming
 

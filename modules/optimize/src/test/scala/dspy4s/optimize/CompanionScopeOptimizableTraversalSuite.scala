@@ -1,36 +1,36 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{OptimizableParameters, PredictorTraversal}
+import dspy4s.programs.predictors.{OptimizableParameters, OptimizableTraversal}
 
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.Predict
 import dspy4s.typed.Signature
 import munit.FunSuite
 
-import CompanionScopePredictorTraversalSuite.Agent
+import CompanionScopeOptimizableTraversalSuite.Agent
 
-/** Regression for the HIGH-severity scope bug: the leaf `PredictorLens[Predict]` / `PredictorLens[ChainOfThought]` instances
-  * (and the hand-written `PredictorTraversal` instances for the composite typed programs) USED to live in a non-companion
+/** Regression for the HIGH-severity scope bug: the leaf `OptimizableLeaf[Predict]` / `OptimizableLeaf[ChainOfThought]` instances
+  * (and the hand-written `OptimizableTraversal` instances for the composite typed programs) USED to live in a non-companion
   * `object ProgramPredictors`, so they were only in implicit scope after an explicit `import ProgramPredictors.given`.
   *
   * This suite DELIBERATELY does NOT import them: it only exercises companion-scope resolution. On the old code a user
-  * composite `case class Agent(...)` with `given PredictorTraversal[Agent] = PredictorTraversal.derived` and no such import would
+  * composite `case class Agent(...)` with `given OptimizableTraversal[Agent] = OptimizableTraversal.derived` and no such import would
   * resolve each typed-program field to ZERO predictors. With the instances moved to the typeclass companions it is 2;
   * the strict derivation boundary now also makes a future omission fail compilation instead of silently falling back to
-  * `PredictorTraversal.empty`.
+  * `OptimizableTraversal.empty`.
   */
-class CompanionScopePredictorTraversalSuite extends FunSuite:
+class CompanionScopeOptimizableTraversalSuite extends FunSuite:
 
   private val qaSignature = Signature.fromString("question -> answer")
 
-  private def predictorsOf[P](@annotation.unused program: P)(using ps: PredictorTraversal[P]): PredictorTraversal[P] = ps
+  private def predictorsOf[P](@annotation.unused program: P)(using ps: OptimizableTraversal[P]): OptimizableTraversal[P] = ps
 
   test("composite of typed programs resolves field predictors WITHOUT any import (was 0, now 2)") {
     val agent = Agent(
       planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
-    val ps   = summon[PredictorTraversal[Agent]]
+    val ps   = summon[OptimizableTraversal[Agent]]
     val views = ps.inspect(agent)
     // Each typed-program leaf is found in companion scope; strict derivation would reject a missing instance.
     assertEquals(views.size, 2)
@@ -55,35 +55,35 @@ class CompanionScopePredictorTraversalSuite extends FunSuite:
       planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
-    val ps = summon[PredictorTraversal[Agent]]
+    val ps = summon[OptimizableTraversal[Agent]]
     assertEquals(ps.replace(agent, ps.read(agent)), agent)
   }
 
-  test("DerivedPredictorTraversal.replace rejects an over-long update vector (LOW #4)") {
+  test("DerivedOptimizableTraversal.replace rejects an over-long update vector (LOW #4)") {
     val agent = Agent(
       planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
-    val ps      = summon[PredictorTraversal[Agent]]
+    val ps      = summon[OptimizableTraversal[Agent]]
     val correct = ps.read(agent)          // arity 2
     val tooMany = correct :+ correct.head // arity 3
     val ex      = intercept[IllegalArgumentException](ps.replace(agent, tooMany))
     assert(ex.getMessage.contains("expected 2 updates, got 3"), ex.getMessage)
   }
 
-  test("DerivedPredictorTraversal.replace rejects a too-short update vector (LOW #4)") {
+  test("DerivedOptimizableTraversal.replace rejects a too-short update vector (LOW #4)") {
     val agent = Agent(
       planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
-    val ps     = summon[PredictorTraversal[Agent]]
+    val ps     = summon[OptimizableTraversal[Agent]]
     val tooFew = Vector.empty[OptimizableParameters]
     intercept[IllegalArgumentException](ps.replace(agent, tooFew))
   }
 
-object CompanionScopePredictorTraversalSuite:
+object CompanionScopeOptimizableTraversalSuite:
 
-  // A USER composite of two typed programs. Crucially: `PredictorTraversal.derived` is the only given, and NO
+  // A USER composite of two typed programs. Crucially: `OptimizableTraversal.derived` is the only given, and NO
   // `import ProgramPredictors.given` exists (that object no longer exists). The leaf instances must be found in
   // companion scope.
   final case class Agent(
@@ -92,4 +92,4 @@ object CompanionScopePredictorTraversalSuite:
   )
 
   object Agent:
-    given PredictorTraversal[Agent] = PredictorTraversal.derived
+    given OptimizableTraversal[Agent] = OptimizableTraversal.derived

@@ -4,33 +4,33 @@ import dspy4s.core.contracts.{IsEq, Law, Lens, <->}
 import dspy4s.programs.{ChainOfThought, DynamicPredict, Predict}
 import dspy4s.typed.OutputAugmentation.PrependField
 
-/** A program that is one learnable predictor (a leaf of the introspection tree).
+/** A program that is one independently optimizable leaf of the introspection tree.
   *
   * This is a lawful [[dspy4s.core.contracts.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the
   * Get-Put / Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins
-  * what makes the focus exact — writing parameters can never change the read-only [[PredictorMetadata]], which
+  * what makes the focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which
   * excludes signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite`
   * executes all four statements per instance.
   */
-trait PredictorLens[P] extends Lens[P, OptimizableParameters]:
-  def metadata(program: P): PredictorMetadata
+trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
+  def metadata(program: P): OptimizableMetadata
 
-  final def inspect(program: P): PredictorView = PredictorView(metadata(program), get(program))
+  final def inspect(program: P): OptimizableView = OptimizableView(metadata(program), get(program))
 
   @Law("frame: writing parameters never changes the read-only metadata")
-  def frame(program: P, updated: OptimizableParameters): IsEq[PredictorMetadata] =
+  def frame(program: P, updated: OptimizableParameters): IsEq[OptimizableMetadata] =
     metadata(set(program, updated)) <-> metadata(program)
 
-object PredictorLens:
-  /** A [[DynamicPredict]] is itself a learnable predictor leaf. Defined in the [[PredictorLens]] companion so it is in
-    * implicit scope wherever a `PredictorLens[DynamicPredict]` (or its `NotGiven`) is sought.
+object OptimizableLeaf:
+  /** A [[DynamicPredict]] is itself an optimizable leaf. Defined in the [[OptimizableLeaf]] companion so it is in
+    * implicit scope wherever an `OptimizableLeaf[DynamicPredict]` (or its `NotGiven`) is sought.
     */
-  given PredictorLens[DynamicPredict] with
+  given OptimizableLeaf[DynamicPredict] with
     def get(program: DynamicPredict): OptimizableParameters =
       OptimizableParameters(program.layout.instructions, program.demos, program.config)
 
-    def metadata(program: DynamicPredict): PredictorMetadata =
-      PredictorMetadata.from(program.layout, program.moduleName)
+    def metadata(program: DynamicPredict): OptimizableMetadata =
+      OptimizableMetadata.from(program.layout, program.moduleName)
 
     def set(program: DynamicPredict, updated: OptimizableParameters): DynamicPredict =
       if updated == get(program) then program
@@ -41,21 +41,21 @@ object PredictorLens:
           config = updated.config
         )
 
-  /** Leaf [[PredictorLens]] for the typed single-predictor program [[Predict]]. A `Predict` field inside a user composite
-    * resolves here (via [[PredictorTraversal.fromPredictorLens]], 1 element) rather than being structurally torn apart
-    * by [[PredictorTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
-    * [[PredictorLens]] companion so it is in implicit scope without an explicit import.
+  /** [[OptimizableLeaf]] for the typed single-leaf program [[Predict]]. A `Predict` field inside a user composite
+    * resolves here (via [[OptimizableTraversal.fromOptimizableLeaf]], 1 element) rather than being structurally torn apart
+    * by [[OptimizableTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
+    * [[OptimizableLeaf]] companion so it is in implicit scope without an explicit import.
     *
     * Optimizable parameters are exactly instructions, demos, and module config. The signature field structure, output
     * shape, name, runtime, bound LM, and tools remain on the original typed program and are exposed only as read-only
     * metadata.
     */
-  given predictPredictorLens[I, O]: PredictorLens[Predict[I, O]] with
+  given predictOptimizableLeaf[I, O]: OptimizableLeaf[Predict[I, O]] with
     def get(program: Predict[I, O]): OptimizableParameters =
       OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
 
-    def metadata(program: Predict[I, O]): PredictorMetadata =
-      PredictorMetadata.from(program.signature.layout, program.moduleName)
+    def metadata(program: Predict[I, O]): OptimizableMetadata =
+      OptimizableMetadata.from(program.signature.layout, program.moduleName)
 
     def set(program: Predict[I, O], updated: OptimizableParameters): Predict[I, O] =
       if updated == get(program) then program
@@ -66,7 +66,7 @@ object PredictorLens:
           signature = program.signature.withInstructions(updated.instructions)
         )
 
-  /** Leaf [[PredictorLens]] for the typed single-predictor program [[ChainOfThought]]. Like [[predictPredictorLens]], but
+  /** [[OptimizableLeaf]] for the typed single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but
     * the exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
     * `ChainOfThought.augmentLayout` returns an `Either`; it is resolved fail-fast here (consistent with the P3
     * hand-written instances), and only fails for layouts that cannot be augmented.
@@ -74,9 +74,9 @@ object PredictorLens:
     * Optimizable parameters remain instructions, demos, and config. The augmented signature structure is metadata only;
     * writing parameters changes the base signature's instructions, from which the same augmented structure is rebuilt.
     */
-  given chainOfThoughtPredictorLens[I, O](using
+  given chainOfThoughtOptimizableLeaf[I, O](using
       prepend: PrependField.Of["reasoning", String, O]
-  ): PredictorLens[ChainOfThought[I, O]] with
+  ): OptimizableLeaf[ChainOfThought[I, O]] with
     private def augmented(program: ChainOfThought[I, O]) =
       ChainOfThought
         .augmentLayout(program.signature.layout)
@@ -91,8 +91,8 @@ object PredictorLens:
     def get(program: ChainOfThought[I, O]): OptimizableParameters =
       OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
 
-    def metadata(program: ChainOfThought[I, O]): PredictorMetadata =
-      PredictorMetadata.from(augmented(program), program.moduleName)
+    def metadata(program: ChainOfThought[I, O]): OptimizableMetadata =
+      OptimizableMetadata.from(augmented(program), program.moduleName)
 
     def set(program: ChainOfThought[I, O], updated: OptimizableParameters): ChainOfThought[I, O] =
       if updated == get(program) then program
@@ -103,10 +103,10 @@ object PredictorLens:
           signature = program.signature.withInstructions(updated.instructions)
         )
 
-/** Uniform syntax derived from the lawful [[PredictorLens]] lens. Every current and third-party leaf receives the same
+/** Uniform syntax derived from the lawful [[OptimizableLeaf]] lens. Every current and third-party leaf receives the same
   * parameter and inspection operations from its typeclass instance.
   */
-extension [P](program: P)(using predictorLens: PredictorLens[P])
-  def optimizableParameters: OptimizableParameters = predictorLens.get(program)
-  def predictorView: PredictorView                  = predictorLens.inspect(program)
-  def withOptimizableParameters(updated: OptimizableParameters): P = predictorLens.set(program, updated)
+extension [P](program: P)(using optimizableLeaf: OptimizableLeaf[P])
+  def optimizableParameters: OptimizableParameters                    = optimizableLeaf.get(program)
+  def optimizableView: OptimizableView                                = optimizableLeaf.inspect(program)
+  def withOptimizableParameters(updated: OptimizableParameters): P = optimizableLeaf.set(program, updated)

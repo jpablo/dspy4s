@@ -16,8 +16,8 @@ import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorView
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableView
+import dspy4s.programs.predictors.OptimizableTraversal
 import dspy4s.programs.contracts.ProgramCall
 
 import scala.collection.mutable
@@ -71,11 +71,11 @@ final case class InferRulesConfig(
   *   - '''Context-window fallback narrows on [[ContextWindowExceededError]]''' specifically (upstream also accepts
   *     `ValueError`/`BadRequestError`), dropping the last example and retrying down to a single example.
   */
-final class InferRules[P: {PredictorTraversal, ProgramRunner}](config: InferRulesConfig) extends Teleprompter[P]:
+final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRulesConfig) extends Teleprompter[P]:
 
   override val name: String = "infer_rules"
 
-  private val ps: PredictorTraversal[P]   = summon[PredictorTraversal[P]]
+  private val ps: OptimizableTraversal[P]   = summon[OptimizableTraversal[P]]
   private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
 
   override def compile(
@@ -143,7 +143,7 @@ final class InferRules[P: {PredictorTraversal, ProgramRunner}](config: InferRule
   /** Induce rules for one predictor from the trainset, narrowing the example set on a context-window overflow. Returns
     * the induced rules text, or `None` if even a single example can't produce rules.
     */
-  private def induceRules(predictor: PredictorView, trainset: Vector[Example], candIdx: Int, predIdx: Int)(using
+  private def induceRules(predictor: OptimizableView, trainset: Vector[Example], candIdx: Int, predIdx: Int)(using
       RuntimeContext
   ): Option[String] =
     val gen = DynamicPredict(layout = ruleInductionLayout, name = Some("infer_rules_induction"))
@@ -171,7 +171,7 @@ final class InferRules[P: {PredictorTraversal, ProgramRunner}](config: InferRule
   /** Render demos as upstream's `format_examples` text, projecting each example to the predictor's own input/output
     * fields.
     */
-  private def formatExamples(demos: Vector[Example], predictor: PredictorView): String =
+  private def formatExamples(demos: Vector[Example], predictor: OptimizableView): String =
     def render(fields: Vector[FieldSpec], ex: Example): String =
       fields.flatMap(f =>
         DynamicValues.recordGet(ex.values, f.name).map(v => s"${f.name}: ${DynamicValues.renderText(v)}")

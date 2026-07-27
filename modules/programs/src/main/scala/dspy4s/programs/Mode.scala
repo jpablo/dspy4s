@@ -91,11 +91,11 @@ final case class Moded[I, O, P <: Module[I, O]](mode: Mode, program: P)
 
 object Moded:
   /** `mode` is non-learnable, so addressability passes straight through to the wrapped program (fork 4). */
-  given modedPredictorTraversal[I, O, P <: Module[I, O]](using
-      inner: PredictorTraversal[P]
-  ): PredictorTraversal[Moded[I, O, P]] with
-    def inspect(program: Moded[I, O, P]): Vector[PredictorView] = inner.inspect(program.program)
+  given modedOptimizableTraversal[I, O, P <: Module[I, O]](using
+      inner: OptimizableTraversal[P]
+  ): OptimizableTraversal[Moded[I, O, P]] with
+    def inspect(program: Moded[I, O, P]): Vector[OptimizableView] = inner.inspect(program.program)
     def replace(program: Moded[I, O, P], updates: Vector[OptimizableParameters]): Moded[I, O, P] =
       program.copy(program = inner.replace(program.program, updates))
-    override def inspectNamed(program: Moded[I, O, P]): Vector[(String, PredictorView)] =
+    override def inspectNamed(program: Moded[I, O, P]): Vector[(String, OptimizableView)] =
       inner.inspectNamed(program.program)

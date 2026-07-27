@@ -45,16 +45,16 @@ final class OptimizableParametersSuite extends FunSuite:
   private def holds[A](law: String, eq: IsEq[A]): Unit =
     assert(eq.lhs.equals(eq.rhs), s"$law: ${eq.lhs} != ${eq.rhs}")
 
-  /** Runs the four `@Law` statements the [[PredictorLens]] lens carries (Get-Put / Put-Get / Put-Put inherited from
+  /** Runs the four `@Law` statements the [[OptimizableLeaf]] lens carries (Get-Put / Put-Get / Put-Put inherited from
     * `Lens`, plus the metadata frame), then the view/extension-syntax invariants. */
   private def assertLeafLaws[P](program: P, first: OptimizableParameters, second: OptimizableParameters)(using
-      leaf: PredictorLens[P]
+      leaf: OptimizableLeaf[P]
   ): Unit =
     val original = leaf.get(program)
     val metadata = leaf.metadata(program)
 
     assertEquals(program.optimizableParameters, original)
-    assertEquals(program.predictorView, leaf.inspect(program))
+    assertEquals(program.optimizableView, leaf.inspect(program))
     assertEquals(program.withOptimizableParameters(first).optimizableParameters, first)
 
     holds("get-put", leaf.getPut(program))
@@ -114,12 +114,12 @@ final class OptimizableParametersSuite extends FunSuite:
     assert(result.left.toOption.exists(_.message.contains("missing 'instructions'")))
   }
 
-  test("PredictorLens[DynamicPredict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
+  test("OptimizableLeaf[DynamicPredict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
     val program = DynamicPredict(layout = layout, demos = demos, config = DynamicValues.record("seed" := 1))
     assertLeafLaws(program, firstParameters, secondParameters)
   }
 
-  test("PredictorLens[Predict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
+  test("OptimizableLeaf[Predict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Answer directly."))
     val program = Predict(
       signature,
@@ -130,7 +130,7 @@ final class OptimizableParametersSuite extends FunSuite:
     assertLeafLaws(program, firstParameters, secondParameters)
   }
 
-  test("PredictorLens[ChainOfThought] satisfies the lens laws and includes config in optimizable parameters") {
+  test("OptimizableLeaf[ChainOfThought] satisfies the lens laws and includes config in optimizable parameters") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Reason carefully."))
     val program = ChainOfThought(
       signature,
@@ -138,7 +138,7 @@ final class OptimizableParametersSuite extends FunSuite:
       name = Some("typed_cot"),
       config = DynamicValues.record("seed" := 1)
     )
-    val leaf = summon[PredictorLens[ChainOfThought[(question: String), (answer: String)]]]
+    val leaf = summon[OptimizableLeaf[ChainOfThought[(question: String), (answer: String)]]]
 
     assertLeafLaws(program, firstParameters, secondParameters)
     assertEquals(leaf.get(program).config, DynamicValues.record("seed" := 1))
@@ -172,8 +172,8 @@ final class OptimizableParametersSuite extends FunSuite:
     assertEquals(updated.tools, tools)
   }
 
-  test("PredictorTraversal.empty rejects non-empty parameter vectors") {
-    val empty = PredictorTraversal.empty[Int]
+  test("OptimizableTraversal.empty rejects non-empty parameter vectors") {
+    val empty = OptimizableTraversal.empty[Int]
     assertEquals(empty.read(42), Vector.empty[OptimizableParameters])
     assertEquals(empty.replace(42, Vector.empty), 42)
 

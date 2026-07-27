@@ -20,7 +20,7 @@ Programs live on two layers that share one engine:
   boundary. `DynamicPredict` is the executable prediction leaf on this spine. The typed
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
-The bridge for optimization is `PredictorTraversal[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
+The bridge for optimization is `OptimizableTraversal[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
 non-executable predictor views (`inspect` / `readIdentified`) and `OptimizableParameters` values (`read`), then writes
 an arity-matched parameter vector back through `replace`. This is what the [`optimize`](../optimize/README.md) and
 [`gepa`](../gepa/README.md) modules drive.
@@ -34,7 +34,7 @@ an arity-matched parameter vector back through `replace`. This is what the [`opt
 | `Predict[I, O]` | The fundamental typed predictor: encode `I`, run its `PredictEngine` against the LM, decode into `Prediction[O]`. |
 | `DynamicPredict` | The dynamic predictor for runtime-known layouts: accept a `ProgramCall[DynamicValue.Record]`, run the shared engine, and return `Prediction[DynamicValue.Record]`. |
 | `OptimizableParameters` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
-| `PredictorView` | A non-executable snapshot pairing `OptimizableParameters` with read-only signature structure and module name. |
+| `OptimizableView` | A non-executable snapshot pairing `OptimizableParameters` with read-only signature structure and module name. |
 | `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
 | `ReAct[I, O]` | Reasoning-and-acting agent: iterates over a tool set using a text protocol (`next_thought` / `next_tool_name` / `next_tool_args`), then a CoT-augmented extractor produces `O`. Learnable: `reactPredict`, `extractorPredict`. |
 | `CodeAct[I, O]` | Generates and executes Python via a `CodeInterpreter` in a loop, then extracts outputs. Supports user tools bridged into the sandbox. |
@@ -65,7 +65,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
 | `ProgramRunner[P]` | Runs typed or dynamic `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
 | `Prediction[O]` | Typed output `O` + its `RawPrediction` evidence (completions, usage). |
-| `PredictorTraversal[P]` / `PredictorLens[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
+| `OptimizableTraversal[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
 | `Aggregation.majority` | Picks the most-common field value across candidate completions (ties to first). |
 | `KNN` / `EmbeddingsRetriever` | Brute-force in-memory retrievers (no FAISS): nearest trainset examples by dot product, top-k passages by cosine. |
@@ -79,8 +79,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
   from their signature representation, so a typed call emits one `predict` module lifecycle rather than a
   wrapper-over-dynamic pair. `Predict.erase` creates a one-way dynamic snapshot with the same engine state;
   programs that start with a runtime-known layout construct `DynamicPredict` directly.
-- **`PredictorTraversal` is the optimizer backbone.** Optimizers never special-case program types — they read the
-  predictor genome through `PredictorTraversal`, build edited copies, and `replace`. This is why one optimizer codepath
+- **`OptimizableTraversal` is the optimizer backbone.** Optimizers never special-case program types — they read the
+  predictor genome through `OptimizableTraversal`, build edited copies, and `replace`. This is why one optimizer codepath
   covers a bare `Predict` and an arbitrary composite.
 - **Config layering and bound LMs.** Module-level and per-call `config` merge with per-call winning;
   `rolloutId` is a typed cache-busting field, not part of the provider bag. A predictor can bind its own
@@ -97,8 +97,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `Predict.scala`, `DynamicPredict.scala` | sibling statically typed and dynamic predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
-| `predictors/PredictorLens.scala`, `PredictorTraversal.scala` | leaf lens and composite optimizer-traversal typeclasses |
-| `predictors/CompositePredictorTraversalInstances.scala`, `PredictorTraversalDerivation.scala` | built-in composite instances and strict Mirror derivation |
+| `predictors/OptimizableLeaf.scala`, `OptimizableTraversal.scala` | leaf lens and composite optimizer-traversal typeclasses |
+| `predictors/CompositeOptimizableTraversalInstances.scala`, `OptimizableTraversalDerivation.scala` | built-in composite instances and strict Mirror derivation |
 | `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
 | `contracts/ToolFunction.scala`, `ToolCall.scala` | callable tools and their invocation messages |
 | `ProgramRunner.scala` | the shared typed/dynamic record-running capability |
@@ -110,5 +110,5 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 ## Relation to dspy
 
 This ports `dspy.predict` and the module family. The shape decisions specific to dspy4s — pure modules with
-runtime-owned bookkeeping, the static/dynamic split sharing one engine, and `PredictorTraversal` standing in for
+runtime-owned bookkeeping, the static/dynamic split sharing one engine, and `OptimizableTraversal` standing in for
 `named_predictors()` — are what let the typed surface and the optimizers coexist over one substrate.

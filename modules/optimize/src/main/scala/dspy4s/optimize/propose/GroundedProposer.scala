@@ -11,9 +11,9 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.CandidateCount
 import dspy4s.optimize.DatasetSampleSize
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorView
+import dspy4s.programs.predictors.OptimizableView
 import dspy4s.programs.contracts.ProgramCall
 
 /** Knobs for [[GroundedProposer]], mirroring the relevant slice of upstream's
@@ -58,7 +58,7 @@ final case class GroundedProposerConfig(
   * predictor, grounded in the task data and (optionally) bootstrapped demos. A v1 port of the proposer slice of DSPy's
   * `dspy.propose.grounded_proposer` (`grounded_proposer.py`, `dataset_summary_generator.py`).
   *
-  * '''What it does.''' For each learnable predictor exposed by [[PredictorTraversal.read]] (in read order), it emits
+  * '''What it does.''' For each learnable predictor exposed by [[OptimizableTraversal.read]] (in read order), it emits
   * `config.numInstructions` candidate instruction strings via an instruction-generation [[DynamicPredict]] (the
   * `GenerateModuleInstruction` analogue). Each proposal is grounded in:
   *   1. a '''dataset summary''' — a short observations string bootstrapped once per call from a sample of the trainset
@@ -93,17 +93,17 @@ final case class GroundedProposerConfig(
   *     optimizer's accumulated attempts; the standalone proposer has none, and MIPROv2 (a later phase) owns that loop.
   *     Only round-0-style proposal is implemented here.
   */
-final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: PredictorTraversal[P]):
+final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: OptimizableTraversal[P]):
 
   /** Propose `config.numInstructions` candidate instruction strings for EACH predictor of `program` (in
-    * [[PredictorTraversal.read]] order), grounded in `trainset` and (optionally) `demoCandidates`.
+    * [[OptimizableTraversal.read]] order), grounded in `trainset` and (optionally) `demoCandidates`.
     *
     * @param program
     *   the program whose predictors get fresh instruction proposals
     * @param trainset
     *   task data; a sample grounds the dataset-summary step
     * @param demoCandidates
-    *   per-predictor bootstrapped demo sets (outer index aligns with [[PredictorTraversal.read]] order); empty (the default)
+    *   per-predictor bootstrapped demo sets (outer index aligns with [[OptimizableTraversal.read]] order); empty (the default)
     *   means no demos are rendered into proposals
     * @return
     *   for each predictor (in read order) a vector of `numInstructions` candidate instruction strings, or the first
@@ -190,7 +190,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
     * summary, the predictor's signature-derived description, the optional demo set, and a rotating tip.
     */
   private def proposeForPredictor(
-      predictor: PredictorView,
+      predictor: OptimizableView,
       idx: Int,
       summary: Option[String],
       demoSet: Vector[Example]
@@ -238,7 +238,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
   /** The signature-derived module description (the `DescribeModule` analogue): the predictor's name plus a
     * `Name(inputs) -> outputs` field-name rendering. dspy4s has no program source to introspect.
     */
-  private def describeModule(predictor: PredictorView): String =
+  private def describeModule(predictor: OptimizableView): String =
     val layout  = predictor.layout
     val inputs  = layout.inputFields.map(_.name).mkString(", ")
     val outputs = layout.outputFields.map(_.name).mkString(", ")

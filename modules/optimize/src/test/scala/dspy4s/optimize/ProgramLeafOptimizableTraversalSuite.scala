@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{PredictorLens, PredictorTraversal}
+import dspy4s.programs.predictors.{OptimizableLeaf, OptimizableTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -9,18 +9,18 @@ import dspy4s.programs.Predict
 import dspy4s.typed.Signature
 import munit.FunSuite
 
-import ProgramLeafPredictorTraversalSuite.Pipe2
+import ProgramLeafOptimizableTraversalSuite.Pipe2
 
-/** P4: leaf [[PredictorLens]] instances for the typed single-predictor programs [[Predict]] and [[ChainOfThought]].
+/** P4: leaf [[OptimizableLeaf]] instances for the typed single-predictor programs [[Predict]] and [[ChainOfThought]].
   *
   * A `Predict`/`ChainOfThought` field inside a composite must resolve to the 1-element leaf (via
-  * [[PredictorTraversal.fromPredictorLens]]) rather than being structurally torn apart by [[PredictorTraversal.derived]]. */
-class ProgramLeafPredictorTraversalSuite extends FunSuite:
+  * [[OptimizableTraversal.fromOptimizableLeaf]]) rather than being structurally torn apart by [[OptimizableTraversal.derived]]. */
+class ProgramLeafOptimizableTraversalSuite extends FunSuite:
 
-  /** Resolves the right [[PredictorLens]]/[[PredictorTraversal]] from the program's *static* type, so the `[I, O]` of the
+  /** Resolves the right [[OptimizableLeaf]]/[[OptimizableTraversal]] from the program's *static* type, so the `[I, O]` of the
     * given are inferred at the call site rather than pinned to `Nothing`. */
-  private def predictorOf[P](@annotation.unused program: P)(using leaf: PredictorLens[P]): PredictorLens[P]    = leaf
-  private def predictorsOf[P](@annotation.unused program: P)(using ps: PredictorTraversal[P]): PredictorTraversal[P]   = ps
+  private def predictorOf[P](@annotation.unused program: P)(using leaf: OptimizableLeaf[P]): OptimizableLeaf[P]    = leaf
+  private def predictorsOf[P](@annotation.unused program: P)(using ps: OptimizableTraversal[P]): OptimizableTraversal[P]   = ps
 
   // A concrete typed signature: (question: String) -> (answer: String).
   private val qaSignature = Signature.fromString("question -> answer")
@@ -29,7 +29,7 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
 
   // ── Predict ─────────────────────────────────────────────────────────────
 
-  test("PredictorLens[Predict] separates writable state from read-only metadata") {
+  test("OptimizableLeaf[Predict] separates writable state from read-only metadata") {
     val predict = Predict(qaSignature, demos = demo, name = Some("ask"))
     val leaf    = predictorOf(predict)
     val state   = leaf.get(predict)
@@ -39,13 +39,13 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
     assertEquals(view.moduleName, "ask")
   }
 
-  test("PredictorLens[Predict]: set(p, get(p)) round-trips to identity") {
+  test("OptimizableLeaf[Predict]: set(p, get(p)) round-trips to identity") {
     val predict = Predict(qaSignature, demos = demo, name = Some("ask"))
     val leaf    = predictorOf(predict)
     assertEquals(leaf.set(predict, leaf.get(predict)), predict)
   }
 
-  test("PredictorLens[Predict]: set with edited demos is reflected (demos-only)") {
+  test("OptimizableLeaf[Predict]: set with edited demos is reflected (demos-only)") {
     val predict = Predict(qaSignature, name = Some("ask"))
     val leaf    = predictorOf(predict)
     val edited  = leaf.get(predict).copy(demos = demo)
@@ -55,7 +55,7 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
     assertEquals(leaf.get(out).demos, demo)
   }
 
-  test("PredictorLens[Predict]: set writes back instructions (COPRO/MIPRO enabler)") {
+  test("OptimizableLeaf[Predict]: set writes back instructions (COPRO/MIPRO enabler)") {
     val predict = Predict(qaSignature, name = Some("ask"))
     val leaf    = predictorOf(predict)
     val cur     = leaf.get(predict)
@@ -64,7 +64,7 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
     assertEquals(leaf.get(out).instructions, Some("Think carefully."))
   }
 
-  test("PredictorLens[Predict]: set writes back module config") {
+  test("OptimizableLeaf[Predict]: set writes back module config") {
     val predict = Predict(qaSignature, name = Some("ask"))
     val leaf    = predictorOf(predict)
     val cfg     = rec("temperature" := 0.3)
@@ -76,7 +76,7 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
 
   // ── ChainOfThought ───────────────────────────────────────────────────────
 
-  test("PredictorLens[ChainOfThought] exposes augmented read-only metadata plus writable state") {
+  test("OptimizableLeaf[ChainOfThought] exposes augmented read-only metadata plus writable state") {
     val cot  = ChainOfThought(qaSignature, demos = demo, name = Some("think"))
     val leaf = predictorOf(cot)
     val state = leaf.get(cot)
@@ -88,13 +88,13 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
     assertEquals(view.moduleName, "think")
   }
 
-  test("PredictorLens[ChainOfThought]: set(p, get(p)) round-trips to identity") {
+  test("OptimizableLeaf[ChainOfThought]: set(p, get(p)) round-trips to identity") {
     val cot  = ChainOfThought(qaSignature, demos = demo, name = Some("think"))
     val leaf = predictorOf(cot)
     assertEquals(leaf.set(cot, leaf.get(cot)), cot)
   }
 
-  test("PredictorLens[ChainOfThought]: set with edited demos is reflected (demos-only)") {
+  test("OptimizableLeaf[ChainOfThought]: set with edited demos is reflected (demos-only)") {
     val cot    = ChainOfThought(qaSignature, name = Some("think"))
     val leaf   = predictorOf(cot)
     val edited = leaf.get(cot).copy(demos = demo)
@@ -103,7 +103,7 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
     assertEquals(leaf.get(out).demos, demo)
   }
 
-  test("PredictorLens[ChainOfThought]: set writes back instructions") {
+  test("OptimizableLeaf[ChainOfThought]: set writes back instructions") {
     val cot  = ChainOfThought(qaSignature, name = Some("think"))
     val leaf = predictorOf(cot)
     val cur  = leaf.get(cot)
@@ -113,19 +113,19 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
 
   // ── Resolution priority: leaf, not structural derivation ─────────────────
 
-  test("PredictorTraversal[Predict] resolves to the leaf fromPredictorLens instance, not derived") {
+  test("OptimizableTraversal[Predict] resolves to the leaf fromOptimizableLeaf instance, not derived") {
     val predict = Predict(qaSignature, name = Some("ask"))
     assertEquals(
       predictorsOf(predict).getClass.getName,
-      "dspy4s.programs.predictors.PredictorTraversal$fromPredictorLens"
+      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
     )
   }
 
-  test("PredictorTraversal[ChainOfThought] resolves to the leaf fromPredictorLens instance, not derived") {
+  test("OptimizableTraversal[ChainOfThought] resolves to the leaf fromOptimizableLeaf instance, not derived") {
     val cot = ChainOfThought(qaSignature, name = Some("think"))
     assertEquals(
       predictorsOf(cot).getClass.getName,
-      "dspy4s.programs.predictors.PredictorTraversal$fromPredictorLens"
+      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
     )
   }
 
@@ -136,7 +136,7 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = ChainOfThought(qaSignature, name = Some("think"))
     )
-    val ps   = summon[PredictorTraversal[Pipe2]]
+    val ps   = summon[OptimizableTraversal[Pipe2]]
     val views = ps.inspect(pipe)
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "ask")
@@ -152,13 +152,13 @@ class ProgramLeafPredictorTraversalSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = ChainOfThought(qaSignature, name = Some("think"))
     )
-    val ps       = summon[PredictorTraversal[Pipe2]]
+    val ps       = summon[OptimizableTraversal[Pipe2]]
     val attached = ps.replace(pipe, ps.read(pipe).map(_.copy(demos = demo)))
     assertEquals(attached.a.demos, demo)
     assertEquals(attached.b.demos, demo)
   }
 
-object ProgramLeafPredictorTraversalSuite:
+object ProgramLeafOptimizableTraversalSuite:
 
   // A composite holding a typed Predict and a typed ChainOfThought, both concrete (question -> answer).
   final case class Pipe2(
@@ -167,4 +167,4 @@ object ProgramLeafPredictorTraversalSuite:
   )
 
   object Pipe2:
-    given PredictorTraversal[Pipe2] = PredictorTraversal.derived
+    given OptimizableTraversal[Pipe2] = OptimizableTraversal.derived

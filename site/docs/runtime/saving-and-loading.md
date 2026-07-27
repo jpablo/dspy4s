@@ -30,19 +30,19 @@ This contract is shared by typed `Predict`, typed `ChainOfThought`, and
 leaf—for example, `ProgramOfThought` exposes its generator, regenerator, and
 answerer. The executable predictor is not used as a parameter carrier.
 
-`PredictorLens[P]` is a lens onto these parameters. Its instances obey:
+`OptimizableLeaf[P]` is a lens onto these parameters. Its instances obey:
 
 - Get-Put: writing the parameters just read is a no-op.
 - Put-Get: reading after a write returns the written parameters.
 - Put-Put: only the last parameters written matter.
 - Frame: writing parameters does not change predictor metadata.
 
-At the composite level, `PredictorTraversal.replace(program, PredictorTraversal.read(program))`
+At the composite level, `OptimizableTraversal.replace(program, OptimizableTraversal.read(program))`
 returns the original program, and an arity-matched replacement reads back as the
 same parameter vector.
 
-Algebraically, `PredictorLens[P]` is a lawful lens focused on one `OptimizableParameters`,
-while `PredictorTraversal[P]` is an ordered finite traversal. Composition concatenates
+Algebraically, `OptimizableLeaf[P]` is a lawful lens focused on one `OptimizableParameters`,
+while `OptimizableTraversal[P]` is an ordered finite traversal. Composition concatenates
 the child traversals, parameter-free structure contributes the empty vector, and
 `Vector[OptimizableParameters]` forms the parameter monoid under concatenation. Named
 inspection is checked against the canonical traversal so labels cannot silently
@@ -50,7 +50,7 @@ reorder or substitute parameters.
 
 ## Metadata and execution resources
 
-`PredictorMetadata` is inspectable but not writable through optimizer replacement.
+`OptimizableMetadata` is inspectable but not writable through optimizer replacement.
 It contains the signature field structure (with instructions removed) and module
 name. Loading preserves that metadata from the fresh target program.
 
@@ -64,10 +64,10 @@ The following are also not persisted:
 This boundary prevents a saved prompt artifact from replacing architecture or live
 execution resources. Recreate and configure those normally, then load state into it.
 
-## PredictorLens IDs and compatibility
+## OptimizableLeaf IDs and compatibility
 
 The JSON object keys are `predictor-0`, `predictor-1`, and so on. They are ordinal
-IDs derived from the root `PredictorTraversal` traversal:
+IDs derived from the root `OptimizableTraversal` traversal:
 
 - JSON object order does not matter.
 - Missing and unknown ordinals are rejected.

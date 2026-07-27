@@ -22,7 +22,7 @@ import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence, RoundCount}
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 import dspy4s.typed.Signature
 
 import java.nio.file.Files
@@ -31,7 +31,7 @@ object Saving:
 
   /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`.
     * This tutorial uses `DynamicPredict` for a compact runtime-layout example; typed `Predict` and
-    * `ChainOfThought` are supported through the same `PredictorTraversal` / `OptimizableParameters` contract. */
+    * `ChainOfThought` are supported through the same `OptimizableTraversal` / `OptimizableParameters` contract. */
   // --8<-- [start:program]
   def program(): DynamicPredict =
     DynamicPredict(Signature.fromString("question -> answer").layout)
@@ -102,7 +102,7 @@ object Saving:
   roundTrip match
     case Left(err) => sys.error(s"save/load failed: ${err.message}")
     case Right(loaded) =>
-      val ps     = summon[PredictorTraversal[DynamicPredict]]
+      val ps     = summon[OptimizableTraversal[DynamicPredict]]
       val before = ps.read(compiled).head.demos.size
       val after  = ps.read(loaded).head.demos.size
       println(s"saved program state to: $path")

@@ -36,9 +36,9 @@ class TransformCombinatorSuite extends FunSuite:
       run(call.input).map(output => Prediction(output, RawPrediction(DynamicValues.record("tag" := tag))))
 
   private object Step:
-    given stepPredictor[I, O]: PredictorLens[Step[I, O]] with
+    given stepPredictor[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
+      def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -48,7 +48,7 @@ class TransformCombinatorSuite extends FunSuite:
   private def step[I, O](tag: String, signature: String)(f: I => O): Step[I, O] =
     Step(tag, input => Right(f(input)), predictor(signature))
 
-  private def params[P](program: P)(using predictors: PredictorTraversal[P]): Vector[OptimizableParameters] =
+  private def params[P](program: P)(using predictors: OptimizableTraversal[P]): Vector[OptimizableParameters] =
     predictors.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current

@@ -4,7 +4,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LanguageModel
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 import dspy4s.programs.ProgramRunner
 
 /** User-facing GEPA optimizer — the dspy4s analogue of dspy's `GEPA` teleprompter. It wires the [[GepaAdapter]] +
@@ -24,7 +24,7 @@ final class Gepa[P](
     metric: FeedbackMetric,
     reflectionLm: LanguageModel,
     config: GepaConfig
-)(using PredictorTraversal[P], ProgramRunner[P]):
+)(using OptimizableTraversal[P], ProgramRunner[P]):
 
   val name: String = "gepa"
 

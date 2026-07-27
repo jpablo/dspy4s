@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
@@ -15,7 +15,7 @@ final case class LabeledFewShotConfig(
     seed: Long = 0L
 )
 
-final class LabeledFewShot[P: PredictorTraversal](
+final class LabeledFewShot[P: OptimizableTraversal](
     config: LabeledFewShotConfig = LabeledFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -27,7 +27,7 @@ final class LabeledFewShot[P: PredictorTraversal](
       teacher: Option[P] = None,
       valset: Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps = summon[PredictorTraversal[P]]
+    val ps = summon[OptimizableTraversal[P]]
 
     val demos: Vector[Example] =
       if trainset.isEmpty then Vector.empty

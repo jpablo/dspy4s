@@ -17,7 +17,7 @@ A program denotes a Kleisli arrow `I ⇝ O`: `run : Program[I, O] => I => M[O]`,
 effect. Because `run` is effectful and the model is nondeterministic, laws are never stated on concrete
 model outputs. They are stated on **composition** and checked in whichever way is honest for each:
 
-- **structural** (on the program tree the combinator builds; no LLM): Category, Mode monoid, the `PredictorTraversal`
+- **structural** (on the program tree the combinator builds; no LLM): Category, Mode monoid, the `OptimizableTraversal`
   homomorphism;
 - **mock-LM** (deterministic stub model): the augment round-trip;
 - **distributional** (holds for any model output): exhaustive finite-score `argMax` monotonicity under an
@@ -26,7 +26,7 @@ model outputs. They are stated on **composition** and checked in whichever way i
 ## Carrier (forks 1 and 5)
 
 - **The unit stays `Module[I, O]`.** No parallel executable representation is introduced (this keeps
-  the `PredictorTraversal` optimizer machinery working). `Program[I, O]` below is denotational shorthand for that type.
+  the `OptimizableTraversal` optimizer machinery working). `Program[I, O]` below is denotational shorthand for that type.
 - **`>>>` threads the plain typed value `O`,** not `Prediction[O]`. Controls (`config`, `traceEnabled`,
   `rolloutId`) ride in `ProgramCall`; the `Prediction` envelope and the effect sit at the edges. Intermediate
   `Prediction.raw` (reasoning, completions, per-step usage) goes to the `RuntimeContext` trace, not onto the
@@ -75,7 +75,7 @@ augment[Name, T](field)(p) : Program[I, O] => Program[I, Out]                   
 
 mode(m: Mode)(p)               : Program[I, O] => Program[I, O]         // Monoid middleware, NON-learnable  [IMPLEMENTED 6.5]
 //   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode: model swap /
-//   temperature / rolloutId / traceEnabled. m introduces no learnable predict (PredictorTraversal passes through);
+//   temperature / rolloutId / traceEnabled. m introduces no learnable predict (OptimizableTraversal passes through);
 //   trace-transparent. Execution-wrapping modes (retry / pre-post) stay additive (no consumer yet).
 
 bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // shared reducer  [IMPLEMENTED 6.1]
@@ -132,7 +132,7 @@ selectBest        ordered search: early stopping and ties preserve attempt order
 
 feedback          feedback is NOT permutation-invariant       // carried hint = order matters
 
-PredictorTraversal        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
+OptimizableTraversal        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
                   read(c) = inspect(c).map(_.parameters)                    // parameter projection
                   replace(p, read(p)) = p                              // Get-Put
                   read(replace(p, states)) = states                    // Put-Get
@@ -146,7 +146,7 @@ commutative laws.
 
 ## Optimizer-addressability (fork 4)
 
-This is a data-shape constraint, satisfied by the existing `PredictorLens` (leaf) / `PredictorTraversal` (composite)
+This is a data-shape constraint, satisfied by the existing `OptimizableLeaf` (leaf) / `OptimizableTraversal` (composite)
 typeclasses, not new machinery. The rule:
 
 - **Learnable predicts are addressable immutable fields; fixed behavior is closures.** A combinator that
@@ -157,11 +157,11 @@ typeclasses, not new machinery. The rule:
     parameterized over the concrete inner type (`BestOfN[P, I, O]`, mirroring `Refine`) with a pass-through
     instance in its companion.
   - `loop`: holds `policy` + `extractor` fields (`read = [policy, extractor]`; = ReAct/CodeAct, and now RLM:
-    `rlmPredictorTraversal` reads `[actionPredict, extractPredict]` via the override-field pattern, commit `dd2fd4f`).
+    `rlmOptimizableTraversal` reads `[actionPredict, extractPredict]` via the override-field pattern, commit `dd2fd4f`).
   - `feedback`: holds inner `p` + `critic` predict (`read = read(p) ++ [critic]`). DONE (commit `dd2fd4f`):
     the OfferFeedback critic is hoisted to an addressable `criticPredict` field (override pattern) and
-    `refinePredictorTraversal` exposes it last, so optimizers can tune the critic like any other learnable.
-    Pinned by `CompositePredictorTraversalSuite`.
+    `refineOptimizableTraversal` exposes it last, so optimizers can tune the critic like any other learnable.
+    Pinned by `CompositeOptimizableTraversalSuite`.
 - **`mode` is restricted to non-learnable transforms** so it can stay closure-shaped and ergonomic. Anything
   with a learnable sub-generation (synthesis, comparison, critique) is a dedicated combinator that holds the
   predict as a field (`selectBest`, `feedback`, `MultiChainComparison`), never a mode. This is the one place
@@ -174,17 +174,17 @@ The addressability layer is an instance of the **Para construction** from catego
 Cruttwell et al.): a morphism is a pair (parameters, shape), composition tensors the parameters, and
 reparameterization is the 2-cell layer optimizers act on. dspy4s's writable parameters are homogeneous (every
 parameter block is an `OptimizableParameters` value containing instructions, demos, and config), so the parameter tensor degenerates
-to the free monoid `Vector[OptimizableParameters]`. `PredictorTraversal.read` / `replace` are exactly Para's projection and
+to the free monoid `Vector[OptimizableParameters]`. `OptimizableTraversal.read` / `replace` are exactly Para's projection and
 reparameterization; signature structure and module identity remain in the morphism's read-only metadata.
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
 `dspy4s.programs.para.ParaCategory` (id / `>>>` / ordered `fanout` / `params` / `reparam` with the Para laws) over
 `dspy4s.programs.para.Program` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
-`PredictorTraversal[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
+`OptimizableTraversal[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
 the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ParaCategoryLawSuite`.
-The Mirror-based `PredictorTraversal.derived` gate is strict: every product field must provide `PredictorTraversal` evidence.
-Intentionally parameter-free field types opt in with `PredictorTraversal.empty`; missing evidence is a compile error,
+The Mirror-based `OptimizableTraversal.derived` gate is strict: every product field must provide `OptimizableTraversal` evidence.
+Intentionally parameter-free field types opt in with `OptimizableTraversal.empty`; missing evidence is a compile error,
 so a learnable subtree cannot silently disappear from optimizer addressability.
 
 **Entry-point experiment (commit `8d7e009`), CLOSED (commit `d1d38d0`).** The first round drove COPRO through
@@ -198,7 +198,7 @@ The close went through two forms. FIRST (historical): `Program` packaged a per-m
 documented coherence law (the packaged decoder must agree with the program's typed input boundary) as the
 condition under which the category laws held. SECOND (current, stage 4): decoding is a property of the OBJECT.
 `Program` packages nothing decode-related; `Program.of` requires a sealed `RecordCodec[I]` at the domain (the
-object gate) alongside `PredictorTraversal`; the record-boundary runner demands `RecordCodec[I]` at use; composition
+object gate) alongside `OptimizableTraversal`; the record-boundary runner demands `RecordCodec[I]` at use; composition
 threads nothing. `ProgramInput`, the morphism-specific decoder, and the coherence law are GONE: identity, every
 program at an object, and the runner all decode through the object's one canonical codec, so the unit laws hold
 with no decode-side condition and an incoherent per-morphism decoder is UNREPRESENTABLE (compile gates pin both
@@ -228,7 +228,7 @@ category level (see "The close" above).
 
 Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)` is the path-dependent
 constructor (the runtime-string counterpart of `Predict(Signature.derived(...))`, outputs read from the raw
-envelope as always), and the optimizer surface (`PredictorTraversal` read/replace + the record-boundary
+envelope as always), and the optimizer surface (`OptimizableTraversal` read/replace + the record-boundary
 `ProgramRunner`) holds over a packaged bundle program. Cross-fiber pipelines are expressed through
 `DynamicSignature.bridge(from, to): Either[_, Program[from.Out, to.In]]`, the reindexing morphism: it factors
 through the wire (encode, then the target's validating entry, a parameter-free `LiftEither`), fails EAGERLY
@@ -240,13 +240,13 @@ lawful statement is exactly "bridges are lifts of base compatibility arrows".
 
 Stage 3 landed and the prototype label is off: `ParaCompileSuite` drives COPRO through a packaged bundle
 program (the runtime-string student finds the winning instruction exactly like the typed one, through the same
-`PredictorTraversal` + `ProgramRunner` entry point, no dynamic-specific plumbing), and the learn/optimization example
+`OptimizableTraversal` + `ProgramRunner` entry point, no dynamic-specific plumbing), and the learn/optimization example
 runs its main through `DynamicSignature.parse` + `predict()` with the doc snippet generalized to the capability
 constraints. The declared stance: `DynamicSignature` is the user path for runtime-string signatures;
 `DynamicPredict` is the untyped substrate for framework-internal generations (its scaladoc now points users to
 the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
 decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
-unrepresentable. Both optimizer capabilities are uniform over the packaged type: `PredictorTraversal[Program[I, O]]`
+unrepresentable. Both optimizer capabilities are uniform over the packaged type: `OptimizableTraversal[Program[I, O]]`
 (Program companion; read/replace = the Para projection/reparameterization) and `ProgramRunner[Program[I, O]]`
 (Program companion; conditional on `RecordCodec[I]`, decode object-side + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
@@ -285,7 +285,7 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   formalization library: there the equations are the deliverable, here they are executable specifications.
 - **`params` as a functor value.** `ParaCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
   parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`
-  category to the parameter-monoid delooping) names what `PredictorTraversal.read` is categorically; its functor laws
+  category to the parameter-monoid delooping) names what `OptimizableTraversal.read` is categorically; its functor laws
   (preserves id + composition), carried on the `CategoryFunctor` trait against the two `Category` instances, are exactly
   the Para projection laws. The
   parameter monoid is now an explicit `given Monoid[Vector[OptimizableParameters]]` and the delooping is generic
@@ -383,7 +383,7 @@ suites as the regression net:
    the correction above). Pinned by `AttemptSelectionLawSuite`; `TypedBestOfNSuite` / `RefinePerModuleAdviceSuite`
    green unchanged. Built on the step-4 `isolatedAttempt`/`propagateAttempt` primitives.
 2. **`>>>` (Category) and `parallel`. DONE (commit `60d2ea5`).** Added `id` / `AndThen` (`>>>`) / `Both`
-   (`parallel`) in `Compose.scala`, with hand-written `PredictorTraversal` instances (concretely typed children, so
+   (`parallel`) in `Compose.scala`, with hand-written `OptimizableTraversal` instances (concretely typed children, so
    pipelines stay addressable) and `ComposeLawSuite` covering value-category and ordered-fan-out semantics.
    **Code-truth correction:** `parallel` did NOT "largely exist as `Parallel`" — `Parallel` is a thread-pool
    batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the typed fan-out
@@ -400,7 +400,7 @@ suites as the regression net:
    String/identity instance, so the five call sites are unchanged. Closing position stays additive (no
    consumer). `OutputAugmentationSuite` adds a typed-field test, the round-trip law, and a hook accept/reject.
 5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
-   `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, PredictorTraversal
+   `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, OptimizableTraversal
    pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay
    additive until a consumer needs them.
 
@@ -446,10 +446,10 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
 - **Full Para adoption**: promote the packaged `Program` (see the Para formalization above; the entry-point
   loop is closed, decoding is object-side with codec-equipped objects gating `of` / `id` / the runner, the
   signature-backed `ProgramRunner` instances cover the framework leaves and composites for bare-module
-  running, and the BestOfN / Refine / RLM `PredictorTraversal` instances are in place, so the layer and its instance
+  running, and the BestOfN / Refine / RLM `OptimizableTraversal` instances are in place, so the layer and its instance
   coverage are functionally complete) to the DOCUMENTED public optimizer entry-point API (docs-site guide +
   README surface). The former Mirror silent-drop is already closed: structural derivation now requires field
-  evidence, with `PredictorTraversal.empty` as an explicit parameter-free opt-in. The stage-4 API break already
+  evidence, with `OptimizableTraversal.empty` as an explicit parameter-free opt-in. The stage-4 API break already
   happened in the no-users window, so what remains is documentation surface, not code.
 - **CIO substrate migration**: the deferred kyo-compat phase described under fork 5 — a mechanical rewrite of
   the combinator bodies (`Either`-flatMap → `CIO[Either]`-flatMap), guarded by the law suites.

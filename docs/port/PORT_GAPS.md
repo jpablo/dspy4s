@@ -28,20 +28,20 @@
 
 **Status:** Resolved (P1–P6, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07 / 1657f9c)
 
-**Resolution.** Closed by a typed `PredictorTraversal[P]` / `PredictorLens[P]` typeclass pair
+**Resolution.** Closed by a typed `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclass pair
 with Scala 3 Mirror derivation (`modules/programs/.../predictors/`). `inspect`
-enumerates non-executable `PredictorView`s (read-only metadata + optimizable parameters),
+enumerates non-executable `OptimizableView`s (read-only metadata + optimizable parameters),
 `read` projects their `OptimizableParameters` values, and `replace` rebuilds the program immutably.
-Each `PredictorLens` leaf satisfies Get-Put, Put-Get, Put-Put, and the metadata frame exactly.
+Each `OptimizableLeaf` leaf satisfies Get-Put, Put-Get, Put-Put, and the metadata frame exactly.
 Composite traversal satisfies exact no-op replacement, read-after-write, and stable metadata/order;
 override-backed composites satisfy last-write-wins observationally through `read`. User composites derive it for free; framework composites
 (`ReAct`, `CodeAct`, `MultiChainComparison`) get
 hand-written instances and had their sub-predicts **hoisted to stable fields**
 (closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
-`PredictOps` assumption onto `PredictorTraversal` (the `LabeledSampleProgram` glue was deleted),
+`PredictOps` assumption onto `OptimizableTraversal` (the `LabeledSampleProgram` glue was deleted),
 and a `ProgramRunner[P]` capability (`programs/ProgramRunner.scala`) dropped the `P <: DynamicModule` bound
 so **typed** programs and user composites are now optimizable end-to-end. The legacy
-`PredictOps` typeclass and its bridge were removed in P6 — `PredictorTraversal` is the sole
+`PredictOps` typeclass and its bridge were removed in P6 — `OptimizableTraversal` is the sole
 introspection typeclass. Writable state is uniformly instructions + demos + module config;
 `MultiChainComparison` has no `ProgramRunner` because its `MultiChainInput` includes candidate
 predictions in addition to the base record input; arbitrary user composites supply their own `ProgramRunner`.
@@ -115,7 +115,7 @@ A **typed** equivalent of `named_predictors` — *not* a reflective
 - a capability method on the program contract, e.g.
   `def predictors: Vector[DynamicPredict]` (and a way to rebuild with updated
   ones), or
-- a derivable typeclass `PredictorTraversal[P]` that yields/updates the contained
+- a derivable typeclass `OptimizableTraversal[P]` that yields/updates the contained
   predictors,
 
 so optimizers can read and immutably replace the learnable parts of any
@@ -211,7 +211,7 @@ merged under the per-call override. Tier 0.
 
 **Status:** Resolved
 
-**Resolution.** Closed by wiring the `PredictorTraversal[P]` traversal into `ProgramPersistence`,
+**Resolution.** Closed by wiring the `OptimizableTraversal[P]` traversal into `ProgramPersistence`,
 so a single typed or dynamic predictor and an arbitrary composite share one code path.
 New primitives:
 
@@ -223,13 +223,13 @@ New primitives:
   This is the complete writable state for `DynamicPredict`, typed `Predict`, and typed `ChainOfThought`.
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
-  `PredictorTraversal`-based: `{ "predictors": { "predictor-0": <OptimizableParameters>, ... } }`.
+  `OptimizableTraversal`-based: `{ "predictors": { "predictor-0": <OptimizableParameters>, ... } }`.
   Ordinal IDs are validated on load. JSON via
   `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
   `RuntimeError`.
 
 **Round-trip scope.** Instructions, demos, and module config round-trip for every supported leaf.
-Signature field structure and module name are read-only `PredictorMetadata`; runtimes, output schemas,
+Signature field structure and module name are read-only `OptimizableMetadata`; runtimes, output schemas,
 bound LMs, tools, callbacks, and history are execution resources. Loading state into a fresh program
 preserves all of them. The target must have the same predictor traversal/order: `predictor-N` IDs reject
 missing/unknown ordinals and ignore JSON object order, but cannot detect a same-cardinality reorder.
@@ -278,14 +278,14 @@ threshold, and injects it as a `hint_` input into the next attempt via a
 
 **v2 — per-module advice (parity).** `Refine[P, I, O]` now retains the inner program type
 `P` (an upper-bounded typed module, so `I`/`O` still infer at call sites — `BestOfN`-style
-ergonomics, no call-site type annotations) and requires `PredictorTraversal[P]`. `OfferFeedback`
+ergonomics, no call-site type annotations) and requires `OptimizableTraversal[P]`. `OfferFeedback`
 now takes a `module_names` input and emits `advice` as a JSON object `{component: advice}`
-keyed by the inner program's named predictor views (`PredictorTraversal.inspectNamed`, G-12 P-c). Each
+keyed by the inner program's named predictor views (`OptimizableTraversal.inspectNamed`, G-12 P-c). Each
 predictor's call is matched to its advice by its `SignatureLayout` — the dspy4s stand-in
 for Python's `signature2name[signature]` object-identity routing — and only that predictor's
 `hint_` is injected (absent/`N/A` → no hint). A bare (non-JSON) advice string degrades to
 uniform advice across all components, preserving the v1 single-predictor behavior. This
-required relocating `PredictorTraversal`/`PredictorLens` from `optimize` to `programs` (they describe
+required relocating `OptimizableTraversal`/`OptimizableLeaf` from `optimize` to `programs` (they describe
 program structure, not optimization) to avoid a `programs`→`optimize` cycle. **Remaining
 delta:** grounding is the trace + I/O, not program/reward source code (dspy4s has no source
 introspection); routing is by layout value-equality, not object identity (structurally
@@ -585,12 +585,12 @@ prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureF
 (`evaluate`/`makeReflectiveDataset`), `InstructionProposer` (reflective mutation), `GepaState` + Pareto
 candidate selection, `GepaEngine` (reflective-mutation loop), and the `Gepa` facade. A deterministic
 instruction-sensitive test shows GEPA discovering a better instruction (score 0 → 1.0 within budget).
-**P-c done:** `PredictorTraversal.inspectNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
+**P-c done:** `OptimizableTraversal.inspectNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
 field labels for a composite), while `readIdentified` assigns typed `PredictorId`s from the canonical traversal.
 GEPA keys candidates and trace-index association by ID; labels remain display/prompt metadata and may reflect an
 anonymous composition tree's current association. The `inspectNamed` capability is also what Refine per-module advice
 (G-5 follow-up) needs — now **done** (G-5 v2;
-`PredictorTraversal` relocated to `programs` to break the cycle). **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
+`OptimizableTraversal` relocated to `programs` to break the cycle). **Multi-predictor GEPA validated end-to-end:** a two-stage pipeline (hinter → answerer) where BOTH
 predictors must improve — GEPA evolves both (per-component reflective datasets + name→trace association), score
 0 → 1.0. **Round-robin component selection done** (gepa's default; `ComponentSelector.RoundRobin`/`All`).
 **Live-model validation done:** `gepaSmokeMain` (gpt-4o-mini) evolved the vague baseline "Answer the question."
@@ -637,7 +637,7 @@ dependencies to replace** (unlike SIMBA/GRPO/Optuna). The "dependency" is just t
 
 ### dspy4s current state — what we have, and the prerequisites the spike found
 
-Already shipped (enablers): `PredictorTraversal[P]`/`PredictorLens.set` (G-1 — the candidate↔program mapping, dspy's
+Already shipped (enablers): `OptimizableTraversal[P]`/`OptimizableLeaf.set` (G-1 — the candidate↔program mapping, dspy's
 `named_predictors()` + `with_instructions()`), `ProgramRunner[P]` + `Evaluate` (batch scoring), per-module trace
 (`TraceEntry`), bound/reflection LM (G-3). A **single-predictor** program already traces cleanly.
 
@@ -649,7 +649,7 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **P-b — parse-failure-as-feedback.** `PredictEngine.parseOutputs` aborts on `adapter.parse → Left` and discards
   the raw `LmOutput.text`. Need a `FailedPrediction`-style capture (raw completion + low score + format feedback),
   not an aborting error (dspy's `add_format_failure_as_feedback`).
-- **P-c — named predictors.** At the time of this prerequisite spike, `PredictorTraversal.read` was positional
+- **P-c — named predictors.** At the time of this prerequisite spike, `OptimizableTraversal.read` was positional
   (`Vector[DynamicPredict]`); trace entries are keyed
   by `component = moduleName` (a possibly-colliding string). GEPA's whole model is keyed by unique component names.
   The names are **latent** — the Mirror derivation has `MirroredElemLabels` but only uses `MirroredElemTypes`;
@@ -666,7 +666,7 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **v1:** add P-c (named predictors) → multi-predictor programs; closes Refine per-module advice as a freebie.
 - **v2:** merge proposer (crossover), multi-objective frontier types, eval cache, run_dir resume, wandb/mlflow.
 
-Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `PredictorTraversal`/`ProgramRunner`/`Teleprompter`
+Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `OptimizableTraversal`/`ProgramRunner`/`Teleprompter`
 spine). Tier 2.
 
 ---
@@ -697,7 +697,7 @@ Part of the exported optimizer surface; the demo+rule dual strategy is distinct 
 
 ### Proposed direction
 
-Port on the existing spine (`PredictorTraversal`, `ProgramRunner`, `Evaluate`, per-module trace). The trajectory
+Port on the existing spine (`OptimizableTraversal`, `ProgramRunner`, `Evaluate`, per-module trace). The trajectory
 capture GEPA added (failure traces, per-component association) covers SIMBA's introspection needs; the
 numpy softmax is a few lines of Scala. Tier 2.
 
@@ -843,7 +843,7 @@ the dataset summary.
 
 `GroundedProposer` v1 grounds in a dataset summary + demos. Program-source grounding is impossible
 as-is (no source introspection in Scala; the same delta documented for Refine's `OfferFeedback`); a
-structural program description (from `PredictorTraversal.inspectNamed` + layouts) is the feasible analogue.
+structural program description (from `OptimizableTraversal.inspectNamed` + layouts) is the feasible analogue.
 Summary refinement is just unimplemented.
 
 ### Why it matters

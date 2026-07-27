@@ -43,16 +43,16 @@ class RecoveryCombinatorSuite extends FunSuite:
       )
 
   private object Attempt:
-    given attemptPredictor: PredictorLens[Attempt] with
+    given attemptPredictor: OptimizableLeaf[Attempt] with
       def get(program: Attempt): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: Attempt): PredictorMetadata = program.predict.predictorView.metadata
+      def metadata(program: Attempt): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Attempt, updated: OptimizableParameters): Attempt =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private def predictor(instruction: String): DynamicPredict =
     DynamicPredict(SignatureLayout.parse("i -> s").toOption.get.withInstructions(Some(instruction)))
 
-  private def params[P](program: P)(using predictors: PredictorTraversal[P]): Vector[OptimizableParameters] =
+  private def params[P](program: P)(using predictors: OptimizableTraversal[P]): Vector[OptimizableParameters] =
     predictors.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
@@ -138,7 +138,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary  = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
     val recovered = primary.recoverWith(RecoveryPolicy.Always)(fallback)
-    val P         = summon[PredictorTraversal[RecoverWith[Int, String, Attempt, Attempt]]]
+    val P         = summon[OptimizableTraversal[RecoverWith[Int, String, Attempt, Attempt]]]
 
     assertEquals(
       params(recovered),

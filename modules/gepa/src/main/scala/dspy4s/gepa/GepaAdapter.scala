@@ -7,9 +7,9 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
-import dspy4s.programs.predictors.IdentifiedPredictor
+import dspy4s.programs.predictors.IdentifiedOptimizable
 import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.ProgramRunner
 
@@ -28,10 +28,10 @@ final class GepaAdapter[P](
     val program: P,
     val metric: FeedbackMetric,
     val failureScore: Double = 0.0
-)(using ps: PredictorTraversal[P], runner: ProgramRunner[P]):
+)(using ps: OptimizableTraversal[P], runner: ProgramRunner[P]):
 
   /** Stable predictor ID → its traversal entry and trace index. Display names never participate in lookup. */
-  private val componentsById: Map[PredictorId, (IdentifiedPredictor, Int)] =
+  private val componentsById: Map[PredictorId, (IdentifiedOptimizable, Int)] =
     ps.readIdentified(program).zipWithIndex.map { case (entry, index) => entry.id -> (entry -> index) }.toMap
 
   /** Apply `candidate` to the program and evaluate it over `batch`, returning per-example outputs + scores.

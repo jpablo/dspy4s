@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{PredictorLens, PredictorMetadata, OptimizableParameters}
+import dspy4s.programs.predictors.{OptimizableLeaf, OptimizableMetadata, OptimizableParameters}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -58,11 +58,11 @@ final case class DemoAwarePredictProgram(
     Right(RawPrediction(rec("answer" := answer)))
 
 object DemoAwarePredictProgram:
-  given demoAwarePredictor: PredictorLens[DemoAwarePredictProgram] with
+  given demoAwarePredictor: OptimizableLeaf[DemoAwarePredictProgram] with
     def get(program: DemoAwarePredictProgram): OptimizableParameters =
       OptimizableParameters(program.layout.instructions, program.demos, program.config)
-    def metadata(program: DemoAwarePredictProgram): PredictorMetadata =
-      PredictorMetadata.from(program.layout, program.moduleName)
+    def metadata(program: DemoAwarePredictProgram): OptimizableMetadata =
+      OptimizableMetadata.from(program.layout, program.moduleName)
     def set(program: DemoAwarePredictProgram, updated: OptimizableParameters): DemoAwarePredictProgram =
       if updated == get(program) then program
       else
@@ -73,11 +73,11 @@ object DemoAwarePredictProgram:
       )
 
 object ScriptedPredictProgram:
-  given scriptedPredictor: PredictorLens[ScriptedPredictProgram] with
+  given scriptedPredictor: OptimizableLeaf[ScriptedPredictProgram] with
     def get(program: ScriptedPredictProgram): OptimizableParameters =
       OptimizableParameters(program.layout.instructions, program.demos, program.config)
-    def metadata(program: ScriptedPredictProgram): PredictorMetadata =
-      PredictorMetadata.from(program.layout, program.moduleName)
+    def metadata(program: ScriptedPredictProgram): OptimizableMetadata =
+      OptimizableMetadata.from(program.layout, program.moduleName)
     def set(program: ScriptedPredictProgram, updated: OptimizableParameters): ScriptedPredictProgram =
       if updated == get(program) then program
       else

@@ -9,7 +9,7 @@ import zio.blocks.schema.Schema
 private final case class ProgramOfThoughtStateInput(question: String) derives Schema
 private final case class ProgramOfThoughtStateOutput(answer: String) derives Schema
 
-class ProgramOfThoughtPredictorTraversalSuite extends FunSuite:
+class ProgramOfThoughtOptimizableTraversalSuite extends FunSuite:
 
   private object Interpreter extends CodeInterpreter:
     def execute(code: String): Either[DspyError, CodeResult] =
@@ -22,9 +22,9 @@ class ProgramOfThoughtPredictorTraversalSuite extends FunSuite:
       interpreter = Interpreter
     )
 
-  test("PredictorTraversal exposes generator, regenerator, and answerer in stable named order") {
+  test("OptimizableTraversal exposes generator, regenerator, and answerer in stable named order") {
     val pot = program
-    val P   = summon[PredictorTraversal[ProgramOfThought[ProgramOfThoughtStateInput, ProgramOfThoughtStateOutput]]]
+    val P   = summon[OptimizableTraversal[ProgramOfThought[ProgramOfThoughtStateInput, ProgramOfThoughtStateOutput]]]
 
     assertEquals(
       P.read(pot),
@@ -45,9 +45,9 @@ class ProgramOfThoughtPredictorTraversalSuite extends FunSuite:
     )
   }
 
-  test("PredictorTraversal replacement obeys Get-Put, read-after-write, and the metadata frame") {
+  test("OptimizableTraversal replacement obeys Get-Put, read-after-write, and the metadata frame") {
     val pot      = program
-    val P        = summon[PredictorTraversal[ProgramOfThought[ProgramOfThoughtStateInput, ProgramOfThoughtStateOutput]]]
+    val P        = summon[OptimizableTraversal[ProgramOfThought[ProgramOfThoughtStateInput, ProgramOfThoughtStateOutput]]]
     val original = P.read(pot)
     val metadata = P.inspect(pot).map(_.metadata)
 

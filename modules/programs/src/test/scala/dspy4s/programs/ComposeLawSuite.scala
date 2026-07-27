@@ -57,22 +57,22 @@ class ComposeLawSuite extends FunSuite:
       Right(Prediction(RuntimeEnvironment.current.trace.size, RawPrediction.empty))
 
   private object Step:
-    given stepPredictor[I, O]: PredictorLens[Step[I, O]] with
+    given stepPredictor[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
+      def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private object TraceSize:
-    given traceSizePredictor: PredictorLens[TraceSize] with
+    given traceSizePredictor: OptimizableLeaf[TraceSize] with
       def get(program: TraceSize): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: TraceSize): PredictorMetadata = program.predict.predictorView.metadata
+      def metadata(program: TraceSize): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: TraceSize, updated: OptimizableParameters): TraceSize =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
-  private def identified[P](program: P)(using predictors: PredictorTraversal[P]): Vector[IdentifiedPredictor] =
+  private def identified[P](program: P)(using predictors: OptimizableTraversal[P]): Vector[IdentifiedOptimizable] =
     predictors.readIdentified(program)
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
@@ -203,7 +203,7 @@ class ComposeLawSuite extends FunSuite:
     val a  = step[Int, String]("a", "i -> s")(i => s"v$i")
     val b  = step[String, Int]("b", "s -> n")(s => s.length)
     val ab = a >>> b
-    val P  = summon[PredictorTraversal[AndThen[Int, String, Int, Step[Int, String], Step[String, Int]]]]
+    val P  = summon[OptimizableTraversal[AndThen[Int, String, Int, Step[Int, String], Step[String, Int]]]]
 
     assertEquals(P.read(ab), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(ab).map(_._1), Vector("first", "second"))
@@ -219,7 +219,7 @@ class ComposeLawSuite extends FunSuite:
     val a   = step[Int, String]("a", "i -> s")(i => s"v$i")
     val b   = step[Int, Int]("b", "i -> n")(i => i)
     val par = Compose.parallel(a, b)
-    val P   = summon[PredictorTraversal[Both[Int, String, Int, Step[Int, String], Step[Int, Int]]]]
+    val P   = summon[OptimizableTraversal[Both[Int, String, Int, Step[Int, String], Step[Int, Int]]]]
     assertEquals(P.read(par), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(par).map(_._1), Vector("first", "second"))
   }
@@ -249,7 +249,7 @@ class ComposeLawSuite extends FunSuite:
     val a  = step[Int, String]("a", "i -> s")(i => s"v$i")
     val b  = step[Boolean, Int]("b", "p -> n")(_ => 0)
     val tn = Compose.tensor(a, b)
-    val P  = summon[PredictorTraversal[Tensor[Int, Boolean, String, Int, Step[Int, String], Step[Boolean, Int]]]]
+    val P  = summon[OptimizableTraversal[Tensor[Int, Boolean, String, Int, Step[Int, String], Step[Boolean, Int]]]]
     assertEquals(P.read(tn), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(tn).map(_._1), Vector("first", "second"))
   }

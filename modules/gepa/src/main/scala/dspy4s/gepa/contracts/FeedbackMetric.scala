@@ -22,7 +22,7 @@ final case class ScoreWithFeedback(score: Double, feedback: String)
   *
   *   - '''Program level''' (`component = None`, `componentTrace` empty): the overall score plus program-wide
   *     feedback for one example. Drives candidate scoring / acceptance.
-  *   - '''PredictorLens level''' (`component = Some(name)`, `componentTrace` = the slice of `trace` produced by that
+  *   - '''OptimizableLeaf level''' (`component = Some(name)`, `componentTrace` = the slice of `trace` produced by that
   *     predictor): feedback aimed at a single named predictor. The reflection loop assembles each component's
   *     reflective dataset from these, then asks the reflection LM for a better instruction.
   *

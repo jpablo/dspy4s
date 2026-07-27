@@ -44,9 +44,9 @@ class ModeLawSuite extends FunSuite:
       Right(Prediction(call.input, RawPrediction.empty))
 
   private object Recorder:
-    given recorderPredictor: PredictorLens[Recorder] with
+    given recorderPredictor: OptimizableLeaf[Recorder] with
       def get(program: Recorder): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: Recorder): PredictorMetadata = program.predict.predictorView.metadata
+      def metadata(program: Recorder): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Recorder, updated: OptimizableParameters): Recorder =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -107,10 +107,10 @@ class ModeLawSuite extends FunSuite:
     assertEquals(RuntimeEnvironment.current.trace.map(_.component), Vector("recorder"))
   }
 
-  test("PredictorTraversal passes through the wrapped program (mode is non-learnable)") {
+  test("OptimizableTraversal passes through the wrapped program (mode is non-learnable)") {
     val r     = Recorder(predict("a -> b"))
     val moded = Compose.mode(Mode.temperature(1.0))(r)
-    val P     = summon[PredictorTraversal[Moded[Int, Int, Recorder]]]
+    val P     = summon[OptimizableTraversal[Moded[Int, Int, Recorder]]]
     assertEquals(P.read(moded), Vector(r.predict.optimizableParameters))
     assertEquals(P.readNamed(moded).map(_._1), Vector("self"))
     assertEquals(P.read(P.replace(moded, P.read(moded))), P.read(moded))

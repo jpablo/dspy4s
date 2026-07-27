@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.predictors.optimizableParameters
 
-import dspy4s.programs.predictors.{OptimizableParameters, PredictorTraversal}
+import dspy4s.programs.predictors.{OptimizableParameters, OptimizableTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -10,7 +10,7 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.programs.DynamicPredict
 import munit.FunSuite
 
-class PredictorTraversalSuite extends FunSuite:
+class OptimizableTraversalSuite extends FunSuite:
 
   private val sigA = SignatureDsl.parse("question: str -> answer: str").toOption.get
   private val sigB = SignatureDsl.parse("text: str -> summary: str").toOption.get
@@ -18,12 +18,12 @@ class PredictorTraversalSuite extends FunSuite:
   // A composite of two predictors plus a non-predictor field.
   final case class Pipe(a: DynamicPredict, b: DynamicPredict, n: Int)
   object Pipe:
-    given PredictorTraversal[Int]  = PredictorTraversal.empty
-    given PredictorTraversal[Pipe] = PredictorTraversal.derived
+    given OptimizableTraversal[Int]  = OptimizableTraversal.empty
+    given OptimizableTraversal[Pipe] = OptimizableTraversal.derived
 
-  test("PredictorLens lifts to a 1-element PredictorTraversal via fromPredictorLens") {
+  test("OptimizableLeaf lifts to a 1-element OptimizableTraversal via fromOptimizableLeaf") {
     val p  = DynamicPredict(layout = sigA)
-    val ps = summon[PredictorTraversal[DynamicPredict]]
+    val ps = summon[OptimizableTraversal[DynamicPredict]]
     assertEquals(ps.read(p).size, 1)
     assertEquals(ps.read(p).head, p.optimizableParameters)
     val updated = p.optimizableParameters.copy(instructions = Some("updated"))
@@ -36,7 +36,7 @@ class PredictorTraversalSuite extends FunSuite:
     val a    = DynamicPredict(layout = sigA, name = Some("a"))
     val b    = DynamicPredict(layout = sigB, name = Some("b"))
     val pipe = Pipe(a, b, 7)
-    val ps   = summon[PredictorTraversal[Pipe]]
+    val ps   = summon[OptimizableTraversal[Pipe]]
     val views = ps.inspect(pipe)
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "a")
@@ -47,7 +47,7 @@ class PredictorTraversalSuite extends FunSuite:
     val a    = DynamicPredict(layout = sigA, name = Some("a"))
     val b    = DynamicPredict(layout = sigB, name = Some("b"))
     val pipe = Pipe(a, b, 7)
-    val ps   = summon[PredictorTraversal[Pipe]]
+    val ps   = summon[OptimizableTraversal[Pipe]]
     assertEquals(ps.replace(pipe, ps.read(pipe)), pipe)
   }
 
@@ -55,7 +55,7 @@ class PredictorTraversalSuite extends FunSuite:
     val a       = DynamicPredict(layout = sigA, name = Some("a"))
     val b       = DynamicPredict(layout = sigB, name = Some("b"))
     val pipe    = Pipe(a, b, 7)
-    val ps      = summon[PredictorTraversal[Pipe]]
+    val ps      = summon[OptimizableTraversal[Pipe]]
     val newDemo = Vector(Example(rec("question" := "q", "answer" := "x")))
     val editedA = a.optimizableParameters.copy(demos = newDemo)
     val out     = ps.replace(pipe, Vector(editedA, b.optimizableParameters))
@@ -65,46 +65,46 @@ class PredictorTraversalSuite extends FunSuite:
   }
 
   test("empty is the identity instance: reads nothing, replace returns the program") {
-    val empty = PredictorTraversal.empty[Int]
+    val empty = OptimizableTraversal.empty[Int]
     assertEquals(empty.read(42), Vector.empty[OptimizableParameters])
     assertEquals(empty.replace(42, Vector.empty), 42)
   }
 
-  test("derived rejects a field without PredictorTraversal evidence instead of silently treating it as empty") {
+  test("derived rejects a field without OptimizableTraversal evidence instead of silently treating it as empty") {
     val errors = compileErrors("""
       import dspy4s.programs.DynamicPredict
-      import dspy4s.programs.predictors.PredictorTraversal
+      import dspy4s.programs.predictors.OptimizableTraversal
 
       final class Opaque
       final case class Broken(predict: DynamicPredict, opaque: Opaque)
-      given PredictorTraversal[Broken] = PredictorTraversal.derived
+      given OptimizableTraversal[Broken] = OptimizableTraversal.derived
     """)
 
-    assert(errors.contains("Cannot derive PredictorTraversal"), errors)
-    assert(errors.contains("PredictorTraversal.empty"), errors)
+    assert(errors.contains("Cannot derive OptimizableTraversal"), errors)
+    assert(errors.contains("OptimizableTraversal.empty"), errors)
   }
 
   test("given priority: leaf vs structural derivation resolve distinctly") {
-    // A leaf type (DynamicPredict has PredictorLens and is a Product) -> fromPredictorLens.
+    // A leaf type (DynamicPredict has OptimizableLeaf and is a Product) -> fromOptimizableLeaf.
     assertEquals(
-      summon[PredictorTraversal[DynamicPredict]].getClass.getName,
-      "dspy4s.programs.predictors.PredictorTraversal$fromPredictorLens"
+      summon[OptimizableTraversal[DynamicPredict]].getClass.getName,
+      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
     )
-    // A single-predictor program with a PredictorLens leaf instance -> fromPredictorLens (not torn into fields).
+    // A single-leaf program with an OptimizableLeaf instance -> fromOptimizableLeaf (not torn into fields).
     assertEquals(
-      summon[PredictorTraversal[ScriptedPredictProgram]].getClass.getName,
-      "dspy4s.programs.predictors.PredictorTraversal$fromPredictorLens"
+      summon[OptimizableTraversal[ScriptedPredictProgram]].getClass.getName,
+      "dspy4s.programs.predictors.OptimizableTraversal$fromOptimizableLeaf"
     )
     // A plain composite with no leaf instance -> structural derivation.
     assertEquals(
-      summon[PredictorTraversal[Pipe]].getClass.getName,
-      "dspy4s.programs.predictors.PredictorTraversal$DerivedPredictorTraversal"
+      summon[OptimizableTraversal[Pipe]].getClass.getName,
+      "dspy4s.programs.predictors.OptimizableTraversal$DerivedOptimizableTraversal"
     )
   }
 
-  test("PredictorLens leaf program is length-1 and round-trips demos through the leaf set") {
+  test("OptimizableLeaf leaf program is length-1 and round-trips demos through the leaf set") {
     val student = ScriptedPredictProgram(Map.empty, sigA)
-    val ps      = summon[PredictorTraversal[ScriptedPredictProgram]]
+    val ps      = summon[OptimizableTraversal[ScriptedPredictProgram]]
     assertEquals(ps.read(student).size, 1)
     assertEquals(ps.inspect(student).head.layout, sigA)
 
@@ -119,7 +119,7 @@ class PredictorTraversalSuite extends FunSuite:
     val a    = DynamicPredict(layout = sigA, name = Some("a"))
     val b    = DynamicPredict(layout = sigB, name = Some("b"))
     val pipe = Pipe(a, b, 7)
-    val ps   = summon[PredictorTraversal[Pipe]]
+    val ps   = summon[OptimizableTraversal[Pipe]]
 
     val demos    = Vector(Example(rec("question" := "q", "answer" := "x")))
     val attached = ps.replace(pipe, ps.read(pipe).map(_.copy(demos = demos)))

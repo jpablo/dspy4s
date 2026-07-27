@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
@@ -28,7 +28,7 @@ final case class BootstrapFewShotConfig(
     seed: Long = 0L
 )
 
-final class BootstrapFewShot[P: {PredictorTraversal, ProgramRunner}](
+final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -115,7 +115,7 @@ final class BootstrapFewShot[P: {PredictorTraversal, ProgramRunner}](
 
           if !success then failedIndices += idx
       }
-      val ps = summon[PredictorTraversal[P]]
+      val ps = summon[OptimizableTraversal[P]]
       val rng = new scala.util.Random(config.seed)
       val labeledPool = failedIndices.toVector.map(idx => trainset(idx))
       val labeledPoolShuffled = Vector.from(rng.shuffle(labeledPool))

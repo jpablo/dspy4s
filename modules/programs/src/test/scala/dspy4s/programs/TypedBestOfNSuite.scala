@@ -40,7 +40,7 @@ class TypedBestOfNSuite extends FunSuite:
   // an empty named-predictor set for them (the faithful analogue of Python's `named_predictors() == []`). `InnerPredict`
   // hand-rolls a single LM call on a fixed layout, so it exposes that layout as its one "self" predictor — enough for
   // advice to route back to it (its advice degrades to uniform, matching the single-predictor case).
-  private given PredictorTraversal[TypedStub] = PredictorTraversal.empty
+  private given OptimizableTraversal[TypedStub] = OptimizableTraversal.empty
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
@@ -339,10 +339,10 @@ class TypedBestOfNSuite extends FunSuite:
   /** `InnerPredict` runs one LM call on a fixed layout; expose one lawful parameter focus so Refine's advice can route
     * back to it without treating an executable `DynamicPredict` as optimizer parameters.
     */
-  private given PredictorLens[InnerPredict] with
+  private given OptimizableLeaf[InnerPredict] with
     def get(program: InnerPredict): OptimizableParameters = program.parameters
-    def metadata(program: InnerPredict): PredictorMetadata =
-      PredictorMetadata.from(program.layout, program.moduleName)
+    def metadata(program: InnerPredict): OptimizableMetadata =
+      OptimizableMetadata.from(program.layout, program.moduleName)
     def set(program: InnerPredict, updated: OptimizableParameters): InnerPredict = program.copy(parameters = updated)
 
   test("Refine generates advice and injects it as a hint so a retry improves above threshold") {

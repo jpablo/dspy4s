@@ -53,13 +53,13 @@ final case class RecoverWith[
         }
 
 object RecoverWith:
-  given recoverWithPredictorTraversal[
+  given recoverWithOptimizableTraversal[
       I,
       O,
       P <: Module[I, O],
       F <: Module[I, O]
-  ](using primary: PredictorTraversal[P], fallback: PredictorTraversal[F]): PredictorTraversal[RecoverWith[I, O, P, F]] with
-    def inspect(program: RecoverWith[I, O, P, F]): Vector[PredictorView] =
+  ](using primary: OptimizableTraversal[P], fallback: OptimizableTraversal[F]): OptimizableTraversal[RecoverWith[I, O, P, F]] with
+    def inspect(program: RecoverWith[I, O, P, F]): Vector[OptimizableView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
 
     def replace(program: RecoverWith[I, O, P, F], updates: Vector[OptimizableParameters]): RecoverWith[I, O, P, F] =
@@ -69,7 +69,7 @@ object RecoverWith:
         fallback = fallback.replace(program.fallback, fallbackUpdates)
       )
 
-    override def inspectNamed(program: RecoverWith[I, O, P, F]): Vector[(String, PredictorView)] =
+    override def inspectNamed(program: RecoverWith[I, O, P, F]): Vector[(String, OptimizableView)] =
       primary.inspectNamed(program.primary).map { case (sub, view) =>
         (if sub == "self" then "primary" else s"primary.$sub") -> view
       } ++ fallback.inspectNamed(program.fallback).map { case (sub, view) =>

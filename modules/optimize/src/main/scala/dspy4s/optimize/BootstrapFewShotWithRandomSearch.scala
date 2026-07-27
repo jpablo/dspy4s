@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.PredictorTraversal
+import dspy4s.programs.predictors.OptimizableTraversal
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
@@ -32,7 +32,7 @@ final case class RandomSearchConfig(
     seed: Long = 0L
 )
 
-final class BootstrapFewShotWithRandomSearch[P: {PredictorTraversal, ProgramRunner}](
+final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRunner}](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 
@@ -44,7 +44,7 @@ final class BootstrapFewShotWithRandomSearch[P: {PredictorTraversal, ProgramRunn
       teacher: Option[P] = None,
       valset: Option[Vector[Example]] = None
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps = summon[PredictorTraversal[P]]
+    val ps = summon[OptimizableTraversal[P]]
     val effectiveValset: Vector[Example] =
       valset.getOrElse(trainset)
 
