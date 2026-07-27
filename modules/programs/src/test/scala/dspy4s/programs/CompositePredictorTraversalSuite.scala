@@ -18,13 +18,13 @@ import zio.blocks.schema.Schema
 final case class RlmIn(question: String) derives Schema
 final case class RlmOut(answer: String) derives Schema
 
-/** Round-trip and distribution laws for the `Predictors` instances added for the remaining composites ([[BestOfN]]
+/** Round-trip and distribution laws for the `PredictorTraversal` instances added for the remaining composites ([[BestOfN]]
   * pass-through, [[Refine]] `read = inner ++ [critic]`, [[RLM]] action+extract) — the gap-closing counterpart of
   * `ComposeLawSuite` / `ModeLawSuite`'s addressability sections. The invariant under test is the spec's homomorphism
   * contract: `read` distributes structurally, `replace(p, read(p)) == p`, and a genuine replace writes back
   * positionally.
   */
-class CompositePredictorsSuite extends FunSuite:
+class CompositePredictorTraversalSuite extends FunSuite:
 
   private object Interpreter extends CodeInterpreter:
     def execute(code: String): Either[DspyError, CodeResult] =
@@ -44,7 +44,7 @@ class CompositePredictorsSuite extends FunSuite:
       Right(Prediction(f(call.input), RawPrediction.empty))
 
   private object Leaf:
-    given leafPredictor[I, O]: Predictor[Leaf[I, O]] with
+    given leafPredictor[I, O]: PredictorLens[Leaf[I, O]] with
       def get(program: Leaf[I, O]): PredictorState = program.predict.predictorState
       def metadata(program: Leaf[I, O]): PredictorMetadata = program.predict.predictorView.metadata
       def set(program: Leaf[I, O], updated: PredictorState): Leaf[I, O] =
@@ -58,19 +58,19 @@ class CompositePredictorsSuite extends FunSuite:
     val comparison = MultiChainComparison(baseSignature = signature)
 
     assertEquals(
-      summon[Predictors[ReAct[RlmIn, RlmOut]]].inspectNamed(react).map(_._1),
+      summon[PredictorTraversal[ReAct[RlmIn, RlmOut]]].inspectNamed(react).map(_._1),
       Vector("react", "extractor")
     )
     assertEquals(
-      summon[Predictors[CodeAct[RlmIn, RlmOut]]].inspectNamed(codeAct).map(_._1),
+      summon[PredictorTraversal[CodeAct[RlmIn, RlmOut]]].inspectNamed(codeAct).map(_._1),
       Vector("codeact", "extractor")
     )
     assertEquals(
-      summon[Predictors[RLM[RlmIn, RlmOut]]].inspectNamed(rlm).map(_._1),
+      summon[PredictorTraversal[RLM[RlmIn, RlmOut]]].inspectNamed(rlm).map(_._1),
       Vector("action", "extract")
     )
     assertEquals(
-      summon[Predictors[MultiChainComparison[RlmIn, RlmOut]]].inspectNamed(comparison).map(_._1),
+      summon[PredictorTraversal[MultiChainComparison[RlmIn, RlmOut]]].inspectNamed(comparison).map(_._1),
       Vector("compare")
     )
   }
@@ -80,7 +80,7 @@ class CompositePredictorsSuite extends FunSuite:
   test("BestOfN read/inspectNamed pass through to the inner program; replace round-trips") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
     val b    = BestOfN[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
-    val P    = summon[Predictors[BestOfN[Leaf[Int, Int], Int, Int]]]
+    val P    = summon[PredictorTraversal[BestOfN[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.read(b), Vector(leaf.predict.predictorState))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("self"))
@@ -100,7 +100,7 @@ class CompositePredictorsSuite extends FunSuite:
       rewardFn = (_, _) => 1.0,
       threshold = 1.0
     )
-    val P = summon[Predictors[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
+    val P = summon[PredictorTraversal[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
     assertEquals(P.read(b), Vector(first.predict.predictorState, second.predict.predictorState))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("first", "second"))
   }
@@ -110,7 +110,7 @@ class CompositePredictorsSuite extends FunSuite:
   test("Refine read = read(inner) :+ critic; the default critic is the OfferFeedback predict") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
     val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
-    val P    = summon[Predictors[Refine[Leaf[Int, Int], Int, Int]]]
+    val P    = summon[PredictorTraversal[Refine[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.read(r), Vector(leaf.predict.predictorState, r.criticPredict.predictorState))
     assertEquals(P.inspectNamed(r).map(_._1), Vector("self", "critic"))
@@ -121,7 +121,7 @@ class CompositePredictorsSuite extends FunSuite:
   test("Refine replace round-trips; a genuine critic replace writes back (and only the critic)") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
     val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
-    val P    = summon[Predictors[Refine[Leaf[Int, Int], Int, Int]]]
+    val P    = summon[PredictorTraversal[Refine[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.replace(r, P.read(r)), r) // exact no-op state round-trip
     // Swap only the critic: the inner leaf is untouched, the critic is written back.
@@ -141,7 +141,7 @@ class CompositePredictorsSuite extends FunSuite:
 
   test("RLM read = [actionPredict, extractPredict]; replace round-trips and writes back") {
     val rlm = RLM(baseSignature = Signature.derived[RlmIn, RlmOut]("RlmQA"))
-    val P   = summon[Predictors[RLM[RlmIn, RlmOut]]]
+    val P   = summon[PredictorTraversal[RLM[RlmIn, RlmOut]]]
 
     assertEquals(P.read(rlm), Vector(rlm.actionPredict.predictorState, rlm.extractPredict.predictorState))
     assertEquals(P.replace(rlm, P.read(rlm)), rlm) // round-trip: overrides stay None
@@ -159,7 +159,7 @@ class CompositePredictorsSuite extends FunSuite:
 
   test("override-backed composites observe read-after-write and change-revert through state") {
     val rlm      = RLM(baseSignature = Signature.derived[RlmIn, RlmOut]("RlmQA"))
-    val P        = summon[Predictors[RLM[RlmIn, RlmOut]]]
+    val P        = summon[PredictorTraversal[RLM[RlmIn, RlmOut]]]
     val original = P.read(rlm)
     val metadata = P.inspect(rlm).map(_.metadata)
     val changed  = original.updated(0, original.head.copy(instructions = Some("Explore methodically.")))

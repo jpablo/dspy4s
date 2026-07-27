@@ -36,7 +36,7 @@ class TransformCombinatorSuite extends FunSuite:
       run(call.input).map(output => Prediction(output, RawPrediction(DynamicValues.record("tag" := tag))))
 
   private object Step:
-    given stepPredictor[I, O]: Predictor[Step[I, O]] with
+    given stepPredictor[I, O]: PredictorLens[Step[I, O]] with
       def get(program: Step[I, O]): PredictorState = program.predict.predictorState
       def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
       def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
@@ -48,7 +48,7 @@ class TransformCombinatorSuite extends FunSuite:
   private def step[I, O](tag: String, signature: String)(f: I => O): Step[I, O] =
     Step(tag, input => Right(f(input)), predictor(signature))
 
-  private def params[P](program: P)(using predictors: Predictors[P]): Vector[PredictorState] =
+  private def params[P](program: P)(using predictors: PredictorTraversal[P]): Vector[PredictorState] =
     predictors.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current

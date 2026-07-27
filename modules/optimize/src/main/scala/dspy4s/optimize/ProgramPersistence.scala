@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 import dspy4s.programs.predictors.PredictorId
 import dspy4s.programs.predictors.PredictorState
 
@@ -18,9 +18,9 @@ import java.nio.file.Paths
 /** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's
   * `BaseModule.dump_state` / `load_state` and `save` / `load`.
   *
-  * Built entirely on the [[Predictors]] traversal, so a single typed or dynamic predictor and an arbitrary
+  * Built entirely on the [[PredictorTraversal]] traversal, so a single typed or dynamic predictor and an arbitrary
   * composite use the same path: [[dumpState]] serializes every writable [[PredictorState]], and [[loadState]]
-  * writes those states into a fresh program through `Predictors.replace`.
+  * writes those states into a fresh program through `PredictorTraversal.replace`.
   *
   * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature
   * field structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the
@@ -38,7 +38,7 @@ object ProgramPersistence:
 
   /** Serialize a program's writable state to `{ "predictors": { "predictor-0": <PredictorState>, ... } }`.
     * [[PredictorId]] keys make loading independent of JSON object order and detect missing/unknown ordinals. */
-  def dumpState[P](program: P)(using predictors: Predictors[P]): DynamicValue.Record =
+  def dumpState[P](program: P)(using predictors: PredictorTraversal[P]): DynamicValue.Record =
     val states: Seq[(String, DynamicValue)] = predictors.readIdentified(program).map { identified =>
       identified.id.render -> (identified.state.dumpState: DynamicValue)
     }
@@ -51,7 +51,7 @@ object ProgramPersistence:
     case _                        => Left(ValidationError(s"Program state predictor '$at' must be a record"))
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
-      predictors: Predictors[P]
+      predictors: PredictorTraversal[P]
   ): Either[DspyError, P] =
     val expectedIds = predictors.readIdentified(program).map(_.id)
     val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(PredictorId, PredictorState)]]](
@@ -84,7 +84,7 @@ object ProgramPersistence:
     }
 
   /** Rebuild a program from the state produced by [[dumpState]], matching state by stable predictor id. */
-  def loadState[P](program: P, state: DynamicValue.Record)(using predictors: Predictors[P]): Either[DspyError, P] =
+  def loadState[P](program: P, state: DynamicValue.Record)(using predictors: PredictorTraversal[P]): Either[DspyError, P] =
     DynamicValues.recordGet(state, "predictors") match
       case Some(record: DynamicValue.Record) => loadById(program, record)
       case Some(_) => Left(ValidationError("Program state 'predictors' must be an id-keyed record"))
@@ -92,18 +92,18 @@ object ProgramPersistence:
 
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
     * [[loadJson]]. */
-  def dumpJson[P](program: P)(using Predictors[P]): String =
+  def dumpJson[P](program: P)(using PredictorTraversal[P]): String =
     new String(dynamicJsonCodec.encode(dumpState(program)), StandardCharsets.UTF_8)
 
   /** Rebuild a program from the JSON string produced by [[dumpJson]]. */
-  def loadJson[P](program: P, json: String)(using Predictors[P]): Either[DspyError, P] =
+  def loadJson[P](program: P, json: String)(using PredictorTraversal[P]): Either[DspyError, P] =
     dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
       case Right(rec: DynamicValue.Record) => loadState(program, rec)
       case Right(other) => Left(ValidationError(s"Expected a JSON object for program state, got: $other"))
       case Left(err)    => Left(ValidationError(s"Invalid program-state JSON: ${err.toString}"))
 
   /** Write a program's state JSON to `path`. IO failures are wrapped into a [[RuntimeError]]. */
-  def save[P](program: P, path: String)(using Predictors[P]): Either[DspyError, Unit] =
+  def save[P](program: P, path: String)(using PredictorTraversal[P]): Either[DspyError, Unit] =
     try
       Files.write(Paths.get(path), dumpJson(program).getBytes(StandardCharsets.UTF_8))
       Right(())
@@ -113,7 +113,7 @@ object ProgramPersistence:
 
   /** Read a program's state JSON from `path` and rebuild it. IO failures are wrapped into a [[RuntimeError]];
     * malformed JSON / state surfaces as the [[loadJson]] error. */
-  def load[P](program: P, path: String)(using Predictors[P]): Either[DspyError, P] =
+  def load[P](program: P, path: String)(using PredictorTraversal[P]): Either[DspyError, P] =
     val read: Either[DspyError, String] =
       try Right(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8))
       catch

@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.{PredictorState, Predictors}
+import dspy4s.programs.predictors.{PredictorState, PredictorTraversal}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
@@ -52,14 +52,14 @@ final case class MIPROv2Config(
   * '''Three-phase composition (reuses, does not reinvent).'''
   *   1. '''Demo-set candidates''' (Step 1, "bootstrap few-shot examples"). Runs [[BootstrapFewShot]] `numCandidates`
   *      times with distinct seeds (`seed + k`), collecting each compiled program's per-predictor demos via
-  *      `Predictors.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is also
+  *      `PredictorTraversal.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is also
   *      included. The result is a `Vector` of demo-assignments, each a per-predictor `Vector[Vector[Example]]` of
   *      length == predictor count. 2. '''Instruction candidates''' (Step 2, GroundedProposer). Calls
   *      [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates = <first bootstrapped assignment,
   *      or empty>)` → `Vector[Vector[String]]` (per predictor, `numCandidates` instructions). Each predictor's CURRENT
   *      instruction is prepended as an extra candidate. 3. '''Search''' (Step 3, "find optimal prompt parameters"). For
   *      `numTrials` trials with a seeded RNG, randomly picks one demo-assignment index (applied whole-program) and, per
-  *      predictor, one instruction-candidate index. The trial program is built with a single [[Predictors.replace]]
+  *      predictor, one instruction-candidate index. The trial program is built with a single [[PredictorTraversal.replace]]
   *      applying each chosen instruction (`state.copy(instructions = Some(instr))`) AND chosen demos (`.copy(demos =
   *      ...)`). Each trial is scored on the valset (falling back to the trainset) via [[dspy4s.evaluate.Evaluate]] +
   *      [[ProgramRunner]] + the metric. A baseline candidate (the unmodified student) is always scored too. The
@@ -88,11 +88,11 @@ final case class MIPROv2Config(
   *   - '''`track_stats`, `log_dir`, LM-call estimation, and program persistence are omitted.''' The
   *     [[OptimizationReport]] carries the scored candidate list and summary metadata instead.
   */
-final class MIPROv2[P: {Predictors, ProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
+final class MIPROv2[P: {PredictorTraversal, ProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
 
   override val name: String = "mipro_v2"
 
-  private val ps: Predictors[P]   = summon[Predictors[P]]
+  private val ps: PredictorTraversal[P]   = summon[PredictorTraversal[P]]
   private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
 
   override def compile(
@@ -225,8 +225,8 @@ final class MIPROv2[P: {Predictors, ProgramRunner}](config: MIPROv2Config) exten
       )
     )
 
-  /** Build a trial program by applying, via a single [[Predictors.replace]], each predictor's chosen instruction and
-    * chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[Predictors.read]] order.
+  /** Build a trial program by applying, via a single [[PredictorTraversal.replace]], each predictor's chosen instruction and
+    * chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[PredictorTraversal.read]] order.
     */
   private def applyTrial(
       leaves: Vector[PredictorState],

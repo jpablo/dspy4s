@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.{Predictor, PredictorMetadata, PredictorState}
+import dspy4s.programs.predictors.{PredictorLens, PredictorMetadata, PredictorState}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -58,7 +58,7 @@ final case class DemoAwarePredictProgram(
     Right(RawPrediction(rec("answer" := answer)))
 
 object DemoAwarePredictProgram:
-  given demoAwarePredictor: Predictor[DemoAwarePredictProgram] with
+  given demoAwarePredictor: PredictorLens[DemoAwarePredictProgram] with
     def get(program: DemoAwarePredictProgram): PredictorState =
       PredictorState(program.layout.instructions, program.demos, program.config)
     def metadata(program: DemoAwarePredictProgram): PredictorMetadata =
@@ -73,7 +73,7 @@ object DemoAwarePredictProgram:
       )
 
 object ScriptedPredictProgram:
-  given scriptedPredictor: Predictor[ScriptedPredictProgram] with
+  given scriptedPredictor: PredictorLens[ScriptedPredictProgram] with
     def get(program: ScriptedPredictProgram): PredictorState =
       PredictorState(program.layout.instructions, program.demos, program.config)
     def metadata(program: ScriptedPredictProgram): PredictorMetadata =

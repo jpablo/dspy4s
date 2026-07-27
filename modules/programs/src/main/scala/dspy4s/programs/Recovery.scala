@@ -53,12 +53,12 @@ final case class RecoverWith[
         }
 
 object RecoverWith:
-  given recoverWithPredictors[
+  given recoverWithPredictorTraversal[
       I,
       O,
       P <: Module[I, O],
       F <: Module[I, O]
-  ](using primary: Predictors[P], fallback: Predictors[F]): Predictors[RecoverWith[I, O, P, F]] with
+  ](using primary: PredictorTraversal[P], fallback: PredictorTraversal[F]): PredictorTraversal[RecoverWith[I, O, P, F]] with
     def inspect(program: RecoverWith[I, O, P, F]): Vector[PredictorView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
 

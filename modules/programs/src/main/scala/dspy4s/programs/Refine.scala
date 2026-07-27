@@ -40,7 +40,7 @@ import zio.blocks.schema.Schema
   * that is routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
   *
   * '''Per-module advice (parity with Python).''' OfferFeedback returns a JSON object `{componentName: advice}` keyed by
-  * the inner program's named predictors ([[Predictors.inspectNamed]], the dspy4s analogue of `named_predictors()`).
+  * the inner program's named predictors ([[PredictorTraversal.inspectNamed]], the dspy4s analogue of `named_predictors()`).
   * Each predictor's call is matched to its advice by its [[SignatureLayout]] — the dspy4s stand-in for Python's
   * `signature2name[signature]` object-identity routing — and only that predictor's `hint_` is injected. A predictor
   * whose advice is absent or `N/A` gets no hint. When OfferFeedback returns a bare (non-JSON) string, it degrades to
@@ -70,12 +70,12 @@ final case class Refine[P <: Module[I, O], I, O](
     failCount: Option[FailureCount] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
       * [[Refine.offerFeedbackSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
-      * addressable + immutably replaceable (see [[Refine.refinePredictors]]), mirroring the ReAct/CodeAct override
+      * addressable + immutably replaceable (see [[Refine.refinePredictorTraversal]]), mirroring the ReAct/CodeAct override
       * pattern.
       */
     criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
-    predictors: Predictors[P]
+    predictors: PredictorTraversal[P]
 ) extends Module[I, O]:
   override val moduleName: String = "refine"
 
@@ -137,9 +137,9 @@ object Refine:
     * the leading states to the inner program and the trailing state to the critic. An unchanged critic state retains
     * the existing override exactly; a changed state preserves the critic's execution bindings.
     */
-  given refinePredictors[P <: Module[I, O], I, O](using
-      inner: Predictors[P]
-  ): Predictors[Refine[P, I, O]] with
+  given refinePredictorTraversal[P <: Module[I, O], I, O](using
+      inner: PredictorTraversal[P]
+  ): PredictorTraversal[Refine[P, I, O]] with
     def inspect(program: Refine[P, I, O]): Vector[PredictorView] =
       inner.inspect(program.module) :+ program.criticPredict.predictorView
 

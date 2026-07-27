@@ -17,7 +17,7 @@ import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.PredictorView
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 import dspy4s.programs.contracts.ProgramCall
 
 import scala.collection.mutable
@@ -71,11 +71,11 @@ final case class InferRulesConfig(
   *   - '''Context-window fallback narrows on [[ContextWindowExceededError]]''' specifically (upstream also accepts
   *     `ValueError`/`BadRequestError`), dropping the last example and retrying down to a single example.
   */
-final class InferRules[P: {Predictors, ProgramRunner}](config: InferRulesConfig) extends Teleprompter[P]:
+final class InferRules[P: {PredictorTraversal, ProgramRunner}](config: InferRulesConfig) extends Teleprompter[P]:
 
   override val name: String = "infer_rules"
 
-  private val ps: Predictors[P]   = summon[Predictors[P]]
+  private val ps: PredictorTraversal[P]   = summon[PredictorTraversal[P]]
   private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
 
   override def compile(

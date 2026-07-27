@@ -16,7 +16,7 @@ is the improved program:
 --8<-- "learn/optimization/Optimizers.scala:optimize-bootstrap"
 ```
 
-Optimizers are generic over the program type. `Predictors[P]` exposes each leaf's
+Optimizers are generic over the program type. `PredictorTraversal[P]` exposes each leaf's
 writable `PredictorState`, while `ProgramRunner[P]` executes either typed programs or
 the untyped `DynamicModule` spine. The returned program can be
 [saved and loaded](../runtime/saving-and-loading.md), so optimization runs once

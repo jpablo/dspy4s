@@ -47,7 +47,7 @@ import dspy4s.optimize.{
 }
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -155,7 +155,7 @@ object OptimizerSmokeTest:
             case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0
 
         def instructionOf(program: DynamicPredict): String =
-          summon[Predictors[DynamicPredict]].read(program).headOption.flatMap(_.instructions).getOrElse("(none)")
+          summon[PredictorTraversal[DynamicPredict]].read(program).headOption.flatMap(_.instructions).getOrElse("(none)")
 
         def checkpoint(label: String): Unit =
           println(s"\n[smoke] $label  (${progress.count} LM calls so far${
@@ -200,7 +200,7 @@ object OptimizerSmokeTest:
           case Right(report) =>
             val best  = report.bestProgram
             val score = report.metadata.get("best_score").collect { case d: Double => d }.getOrElse(scoreOf(best))
-            val demos = summon[Predictors[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
+            val demos = summon[PredictorTraversal[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
             checkpoint(f"MIPROv2  score: $score%.1f%%   (baseline $baseScore%.1f%%)")
             println(s"""[smoke] MIPROv2  chose instruction: "${instructionOf(best)}"  (+ $demos demos)""")
           case Left(err) => println(s"\n[smoke] MIPROv2 failed: ${err.message}")

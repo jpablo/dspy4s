@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
@@ -149,7 +149,7 @@ class MIPROv2Suite extends FunSuite:
       )
     )
 
-  private def predictors = summon[Predictors[DynamicPredict]]
+  private def predictors = summon[PredictorTraversal[DynamicPredict]]
 
   // ── 1. Happy path: single-predictor student, MIPROv2 finds the winning instruction ──
 

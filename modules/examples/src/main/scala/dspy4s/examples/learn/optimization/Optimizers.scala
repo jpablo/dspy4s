@@ -5,7 +5,7 @@
   * (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
  *
   * This translation states the optimizer generically over the two capabilities every student needs
-  * (`Predictors` + `ProgramRunner`); the main below drives it with a runtime-string student built through
+  * (`PredictorTraversal` + `ProgramRunner`); the main below drives it with a runtime-string student built through
   * `DynamicSignature` (parse once, mint fresh types, build a typed `Predict` over them). `compile(student,
   * trainset)` returns an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
  * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
@@ -25,7 +25,7 @@ import dspy4s.optimize.{
   SearchCandidateCount
 }
 import dspy4s.programs.{DynamicPredict, DynamicSignature, ProgramRunner}
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 
 object Optimizers:
 
@@ -34,7 +34,7 @@ object Optimizers:
   // | teleprompter = BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
   // | optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
   // --8<-- [start:optimize-bootstrap]
-  def optimize[P: {Predictors, ProgramRunner}](
+  def optimize[P: {PredictorTraversal, ProgramRunner}](
       metric: Metric,
       program: P,
       trainset: Vector[Example]

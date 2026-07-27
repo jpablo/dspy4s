@@ -24,23 +24,23 @@ MIPROv2 optimizer family — builds on it.
 
 ## 2. G-1 — typed predictor introspection (the keystone), P1–P6
 
-`Predictors[P]` / `Predictor[P]` typeclasses with Scala 3 Mirror derivation: enumerate and
+`PredictorTraversal[P]` / `PredictorLens[P]` typeclasses with Scala 3 Mirror derivation: enumerate and
 immutably replace the learnable predictors of an arbitrary composite (`replace(p,read(p))==p`).
 
 - `30420f3` P1 typeclasses + derivation · `25d7e8d` P2 retarget optimizers + drop
   `LabeledSampleProgram` · `9bcf99f` P3 hoist ReAct/CodeAct/MCC sub-predicts to fields ·
   `dd466be` P4 leaf instances for typed `Predict`/`ChainOfThought` · `c459d07` P5 **`ProgramRunner`
   spine unification** (optimizers now target typed programs/user composites end-to-end) ·
-  `1657f9c` P6 remove `PredictOps` (`Predictors` is the sole introspection typeclass).
+  `1657f9c` P6 remove `PredictOps` (`PredictorTraversal` is the sole introspection typeclass).
 
 ## 3. Tier-0 state gaps (built on G-1)
 
 - **G-3** `b85fe27` / `b2d0096` — per-module `config` (merged under per-call) + bound LM
   (`withLm`/`boundLm`, the immutable `set_lm`/`get_lm`).
 - **G-4** `9c5a6db` — program `save`/`load` + `dumpState`/`loadState` (JSON) via
-  `ProgramPersistence`, walking a composite through `Predictors` (single Predict + composites
+  `ProgramPersistence`, walking a composite through `PredictorTraversal` (single Predict + composites
   share one path).
-- **Instruction-editing enabler** `50dd00e` — `Predictor.set` now writes back demos + config +
+- **Instruction-editing enabler** `50dd00e` — `PredictorLens.set` now writes back demos + config +
   instructions (the COPRO/MIPRO unlock).
 
 ## 4. The optimizer family
@@ -66,7 +66,7 @@ immutably replace the learnable predictors of an arbitrary composite (`replace(p
 ## 6. Verification (the part offline tests can't give)
 
 - **Adversarial review** (`/workflows` find→refute→synthesize): 10 findings, 8 confirmed.
-  Fixed 7 — incl. a **HIGH silent-correctness bug** (`391456c`): leaf `Predictor` instances
+  Fixed 7 — incl. a **HIGH silent-correctness bug** (`391456c`): leaf `PredictorLens` instances
   were out of implicit scope, so a real user composite would silently optimize **zero**
   predictors with no error. Every unit test had hidden it via one import. Plus 5 med/low fixes
   (`e98d6fe`). 2 findings correctly refuted.

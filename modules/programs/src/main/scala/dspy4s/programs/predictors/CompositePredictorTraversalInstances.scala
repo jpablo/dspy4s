@@ -2,16 +2,16 @@ package dspy4s.programs.predictors
 
 import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
-/** Hand-written [[Predictors]] instances for composite typed programs whose learnable sub-predicts are hoisted to
-  * stable, `copy`-reachable members. Inheriting these instances into the [[Predictors]] companion keeps them in
+/** Hand-written [[PredictorTraversal]] instances for composite typed programs whose learnable sub-predicts are hoisted to
+  * stable, `copy`-reachable members. Inheriting these instances into the [[PredictorTraversal]] companion keeps them in
   * implicit scope without mixing concrete program traversal into the core typeclass definition.
   *
   * `replace` writes state through each current executable predictor. An unchanged state preserves the existing
   * override field exactly; a changed state creates an override with the same signature structure and execution
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
   */
-private[predictors] trait CompositePredictorInstances:
-  given reactPredictors[I, O]: Predictors[ReAct[I, O]] with
+private[predictors] trait CompositePredictorTraversalInstances:
+  given reactPredictorTraversal[I, O]: PredictorTraversal[ReAct[I, O]] with
     def inspect(program: ReAct[I, O]): Vector[PredictorView] =
       Vector(program.reactPredict.predictorView, program.extractorPredict.predictorView)
 
@@ -24,7 +24,7 @@ private[predictors] trait CompositePredictorInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
 
-  given codeActPredictors[I, O]: Predictors[CodeAct[I, O]] with
+  given codeActPredictorTraversal[I, O]: PredictorTraversal[CodeAct[I, O]] with
     def inspect(program: CodeAct[I, O]): Vector[PredictorView] =
       Vector(program.codeActPredict.predictorView, program.extractorPredict.predictorView)
 
@@ -37,7 +37,7 @@ private[predictors] trait CompositePredictorInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
 
-  given rlmPredictors[I, O]: Predictors[RLM[I, O]] with
+  given rlmPredictorTraversal[I, O]: PredictorTraversal[RLM[I, O]] with
     def inspect(program: RLM[I, O]): Vector[PredictorView] =
       Vector(program.actionPredict.predictorView, program.extractPredict.predictorView)
 
@@ -50,7 +50,7 @@ private[predictors] trait CompositePredictorInstances:
       val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
       program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
-  given programOfThoughtPredictors[I, O]: Predictors[ProgramOfThought[I, O]] with
+  given programOfThoughtPredictorTraversal[I, O]: PredictorTraversal[ProgramOfThought[I, O]] with
     def inspect(program: ProgramOfThought[I, O]): Vector[PredictorView] =
       Vector(
         program.generatorPredict.predictorView,
@@ -82,7 +82,7 @@ private[predictors] trait CompositePredictorInstances:
           answererPredictOverride = nextAnswerer
         )
 
-  given multiChainComparisonPredictors[I, O]: Predictors[MultiChainComparison[I, O]] with
+  given multiChainComparisonPredictorTraversal[I, O]: PredictorTraversal[MultiChainComparison[I, O]] with
     def inspect(program: MultiChainComparison[I, O]): Vector[PredictorView] =
       Vector(program.comparePredict.predictorView)
 
@@ -98,5 +98,5 @@ private[predictors] trait CompositePredictorInstances:
       current: P,
       existing: Option[P],
       updated: PredictorState
-  )(using Predictor[P]): Option[P] =
+  )(using PredictorLens[P]): Option[P] =
     if updated == current.predictorState then existing else Some(current.withPredictorState(updated))

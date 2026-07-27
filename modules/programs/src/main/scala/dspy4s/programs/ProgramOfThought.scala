@@ -47,7 +47,7 @@ final case class ProgramOfThought[I, O](
     /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing
       * an explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
       * Carrying it as a defaulted, `copy`-reachable field makes this learnable sub-predict addressable + immutably
-      * replaceable (see the `Predictors[ProgramOfThought]` instance).
+      * replaceable (see the `PredictorTraversal[ProgramOfThought]` instance).
       */
     generatorPredictOverride: Option[Predict[I, ProgramOfThought.CodeOut]] = None,
     /** Optional override for the code-regeneration predict used after a failed attempt (typed over the base input

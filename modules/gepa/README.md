@@ -50,7 +50,7 @@ Feedback is requested at two granularities:
 
 - **Program level** (`component = None`) — overall score + program-wide feedback for one example. Drives
   candidate scoring and acceptance.
-- **Predictor level** (`component = Some(name)`, with that predictor's trace slice) — feedback aimed at one
+- **PredictorLens level** (`component = Some(name)`, with that predictor's trace slice) — feedback aimed at one
   named predictor. The reflection loop assembles each component's reflective dataset from these.
 
 It `extends Metric` (its `score` is the program-level feedback's score) so a single instance is both the
@@ -138,7 +138,7 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 
 ## Relation to dspy
 
-GEPA uses the shared `Predictors` / `ProgramRunner` introspection and execution spines also used by
+GEPA uses the shared `PredictorTraversal` / `ProgramRunner` introspection and execution spines also used by
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns a `GepaResult[P]` rather than an `OptimizationReport[P]`.
 Deferred relative to upstream: multi-objective frontiers and run-dir resume beyond the single-objective

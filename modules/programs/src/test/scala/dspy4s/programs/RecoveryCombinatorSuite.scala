@@ -43,7 +43,7 @@ class RecoveryCombinatorSuite extends FunSuite:
       )
 
   private object Attempt:
-    given attemptPredictor: Predictor[Attempt] with
+    given attemptPredictor: PredictorLens[Attempt] with
       def get(program: Attempt): PredictorState = program.predict.predictorState
       def metadata(program: Attempt): PredictorMetadata = program.predict.predictorView.metadata
       def set(program: Attempt, updated: PredictorState): Attempt =
@@ -52,7 +52,7 @@ class RecoveryCombinatorSuite extends FunSuite:
   private def predictor(instruction: String): DynamicPredict =
     DynamicPredict(SignatureLayout.parse("i -> s").toOption.get.withInstructions(Some(instruction)))
 
-  private def params[P](program: P)(using predictors: Predictors[P]): Vector[PredictorState] = predictors.read(program)
+  private def params[P](program: P)(using predictors: PredictorTraversal[P]): Vector[PredictorState] = predictors.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
 
@@ -137,7 +137,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary  = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
     val recovered = primary.recoverWith(RecoveryPolicy.Always)(fallback)
-    val P         = summon[Predictors[RecoverWith[Int, String, Attempt, Attempt]]]
+    val P         = summon[PredictorTraversal[RecoverWith[Int, String, Attempt, Attempt]]]
 
     assertEquals(params(recovered), Vector(primary.predict.predictorState, fallback.predict.predictorState))
     assertEquals(P.readNamed(recovered).map(_._1), Vector("primary", "fallback"))

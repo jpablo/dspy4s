@@ -9,7 +9,7 @@ import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.programs.predictors.IdentifiedPredictor
 import dspy4s.programs.predictors.PredictorId
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.ProgramRunner
 
@@ -28,7 +28,7 @@ final class GepaAdapter[P](
     val program: P,
     val metric: FeedbackMetric,
     val failureScore: Double = 0.0
-)(using ps: Predictors[P], runner: ProgramRunner[P]):
+)(using ps: PredictorTraversal[P], runner: ProgramRunner[P]):
 
   /** Stable predictor ID → its traversal entry and trace index. Display names never participate in lookup. */
   private val componentsById: Map[PredictorId, (IdentifiedPredictor, Int)] =

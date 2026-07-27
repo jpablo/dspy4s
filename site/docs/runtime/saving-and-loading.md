@@ -30,19 +30,19 @@ This contract is shared by typed `Predict`, typed `ChainOfThought`, and
 leaf—for example, `ProgramOfThought` exposes its generator, regenerator, and
 answerer. The executable predictor is not used as a parameter carrier.
 
-`Predictor[P]` is a lens onto this state. Its instances obey:
+`PredictorLens[P]` is a lens onto this state. Its instances obey:
 
 - Get-Put: writing the state just read is a no-op.
 - Put-Get: reading after a write returns the written state.
 - Put-Put: only the last state written matters.
 - Frame: writing state does not change predictor metadata.
 
-At the composite level, `Predictors.replace(program, Predictors.read(program))`
+At the composite level, `PredictorTraversal.replace(program, PredictorTraversal.read(program))`
 returns the original program, and an arity-matched replacement reads back as the
 same state vector.
 
-Algebraically, `Predictor[P]` is a lawful lens focused on one `PredictorState`,
-while `Predictors[P]` is an ordered finite traversal. Composition concatenates
+Algebraically, `PredictorLens[P]` is a lawful lens focused on one `PredictorState`,
+while `PredictorTraversal[P]` is an ordered finite traversal. Composition concatenates
 the child traversals, parameter-free structure contributes the empty vector, and
 `Vector[PredictorState]` forms the parameter monoid under concatenation. Named
 inspection is checked against the canonical traversal so labels cannot silently
@@ -64,10 +64,10 @@ The following are also not persisted:
 This boundary prevents a saved prompt artifact from replacing architecture or live
 execution resources. Recreate and configure those normally, then load state into it.
 
-## Predictor IDs and compatibility
+## PredictorLens IDs and compatibility
 
 The JSON object keys are `predictor-0`, `predictor-1`, and so on. They are ordinal
-IDs derived from the root `Predictors` traversal:
+IDs derived from the root `PredictorTraversal` traversal:
 
 - JSON object order does not matter.
 - Missing and unknown ordinals are rejected.

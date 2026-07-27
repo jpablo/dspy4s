@@ -7,7 +7,7 @@ package dspy4s.core.contracts
   *
   * An instance is only lawful when `A` is exactly the writable part of `S`: a focus smaller than what `set`
   * touches breaks Put-Get, one larger than what `set` accepts breaks Get-Put. The prime example is
-  * `dspy4s.programs.predictors.Predictor`, whose focus [[dspy4s.programs.predictors.PredictorState]] was carved out of the
+  * `dspy4s.programs.predictors.PredictorLens`, whose focus [[dspy4s.programs.predictors.PredictorState]] was carved out of the
   * executable predictor precisely so these laws hold.
   */
 trait Lens[S, A]:

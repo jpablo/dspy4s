@@ -4,26 +4,26 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.PredictorId
 import munit.FunSuite
 
 private final case class CandidatePair(first: DynamicPredict, second: DynamicPredict)
 private object CandidatePair:
-  given Predictors[CandidatePair] = Predictors.derived
+  given PredictorTraversal[CandidatePair] = PredictorTraversal.derived
 
 private final case class LeftNested(pair: CandidatePair, third: DynamicPredict)
 private object LeftNested:
-  given Predictors[LeftNested] = Predictors.derived
+  given PredictorTraversal[LeftNested] = PredictorTraversal.derived
 
 private final case class RightNested(first: DynamicPredict, pair: CandidatePair)
 private object RightNested:
-  given Predictors[RightNested] = Predictors.derived
+  given PredictorTraversal[RightNested] = PredictorTraversal.derived
 
 class CandidateSuite extends FunSuite:
 
-  private given Predictors[DynamicPredict] = summon[Predictors[DynamicPredict]]
+  private given PredictorTraversal[DynamicPredict] = summon[PredictorTraversal[DynamicPredict]]
 
   private def predict(instruction: String): DynamicPredict =
     DynamicPredict(layout =
@@ -56,7 +56,7 @@ class CandidateSuite extends FunSuite:
       config = DynamicValues.record("temperature" := 0.3)
     )
     val applied = Candidate.applyTo(p, Candidate.seed(p))
-    assertEquals(summon[Predictors[DynamicPredict]].read(applied), summon[Predictors[DynamicPredict]].read(p))
+    assertEquals(summon[PredictorTraversal[DynamicPredict]].read(applied), summon[PredictorTraversal[DynamicPredict]].read(p))
   }
 
   test("seed and applyTo distinguish absent from explicitly empty instructions") {
@@ -79,15 +79,15 @@ class CandidateSuite extends FunSuite:
     val left  = LeftNested(CandidatePair(a, b), c)
     val right = RightNested(a, CandidatePair(b, c))
 
-    val leftEntries  = summon[Predictors[LeftNested]].readIdentified(left)
-    val rightEntries = summon[Predictors[RightNested]].readIdentified(right)
+    val leftEntries  = summon[PredictorTraversal[LeftNested]].readIdentified(left)
+    val rightEntries = summon[PredictorTraversal[RightNested]].readIdentified(right)
     assertEquals(leftEntries.map(_.id), rightEntries.map(_.id))
     assertNotEquals(leftEntries.map(_.displayName), rightEntries.map(_.displayName))
 
     val edited  = Candidate.seed(left).map { case (id, instruction) => id -> instruction.map(_ + "!") }
     val applied = Candidate.applyTo(right, edited)
     assertEquals(
-      summon[Predictors[RightNested]].read(applied).map(_.instructions),
+      summon[PredictorTraversal[RightNested]].read(applied).map(_.instructions),
       Vector(Some("A!"), Some("B!"), Some("C!"))
     )
   }

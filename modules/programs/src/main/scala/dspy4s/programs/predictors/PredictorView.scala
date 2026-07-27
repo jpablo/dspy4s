@@ -6,7 +6,7 @@ import dspy4s.core.contracts.SignatureLayout
   *
   * [[structure]] contains the signature name and fields but never its instructions: instructions are writable
   * [[PredictorState]]. [[moduleName]] is the execution/lifecycle name. Neither field is accepted by
-  * [[Predictors.replace]], so inspecting a predictor cannot accidentally turn architecture into optimizer state.
+  * [[PredictorTraversal.replace]], so inspecting a predictor cannot accidentally turn architecture into optimizer state.
   */
 final case class PredictorMetadata(structure: SignatureLayout, moduleName: String) derives CanEqual:
   require(structure.instructions.isEmpty, "PredictorMetadata.structure must not contain writable instructions")

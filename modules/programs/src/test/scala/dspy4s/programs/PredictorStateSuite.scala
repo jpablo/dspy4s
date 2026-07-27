@@ -45,10 +45,10 @@ class PredictorStateSuite extends FunSuite:
   private def holds[A](law: String, eq: IsEq[A]): Unit =
     assert(eq.lhs.equals(eq.rhs), s"$law: ${eq.lhs} != ${eq.rhs}")
 
-  /** Runs the four `@Law` statements the [[Predictor]] lens carries (Get-Put / Put-Get / Put-Put inherited from
+  /** Runs the four `@Law` statements the [[PredictorLens]] lens carries (Get-Put / Put-Get / Put-Put inherited from
     * `Lens`, plus the metadata frame), then the view/extension-syntax invariants. */
   private def assertLeafLaws[P](program: P, first: PredictorState, second: PredictorState)(using
-      leaf: Predictor[P]
+      leaf: PredictorLens[P]
   ): Unit =
     val original = leaf.get(program)
     val metadata = leaf.metadata(program)
@@ -114,12 +114,12 @@ class PredictorStateSuite extends FunSuite:
     assert(result.left.toOption.exists(_.message.contains("missing 'instructions'")))
   }
 
-  test("Predictor[DynamicPredict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
+  test("PredictorLens[DynamicPredict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
     val program = DynamicPredict(layout = layout, demos = demos, config = DynamicValues.record("seed" := 1))
     assertLeafLaws(program, firstState, secondState)
   }
 
-  test("Predictor[Predict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
+  test("PredictorLens[Predict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Answer directly."))
     val program = Predict(
       signature,
@@ -130,7 +130,7 @@ class PredictorStateSuite extends FunSuite:
     assertLeafLaws(program, firstState, secondState)
   }
 
-  test("Predictor[ChainOfThought] satisfies the lens laws and includes config in writable state") {
+  test("PredictorLens[ChainOfThought] satisfies the lens laws and includes config in writable state") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Reason carefully."))
     val program = ChainOfThought(
       signature,
@@ -138,7 +138,7 @@ class PredictorStateSuite extends FunSuite:
       name = Some("typed_cot"),
       config = DynamicValues.record("seed" := 1)
     )
-    val leaf = summon[Predictor[ChainOfThought[(question: String), (answer: String)]]]
+    val leaf = summon[PredictorLens[ChainOfThought[(question: String), (answer: String)]]]
 
     assertLeafLaws(program, firstState, secondState)
     assertEquals(leaf.get(program).config, DynamicValues.record("seed" := 1))
@@ -172,8 +172,8 @@ class PredictorStateSuite extends FunSuite:
     assertEquals(updated.tools, tools)
   }
 
-  test("Predictors.empty rejects non-empty state vectors") {
-    val empty = Predictors.empty[Int]
+  test("PredictorTraversal.empty rejects non-empty state vectors") {
+    val empty = PredictorTraversal.empty[Int]
     assertEquals(empty.read(42), Vector.empty[PredictorState])
     assertEquals(empty.replace(42, Vector.empty), 42)
 

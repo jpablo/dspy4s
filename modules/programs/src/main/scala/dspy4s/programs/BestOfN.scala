@@ -22,8 +22,8 @@ import zio.blocks.schema.DynamicValue
   * `BestOfN` is its independent-samples instance (no inter-attempt feedback).
   *
   * @tparam P
-  *   the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the pass-through `Predictors`
-  *   instance ([[BestOfN.bestOfNPredictors]]) can delegate to the inner program's own instance; an abstract
+  *   the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the pass-through `PredictorTraversal`
+  *   instance ([[BestOfN.bestOfNPredictorTraversal]]) can delegate to the inner program's own instance; an abstract
   *   `Module[...]` field would erase that evidence.
   */
 final case class BestOfN[P <: Module[I, O], I, O](
@@ -62,9 +62,9 @@ object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any learnable
     * predict of its own, so `inspect` / `replace` / `inspectNamed` delegate to the inner program's instance unchanged.
     */
-  given bestOfNPredictors[P <: Module[I, O], I, O](using
-      inner: Predictors[P]
-  ): Predictors[BestOfN[P, I, O]] with
+  given bestOfNPredictorTraversal[P <: Module[I, O], I, O](using
+      inner: PredictorTraversal[P]
+  ): PredictorTraversal[BestOfN[P, I, O]] with
     def inspect(program: BestOfN[P, I, O]): Vector[PredictorView] =
       inner.inspect(program.module)
 

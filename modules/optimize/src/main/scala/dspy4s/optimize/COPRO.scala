@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -52,13 +52,13 @@ final case class COPROConfig(
 /** COPRO — Coordinate-ascent Prompt Optimizer. A v1 port of DSPy's `dspy.teleprompt.COPRO`
   * (`dspy/teleprompt/copro_optimizer.py`).
   *
-  * '''Algorithm.''' For each learnable predictor exposed by [[Predictors.read]]:
+  * '''Algorithm.''' For each learnable predictor exposed by [[PredictorTraversal.read]]:
   *   1. Seed `breadth - 1` candidate instructions with an instruction-generation [[DynamicPredict]] (the
   *      `BasicGenerateInstruction` analogue: `basic_instruction -> proposed_instruction`), seeded with the predictor's
   *      current instruction and its signature's field names. Distinct candidates are sampled by varying the call's
   *      `rolloutId` (and temperature in `config`), mirroring upstream's `n = breadth`. The predictor's own current
   *      instruction is added as the `breadth`-th candidate (matches upstream). 2. Evaluate the WHOLE program with each
-  *      candidate instruction applied to THIS predictor (via [[Predictors.replace]]) on the valset (falling back to the
+  *      candidate instruction applied to THIS predictor (via [[PredictorTraversal.replace]]) on the valset (falling back to the
   *      trainset) using [[dspy4s.evaluate.Evaluate]] + the metric. 3. Keep the best-scoring instruction for this
   *      predictor, then run `depth - 1` further rounds that refine using the accumulated `(instruction, score)`
   *      attempts (the `GenerateInstructionGivenAttempts` analogue). 4. Lock in the predictor's best instruction before
@@ -80,11 +80,11 @@ final case class COPROConfig(
   *     completion (dspy4s `Predict` returns one completion per call); the effect (distinct proposals) is the same.
   *   - '''De-duplication is by instruction string''', not Python's `(instruction, prefix)` + last-field equality.
   */
-final class COPRO[P: {Predictors, ProgramRunner}](config: COPROConfig) extends Teleprompter[P]:
+final class COPRO[P: {PredictorTraversal, ProgramRunner}](config: COPROConfig) extends Teleprompter[P]:
 
   override val name: String = "copro"
 
-  private val ps: Predictors[P]  = summon[Predictors[P]]
+  private val ps: PredictorTraversal[P]  = summon[PredictorTraversal[P]]
   private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
 
   override def compile(

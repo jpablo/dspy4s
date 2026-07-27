@@ -44,7 +44,7 @@ class ModeLawSuite extends FunSuite:
       Right(Prediction(call.input, RawPrediction.empty))
 
   private object Recorder:
-    given recorderPredictor: Predictor[Recorder] with
+    given recorderPredictor: PredictorLens[Recorder] with
       def get(program: Recorder): PredictorState = program.predict.predictorState
       def metadata(program: Recorder): PredictorMetadata = program.predict.predictorView.metadata
       def set(program: Recorder, updated: PredictorState): Recorder =
@@ -107,10 +107,10 @@ class ModeLawSuite extends FunSuite:
     assertEquals(RuntimeEnvironment.current.trace.map(_.component), Vector("recorder"))
   }
 
-  test("Predictors passes through the wrapped program (mode is non-learnable)") {
+  test("PredictorTraversal passes through the wrapped program (mode is non-learnable)") {
     val r     = Recorder(predict("a -> b"))
     val moded = Compose.mode(Mode.temperature(1.0))(r)
-    val P     = summon[Predictors[Moded[Int, Int, Recorder]]]
+    val P     = summon[PredictorTraversal[Moded[Int, Int, Recorder]]]
     assertEquals(P.read(moded), Vector(r.predict.predictorState))
     assertEquals(P.readNamed(moded).map(_._1), Vector("self"))
     assertEquals(P.read(P.replace(moded, P.read(moded))), P.read(moded))

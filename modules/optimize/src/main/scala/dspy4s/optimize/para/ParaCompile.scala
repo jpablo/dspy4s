@@ -11,8 +11,8 @@ import dspy4s.programs.para.Program
 
 /** A packaged [[Program]] as the optimizer entry point.
   *
-  * `COPRO[P]` needs `Predictors[P]` AND `ProgramRunner[P]`. Both are uniform over the packaged type:
-  * `Predictors[Program[I, O]]` delegates to the packaged evidence (Para projection / reparameterization), and
+  * `COPRO[P]` needs `PredictorTraversal[P]` AND `ProgramRunner[P]`. Both are uniform over the packaged type:
+  * `PredictorTraversal[Program[I, O]]` delegates to the packaged evidence (Para projection / reparameterization), and
   * `ProgramRunner[Program[I, O]]` decodes through the domain OBJECT's `RecordCodec[I]` (decoding is
   * object-side; nothing per-program is packaged). So `new COPRO[Program[I, O]](config)` type-checks directly
   * (any `Teleprompter` does), the report is already `Program`-typed, and it works on UPCAST values and on

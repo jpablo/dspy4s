@@ -45,7 +45,7 @@ the trainset.
 Optimizers are generic over the program type `P`, working through two given instances rather than a fixed
 program class:
 
-- **`Predictors[P]`** — introspection: `inspect` exposes non-executable `PredictorView`s (read-only signature/module
+- **`PredictorTraversal[P]`** — introspection: `inspect` exposes non-executable `PredictorView`s (read-only signature/module
   metadata plus writable state), `read` projects the `PredictorState`s, and `replace` writes an edited state vector
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
@@ -132,7 +132,7 @@ compatibility policy.
 
 This module ports `dspy/teleprompt/` and `dspy/propose/`. Following the [module-purity
 principle](../../README.md), programs stay immutable pure functions; optimizers never mutate a student in
-place (Python monkey-patches `forward`) — they read the predictor genome through `Predictors`, build edited
+place (Python monkey-patches `forward`) — they read the predictor genome through `PredictorTraversal`, build edited
 copies, and return a new program. `KNNFewShot` is the one case that can't be a `Teleprompter` (its behavior is
 per-call), so it returns a wrapper `DynamicModule` instead. The reflective genetic optimizer **GEPA** lives in
 its own [`gepa` module](../gepa/README.md) because it needs a richer feedback metric and a reflection LM.

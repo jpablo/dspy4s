@@ -7,12 +7,12 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.para.Program
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 /** The DynamicSignature bundle end-to-end: the path-dependent `predict` constructor, the optimizer surface
-  * (`Predictors` + `ProgramRunner`) over a packaged bundle program, and the cross-fiber `bridge` (eager
+  * (`PredictorTraversal` + `ProgramRunner`) over a packaged bundle program, and the cross-fiber `bridge` (eager
   * compatibility failure; a bridged pipeline composing and running). The unit-law and freshness pins live in
   * `ParaCategoryLawSuite`; this suite is the usability story.
   */
@@ -60,10 +60,10 @@ class DynamicSignatureSuite extends FunSuite:
     assert(qa.input(DynamicValue.Record.empty).isLeft)
   }
 
-  test("the optimizer surface holds over a packaged bundle program (Predictors read/replace + record run)") {
+  test("the optimizer surface holds over a packaged bundle program (PredictorTraversal read/replace + record run)") {
     import qa.given
     val packaged = Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
-    val P        = summon[Predictors[Program[qa.In, qa.Out]]]
+    val P        = summon[PredictorTraversal[Program[qa.In, qa.Out]]]
 
     val states = P.read(packaged)
     assertEquals(states.size, 1)

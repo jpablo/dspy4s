@@ -122,7 +122,7 @@ class ParaCompileSuite extends FunSuite:
       val result           = student.copro(config(), trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
-      // The whole assertion goes through the Para surface: no Predictors summon at the call site.
+      // The whole assertion goes through the Para surface: no PredictorTraversal summon at the call site.
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
       assertEquals(report.metadata.get("best_score"), Some(100.0))
       assert(report.candidates.nonEmpty)
@@ -196,7 +196,7 @@ class ParaCompileSuite extends FunSuite:
 
   test("COPRO optimizes a DynamicSignature bundle program exactly like a typed student") {
     // The runtime-string counterpart of test 1: the student's signature exists only as a parsed value, but the
-    // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (Predictors +
+    // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (PredictorTraversal +
     // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.
     val bundle  = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
     import bundle.given // the object codec, for the record-boundary runner `.copro` demands

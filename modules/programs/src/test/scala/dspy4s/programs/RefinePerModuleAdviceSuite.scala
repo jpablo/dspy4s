@@ -45,7 +45,7 @@ class RefinePerModuleAdviceSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
 
   /** Two-stage introspectable program: `hinter` (q -> hint) feeds `answerer` (q, hint -> answer). A case class of
-    * `DynamicPredict`s, so `Predictors` is structurally derived with field-label names ("hinter", "answerer").
+    * `DynamicPredict`s, so `PredictorTraversal` is structurally derived with field-label names ("hinter", "answerer").
     */
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
       extends Module[Q, Cand]:

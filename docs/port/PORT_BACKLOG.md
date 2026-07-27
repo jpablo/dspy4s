@@ -183,14 +183,14 @@ Shipped in Phase 7 v2 (commit b01c627):
   majority-vote default
 
 Shipped after v1 (predictor-introspection + persistence track):
-- `Predictors[P]` / `Predictor[P]` typeclass pair (Scala 3 Mirror derivation),
+- `PredictorTraversal[P]` / `PredictorLens[P]` typeclass pair (Scala 3 Mirror derivation),
   replacing `PredictOps` (G-1 resolved, P1–P6; `PredictOps` removed in 1657f9c).
   Composite multi-predictor programs are now introspectable/optimizable end-to-end.
 - Program `save`/`load` + `dumpState`/`loadState` via `ProgramPersistence`
   (commit 9c5a6db; G-4 resolved).
 - Per-module `config` (commit b85fe27) + bound LM `withLm`/`boundLm`
   (commit b2d0096; G-3 resolved).
-- Instruction-editing enabler: `Predictor.set` writes back demos + config +
+- Instruction-editing enabler: `PredictorLens.set` writes back demos + config +
   instructions (commit 50dd00e), unblocking COPRO/MIPRO-style optimizers.
 
 Deferred to Phase 7 v2:
@@ -236,7 +236,7 @@ Tracks:
   resume; live-model validated); **`InferRules`** (G-11, 81ffec1) — trainset-derived
   natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
   per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
-  (`Predictors` introspection, `ProgramRunner` typed spine, instruction editing) + `Evaluate`.
+  (`PredictorTraversal` introspection, `ProgramRunner` typed spine, instruction editing) + `Evaluate`.
   **Still deferred:** `SIMBA` (G-13), `BetterTogether` (G-15),
   `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
   remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative

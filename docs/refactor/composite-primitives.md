@@ -241,7 +241,7 @@ additive later. `MultiChainComparison`'s `rationale` is already a second opening
 self-check would be the first new case.
 
 **Where we must diverge from kyo-ai:** the augmentation field is learnable surface, so the primitive must
-stay introspectable/replaceable by `Predictors` (optimizer-addressable). kyo-ai's `Thought` has no
+stay introspectable/replaceable by `PredictorTraversal` (optimizer-addressable). kyo-ai's `Thought` has no
 optimizer dimension; ours does. See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai).
 
 ## Step 4: `isolatedAttempt` + `propagateAttempt` (covers G)
@@ -362,7 +362,7 @@ CIO substrate lands (a referentially-transparent `CIO` value is re-runnable for 
 trait that tools, prompts, thoughts, and modes all implement, so `enable(tool, prompt, thought, mode)`
 attaches any mix uniformly; our composites hand-wire each capability. Adopt the uniform-binder shape as
 step 6's composition surface. **The dspy4s-specific requirement kyo-ai does not have:** attaching a
-capability can change what the optimizer tunes, so the binder must interplay with the `Predictors`
+capability can change what the optimizer tunes, so the binder must interplay with the `PredictorTraversal`
 typeclass (read/replace of learnable predicts). This is the one place copying kyo-ai directly would be
 wrong.
 
@@ -378,7 +378,7 @@ typed field via `Shape`, optional post-decode hook; ship opening-String now, gen
 - **Do not move errors onto the effect channel.** kyo-ai uses `Abort[AIException]`; our errors-as-values
   (`Either[DspyError, A]`) is exactly what makes `CIO[Either[DspyError, A]]` clean. Keep it.
 - **Must add beyond kyo-ai: optimizer-addressability.** Every borrowed abstraction (Thought-augmentation,
-  mode-middleware, enablement-binder) must remain introspectable/replaceable by `Predictors`. kyo-ai has
+  mode-middleware, enablement-binder) must remain introspectable/replaceable by `PredictorTraversal`. kyo-ai has
   no optimizer, so its versions carry no such constraint; ours must.
 
 **Lesser (only if dspy4s grows stateful):** kyo-ai's `forget` / `fresh` / `snapshot` / `recover` are a more

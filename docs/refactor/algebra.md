@@ -273,8 +273,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
     `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
     `Program` packages addressability while its domain object supplies a sealed canonical codec, giving uniform
-    `Predictors[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
-    values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `Predictors`, no `Program`;
+    `PredictorTraversal[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
+    values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `PredictorTraversal`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Decoding is OBJECT-side (stage 4, after the lawfulness-review arc that first replaced `unsafeOf` with a
     `ProgramInput` coherence law and then deleted `ProgramInput` outright): `Program.of` and the record-boundary
@@ -285,8 +285,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     runtime-string signatures enter through the `DynamicSignature` bundle, whose parses mint fresh
     codec-equipped types and whose generic `stable` view preserves them across aliases (see
     `algebra-2-program-composition.md`).
-    `Predictors.derived` now requires evidence for every product field; deliberately parameter-free field types
-    opt in with `Predictors.empty`, so an omitted learnable subtree can no longer disappear silently.
+    `PredictorTraversal.derived` now requires evidence for every product field; deliberately parameter-free field types
+    opt in with `PredictorTraversal.empty`, so an omitted learnable subtree can no longer disappear silently.
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
@@ -295,7 +295,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
     structures from the Para pass: the delooping of the parameter monoid as an explicit `Category` instance;
-    `ReadFunctor` (`Predictors.read` as a functor value; its functor laws — preserves id + composition — are
+    `ReadFunctor` (`PredictorTraversal.read` as a functor value; its functor laws — preserves id + composition — are
     carried on the `CategoryFunctor` trait and are exactly the Para projection laws); and
     `fanout` as ordered shared-input pairing, with `parallel` retained as a compatibility name and the copy NON-law
     (sharing vs re-running an effectful `h` differ, in
@@ -306,13 +306,13 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
     `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[PredictorState]]`
-    (`d3be8e1`, the parameter monoid — codomain of the `Predictors` homomorphism). The delooping is generalized
+    (`d3be8e1`, the parameter monoid — codomain of the `PredictorTraversal` homomorphism). The delooping is generalized
     to `delooping[M](using Monoid[M]): Category[AnyObject, Delooped[M]]` ("a monoid is a one-object category"), so
     `paramsDeloop` is now literally the parameter monoid delooped rather than an ad-hoc `Category`. Algebra 1's two
     commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
-    `core.contracts.Lens[S, A]` states get-put / put-get / put-put on the trait, and `Predictor[P] extends
+    `core.contracts.Lens[S, A]` states get-put / put-get / put-put on the trait, and `PredictorLens[P] extends
     Lens[P, PredictorState]` inherits them, adding only the `frame` law (writing state never changes the
     read-only `PredictorMetadata`). The focus had to be carved down to exactly the writable triple
     (instructions / demos / config) before these laws could hold; `PredictorStateSuite` executes all four

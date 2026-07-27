@@ -19,7 +19,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.ChainOfThought
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.DynamicSignature
-import dspy4s.programs.predictors.Predictor
+import dspy4s.programs.predictors.PredictorLens
 import dspy4s.programs.predictors.PredictorMetadata
 import dspy4s.programs.predictors.PredictorState
 import dspy4s.programs.ProgramRunner
@@ -47,7 +47,7 @@ final case class ArrayBox(values: Array[Int]) derives Schema
 /** Executes the `@Law` statements of the Para prototype's structures ([[Category]] / [[ParaCategory]] over [[Program]],
   * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
   * parameter vectors and delooping morphisms, observational equality (complete prediction / params / coherent decode /
-  * lifecycle) for `Program` morphisms. Also pins the two construction gates (no `Predictors`, no `Program`; no `RecordCodec`, no
+  * lifecycle) for `Program` morphisms. Also pins the two construction gates (no `PredictorTraversal`, no `Program`; no `RecordCodec`, no
   * `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying is not natural for effectful
   * morphisms).
   */
@@ -72,13 +72,13 @@ class ParaCategoryLawSuite extends FunSuite:
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
   private object Step:
-    given stepPredictor[I, O]: Predictor[Step[I, O]] with
+    given stepPredictor[I, O]: PredictorLens[Step[I, O]] with
       def get(program: Step[I, O]): PredictorState = program.predict.predictorState
       def metadata(program: Step[I, O]): PredictorMetadata = program.predict.predictorView.metadata
       def set(program: Step[I, O], updated: PredictorState): Step[I, O] =
         program.copy(predict = program.predict.withPredictorState(updated))
 
-  /** A NON-product module: no `Predictor` leaf, no `Mirror`, hence no `Predictors` instance. Used to prove the
+  /** A NON-product module: no `PredictorLens` leaf, no `Mirror`, hence no `PredictorTraversal` instance. Used to prove the
     * construction gate below.
     */
   private final class Opaque extends Module[Int, Int]:
@@ -427,14 +427,14 @@ class ParaCategoryLawSuite extends FunSuite:
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }
 
-  // ── The construction gate: no Predictors evidence, no Program ───────────────────────────────────────────────
-  test("packaging a program without Predictors evidence does not compile") {
-    // Opaque is a plain (non-Product) Module: no Predictor leaf, no Mirror, so Predictors[Opaque] cannot be
+  // ── The construction gate: no PredictorTraversal evidence, no Program ───────────────────────────────────────────────
+  test("packaging a program without PredictorTraversal evidence does not compile") {
+    // Opaque is a plain (non-Product) Module: no PredictorLens leaf, no Mirror, so PredictorTraversal[Opaque] cannot be
     // summoned and Program.of is a compile error. In the ambient Module world the same program runs fine but is
     // silently un-addressable; in the packaged category it cannot exist.
     val opaque = new Opaque
     assertEquals(opaque.apply(ProgramCall(3)).map(_.output), Right(3)) // valid ambient program
     val errors = compileErrors("Program.of(new Opaque)")
     assert(errors.nonEmpty, "expected Program.of(new Opaque) to fail compilation")
-    assert(errors.contains("Predictors"), s"expected a missing-Predictors error, got:\n$errors")
+    assert(errors.contains("PredictorTraversal"), s"expected a missing-PredictorTraversal error, got:\n$errors")
   }

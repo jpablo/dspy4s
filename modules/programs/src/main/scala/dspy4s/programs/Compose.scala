@@ -24,7 +24,7 @@ import dspy4s.typed.Prediction
   * observations visible to a later leaf.
   *
   * Optimizer-addressability (fork 4): the combinators are concretely typed in their child programs (`A` / `B`), and
-  * their hand-written [[Predictors]] instances distribute `read` / `replace` structurally (`read(a) ++ read(b)`), so
+  * their hand-written [[PredictorTraversal]] instances distribute `read` / `replace` structurally (`read(a) ++ read(b)`), so
   * teleprompters can introspect and tune the predicts inside a pipeline.
   */
 
@@ -38,7 +38,7 @@ final case class Identity[I]() extends TransparentModule[I, I]:
     Right(Prediction(call.input, RawPrediction.empty))
 
 object Identity:
-  given identityPredictors[I]: Predictors[Identity[I]] = Predictors.empty
+  given identityPredictorTraversal[I]: PredictorTraversal[Identity[I]] = PredictorTraversal.empty
 
 /** `a >>> b` — sequential (dependent) composition: run `a`, thread its output value into `b`. The Category operation.
   */
@@ -56,22 +56,22 @@ final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
         .map(predO => predO.copy(raw = predX.raw.followedBy(predO.raw)))
     }
 
-/** Shared `Predictors` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural `inspect(first)
+/** Shared `PredictorTraversal` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural `inspect(first)
   * ++ inspect(second)`, `replace` slicing by `first`'s read-arity, and `first.` / `second.` name prefixing (fork 4).
   * One implementation keeps optimizer addressing in sync between `>>>` and `parallel` — a change to the slicing or path
   * naming applied to one combinator cannot silently miss the other.
   */
-private[programs] object PairPredictors:
-  def inspect[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[PredictorView] =
+private[programs] object PairPredictorTraversal:
+  def inspect[A, B](pa: PredictorTraversal[A], pb: PredictorTraversal[B])(first: A, second: B): Vector[PredictorView] =
     pa.inspect(first) ++ pb.inspect(second)
 
-  def replace[A, B, P](pa: Predictors[A], pb: Predictors[B])(first: A, second: B, updates: Vector[PredictorState])(
+  def replace[A, B, P](pa: PredictorTraversal[A], pb: PredictorTraversal[B])(first: A, second: B, updates: Vector[PredictorState])(
       rebuild: (A, B) => P
   ): P =
     val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(first).size)
     rebuild(pa.replace(first, firstUpdates), pb.replace(second, secondUpdates))
 
-  def inspectNamed[A, B](pa: Predictors[A], pb: Predictors[B])(first: A, second: B): Vector[(String, PredictorView)] =
+  def inspectNamed[A, B](pa: PredictorTraversal[A], pb: PredictorTraversal[B])(first: A, second: B): Vector[(String, PredictorView)] =
     pa.inspectNamed(first).map { case (sub, view) =>
       (if sub == "self" then "first" else s"first.$sub") -> view
     } ++
@@ -81,21 +81,21 @@ private[programs] object PairPredictors:
 
 object AndThen:
   /** Structural `read(a) ++ read(b)`; `replace` slices the updates by `first`'s read-arity (fork 4). */
-  given andThenPredictors[I, X, O, A <: Module[I, X], B <: Module[X, O]](
+  given andThenPredictorTraversal[I, X, O, A <: Module[I, X], B <: Module[X, O]](
       using
-      pa: Predictors[A],
-      pb: Predictors[B]
-  ): Predictors[AndThen[I, X, O, A, B]] with
+      pa: PredictorTraversal[A],
+      pb: PredictorTraversal[B]
+  ): PredictorTraversal[AndThen[I, X, O, A, B]] with
     def inspect(program: AndThen[I, X, O, A, B]): Vector[PredictorView] =
-      PairPredictors.inspect(pa, pb)(program.first, program.second)
+      PairPredictorTraversal.inspect(pa, pb)(program.first, program.second)
 
     def replace(program: AndThen[I, X, O, A, B], updates: Vector[PredictorState]): AndThen[I, X, O, A, B] =
-      PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
+      PairPredictorTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
     override def inspectNamed(program: AndThen[I, X, O, A, B]): Vector[(String, PredictorView)] =
-      PairPredictors.inspectNamed(pa, pb)(program.first, program.second)
+      PairPredictorTraversal.inspectNamed(pa, pb)(program.first, program.second)
 
 /** `fanout(a, b)` (compatibility name `parallel`) — run both programs on the same input and tuple their outputs. On the
   * synchronous `Either` substrate the two attempts run left-to-right and fail fast; this is Arrow-like `&&&`, not
@@ -118,22 +118,22 @@ final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
     )
 
 object Both:
-  /** Same structural distribution as [[AndThen.andThenPredictors]], via [[PairPredictors]]. */
-  given bothPredictors[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
+  /** Same structural distribution as [[AndThen.andThenPredictorTraversal]], via [[PairPredictorTraversal]]. */
+  given bothPredictorTraversal[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
       using
-      pa: Predictors[A],
-      pb: Predictors[B]
-  ): Predictors[Both[I, OA, OB, A, B]] with
+      pa: PredictorTraversal[A],
+      pb: PredictorTraversal[B]
+  ): PredictorTraversal[Both[I, OA, OB, A, B]] with
     def inspect(program: Both[I, OA, OB, A, B]): Vector[PredictorView] =
-      PairPredictors.inspect(pa, pb)(program.first, program.second)
+      PairPredictorTraversal.inspect(pa, pb)(program.first, program.second)
 
     def replace(program: Both[I, OA, OB, A, B], updates: Vector[PredictorState]): Both[I, OA, OB, A, B] =
-      PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
+      PairPredictorTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
     override def inspectNamed(program: Both[I, OA, OB, A, B]): Vector[(String, PredictorView)] =
-      PairPredictors.inspectNamed(pa, pb)(program.first, program.second)
+      PairPredictorTraversal.inspectNamed(pa, pb)(program.first, program.second)
 
 /** `split(a, b)` (compatibility name `tensor`) — run two programs left-to-right on independent inputs and pair both
   * outputs. It is the operation beneath shared-input fan-out: `fanout(a, b) = copy >>> split(a, b)`. Because `Either`
@@ -168,8 +168,8 @@ final case class Tensor[
     )
 
 object Tensor:
-  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both` (via [[PairPredictors]]). */
-  given tensorPredictors[
+  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both` (via [[PairPredictorTraversal]]). */
+  given tensorPredictorTraversal[
       I,
       J,
       A,
@@ -178,19 +178,19 @@ object Tensor:
       FB <: Module[J, B]
   ](
       using
-      pa: Predictors[FA],
-      pb: Predictors[FB]
-  ): Predictors[Tensor[I, J, A, B, FA, FB]] with
+      pa: PredictorTraversal[FA],
+      pb: PredictorTraversal[FB]
+  ): PredictorTraversal[Tensor[I, J, A, B, FA, FB]] with
     def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[PredictorView] =
-      PairPredictors.inspect(pa, pb)(program.first, program.second)
+      PairPredictorTraversal.inspect(pa, pb)(program.first, program.second)
 
     def replace(program: Tensor[I, J, A, B, FA, FB], updates: Vector[PredictorState]): Tensor[I, J, A, B, FA, FB] =
-      PairPredictors.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
+      PairPredictorTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
     override def inspectNamed(program: Tensor[I, J, A, B, FA, FB]): Vector[(String, PredictorView)] =
-      PairPredictors.inspectNamed(pa, pb)(program.first, program.second)
+      PairPredictorTraversal.inspectNamed(pa, pb)(program.first, program.second)
 
 /** `copy`: duplicate the input `I` into `(I, I)`. Parameter-free (like `id`); the first half of a fan-out, so
   * `parallel(a, b) = copy >>> tensor(a, b)`. Copy commutes with deterministic programs but not effect-observing
@@ -202,7 +202,7 @@ final case class Copy[I]() extends TransparentModule[I, (I, I)]:
     Right(Prediction((call.input, call.input), RawPrediction.empty))
 
 object Copy:
-  given copyPredictors[I]: Predictors[Copy[I]] = Predictors.empty
+  given copyPredictorTraversal[I]: PredictorTraversal[Copy[I]] = PredictorTraversal.empty
 
 /** `discard`: drop the input, producing `()`. Parameter-free. Although `f >>> discard` and `discard` return the same
   * value, the former still runs `f` and can fail, spend tokens, or invoke tools. No naturality law is claimed for
@@ -214,7 +214,7 @@ final case class Discard[I]() extends TransparentModule[I, Unit]:
     Right(Prediction((), RawPrediction.empty))
 
 object Discard:
-  given discardPredictors[I]: Predictors[Discard[I]] = Predictors.empty
+  given discardPredictorTraversal[I]: PredictorTraversal[Discard[I]] = PredictorTraversal.empty
 
 /** `swap`: exchange two components. Parameter-free and involutive (`swap >>> swap = id`) as a structural value
   * transformation; it does not make ordered effectful execution symmetric.
@@ -228,7 +228,7 @@ final case class Swap[I, J]() extends TransparentModule[(I, J), (J, I)]:
     Right(Prediction((j, i), RawPrediction.empty))
 
 object Swap:
-  given swapPredictors[I, J]: Predictors[Swap[I, J]] = Predictors.empty
+  given swapPredictorTraversal[I, J]: PredictorTraversal[Swap[I, J]] = PredictorTraversal.empty
 
 /** The composition combinators as functions / operators. `lift` / `id` / `fanout` / `split` / `copy` / `discard` /
   * `swap` are plain factories; `>>>`, variance transforms, and recovery also have fluent extensions. Import

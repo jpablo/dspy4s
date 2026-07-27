@@ -17,7 +17,7 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.DynamicPredict
 import dspy4s.programs.predictors.PredictorId

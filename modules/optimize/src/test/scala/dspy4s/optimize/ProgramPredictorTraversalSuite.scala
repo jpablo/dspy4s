@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.predictors.predictorState
 
-import dspy4s.programs.predictors.Predictors
+import dspy4s.programs.predictors.PredictorTraversal
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CodeInterpreter
@@ -19,12 +19,12 @@ import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-class ProgramPredictorsSuite extends FunSuite:
+class ProgramPredictorTraversalSuite extends FunSuite:
 
-  /** Resolves the right [[Predictors]] instance from the program's *static* type, so the `[I, O]` of the given are
+  /** Resolves the right [[PredictorTraversal]] instance from the program's *static* type, so the `[I, O]` of the given are
     * inferred at the call site (accessing the `given ... with` object directly would pin them to `Nothing`).
     */
-  private def predictorsOf[P](@annotation.unused program: P)(using ps: Predictors[P]): Predictors[P] = ps
+  private def predictorsOf[P](@annotation.unused program: P)(using ps: PredictorTraversal[P]): PredictorTraversal[P] = ps
 
   private val qaSignature = Signature.fromString("question -> answer")
 
