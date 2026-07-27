@@ -99,19 +99,18 @@ The `Shape[A]` typeclass has three implementations
 (the product shape from `ZioSchemaCodec.derivedFromZioSchema` for
 case-class I/O via `zio-blocks-schema`, `TupleShape` for named-tuple
 I/O from the macros, `MapShape` for the string DSL).
-The pair-of-types pattern (erased + typed) repeats: `Prediction`
-becomes `DynamicPrediction` + `Prediction[O]` (the typed one keeps the
-erased prediction on `.raw`), and `Predict` becomes `DynamicPredict` +
+The representation pattern repeats at two levels: `DynamicPrediction` is the raw execution evidence retained by every
+`Prediction[O]` on `.raw`, while `Predict` has dynamic and statically typed entry points, `DynamicPredict` and
 `Predict[I, O]`. The two `Predict`s are **siblings** — thin `Module`s
 over the shared `PredictEngine`, not wrapper-and-wrapped. The typed
-programs are themselves `Module`s (`PredictiveModule[I, O]`),
+programs are themselves `Module[I, O]` values,
 so the runtime stack sees them like any other program; `ChainOfThought`
 is a typed signature augmentation that *composes* an inner `Predict[I, O]`
 (its `forward` delegates to it).
 
-This is "purely additive": existing dynamic code keeps working
-unchanged; adapter authors never see the typed layer; new code can
-opt into typed I/O surface-by-surface. See
+Dynamic programs retain record-valued semantics, but now share the same `Prediction[O]` module result as statically
+typed programs: use `.output` for the record and `.raw` for the engine envelope. Adapter authors still never see the
+typed layer, and new code can opt into typed I/O surface-by-surface. See
 [TYPED_SIGNATURES.md](../TYPED_SIGNATURES.md) for the design rationale.
 
 ## 3. Module parameter discovery: `__dict__` walking → typeclass
@@ -317,11 +316,11 @@ doesn't have:
 
 - `runtime/PredictEngine` — the shared execute body
   (`private[dspy4s]`).
-- `contracts/Module` — the generic program base `Module[I, Result]`; its `final apply`
-  does the module-level callback + trace wrapping over an abstract `forward`.
-  `DynamicModule` is the untyped-spine alias (`Module[DynamicValue.Record, DynamicPrediction]`).
-- `DynamicPredict` — erased predict, extends `DynamicModule`.
-- `Predict[I, O]` — typed predict, a `PredictiveModule[I, O]`; a
+- `contracts/Module` — the semantic program base `Module[I, O]`; `forward` returns `Prediction[O]` and its `final apply`
+  adds module callbacks and tracing. `DynamicModule` specializes both semantic types to `DynamicValue.Record` and
+  lifts its raw `DynamicPrediction` through `Prediction.dynamic`.
+- `DynamicPredict` — record-valued predict, extends `DynamicModule`.
+- `Predict[I, O]` — typed predict, a `Module[I, O]`; a
   *sibling* of `DynamicPredict` over `PredictEngine` (not a wrapper).
 
 `ChainOfThought` is itself a `Module` that composes an inner typed `Predict`.
@@ -332,7 +331,7 @@ adapter/LM/callback dance that Python has spread across
 
 **Every program is now typed.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
 `ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
-`DynamicPredict` is the only program left on the untyped spine: it executes runtime-built signatures while typed
+`DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while typed
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 typed programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
 - **`OutputAugmentation`** (`dspy4s.typed`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that

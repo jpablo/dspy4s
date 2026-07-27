@@ -295,7 +295,7 @@ class StreamingPortedSuite extends FunSuite:
 
     val program = new DynamicModule:
       override val moduleName: String = "my_program"
-      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>

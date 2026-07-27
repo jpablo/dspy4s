@@ -74,7 +74,7 @@ class KNNFewShotSuite extends FunSuite:
       val result   = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       // The final answer proves the demos steered the call (the LM answers "guided" only when a1 is in its prompt).
-      assertEquals(result.toOption.flatMap(_.asString("answer").toOption), Some("guided"))
+      assertEquals(result.toOption.flatMap(_.raw.asString("answer").toOption), Some("guided"))
 
       // The final task prompt carries the cluster-A demos (q1/q2 with the teacher's answers) and no cluster-B ones.
       val finalPrompt = lm.prompts.last

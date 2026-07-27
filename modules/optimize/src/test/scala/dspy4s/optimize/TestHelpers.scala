@@ -27,7 +27,7 @@ final case class ScriptedPredictProgram(
     config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
-  override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+  override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, DynamicPrediction] =
     failsWith match
@@ -43,7 +43,7 @@ final case class DemoAwarePredictProgram(
     config: DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
-  override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+  override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, DynamicPrediction] =
     val q = lookupString(input.input, "question")

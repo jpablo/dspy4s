@@ -37,9 +37,9 @@ class ComposeLawSuite extends FunSuite:
     * exposes `predict` as its single learnable leaf (for the addressability laws).
     */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
-      extends Module[I, Prediction[O]]:
+      extends Module[I, O]:
     override val moduleName: String = s"step_$tag"
-    override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
+    override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction(values = DynamicValues.record("tag" := tag))))
@@ -47,9 +47,9 @@ class ComposeLawSuite extends FunSuite:
   /** A leaf that makes lifecycle structure semantically observable by returning the trace size at its forward boundary.
     * Associativity requires both syntax trees to have run the same leaves before reaching it.
     */
-  private final case class TraceSize(predict: DynamicPredict) extends Module[String, Prediction[Int]]:
+  private final case class TraceSize(predict: DynamicPredict) extends Module[String, Int]:
     override val moduleName: String = "trace_size"
-    override protected val lifecycle: ModuleLifecycle[String, Prediction[Int]] =
+    override protected val lifecycle: ModuleLifecycle[String, Int] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[String])(using
         RuntimeContext
@@ -99,7 +99,7 @@ class ComposeLawSuite extends FunSuite:
   test("p >>> id = p on the complete prediction and lifecycle") {
     val p = step[Int, String]("p", "i -> s")(i => s"v$i")
 
-    def run(program: Module[Int, Prediction[String]]) =
+    def run(program: Module[Int, String]) =
       RuntimeEnvironment.resetForTests()
       val result = program.apply(ProgramCall(7))
       (result, RuntimeEnvironment.current.trace.map(_.component))
@@ -126,7 +126,7 @@ class ComposeLawSuite extends FunSuite:
     val b = step[String, String]("b", "s -> t")(identity)
     val c = TraceSize(predict("t -> n"))
 
-    def run(program: Module[Int, Prediction[Int]]): (Either[DspyError, Int], Vector[String]) =
+    def run(program: Module[Int, Int]): (Either[DspyError, Int], Vector[String]) =
       RuntimeEnvironment.resetForTests()
       val output = program.apply(ProgramCall(1)).map(_.output)
       output -> RuntimeEnvironment.current.trace.map(_.component)

@@ -158,7 +158,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
       gen.apply(call) match
         case Right(pred) =>
           Right(
-            DynamicValues.recordGet(pred.values, "observations")
+            DynamicValues.recordGet(pred.output, "observations")
               .map(DynamicValues.renderText)
               .map(_.trim)
               .filter(_.nonEmpty)
@@ -228,7 +228,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Predic
         rolloutId = Some(rolloutId)
       )
       gen.apply(call).map { pred =>
-        DynamicValues.recordGet(pred.values, "proposed_instruction")
+        DynamicValues.recordGet(pred.output, "proposed_instruction")
           .map(DynamicValues.renderText)
           .map(_.trim)
           .getOrElse("")

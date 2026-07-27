@@ -221,8 +221,8 @@ wrapper.
 ### 6. Layout escape hatch — `SignatureLayout.create / parse`
 
 Rare. Direct construction of a `SignatureLayout` value, bypassing the
-typed surface entirely. You hand it to `DynamicPredict` and get back
-`DynamicPrediction` (a `Map[String, Any]`-shaped result). Use only
+typed signature surface entirely. You hand it to `DynamicPredict` and get back
+`Prediction[DynamicValue.Record]`; its `.raw` retains the `DynamicPrediction` containing completions and usage. Use only
 when interoperating with code that already speaks the erased
 contract.
 
@@ -415,7 +415,7 @@ decoding). The shared `PredictEngine` and adapters consume the
 encoding and decoding around that raw engine call:
 
 - New typed code can opt in surface-by-surface.
-- Existing dynamic code keeps working unchanged.
+- Dynamic programs keep record-valued I/O; their uniform module result is `Prediction[DynamicValue.Record]`.
 - Adapter authors don't need to know the typed layer exists.
 
 When you need to drop into the erased world (passing a signature to

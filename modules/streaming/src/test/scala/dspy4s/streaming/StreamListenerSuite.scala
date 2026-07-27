@@ -360,7 +360,7 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
-      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         for
@@ -368,10 +368,10 @@ class StreamListenerSuite extends FunSuite:
           judgement <- predict2.apply(input.copy(
             input = input.input.updated(
                             "answer",
-                            answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+                            answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
                           )
                         ))
-        yield judgement
+        yield judgement.raw
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -455,13 +455,13 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig, name = Some("predict2"))
-      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         for
           _      <- predict1.apply(input)
           second <- predict2.apply(input)
-        yield second
+        yield second.raw
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -508,13 +508,13 @@ class StreamListenerSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val p1 = DynamicPredict(layout = sig, name = Some("p1"))
       private val p2 = DynamicPredict(layout = sig, name = Some("p2"))
-      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         for
           _ <- p1.apply(input)
           out <- p2.apply(input)
-        yield out
+        yield out.raw
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
@@ -595,7 +595,7 @@ class StreamListenerSuite extends FunSuite:
 
     val opaqueProgram = new DynamicModule:
       override val moduleName: String = "opaque"
-      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         Right(dspy4s.core.data.DynamicPrediction(values = rec("answer" := "x")))

@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.data.DynamicPrediction
 import dspy4s.programs.contracts.{DynamicModule, Module, ProgramCall}
-import dspy4s.typed.{Prediction, Shape}
+import dspy4s.typed.Shape
 import zio.blocks.schema.DynamicValue
 
 /** Capability for evaluating a program from the dynamic record boundary.
@@ -28,7 +28,7 @@ trait ProgramRunner[P]:
 private[programs] trait LowPriorityProgramRunner:
   /** Any typed module whose input type carries a [[RecordCodec]] (user composites without a hand-written
     * runner). Lower priority than the signature-backed instances in the companion. */
-  given fromRecordCodec[I, O, P <: Module[I, Prediction[O]]](using
+  given fromRecordCodec[I, O, P <: Module[I, O]](using
       codec: RecordCodec[I]
   ): ProgramRunner[P] with
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
@@ -45,9 +45,9 @@ object ProgramRunner extends LowPriorityProgramRunner:
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, DynamicPrediction] =
-      program.apply(call)
+      program.apply(call).map(_.raw)
 
-  private def signatureBacked[I, O, P <: Module[I, Prediction[O]]](
+  private def signatureBacked[I, O, P <: Module[I, O]](
       inputShapeOf: P => Shape[I]
   ): ProgramRunner[P] = new ProgramRunner[P]:
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using

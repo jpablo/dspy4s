@@ -31,7 +31,7 @@ final case class Parallel(
       tasks: Vector[(DynamicModule, ProgramCall[DynamicValue.Record])]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[DynamicPrediction]] =
     resolvedExecutor.executeEither[(DynamicModule, ProgramCall[DynamicValue.Record]), DynamicPrediction](
-      task = (pair: (DynamicModule, ProgramCall[DynamicValue.Record])) => pair._1.apply(pair._2),
+      task = (pair: (DynamicModule, ProgramCall[DynamicValue.Record])) => pair._1.apply(pair._2).map(_.raw),
       data = tasks
     )
 

@@ -76,7 +76,7 @@ object AutoEvaluation:
       values <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc
-          value <- prediction.asDouble(field)
+          value <- prediction.raw.asDouble(field)
         yield soFar :+ value
       }
     yield values

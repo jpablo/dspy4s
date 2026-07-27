@@ -47,7 +47,7 @@ final class KNNFewShotProgram[P: {Predictors, ProgramRunner}] private[optimize] 
 
   override val moduleName: String = "knn_few_shot"
 
-  override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+  override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, DynamicPrediction] =
     for

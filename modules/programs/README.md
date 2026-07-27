@@ -7,16 +7,17 @@ introspection type-class the optimizers rely on and the in-memory retrievers. De
 
 ## The core idea
 
-Every program is a `Module` — a pure `forward: I => Either[DspyError, O]` wrapped by a `final` `apply` that
-adds the universal lifecycle (callbacks, tracing, history). Subclasses implement only `forward`; bookkeeping is
-never reimplemented and never mutated in place.
+Every program is a `Module[I, O]`: its semantic computation is wrapped uniformly as
+`ProgramCall[I] => Either[DspyError, Prediction[O]]`. A `final apply` adds the universal lifecycle (callbacks, tracing,
+history); subclasses implement only `forward`, so bookkeeping is never reimplemented or mutated in place.
 
 Programs live on two layers that share one engine:
 
 - **The typed surface** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind static input/output
   types and encode/decode at the boundary.
-- **The untyped spine** — `DynamicModule = Module[DynamicValue.Record, DynamicPrediction]`, where programs can build and
-  augment signatures at runtime. `DynamicPredict` is the executable prediction leaf on this spine. The typed
+- **The dynamic spine** — `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`, where programs can build
+  and augment signatures at runtime. Its raw `DynamicPrediction` is lifted through `Prediction.dynamic` at the module
+  boundary. `DynamicPredict` is the executable prediction leaf on this spine. The typed
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
 The bridge for optimization is `Predictors[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
@@ -31,7 +32,7 @@ an arity-matched state vector back through `replace`. This is what the [`optimiz
 | Type | Role |
 |------|------|
 | `Predict[I, O]` | The fundamental typed predictor: encode `I`, run its `PredictEngine` against the LM, decode into `Prediction[O]`. |
-| `DynamicPredict` | The untyped predictor for runtime-known layouts: accept a `ProgramCall[DynamicValue.Record]`, run the shared engine, return a `DynamicPrediction`. |
+| `DynamicPredict` | The dynamic predictor for runtime-known layouts: accept a `ProgramCall[DynamicValue.Record]`, run the shared engine, and return `Prediction[DynamicValue.Record]`. |
 | `PredictorState` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
 | `PredictorView` | A non-executable snapshot pairing `PredictorState` with read-only signature structure and module name. |
 | `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
@@ -60,7 +61,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 
 | Type | Role |
 |------|------|
-| `Module[I, O]` | Base trait: pure `forward`, `final` lifecycle `apply`. `DynamicModule` is the untyped specialization. |
+| `Module[I, O]` | Semantic program trait: `forward` returns `Prediction[O]`; `final apply` owns the lifecycle. `DynamicModule` specializes both sides to records. |
 | `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
 | `ProgramRunner[P]` | Runs typed or dynamic `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
 | `Prediction[O]` | Typed output `O` + the raw `DynamicPrediction` (completions, usage). |
@@ -93,7 +94,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 
 | Path | Contents |
 |------|----------|
-| `Predict.scala`, `DynamicPredict.scala` | sibling typed and untyped predictors over the shared engine |
+| `Predict.scala`, `DynamicPredict.scala` | sibling statically typed and dynamic predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
 | `Predictors.scala` | the `Predictors`/`Predictor` introspection type-classes |
@@ -107,5 +108,5 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 ## Relation to dspy
 
 This ports `dspy.predict` and the module family. The shape decisions specific to dspy4s — pure modules with
-runtime-owned bookkeeping, the typed/untyped split sharing one engine, and `Predictors` standing in for
+runtime-owned bookkeeping, the static/dynamic split sharing one engine, and `Predictors` standing in for
 `named_predictors()` — are what let the typed surface and the optimizers coexist over one substrate.

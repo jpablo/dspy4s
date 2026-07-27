@@ -19,7 +19,7 @@ import zio.blocks.schema.DynamicValue
   *      through `signature.outputShape` into a typed `Prediction[O]`; decode failures surface as `Left(DspyError)` from
   *      `apply`, never via lazy field access.
   *
-  * `Predict[I, O]` is a `Module[I, Prediction[O]]` — the typed analog of `dspy.Predict`. It is a *sibling*
+  * `Predict[I, O]` is a `Module[I, O]` — the typed analog of `dspy.Predict`. It is a *sibling*
   * of the untyped [[DynamicPredict]] rather than a wrapper around it: both are thin `Module`s over the shared
   * [[dspy4s.programs.runtime.PredictEngine PredictEngine]]. So a typed call emits exactly one module event (named by
   * this `Predict`), and the whole encode → LM call → decode runs inside `Module.apply`'s lifecycle wrapping — adapter
@@ -46,7 +46,7 @@ final case class Predict[I, O](
       * serialized state. See PORT_GAPS G-7b.
       */
     tools: Vector[ToolSpec] = Vector.empty
-) extends Module[I, Prediction[O]]:
+) extends Module[I, O]:
 
   override val moduleName: String = name.getOrElse("predict")
 
@@ -89,7 +89,7 @@ final case class Predict[I, O](
       tools = tools
     )
 
-  override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
+  override protected val lifecycle: ModuleLifecycle[I, O] =
     ModuleLifecycle.typed(signature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =

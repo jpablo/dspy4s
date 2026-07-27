@@ -206,7 +206,7 @@ class TypedPredictSuite extends FunSuite:
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
       val typedResult      = program.apply(input).map(_.raw)
-      val erasedResult     = erased.apply(ProgramCall(sig.inputShape.encode(input)))
+      val erasedResult     = erased.apply(ProgramCall(sig.inputShape.encode(input))).map(_.raw)
 
       assertEquals(erasedResult, typedResult)
     }
@@ -300,7 +300,7 @@ class TypedPredictSuite extends FunSuite:
   // ── Decode-failure / trace consistency ──────────────────────────────────
 
   test("decode failures: no trace/history is recorded (typed decode runs inside the wrapped forward)") {
-    // `Predict[I, O]` is now a `Module[I, Prediction[O]]` whose `forward` does the typed decode
+    // `Predict[I, O]` is now a `Module[I, O]` whose `forward` does the typed decode
     // *inside* the lifecycle wrapping. So a decode failure makes `forward` return `Left`, and `Module.apply`
     // appends neither a trace nor a history entry -- the observability layer and the return value agree.
     // (This replaces the earlier "known limitation" where execution crossed a separately wrapped dynamic
@@ -324,6 +324,6 @@ class TypedPredictSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result           = DynamicPredict(sig).apply(ProgramCall(input = rec("question" := "x")))
       assert(result.isRight)
-      assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
+      assertEquals(lookupString(result.toOption.get.output, "answer"), "Paris")
     }
   }

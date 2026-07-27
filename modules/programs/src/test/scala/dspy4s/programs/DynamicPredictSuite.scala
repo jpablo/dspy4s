@@ -123,10 +123,10 @@ class PredictSuite extends FunSuite:
 
         assert(result.isRight)
         val prediction = result.toOption.get
-        assertEquals(lookupString(prediction.values, "answer"), "Paris")
-        assertEquals(prediction.asDouble("score"), Right(0.95))
-        assertEquals(prediction.completions.get.size, 2)
-        assertEquals(prediction.lmUsage, Some(expectedUsage))
+        assertEquals(lookupString(prediction.output, "answer"), "Paris")
+        assertEquals(prediction.raw.asDouble("score"), Right(0.95))
+        assertEquals(prediction.raw.completions.get.size, 2)
+        assertEquals(prediction.raw.lmUsage, Some(expectedUsage))
         assertEquals(RuntimeEnvironment.current.trace.size, 1)
         assertEquals(RuntimeEnvironment.current.history.size, 1)
       }
@@ -178,7 +178,7 @@ class PredictSuite extends FunSuite:
       val result           = DynamicPredict(signature).apply(ProgramCall(input = rec("question" := "x")))
 
       assert(result.isRight)
-      val toolCalls = lookup(result.toOption.get.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]]
+      val toolCalls = lookup(result.toOption.get.output, "tool_calls").get.asInstanceOf[List[Map[String, Any]]]
       assertEquals(toolCalls.size, 1)
       assertEquals(toolCalls.head("name"), "search": Any)
       assertEquals(toolCalls.head("args"), Map("query" -> "capital of belgium"): Any)

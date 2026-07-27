@@ -25,7 +25,7 @@ model outputs. They are stated on **composition** and checked in whichever way i
 
 ## Carrier (forks 1 and 5)
 
-- **The unit stays `PredictiveModule[I, O]`.** No parallel `Program` type is introduced (this keeps
+- **The unit stays `Module[I, O]`.** No parallel executable representation is introduced (this keeps
   the `Predictors` optimizer machinery working). `Program[I, O]` below is denotational shorthand for that type.
 - **`>>>` threads the plain typed value `O`,** not `Prediction[O]`. Controls (`config`, `traceEnabled`,
   `rolloutId`) ride in `ProgramCall`; the `Prediction` envelope and the effect sit at the edges. Intermediate
@@ -41,7 +41,7 @@ model outputs. They are stated on **composition** and checked in whichever way i
 
 ## Operations
 
-`Program[I, O]` = `PredictiveModule[I, O]`. Learnable parts are held as addressable immutable
+`Program[I, O]` = `Module[I, O]`. Learnable parts are held as addressable immutable
 fields (see Optimizer-addressability); fixed parts (`env.step`, `reward`, `critic`, `classify`) are closures.
 
 ```

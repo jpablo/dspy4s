@@ -83,7 +83,7 @@ final case class CodeAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), CodeAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of["reasoning", String, O]
-) extends Module[I, Prediction[CodeAct.WithReasoning[O]]]:
+) extends Module[I, CodeAct.WithReasoning[O]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = CodeAct.WithReasoning[O]
@@ -172,7 +172,7 @@ final case class CodeAct[I, O](
          |$library""".stripMargin
     ) ++ toolLines).mkString("\n")
 
-  override protected val lifecycle: ModuleLifecycle[I, Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[I, Out] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =

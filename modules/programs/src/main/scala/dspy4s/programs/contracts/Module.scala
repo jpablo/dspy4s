@@ -18,14 +18,14 @@ import zio.blocks.schema.DynamicValue
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
-/** The base type for every dspy4s program — a port of Python DSPy's `dspy.Module`. It is generic in semantic input `I`
-  * and the complete `Result`; the uniform public/forward boundary is always `ProgramCall[I]`. The *same* base serves
-  * both layers of dspy4s:
+/** The base type for every dspy4s program — a port of Python DSPy's `dspy.Module`. Its type parameters are the semantic
+  * input `I` and output `O`; the uniform execution boundary adds [[ProgramCall]] on input and [[Prediction]] on output.
+  * The *same* base serves both layers of dspy4s:
   *
-  *   - the untyped spine, `Module[DynamicValue.Record, DynamicPrediction]` (see [[DynamicModule]]), which
-  *     every engine program (`DynamicPredict`, `ReAct`, `CodeAct`, ...) extends; and
-  *   - the typed surface, `PredictiveModule[I, O]`, which `Predict[I, O]` / `ChainOfThought[I, O]`
-  *     extend — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
+  *   - the dynamic spine, `Module[DynamicValue.Record, DynamicValue.Record]` (see [[DynamicModule]]), whose raw engine
+  *     result is lifted by [[Prediction.dynamic]]; and
+  *   - the statically typed surface, `Module[I, O]`, used by `Predict[I, O]`, `ChainOfThought[I, O]`, and the other
+  *     typed programs — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
   *
   * A program implements [[forward]]; [[apply]] is the `final` caller entry (Scala's `__call__`) that wraps `forward`
   * with the module lifecycle — the callback `ModuleStart`/`ModuleEnd` scope plus trace/history recording. That
@@ -35,8 +35,8 @@ import scala.concurrent.Future
   * children still receive the normal lifecycle, while the syntax used to compose those children does not add callbacks,
   * trace, or history entries of its own.
   *
-  * Callbacks, trace, and history all record `DynamicValue.Record`s, not the static `I` / `Result`. [[lifecycle]] provides
-  * the explicit [[ModuleLifecycle]] strategy that bridges the generic call/result into those records, or marks a
+  * Callbacks, trace, and history all record `DynamicValue.Record`s, not the static `I` / `O`. [[lifecycle]] provides
+  * the explicit [[ModuleLifecycle]] strategy that bridges the generic call/prediction into those records, or marks a
   * structural module as lifecycle-transparent.
   *
   * [[moduleName]] is the public identity (snake_case: `"predict"`, `"chain_of_thought"`, `"react"`), used by callbacks,
@@ -44,18 +44,18 @@ import scala.concurrent.Future
   * additionally returns the worker's trace/history delta. Both propagate runtime services, configuration, scope, and
   * registered carriers across the thread boundary.
   */
-trait Module[I, Result]:
+trait Module[I, O]:
   def moduleName: String
 
   /** How this module boundary participates in callbacks, trace, and history. */
-  protected val lifecycle: ModuleLifecycle[I, Result]
+  protected val lifecycle: ModuleLifecycle[I, O]
 
   /** The program's actual computation, minus the module lifecycle. Subclasses implement this; callers invoke [[apply]]
     * (or [[applyAsync]]), never `forward`.
     */
-  protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Result]
+  protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]]
 
-  final def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Result] =
+  final def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     lifecycle match
       case ModuleLifecycle.Transparent() => forward(call)
       case ModuleLifecycle.Observed(observation) =>
@@ -97,37 +97,42 @@ trait Module[I, Result]:
   /** Async value-only compatibility entry. Worker trace/history is isolated; use [[applyAsyncExecuted]] when the
     * observable runtime output must be retained and explicitly joined into another execution.
     */
-  def applyAsync(call: ProgramCall[I])(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Result]] =
+  def applyAsync(
+      call: ProgramCall[I]
+  )(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Prediction[O]]] =
     applyAsyncExecuted(call).map(_.value)(using ExecutionContext.parasitic)
 
   /** Async writer entry: returns the program result together with the worker-produced runtime delta. */
   def applyAsyncExecuted(
       call: ProgramCall[I]
-  )(using RuntimeContext, ExecutionContext): Future[Executed[Either[DspyError, Result]]] =
+  )(using RuntimeContext, ExecutionContext): Future[Executed[Either[DspyError, Prediction[O]]]] =
     ContextPropagation.futureExecuted(apply(call))
-
-/** A module whose complete result is a typed prediction. Its parameters name the semantic domain and codomain rather
-  * than the boundary envelopes used to execute the program.
-  */
-type PredictiveModule[I, O] = Module[I, Prediction[O]]
 
 /** A structural program node whose own identity is not part of execution observability. Its children remain ordinary
   * [[Module]]s and therefore still emit callbacks, trace, and history. Keeping this distinction in the base lifecycle
   * prevents `AndThen(AndThen(a, b), c)` and `AndThen(a, AndThen(b, c))` from producing different runtime observations
   * solely because their syntax trees are associated differently.
   */
-private[programs] trait TransparentModule[I, Result] extends Module[I, Result]:
-  final override protected val lifecycle: ModuleLifecycle[I, Result] = ModuleLifecycle.transparent
+private[programs] trait TransparentModule[I, O] extends Module[I, O]:
+  final override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.transparent
 
-/** The untyped program spine: `Module[DynamicValue.Record, DynamicPrediction]` with a lifecycle strategy
-  * for the spine record shapes (`call.input` / `prediction.values`).
-  * [[dspy4s.programs.DynamicPredict DynamicPredict]] is the untyped prediction module on this spine; user-defined
+/** The dynamic program spine: `Module[DynamicValue.Record, DynamicValue.Record]` with a lifecycle strategy for the
+  * record shapes. Subclasses implement [[forwardDynamic]] in terms of the raw engine envelope; this trait lifts that
+  * result exactly once through [[Prediction.dynamic]], making the ordinary [[Module]] boundary uniform.
+  *
+  * [[dspy4s.programs.DynamicPredict DynamicPredict]] is the dynamic prediction module on this spine; user-defined
   * data-bag programs may extend it too. The typed [[dspy4s.programs.Predict Predict]] is a sibling module over the
-  * shared `PredictEngine`, not a wrapper around `DynamicPredict`. Subclasses implement only `forward` + `moduleName`;
-  * `lifecycle` stays overridable for programs that need a different observation. (The typed programs — `Predict` /
-  * `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` / `MultiChainComparison` / `BestOfN` / `Refine` —
-  * instead extend [[PredictiveModule]].
+  * shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */
-trait DynamicModule extends Module[DynamicValue.Record, DynamicPrediction]:
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicPrediction] =
+trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     ModuleLifecycle.dynamic
+
+  protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
+      RuntimeContext
+  ): Either[DspyError, DynamicPrediction]
+
+  final override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+      RuntimeContext
+  ): Either[DspyError, Prediction[DynamicValue.Record]] =
+    forwardDynamic(call).map(Prediction.dynamic)

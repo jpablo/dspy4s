@@ -58,7 +58,7 @@ class ProgramRuntimeSuite extends FunSuite:
 
   private final class EchoProgram extends DynamicModule:
     override val moduleName: String = "echo"
-    override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+    override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, DynamicPrediction] =
       Right(DynamicPrediction(values =
@@ -104,7 +104,7 @@ class ProgramRuntimeSuite extends FunSuite:
       val output           = program.apply(ProgramCall(input = rec("question" := "hello")))
 
       assert(output.isRight)
-      assertEquals(lookupString(output.toOption.get.values, "answer"), "ok")
+      assertEquals(lookupString(output.toOption.get.output, "answer"), "ok")
       assert(events.head.isInstanceOf[ModuleStartEvent])
       assert(events.last.isInstanceOf[ModuleEndEvent])
       assertEquals(RuntimeEnvironment.current.trace.size, 1)

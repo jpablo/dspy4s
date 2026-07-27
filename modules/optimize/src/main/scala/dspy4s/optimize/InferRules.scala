@@ -161,7 +161,7 @@ final class InferRules[P: {Predictors, ProgramRunner}](config: InferRulesConfig)
         )
         gen.apply(call) match
           case Right(pred) =>
-            DynamicValues.recordGet(pred.values, "natural_language_rules").map(DynamicValues.renderText).map(_.trim)
+            DynamicValues.recordGet(pred.output, "natural_language_rules").map(DynamicValues.renderText).map(_.trim)
               .filter(_.nonEmpty)
           case Left(_: ContextWindowExceededError) if demos.size > 1 => attempt(demos.dropRight(1))
           case Left(_)                                               => None

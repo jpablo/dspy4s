@@ -50,14 +50,14 @@ class BoundLmSuite extends FunSuite:
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val module = DynamicPredict(layout = layout, lm = Some(boundLm))
     val out    = underAmbient(module.apply(ProgramCall(input = rec("question" := "x"))))
-    assertEquals(lookupString(out.toOption.get.values, "answer"), "BOUND")
+    assertEquals(lookupString(out.toOption.get.output, "answer"), "BOUND")
   }
 
   test("DynamicPredict: no bound lm falls back to the ambient RuntimeContext lm") {
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val module = DynamicPredict(layout = layout)
     val out    = underAmbient(module.apply(ProgramCall(input = rec("question" := "x"))))
-    assertEquals(lookupString(out.toOption.get.values, "answer"), "AMBIENT")
+    assertEquals(lookupString(out.toOption.get.output, "answer"), "AMBIENT")
   }
 
   test("Predict[I,O]: withLm pins a bound lm used in preference to ambient") {

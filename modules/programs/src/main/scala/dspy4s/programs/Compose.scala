@@ -13,7 +13,7 @@ import dspy4s.typed.Prediction
 /** The program-composition combinators `id` / `>>>` / `fanout` / `split` — value-level category composition plus
   * ordered shared- and independent-input pairing (`docs/refactor/algebra-2-program-composition.md`).
   *
-  * Carrier (the grill's fork-1/5 decision): a program is `Module[I, Prediction[O]]`. `>>>` threads the
+  * Carrier (the grill's fork-1/5 decision): a program is `Module[I, O]`. `>>>` threads the
   * plain typed value `O` (not the `Prediction[O]` envelope): it runs the first program, feeds its `prediction.output`
   * into a fresh `ProgramCall` that inherits the outer call's controls (`config` / `traceEnabled` / `rolloutId`), and
   * runs the second. Each sub-program's own `apply` records its trace/history entry, while the composite result
@@ -32,7 +32,7 @@ import dspy4s.typed.Prediction
   * Sequential composition accumulates envelopes through [[DynamicPrediction.followedBy]], for which the empty envelope
   * is an identity, so both `id >>> p` and `p >>> id` preserve the complete prediction.
   */
-final case class Identity[I]() extends TransparentModule[I, Prediction[I]]:
+final case class Identity[I]() extends TransparentModule[I, I]:
   override val moduleName: String = "id"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[I]] =
     Right(Prediction(call.input, DynamicPrediction.empty))
@@ -42,10 +42,10 @@ object Identity:
 
 /** `a >>> b` — sequential (dependent) composition: run `a`, thread its output value into `b`. The Category operation.
   */
-final case class AndThen[I, X, O, A <: Module[I, Prediction[X]], B <: Module[X, Prediction[O]]](
+final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
     first: A,
     second: B
-) extends TransparentModule[I, Prediction[O]]:
+) extends TransparentModule[I, O]:
   override val moduleName: String = "and_then"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -81,7 +81,7 @@ private[programs] object PairPredictors:
 
 object AndThen:
   /** Structural `read(a) ++ read(b)`; `replace` slices the updates by `first`'s read-arity (fork 4). */
-  given andThenPredictors[I, X, O, A <: Module[I, Prediction[X]], B <: Module[X, Prediction[O]]](
+  given andThenPredictors[I, X, O, A <: Module[I, X], B <: Module[X, O]](
       using
       pa: Predictors[A],
       pb: Predictors[B]
@@ -102,10 +102,10 @@ object AndThen:
   * concurrent execution and not by itself an `Applicative` instance. The result's raw merges both sub-predictions'
   * value records (`second` wins on a key collision).
   */
-final case class Both[I, OA, OB, A <: Module[I, Prediction[OA]], B <: Module[I, Prediction[OB]]](
+final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
     first: A,
     second: B
-) extends TransparentModule[I, Prediction[(OA, OB)]]:
+) extends TransparentModule[I, (OA, OB)]:
   override val moduleName: String = "parallel"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[(OA, OB)]] =
@@ -119,7 +119,7 @@ final case class Both[I, OA, OB, A <: Module[I, Prediction[OA]], B <: Module[I, 
 
 object Both:
   /** Same structural distribution as [[AndThen.andThenPredictors]], via [[PairPredictors]]. */
-  given bothPredictors[I, OA, OB, A <: Module[I, Prediction[OA]], B <: Module[I, Prediction[OB]]](
+  given bothPredictors[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
       using
       pa: Predictors[A],
       pb: Predictors[B]
@@ -148,12 +148,12 @@ final case class Tensor[
     J,
     A,
     B,
-    FA <: Module[I, Prediction[A]],
-    FB <: Module[J, Prediction[B]]
+    FA <: Module[I, A],
+    FB <: Module[J, B]
 ](
     first: FA,
     second: FB
-) extends TransparentModule[(I, J), Prediction[(A, B)]]:
+) extends TransparentModule[(I, J), (A, B)]:
   override val moduleName: String = "tensor"
 
   override protected def forward(call: ProgramCall[(I, J)])(using
@@ -174,8 +174,8 @@ object Tensor:
       J,
       A,
       B,
-      FA <: Module[I, Prediction[A]],
-      FB <: Module[J, Prediction[B]]
+      FA <: Module[I, A],
+      FB <: Module[J, B]
   ](
       using
       pa: Predictors[FA],
@@ -196,7 +196,7 @@ object Tensor:
   * `parallel(a, b) = copy >>> tensor(a, b)`. Copy commutes with deterministic programs but not effect-observing
   * programs; this is a useful classifier rather than a law of the unrestricted execution carrier.
   */
-final case class Copy[I]() extends TransparentModule[I, Prediction[(I, I)]]:
+final case class Copy[I]() extends TransparentModule[I, (I, I)]:
   override val moduleName: String = "copy"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[(I, I)]] =
     Right(Prediction((call.input, call.input), DynamicPrediction.empty))
@@ -208,7 +208,7 @@ object Copy:
   * value, the former still runs `f` and can fail, spend tokens, or invoke tools. No naturality law is claimed for
   * unrestricted executable programs.
   */
-final case class Discard[I]() extends TransparentModule[I, Prediction[Unit]]:
+final case class Discard[I]() extends TransparentModule[I, Unit]:
   override val moduleName: String = "discard"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Unit]] =
     Right(Prediction((), DynamicPrediction.empty))
@@ -219,7 +219,7 @@ object Discard:
 /** `swap`: exchange two components. Parameter-free and involutive (`swap >>> swap = id`) as a structural value
   * transformation; it does not make ordered effectful execution symmetric.
   */
-final case class Swap[I, J]() extends TransparentModule[(I, J), Prediction[(J, I)]]:
+final case class Swap[I, J]() extends TransparentModule[(I, J), (J, I)]:
   override val moduleName: String = "swap"
   override protected def forward(call: ProgramCall[(I, J)])(using
       RuntimeContext
@@ -239,7 +239,7 @@ object Compose:
   def id[I]: Identity[I] = Identity[I]()
 
   /** Sequentially compose two programs, threading the first program's output value into the second. */
-  def andThen[I, X, O, A <: Module[I, Prediction[X]], B <: Module[X, Prediction[O]]](
+  def andThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
       first: A,
       second: B
   ): AndThen[I, X, O, A, B] = AndThen(first, second)
@@ -251,31 +251,31 @@ object Compose:
   def liftEither[I, O](f: I => Either[DspyError, O]): LiftEither[I, O] = LiftEither(f)
 
   /** Ordered shared-input fanout (`&&&`): run `a`, then `b`, and pair their outputs. */
-  def fanout[I, OA, OB, A <: Module[I, Prediction[OA]], B <: Module[I, Prediction[OB]]](
+  def fanout[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
       a: A,
       b: B
   ): Both[I, OA, OB, A, B] = Both(a, b)
 
   /** Compatibility name for [[fanout]]. This operation is ordered, not concurrent. */
-  def parallel[I, OA, OB, A <: Module[I, Prediction[OA]], B <: Module[I, Prediction[OB]]](
+  def parallel[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
       a: A,
       b: B
   ): Both[I, OA, OB, A, B] = fanout(a, b)
 
   /** Ordered independent-input split (`***`): run `a` on the first input, then `b` on the second. */
-  def split[I, J, A, B, FA <: Module[I, Prediction[A]], FB <: Module[J, Prediction[B]]](
+  def split[I, J, A, B, FA <: Module[I, A], FB <: Module[J, B]](
       a: FA,
       b: FB
   ): Tensor[I, J, A, B, FA, FB] = Tensor(a, b)
 
   /** Compatibility name for [[split]]. */
-  def tensor[I, J, A, B, FA <: Module[I, Prediction[A]], FB <: Module[J, Prediction[B]]](
+  def tensor[I, J, A, B, FA <: Module[I, A], FB <: Module[J, B]](
       a: FA,
       b: FB
   ): Tensor[I, J, A, B, FA, FB] = split(a, b)
 
   /** Try `primary`, then a fixed fallback only when `policy` selects the primary error. */
-  def recover[I, O, P <: Module[I, Prediction[O]], F <: Module[I, Prediction[O]]](
+  def recover[I, O, P <: Module[I, O], F <: Module[I, O]](
       primary: P,
       fallback: F,
       policy: RecoveryPolicy
@@ -293,42 +293,42 @@ object Compose:
   /** Non-learnable control middleware: `mode(m)(p)` runs `p` with its per-call controls rewritten by `m` (model /
     * temperature / rolloutId / traceEnabled). See [[Mode]].
     */
-  def mode[I, O, P <: Module[I, Prediction[O]]](m: Mode)(p: P): Moded[I, O, P] = Moded(m, p)
+  def mode[I, O, P <: Module[I, O]](m: Mode)(p: P): Moded[I, O, P] = Moded(m, p)
 
 /** `a >>> b`: sequential composition. Defined at package level so it is available wherever the programs package is in
   * scope (or via `import dspy4s.programs.*`).
   */
-extension [I, X, A <: Module[I, Prediction[X]]](self: A)
+extension [I, X, A <: Module[I, X]](self: A)
   /** Named form of sequential composition. */
-  def andThen[O, B <: Module[X, Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
+  def andThen[O, B <: Module[X, O]](next: B): AndThen[I, X, O, A, B] =
     Compose.andThen(self, next)
 
   /** Operator form of [[andThen]]. */
-  infix def >>>[O, B <: Module[X, Prediction[O]]](next: B): AndThen[I, X, O, A, B] =
+  infix def >>>[O, B <: Module[X, O]](next: B): AndThen[I, X, O, A, B] =
     self.andThen(next)
 
   /** Fluent ordered shared-input fanout. */
-  def fanout[O, B <: Module[I, Prediction[O]]](other: B): Both[I, X, O, A, B] =
+  def fanout[O, B <: Module[I, O]](other: B): Both[I, X, O, A, B] =
     Compose.fanout(self, other)
 
   /** Arrow operator for ordered shared-input [[fanout]]. */
-  infix def &&&[O, B <: Module[I, Prediction[O]]](other: B): Both[I, X, O, A, B] =
+  infix def &&&[O, B <: Module[I, O]](other: B): Both[I, X, O, A, B] =
     self.fanout(other)
 
   /** Compatibility name for [[fanout]]. */
-  def parallel[O, B <: Module[I, Prediction[O]]](other: B): Both[I, X, O, A, B] =
+  def parallel[O, B <: Module[I, O]](other: B): Both[I, X, O, A, B] =
     self.fanout(other)
 
   /** Fluent ordered independent-input split. */
-  def split[J, O, B <: Module[J, Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
+  def split[J, O, B <: Module[J, O]](other: B): Tensor[I, J, X, O, A, B] =
     Compose.split(self, other)
 
   /** Arrow operator for ordered independent-input [[split]]. */
-  infix def ***[J, O, B <: Module[J, Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
+  infix def ***[J, O, B <: Module[J, O]](other: B): Tensor[I, J, X, O, A, B] =
     self.split(other)
 
   /** Compatibility name for [[split]]. */
-  def tensor[J, O, B <: Module[J, Prediction[O]]](other: B): Tensor[I, J, X, O, A, B] =
+  def tensor[J, O, B <: Module[J, O]](other: B): Tensor[I, J, X, O, A, B] =
     self.split(other)
 
   /** Apply non-learnable control middleware to this program. */

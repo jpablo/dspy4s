@@ -36,7 +36,7 @@ import java.nio.charset.StandardCharsets
   * `finish` tool (or `maxIterations` is reached). A separate reasoning-augmented extractor then reads the full
   * trajectory and produces the user-visible outputs declared in `baseSignature`.
   *
-  * `ReAct[I, O]` is a `Module[I, Prediction[WithReasoning[O]]]`: the input is encoded from `I`, and the
+  * `ReAct[I, O]` is a `Module[I, WithReasoning[O]]`: the input is encoded from `I`, and the
   * extractor's reply is decoded into the base outputs `O` with a `reasoning: String` prepended (always a named tuple;
   * see [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection. The loop's tool
   * protocol runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
@@ -64,7 +64,7 @@ final case class ReAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), ReAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of["reasoning", String, O]
-) extends Module[I, Prediction[ReAct.WithReasoning[O]]]:
+) extends Module[I, ReAct.WithReasoning[O]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ReAct.WithReasoning[O]
@@ -154,7 +154,7 @@ final case class ReAct[I, O](
        |next_tool_name must be one of:
        |$toolList""".stripMargin
 
-  override protected val lifecycle: ModuleLifecycle[I, Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[I, Out] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =

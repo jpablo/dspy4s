@@ -42,7 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger
   * SUBMIT, an extract predict produces the outputs from the trajectory (the fallback). Reference: "Recursive Language
   * Models" (Zhang, Kraska, Khattab, 2025).
   *
-  * `RLM[I, O]` is a `Module[I, Prediction[O]]` — SUBMIT's payload (or the extract's reply) is decoded into
+  * `RLM[I, O]` is a `Module[I, O]` — SUBMIT's payload (or the extract's reply) is decoded into
   * the typed outputs `O`; the rendered trajectory and `final_reasoning` ride on `.raw`.
   *
   * ==Deltas from Python==
@@ -94,7 +94,7 @@ final case class RLM[I, O](
       * meta inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
       */
     extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None
-) extends Module[I, Prediction[O]]:
+) extends Module[I, O]:
 
   override val moduleName: String = "rlm"
   tools.foreach { tool =>
@@ -211,7 +211,7 @@ final case class RLM[I, O](
       "Based on the REPL trajectory, extract the final outputs now.\n\n" +
       "Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs."
 
-  override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
+  override protected val lifecycle: ModuleLifecycle[I, O] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =

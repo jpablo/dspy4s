@@ -69,6 +69,6 @@ val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Ou
 
 Python dspy has no static signature types — a `Signature` is a runtime object with attribute access. The
 `typed` module is the dspy4s addition that makes signatures statically typed Scala values while keeping a
-faithful runtime `SignatureLayout` underneath, so the typed surface and the untyped spine in
+faithful runtime `SignatureLayout` underneath, so the statically typed surface and dynamic spine in
 [`programs`](../programs/README.md) share one representation. Per the [single-codec
 decision](../../README.md), zio-blocks `Schema` is the only codec involved.

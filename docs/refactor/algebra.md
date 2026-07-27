@@ -89,7 +89,7 @@ uniqueness; the raw mutators that can break it are private).
 
 ## Algebra 2: program composition (step-6 frontier)
 
-The algebra over predictive programs (`PredictiveModule[I, O]`, or a `Program[I, O]`). This is the design target for step 6.
+The algebra over predictive programs (`Module[I, O]`, or a `Program[I, O]`). This is the design target for step 6.
 
 > **Now specified.** The five open forks were resolved by a design grill, and the full operation + law set,
 > the per-module reduction recipes (acceptance criteria), and the implementation sequencing live in

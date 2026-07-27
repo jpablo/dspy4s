@@ -37,7 +37,7 @@ final case class MultiChainInput[I](
   *      new attempt inputs. 5. Run the augmented predict, then decode the reply into `Prediction[WithRationale[O]]` —
   *      the base output with a typed `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
   *
-  * `MultiChainComparison[I, O]` is a `Module[MultiChainInput[I], Prediction[WithRationale[O]]]`. Callers normally use
+  * `MultiChainComparison[I, O]` is a `Module[MultiChainInput[I], WithRationale[O]]`. Callers normally use
   * the [[compare]] convenience, which builds the semantic input and its uniform [[ProgramCall]] envelope.
   *
   * @param baseSignature
@@ -62,7 +62,7 @@ final case class MultiChainComparison[I, O](
     comparePredictStateOverride: Option[PredictorState] = None
 )(using
     prepend: PrependField.Of["rationale", String, O]
-) extends Module[MultiChainInput[I], Prediction[MultiChainComparison.WithRationale[O]]]:
+) extends Module[MultiChainInput[I], MultiChainComparison.WithRationale[O]]:
 
   /** The output type — `rationale: String` prepended to `O`'s named-tuple view (always a named tuple). */
   type Out = MultiChainComparison.WithRationale[O]
@@ -127,7 +127,7 @@ final case class MultiChainComparison[I, O](
     )
     comparePredictStateOverride.fold(base)(base.withPredictorState)
 
-  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Prediction[Out]] =
+  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] =
     ModuleLifecycle.observed(
       // Preserve the existing observation surface: attempts affect execution but are not copied into trace inputs.
       call => baseSignature.inputShape.encode(call.input.baseInput),

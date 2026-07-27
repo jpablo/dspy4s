@@ -103,7 +103,7 @@ instruction-proposal phase.
 
 Not a `Teleprompter` — it `compile`s a `Vector[DynamicModule]` into a single `DynamicModule` that runs all
 members (or a random `size`-sized sample) per call and folds their outputs through a `reduceFn` (majority vote
-by default). Built on the untyped spine because an ensemble is inherently heterogeneous; it can nest anywhere a
+by default). Built on the dynamic spine because an ensemble is inherently heterogeneous; it can nest anywhere a
 program is expected.
 
 ## Persistence

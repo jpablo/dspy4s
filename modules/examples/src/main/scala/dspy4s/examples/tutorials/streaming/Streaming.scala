@@ -74,14 +74,14 @@ object Streaming:
     private val predict2 =
       DynamicPredict(Signature.fromString("answer -> simplified_answer").layout, name = Some("predict2"))
 
-    override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+    override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, DynamicPrediction] =
       for
         step1 <- predict1.apply(call)
-        answer = textField(step1.values, "answer")
+        answer = textField(step1.output, "answer")
         step2 <- predict2.apply(ProgramCall(input = DynamicValues.recordFromEntries(Vector("answer" := answer))))
-      yield step2
+      yield step2.raw
   // --8<-- [end:compose-module]
 
   def streamSimplify(question: String)(using RuntimeContext): Option[DynamicPrediction] =
@@ -128,17 +128,17 @@ object Streaming:
     private val predict2 =
       DynamicPredict(Signature.fromString("question, draft -> answer, score").layout, name = Some("predict2"))
 
-    override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+    override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, DynamicPrediction] =
       for
         step1 <- predict1.apply(call)
         question = textField(call.input, "question")
-        answer   = textField(step1.values, "answer")
+        answer   = textField(step1.output, "answer")
         step2 <- predict2.apply(ProgramCall(input =
                    DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
                  ))
-      yield step2
+      yield step2.raw
 
   def streamScoring(question: String)(using RuntimeContext): Option[DynamicPrediction] =
     val streamPredict = Streamify.streamify(
@@ -171,7 +171,7 @@ object Streaming:
       override val moduleName: String = "reasoning_module"
       private val predict =
         DynamicPredict(Signature.fromString("question, doubled -> reasoning, answer").layout, name = Some("predict"))
-      override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         for
@@ -181,7 +181,7 @@ object Streaming:
                    Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
             )
           ))
-        yield out
+        yield out.raw
 
     val streamPredict = Streamify.streamify(
       program               = program,

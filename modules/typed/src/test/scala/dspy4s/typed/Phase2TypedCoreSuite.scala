@@ -169,6 +169,14 @@ class Phase2TypedCoreSuite extends FunSuite:
       case Left(err) => fail(s"expected success but got: $err")
   }
 
+  test("Prediction.dynamic uses the raw value record as its semantic output") {
+    val raw        = DynamicPrediction(values = rec("answer" := "Paris"))
+    val prediction = Prediction.dynamic(raw)
+
+    assertEquals(prediction.output, raw.values)
+    assert(prediction.raw eq raw, "dynamic lifting must preserve the complete raw envelope")
+  }
+
   // ── End-to-end: Signature round-trip ────────────────────────────────
 
   test("Signature encodes inputs and decodes outputs end-to-end") {

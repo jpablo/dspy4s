@@ -2,6 +2,7 @@ package dspy4s.typed
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.DynamicPrediction
+import zio.blocks.schema.DynamicValue
 
 /** A `DynamicPrediction` whose output fields have been decoded into a typed case
   * class instance `O`. Constructed only after every required output field
@@ -23,6 +24,12 @@ final case class Prediction[O](
 )
 
 object Prediction:
+
+  /** Lift the erased prediction boundary into the uniform module result. The dynamic semantic output is exactly the
+    * raw prediction's value record; completions, usage, and adapter metadata remain available through [[Prediction.raw]].
+    */
+  def dynamic(raw: DynamicPrediction): Prediction[DynamicValue.Record] =
+    Prediction(output = raw.values, raw = raw)
 
   /** Decodes a raw `DynamicPrediction` against an output `Shape`, lifting decode
     * errors into the `Either` channel.

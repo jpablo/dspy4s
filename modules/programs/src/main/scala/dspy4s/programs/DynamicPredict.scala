@@ -14,13 +14,14 @@ import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
 
-/** The untyped prediction module: the data-bag counterpart to typed [[Predict]]. Given a
+/** The dynamic prediction module: the data-bag counterpart to statically typed [[Predict]]. Given a
   * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (field names, roles, and wire types known only at
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
-  * [[dspy4s.core.data.DynamicPrediction DynamicPrediction]] (a `DynamicValue.Record` of output fields plus raw
-  * completions and LM usage). The actual execution lives in [[dspy4s.programs.runtime.PredictEngine PredictEngine]];
-  * the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and history. Mirrors DSPy's
-  * `dspy.Predict` at the dynamic boundary.
+  * `Prediction[DynamicValue.Record]`. Its semantic output is the parsed value record; its `raw` field retains the
+  * [[dspy4s.core.data.DynamicPrediction DynamicPrediction]] with completions and LM usage. The actual execution lives
+  * in [[dspy4s.programs.runtime.PredictEngine PredictEngine]]; [[DynamicModule]] lifts that engine result through
+  * `Prediction.dynamic`, and the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and
+  * history. Mirrors DSPy's `dspy.Predict` at the dynamic boundary.
   *
   * Why it exists separately from [[Predict]]: `Predict[I, O]` is the user-facing, statically typed surface;
   * `DynamicPredict` is the executable data-bag surface for signatures whose Scala input/output types are not known.
@@ -80,7 +81,7 @@ final case class DynamicPredict(
 
   private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools)
 
-  override protected def forward(call: ProgramCall[DynamicValue.Record])(using
+  override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, DynamicPrediction] =
     engine.execute(call)

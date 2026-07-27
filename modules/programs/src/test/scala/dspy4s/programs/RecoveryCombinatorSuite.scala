@@ -30,9 +30,9 @@ class RecoveryCombinatorSuite extends FunSuite:
       result: Either[DspyError, String],
       predict: DynamicPredict,
       runs: ArrayBuffer[String]
-  ) extends Module[Int, Prediction[String]]:
+  ) extends Module[Int, String]:
     override val moduleName: String = name
-    override protected val lifecycle: ModuleLifecycle[Int, Prediction[String]] =
+    override protected val lifecycle: ModuleLifecycle[Int, String] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext

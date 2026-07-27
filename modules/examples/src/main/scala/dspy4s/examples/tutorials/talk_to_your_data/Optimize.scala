@@ -92,7 +92,7 @@ object Optimize:
         val inputs = DynamicValues.recordFromEntries(ex.inputKeys.toVector.flatMap(k => ex.get(k).map(k -> _)))
         student.apply(ProgramCall(input = inputs)) match
           case Left(_)     => 0.0
-          case Right(pred) => metric.feedback(ex, pred, Vector.empty, None, Vector.empty).map(_.score).getOrElse(0.0)
+          case Right(pred) => metric.feedback(ex, pred.raw, Vector.empty, None, Vector.empty).map(_.score).getOrElse(0.0)
       }
       scores.sum / scores.size
 

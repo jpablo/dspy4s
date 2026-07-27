@@ -48,18 +48,18 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     * `DynamicPredict`s, so `Predictors` is structurally derived with field-label names ("hinter", "answerer").
     */
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
-      extends Module[Q, Prediction[Cand]]:
+      extends Module[Q, Cand]:
     override val moduleName: String = "hint_then_answer"
-    override protected val lifecycle: ModuleLifecycle[Q, Prediction[Cand]] =
+    override protected val lifecycle: ModuleLifecycle[Q, Cand] =
       ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       for
         hintPred <- hinter.apply(ProgramCall(input = rec("q" := call.input.q)))
-        hint      = DynamicValues.recordGet(hintPred.values, "hint").map(DynamicValues.renderText).getOrElse("")
+        hint      = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
         ansPred <- answerer.apply(ProgramCall(input = rec("q" := call.input.q, "hint" := hint)))
-        answer   <- ansPred.asString("answer")
-      yield Prediction(output = Cand(answer), raw = ansPred)
+        answer   <- ansPred.raw.asString("answer")
+      yield Prediction(output = Cand(answer), raw = ansPred.raw)
 
   /** Generic adapter that tags each prompt with its requested OUTPUT fields (so the LM and the test can route), and
     * records the LAST prompt per tag (so we can inspect what each predictor saw on the final attempt). Parses output

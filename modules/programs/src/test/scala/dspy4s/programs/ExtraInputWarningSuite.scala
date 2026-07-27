@@ -56,7 +56,7 @@ class ExtraInputWarningSuite extends FunSuite:
           ProgramCall(input = rec("question" := "x", "bogus" := "y", "extra" := "z"))
         )
         assert(result.isRight, s"extra inputs must NOT fail the call, got: $result")
-        assertEquals(lookupString(result.toOption.get.values, "answer"), "Paris")
+        assertEquals(lookupString(result.toOption.get.output, "answer"), "Paris")
       }
     }
     assert(err.toLowerCase.contains("warn"), s"expected a warning to be emitted, stderr was: [$err]")

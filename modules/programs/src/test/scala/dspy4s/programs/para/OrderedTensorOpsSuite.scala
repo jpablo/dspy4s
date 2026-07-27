@@ -30,24 +30,24 @@ class OrderedTensorOpsSuite extends FunSuite:
     assert(errors.nonEmpty)
   }
 
-  private final case class Fn[I, O](f: I => O) extends Module[I, Prediction[O]]:
+  private final case class Fn[I, O](f: I => O) extends Module[I, O]:
     override val moduleName: String = "fn"
-    override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
+    override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), DynamicPrediction.empty))
 
-  private final case class Fail[I, O](label: String) extends Module[I, Prediction[O]]:
+  private final case class Fail[I, O](label: String) extends Module[I, O]:
     override val moduleName: String = s"fail_$label"
-    override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
+    override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Left(ValidationError(label))
 
-  private final class Counting extends Module[Int, Prediction[String]]:
+  private final class Counting extends Module[Int, String]:
     val calls: AtomicInteger = AtomicInteger(0)
     override val moduleName: String = "counting"
-    override protected val lifecycle: ModuleLifecycle[Int, Prediction[String]] =
+    override protected val lifecycle: ModuleLifecycle[Int, String] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext

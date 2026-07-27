@@ -100,22 +100,23 @@ graph TD
 
 5. **`programs`** — orchestration.
    - `runtime/PredictEngine` — the shared execute body (private)
-   - `contracts/Module` — the generic program base `Module[I, Result]`; its `final apply`
-     does the module-level callback + trace wrapping over an abstract `forward`.
-     `DynamicModule` is the untyped-spine alias (`Module[DynamicValue.Record, DynamicPrediction]`,
-     with the bag projection hooks defaulted)
-   - `DynamicPredict` — erased predict, extends `DynamicModule`
-   - `Predict[I, O]` — typed predict, a `PredictiveModule[I, O]`; a *sibling*
+   - `contracts/Module` — the semantic program base `Module[I, O]`; its abstract `forward`
+     consumes `ProgramCall[I]` and returns `Prediction[O]`, while `final apply` adds module callbacks and tracing.
+     `DynamicModule` is the dynamic-spine specialization
+     (`Module[DynamicValue.Record, DynamicValue.Record]`); its raw `DynamicPrediction` is lifted through
+     `Prediction.dynamic` at the module boundary.
+   - `DynamicPredict` — record-valued predict, extends `DynamicModule`
+   - `Predict[I, O]` — typed predict, a `Module[I, O]`; a *sibling*
      of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
    - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
-   - All other programs are typed `PredictiveModule[I, …]` too:
+   - All other programs are typed `Module[I, …]` too:
      `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
      data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
      (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
-     `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the only program on the untyped spine.
+     `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf on the dynamic spine.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
    - `contracts/ProgramContracts.scala` — generic `ProgramCall[I]` (input + `config` /
      `traceEnabled` / `rolloutId`), `ProgramRuntime`, `ToolFunction`
@@ -126,7 +127,7 @@ graph TD
 7. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
    Uses `Predictors[P]` to inspect read-only predictor metadata, read/write
    `PredictorState` (instructions, demos, config), and rebuild candidates;
-   `ProgramRunner[P]` supplies uniform typed/untyped execution.
+   `ProgramRunner[P]` supplies uniform static/dynamic execution.
 
 8. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
    `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
@@ -141,11 +142,11 @@ graph TD
 
 ## The two stacks
 
-### Dynamic chain (runtime, erased)
+### Dynamic chain (runtime layout, record semantics)
 
 ```
-SignatureLayout ──→ ProgramCall ──→ DynamicPredict ──→ DynamicPrediction
-                    (DynamicValue.Record)              (DynamicValue.Record)
+SignatureLayout ──→ ProgramCall[Record] ──→ DynamicPredict ──→ Prediction[Record]
+                                                               └─ raw: DynamicPrediction
 ```
 
 `SignatureLayout` carries a name, optional instructions, and an ordered

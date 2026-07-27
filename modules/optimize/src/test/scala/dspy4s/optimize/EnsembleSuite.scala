@@ -30,7 +30,7 @@ class EnsembleSuite extends FunSuite:
 
     val result = ensembled.apply(call)
     assert(result.isRight, s"apply failed: ${result.left.toOption}")
-    assertEquals(lookupString(result.toOption.get.values, "answer"), "A")
+    assertEquals(lookupString(result.toOption.get.output, "answer"), "A")
   }
 
   test("Ensemble with a single program returns that program's output") {
@@ -38,7 +38,7 @@ class EnsembleSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = ensembled.apply(call)
-    assertEquals(lookupString(result.toOption.get.values, "answer"), "only")
+    assertEquals(lookupString(result.toOption.get.output, "answer"), "only")
   }
 
   test("Ensemble size-sampling is seeded and deterministic; sample respects size") {
@@ -47,8 +47,8 @@ class EnsembleSuite extends FunSuite:
     val optimizer = Ensemble(size = Some(EnsembleSize(3)), seed = 42L)
     given RuntimeContext = RuntimeEnvironment.current
 
-    val first = lookupString(optimizer.compile(programs).apply(call).toOption.get.values, "answer")
-    val second = lookupString(optimizer.compile(programs).apply(call).toOption.get.values, "answer")
+    val first = lookupString(optimizer.compile(programs).apply(call).toOption.get.output, "answer")
+    val second = lookupString(optimizer.compile(programs).apply(call).toOption.get.output, "answer")
     assertEquals(first, second, "same seed should pick the same sample deterministically")
   }
 

@@ -14,8 +14,8 @@ import dspy4s.programs.ReAct
 import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 
-/** What [[Streamify]] needs of a program in order to stream it, captured as a typeclass so that both untyped
-  * `DynamicModule`s and typed `Module[I, …]` programs (which don't share a single callable base) can be
+/** What [[Streamify]] needs of a program in order to stream it, captured as a typeclass so that both dynamic
+  * `Module[DynamicValue.Record, DynamicValue.Record]` values and statically typed `Module[I, O]` values can be
   * streamed through the same entry point. `Streamify` requires exactly two things of a program:
   *
   *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding the raw `DynamicPrediction`
@@ -41,7 +41,7 @@ object Streamable:
       protected val runner: ProgramRunner[P]                             = programRunner
       def knownSignatures(program: P): Vector[(String, SignatureLayout)] = known(program)
 
-  /** Any untyped program: invoke via a `ProgramCall`; surface a leaf `DynamicPredict`'s signature for validation. */
+  /** Any dynamic program: invoke via a `ProgramCall`; surface a leaf `DynamicPredict`'s signature for validation. */
   given dynamicModule[P <: DynamicModule](using ProgramRunner[P]): Streamable[P] =
     from { program =>
       program match

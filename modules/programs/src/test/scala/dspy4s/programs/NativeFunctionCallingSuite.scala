@@ -81,7 +81,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       )
 
       // The tool_calls output field was populated from the provider's structured tool_calls.
-      val calls = pred.get("tool_calls").getOrElse(fail("missing tool_calls field")) match
+      val calls = pred.raw.get("tool_calls").getOrElse(fail("missing tool_calls field")) match
         case DynamicValue.Sequence(els) => els.iterator.toVector
         case other                      => fail(s"expected a sequence for tool_calls, got $other")
       assertEquals(calls.size, 1)

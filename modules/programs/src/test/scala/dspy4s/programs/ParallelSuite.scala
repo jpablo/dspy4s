@@ -21,7 +21,7 @@ class ParallelSuite extends FunSuite:
       override val moduleName: String = "stub",
       behavior: Int => Either[DspyError, DynamicPrediction]
   ) extends DynamicModule:
-    override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+    override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, DynamicPrediction] =
       val value = lookup(input.input, "value").get.asInstanceOf[Int]

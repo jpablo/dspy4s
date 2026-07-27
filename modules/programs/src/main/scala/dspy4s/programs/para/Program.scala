@@ -12,7 +12,7 @@ import dspy4s.programs.predictors.PredictorView
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.predictors.Predictors
 import dspy4s.programs.RecordCodec
-import dspy4s.programs.contracts.PredictiveModule
+import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import zio.blocks.schema.DynamicValue
@@ -36,7 +36,7 @@ import zio.blocks.schema.DynamicValue
   * existential package.
   */
 sealed trait Program[I, O]:
-  type Rep <: PredictiveModule[I, O]
+  type Rep <: Module[I, O]
   val program: Rep
   val addressable: Predictors[Rep]
 
@@ -46,7 +46,7 @@ sealed trait Program[I, O]:
 
 object Program:
 
-  private def packageWith[I, O, F <: PredictiveModule[I, O]](
+  private def packageWith[I, O, F <: Module[I, O]](
       f: F
   )(using ev: Predictors[F]): Program[I, O] { type Rep = F } =
     new Program[I, O]:
@@ -56,7 +56,7 @@ object Program:
 
   /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate:
     * every object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional. */
-  def of[I, O, F <: PredictiveModule[I, O]](f: F)(using
+  def of[I, O, F <: Module[I, O]](f: F)(using
       ev: Predictors[F],
       @annotation.unused codec: RecordCodec[I]
   ): Program[I, O] { type Rep = F } =

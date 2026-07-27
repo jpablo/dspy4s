@@ -6,8 +6,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** Result of a single `DynamicPredict.apply` (the erased predict path): the primary completion's field values, plus
   * optional [[completions]] (when the underlying LM returned multiple candidates) and [[lmUsage]] (token accounting).
-  * The typed surface wraps a `DynamicPrediction` on [[dspy4s.typed.Prediction.raw]]; adapters, callbacks, trace, and
-  * history all see this same object.
+  * Every module result retains a `DynamicPrediction` on [[dspy4s.typed.Prediction.raw]]; adapters, callbacks, trace,
+  * and history all see this same object. Dynamic modules use its [[values]] as their semantic record output.
   *
   * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that the typed layer's Schema-backed
   * decode performs (`dspy4s.typed.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction

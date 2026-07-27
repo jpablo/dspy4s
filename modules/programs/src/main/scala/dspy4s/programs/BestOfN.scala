@@ -12,7 +12,7 @@ import zio.blocks.schema.DynamicValue
 
 /** Typed `BestOfN`: runs an inner typed program up to `n` times and keeps the highest-reward `Prediction[O]`,
   * short-circuiting once `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O`
-  * unchanged (a `Module[I, Prediction[O]]`), so it composes around any typed program (`Predict`,
+  * unchanged (a `Module[I, O]`), so it composes around any typed program (`Predict`,
   * `ChainOfThought`, …). The repeated samples are made distinct by a per-attempt `rolloutId` (cache-busting);
   * `failCount` bounds tolerated failures before giving up (defaults to `n`).
   *
@@ -26,16 +26,16 @@ import zio.blocks.schema.DynamicValue
   *   instance ([[BestOfN.bestOfNPredictors]]) can delegate to the inner program's own instance; an abstract
   *   `Module[...]` field would erase that evidence.
   */
-final case class BestOfN[P <: Module[I, Prediction[O]], I, O](
+final case class BestOfN[P <: Module[I, O], I, O](
     module: P,
     n: AttemptCount,
     rewardFn: (I, Prediction[O]) => Double,
     threshold: Double,
     failCount: Option[FailureCount] = None
-) extends Module[I, Prediction[O]]:
+) extends Module[I, O]:
   override val moduleName: String = "best_of_n"
 
-  override protected val lifecycle: ModuleLifecycle[I, Prediction[O]] =
+  override protected val lifecycle: ModuleLifecycle[I, O] =
     ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -62,7 +62,7 @@ object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any learnable
     * predict of its own, so `inspect` / `replace` / `inspectNamed` delegate to the inner program's instance unchanged.
     */
-  given bestOfNPredictors[P <: Module[I, Prediction[O]], I, O](using
+  given bestOfNPredictors[P <: Module[I, O], I, O](using
       inner: Predictors[P]
   ): Predictors[BestOfN[P, I, O]] with
     def inspect(program: BestOfN[P, I, O]): Vector[PredictorView] =

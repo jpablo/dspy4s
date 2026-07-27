@@ -156,10 +156,10 @@ lifecycle wrapping is **universal and non-bypassable** — every program emits i
 get the wrapping; `BestOfN` accordingly records its own trace entry. See
 [PORT_MODULE_HIERARCHY.md](PORT_MODULE_HIERARCHY.md).
 
-**Note (commit 42671c2).** `Module` later became generic again — `Module[I, Result]`, instantiated at the untyped spine
-`DynamicModule = Module[DynamicValue.Record, DynamicPrediction]` and the typed surface `PredictiveModule[I, O]`
-that `Predict` / `ChainOfThought` now extend. This reopened only the `[In,Out]` type params (whose earlier removal
-was justified by there being a single instantiation — no longer true once the typed layer joined). `apply` remains
+**Evolution.** `Module` later became generic again and now uses semantic parameters throughout:
+`Module[I, O]#forward` returns `Prediction[O]`. The dynamic spine is
+`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`; its raw `DynamicPrediction` is lifted into the
+uniform result by `Prediction.dynamic`. This removes the former typed/dynamic result asymmetry while `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.
 
 ---

@@ -38,10 +38,10 @@ object RecoveryPolicy:
 final case class RecoverWith[
     I,
     O,
-    P <: Module[I, Prediction[O]],
-    F <: Module[I, Prediction[O]]
+    P <: Module[I, O],
+    F <: Module[I, O]
 ](primary: P, fallback: F, policy: RecoveryPolicy)
-    extends TransparentModule[I, Prediction[O]]:
+    extends TransparentModule[I, O]:
   override val moduleName: String = "recover_with"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -56,8 +56,8 @@ object RecoverWith:
   given recoverWithPredictors[
       I,
       O,
-      P <: Module[I, Prediction[O]],
-      F <: Module[I, Prediction[O]]
+      P <: Module[I, O],
+      F <: Module[I, O]
   ](using primary: Predictors[P], fallback: Predictors[F]): Predictors[RecoverWith[I, O, P, F]] with
     def inspect(program: RecoverWith[I, O, P, F]): Vector[PredictorView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
@@ -76,8 +76,8 @@ object RecoverWith:
         (if sub == "self" then "fallback" else s"fallback.$sub") -> view
       }
 
-extension [I, O, P <: Module[I, Prediction[O]]](self: P)
+extension [I, O, P <: Module[I, O]](self: P)
   /** Add a fixed, optimizer-addressable fallback under an explicit failure-selection policy. */
-  def recoverWith[F <: Module[I, Prediction[O]]](policy: RecoveryPolicy)(
+  def recoverWith[F <: Module[I, O]](policy: RecoveryPolicy)(
       fallback: F
   ): RecoverWith[I, O, P, F] = RecoverWith(self, fallback, policy)

@@ -244,7 +244,7 @@ final class COPRO[P: {Predictors, ProgramRunner}](config: COPROConfig) extends T
         )
         gen.apply(call) match
           case Right(pred) =>
-            DynamicValues.recordGet(pred.values, "proposed_instruction")
+            DynamicValues.recordGet(pred.output, "proposed_instruction")
               .map(DynamicValues.renderText)
               .map(_.trim)
               .filter(_.nonEmpty)

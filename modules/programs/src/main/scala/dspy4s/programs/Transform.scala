@@ -38,7 +38,7 @@ private[programs] object UnaryPredictors:
       override def inspectNamed(program: W): Vector[(String, PredictorView)] = inner.inspectNamed(get(program))
 
 /** Lift a total Scala function into a parameter-free, lifecycle-transparent program. */
-final case class Lift[I, O](run: I => O) extends TransparentModule[I, Prediction[O]]:
+final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:
   override val moduleName: String = "lift"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -49,7 +49,7 @@ object Lift:
 
 /** Lift an explicitly fallible Scala function into a parameter-free, lifecycle-transparent program. */
 final case class LiftEither[I, O](run: I => Either[DspyError, O])
-    extends TransparentModule[I, Prediction[O]]:
+    extends TransparentModule[I, O]:
   override val moduleName: String = "lift_either"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -59,8 +59,8 @@ object LiftEither:
   given liftEitherPredictors[I, O]: Predictors[LiftEither[I, O]] = Predictors.empty
 
 /** Covariantly transform a program's semantic output while preserving its raw prediction envelope. */
-final case class MapOutput[I, O, B, P <: Module[I, Prediction[O]]](program: P, map: O => B)
-    extends TransparentModule[I, Prediction[B]]:
+final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
+    extends TransparentModule[I, B]:
   override val moduleName: String = "map_output"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[B]] =
@@ -69,7 +69,7 @@ final case class MapOutput[I, O, B, P <: Module[I, Prediction[O]]](program: P, m
     }
 
 object MapOutput:
-  given mapOutputPredictors[I, O, B, P <: Module[I, Prediction[O]]](using
+  given mapOutputPredictors[I, O, B, P <: Module[I, O]](using
       inner: Predictors[P]
   ): Predictors[MapOutput[I, O, B, P]] =
     UnaryPredictors.passthrough[MapOutput[I, O, B, P], P](_.program)((wrapper, updated) =>
@@ -77,8 +77,8 @@ object MapOutput:
     )
 
 /** Contravariantly adapt a program's input, forwarding the outer call controls unchanged. */
-final case class ContramapInput[J, I, O, P <: Module[I, Prediction[O]]](program: P, contramap: J => I)
-    extends TransparentModule[J, Prediction[O]]:
+final case class ContramapInput[J, I, O, P <: Module[I, O]](program: P, contramap: J => I)
+    extends TransparentModule[J, O]:
   override val moduleName: String = "contramap_input"
 
   override protected def forward(call: ProgramCall[J])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -87,7 +87,7 @@ final case class ContramapInput[J, I, O, P <: Module[I, Prediction[O]]](program:
     }
 
 object ContramapInput:
-  given contramapInputPredictors[J, I, O, P <: Module[I, Prediction[O]]](using
+  given contramapInputPredictors[J, I, O, P <: Module[I, O]](using
       inner: Predictors[P]
   ): Predictors[ContramapInput[J, I, O, P]] =
     UnaryPredictors.passthrough[ContramapInput[J, I, O, P], P](_.program)((wrapper, updated) =>
@@ -95,11 +95,11 @@ object ContramapInput:
     )
 
 /** Adapt both sides of a program in one transparent node, preserving the inner prediction envelope. */
-final case class Dimap[J, I, O, B, P <: Module[I, Prediction[O]]](
+final case class Dimap[J, I, O, B, P <: Module[I, O]](
     program: P,
     contramap: J => I,
     map: O => B
-) extends TransparentModule[J, Prediction[B]]:
+) extends TransparentModule[J, B]:
   override val moduleName: String = "dimap"
 
   override protected def forward(call: ProgramCall[J])(using RuntimeContext): Either[DspyError, Prediction[B]] =
@@ -110,14 +110,14 @@ final case class Dimap[J, I, O, B, P <: Module[I, Prediction[O]]](
     yield Prediction(output, prediction.raw)
 
 object Dimap:
-  given dimapPredictors[J, I, O, B, P <: Module[I, Prediction[O]]](using
+  given dimapPredictors[J, I, O, B, P <: Module[I, O]](using
       inner: Predictors[P]
   ): Predictors[Dimap[J, I, O, B, P]] =
     UnaryPredictors.passthrough[Dimap[J, I, O, B, P], P](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 
-extension [I, O, P <: Module[I, Prediction[O]]](self: P)
+extension [I, O, P <: Module[I, O]](self: P)
   /** Transform the semantic output and retain the program's raw prediction. */
   def mapOutput[B](f: O => B): MapOutput[I, O, B, P] = MapOutput(self, f)
 

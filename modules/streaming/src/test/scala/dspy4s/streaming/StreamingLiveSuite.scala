@@ -78,7 +78,7 @@ class StreamingLiveSuite extends FunSuite:
       override val moduleName: String = "my_program"
       private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
       private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
-      override protected def forward(input: ProgramCall[DynamicValue.Record])(using
+      override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, DynamicPrediction] =
         for
@@ -86,10 +86,10 @@ class StreamingLiveSuite extends FunSuite:
           judgement <- predict2.apply(input.copy(
             input = input.input.updated(
                             "answer",
-                            answer.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+                            answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
                           )
                         ))
-        yield judgement
+        yield judgement.raw
 
   /** Direct dspy4s port of Python DSPy's `tests/streaming/test_streaming.py::test_stream_listener_chat_adapter`.
     *
