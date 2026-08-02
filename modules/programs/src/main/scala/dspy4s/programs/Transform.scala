@@ -30,8 +30,11 @@ private[programs] object TransformResult:
 
 /** Shared optimizer traversal for a transparent unary wrapper. */
 private[programs] object UnaryOptimizableTraversal:
-  def passthrough[W, P](get: W => P)(replaceInner: (W, P) => W)(using inner: OptimizableTraversal[P]): OptimizableTraversal[W] =
-    new OptimizableTraversal[W]:
+  def passthrough[W, P, N <: Int](get: W => P)(replaceInner: (W, P) => W)(using
+      inner: FixedArityOptimizableTraversal.Aux[P, N]
+  ): FixedArityOptimizableTraversal.Of[W, N] =
+    new FixedArityOptimizableTraversal.Of[W, N]:
+      val arity: Int = inner.arity
       def inspect(program: W): Vector[OptimizableView] = inner.inspect(get(program))
       def replace(program: W, updates: Vector[OptimizableParameters]): W =
         replaceInner(program, inner.replace(get(program), updates))
@@ -45,7 +48,7 @@ final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:
     TransformResult.guard("program_lift")(Right(Prediction(run(call.input), RawPrediction.empty)))
 
 object Lift:
-  given liftOptimizableTraversal[I, O]: OptimizableTraversal[Lift[I, O]] = OptimizableTraversal.empty
+  given liftOptimizableTraversal[I, O]: FixedArityOptimizableTraversal.Aux[Lift[I, O], 0] = OptimizableTraversal.empty
 
 /** Lift an explicitly fallible Scala function into a parameter-free, lifecycle-transparent program. */
 final case class LiftEither[I, O](run: I => Either[DspyError, O])
@@ -56,7 +59,8 @@ final case class LiftEither[I, O](run: I => Either[DspyError, O])
     TransformResult.guard("program_lift_either")(run(call.input).map(Prediction(_, RawPrediction.empty)))
 
 object LiftEither:
-  given liftEitherOptimizableTraversal[I, O]: OptimizableTraversal[LiftEither[I, O]] = OptimizableTraversal.empty
+  given liftEitherOptimizableTraversal[I, O]: FixedArityOptimizableTraversal.Aux[LiftEither[I, O], 0] =
+    OptimizableTraversal.empty
 
 /** Covariantly transform a program's semantic output while preserving its raw prediction envelope. */
 final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
@@ -69,10 +73,10 @@ final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
     }
 
 object MapOutput:
-  given mapOutputOptimizableTraversal[I, O, B, P <: Module[I, O]](using
-      inner: OptimizableTraversal[P]
-  ): OptimizableTraversal[MapOutput[I, O, B, P]] =
-    UnaryOptimizableTraversal.passthrough[MapOutput[I, O, B, P], P](_.program)((wrapper, updated) =>
+  given mapOutputOptimizableTraversal[I, O, B, P <: Module[I, O], N <: Int](using
+      inner: FixedArityOptimizableTraversal.Aux[P, N]
+  ): FixedArityOptimizableTraversal.Of[MapOutput[I, O, B, P], N] =
+    UnaryOptimizableTraversal.passthrough[MapOutput[I, O, B, P], P, N](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 
@@ -87,10 +91,10 @@ final case class ContramapInput[J, I, O, P <: Module[I, O]](program: P, contrama
     }
 
 object ContramapInput:
-  given contramapInputOptimizableTraversal[J, I, O, P <: Module[I, O]](using
-      inner: OptimizableTraversal[P]
-  ): OptimizableTraversal[ContramapInput[J, I, O, P]] =
-    UnaryOptimizableTraversal.passthrough[ContramapInput[J, I, O, P], P](_.program)((wrapper, updated) =>
+  given contramapInputOptimizableTraversal[J, I, O, P <: Module[I, O], N <: Int](using
+      inner: FixedArityOptimizableTraversal.Aux[P, N]
+  ): FixedArityOptimizableTraversal.Of[ContramapInput[J, I, O, P], N] =
+    UnaryOptimizableTraversal.passthrough[ContramapInput[J, I, O, P], P, N](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 
@@ -110,10 +114,10 @@ final case class Dimap[J, I, O, B, P <: Module[I, O]](
     yield Prediction(output, prediction.raw)
 
 object Dimap:
-  given dimapOptimizableTraversal[J, I, O, B, P <: Module[I, O]](using
-      inner: OptimizableTraversal[P]
-  ): OptimizableTraversal[Dimap[J, I, O, B, P]] =
-    UnaryOptimizableTraversal.passthrough[Dimap[J, I, O, B, P], P](_.program)((wrapper, updated) =>
+  given dimapOptimizableTraversal[J, I, O, B, P <: Module[I, O], N <: Int](using
+      inner: FixedArityOptimizableTraversal.Aux[P, N]
+  ): FixedArityOptimizableTraversal.Of[Dimap[J, I, O, B, P], N] =
+    UnaryOptimizableTraversal.passthrough[Dimap[J, I, O, B, P], P, N](_.program)((wrapper, updated) =>
       wrapper.copy(program = updated)
     )
 

@@ -9,7 +9,9 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldRole
-import dspy4s.core.algebra.{IsEq, Monoid}
+import dspy4s.core.algebra.{IsEq, Lens, Monoid}
+import dspy4s.core.collections.SizedVector
+import dspy4s.core.collections.SizedVector.*
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -212,6 +214,32 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
     assertEquals(ab.reparam(ab.params)(ProgramCall(5)).map(_.output), ab(ProgramCall(5)).map(_.output))
     assertEquals(ab.reparam(fresh)(ProgramCall(5)).map(_.output), Right(2))
+  }
+
+  test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
+    val inferred = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val program: Program.Aux[Boxed, Wrapped, 1] = inferred
+    val lens = summon[Lens[
+      Program.Aux[Boxed, Wrapped, 1],
+      SizedVector[OptimizableParameters, 1]
+    ]]
+    val current: SizedVector[OptimizableParameters, 1] = lens.get(program)
+    val updated = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
+    val second = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
+    val composed: Program.Aux[Boxed, Boxed, 2] = program >>> second
+    val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams
+    val arityAgreement = composed.optimizableParameters.arityAgreement(composed.program)
+
+    val getPut = lens.getPut(program)
+    assertEquals(getPut.lhs.params, getPut.rhs.params)
+    assertEquals(observe(getPut.lhs, Boxed(1)), observe(getPut.rhs, Boxed(1)))
+    assertIsEq(lens.putGet(program, updated))
+
+    val putPut = lens.putPut(program, current, updated)
+    assertEquals(putPut.lhs.params, putPut.rhs.params)
+    assertEquals(observe(putPut.lhs, Boxed(1)), observe(putPut.rhs, Boxed(1)))
+    assertEquals(composedParameters.unsized.size, 2)
+    assertEquals(arityAgreement.lhs, arityAgreement.rhs)
   }
 
   // ── fanout: behavior, its params law, and the copy NON-law ───────────────────────────────────────────────

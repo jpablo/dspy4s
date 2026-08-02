@@ -28,6 +28,8 @@ import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
 
+import scala.compiletime.ops.int.+
+
 /** Typed `Refine`: runs an inner typed program up to `n` times (varying `rolloutId` at `temperature=1.0`), keeps the
   * highest-reward `Prediction[O]`, and short-circuits once `rewardFn` reaches `threshold` — the same selection surface
   * as [[BestOfN]] — but, on each sub-threshold attempt that is not the last, it generates LM **advice** grounded in
@@ -137,9 +139,10 @@ object Refine:
     * the leading states to the inner program and the trailing state to the critic. An unchanged critic state retains
     * the existing override exactly; a changed state preserves the critic's execution bindings.
     */
-  given refineOptimizableTraversal[P <: Module[I, O], I, O](using
-      inner: OptimizableTraversal[P]
-  ): OptimizableTraversal[Refine[P, I, O]] with
+  given refineOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
+      inner: FixedArityOptimizableTraversal.Aux[P, N]
+  ): FixedArityOptimizableTraversal.Of[Refine[P, I, O], N + 1] with
+    val arity: Int = inner.arity + 1
     def inspect(program: Refine[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module) :+ program.criticPredict.optimizableView
 

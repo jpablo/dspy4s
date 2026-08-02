@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
 import dspy4s.programs.algebra.Program
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.FixedArityOptimizableTraversal
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 
@@ -79,7 +79,7 @@ sealed trait DynamicSignature:
       name: Option[String] = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
   ): Program[In, Out] =
-    Program.of(predict(demos, name, config))(using summon[OptimizableTraversal[Predict[In, Out]]], inputCodec)
+    Program.of(predict(demos, name, config))(using summon[FixedArityOptimizableTraversal[Predict[In, Out]]], inputCodec)
 
 object DynamicSignature:
 

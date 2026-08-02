@@ -8,6 +8,8 @@ import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 
+import scala.compiletime.ops.int.+
+
 /** Explicit classification of which typed program failures may activate a fallback.
   *
   * Recovery is a runtime-selected policy value, not a typeclass: several policies can coexist for the same program
@@ -57,8 +59,14 @@ object RecoverWith:
       I,
       O,
       P <: Module[I, O],
-      F <: Module[I, O]
-  ](using primary: OptimizableTraversal[P], fallback: OptimizableTraversal[F]): OptimizableTraversal[RecoverWith[I, O, P, F]] with
+      F <: Module[I, O],
+      NP <: Int,
+      NF <: Int
+  ](using
+      primary: FixedArityOptimizableTraversal.Aux[P, NP],
+      fallback: FixedArityOptimizableTraversal.Aux[F, NF]
+  ): FixedArityOptimizableTraversal.Of[RecoverWith[I, O, P, F], NP + NF] with
+    val arity: Int = primary.arity + fallback.arity
     def inspect(program: RecoverWith[I, O, P, F]): Vector[OptimizableView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
 

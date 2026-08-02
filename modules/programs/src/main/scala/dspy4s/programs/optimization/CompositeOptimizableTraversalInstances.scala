@@ -11,7 +11,8 @@ import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, 
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
   */
 private[optimization] trait CompositeOptimizableTraversalInstances:
-  given reactOptimizableTraversal[I, O]: OptimizableTraversal[ReAct[I, O]] with
+  given reactOptimizableTraversal[I, O]: FixedArityOptimizableTraversal.Of[ReAct[I, O], 2] with
+    val arity: Int = 2
     def inspect(program: ReAct[I, O]): Vector[OptimizableView] =
       Vector(program.reactPredict.optimizableView, program.extractorPredict.optimizableView)
 
@@ -24,7 +25,8 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
 
-  given codeActOptimizableTraversal[I, O]: OptimizableTraversal[CodeAct[I, O]] with
+  given codeActOptimizableTraversal[I, O]: FixedArityOptimizableTraversal.Of[CodeAct[I, O], 2] with
+    val arity: Int = 2
     def inspect(program: CodeAct[I, O]): Vector[OptimizableView] =
       Vector(program.codeActPredict.optimizableView, program.extractorPredict.optimizableView)
 
@@ -37,7 +39,8 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
 
-  given rlmOptimizableTraversal[I, O]: OptimizableTraversal[RLM[I, O]] with
+  given rlmOptimizableTraversal[I, O]: FixedArityOptimizableTraversal.Of[RLM[I, O], 2] with
+    val arity: Int = 2
     def inspect(program: RLM[I, O]): Vector[OptimizableView] =
       Vector(program.actionPredict.optimizableView, program.extractPredict.optimizableView)
 
@@ -50,7 +53,8 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
       program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
-  given programOfThoughtOptimizableTraversal[I, O]: OptimizableTraversal[ProgramOfThought[I, O]] with
+  given programOfThoughtOptimizableTraversal[I, O]: FixedArityOptimizableTraversal.Of[ProgramOfThought[I, O], 3] with
+    val arity: Int = 3
     def inspect(program: ProgramOfThought[I, O]): Vector[OptimizableView] =
       Vector(
         program.generatorPredict.optimizableView,
@@ -82,7 +86,9 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
           answererPredictOverride = nextAnswerer
         )
 
-  given multiChainComparisonOptimizableTraversal[I, O]: OptimizableTraversal[MultiChainComparison[I, O]] with
+  given multiChainComparisonOptimizableTraversal[I, O]
+      : FixedArityOptimizableTraversal.Of[MultiChainComparison[I, O], 1] with
+    val arity: Int = 1
     def inspect(program: MultiChainComparison[I, O]): Vector[OptimizableView] =
       Vector(program.comparePredict.optimizableView)
 
