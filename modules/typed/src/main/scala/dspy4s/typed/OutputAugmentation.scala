@@ -36,7 +36,7 @@ object OutputAugmentation:
 
   /** Type-directed construction of [[WithField]] from a base output value, with no `asInstanceOf`. The abstract
     * `Out` member lets each instance pin the exact type it builds (sidestepping match-type/`Mirror` alignment);
-    * consumers constrain it via `Aux[Name, T, O, WithField[O, Name, T]]`. Instances resolve where `O` is
+    * consumers constrain it via `WithOutput[Name, T, O, WithField[O, Name, T]]`. Instances resolve where `O` is
     * concrete (the program's call site), never against an abstract `O` — there only the fallback would match. */
   trait PrependField[Name <: String & Singleton, T, O]:
     type Out
@@ -52,18 +52,18 @@ object OutputAugmentation:
         def prepend(value: T, base: O): Option[Out] = None
 
   object PrependField extends LowPriorityPrependField:
-    type Aux[Name <: String & Singleton, T, O, O2] = PrependField[Name, T, O] { type Out = O2 }
+    type WithOutput[Name <: String & Singleton, T, O, O2] = PrependField[Name, T, O] { type Out = O2 }
 
-    /** Evidence for the canonical augmentation result [[WithField]]. Use [[Aux]] only when the output is intentionally
-      * pinned to some other type member.
+    /** Evidence for the canonical augmentation result [[WithField]]. Use [[WithOutput]] only when the output is
+      * intentionally pinned to some other type member.
       */
-    type Of[Name <: String & Singleton, T, O] = Aux[Name, T, O, WithField[O, Name, T]]
+    type Of[Name <: String & Singleton, T, O] = WithOutput[Name, T, O, WithField[O, Name, T]]
 
     /** Named-tuple output without a `Name` field: prepend it via the supported whole-tuple constructor
       * `NamedTuple.build`. */
     given ntAbsent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using
         Contains[N, Name] =:= false
-    ): Aux[Name, T, NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[Name *: N, T *: V]] =
+    ): WithOutput[Name, T, NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[Name *: N, T *: V]] =
       new PrependField[Name, T, NamedTuple.NamedTuple[N, V]]:
         type Out = NamedTuple.NamedTuple[Name *: N, T *: V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] =
@@ -72,7 +72,7 @@ object OutputAugmentation:
     /** Named-tuple output that already declares `Name`: idempotent — kept unchanged. */
     given ntPresent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using
         Contains[N, Name] =:= true
-    ): Aux[Name, T, NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[N, V]] =
+    ): WithOutput[Name, T, NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[N, V]] =
       new PrependField[Name, T, NamedTuple.NamedTuple[N, V]]:
         type Out = NamedTuple.NamedTuple[N, V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] = Some(base)
@@ -82,7 +82,7 @@ object OutputAugmentation:
     given product[Name <: String & Singleton, T, O <: Product, N <: Tuple, V <: Tuple](using
         m: Mirror.ProductOf[O] { type MirroredElemLabels = N; type MirroredElemTypes = V },
         inner: PrependField[Name, T, NamedTuple.NamedTuple[N, V]]
-    ): Aux[Name, T, O, inner.Out] =
+    ): WithOutput[Name, T, O, inner.Out] =
       new PrependField[Name, T, O]:
         type Out = inner.Out
         def prepend(value: T, base: O): Option[Out] =
@@ -105,7 +105,7 @@ object OutputAugmentation:
       signatureName: String,
       readField: (DynamicValue.Record, Name, String) => Either[DspyError, T],
       hook: Out => Either[DspyError, Out] = (out: Out) => Right(out)
-  )(using prepend: PrependField.Aux[Name, T, O, Out]): Either[DspyError, Out] =
+  )(using prepend: PrependField.WithOutput[Name, T, O, Out]): Either[DspyError, Out] =
     for
       value     <- readField(raw, fieldName, label)
       baseOut   <- shape.decode(raw)
@@ -122,7 +122,7 @@ object OutputAugmentation:
       fieldName: Name,
       label: String,
       signatureName: String
-  )(using prepend: PrependField.Aux[Name, String, O, Out]): Either[DspyError, Out] =
+  )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Either[DspyError, Out] =
     decodeAugmented[O, Name, String, Out](
       raw, shape, fieldName, label, signatureName,
       readField = (record, field, lbl) => DynamicValues.requireString(record, field, lbl)
@@ -141,7 +141,7 @@ object OutputAugmentation:
       fieldName: Name,
       label: String,
       signatureName: String
-  )(using prepend: PrependField.Aux[Name, String, O, Out]): Shape[Out] = new Shape[Out]:
+  )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Shape[Out] = new Shape[Out]:
     val fieldSpecs: Vector[dspy4s.core.contracts.FieldSpec] =
       if base.fieldSpecs.exists(_.name == field.name) then base.fieldSpecs
       else field +: base.fieldSpecs

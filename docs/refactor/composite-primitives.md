@@ -195,7 +195,7 @@ def decodePrepended[O, Name <: String & Singleton, Out](
     fieldName: Name,
     label: String,
     signatureName: String
-)(using prepend: PrependField.Aux[Name, String, O, Out]): Either[DspyError, Out] =
+)(using prepend: PrependField.WithOutput[Name, String, O, Out]): Either[DspyError, Out] =
   for
     value     <- DynamicValues.requireString(raw, fieldName, label)
     baseOut   <- shape.decode(raw)

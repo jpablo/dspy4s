@@ -45,7 +45,7 @@ sealed trait Program[I, O]:
   type Rep <: Module[I, O]
   type ParameterArity <: Int
   val program: Rep
-  val optimizableParameters: FixedArityOptimizableTraversal.Aux[Rep, ParameterArity]
+  val optimizableParameters: FixedArityOptimizableTraversal.WithArity[Rep, ParameterArity]
 
   /** Run the packaged program through the module's wrapped `apply`. */
   def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -54,7 +54,7 @@ sealed trait Program[I, O]:
 object Program:
 
   /** A packaged program whose parameter arity remains visible to the type system. */
-  type Aux[I, O, N <: Int] = Program[I, O] { type ParameterArity = N }
+  type WithArity[I, O, N <: Int] = Program[I, O] { type ParameterArity = N }
 
   private def packageWith[I, O, F <: Module[I, O]](
       f: F
@@ -63,7 +63,7 @@ object Program:
       type Rep = F
       type ParameterArity = ev.Arity
       val program: F = f
-      val optimizableParameters: FixedArityOptimizableTraversal.Aux[F, ParameterArity] = ev
+      val optimizableParameters: FixedArityOptimizableTraversal.WithArity[F, ParameterArity] = ev
 
   /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate:
     * every object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional. */
@@ -81,7 +81,7 @@ object Program:
     /** Reparameterize with a vector whose type already proves it has the right number of leaves. */
     def reparamSized(
         parameters: SizedVector[OptimizableParameters, program.ParameterArity]
-    ): Aux[I, O, program.ParameterArity] =
+    ): WithArity[I, O, program.ParameterArity] =
       packageWith(program.optimizableParameters.replaceSized(program.program, parameters))(using
         program.optimizableParameters
       )
@@ -89,13 +89,13 @@ object Program:
   /** The additive lawful lens requested by the parameter algebra: existing `params` / `reparam` methods remain the
     * compatibility surface, while this instance makes their exact total domain explicit.
     */
-  given parameterLens[I, O, N <: Int]: Lens[Aux[I, O, N], SizedVector[OptimizableParameters, N]] with
-    def get(program: Aux[I, O, N]): SizedVector[OptimizableParameters, N] = program.sizedParams
+  given parameterLens[I, O, N <: Int]: Lens[WithArity[I, O, N], SizedVector[OptimizableParameters, N]] with
+    def get(program: WithArity[I, O, N]): SizedVector[OptimizableParameters, N] = program.sizedParams
 
     def set(
-        program: Aux[I, O, N],
+        program: WithArity[I, O, N],
         parameters: SizedVector[OptimizableParameters, N]
-    ): Aux[I, O, N] = program.reparamSized(parameters)
+    ): WithArity[I, O, N] = program.reparamSized(parameters)
 
   /** Addressability for packaged programs delegates to the evidence retained by the package. */
   given programOptimizableTraversal[I, O]: OptimizableTraversal[Program[I, O]] with
@@ -124,13 +124,13 @@ object Program:
     * canonical object codec, so the unit laws hold with no morphism-specific coherence condition.
     */
   given parameterizedCategoryProgram: ParameterizedCategory[RecordCodec, Program] with
-    def id[A](using @annotation.unused codec: RecordCodec[A]): Aux[A, A, 0] =
+    def id[A](using @annotation.unused codec: RecordCodec[A]): WithArity[A, A, 0] =
       Program.packageWith(Compose.id[A])
 
     def fanout[I, A, B](
         f: Program[I, A],
         g: Program[I, B]
-    ): Aux[I, (A, B), f.ParameterArity + g.ParameterArity] =
+    ): WithArity[I, (A, B), f.ParameterArity + g.ParameterArity] =
       Program.packageWith(f.program &&& g.program)(using
         Both.bothOptimizableTraversal[I, A, B, f.Rep, g.Rep, f.ParameterArity, g.ParameterArity](using
           f.optimizableParameters,
@@ -139,7 +139,7 @@ object Program:
       )
 
     extension [A, B](f: Program[A, B])
-      infix def >>>[C](g: Program[B, C]): Aux[A, C, f.ParameterArity + g.ParameterArity] =
+      infix def >>>[C](g: Program[B, C]): WithArity[A, C, f.ParameterArity + g.ParameterArity] =
         Program.packageWith(f.program.andThen(g.program))(using
           AndThen.andThenOptimizableTraversal[A, B, C, f.Rep, g.Rep, f.ParameterArity, g.ParameterArity](using
             f.optimizableParameters,

@@ -218,15 +218,15 @@ class ParameterizedCategoryLawSuite extends FunSuite:
 
   test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
     val inferred = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val program: Program.Aux[Boxed, Wrapped, 1] = inferred
+    val program: Program.WithArity[Boxed, Wrapped, 1] = inferred
     val lens = summon[Lens[
-      Program.Aux[Boxed, Wrapped, 1],
+      Program.WithArity[Boxed, Wrapped, 1],
       SizedVector[OptimizableParameters, 1]
     ]]
     val current: SizedVector[OptimizableParameters, 1] = lens.get(program)
     val updated = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
     val second = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
-    val composed: Program.Aux[Boxed, Boxed, 2] = program >>> second
+    val composed: Program.WithArity[Boxed, Boxed, 2] = program >>> second
     val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams
     val arityAgreement = composed.optimizableParameters.arityAgreement(composed.program)
 

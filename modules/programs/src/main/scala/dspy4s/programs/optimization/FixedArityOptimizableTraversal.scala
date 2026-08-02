@@ -34,7 +34,7 @@ trait FixedArityOptimizableTraversal[P] extends OptimizableTraversal[P]:
     read(program).size <-> arity
 
 object FixedArityOptimizableTraversal:
-  type Aux[P, N <: Int] = FixedArityOptimizableTraversal[P] { type Arity = N }
+  type WithArity[P, N <: Int] = FixedArityOptimizableTraversal[P] { type Arity = N }
 
   /** Nominal implementation base for givens whose arity should remain visible in their public result type. */
   trait Of[P, N <: Int] extends FixedArityOptimizableTraversal[P]:
@@ -45,5 +45,5 @@ object FixedArityOptimizableTraversal:
 
   /** A fixed traversal is also the canonical lawful lens onto its complete parameter vector. */
   given parameterLens[P, N <: Int](using
-      traversal: Aux[P, N]
+      traversal: WithArity[P, N]
   ): Lens[P, SizedVector[OptimizableParameters, N]] = traversal.parameterLens

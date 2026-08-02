@@ -11,7 +11,7 @@ class OutputAugmentationSuite extends FunSuite:
 
   case class Answer(answer: String, score: Double)
 
-  // Summon the pinned instance the way a program would (Aux[Name, T, O, WithField[O, Name, T]]).
+  // Summon the pinned instance the way a program would (WithOutput[Name, T, O, WithField[O, Name, T]]).
   private inline def prepend[Name <: String & Singleton, T, O](value: T, base: O)(using
       p: PrependField.Of[Name, T, O]
   ): Option[WithField[O, Name, T]] = p.prepend(value, base)

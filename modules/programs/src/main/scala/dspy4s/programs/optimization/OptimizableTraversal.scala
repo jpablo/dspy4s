@@ -76,7 +76,7 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     * instance in scope for each deliberately non-learnable field type. This makes an omitted `OptimizableTraversal`
     * instance a compile error instead of silently hiding a potentially learnable subtree.
     */
-  def empty[P]: FixedArityOptimizableTraversal.Aux[P, 0] = new FixedArityOptimizableTraversal.Of[P, 0]:
+  def empty[P]: FixedArityOptimizableTraversal.WithArity[P, 0] = new FixedArityOptimizableTraversal.Of[P, 0]:
     val arity: Int = 0
     def inspect(program: P): Vector[OptimizableView] = Vector.empty
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
@@ -146,7 +146,7 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     val arity: Int = 0
 
   given consFixedFieldTraversals[Head, Tail <: Tuple, NHead <: Int, NTail <: Int](using
-      head: FixedArityOptimizableTraversal.Aux[Head, NHead],
+      head: FixedArityOptimizableTraversal.WithArity[Head, NHead],
       tail: FixedFieldTraversals[Tail, NTail]
   ): FixedFieldTraversals[Head *: Tail, NHead + NTail] with
     val instances: List[OptimizableTraversal[Any]] = widen(head) :: tail.instances

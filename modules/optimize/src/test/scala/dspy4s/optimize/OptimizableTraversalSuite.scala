@@ -18,7 +18,7 @@ class OptimizableTraversalSuite extends FunSuite:
   // A composite of two predictors plus a non-predictor field.
   final case class Pipe(a: DynamicPredict, b: DynamicPredict, n: Int)
   object Pipe:
-    given FixedArityOptimizableTraversal.Aux[Int, 0] = OptimizableTraversal.empty
+    given FixedArityOptimizableTraversal.WithArity[Int, 0] = OptimizableTraversal.empty
     given OptimizableTraversal[Pipe]                 = OptimizableTraversal.derived
 
   test("OptimizableLeaf lifts to a 1-element OptimizableTraversal via fromOptimizableLeaf") {
