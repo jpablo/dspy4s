@@ -1,7 +1,7 @@
 package dspy4s.core.algebra
 
 /** Reusable abstract algebraic structures, carrying their laws ON the trait as `@Law`/[[IsEq]] statements — the same
-  * shape as [[Category]] / `dspy4s.programs.para.ParaCategory` (and jpablo/math-with-scala's `algebra` traits): the trait
+  * shape as [[Category]] / `dspy4s.programs.algebra.ParameterizedCategory` (and jpablo/math-with-scala's `algebra` traits): the trait
   * fixes the operations and states the equations in terms of them; concrete types provide `given` instances; the law
   * suites execute the statements under the equality honest for each carrier (structural `==`, or
   * observational/extensional equality where `==` is meaningless — e.g. a function- wrapped carrier). The equations are

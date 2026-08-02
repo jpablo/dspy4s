@@ -1,4 +1,4 @@
-package dspy4s.programs.para
+package dspy4s.programs.algebra
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction

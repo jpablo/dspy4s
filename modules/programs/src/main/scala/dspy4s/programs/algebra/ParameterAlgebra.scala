@@ -1,9 +1,9 @@
-package dspy4s.programs.para
+package dspy4s.programs.algebra
 
 import dspy4s.core.algebra.{AnyObject, Category, Delooped, Monoid, delooping}
 import dspy4s.programs.optimization.OptimizableParameters
 
-/** The free monoid of homogeneous Para parameters under concatenation.
+/** The free monoid of homogeneous optimizable parameters under concatenation.
   *
   * This is the codomain of the `OptimizableTraversal` homomorphism and makes parameter composition explicit rather than encoding
   * it in an ad-hoc category whose composition merely happens to be `++`.

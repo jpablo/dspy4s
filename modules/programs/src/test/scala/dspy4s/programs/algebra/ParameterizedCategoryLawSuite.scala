@@ -1,4 +1,4 @@
-package dspy4s.programs.para
+package dspy4s.programs.algebra
 
 import dspy4s.programs.optimization.{optimizableParameters, optimizableView, withOptimizableParameters}
 
@@ -43,14 +43,14 @@ final case class NestedValue(n: Int) derives Schema
 final case class NestedBox(value: NestedValue) derives Schema
 final case class ArrayBox(values: Array[Int]) derives Schema
 
-/** Executes the `@Law` statements of the Para prototype's structures ([[Category]] / [[ParaCategory]] over [[Program]],
+/** Executes the `@Law` statements of the parameterized program structures ([[Category]] / [[ParameterizedCategory]] over [[Program]],
   * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
   * parameter vectors and delooping morphisms, observational equality (complete prediction / params / coherent decode /
   * lifecycle) for `Program` morphisms. Also pins the two construction gates (no `OptimizableTraversal`, no `Program`; no `RecordCodec`, no
   * `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying is not natural for effectful
   * morphisms).
   */
-class ParaCategoryLawSuite extends FunSuite:
+class ParameterizedCategoryLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
@@ -89,7 +89,7 @@ class ParaCategoryLawSuite extends FunSuite:
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[ParaCategory[RecordCodec, Program]]
+  private val C = summon[ParameterizedCategory[RecordCodec, Program]]
 
   // ── Bundle-tagged dynamic objects: fresh types minted per parse (DynamicSignature) ─────────────────────────
   // Suite-level so the freshness compile gate can reference them from compileErrors snippets.
@@ -196,8 +196,8 @@ class ParaCategoryLawSuite extends FunSuite:
     assertEquals(runner.run(C.id[Boxed] >>> f, record), runner.run(f, record))
   }
 
-  // ── Para laws, executed from the @Law statements ─────────────────────────────────────────────────────────
-  test("Para laws: paramsId, paramsCompose, reparam round-trip and write-back") {
+  // ── parameterization laws, executed from the @Law statements ─────────────────────────────────────────────────────────
+  test("parameterization laws: paramsId, paramsCompose, reparam round-trip and write-back") {
     val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
     val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
     val ab = a >>> b

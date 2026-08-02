@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
-import dspy4s.programs.para.Program
+import dspy4s.programs.algebra.Program
 import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
@@ -13,7 +13,7 @@ import zio.blocks.schema.DynamicValue
   *
   * The problem this solves: every `Signature.fromStringDynamic` program shares the input type
   * `DynamicValue.Record`, while each needs its own field-validating decoder, so the type cannot determine the
-  * decoder and the Para category's left unit holds only under the `ProgramInput` coherence law. The bundle
+  * decoder and the parameterized category's left unit holds only under the `ProgramInput` coherence law. The bundle
   * makes the fibration honest in the type system: each parse mints its own `In` / `Out` as abstract type
   * members (fresh per stable path, the path-dependent freshness the compiler enforces), and the codec and the
   * signature are born from the same parse behind that abstraction. Outside, the only source of a
@@ -72,7 +72,7 @@ sealed trait DynamicSignature:
   ): Predict[In, Out] =
     Predict(signature, demos = demos, name = name, config = config)
 
-  /** Package this bundle's predict as a Para category object in one step: the object codec comes from the
+  /** Package this bundle's predict as a parameterized-category object in one step: the object codec comes from the
     * bundle itself, so no `import s.given` is needed at the call site. */
   final def packaged(
       demos: Vector[Example] = Vector.empty,

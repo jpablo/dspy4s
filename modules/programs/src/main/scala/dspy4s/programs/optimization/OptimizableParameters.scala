@@ -10,7 +10,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * This value is deliberately smaller than [[DynamicPredict]]. A leaf's signature shape, module name, runtime,
   * output schema, bound language model, and tools describe or execute the leaf; they are not prompt parameters and
   * must not be replaceable by an optimizer. Keeping only the three fields every supported predictor can write makes
-  * [[OptimizableLeaf]] a lawful lens and gives [[OptimizableTraversal]] and Para one homogeneous parameter carrier.
+  * [[OptimizableLeaf]] a lawful lens and gives [[OptimizableTraversal]] and the parameterized program algebra one
+  * homogeneous parameter carrier.
   *
   * @param instructions
   *   signature-level prompt instructions

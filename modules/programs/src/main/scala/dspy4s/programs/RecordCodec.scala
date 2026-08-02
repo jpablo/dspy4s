@@ -6,7 +6,7 @@ import zio.blocks.schema.DynamicValue
 
 /** Evidence that a typed program input can be decoded from the dynamic record boundary.
   *
-  * This is independent of any particular program representation. The Para category uses it as its OBJECT
+  * This is independent of any particular program representation. The parameterized category uses it as its OBJECT
   * constraint: identity morphisms and record-boundary evaluation both decode through the object's codec, so
   * two programs at the same object cannot disagree about decoding. The coherence that previously needed a
   * per-package law is definitional (one decoder per type; runtime-string signatures get their own types via

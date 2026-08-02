@@ -1,4 +1,4 @@
-package dspy4s.programs.para
+package dspy4s.programs.algebra
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -18,7 +18,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Prediction
 import zio.blocks.schema.DynamicValue
 
-/** A packaged, existentially typed addressable program: the hom-set of the Para-shaped category.
+/** A packaged, existentially typed addressable program: the hom-set of the parameterized category.
   *
   * The package hides a concrete module representation while retaining its [[OptimizableTraversal]] evidence, so the binary
   * type `Program[I, O]` supports parameter projection and reparameterization without knowing the representation.
@@ -83,13 +83,13 @@ object Program:
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
       codec.decode(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
 
-  /** The Para category over packaged programs.
+  /** The parameterized category over packaged programs.
     *
     * Identity exists at codec-equipped objects; composition and fan-out retain only the structural `OptimizableTraversal`
     * evidence of their children. Decoder equality between `id` and any program is definitional on the sealed
     * canonical object codec, so the unit laws hold with no morphism-specific coherence condition.
     */
-  given paraCategoryProgram: ParaCategory[RecordCodec, Program] with
+  given parameterizedCategoryProgram: ParameterizedCategory[RecordCodec, Program] with
     def id[A](using @annotation.unused codec: RecordCodec[A]): Program[A, A] =
       Program.packageWith(Compose.id[A])
 

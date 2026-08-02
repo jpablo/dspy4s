@@ -167,29 +167,29 @@ typeclasses, not new machinery. The rule:
   predict as a field (`selectBest`, `feedback`, `MultiChainComparison`), never a mode. This is the one place
   the design must diverge from kyo-ai, whose closure-captured `Tool`/`Mode` carry no optimizer constraint.
 
-### Para formalization (prototype landed)
+### Parameterized program algebra (Para-inspired prototype landed)
 
-The addressability layer is an instance of the **Para construction** from categorical learning theory
+The addressability layer is inspired by the **Para construction** from categorical learning theory
 ("Backprop as Functor", Fong/Spivak/Tuyeras; "Categorical Foundations of Gradient-Based Learning",
 Cruttwell et al.): a morphism is a pair (parameters, shape), composition tensors the parameters, and
 reparameterization is the 2-cell layer optimizers act on. dspy4s's writable parameters are homogeneous (every
 parameter block is an `OptimizableParameters` value containing instructions, demos, and config), so the parameter tensor degenerates
-to the free monoid `Vector[OptimizableParameters]`. `OptimizableTraversal.read` / `replace` are exactly Para's projection and
+to the free monoid `Vector[OptimizableParameters]`. `OptimizableTraversal.read` / `replace` provide the corresponding parameter projection and
 reparameterization; signature structure and module identity remain in the morphism's read-only metadata.
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
-`dspy4s.programs.para.ParaCategory` (id / `>>>` / ordered `fanout` / `params` / `reparam` with the Para laws) over
-`dspy4s.programs.para.Program` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
+`dspy4s.programs.algebra.ParameterizedCategory` (id / `>>>` / ordered `fanout` / `params` / `reparam` with the parameterization laws) over
+`dspy4s.programs.algebra.Program` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
 `OptimizableTraversal[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
-the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ParaCategoryLawSuite`.
+the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ParameterizedCategoryLawSuite`.
 The Mirror-based `OptimizableTraversal.derived` gate is strict: every product field must provide `OptimizableTraversal` evidence.
 Intentionally parameter-free field types opt in with `OptimizableTraversal.empty`; missing evidence is a compile error,
 so a learnable subtree cannot silently disappear from optimizer addressability.
 
 **Entry-point experiment (commit `8d7e009`), CLOSED (commit `d1d38d0`).** The first round drove COPRO through
 a packaged `Program` via the path-dependent instantiation `new COPRO[program.Rep](config)(using program.optimizableParameters,
-runnable)` and surfaced the finding: **Para evidence alone is not enough to optimize.** Optimizers also need
+runnable)` and surfaced the finding: **parameterization evidence alone is not enough to optimize.** Optimizers also need
 `ProgramRunner` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
 type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.
 
@@ -218,7 +218,7 @@ per stable path, the path-dependent freshness the compiler enforces) and carries
 the same parse behind the abstraction. Identity and any program over the bundle then decode identically as a
 consequence of abstraction: the unit laws hold on bundle objects with NO coherence caveat, and re-parsing the
 same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
-`ParaCategoryLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
+`ParameterizedCategoryLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
 parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
 `MultiChainComparison` owns a path-branded opaque attempt block validated against `m`. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
@@ -247,18 +247,18 @@ constraints. The declared stance: `DynamicSignature` is the user path for runtim
 the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
 decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
 unrepresentable. Both optimizer capabilities are uniform over the packaged type: `OptimizableTraversal[Program[I, O]]`
-(Program companion; read/replace = the Para projection/reparameterization) and `ProgramRunner[Program[I, O]]`
+(Program companion; read/replace = parameter projection/reparameterization) and `ProgramRunner[Program[I, O]]`
 (Program companion; conditional on `RecordCodec[I]`, decode object-side + run). So `Program[I, O]` is a
 first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
 does), upcasts and composed pipelines `a >>> b` optimize end-to-end, and `.copro` demands exactly the runner,
-which exists exactly when the pipeline's input object is codec-equipped. Pinned by `ParaCategoryLawSuite`
+which exists exactly when the pipeline's input object is codec-equipped. Pinned by `ParameterizedCategoryLawSuite`
 (object-side decoding + the unrepresentability gates) and `ParaCompileSuite` (upcast + composed-pipeline +
 bundle optimization).
 
 **Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:
 `id[A]` carried a failing decoder (nothing decodes an arbitrary `A` from a record), so the left unit
 degraded on the evaluation observation. The fix is the `CategoryTC[P[_], Hom]` object-constraint slot from
-jpablo/math-with-scala, applied where it belongs: `ParaCategory` is now `ParaCategory[P[_], Hom[_,_]]`, instantiated
+jpablo/math-with-scala, applied where it belongs: `ParameterizedCategory` is now `ParameterizedCategory[P[_], Hom[_,_]]`, instantiated
 for `Program` at `P = RecordCodec` ("the object decodes from a record", built on the SAME
 `Shape.derivedWithRole(Input)` decode path `Signature.derived` uses, so codec- and signature-derived
 decoders cohere definitionally). Unlike a blanket Ok-style constrained category, the constraint appears
@@ -275,19 +275,19 @@ no decoder evidence is stored in a morphism.
 Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
 
 - **Laws as statements.** `core.algebra.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
-  and the `@Law` annotation. The Para structures now state their laws as `@Law` methods ON the traits, and
-  `ParaCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
+  and the `@Law` annotation. The parameterized structures now state their laws as `@Law` methods ON the traits, and
+  `ParameterizedCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
   observation (structural `==` for parameter vectors; complete prediction + params + lifecycle for `Program`
   morphisms, decoding having moved to the objects in stage 4). Sequential raw evidence has an associative
   accumulator with the empty envelope as identity, so `p >>> id` is indistinguishable even through `ProgramRunner`.
   The former unlawful-decoder counterexample is UNREPRESENTABLE: `RecordCodec` is sealed and its removal is pinned
   by compile gates. The deliberate split from the
   formalization library: there the equations are the deliverable, here they are executable specifications.
-- **`params` as a functor value.** `ParaCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
+- **`params` as a functor value.** `ParameterizedCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
   parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`
   category to the parameter-monoid delooping) names what `OptimizableTraversal.read` is categorically; its functor laws
   (preserves id + composition), carried on the `CategoryFunctor` trait against the two `Category` instances, are exactly
-  the Para projection laws. The
+  the parameter projection laws. The
   parameter monoid is now an explicit `given Monoid[Vector[OptimizableParameters]]` and the delooping is generic
   (`delooping[M](using Monoid[M]) : Category[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
   `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).
@@ -442,8 +442,8 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
 - **Commutative denotational carrier**: the abstract `CDCategory[Hom]` law target remains, but unrestricted
   `ModuleHom` implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or
   other commutative carrier could implement CD/Markov laws. A pair-input decoder would still be needed to lift
-  ordered tensor into `ParaCategory`/`Program`.
-- **Full Para adoption**: promote the packaged `Program` (see the Para formalization above; the entry-point
+  ordered tensor into `ParameterizedCategory`/`Program`.
+- **Full parameterized-program adoption**: promote the packaged `Program` (see the formalization above; the entry-point
   loop is closed, decoding is object-side with codec-equipped objects gating `of` / `id` / the runner, the
   signature-backed `ProgramRunner` instances cover the framework leaves and composites for bare-module
   running, and the BestOfN / Refine / RLM `OptimizableTraversal` instances are in place, so the layer and its instance

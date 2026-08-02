@@ -1,9 +1,9 @@
-package dspy4s.programs.para
+package dspy4s.programs.algebra
 
 import dspy4s.core.algebra.{Category, IsEq, Law, <->}
 import dspy4s.programs.optimization.OptimizableParameters
 
-/** A category equipped with the Para operations used by optimizers.
+/** A category equipped with the parameterization operations used by optimizers.
   *
   * `params` projects a morphism's tunable parameters and `reparam` changes those parameters while preserving the
   * program shape. In dspy4s, the homogeneous parameter tensor is `Vector[OptimizableParameters]` under concatenation.
@@ -11,7 +11,7 @@ import dspy4s.programs.optimization.OptimizableParameters
   * sharing a computation is observably different from running it twice. As with [[Category]], each `IsEq` law is a
   * statement interpreted under the carrier's documented observational equality rather than Scala structural `==`.
   */
-trait ParaCategory[P[_], Hom[_, _]] extends Category[P, Hom]:
+trait ParameterizedCategory[P[_], Hom[_, _]] extends Category[P, Hom]:
   extension [A, B](f: Hom[A, B])
     /** The morphism's tunable parameters, in stable address order. */
     def params: Vector[OptimizableParameters]

@@ -142,7 +142,7 @@ object Both:
 /** `split(a, b)` (compatibility name `tensor`) — run two programs left-to-right on independent inputs and pair both
   * outputs. It is the operation beneath shared-input fan-out: `fanout(a, b) = copy >>> split(a, b)`. Because `Either`
   * failures and runtime effects make that order observable, this operation is not a bifunctorial monoidal tensor on
-  * unrestricted modules. Unlike `parallel` it does NOT lift into the packaged `Program`/`ParaCategory` category: its
+  * unrestricted modules. Unlike `parallel` it does NOT lift into the packaged `Program`/`ParameterizedCategory`: its
   * input `(I, J)` has no canonical single-record decoder (fan-out reuses the shared input's decoder; the tensor's two
   * inputs don't), so it lives at the `Module` level. Result raw merges both sub-predictions' records (`second` wins on
   * collision).

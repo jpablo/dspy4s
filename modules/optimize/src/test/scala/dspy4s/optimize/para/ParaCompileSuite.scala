@@ -12,7 +12,7 @@ import dspy4s.programs.RecordCodec
 import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.Predict
-import dspy4s.programs.para.{ParaCategory, Program}
+import dspy4s.programs.algebra.{ParameterizedCategory, Program}
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -113,7 +113,7 @@ class ParaCompileSuite extends FunSuite:
       instructionMarker = instrGenMarker
     )
 
-  // ── 1. Happy path: the packaged entry point finds the winner; assertions via the Para surface ────────────
+  // ── 1. Happy path: the packaged entry point finds the winner; assertions via the parameterized surface ────────────
 
   test("COPRO through a packaged Program selects the winning instruction (asserted via params)") {
     val student = Program.of(Predict[QAInput, QAOutput](taskSignature))
@@ -122,7 +122,7 @@ class ParaCompileSuite extends FunSuite:
       val result           = student.copro(config(), trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
-      // The whole assertion goes through the Para surface: no OptimizableTraversal summon at the call site.
+      // The whole assertion goes through the parameterized surface: no OptimizableTraversal summon at the call site.
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
       assertEquals(report.metadata.get("best_score"), Some(100.0))
       assert(report.candidates.nonEmpty)
@@ -217,7 +217,7 @@ class ParaCompileSuite extends FunSuite:
     // id[QAInput] synthesizes its decoder from RecordCodec[QAInput] (via the input type's Schema, the same
     // Shape decode path Signature.derived uses), so the previously-degraded left-unit case now evaluates and
     // optimizes end-to-end.
-    val C                                    = summon[ParaCategory[RecordCodec, Program]]
+    val C                                    = summon[ParameterizedCategory[RecordCodec, Program]]
     val pipeline: Program[QAInput, QAOutput] = C.id[QAInput] >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current

@@ -6,7 +6,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.para.Program
+import dspy4s.programs.algebra.Program
 import dspy4s.programs.optimization.OptimizableTraversal
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -14,7 +14,7 @@ import zio.blocks.schema.DynamicValue
 /** The DynamicSignature bundle end-to-end: the path-dependent `predict` constructor, the optimizer surface
   * (`OptimizableTraversal` + `ProgramRunner`) over a packaged bundle program, and the cross-fiber `bridge` (eager
   * compatibility failure; a bridged pipeline composing and running). The unit-law and freshness pins live in
-  * `ParaCategoryLawSuite`; this suite is the usability story.
+  * `ParameterizedCategoryLawSuite`; this suite is the usability story.
   */
 class DynamicSignatureSuite extends FunSuite:
 
@@ -94,7 +94,7 @@ class DynamicSignatureSuite extends FunSuite:
     val p2       = Program.of(judge.predict().withLm(new FixedLm("two", "valid")))
     val pipeline = p1 >>> b >>> p2 // Program[qa.In, judge.Out]: expressible ONLY through the bridge
 
-    // The bridge is parameter-free: the pipeline's Para params are exactly the two predicts'.
+    // The bridge is parameter-free: the pipeline.s parameters are exactly the two predicts'.
     assertEquals(pipeline.params.size, 2)
     // Decoding is object-side: the pipeline's record boundary is qa's codec (its domain object).
     assert(summon[RecordCodec[qa.In]].decode(DynamicValues.record("question" := "?")).isRight)

@@ -148,7 +148,7 @@ operation runs the left program before the right program, so execution order is 
 carrier does **not** form a symmetric monoidal, CD, or Markov category.
 
 The reusable executable interface is
-[`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/para/OrderedExecution.scala), with the
+[`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/algebra/OrderedExecution.scala), with the
 `given orderedProgram` instance over `ModuleHom`. It deliberately exposes operations without asserting tensor
 interchange, symmetry of effects, or discard naturality:
 
@@ -182,10 +182,10 @@ The load-bearing facts, all executable:
   `h >>> copy = copy >>> split(h, h)`, i.e. iff `h` is deterministic under the chosen observation. Both sides
   are pinned: the positive case for a pure `h` in
   `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
-  `ParaCategoryLawSuite`. This remains useful without claiming a Markov structure for execution.
+  `ParameterizedCategoryLawSuite`. This remains useful without claiming a Markov structure for execution.
 
-**Why `split` lives at the Module level, not on `ParaCategory`.** `fanout` lifts into the packaged `Program` /
-`ParaCategory` category because both legs share one input, so the pair reuses that input's decoder. The split's
+**Why `split` lives at the Module level, not on `ParameterizedCategory`.** `fanout` lifts into the packaged `Program` /
+`ParameterizedCategory` category because both legs share one input, so the pair reuses that input's decoder. The split's
 input `(I, J)` has no canonical single-record decoder (two independent inputs, one flat `Example` record), so
 `split` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
 category naturally supports fan-out, and the raw split is the structural op beneath it.
@@ -265,12 +265,12 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
     `augment` closing position, execution-wrapping modes. Usage accumulation on `>>>` is now part of the lawful
     `RawPrediction.followedBy` envelope operation.
-  - **Para prototype** (commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
+  - **Parameterized-program prototype** (Para-inspired; commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
     homogeneous `OptimizableParameters` values make `Vector` the exact, not approximate, parameter object, while layout/module
     metadata remains read-only). Prototyped as
-    `dspy4s.programs.para.ParaCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
+    `dspy4s.programs.algebra.ParameterizedCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
     `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
     `Program` packages addressability while its domain object supplies a sealed canonical codec, giving uniform
     `OptimizableTraversal[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
@@ -287,22 +287,22 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `algebra-2-program-composition.md`).
     `OptimizableTraversal.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `OptimizableTraversal.empty`, so an omitted learnable subtree can no longer disappear silently.
-    Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
-    deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
+    Pinned by `ParameterizedCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
+    deferred to the CIO phase; see the "Parameterized program algebra" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
     now stated ON the structures as `@Law` methods returning `IsEq` (`core.algebra.Laws`) and executed by the
-    suites under per-law honest observations. Applied to the Para structures (`446ccb6`) and retrofitted onto
+    suites under per-law honest observations. Applied to the parameterized structures (`446ccb6`) and retrofitted onto
     Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
-    structures from the Para pass: the delooping of the parameter monoid as an explicit `Category` instance;
+    structures from the parameterization pass: the delooping of the parameter monoid as an explicit `Category` instance;
     `ReadFunctor` (`OptimizableTraversal.read` as a functor value; its functor laws — preserves id + composition — are
-    carried on the `CategoryFunctor` trait and are exactly the Para projection laws); and
+    carried on the `CategoryFunctor` trait and are exactly the parameter projection laws); and
     `fanout` as ordered shared-input pairing, with `parallel` retained as a compatibility name and the copy NON-law
     (sharing vs re-running an effectful `h` differ, in
     behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the
     uniform law-statement style across the codebase; every use must name an observational equality preserved by
     its public combinators.
-  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParaCategory` pattern (an
+  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParameterizedCategory` pattern (an
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.algebra.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
     `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[OptimizableParameters]]`

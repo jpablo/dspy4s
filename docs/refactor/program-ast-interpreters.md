@@ -39,7 +39,7 @@ of program structure grows.
 | Execution | `forward` on every structural case class |
 | Lifecycle transparency | Inheritance from `TransparentModule` |
 | OptimizableLeaf traversal and replacement | A `OptimizableTraversal` instance for every node |
-| Record-boundary decoding | The existential package in `para.Program` |
+| Record-boundary decoding | The existential package in `algebra.Program` |
 | Optimizer state persistence | A traversal through `OptimizableTraversal` |
 | Laws | Tests observing execution, lifecycle, and parameter traversal |
 | Potential graphing, normalization, or full persistence | No common interpreter boundary yet |
@@ -204,7 +204,7 @@ the interpreter. Leaves—not the adapter or structural nodes—remain the obser
 
 ### 4. Keep record decoding outside the AST
 
-Typed execution and decoding a `DynamicValue.Record` are separate capabilities. The current `para.Program` packages
+Typed execution and decoding a `DynamicValue.Record` are separate capabilities. The current `algebra.Program` packages
 both, which is why independent-input `split` cannot lift into that category: `(I, J)` has no canonical decoder from one
 flat record.
 
@@ -225,9 +225,9 @@ final case class RecordProgram[I, O](
 - A split program becomes a `RecordProgram[(I, J), (A, B)]` only when the caller supplies an explicit coherent decoder
   for `(I, J)`.
 
-This preserves the honest boundary discovered by the Para prototype without weakening the core typed algebra.
+This preserves the honest boundary discovered by the parameterized-program prototype without weakening the core typed algebra.
 
-The current `para.Program` is close to this wrapper already. Its path-dependent representation and packaged
+The current `algebra.Program` is close to this wrapper already. Its path-dependent representation and packaged
 `OptimizableTraversal` evidence would move down into `Atom`; its decoder would remain at the `RecordProgram` boundary.
 
 ## Interpreters
@@ -457,7 +457,7 @@ better design.
 ## Recommendation
 
 Proceed only with Phase 0 as a future isolated experiment. The architecture is promising because dspy4s already has a
-real syntax tree and multiple interpretations, and because the current `para.Program` proves that packaging concrete
+real syntax tree and multiple interpretations, and because the current `algebra.Program` proves that packaging concrete
 representations with capabilities is workable. The largest uncertainty is not the algebra; it is Scala 3 ergonomics
 around existential leaves, GADT recursion, reconstruction, and extension-method inference.
 
