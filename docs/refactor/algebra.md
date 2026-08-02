@@ -290,7 +290,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     Pinned by `ParaCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Para formalization" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
-    now stated ON the structures as `@Law` methods returning `IsEq` (`core.contracts.Laws`) and executed by the
+    now stated ON the structures as `@Law` methods returning `IsEq` (`core.algebra.Laws`) and executed by the
     suites under per-law honest observations. Applied to the Para structures (`446ccb6`) and retrofitted onto
     Algebra 1 (`SignatureOps.laws`) and the `Mode` monoid (`7004627`) — the latter adding the raw monoid laws
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
@@ -303,7 +303,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     uniform law-statement style across the codebase; every use must name an observational equality preserved by
     its public combinators.
   - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParaCategory` pattern (an
-    abstract trait carrying the laws + `given` instances), monoids get an explicit `core.contracts.Monoid[M]`
+    abstract trait carrying the laws + `given` instances), monoids get an explicit `core.algebra.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
     `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[OptimizableParameters]]`
     (`d3be8e1`, the parameter monoid — codomain of the `OptimizableTraversal` homomorphism). The delooping is generalized
@@ -312,7 +312,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
-    `core.contracts.Lens[S, A]` states get-put / put-get / put-put on the trait, and `OptimizableLeaf[P] extends
+    `core.algebra.Lens[S, A]` states get-put / put-get / put-put on the trait, and `OptimizableLeaf[P] extends
     Lens[P, OptimizableParameters]` inherits them, adding only the `frame` law (writing parameters never changes the
     read-only `OptimizableMetadata`). The focus had to be carved down to exactly the writable triple
     (instructions / demos / config) before these laws could hold; `OptimizableParametersSuite` executes all four

@@ -2,6 +2,7 @@ package dspy4s.programs.para
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.algebra.{AnyObject, CategoryFunctor}
 import dspy4s.programs.AndThen
 import dspy4s.programs.Both
 import dspy4s.programs.Compose

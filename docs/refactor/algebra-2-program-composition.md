@@ -274,7 +274,7 @@ no decoder evidence is stored in a morphism.
 **Law statements, the read functor, and fan-out (commit `446ccb6`, adopted from jpablo/math-with-scala).**
 Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
 
-- **Laws as statements.** `core.contracts.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
+- **Laws as statements.** `core.algebra.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
   and the `@Law` annotation. The Para structures now state their laws as `@Law` methods ON the traits, and
   `ParaCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
   observation (structural `==` for parameter vectors; complete prediction + params + lifecycle for `Program`

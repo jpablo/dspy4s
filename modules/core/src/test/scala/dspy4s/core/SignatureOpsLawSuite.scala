@@ -1,6 +1,7 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.{FieldRole, FieldSpec, InputTransform, IsEq, Monoid, OutputTransform, SignatureLayout, SignatureTransformLaws}
+import dspy4s.core.algebra.{IsEq, Monoid}
+import dspy4s.core.contracts.{FieldRole, FieldSpec, InputTransform, OutputTransform, SignatureLayout, SignatureTransformLaws}
 import dspy4s.core.contracts.SignatureOps.laws
 import org.scalacheck.{Gen, Prop}
 

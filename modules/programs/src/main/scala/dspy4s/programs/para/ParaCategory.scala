@@ -1,8 +1,6 @@
 package dspy4s.programs.para
 
-import dspy4s.core.contracts.IsEq
-import dspy4s.core.contracts.Law
-import dspy4s.core.contracts.<->
+import dspy4s.core.algebra.{Category, IsEq, Law, <->}
 import dspy4s.programs.optimization.OptimizableParameters
 
 /** A category equipped with the Para operations used by optimizers.

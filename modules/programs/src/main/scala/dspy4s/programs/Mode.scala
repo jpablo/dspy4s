@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.Monoid
+import dspy4s.core.algebra.Monoid
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
@@ -24,7 +24,7 @@ import zio.blocks.schema.DynamicValue
   *   1. '''`Mode` is a monoid''' under `++` (left-to-right control transform) with unit [[Mode.id]] — concretely the
   *      endomorphism monoid on `Controls` (`++` = function composition, `Mode.id` = the identity transform), witnessed
   *      by the [[Mode.monoid]] `given Monoid[Mode]` (`combine` = `++`, `empty` = `id`). Its laws come from the
-  *      [[dspy4s.core.contracts.Monoid]] trait and hold up to '''extensional equality''' of the wrapped transform (`m1
+  *      [[dspy4s.core.algebra.Monoid]] trait and hold up to '''extensional equality''' of the wrapped transform (`m1
   *      ≡ m2` iff `∀ c. m1.transform(c) == m2.transform(c)`), NOT the case class's structural `==` — `++` allocates a
   *      fresh closure each time, so `==` (reference equality on the function field) would reject even `Mode.id ++ m ≡
   *      m`. `ModeLawSuite` executes the trait's laws through the instance under that extensional equality.
@@ -64,7 +64,7 @@ object Mode:
   def rolloutId(value: Int): Mode = Mode(controls => controls.copy(rolloutId = Some(value)))
 
   /** `Mode` as the endomorphism monoid on `Controls`: `combine` = `++` (compose the control transforms), `empty` =
-    * [[Mode.id]]. The associativity / identity laws come from [[dspy4s.core.contracts.Monoid]] and are executed by
+    * [[Mode.id]]. The associativity / identity laws come from [[dspy4s.core.algebra.Monoid]] and are executed by
     * `ModeLawSuite` under extensional equality of the transform (see fact 1 in the class scaladoc). Distinct from the
     * mode-ACTION homomorphism (`mode(m1 ++ m2) = mode(m1) ∘ mode(m2)`), which is a program-level equation observed via
     * the recorder in that suite.

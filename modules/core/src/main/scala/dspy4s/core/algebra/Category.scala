@@ -1,9 +1,4 @@
-package dspy4s.programs.para
-
-import dspy4s.core.contracts.IsEq
-import dspy4s.core.contracts.Law
-import dspy4s.core.contracts.Monoid
-import dspy4s.core.contracts.<->
+package dspy4s.core.algebra
 
 /** A category whose objects may be constrained by `P`.
   *

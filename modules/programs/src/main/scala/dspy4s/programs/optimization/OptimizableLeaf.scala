@@ -1,12 +1,12 @@
 package dspy4s.programs.optimization
 
-import dspy4s.core.contracts.{IsEq, Law, Lens, <->}
+import dspy4s.core.algebra.{IsEq, Law, Lens, <->}
 import dspy4s.programs.{ChainOfThought, DynamicPredict, Predict}
 import dspy4s.typed.OutputAugmentation.PrependField
 
 /** A program that is one independently optimizable leaf of the introspection tree.
   *
-  * This is a lawful [[dspy4s.core.contracts.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the
+  * This is a lawful [[dspy4s.core.algebra.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the
   * Get-Put / Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins
   * what makes the focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which
   * excludes signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite`

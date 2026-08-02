@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.algebra.Monoid
+
 /** A provider-specific token-usage category carried in [[LmUsage.extras]]. Universal prompt/completion/total counts are
   * typed fields on [[LmUsage]]; this enum covers the provider-specific remainder without falling back to magic strings.
   * [[Other]] is the forward-compatible escape for counters not yet modeled by dspy4s.

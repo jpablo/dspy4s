@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.algebra.Monoid
+
 import zio.blocks.schema.DynamicValue
 
 import java.time.Instant

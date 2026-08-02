@@ -1,8 +1,6 @@
 package dspy4s.programs.para
 
-import dspy4s.core.contracts.IsEq
-import dspy4s.core.contracts.Law
-import dspy4s.core.contracts.<->
+import dspy4s.core.algebra.{AnyObject, Category, IsEq, Law, <->}
 import dspy4s.programs.Compose
 import dspy4s.programs.andThen
 import dspy4s.programs.***

@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.algebra.{IsEq, Law, Monoid, <->}
+
 /** The value-level "signature algebra": idempotent, role-aware, named transforms over [[SignatureLayout]].
   *
   * The low-level `append` / `prepend` / `insert` / `withFields` mutators on [[SignatureLayout]] stay
@@ -50,7 +52,7 @@ private[dspy4s] object SignatureOps:
       layout.withFields(layout.inputFields ++ fields)
 
   /** The signature-algebra laws stated ON the structure as `@Law` methods returning [[IsEq]] (the
-    * math-with-scala statement style; see `core.contracts.Laws` and `docs/refactor/algebra.md`). `SignatureOpsLawSuite`
+    * math-with-scala statement style; see `core.algebra.Laws` and `docs/refactor/algebra.md`). `SignatureOpsLawSuite`
     * EXECUTES these over generated layouts, checking each under the honest observation: layout equations by
     * observational equality (`in` / `out` / `instructions` / `name`, since cross-cohort commutativity reorders
     * the underlying field vector while leaving every observation identical), field-cohort equations by
