@@ -140,9 +140,9 @@ object Refine:
     * the existing override exactly; a changed state preserves the critic's execution bindings.
     */
   given refineOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
-      inner: FixedArityOptimizableTraversal.WithArity[P, N]
-  ): FixedArityOptimizableTraversal.Of[Refine[P, I, O], N + 1] with
-    val arity: Int = inner.arity + 1
+      inner: OptimizableTraversal.WithArity[P, N]
+  ): OptimizableTraversal.Of[Refine[P, I, O], N + 1] with
+    def arity(program: Refine[P, I, O]): Int = inner.arity(program.module) + 1
     def inspect(program: Refine[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module) :+ program.criticPredict.optimizableView
 

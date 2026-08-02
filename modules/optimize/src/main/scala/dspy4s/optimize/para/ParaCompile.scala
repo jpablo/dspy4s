@@ -11,22 +11,21 @@ import dspy4s.programs.algebra.Program
 
 /** A packaged [[Program]] as the optimizer entry point.
   *
-  * `COPRO[P]` needs `OptimizableTraversal[P]` AND `ProgramRunner[P]`. Both are uniform over the packaged type:
-  * `OptimizableTraversal[Program[I, O]]` delegates to the packaged parameter projection / reparameterization, and
-  * `ProgramRunner[Program[I, O]]` decodes through the domain OBJECT's `RecordCodec[I]` (decoding is
-  * object-side; nothing per-program is packaged). So `new COPRO[Program[I, O]](config)` type-checks directly
-  * (any `Teleprompter` does), the report is already `Program`-typed, and it works on UPCAST values and on
-  * COMPOSED pipelines (`a >>> b`). [[copro]] is retained as call-site sugar; it demands the runner, which
-  * exists exactly when the pipeline's input object is codec-equipped.
+  * `COPRO[P]` needs `OptimizableTraversal[P]` and `ProgramRunner[P]`. The packaged entry point therefore retains
+  * `Program.WithArity[I, O, N]`: the runner depends only on the codec-equipped input object, while optimizer traversal
+  * additionally requires the parameter shape that a plain `Program[I, O]` has erased.
   */
 object ParaCompile:
-  extension [I, O](program: Program[I, O])
-    /** Run COPRO over a packaged program. Sugar over `new COPRO[Program[I, O]](config)`; the required
-      * `ProgramRunner` exists whenever `RecordCodec[I]` does (object-side decoding).
+  extension [I, O, N <: Int](program: Program.WithArity[I, O, N])
+    /** Run COPRO over a packaged program while preserving its static parameter arity. The required `ProgramRunner`
+      * exists whenever `RecordCodec[I]` does (object-side decoding).
       */
     def copro(
         config: COPROConfig,
         trainset: Vector[Example],
         valset: Option[Vector[Example]] = None
-    )(using RuntimeContext, ProgramRunner[Program[I, O]]): Either[DspyError, OptimizationReport[Program[I, O]]] =
-      new COPRO[Program[I, O]](config).compile(program, trainset, valset = valset)
+    )(using
+        RuntimeContext,
+        ProgramRunner[Program.WithArity[I, O, N]]
+    ): Either[DspyError, OptimizationReport[Program.WithArity[I, O, N]]] =
+      new COPRO[Program.WithArity[I, O, N]](config).compile(program, trainset, valset = valset)

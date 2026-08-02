@@ -40,7 +40,7 @@ final case class Identity[I]() extends TransparentModule[I, I]:
     Right(Prediction(call.input, RawPrediction.empty))
 
 object Identity:
-  given identityOptimizableTraversal[I]: FixedArityOptimizableTraversal.WithArity[Identity[I], 0] =
+  given identityOptimizableTraversal[I]: OptimizableTraversal.WithArity[Identity[I], 0] =
     OptimizableTraversal.empty
 
 /** `a >>> b` — sequential (dependent) composition: run `a`, thread its output value into `b`. The Category operation.
@@ -98,10 +98,10 @@ object AndThen:
       NB <: Int
   ](
       using
-      pa: FixedArityOptimizableTraversal.WithArity[A, NA],
-      pb: FixedArityOptimizableTraversal.WithArity[B, NB]
-  ): FixedArityOptimizableTraversal.Of[AndThen[I, X, O, A, B], NA + NB] with
-    val arity: Int = pa.arity + pb.arity
+      pa: OptimizableTraversal.WithArity[A, NA],
+      pb: OptimizableTraversal.WithArity[B, NB]
+  ): OptimizableTraversal.Of[AndThen[I, X, O, A, B], NA + NB] with
+    def arity(program: AndThen[I, X, O, A, B]): Int = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: AndThen[I, X, O, A, B]): Vector[OptimizableView] =
       PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
 
@@ -145,10 +145,10 @@ object Both:
       NB <: Int
   ](
       using
-      pa: FixedArityOptimizableTraversal.WithArity[A, NA],
-      pb: FixedArityOptimizableTraversal.WithArity[B, NB]
-  ): FixedArityOptimizableTraversal.Of[Both[I, OA, OB, A, B], NA + NB] with
-    val arity: Int = pa.arity + pb.arity
+      pa: OptimizableTraversal.WithArity[A, NA],
+      pb: OptimizableTraversal.WithArity[B, NB]
+  ): OptimizableTraversal.Of[Both[I, OA, OB, A, B], NA + NB] with
+    def arity(program: Both[I, OA, OB, A, B]): Int = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: Both[I, OA, OB, A, B]): Vector[OptimizableView] =
       PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
 
@@ -205,10 +205,10 @@ object Tensor:
       NB <: Int
   ](
       using
-      pa: FixedArityOptimizableTraversal.WithArity[FA, NA],
-      pb: FixedArityOptimizableTraversal.WithArity[FB, NB]
-  ): FixedArityOptimizableTraversal.Of[Tensor[I, J, A, B, FA, FB], NA + NB] with
-    val arity: Int = pa.arity + pb.arity
+      pa: OptimizableTraversal.WithArity[FA, NA],
+      pb: OptimizableTraversal.WithArity[FB, NB]
+  ): OptimizableTraversal.Of[Tensor[I, J, A, B, FA, FB], NA + NB] with
+    def arity(program: Tensor[I, J, A, B, FA, FB]): Int = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[OptimizableView] =
       PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
 
@@ -233,7 +233,7 @@ final case class Copy[I]() extends TransparentModule[I, (I, I)]:
     Right(Prediction((call.input, call.input), RawPrediction.empty))
 
 object Copy:
-  given copyOptimizableTraversal[I]: FixedArityOptimizableTraversal.WithArity[Copy[I], 0] =
+  given copyOptimizableTraversal[I]: OptimizableTraversal.WithArity[Copy[I], 0] =
     OptimizableTraversal.empty
 
 /** `discard`: drop the input, producing `()`. Parameter-free. Although `f >>> discard` and `discard` return the same
@@ -246,7 +246,7 @@ final case class Discard[I]() extends TransparentModule[I, Unit]:
     Right(Prediction((), RawPrediction.empty))
 
 object Discard:
-  given discardOptimizableTraversal[I]: FixedArityOptimizableTraversal.WithArity[Discard[I], 0] =
+  given discardOptimizableTraversal[I]: OptimizableTraversal.WithArity[Discard[I], 0] =
     OptimizableTraversal.empty
 
 /** `swap`: exchange two components. Parameter-free and involutive (`swap >>> swap = id`) as a structural value
@@ -261,7 +261,7 @@ final case class Swap[I, J]() extends TransparentModule[(I, J), (J, I)]:
     Right(Prediction((j, i), RawPrediction.empty))
 
 object Swap:
-  given swapOptimizableTraversal[I, J]: FixedArityOptimizableTraversal.WithArity[Swap[I, J], 0] =
+  given swapOptimizableTraversal[I, J]: OptimizableTraversal.WithArity[Swap[I, J], 0] =
     OptimizableTraversal.empty
 
 /** The composition combinators as functions / operators. `lift` / `id` / `fanout` / `split` / `copy` / `discard` /

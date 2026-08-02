@@ -63,10 +63,11 @@ object RecoverWith:
       NP <: Int,
       NF <: Int
   ](using
-      primary: FixedArityOptimizableTraversal.WithArity[P, NP],
-      fallback: FixedArityOptimizableTraversal.WithArity[F, NF]
-  ): FixedArityOptimizableTraversal.Of[RecoverWith[I, O, P, F], NP + NF] with
-    val arity: Int = primary.arity + fallback.arity
+      primary: OptimizableTraversal.WithArity[P, NP],
+      fallback: OptimizableTraversal.WithArity[F, NF]
+  ): OptimizableTraversal.Of[RecoverWith[I, O, P, F], NP + NF] with
+    def arity(program: RecoverWith[I, O, P, F]): Int =
+      primary.arity(program.primary) + fallback.arity(program.fallback)
     def inspect(program: RecoverWith[I, O, P, F]): Vector[OptimizableView] =
       primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
 

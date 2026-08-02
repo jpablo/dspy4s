@@ -62,8 +62,9 @@ class DynamicSignatureSuite extends FunSuite:
 
   test("the optimizer surface holds over a packaged bundle program (OptimizableTraversal read/replace + record run)") {
     import qa.given
-    val packaged = Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
-    val P        = summon[OptimizableTraversal[Program[qa.In, qa.Out]]]
+    val packaged: Program.WithArity[qa.In, qa.Out, 1] =
+      Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
+    val P = summon[OptimizableTraversal[Program.WithArity[qa.In, qa.Out, 1]]]
 
     val states = P.read(packaged)
     assertEquals(states.size, 1)
@@ -71,7 +72,7 @@ class DynamicSignatureSuite extends FunSuite:
     assertEquals(P.read(tuned).head.instructions, Some("Be terse."))
 
     // The record-boundary run decodes through the bundle's codec, then executes the typed predict.
-    val runner = summon[ProgramRunner[Program[qa.In, qa.Out]]]
+    val runner = summon[ProgramRunner[Program.WithArity[qa.In, qa.Out, 1]]]
     val out    = underAdapter(runner.run(packaged, ProgramCall(input = DynamicValues.record("question" := "x"))))
     assertEquals(out.toOption.map(p => field(p.values, "answer")), Some(Some("7")))
     // A record missing the declared input fails at decode, before any LM call.

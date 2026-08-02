@@ -246,14 +246,12 @@ constraints. The declared stance: `DynamicSignature` is the user path for runtim
 `DynamicPredict` is the untyped substrate for framework-internal generations (its scaladoc now points users to
 the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
 decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
-unrepresentable. Both optimizer capabilities are uniform over the packaged type: `OptimizableTraversal[Program[I, O]]`
-(Program companion; read/replace = parameter projection/reparameterization) and `ProgramRunner[Program[I, O]]`
-(Program companion; conditional on `RecordCodec[I]`, decode object-side + run). So `Program[I, O]` is a
-first-class optimizable program: `new COPRO[Program[I, O]](config)` type-checks directly (any `Teleprompter`
-does), upcasts and composed pipelines `a >>> b` optimize end-to-end, and `.copro` demands exactly the runner,
-which exists exactly when the pipeline's input object is codec-equipped. Pinned by `ParameterizedCategoryLawSuite`
-(object-side decoding + the unrepresentability gates) and `ParaCompileSuite` (upcast + composed-pipeline +
-bundle optimization).
+unrepresentable. Record-running is uniform over the binary package through `ProgramRunner[Program[I, O]]`, while
+optimization deliberately retains `Program.WithArity[I, O, N]`. An upcast to `Program[I, O]` therefore remains
+runnable but erases the parameter shape required by `OptimizableTraversal`; shape-preserving composed pipelines
+still optimize end-to-end, and `.copro` preserves their arity in its report type. Pinned by
+`ParameterizedCategoryLawSuite` (object-side decoding + the unrepresentability gates) and `ParaCompileSuite`
+(erasure boundary + composed-pipeline + bundle optimization).
 
 **Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:
 `id[A]` carried a failing decoder (nothing decodes an arbitrary `A` from a record), so the left unit

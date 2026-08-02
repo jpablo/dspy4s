@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
 import dspy4s.programs.algebra.Program
-import dspy4s.programs.optimization.FixedArityOptimizableTraversal
+import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue
 
@@ -78,8 +78,8 @@ sealed trait DynamicSignature:
       demos: Vector[Example] = Vector.empty,
       name: Option[String] = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
-  ): Program[In, Out] =
-    Program.of(predict(demos, name, config))(using summon[FixedArityOptimizableTraversal[Predict[In, Out]]], inputCodec)
+  ): Program.WithArity[In, Out, 1] =
+    Program.of(predict(demos, name, config))(using summon[OptimizableTraversal[Predict[In, Out]]], inputCodec)
 
 object DynamicSignature:
 
@@ -108,7 +108,7 @@ object DynamicSignature:
         demos: Vector[Example] = Vector.empty,
         name: Option[String] = None,
         config: DynamicValue.Record = DynamicValue.Record.empty
-    ): Program[I, O] = underlying.packaged(demos, name, config)
+    ): Program.WithArity[I, O, 1] = underlying.packaged(demos, name, config)
 
   /** Parse a DSPy-style DSL string at runtime, minting a fresh pair of input/output types for it. The declared
     * `DynamicSignature` return type is what seals the type members: the concrete representation (`In` and
@@ -132,7 +132,7 @@ object DynamicSignature:
     * name-set condition is the base-level compatibility arrow this bridge lifts. At run time the validating
     * entry rejects records whose declared fields are absent. Parameter-free ([[LiftEither]]), so it
     * contributes nothing to `params` and pipelines optimize exactly as before. */
-  def bridge(from: DynamicSignature, to: DynamicSignature): Either[DspyError, Program[from.Out, to.In]] =
+  def bridge(from: DynamicSignature, to: DynamicSignature): Either[DspyError, Program.WithArity[from.Out, to.In, 0]] =
     val provided = from.signature.layout.outputFields.map(_.name).toSet
     val missing  = to.signature.layout.inputFields.map(_.name).filterNot(provided.contains)
     if missing.nonEmpty then

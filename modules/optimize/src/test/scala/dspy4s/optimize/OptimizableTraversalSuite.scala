@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.optimization.optimizableParameters
 
-import dspy4s.programs.optimization.{FixedArityOptimizableTraversal, OptimizableParameters, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableParameters, OptimizableTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -18,7 +18,7 @@ class OptimizableTraversalSuite extends FunSuite:
   // A composite of two predictors plus a non-predictor field.
   final case class Pipe(a: DynamicPredict, b: DynamicPredict, n: Int)
   object Pipe:
-    given FixedArityOptimizableTraversal.WithArity[Int, 0] = OptimizableTraversal.empty
+    given OptimizableTraversal.WithArity[Int, 0] = OptimizableTraversal.empty
     given OptimizableTraversal[Pipe]                 = OptimizableTraversal.derived
 
   test("OptimizableLeaf lifts to a 1-element OptimizableTraversal via fromOptimizableLeaf") {

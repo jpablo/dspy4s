@@ -63,9 +63,9 @@ object BestOfN:
     * predict of its own, so `inspect` / `replace` / `inspectNamed` delegate to the inner program's instance unchanged.
     */
   given bestOfNOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
-      inner: FixedArityOptimizableTraversal.WithArity[P, N]
-  ): FixedArityOptimizableTraversal.Of[BestOfN[P, I, O], N] with
-    val arity: Int = inner.arity
+      inner: OptimizableTraversal.WithArity[P, N]
+  ): OptimizableTraversal.Of[BestOfN[P, I, O], N] with
+    def arity(program: BestOfN[P, I, O]): Int = inner.arity(program.module)
     def inspect(program: BestOfN[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module)
 

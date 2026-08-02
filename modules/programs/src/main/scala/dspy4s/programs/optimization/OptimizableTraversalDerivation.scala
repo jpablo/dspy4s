@@ -19,11 +19,10 @@ trait LowPriorityOptimizableTraversal:
   inline given derived[P <: Product, N <: Int](using
       m: Mirror.ProductOf[P],
       @annotation.unused notLeaf: NotGiven[OptimizableLeaf[P]],
-      fields: OptimizableTraversal.FixedFieldTraversals[m.MirroredElemTypes, N]
-  ): FixedArityOptimizableTraversal.Of[P, N] =
+      fields: OptimizableTraversal.FieldTraversals[m.MirroredElemTypes, N]
+  ): OptimizableTraversal.Of[P, N] =
     new OptimizableTraversal.DerivedOptimizableTraversal[P, N](
       m,
       fields.instances,
-      scala.compiletime.constValueTuple[m.MirroredElemLabels].toList.map(_.toString),
-      fields.arity
+      scala.compiletime.constValueTuple[m.MirroredElemLabels].toList.map(_.toString)
     )

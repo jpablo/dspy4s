@@ -13,7 +13,6 @@ import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.optimization.OptimizableTraversal
-import dspy4s.programs.optimization.FixedArityOptimizableTraversal
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
@@ -27,7 +26,7 @@ import scala.compiletime.ops.int.+
   * The package hides a concrete module representation while retaining its fixed-arity [[OptimizableTraversal]] evidence,
   * so the binary type `Program[I, O]` supports parameter projection and reparameterization without knowing the
   * representation. Construction through [[Program.of]] is the only gate, and it requires evidence at BOTH slots:
-  * [[FixedArityOptimizableTraversal]] for the morphism (no addressability, no program) and [[RecordCodec]] for the domain
+  * [[OptimizableTraversal]] for the morphism (no addressability, no program) and [[RecordCodec]] for the domain
   * OBJECT (no codec, no object).
   *
   * Decoding is a property of the object, not the morphism: nothing decode-related is packaged, and identity plus
@@ -45,7 +44,7 @@ sealed trait Program[I, O]:
   type Rep <: Module[I, O]
   type ParameterArity <: Int
   val program: Rep
-  val optimizableParameters: FixedArityOptimizableTraversal.WithArity[Rep, ParameterArity]
+  val optimizableParameters: OptimizableTraversal.WithArity[Rep, ParameterArity]
 
   /** Run the packaged program through the module's wrapped `apply`. */
   def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -58,17 +57,17 @@ object Program:
 
   private def packageWith[I, O, F <: Module[I, O]](
       f: F
-  )(using ev: FixedArityOptimizableTraversal[F]): Program[I, O] { type Rep = F; type ParameterArity = ev.Arity } =
+  )(using ev: OptimizableTraversal[F]): Program[I, O] { type Rep = F; type ParameterArity = ev.Arity } =
     new Program[I, O]:
       type Rep = F
       type ParameterArity = ev.Arity
       val program: F = f
-      val optimizableParameters: FixedArityOptimizableTraversal.WithArity[F, ParameterArity] = ev
+      val optimizableParameters: OptimizableTraversal.WithArity[F, ParameterArity] = ev
 
   /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate:
     * every object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional. */
   def of[I, O, F <: Module[I, O]](f: F)(using
-      ev: FixedArityOptimizableTraversal[F],
+      ev: OptimizableTraversal[F],
       @annotation.unused codec: RecordCodec[I]
   ): Program[I, O] { type Rep = F; type ParameterArity = ev.Arity } =
     packageWith(f)
@@ -97,22 +96,32 @@ object Program:
         parameters: SizedVector[OptimizableParameters, N]
     ): WithArity[I, O, N] = program.reparamSized(parameters)
 
-  /** Addressability for packaged programs delegates to the evidence retained by the package. */
-  given programOptimizableTraversal[I, O]: OptimizableTraversal[Program[I, O]] with
-    def inspect(program: Program[I, O]): Vector[OptimizableView] =
+  /** Optimizer traversal for a package whose parameter arity has not been erased. */
+  given programOptimizableTraversal[I, O, N <: Int]: OptimizableTraversal.Of[WithArity[I, O, N], N] with
+    def arity(program: WithArity[I, O, N]): Int =
+      program.optimizableParameters.arity(program.program)
+
+    def inspect(program: WithArity[I, O, N]): Vector[OptimizableView] =
       program.optimizableParameters.inspect(program.program)
 
-    def replace(program: Program[I, O], updates: Vector[OptimizableParameters]): Program[I, O] =
+    def replace(program: WithArity[I, O, N], updates: Vector[OptimizableParameters]): WithArity[I, O, N] =
       Program.packageWith(program.optimizableParameters.replace(program.program, updates))(using
         program.optimizableParameters
       )
 
-    override def inspectNamed(program: Program[I, O]): Vector[(String, OptimizableView)] =
+    override def inspectNamed(program: WithArity[I, O, N]): Vector[(String, OptimizableView)] =
       program.optimizableParameters.inspectNamed(program.program)
 
   /** Record-boundary execution resolves the sealed canonical codec for the domain object. */
   given programRunner[I, O](using codec: RecordCodec[I]): ProgramRunner[Program[I, O]] with
     def run(program: Program[I, O], call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, dspy4s.core.data.RawPrediction] =
+      codec.decode(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
+
+  /** Preserve the refined package type when an optimizer requires both traversal and record-running evidence. */
+  given programWithArityRunner[I, O, N <: Int](using codec: RecordCodec[I]): ProgramRunner[WithArity[I, O, N]] with
+    def run(program: WithArity[I, O, N], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
       codec.decode(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))

@@ -58,8 +58,8 @@ modules extensible despite that choice.
   nested implementation types such as `AndThen[I, X, O, A, B]`.
 - Define execution semantics in one interpreter, including `ProgramCall` control propagation and `Prediction.raw`
   behavior.
-- Derive one lawful `OptimizableTraversal[Program[I, O]]` implementation from the tree instead of one instance per structural
-  node.
+- Derive one lawful `OptimizableTraversal.WithArity[Program.WithArity[I, O, N], N]` implementation from the tree
+  instead of one instance per structural node.
 - Preserve arbitrary user and framework `Module`s as executable, optimizer-addressable leaves.
 - Keep learnable children structurally visible. In particular, do not introduce a closure-based
   `flatMap: O => Program[?, ?]` that can hide input-dependent predictors.
@@ -275,7 +275,9 @@ One tree interpreter replaces the structural `OptimizableTraversal` instances:
 The public typeclass becomes a single adapter:
 
 ```scala
-given [I, O]: OptimizableTraversal[Program[I, O]] = ProgramPredictorInterpreter.instance
+given [I, O, N <: Int]
+    : OptimizableTraversal.WithArity[Program.WithArity[I, O, N], N] =
+  ProgramPredictorInterpreter.instance
 ```
 
 The existing laws remain the contract:

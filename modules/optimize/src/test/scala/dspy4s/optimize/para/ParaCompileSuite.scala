@@ -8,21 +8,19 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
 import dspy4s.optimize.{COPROConfig, CoproBreadth, QAInput, QAOutput, RoundCount}
 import dspy4s.programs.ProgramRunner
-import dspy4s.programs.RecordCodec
 import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.Predict
-import dspy4s.programs.algebra.{ParameterizedCategory, Program}
+import dspy4s.programs.algebra.Program
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 /** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a TYPED
   * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction
-  * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the closed loop:
-  * with `decodeInput` packaged, `copro` works on an UPCAST `Program[I, O]` (the earlier revision proved at compile time
-  * that it could not) and on a COMPOSED pipeline `a >>> b`, which the ambient `Module` world cannot run from records at
-  * all.
+  * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the distinction
+  * between record-running and optimization: an upcast `Program[I, O]` remains runnable but has erased the arity required
+  * by optimizers, while a shape-preserving composed pipeline remains both runnable and optimizable.
   */
 class ParaCompileSuite extends FunSuite:
 
@@ -146,19 +144,20 @@ class ParaCompileSuite extends FunSuite:
     assertEquals(a, Some(winningInstruction))
   }
 
-  // ── 3. The closed loop, part 1: the upcast that used to fail now works ───────────────────────────────────
+  // ── 3. Erasing parameter arity preserves running but deliberately loses optimization ───────────────────
 
-  test("copro works on an UPCAST Program[I, O] (the packaged decoder closed the ProgramRunner gap)") {
-    // The earlier revision pinned (via compileErrors) that this exact shape could NOT compile: ProgramRunner had
-    // to be summoned against the packaging-refined Rep. With decodeInput packaged, both optimizer
-    // capabilities are uniform over Program[I, O], so the erased type is fully optimizable.
+  test("an upcast Program[I, O] remains runnable but is no longer optimizable") {
     val erased: Program[QAInput, QAOutput] = Program.of(Predict[QAInput, QAOutput](taskSignature))
     assertEquals(erased.params.size, 1)
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val report           = erased.copro(config(), trainset).toOption.get
-      assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
+      val ran = summon[ProgramRunner[Program[QAInput, QAOutput]]].run(erased, rec("question" := "q1"))
+      assert(ran.isRight, s"record-run of the erased program failed: ${ran.left.toOption}")
     }
+    val errors = compileErrors(
+      "summon[dspy4s.programs.optimization.OptimizableTraversal[Program[QAInput, QAOutput]]]"
+    )
+    assert(errors.nonEmpty, "expected erased Program traversal lookup to fail")
   }
 
   // ── 4. The closed loop, part 2: a COMPOSED pipeline is record-runnable and optimizable ──────────────────
@@ -167,7 +166,7 @@ class ParaCompileSuite extends FunSuite:
     // Second stage maps QAOutput back to QAInput (fields `answer -> question`, unique within one layout).
     val first  = Program.of(Predict[QAInput, QAOutput](taskSignature))
     val second = Program.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
-    val pipeline: Program[QAInput, QAInput] = first >>> second
+    val pipeline: Program.WithArity[QAInput, QAInput, 2] = first >>> second
     // The metric compares the pipeline's final output field ("question"); this test proves the PLUMBING
     // (record-run + optimization over a composite), not instruction discovery, so zero scores are fine.
     val pipelineConfig = COPROConfig(
@@ -181,7 +180,7 @@ class ParaCompileSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       // Uniform record-based evaluation on a composite: decode via the threaded first-leg decoder, run both
       // stages. Bare user composites need a hand-written ProgramRunner for exactly this (ProgramRunner's scaladoc).
-      val ran = summon[ProgramRunner[Program[QAInput, QAInput]]].run(pipeline, rec("question" := "q1"))
+      val ran = summon[ProgramRunner[Program.WithArity[QAInput, QAInput, 2]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the composed pipeline failed: ${ran.left.toOption}")
       // And the whole pipeline is optimizable: COPRO sees both predicts through the packaged evidence.
       val result = pipeline.copro(pipelineConfig, trainset)
@@ -213,15 +212,14 @@ class ParaCompileSuite extends FunSuite:
 
   // ── 5. Codec-equipped objects: an id-headed pipeline evaluates and optimizes ─────────────────────────────
 
-  test("id at the head of a pipeline is record-runnable and optimizable (codec-equipped objects)") {
-    // id[QAInput] synthesizes its decoder from RecordCodec[QAInput] (via the input type's Schema, the same
-    // Shape decode path Signature.derived uses), so the previously-degraded left-unit case now evaluates and
-    // optimizes end-to-end.
-    val C                                    = summon[ParameterizedCategory[RecordCodec, Program]]
-    val pipeline: Program[QAInput, QAOutput] = C.id[QAInput] >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
+  test("an explicitly packaged zero-arity identity remains optimizable at the head of a pipeline") {
+    val identity = Program.of(dspy4s.programs.Compose.id[QAInput])
+    val pipeline: Program.WithArity[QAInput, QAOutput, 1] =
+      identity >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran              = summon[ProgramRunner[Program[QAInput, QAOutput]]].run(pipeline, rec("question" := "q1"))
+      val ran = summon[ProgramRunner[Program.WithArity[QAInput, QAOutput, 1]]]
+        .run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
       val report = pipeline.copro(config(), trainset).toOption.get
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))

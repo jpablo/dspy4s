@@ -1,5 +1,8 @@
 package dspy4s.programs.optimization
 
+import dspy4s.core.algebra.{IsEq, Law, Lens, <->}
+import dspy4s.core.collections.SizedVector
+
 import scala.annotation.implicitNotFound
 import scala.compiletime.ops.int.+
 import scala.deriving.Mirror
@@ -13,9 +16,32 @@ import scala.deriving.Mirror
   * `read` even when two source values use different internal `Option` representations.
   */
 trait OptimizableTraversal[P]:
+  type Arity <: Int
+
+  /** Runtime reflection of [[Arity]] for compatibility APIs that still accept an unsized `Vector`. */
+  def arity(program: P): Int
+
   def inspect(program: P): Vector[OptimizableView]
   final def read(program: P): Vector[OptimizableParameters] = inspect(program).map(_.parameters)
   def replace(program: P, updates: Vector[OptimizableParameters]): P
+
+  /** Read parameters while retaining the statically known arity. */
+  final def readSized(program: P): SizedVector[OptimizableParameters, Arity] =
+    SizedVector.assumeSize(read(program))
+
+  /** Replace parameters whose type already proves the correct arity. */
+  final def replaceSized(program: P, updates: SizedVector[OptimizableParameters, Arity]): P =
+    replace(program, updates)
+
+  /** The lawful focus from a fixed-shape program onto all of its writable parameters. */
+  final def parameterLens: Lens[P, SizedVector[OptimizableParameters, Arity]] =
+    new Lens[P, SizedVector[OptimizableParameters, Arity]]:
+      def get(program: P): SizedVector[OptimizableParameters, Arity] = readSized(program)
+      def set(program: P, updates: SizedVector[OptimizableParameters, Arity]): P = replaceSized(program, updates)
+
+  @Law("the runtime traversal cardinality agrees with its static arity")
+  final def arityAgreement(program: P): IsEq[Int] =
+    read(program).size <-> arity(program)
 
   /** Each view paired with a human-readable structural name, analogous to Python's `named_predictors()`. Names are
     * dotted field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and
@@ -56,12 +82,26 @@ trait OptimizableTraversal[P]:
 
 object OptimizableTraversal extends CompositeOptimizableTraversalInstances with LowPriorityOptimizableTraversal:
 
+  type WithArity[P, N <: Int] = OptimizableTraversal[P] { type Arity = N }
+
+  /** Nominal implementation base for givens whose arity should remain visible in their public result type. */
+  trait Of[P, N <: Int] extends OptimizableTraversal[P]:
+    final type Arity = N
+
+  /** Summon a traversal. */
+  def apply[P](using traversal: OptimizableTraversal[P]): OptimizableTraversal[P] = traversal
+
+  /** A traversal is the canonical lawful lens onto its complete parameter vector. */
+  given parameterLens[P, N <: Int](using
+      traversal: WithArity[P, N]
+  ): Lens[P, SizedVector[OptimizableParameters, N]] = traversal.parameterLens
+
   /** Lifts a single [[OptimizableLeaf]] leaf to a 1-element [[OptimizableTraversal]]. A type that is itself a leaf (e.g.
     * [[dspy4s.programs.DynamicPredict]], which is also a `Product`) resolves here and is not torn into its case-class
     * fields by structural derivation.
     */
-  given fromOptimizableLeaf[P](using leaf: OptimizableLeaf[P]): FixedArityOptimizableTraversal.Of[P, 1] with
-    val arity: Int = 1
+  given fromOptimizableLeaf[P](using leaf: OptimizableLeaf[P]): OptimizableTraversal.Of[P, 1] with
+    def arity(@annotation.unused program: P): Int = 1
     def inspect(program: P): Vector[OptimizableView] = Vector(leaf.inspect(program))
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.size == 1, s"OptimizableLeaf expects exactly 1 update, got ${updates.size}")
@@ -76,8 +116,8 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     * instance in scope for each deliberately non-learnable field type. This makes an omitted `OptimizableTraversal`
     * instance a compile error instead of silently hiding a potentially learnable subtree.
     */
-  def empty[P]: FixedArityOptimizableTraversal.WithArity[P, 0] = new FixedArityOptimizableTraversal.Of[P, 0]:
-    val arity: Int = 0
+  def empty[P]: OptimizableTraversal.WithArity[P, 0] = new OptimizableTraversal.Of[P, 0]:
+    def arity(@annotation.unused program: P): Int = 0
     def inspect(program: P): Vector[OptimizableView] = Vector.empty
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
@@ -89,9 +129,13 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
   private[dspy4s] final class DerivedOptimizableTraversal[P <: Product, N <: Int](
       m: Mirror.ProductOf[P],
       fieldInstances: List[OptimizableTraversal[Any]],
-      labels: List[String],
-      val arity: Int
-  ) extends FixedArityOptimizableTraversal.Of[P, N]:
+      labels: List[String]
+  ) extends OptimizableTraversal.Of[P, N]:
+    def arity(program: P): Int =
+      fieldInstances.zipWithIndex.map { case (instance, index) =>
+        instance.arity(program.productElement(index))
+      }.sum
+
     def inspect(program: P): Vector[OptimizableView] =
       fieldInstances.zipWithIndex.foldLeft(Vector.empty[OptimizableView]) { case (acc, (inst, i)) =>
         acc ++ inst.inspect(program.productElement(i))
@@ -137,24 +181,21 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     "Cannot derive OptimizableTraversal: every field must provide fixed-arity OptimizableTraversal evidence. " +
       "Declare an explicit OptimizableTraversal.empty instance for intentionally parameter-free field types."
   )
-  sealed trait FixedFieldTraversals[Elems <: Tuple, N <: Int]:
+  sealed trait FieldTraversals[Elems <: Tuple, N <: Int]:
     def instances: List[OptimizableTraversal[Any]]
-    def arity: Int
 
-  given emptyFixedFieldTraversals: FixedFieldTraversals[EmptyTuple, 0] with
+  given emptyFieldTraversals: FieldTraversals[EmptyTuple, 0] with
     val instances: List[OptimizableTraversal[Any]] = Nil
-    val arity: Int = 0
 
-  given consFixedFieldTraversals[Head, Tail <: Tuple, NHead <: Int, NTail <: Int](using
-      head: FixedArityOptimizableTraversal.WithArity[Head, NHead],
-      tail: FixedFieldTraversals[Tail, NTail]
-  ): FixedFieldTraversals[Head *: Tail, NHead + NTail] with
+  given consFieldTraversals[Head, Tail <: Tuple, NHead <: Int, NTail <: Int](using
+      head: OptimizableTraversal.WithArity[Head, NHead],
+      tail: FieldTraversals[Tail, NTail]
+  ): FieldTraversals[Head *: Tail, NHead + NTail] with
     val instances: List[OptimizableTraversal[Any]] = widen(head) :: tail.instances
-    val arity: Int = head.arity + tail.arity
 
   /** Confines the unavoidable widening of a per-field `OptimizableTraversal[A]` to a `OptimizableTraversal[Any]` to one
     * private helper. Safe because the Mirror pairs this instance positionally with a value of type `A` (see
-    * [[FixedFieldTraversals]]); `OptimizableTraversal` is invariant so the compiler cannot prove the subtype, but the
+    * [[FieldTraversals]]); `OptimizableTraversal` is invariant so the compiler cannot prove the subtype, but the
     * runtime contract holds.
     */
   private[dspy4s] def widen[A](inst: OptimizableTraversal[A]): OptimizableTraversal[Any] =

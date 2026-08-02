@@ -53,7 +53,8 @@ class OptimizableTraversalNamedSuite extends FunSuite:
   test("identified and named reads reject a naming traversal with divergent views") {
     val canonical = predict("canonical").optimizableView
     val misleading = predict("misleading").optimizableView
-    val ps = new OptimizableTraversal[Unit]:
+    val ps = new OptimizableTraversal.Of[Unit, 1]:
+      def arity(@annotation.unused program: Unit): Int = 1
       def inspect(program: Unit) = Vector(canonical)
       def replace(program: Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector("leaf" -> misleading)
@@ -66,7 +67,8 @@ class OptimizableTraversalNamedSuite extends FunSuite:
 
   test("identified and named reads reject a naming traversal with different arity") {
     val canonical = predict("canonical").optimizableView
-    val ps = new OptimizableTraversal[Unit]:
+    val ps = new OptimizableTraversal.Of[Unit, 1]:
+      def arity(@annotation.unused program: Unit): Int = 1
       def inspect(program: Unit) = Vector(canonical)
       def replace(program: Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector.empty
