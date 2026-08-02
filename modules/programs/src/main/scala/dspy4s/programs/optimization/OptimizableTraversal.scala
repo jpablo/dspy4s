@@ -33,12 +33,6 @@ trait OptimizableTraversal[P]:
   final def replaceSized(program: P, updates: SizedVector[OptimizableParameters, Arity]): P =
     replace(program, updates)
 
-  /** The lawful focus from a fixed-shape program onto all of its writable parameters. */
-  final def parameterLens: Lens[P, SizedVector[OptimizableParameters, Arity]] =
-    new Lens[P, SizedVector[OptimizableParameters, Arity]]:
-      def get(program: P): SizedVector[OptimizableParameters, Arity] = readSized(program)
-      def set(program: P, updates: SizedVector[OptimizableParameters, Arity]): P = replaceSized(program, updates)
-
   @Law("the runtime traversal cardinality agrees with its static arity")
   final def arityAgreement(program: P): IsEq[Int] =
     read(program).size <-> arity(program)
@@ -94,7 +88,10 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
   /** A traversal is the canonical lawful lens onto its complete parameter vector. */
   given parameterLens[P, N <: Int](using
       traversal: WithArity[P, N]
-  ): Lens[P, SizedVector[OptimizableParameters, N]] = traversal.parameterLens
+  ): Lens[P, SizedVector[OptimizableParameters, N]] with
+    def get(program: P): SizedVector[OptimizableParameters, N] = traversal.readSized(program)
+    def set(program: P, updates: SizedVector[OptimizableParameters, N]): P =
+      traversal.replaceSized(program, updates)
 
   /** Lifts a single [[OptimizableLeaf]] leaf to a 1-element [[OptimizableTraversal]]. A type that is itself a leaf (e.g.
     * [[dspy4s.programs.DynamicPredict]], which is also a `Product`) resolves here and is not torn into its case-class
