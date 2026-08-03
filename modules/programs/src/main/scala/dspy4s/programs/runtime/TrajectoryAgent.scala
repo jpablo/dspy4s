@@ -1,20 +1,61 @@
 package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.RuntimeContext
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.contracts.{Module, ProgramCall}
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.Prediction
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+
+/** A module that gathers a typed trajectory and then extracts its user-visible result.
+  *
+  * `ReAct` and `CodeAct` share this execution shape even though their transitions are different: ReAct chooses and
+  * invokes a tool, while CodeAct generates and executes code. Implementations provide that domain-specific
+  * [[trajectoryStep]], plus a renderer and extractor; this trait owns the common module boundary and guarantees that
+  * the complete trajectory is attached to the extractor's preserved raw prediction.
+  *
+  * @tparam I
+  *   the program input
+  * @tparam O
+  *   the extracted program output
+  * @tparam S
+  *   one entry in the accumulated trajectory
+  */
+trait TrajectoryAgent[I, O, S] extends Module[I, O]:
+
+  /** Maximum number of transitions before extracting from the accumulated trajectory. */
+  def maxIterations: IterationLimit
+
+  /** The final module that turns the original input and rendered trajectory into the user-visible prediction. */
+  protected def extractorPredict: Module[(I, String), O]
+
+  /** Raw-prediction field under which the complete rendered trajectory is exposed. */
+  protected def trajectoryKey: String
+
+  /** Render the typed trajectory for both the iterative policy and final extractor. */
+  protected def renderTrajectory(trajectory: Vector[S]): String
+
+  /** One domain-specific transition: act, append an entry, and decide whether the trajectory is complete. */
+  protected def trajectoryStep(call: ProgramCall[I])(using
+      RuntimeContext
+  ): (Vector[S], Int) => Either[DspyError, TrajectoryAgent.Step[S]]
+
+  final override protected def forward(call: ProgramCall[I])(using
+      RuntimeContext
+  ): Either[DspyError, Prediction[O]] =
+    TrajectoryAgent.runAndExtractPrediction[S, O](maxIterations, renderTrajectory, trajectoryKey)(trajectoryStep(call)) {
+      rendered =>
+        extractorPredict(call.mapInput(input => (input, rendered)))
+    }
 
 /** The shared "gather a trajectory, then extract the answer from it" agent shape behind `ReAct` and `CodeAct` (the
   * trajectory-and-extractor flavor of `agentLoop`; see `docs/refactor/algebra-2-program-composition.md`).
   *
   * Both run a bounded loop building a `Vector[S]` of trajectory steps (via [[AgentLoop.run]]), then feed the rendered
   * trajectory to a reasoning-augmented extractor predict, truncating the OLDEST step and retrying on a context-window
-  * overflow (Python's `_call_with_potential_trajectory_truncation`). What differs — the trajectory entry type, how it
-  * renders, the per-iteration policy/tool/code step, and HOW the extractor is called (a typed `Predict` constructing
-  * its augmented input, or a dynamic record update) — stays in the caller's `step` and `extract` closures, so the
-  * helper is agnostic to the extractor's typing (`E` is the extractor's result: a typed `Prediction[..]` for the
-  * converted programs).
+  * overflow (Python's `_call_with_potential_trajectory_truncation`). The generic helpers remain available separately
+  * from the [[TrajectoryAgent]] module template so non-module runtimes can reuse the same loop mechanics.
   */
 object TrajectoryAgent:
 

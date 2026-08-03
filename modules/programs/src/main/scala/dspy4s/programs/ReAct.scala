@@ -8,7 +8,6 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.SignatureOps.*
-import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
@@ -18,7 +17,7 @@ import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Shape, Signature}
+import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -45,7 +44,7 @@ import java.nio.charset.StandardCharsets
 final case class ReAct[I, O](
     baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
-    maxIterations: IterationLimit = IterationLimit(5),
+    override val maxIterations: IterationLimit = IterationLimit(5),
     reactProgramName: String = ReActKeys.reactModule,
     extractorProgramName: String = ReActKeys.extractModule,
     /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the
@@ -61,7 +60,7 @@ final case class ReAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), ReAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
-) extends Module[I, ReAct.WithReasoning[O]]:
+) extends TrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ReAct.WithReasoning[O]
@@ -107,7 +106,7 @@ final case class ReAct[I, O](
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
     * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
     */
-  val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
+  override val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
         name   = baseSignature.name,
@@ -150,16 +149,15 @@ final case class ReAct[I, O](
   override protected val lifecycle: ModuleLifecycle[I, Out] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
-  override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    // Gather the trajectory (the react step truncates + may break on overflow), run the typed extractor, then attach
-    // the complete trajectory to its preserved raw envelope. CodeAct uses the same shared architecture.
-    TrajectoryAgent.runAndExtractPrediction[ReAct.TrajectoryEntry, Out](
-      maxIterations,
-      ReAct.renderTrajectory,
-      ReActKeys.trajectory
-    )(reactStep(call)) { rendered =>
-      extractorPredict(call.mapInput(input => (input, rendered)))
-    }
+  override protected val trajectoryKey: String = ReActKeys.trajectory
+
+  override protected def renderTrajectory(trajectory: Vector[ReAct.TrajectoryEntry]): String =
+    ReAct.renderTrajectory(trajectory)
+
+  override protected def trajectoryStep(call: ProgramCall[I])(using
+      RuntimeContext
+  ): (Vector[ReAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[ReAct.TrajectoryEntry]] =
+    reactStep(call)
 
   /** One react iteration as a [[TrajectoryAgent]] step: run the react predict (truncating + possibly breaking on a
     * persistent context-window overflow), then run the chosen tool and append the observation. `finish` (or a step that

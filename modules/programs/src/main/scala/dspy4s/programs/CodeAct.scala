@@ -9,13 +9,12 @@ import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.SignatureOps.*
-import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Shape, Signature}
+import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -64,7 +63,7 @@ final case class CodeAct[I, O](
       * actually execute) — same vector, both sides.
       */
     tools: Vector[dspy4s.programs.contracts.ToolFunction] = Vector.empty,
-    maxIterations: IterationLimit = IterationLimit(5),
+    override val maxIterations: IterationLimit = IterationLimit(5),
     codeActProgramName: String = "codeact",
     extractorProgramName: String = "codeact_extract",
     /** Optional override for the per-iteration code-generator predict — a TYPED `Predict` over the base input plus
@@ -80,7 +79,7 @@ final case class CodeAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), CodeAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
-) extends Module[I, CodeAct.WithReasoning[O]]:
+) extends TrajectoryAgent[I, CodeAct.WithReasoning[O], CodeAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = CodeAct.WithReasoning[O]
@@ -126,7 +125,7 @@ final case class CodeAct[I, O](
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
     * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
     */
-  val extractorPredict: Predict[(I, String), CodeAct.WithReasoning[O]] =
+  override val extractorPredict: Predict[(I, String), CodeAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
         name   = baseSignature.name,
@@ -168,16 +167,15 @@ final case class CodeAct[I, O](
   override protected val lifecycle: ModuleLifecycle[I, Out] =
     ModuleLifecycle.typed(baseSignature.inputShape)
 
-  override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    // Build the code/observation trajectory, run the typed extractor, then attach the complete trajectory to its
-    // preserved raw envelope. ReAct uses the same shared architecture; only the step semantics and entry type differ.
-    TrajectoryAgent.runAndExtractPrediction[CodeAct.TrajectoryEntry, Out](
-      maxIterations,
-      CodeAct.renderTrajectory,
-      CodeAct.extractTrajectoryField.name
-    )(codeActStep(call)) { rendered =>
-      extractorPredict(call.mapInput(input => (input, rendered)))
-    }
+  override protected val trajectoryKey: String = CodeAct.extractTrajectoryField.name
+
+  override protected def renderTrajectory(trajectory: Vector[CodeAct.TrajectoryEntry]): String =
+    CodeAct.renderTrajectory(trajectory)
+
+  override protected def trajectoryStep(call: ProgramCall[I])(using
+      RuntimeContext
+  ): (Vector[CodeAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[CodeAct.TrajectoryEntry]] =
+    codeActStep(call)
 
   /** This program's [[tools]] bridged for a sandboxed interpreter — pass as `new DenoPyodideInterpreter(tools =
     * program.sandboxTools)` so the prompt's tool list and the sandbox's callable surface come from the same vector. See
