@@ -1,7 +1,7 @@
 # dspy4s `typed`
 
 The compile-time-typed signature layer. Where [`core`](../core/README.md) carries a runtime `SignatureLayout`
-(an untyped list of fields), `typed` pairs that layout with static Scala types — an input type `I` and an
+(separate untyped input and output field cohorts), `typed` pairs that layout with static Scala types — an input type `I` and an
 output type `O` — and the bidirectional codec that moves between a typed value and the `DynamicValue.Record`
 spine. This is what gives the typed program surface (`Predict[I, O]`, `ChainOfThought[I, O]`, …) its
 compile-time safety. It depends only on `core`.
@@ -10,7 +10,7 @@ compile-time safety. It depends only on `core`.
 
 A `Signature[I, O]` wraps a `SignatureLayout` alongside a `Shape[I]` and a `Shape[O]` — schema-aware
 projections of the input and output types. At compile time a macro inspects a case-class (or named-tuple, or
-`Spec`-trait) signature, extracts each field's name, type, and role, and derives its wire `TypeRef` from the
+`Spec`-trait) signature, extracts each field's name and type, assigns it to an input or output cohort, and derives its wire `TypeRef` from the
 field's zio-blocks `Schema`. At runtime, `Shape` uses that same `Schema` to **encode** a typed value into a
 record (`Schema.toDynamicValue`) and to **decode** a record back into the typed value
 (`Schema.fromDynamicValue`, after LM-shaped coercion). The codec speaks only `DynamicValue.Record` end to end —
@@ -41,13 +41,13 @@ val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Ou
 
 - **One codec, no `FieldCodec`.** All encode/decode goes through zio-blocks `Schema` on the `DynamicValue.Record`
   spine. There is no per-field codec layer (it was removed; don't reintroduce it).
-- **Metadata derives from the same `Reflect` as the decode.** `FieldSpec`s (name, role, wire type) come from the
+- **Metadata derives from the same `Reflect` as the decode.** `FieldSpec`s (name and wire type) come from the
   field's `Reflect`, and the decode path is driven by it too, so names and type mappings never drift.
 - **LM-shaped coercion before decode.** `ZioSchemaCodec.normalize` walks the `DynamicValue` and coerces
   primitives the way LM output tends to arrive — `"true"` → `Boolean`, `"42"` → `Int`, trimmed numerics,
   Option/Variant wrapping — so a loosely-formatted model reply still decodes into the strict typed value.
-- **Roles baked in at derivation.** `Signature.derived` applies `Shape.derivedWithRole[I](Input)` and
-  `[O](Output)`, so field roles live in the metadata from the start.
+- **Direction-neutral shapes.** `Shape[A]` derives role-free field metadata. `Signature.derived` assigns the input
+  and output shapes' fields to the corresponding `SignatureLayout` cohorts.
 - **Compile-time validation.** The macros (`FunctionMacro`, `SpecMacro`) fail compilation when a field type
   lacks a `Schema`, names collide, or the trait/method shape is invalid — type errors, not runtime surprises.
 

@@ -3,7 +3,6 @@ package dspy4s.programs
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -71,12 +70,11 @@ final case class ProgramOfThought[I, O](
   import ProgramOfThought.{codeOutputField, errorField, finalGeneratedCodeField, generatedCodeField, previousCodeField}
 
   private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): SignatureLayout =
-    val withInputs = extraInputs.foldLeft(baseLayout)(_.append(_))
-    // The generate / regenerate signatures discard the user's outputs —
-    // generated_code is the only output of those steps.
-    val withoutUserOutputs =
-      withInputs.withFields(withInputs.fields.filterNot(_.role == FieldRole.Output))
-    extraOutputs.foldLeft(withoutUserOutputs)(_.append(_))
+    // The generate / regenerate signatures retain the user's inputs, append the step inputs, and replace the user's
+    // outputs with the step outputs.
+    baseLayout
+      .withInputFields(baseLayout.inputFields ++ extraInputs)
+      .withOutputFields(extraOutputs)
 
   /** SignatureLayout for the initial code-generation step. Inputs from the user's signature; outputs a `generated_code`
     * string.
@@ -111,8 +109,7 @@ final case class ProgramOfThought[I, O](
     */
   val answerSignature: SignatureLayout =
     baseLayout
-      .append(finalGeneratedCodeField)
-      .append(codeOutputField)
+      .withInputFields(baseLayout.inputFields ++ Vector(finalGeneratedCodeField, codeOutputField))
       .withInstructions(Some({
         val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
         s"Given the final Python code and its printed output, produce the final $outputs."
@@ -312,31 +309,26 @@ object ProgramOfThought:
   // code_output -> "Code Output:". The old code reused "Code:" on two distinct fields; derivation disambiguates. ──
   private[programs] val generatedCodeField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name = "generated_code",
-    role = FieldRole.Output,
     typeRef = TypeRef.string,
     description = Some("Python code that, when executed, computes the answer and prints it as JSON.")
   ))
   private[programs] val previousCodeField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name = "previous_code",
-    role = FieldRole.Input,
     typeRef = TypeRef.string,
     description = Some("The Python code from the previous attempt that errored.")
   ))
   private[programs] val errorField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name = "error",
-    role = FieldRole.Input,
     typeRef = TypeRef.string,
     description = Some("Error message produced by the previous Python code.")
   ))
   private[programs] val finalGeneratedCodeField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name = "final_generated_code",
-    role = FieldRole.Input,
     typeRef = TypeRef.string,
     description = Some("The final Python code that produced the answer.")
   ))
   private[programs] val codeOutputField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name = "code_output",
-    role = FieldRole.Input,
     typeRef = TypeRef.string,
     description = Some("The printed output of the final Python code.")
   ))

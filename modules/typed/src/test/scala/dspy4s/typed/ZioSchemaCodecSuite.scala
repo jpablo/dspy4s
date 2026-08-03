@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{:=, DynamicValues, FieldRole, TypeRef}
+import dspy4s.core.contracts.{:=, DynamicValues, TypeRef}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -39,17 +39,16 @@ object ZsOptionProbe:
   * the native `encode` / `decode` round-trip through `DynamicValue.Record`. */
 class ZioSchemaCodecSuite extends FunSuite:
 
-  test("fieldSpecsFromReflect produces FieldSpecs with the right names, roles, typeRefs") {
+  test("fieldSpecsFromReflect produces role-free FieldSpecs with the right names and typeRefs") {
     import ZsCommentInput.given
-    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsCommentInput]].reflect, FieldRole.Input)
+    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsCommentInput]].reflect)
     assertEquals(specs.map(_.name), Vector("comment", "lang"))
-    assertEquals(specs.map(_.role), Vector(FieldRole.Input, FieldRole.Input))
     assertEquals(specs.map(_.typeRef), Vector(TypeRef.string, TypeRef.string))
   }
 
   test("enumValuesOf surfaces a plain enum's cases but not an Option's Some/None") {
     import ZsMixed.given
-    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsMixed]].reflect, FieldRole.Output)
+    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsMixed]].reflect)
     assertEquals(specs.find(_.name == "kind").get.enumValues, Vector("alpha", "beta"))
     assertEquals(
       specs.find(_.name == "amount").get.enumValues,
@@ -60,7 +59,7 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("normalize wraps a bare value into Some and Null into None for an Option field") {
     import ZsOptionProbe.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsOptionProbe](FieldRole.Output)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsOptionProbe]
     assertEquals(
       shape.decode(DynamicValues.recordFromEntries(Seq("amount" := 2399.0, "note" := "x"))),
       Right(ZsOptionProbe(Some(2399.0), "x"))
@@ -80,7 +79,7 @@ class ZioSchemaCodecSuite extends FunSuite:
     case class Money(amount: Double, count: Int)
     object Money { given Schema[Money] = Schema.derived }
     import Money.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[Money](FieldRole.Output)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[Money]
     assertEquals(
       shape.decode(DynamicValues.recordFromEntries(Seq("amount" := "$2,399.00", "count" := "1,234"))),
       Right(Money(amount = 2399.0, count = 1234)),
@@ -90,7 +89,7 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("normalize coerces a currency-formatted number inside an Option[Double]") {
     import ZsOptionProbe.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsOptionProbe](FieldRole.Output)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsOptionProbe]
     assertEquals(
       shape.decode(DynamicValues.recordFromEntries(Seq("amount" := "$2,399.00", "note" := "x"))),
       Right(ZsOptionProbe(Some(2399.0), "x"))
@@ -99,14 +98,14 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("Variant-typed fields surface as TypeRef.string at the wire boundary") {
     import ZsClassifyOutput.given
-    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect, FieldRole.Output)
+    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect)
     val sentiment = specs.find(_.name == "sentiment").get
     assertEquals(sentiment.typeRef, TypeRef.string)
   }
 
   test("derivedFromZioSchema encode produces a DynamicValue.Record with each output field present") {
     import ZsClassifyOutput.given
-    val shape   = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput](FieldRole.Output)
+    val shape   = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput]
     val encoded = shape.encode(ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.95))
     assertEquals(DynamicValues.recordKeys(encoded).toSet, Set("sentiment", "confidence"))
     // confidence is a primitive Double -- read it back through the helper.
@@ -118,7 +117,7 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("derivedFromZioSchema decode accepts a DynamicValue.Record with the enum as a flat string") {
     import ZsClassifyOutput.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput](FieldRole.Output)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput]
     val raw   = DynamicValues.recordFromEntries(Seq("sentiment" := "joy", "confidence" := 0.95))
     val out   = shape.decode(raw)
     assertEquals(out, Right(ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.95)))
@@ -128,7 +127,7 @@ class ZioSchemaCodecSuite extends FunSuite:
     case class Probe(flag: Boolean, count: Int, score: Double)
     object Probe { given Schema[Probe] = Schema.derived }
     import Probe.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[Probe](FieldRole.Output)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[Probe]
     val raw   = DynamicValues.recordFromEntries(Seq("flag" := "true", "count" := "42", "score" := "0.9"))
     val out   = shape.decode(raw)
     assertEquals(out, Right(Probe(flag = true, count = 42, score = 0.9)))
@@ -136,7 +135,7 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("encode / decode round-trip via DynamicValue.Record (no Map intermediate)") {
     import ZsClassifyOutput.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput](FieldRole.Output)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput]
     val value = ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.42)
 
     val encoded = shape.encode(value)
@@ -151,7 +150,7 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("encode/decode round-trip for a case-class input") {
     import ZsCommentInput.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsCommentInput](FieldRole.Input)
+    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsCommentInput]
     val value = ZsCommentInput(comment = "Best movie ever!", lang = "en")
     val encoded = shape.encode(value)
     val decoded = shape.decode(encoded)

@@ -125,16 +125,18 @@ class ChatAdapterSuite extends FunSuite:
 
   test("format emits FieldSpec.description when one is set, omits it when default") {
     val signature = SignatureDsl.parse("q -> answer").toOption.get
-      .withFields(
+      .withInputFields(
         Vector(
           dspy4s.core.contracts.FieldSpec(
             name = "q",
-            role = dspy4s.core.contracts.FieldRole.Input,
             description = Some("The user's question to answer.")
-          ),
+          )
+        )
+      )
+      .withOutputFields(
+        Vector(
           dspy4s.core.contracts.FieldSpec(
-            name = "answer",
-            role = dspy4s.core.contracts.FieldRole.Output
+            name = "answer"
             // description omitted — should fall back to the `${name}` placeholder
             // inserted by FieldSpec.normalize and be suppressed by the renderer.
           )
@@ -157,16 +159,18 @@ class ChatAdapterSuite extends FunSuite:
 
   test("format renders field constraints, and nothing extra for unconstrained fields") {
     val signature = SignatureDsl.parse("q -> answer").toOption.get
-      .withFields(
+      .withInputFields(
         Vector(
           dspy4s.core.contracts.FieldSpec(
-            name = "q",
-            role = dspy4s.core.contracts.FieldRole.Input
+            name = "q"
             // no constraints — must render identically to the unconstrained baseline
-          ),
+          )
+        )
+      )
+      .withOutputFields(
+        Vector(
           dspy4s.core.contracts.FieldSpec(
             name        = "answer",
-            role        = dspy4s.core.contracts.FieldRole.Output,
             description = Some("The model's answer."),
             constraints = Vector(
               dspy4s.core.contracts.FieldConstraints.gt(0),
@@ -196,12 +200,11 @@ class ChatAdapterSuite extends FunSuite:
 
   test("format renders constraints even when the field has no description") {
     val signature = SignatureDsl.parse("q -> answer").toOption.get
-      .withFields(
+      .withInputFields(Vector(dspy4s.core.contracts.FieldSpec(name = "q")))
+      .withOutputFields(
         Vector(
-          dspy4s.core.contracts.FieldSpec(name = "q", role = dspy4s.core.contracts.FieldRole.Input),
           dspy4s.core.contracts.FieldSpec(
             name        = "answer",
-            role        = dspy4s.core.contracts.FieldRole.Output,
             constraints = Vector(dspy4s.core.contracts.FieldConstraints.ge(1))
           )
         )

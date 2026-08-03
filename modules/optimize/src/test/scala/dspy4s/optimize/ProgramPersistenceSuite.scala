@@ -63,7 +63,8 @@ class ProgramPersistenceSuite extends FunSuite:
     val trainedLayout = qaSignature.layout.withInstructions(Some("Use the trained prompt."))
     val freshLayout = SignatureLayout.of(
       name = "FreshQA",
-      fields = qaSignature.layout.fields,
+      inputFields = qaSignature.layout.inputFields,
+      outputFields = qaSignature.layout.outputFields,
       instructions = Some("This will be replaced.")
     )
     val trained = DynamicPredict(

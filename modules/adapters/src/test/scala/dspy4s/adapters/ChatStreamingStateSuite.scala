@@ -1,14 +1,13 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import munit.FunSuite
 
 class ChatStreamingStateSuite extends FunSuite:
 
   private def output(name: String): FieldSpec =
-    FieldSpec(name = name, role = FieldRole.Output)
+    FieldSpec(name = name)
 
   /** Drive the state with a sequence of receive() calls and finish at the end.
     * Returns every emitted FieldChunk in order. */

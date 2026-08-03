@@ -2,7 +2,7 @@ package dspy4s.typed
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{DspyError, FieldRole, NotFoundError, ValidationError, :=}
+import dspy4s.core.contracts.{DspyError, NotFoundError, ValidationError, :=}
 import dspy4s.core.data.RawPrediction
 import munit.FunSuite
 
@@ -36,7 +36,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(shape.fieldSpecs.map(_.name), Vector("sentence"))
   }
 
-  test("Signature.derived assigns input and output roles correctly") {
+  test("Signature.derived assigns fields to the input and output cohorts") {
     val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
     val inputs  = sig.layout.inputFields.map(_.name)
     val outputs = sig.layout.outputFields.map(_.name)
@@ -53,12 +53,12 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(sig.layout.instructions, Some("Classify emotion."))
     assertEquals(sig.layout.signatureString, "sentence -> sentiment, confidence")
     assertEquals(
-      sig.layout.fields.map(f => (f.name, f.role, f.typeRef.repr)),
-      Vector(
-        ("sentence",   FieldRole.Input,  "string"),
-        ("sentiment",  FieldRole.Output, "string"),
-        ("confidence", FieldRole.Output, "double")
-      )
+      sig.layout.inputFields.map(f => (f.name, f.typeRef.repr)),
+      Vector(("sentence", "string"))
+    )
+    assertEquals(
+      sig.layout.outputFields.map(f => (f.name, f.typeRef.repr)),
+      Vector(("sentiment", "string"), ("confidence", "double"))
     )
   }
 

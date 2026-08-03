@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DynamicValues, FieldRole, TypeRef, :=}
+import dspy4s.core.contracts.{DynamicValues, TypeRef, :=}
 import zio.blocks.schema.Schema
 import munit.FunSuite
 
@@ -46,7 +46,7 @@ class Phase5SpecMacroSuite extends FunSuite:
 
   // ── Spec → SignatureLayout derivation ─────────────────────────────────────────
 
-  test("spec trait derives a SignatureLayout with correct field names + roles") {
+  test("spec trait derives a SignatureLayout with correct field names and cohorts") {
     val sig = Signature.of[P5SentimentSpec]
     assertEquals(sig.layout.name, "P5SentimentSpec")
     assertEquals(sig.layout.inputFields.map(_.name),  Vector("sentence"))
@@ -205,8 +205,12 @@ class Phase5SpecMacroSuite extends FunSuite:
     assertEquals(fromSpec.name, fromBuilder.name)
     assertEquals(fromSpec.signatureString, fromBuilder.signatureString)
     assertEquals(
-      fromSpec.fields.map(f => (f.name, f.role, f.typeRef.repr)),
-      fromBuilder.fields.map(f => (f.name, f.role, f.typeRef.repr))
+      fromSpec.inputFields.map(f => (f.name, f.typeRef.repr)),
+      fromBuilder.inputFields.map(f => (f.name, f.typeRef.repr))
+    )
+    assertEquals(
+      fromSpec.outputFields.map(f => (f.name, f.typeRef.repr)),
+      fromBuilder.outputFields.map(f => (f.name, f.typeRef.repr))
     )
   }
 

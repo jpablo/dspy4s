@@ -6,7 +6,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldConstraints
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -86,10 +85,10 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
     val layout = SignatureLayout.create(
       name = "Scored",
-      fields = Vector(
-        FieldSpec("question", FieldRole.Input),
+      inputFields = Vector(FieldSpec("question")),
+      outputFields = Vector(
         FieldSpec(
-          name = "score", role = FieldRole.Output, typeRef = TypeRef.int,
+          name = "score", typeRef = TypeRef.int,
           constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
         )
       )

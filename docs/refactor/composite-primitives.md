@@ -121,7 +121,7 @@ step also adds a focused unit suite for the extracted primitive.
 
 **Where:** `modules/core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala`, `private[dspy4s]`
 (consistent with the existing policy: user code mutates at the typed `Signature` surface, not the layout).
-The low-level `append`/`prepend`/`insert`/`withFields` mutators stay private; this layer gives them names,
+The low-level `withInputFields` / `withOutputFields` cohort mutators stay private; this layer gives common edits names,
 idempotence, and laws.
 
 ```scala
@@ -129,19 +129,19 @@ private[dspy4s] object SignatureOps:
   extension (layout: SignatureLayout)
     /** Prepend an output field at the output-cohort head, unless one with the same name exists. Idempotent.
       * Exactly today's ChainOfThought.augmentLayout, generalized off the "reasoning" literal. */
-    def prependOutput(field: FieldSpec): Either[DspyError, SignatureLayout] =
-      if layout.outputFields.exists(_.name == field.name) then Right(layout)
-      else layout.insert(index = 0, field = field)
+    def prependOutput(field: FieldSpec): SignatureLayout =
+      if layout.fields.exists(_.name == field.name) then layout
+      else layout.withOutputFields(field +: layout.outputFields)
 
     /** Append an input field, unless one with the same name exists. Idempotent. */
     def appendInput(field: FieldSpec): SignatureLayout =
-      if layout.inputFields.exists(_.name == field.name) then layout
-      else layout.append(field)
+      if layout.fields.exists(_.name == field.name) then layout
+      else layout.withInputFields(layout.inputFields :+ field)
 
     /** Keep the inputs, replace all output fields with `fields` (loop-step signatures drop the base
       * outputs; the extractor produces them). */
     def replaceOutputs(fields: Vector[FieldSpec]): SignatureLayout =
-      layout.withFields(layout.inputFields ++ fields)
+      layout.withOutputFields(fields)
 ```
 
 **Laws (unit-tested):** `prependOutput` idempotent on name; `appendInput` idempotent on name;

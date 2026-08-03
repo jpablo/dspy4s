@@ -4,7 +4,6 @@ import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -256,31 +255,26 @@ object ReAct:
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
     name        = ReActKeys.trajectory,
-    role        = FieldRole.Input,
     typeRef     = TypeRef.string,
     description = Some("The sequence of thoughts, tool calls, and observations so far.")
   )
   private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
     name        = ReActKeys.trajectory,
-    role        = FieldRole.Input,
     typeRef     = TypeRef.string,
     description = Some("The completed sequence of thoughts, tool calls, and observations.")
   )
   private[programs] val nextThoughtField: FieldSpec = FieldSpec(
     name        = ReActKeys.nextThought,
-    role        = FieldRole.Output,
     typeRef     = TypeRef.string,
     description = Some("Reasoning about the current situation and what to do next.")
   )
   private[programs] val nextToolNameField: FieldSpec = FieldSpec(
     name        = ReActKeys.nextToolName,
-    role        = FieldRole.Output,
     typeRef     = TypeRef.string,
     description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
   )
   private[programs] val nextToolArgsField: FieldSpec = FieldSpec(
     name        = ReActKeys.nextToolArgs,
-    role        = FieldRole.Output,
     typeRef     = TypeRef.json,
     description = Some("Arguments for the next tool, as a JSON object.")
   )

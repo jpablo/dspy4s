@@ -7,7 +7,6 @@ import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -36,10 +35,10 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
   private val layout: SignatureLayout =
     SignatureLayout.create(
       name = "Search",
-      fields = Vector(
-        FieldSpec("question", FieldRole.Input),
-        FieldSpec("answer", FieldRole.Output),
-        FieldSpec("tool_calls", FieldRole.Output, typeRef = TypeRef.toolCalls)
+      inputFields = Vector(FieldSpec("question")),
+      outputFields = Vector(
+        FieldSpec("answer"),
+        FieldSpec("tool_calls", typeRef = TypeRef.toolCalls)
       )
     ).toOption.get
 

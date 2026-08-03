@@ -1,7 +1,7 @@
 package dspy4s.core
 
 import dspy4s.core.algebra.{IsEq, Monoid}
-import dspy4s.core.contracts.{FieldRole, FieldSpec, InputTransform, OutputTransform, SignatureLayout, SignatureTransformLaws}
+import dspy4s.core.contracts.{FieldSpec, InputTransform, OutputTransform, SignatureLayout, SignatureTransformLaws}
 import dspy4s.core.contracts.SignatureOps.laws
 import org.scalacheck.{Gen, Prop}
 
@@ -22,22 +22,22 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
       outs     <- Gen.someOf(outputPool)
     yield
       val ins    = ("a" +: extraIns.toVector).distinct
-      val fields = ins.map(FieldSpec(_, FieldRole.Input)) ++ outs.toVector.distinct.map(FieldSpec(_, FieldRole.Output))
-      SignatureLayout.create("test", fields).fold(e => throw new IllegalStateException(e.message), identity)
+      val inputs = ins.map(FieldSpec(_))
+      val outputs = outs.toVector.distinct.map(FieldSpec(_))
+      SignatureLayout.create("test", inputs, outputs).fold(e => throw new IllegalStateException(e.message), identity)
 
   // Transform fields draw from pools that OVERLAP the layout's (so a prepended/appended name is sometimes
   // already present -> the idempotent / dedup branch is hit) and sometimes fresh ("r" / "n").
-  private val genOutField: Gen[FieldSpec]          = Gen.oneOf("x", "y", "r").map(FieldSpec(_, FieldRole.Output))
-  private val genInField: Gen[FieldSpec]           = Gen.oneOf("a", "b", "n").map(FieldSpec(_, FieldRole.Input))
+  private val genOutField: Gen[FieldSpec]          = Gen.oneOf("x", "y", "r").map(FieldSpec(_))
+  private val genInField: Gen[FieldSpec]           = Gen.oneOf("a", "b", "n").map(FieldSpec(_))
   private val genOutFields: Gen[Vector[FieldSpec]] =
-    Gen.someOf(outputPool).map(_.toVector.distinct.map(FieldSpec(_, FieldRole.Output)))
+    Gen.someOf(outputPool).map(_.toVector.distinct.map(FieldSpec(_)))
   private val genInstr: Gen[String]                = Gen.oneOf("inst-1", "inst-2", "inst-3")
 
   // ── The two honest observations the @Law statements are checked under ────────────────────────────────────
 
-  // Observational equality of layouts: equal iff no observation (in / out / instructions / name) can tell
-  // them apart. NOT structural `==` (cross-cohort commutativity reorders the underlying field vector while
-  // leaving every observation identical). `sameElements` keeps strict-equality off the call site.
+  // Observational equality of layouts: equal iff no public cohort observation (in / out / instructions / name)
+  // can tell them apart. `sameElements` keeps strict-equality off the call site.
   private def obsEq(a: SignatureLayout, b: SignatureLayout): Boolean =
     a.inputFields.sameElements(b.inputFields) &&
       a.outputFields.sameElements(b.outputFields) &&

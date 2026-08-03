@@ -258,7 +258,7 @@ still optimize end-to-end, and `.copro` preserves their arity in its report type
 degraded on the evaluation observation. The fix is the `CategoryTC[P[_], Hom]` object-constraint slot from
 jpablo/math-with-scala, applied where it belongs: `ParameterizedCategory` is now `ParameterizedCategory[P[_], Hom[_,_]]`, instantiated
 for `Program` at `P = RecordCodec` ("the object decodes from a record", built on the SAME
-`Shape.derivedWithRole(Input)` decode path `Signature.derived` uses, so codec- and signature-derived
+role-free canonical `Shape` decode path `Signature.derived` uses, so codec- and signature-derived
 decoders cohere definitionally). Unlike a blanket Ok-style constrained category, the constraint appears
 ONLY where object evidence is required: `id[A: RecordCodec]` is available at codec-equipped objects while
 `>>>` stays unconstrained and packages no decoder.

@@ -8,7 +8,6 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -193,12 +192,13 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
     */
   private def instructionGenLayout(withAttempts: Boolean): SignatureLayout =
     val inputs =
-      Vector(FieldSpec(name = "basic_instruction", role = FieldRole.Input)) ++
-        (if withAttempts then Vector(FieldSpec(name = "attempted_instructions", role = FieldRole.Input))
+      Vector(FieldSpec(name = "basic_instruction")) ++
+        (if withAttempts then Vector(FieldSpec(name = "attempted_instructions"))
          else Vector.empty)
     SignatureLayout.of(
       name = "GenerateInstruction",
-      fields = inputs :+ FieldSpec(name = "proposed_instruction", role = FieldRole.Output),
+      inputFields = inputs,
+      outputFields = Vector(FieldSpec(name = "proposed_instruction")),
       instructions = Some(config.instructionMarker)
     )
 

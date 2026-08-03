@@ -5,13 +5,6 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import scala.util.matching.Regex
 
-/** Discriminator on [[FieldSpec]] that partitions a [[SignatureLayout]]'s fields into the values the LM is given
-  * (`Input`) versus the values it must produce (`Output`). Adapters use this to drive prompt structure and to know
-  * which keys to expect in the parsed response. */
-enum FieldRole derives CanEqual:
-  case Input
-  case Output
-
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
   * This is the *adapter / prompt* type, not the Scala type -- the typed layer's `Shape[A]` carries the static
@@ -51,7 +44,6 @@ object TypeRef:
 /** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses.
   *
   *   - [[name]] is the canonical field key used in input / output records.
-  *   - [[role]] partitions the field into input vs output.
   *   - [[typeRef]] is the wire-format type the LM sees in the prompt -- see [[TypeRef]].
   *   - [[description]] is a per-field hint shown in adapter prompts (e.g. `"the question to answer"`). When
   *     `None`, [[FieldSpec.normalize]] defaults it to a placeholder like `"${question}"` so the prompt always
@@ -71,7 +63,6 @@ object TypeRef:
   */
 final case class FieldSpec(
     name: String,
-    role: FieldRole,
     typeRef: TypeRef = TypeRef.string,
     description: Option[String] = None,
     prefix: Option[String] = None,
@@ -232,8 +223,8 @@ object FieldSpec:
       description = field.description.orElse(Some(s"$${${field.name}}"))
     )
 
-/** The compiled runtime layout of a typed Signature: a name, optional instructions, and an ordered list of
-  * [[FieldSpec]]s. Adapters, programs, and the rest of the runtime stack consume this directly; the typed
+/** The compiled runtime layout of a typed Signature: a name, optional instructions, and separate ordered input and
+  * output cohorts. Adapters, programs, and the rest of the runtime stack consume this directly; the typed
   * `Signature[I, O]` (in `dspy4s.typed`) is the user-facing wrapper around it.
   *
   * '''Construction paths.'''
@@ -249,21 +240,23 @@ object FieldSpec:
   * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name
   * uniqueness closed by construction (see Invariants) rather than relying on a runtime precondition.
   *
-  * '''Field mutation.''' The `append` / `prepend` / `withFields` methods are `private[dspy4s]`. They exist
+  * '''Field mutation.''' The `withInputFields` / `withOutputFields` methods are `private[dspy4s]`. They exist
   * because composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to
   * augment a base layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a
   * `DynamicPredict`. User code should mutate at the typed `Signature` surface (use a different `Spec` trait, a
   * different `Signature.derived[I, O]`, etc.) rather than reaching into the layout directly.
   *
-  * '''Invariants.''' Name uniqueness is maintained by construction, not by a precondition: the primary
-  * constructor is `private`, so every layout comes from [[SignatureLayout.create]] (which rejects duplicate
-  * names) or from a mutator, and every mutator routes through [[withFields]], which dedups by name. A built
-  * layout therefore always has unique field names; adapters can rely on that without re-checking. The
-  * constructor still requires a non-empty `name` and identifier-shaped field names.
+  * '''Invariants.''' A field's role is represented exactly once by cohort membership. Name uniqueness across both
+  * cohorts is maintained by construction, not by a precondition: the primary constructor is `private`, so every
+  * layout comes from [[SignatureLayout.create]] (which rejects duplicate names) or from a cohort mutator, which
+  * dedups by name and resolves cross-cohort collisions in favor of inputs. A built layout therefore always has
+  * unique field names; adapters can rely on that without re-checking. The constructor still requires a non-empty
+  * `name` and identifier-shaped field names.
   */
 final case class SignatureLayout private (
     name: String,
-    fields: Vector[FieldSpec],
+    inputFields: Vector[FieldSpec],
+    outputFields: Vector[FieldSpec],
     instructions: Option[String]
 ):
   require(name.nonEmpty, "SignatureLayout name cannot be empty")
@@ -274,11 +267,8 @@ final case class SignatureLayout private (
 
   // ── Stable public accessors / settings ──────────────────────────────
 
-  /** All input-role fields in declaration order. */
-  def inputFields: Vector[FieldSpec]  = fields.filter(_.role == FieldRole.Input)
-
-  /** All output-role fields in declaration order. */
-  def outputFields: Vector[FieldSpec] = fields.filter(_.role == FieldRole.Output)
+  /** Compatibility view in canonical cohort order: all inputs followed by all outputs. */
+  def fields: Vector[FieldSpec] = inputFields ++ outputFields
 
   /** Replace signature-level instructions. */
   def withInstructions(text: Option[String]): SignatureLayout = copy(instructions = text)
@@ -296,20 +286,19 @@ final case class SignatureLayout private (
   // typed `Signature` surface (`derived`, `fromType`, `of[Spec]`,
   // `builder`, `fromString`) instead of mutating layouts directly.
 
-  // The single chokepoint every field mutator routes through: dedup by name (keep first), so a duplicate is
-  // impossible to introduce, which is what lets the unique-name precondition be retired. In practice the
-  // callers never pass a duplicate, so this is a structural guarantee rather than an observable change.
-  private[dspy4s] def withFields(updated: Vector[FieldSpec]): SignatureLayout =
-    copy(fields = updated.distinctBy(_.name))
+  /** Replace the input cohort while keeping global field names unique (first occurrence wins). */
+  private[dspy4s] def withInputFields(updated: Vector[FieldSpec]): SignatureLayout =
+    val inputs     = updated.distinctBy(_.name)
+    val inputNames = inputs.iterator.map(_.name).toSet
+    copy(
+      inputFields = inputs,
+      outputFields = outputFields.filterNot(field => inputNames.contains(field.name))
+    )
 
-  private[dspy4s] def append(field: FieldSpec): SignatureLayout = withFields(fields :+ field)
-
-  private[dspy4s] def prepend(field: FieldSpec): SignatureLayout =
-    val sameRole = fields.filter(_.role == field.role)
-    val otherRole = fields.filterNot(_.role == field.role)
-    field.role match
-      case FieldRole.Input  => withFields((field +: sameRole) ++ otherRole)
-      case FieldRole.Output => withFields(otherRole ++ (field +: sameRole))
+  /** Replace the output cohort while keeping global field names unique (the existing inputs win). */
+  private[dspy4s] def withOutputFields(updated: Vector[FieldSpec]): SignatureLayout =
+    val inputNames = inputFields.iterator.map(_.name).toSet
+    copy(outputFields = updated.distinctBy(_.name).filterNot(field => inputNames.contains(field.name)))
 
   // ── Read helpers ────────────────────────────────────────────────────
 
@@ -323,7 +312,9 @@ final case class SignatureLayout private (
   /** Equality that ignores the [[name]]. Useful for comparing two layouts that describe the same shape but were
     * constructed with different anonymous names (e.g. `"Signature"` from `fromType` vs `"X"` from a builder). */
   def equalsByStructure(other: SignatureLayout): Boolean =
-    instructions == other.instructions && fields.sameElements(other.fields)
+    instructions == other.instructions &&
+      inputFields.sameElements(other.inputFields) &&
+      outputFields.sameElements(other.outputFields)
 
   /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same codec-spine type
     * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
@@ -333,10 +324,10 @@ final case class SignatureLayout private (
   def dumpState: DynamicValue.Record =
     def str(s: String): DynamicValue        = DynamicValue.Primitive(PrimitiveValue.String(s))
     def opt(o: Option[Any]): DynamicValue   = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
-    val fieldRecords: Seq[DynamicValue] = fields.map { field =>
+    def fieldRecord(field: FieldSpec, role: String): DynamicValue =
       DynamicValue.Record(Chunk.from(Seq(
         "name"         -> str(field.name),
-        "role"         -> str(field.role.toString),
+        "role"         -> str(role),
         "typeRef"      -> str(field.typeRef.repr),
         "description"  -> opt(field.description),
         "prefix"       -> opt(field.prefix),
@@ -344,7 +335,8 @@ final case class SignatureLayout private (
         "enumValues"   -> DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))),
         "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue)))
       )))
-    }
+    val fieldRecords: Seq[DynamicValue] =
+      inputFields.map(fieldRecord(_, "Input")) ++ outputFields.map(fieldRecord(_, "Output"))
     DynamicValue.Record(Chunk.from(Seq(
       "name"         -> str(name),
       "instructions" -> opt(instructions),
@@ -381,9 +373,11 @@ object SignatureLayout:
     * field so adapters see consistent prefixes / descriptions. */
   def create(
       name: String,
-      fields: Vector[FieldSpec],
+      inputFields: Vector[FieldSpec],
+      outputFields: Vector[FieldSpec],
       instructions: Option[String] = None
   ): Either[DspyError, SignatureLayout] =
+    val fields = inputFields ++ outputFields
     if name.trim.isEmpty then Left(ValidationError("SignatureLayout name cannot be empty"))
     else if fields.isEmpty then Left(ValidationError("SignatureLayout must have at least one field"))
     else if fields.map(_.name).distinct.size != fields.size then
@@ -391,16 +385,29 @@ object SignatureLayout:
     else if fields.exists(f => !FieldSpec.validateName(f.name)) then
       Left(ValidationError("SignatureLayout fields must be valid identifiers"))
     else
-      val normalized = fields.map(FieldSpec.normalize)
-      Right(SignatureLayout(name = name, fields = normalized, instructions = instructions))
+      Right(SignatureLayout(
+        name = name,
+        inputFields = inputFields.map(FieldSpec.normalize),
+        outputFields = outputFields.map(FieldSpec.normalize),
+        instructions = instructions
+      ))
 
   /** Trusted internal construction WITHOUT normalization: framework code builds a signature from known-good,
-    * already-shaped fields and wants a `SignatureLayout` directly (not an `Either`). The (private) constructor
+    * already-separated cohorts and wants a `SignatureLayout` directly (not an `Either`). The (private) constructor
     * still enforces a non-empty `name` and identifier-shaped field names; field-name uniqueness is the
     * caller's responsibility here (pass already-distinct fields; use [[create]] to validate arbitrary input).
     * Replaces the former public case-class apply for the framework's internal call sites. */
-  private[dspy4s] def of(name: String, fields: Vector[FieldSpec], instructions: Option[String]): SignatureLayout =
-    SignatureLayout(name, fields, instructions)
+  private[dspy4s] def of(
+      name: String,
+      inputFields: Vector[FieldSpec],
+      outputFields: Vector[FieldSpec],
+      instructions: Option[String]
+  ): SignatureLayout =
+    SignatureLayout(name, inputFields, outputFields, instructions)
+
+  private enum StoredRole derives CanEqual:
+    case Input
+    case Output
 
   /** Re-hydrate a standalone layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]].
     * Program persistence is state-only and therefore does not use this codec. */
@@ -421,13 +428,13 @@ object SignatureLayout:
         case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(Some(s))
         case Some(_) => Left(ValidationError("Invalid 'instructions' value in signature state"))
 
-    def parseRole(role: String): Either[DspyError, FieldRole] =
+    def parseRole(role: String): Either[DspyError, StoredRole] =
       role.trim.toLowerCase match
-        case "input"  => Right(FieldRole.Input)
-        case "output" => Right(FieldRole.Output)
+        case "input"  => Right(StoredRole.Input)
+        case "output" => Right(StoredRole.Output)
         case _        => Left(ValidationError(s"Invalid field role '$role' in signature state"))
 
-    def readField(raw: DynamicValue): Either[DspyError, FieldSpec] =
+    def readField(raw: DynamicValue): Either[DspyError, (StoredRole, FieldSpec)] =
       raw match
         case rec: DynamicValue.Record =>
           for
@@ -449,9 +456,8 @@ object SignatureLayout:
               case Some(seq: DynamicValue.Sequence) =>
                 seq.elements.iterator.collect { case r: DynamicValue.Record => r }.flatMap(Constraint.fromState).toVector
               case _ => Vector.empty[Constraint]
-            FieldSpec(
+            role -> FieldSpec(
               name         = name,
-              role         = role,
               typeRef      = typeRef,
               description  = getString(rec, "description"),
               prefix       = getString(rec, "prefix"),
@@ -461,10 +467,11 @@ object SignatureLayout:
             )
         case _ => Left(ValidationError("Invalid field entry in signature state"))
 
-    def readFields: Either[DspyError, Vector[FieldSpec]] =
+    def readFields: Either[DspyError, Vector[(StoredRole, FieldSpec)]] =
       DynamicValues.recordGet(state, "fields") match
         case Some(seq: DynamicValue.Sequence) =>
-          seq.elements.iterator.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, raw) =>
+          seq.elements.iterator.foldLeft[Either[DspyError, Vector[(StoredRole, FieldSpec)]]](Right(Vector.empty)) {
+            (acc, raw) =>
             for
               fields <- acc
               field  <- readField(raw)
@@ -476,7 +483,12 @@ object SignatureLayout:
       name         <- readName
       instructions <- readInstructions
       fields       <- readFields
-      signature    <- create(name = name, fields = fields, instructions = instructions)
+      signature <- create(
+        name = name,
+        inputFields = fields.collect { case (StoredRole.Input, field) => field },
+        outputFields = fields.collect { case (StoredRole.Output, field) => field },
+        instructions = instructions
+      )
     yield signature
 
   /** Re-hydrate a layout from a JSON string produced by [[SignatureLayout.dumpJson]]. */

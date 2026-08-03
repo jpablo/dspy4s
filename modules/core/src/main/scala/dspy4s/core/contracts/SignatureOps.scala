@@ -2,9 +2,9 @@ package dspy4s.core.contracts
 
 import dspy4s.core.algebra.{IsEq, Law, Monoid, <->}
 
-/** The value-level "signature algebra": idempotent, role-aware, named transforms over [[SignatureLayout]].
+/** The value-level "signature algebra": idempotent, cohort-aware, named transforms over [[SignatureLayout]].
   *
-  * The low-level `append` / `prepend` / `insert` / `withFields` mutators on [[SignatureLayout]] stay
+  * The low-level `withInputFields` / `withOutputFields` mutators on [[SignatureLayout]] stay
   * `private[dspy4s]`; this object names the augmentations composite programs actually perform, guarantees
   * their idempotence, and gives them laws, so `ChainOfThought` / `ReAct` / `CodeAct` /
   * `MultiChainComparison` stop hand-rolling layout surgery. Kept `private[dspy4s]` for the same reason as
@@ -14,53 +14,42 @@ private[dspy4s] object SignatureOps:
 
   extension (layout: SignatureLayout)
 
-    /** Prepend `field` at the head of the output cohort, unless an output field of the same name already
-      * exists (idempotent). For an output-role field this is the prior `ChainOfThought.augmentLayout`
+    /** Prepend `field` at the head of the output cohort, unless a field of the same name already
+      * exists (idempotent). This is the prior `ChainOfThought.augmentLayout`
       * (`insert(0, _)`) and the `MultiChainComparison` guarded `prepend`, generalized off the hard-coded
       * field: both reconstruct the layout as `inputs ++ (field +: outputs)`.
       *
-      * Requires an Output-role field: a wrong-role spec would silently land in the wrong cohort and break
-      * L1a (cohort isolation), so the precondition fails fast instead. The laws are total over the guarded
-      * carrier.
+      * Output role is established by the target cohort rather than stored redundantly on `field`.
       */
     def prependOutput(field: FieldSpec): SignatureLayout =
-      require(field.role == FieldRole.Output, s"prependOutput requires an Output-role field, got: $field")
-      if layout.outputFields.exists(_.name == field.name) then layout
-      else layout.prepend(field)
+      if layout.fields.exists(_.name == field.name) then layout
+      else layout.withOutputFields(field +: layout.outputFields)
 
     /** Append `field` to the end of the input cohort, unless an input field of the same name already exists
       * (idempotent).
       *
-      * Requires an Input-role field, for the same reason as `prependOutput` (a wrong role breaks L1b).
+      * Input role is established by the target cohort rather than stored redundantly on `field`.
       */
     def appendInput(field: FieldSpec): SignatureLayout =
-      require(field.role == FieldRole.Input, s"appendInput requires an Input-role field, got: $field")
-      if layout.inputFields.exists(_.name == field.name) then layout
-      else layout.append(field)
+      if layout.fields.exists(_.name == field.name) then layout
+      else layout.withInputFields(layout.inputFields :+ field)
 
     /** Keep the inputs, replace every output field with `fields`. The loop-step signatures of `ReAct` and
       * `CodeAct` use this to drop the base outputs (which their extractor produces) in favor of the
       * per-iteration control outputs.
       *
-      * Requires Output-role fields: an Input-role spec here would corrupt both cohorts at once (L4b/L4c).
+      * Output role is established by the target cohort.
       */
     def replaceOutputs(fields: Vector[FieldSpec]): SignatureLayout =
-      require(
-        fields.forall(_.role == FieldRole.Output),
-        s"replaceOutputs requires Output-role fields, got: ${fields.filterNot(_.role == FieldRole.Output)}"
-      )
-      layout.withFields(layout.inputFields ++ fields)
+      layout.withOutputFields(fields)
 
   /** The signature-algebra laws stated ON the structure as `@Law` methods returning [[IsEq]] (the
     * math-with-scala statement style; see `core.algebra.Laws` and `docs/refactor/algebra.md`). `SignatureOpsLawSuite`
-    * EXECUTES these over generated layouts, checking each under the honest observation: layout equations by
-    * observational equality (`in` / `out` / `instructions` / `name`, since cross-cohort commutativity reorders
-    * the underlying field vector while leaving every observation identical), field-cohort equations by
-    * `sameElements`. The equations are the contract; the suite is how they run.
+    * EXECUTES these over generated layouts, checking layout equations by their public cohort observations
+    * (`in` / `out` / `instructions` / `name`) and field-cohort equations by `sameElements`. The equations are the
+    * contract; the suite is how they run.
     *
-    * Carrier note: the laws quantify over role-correct fields, and since the ops now `require` the role, that
-    * subset is enforced at the operation rather than assumed by the suite's generators. A wrong-role field is
-    * an `IllegalArgumentException` at the call site, not a silent law violation. */
+    * Cohort membership is structural, so these laws are total over every [[FieldSpec]]. */
   private[dspy4s] object laws:
 
     // L1 — cohort isolation: each combinator touches exactly one cohort.
@@ -100,10 +89,10 @@ private[dspy4s] object SignatureOps:
       s.replaceOutputs(fs).inputFields <-> s.inputFields
 
     // L5 — the precise effect of prependOutput on the output cohort.
-    @Law("L5 prependOutput adds f at the head unless its name is already present")
+    @Law("L5 prependOutput adds f at the head unless its name is already present in the layout")
     def prependOutputEffect(s: SignatureLayout, f: FieldSpec): IsEq[Vector[FieldSpec]] =
       s.prependOutput(f).outputFields <->
-        (if s.outputFields.exists(_.name == f.name) then s.outputFields else f +: s.outputFields)
+        (if s.fields.exists(_.name == f.name) then s.outputFields else f +: s.outputFields)
 
     // L6 — instructions: last write wins.
     @Law("L6 withInstructions: the last write wins")

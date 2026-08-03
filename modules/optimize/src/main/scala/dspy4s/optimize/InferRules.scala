@@ -7,7 +7,6 @@ import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -187,11 +186,12 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
   private val ruleInductionLayout: SignatureLayout =
     SignatureLayout.of(
       name = "RulesInduction",
-      fields = Vector(
-        FieldSpec(name = "examples_text", role = FieldRole.Input, description = Some("Text containing examples")),
+      inputFields = Vector(
+        FieldSpec(name = "examples_text", description = Some("Text containing examples"))
+      ),
+      outputFields = Vector(
         FieldSpec(
           name = "natural_language_rules",
-          role = FieldRole.Output,
           description = Some("Induced natural language rules")
         )
       ),

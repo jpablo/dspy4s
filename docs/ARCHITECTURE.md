@@ -151,14 +151,13 @@ SignatureLayout ──→ ProgramCall[Record] ──→ DynamicPredict ──→
                                                                └─ raw: RawPrediction
 ```
 
-`SignatureLayout` carries a name, optional instructions, and an ordered
-`Vector[FieldSpec]` (each spec has a role, a `TypeRef`, and metadata).
+`SignatureLayout` carries a name, optional instructions, and separate ordered input and output
+`Vector[FieldSpec]` cohorts (each spec has a `TypeRef` and metadata).
 Adapters consume `SignatureLayout` directly; composite programs (e.g.
 `ChainOfThought`, `CodeAct`, `MultiChainComparison`) augment a
 base layout with extra fields before handing it to a `DynamicPredict`.
 
-The mutation helpers on `SignatureLayout` (`append`, `prepend`, `insert`,
-`delete`, `withFields`, `withUpdatedField*`, `updateField`) are
+The cohort mutation helpers on `SignatureLayout` (`withInputFields` and `withOutputFields`) are
 `private[dspy4s]` — only the composite programs use them. User code
 goes through the typed surface.
 

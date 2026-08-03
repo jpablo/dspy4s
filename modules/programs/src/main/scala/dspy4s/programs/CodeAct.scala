@@ -4,7 +4,6 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -286,25 +285,21 @@ object CodeAct:
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
     name        = "trajectory",
-    role        = FieldRole.Input,
     typeRef     = TypeRef.string,
     description = Some("History of generated code and observations so far.")
   )
   private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
     name        = "trajectory",
-    role        = FieldRole.Input,
     typeRef     = TypeRef.string,
     description = Some("History of generated code and observations.")
   )
   private[programs] val generatedCodeField: FieldSpec = FieldSpec(
     name        = "generated_code",
-    role        = FieldRole.Output,
     typeRef     = TypeRef.string,
     description = Some("Python code that, when executed, produces output relevant to answering the question.")
   )
   private[programs] val finishedField: FieldSpec = FieldSpec(
     name        = "finished",
-    role        = FieldRole.Output,
     typeRef     = TypeRef.bool,
     description = Some("Set to true once enough information has been collected to produce the final outputs.")
   )

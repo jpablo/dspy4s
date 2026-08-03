@@ -1,6 +1,6 @@
 package dspy4s.typed.internal
 
-import dspy4s.core.contracts.{FieldRole, SignatureLayout}
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.typed.{Shape, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
@@ -18,14 +18,15 @@ private[typed] object FunctionMacro:
     val errorNameExpr = Expr(errorName)
     '{
       val name: String = ${ sigNameExpr }
-      // Shapes are schema-backed; their `fieldSpecs` (names, wire typeRefs) come from the derived
-      // `Reflect`, with the role stamped per side. The layout is assembled from them.
+      // Shapes are schema-backed; their role-free `fieldSpecs` (names, wire typeRefs) come from the derived
+      // `Reflect`. The layout assigns them to the corresponding cohort.
       val inputShape  = ${ inputShapeExpr }
       val outputShape = ${ outputShapeExpr }
       val sig = SignatureLayout
         .create(
           name         = name,
-          fields       = inputShape.fieldSpecs ++ outputShape.fieldSpecs,
+          inputFields  = inputShape.fieldSpecs,
+          outputFields = outputShape.fieldSpecs,
           instructions = Option(${ instructionsExpr }).filter(_.nonEmpty)
         )
         .fold(
@@ -216,8 +217,8 @@ private[typed] object FunctionMacro:
         case ('[i], '[o]) =>
           signatureExpr[i, o](
             sigName = sigName,
-            inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](FieldRole.Input,  Shape.canonicalSchema[i]) },
-            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o]) }
+            inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
           )
         case _ =>
           report.errorAndAbort(s"Internal error materializing scalar output for method '$sigName'")
@@ -231,8 +232,8 @@ private[typed] object FunctionMacro:
           case ('[i], '[o]) =>
             signatureExpr[i, o](
               sigName = sigName,
-              inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](FieldRole.Input,  Shape.canonicalSchema[i]) },
-              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o]) }
+              inputShapeExpr  = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
             )
           case _ =>
             report.errorAndAbort(s"Internal error materializing tuple output for method '$sigName'")
@@ -247,8 +248,8 @@ private[typed] object FunctionMacro:
                       signatureExpr[i, o](
                         sigName = sigName,
                         inputShapeExpr =
-                          '{ new Shape.SchemaTupleShape[i](FieldRole.Input, Shape.canonicalSchema[i]) },
-                        outputShapeExpr = '{ Shape.canonicalDerivedWithRole[o](FieldRole.Output) }
+                          '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+                        outputShapeExpr = '{ Shape.canonicalDerived[o] }
                       )
                 case None =>
                   scalarOutputExpr(returnType)
@@ -382,7 +383,7 @@ private[typed] object FunctionMacro:
         sigNameExpr = sigNameExpr,
         instructionsExpr = instructions,
         errorName = sigName,
-        inputShapeExpr = '{ new Shape.SchemaTupleShape[I](FieldRole.Input, Shape.canonicalSchema[I]) },
+        inputShapeExpr = '{ new Shape.SchemaTupleShape[I](Shape.canonicalSchema[I]) },
         outputShapeExpr = outputShapeExpr
       )
 
@@ -393,7 +394,7 @@ private[typed] object FunctionMacro:
       (inputType.asType, outputType.asType) match
         case ('[i], '[o]) =>
           signatureExpr[i, o](
-            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o]) }
+            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
           )
         case _ =>
           report.errorAndAbort("Internal error materializing scalar output for function type")
@@ -406,7 +407,7 @@ private[typed] object FunctionMacro:
         (inputType.asType, returnType.asType) match
           case ('[i], '[o]) =>
             signatureExpr[i, o](
-              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o]) }
+              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
             )
           case _ =>
             report.errorAndAbort("Internal error materializing named-tuple output for function type")
@@ -419,7 +420,7 @@ private[typed] object FunctionMacro:
                   inputType.asType match
                     case '[i] =>
                       signatureExpr[i, o](
-                        outputShapeExpr = '{ Shape.canonicalDerivedWithRole[o](FieldRole.Output) }
+                        outputShapeExpr = '{ Shape.canonicalDerived[o] }
                       )
                 case None =>
                   scalarOutputExpr(returnType)
@@ -479,8 +480,8 @@ private[typed] object FunctionMacro:
           sigNameExpr      = Expr(layout.name),
           instructionsExpr = instructions,
           errorName        = layout.name,
-          inputShapeExpr   = '{ new Shape.SchemaTupleShape[i](FieldRole.Input,  Shape.canonicalSchema[i]) },
-          outputShapeExpr  = '{ new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o]) }
+          inputShapeExpr   = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+          outputShapeExpr  = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
         )
       case _ =>
         report.errorAndAbort(s"""Internal error materializing Signature.fromString "$literal"""")

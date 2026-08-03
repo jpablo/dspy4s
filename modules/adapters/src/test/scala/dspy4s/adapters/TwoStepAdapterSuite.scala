@@ -4,7 +4,6 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -30,7 +29,8 @@ class TwoStepAdapterSuite extends FunSuite:
   private val layout: SignatureLayout =
     SignatureLayout.create(
       name = "QA",
-      fields = Vector(FieldSpec("question", FieldRole.Input), FieldSpec("answer", FieldRole.Output))
+      inputFields = Vector(FieldSpec("question")),
+      outputFields = Vector(FieldSpec("answer"))
     ).toOption.get
 
   test("TwoStepAdapter formats a plain natural-language prompt for the main LM (no structured markers)") {

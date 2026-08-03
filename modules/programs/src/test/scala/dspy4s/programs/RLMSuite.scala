@@ -5,7 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{CodeResult, DspyError, DynamicValues, FieldRole, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SignatureLayout}
+import dspy4s.core.contracts.{CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SignatureLayout}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.typed.Signature
@@ -214,7 +214,7 @@ class RLMSuite extends FunSuite:
     val v = RLM.ReplVariable.fromValue(
       "context",
       DynamicValues.fromAny(long),
-      Some(FieldSpec("context", FieldRole.Input, description = Some("the corpus")))
+      Some(FieldSpec("context", description = Some("the corpus")))
     )
     assertEquals(v.typeName, "str")
     assertEquals(v.totalLength, 3000)

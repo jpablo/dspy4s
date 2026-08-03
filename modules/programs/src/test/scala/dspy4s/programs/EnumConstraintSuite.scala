@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.core.contracts.{DynamicValues, FieldRole, RuntimeContext, :=}
+import dspy4s.core.contracts.{DynamicValues, RuntimeContext, :=}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LmMode, LmRequest}
@@ -37,7 +37,7 @@ class EnumConstraintSuite extends FunSuite:
 
   test("the derived layout preserves an enum field's allowed case names (root-cause guard)") {
     val kindField = signature.layout.outputFields.find(_.name == "kind").getOrElse(fail("no 'kind' output field"))
-    assertEquals(kindField.role, FieldRole.Output)
+    assert(!signature.layout.inputFields.exists(_.name == "kind"))
     assertEquals(
       kindField.enumValues,
       Vector("order_confirmation", "support_request", "meeting_invitation"),

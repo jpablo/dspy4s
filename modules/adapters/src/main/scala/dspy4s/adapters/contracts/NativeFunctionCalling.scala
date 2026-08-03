@@ -1,7 +1,6 @@
 package dspy4s.adapters.contracts
 
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -28,7 +27,7 @@ object NativeFunctionCalling:
   /** True for the output field that receives native provider tool calls (`typeRef == TypeRef.toolCalls`). Such a
     * field is filled from the structured response, never rendered/parsed as text. */
   def isToolCallsField(field: FieldSpec): Boolean =
-    field.role == FieldRole.Output && field.typeRef == TypeRef.toolCalls
+    field.typeRef == TypeRef.toolCalls
 
   /** Whether the ambient LM advertises function-calling support (narrows the opaque `RuntimeContext.lm` ref). */
   def lmSupportsFunctionCalling(using ctx: RuntimeContext): Boolean =

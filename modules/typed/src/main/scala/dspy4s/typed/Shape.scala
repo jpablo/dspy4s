@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError
+  DspyError, DynamicValues, FieldSpec, NotFoundError
 }
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -89,10 +89,10 @@ object Shape:
 
     Schema.derived[A]
 
-  /** Canonical case-class/product shape. Unlike [[derivedWithRole]], this path is closed over structural
-    * derivation and therefore suitable for type-indexed record-boundary objects. */
-  inline def canonicalDerivedWithRole[A](role: FieldRole): Shape[A] =
-    ZioSchemaCodec.derivedFromZioSchema[A](role)(using canonicalSchema[A])
+  /** Canonical case-class/product shape. This path ignores ambient schemas and is closed over structural
+    * derivation, making it suitable for type-indexed record-boundary objects. */
+  inline def canonicalDerived[A]: Shape[A] =
+    ZioSchemaCodec.derivedFromZioSchema[A](using canonicalSchema[A])
 
   /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
     * static schema so the "typed" value stays at the spine type. `encode` is the identity; `decode` only
@@ -119,13 +119,13 @@ object Shape:
     * e.g. `(sentence: String)` for inputs and `(sentiment: Emotion)` for outputs. zio-blocks bridges
     * named-tuple <-> tuple internally (`NamedTuple.toTuple` + register construction), so there is no
     * reflective `productIterator` / `Tuple.fromArray` cast. `fieldSpecs`
-    * (names, wire `typeRef`s) are derived from the schema's `Reflect`, with every field stamped `role`; the
+    * (names and wire `typeRef`s) are derived from the schema's `Reflect`; the enclosing `SignatureLayout`
+    * determines whether they belong to its input or output cohort. The
     * decode path reuses [[ZioSchemaCodec]]'s LM-string coercion, the same path the case-class shapes use. */
   final class SchemaTupleShape[A](
-      role: FieldRole,
       schema: Schema[A]
   ) extends Shape[A]:
-    private val delegate: Shape[A] = ZioSchemaCodec.derivedFromZioSchema[A](role)(using schema)
+    private val delegate: Shape[A] = ZioSchemaCodec.derivedFromZioSchema[A](using schema)
     val fieldSpecs: Vector[FieldSpec]                         = delegate.fieldSpecs
     def encode(value: A): DynamicValue.Record                 = delegate.encode(value)
     def decode(raw: DynamicValue.Record): Either[DspyError, A] = delegate.decode(raw)
@@ -135,10 +135,4 @@ object Shape:
     * zio-blocks owns product encode/decode; dspy4s derives the DSPy-facing field metadata from the same
     * structural Reflect description (see [[ZioSchemaCodec]] for the metadata story). */
   inline def derived[A <: Product](using schema: Schema[A]): Shape[A] =
-    ZioSchemaCodec.derivedFromZioSchema[A](FieldRole.Output)
-
-  /** Derives a `Shape[A]` and stamps every field with the given role. Use `FieldRole.Input` for input case
-    * classes, `FieldRole.Output` for output case classes. `derived` defaults to `Output`; `Signature` builders
-    * that need inputs invoke this explicitly. */
-  inline def derivedWithRole[A <: Product](role: FieldRole)(using schema: Schema[A]): Shape[A] =
-    ZioSchemaCodec.derivedFromZioSchema[A](role)
+    ZioSchemaCodec.derivedFromZioSchema[A]

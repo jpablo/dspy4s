@@ -1,6 +1,6 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.{FieldRole, FieldSpec, SignatureLayout}
+import dspy4s.core.contracts.{FieldSpec, SignatureLayout}
 import dspy4s.core.contracts.SignatureOps.*
 
 /** Laws for the value-level signature algebra (`prependOutput` / `appendInput` / `replaceOutputs`). The
@@ -8,48 +8,48 @@ import dspy4s.core.contracts.SignatureOps.*
   * sites; this pins the primitive itself. */
 class SignatureOpsSuite extends munit.FunSuite:
 
-  private def layout(fields: FieldSpec*): SignatureLayout =
-    SignatureLayout.create("test", fields.toVector).fold(e => fail(e.message), identity)
+  private def layout(inputs: Vector[FieldSpec], outputs: Vector[FieldSpec]): SignatureLayout =
+    SignatureLayout.create("test", inputs, outputs).fold(e => fail(e.message), identity)
 
-  private def in(name: String): FieldSpec  = FieldSpec(name, FieldRole.Input)
-  private def out(name: String): FieldSpec = FieldSpec(name, FieldRole.Output)
+  private def field(name: String): FieldSpec = FieldSpec(name)
 
   test("prependOutput inserts at the output-cohort head; inputs unchanged") {
-    val r = layout(in("question"), out("answer")).prependOutput(out("reasoning"))
+    val r = layout(Vector(field("question")), Vector(field("answer"))).prependOutput(field("reasoning"))
     assertEquals(r.inputFields.map(_.name), Vector("question"))
     assertEquals(r.outputFields.map(_.name), Vector("reasoning", "answer"))
   }
 
   test("prependOutput is idempotent on field name") {
-    val base = layout(in("question"), out("answer"))
-    val once = base.prependOutput(out("reasoning"))
-    assertEquals(once.prependOutput(out("reasoning")), once)
+    val base = layout(Vector(field("question")), Vector(field("answer")))
+    val once = base.prependOutput(field("reasoning"))
+    assertEquals(once.prependOutput(field("reasoning")), once)
     // an output of the same name already present leaves the layout untouched
-    assertEquals(base.prependOutput(out("answer")), base)
+    assertEquals(base.prependOutput(field("answer")), base)
   }
 
   test("appendInput appends to the input cohort; outputs unchanged") {
-    val r = layout(in("question"), out("answer")).appendInput(in("trajectory"))
+    val r = layout(Vector(field("question")), Vector(field("answer"))).appendInput(field("trajectory"))
     assertEquals(r.inputFields.map(_.name), Vector("question", "trajectory"))
     assertEquals(r.outputFields.map(_.name), Vector("answer"))
   }
 
   test("appendInput is idempotent on field name") {
-    val base = layout(in("question"), out("answer"))
-    val once = base.appendInput(in("trajectory"))
-    assertEquals(once.appendInput(in("trajectory")), once)
-    assertEquals(base.appendInput(in("question")), base)
+    val base = layout(Vector(field("question")), Vector(field("answer")))
+    val once = base.appendInput(field("trajectory"))
+    assertEquals(once.appendInput(field("trajectory")), once)
+    assertEquals(base.appendInput(field("question")), base)
   }
 
   test("replaceOutputs keeps the inputs and replaces every output") {
-    val r = layout(in("question"), out("answer"), out("confidence"))
-      .replaceOutputs(Vector(out("code"), out("done")))
+    val r = layout(Vector(field("question")), Vector(field("answer"), field("confidence")))
+      .replaceOutputs(Vector(field("code"), field("done")))
     assertEquals(r.inputFields.map(_.name), Vector("question"))
     assertEquals(r.outputFields.map(_.name), Vector("code", "done"))
   }
 
   test("prependOutput normalizes to inputs ++ (field +: outputs), as the prior insert(0) did") {
-    val r = layout(in("q1"), in("q2"), out("a"), out("b")).prependOutput(out("reasoning"))
+    val r = layout(Vector(field("q1"), field("q2")), Vector(field("a"), field("b")))
+      .prependOutput(field("reasoning"))
     assertEquals(r.fields.map(_.name), Vector("q1", "q2", "reasoning", "a", "b"))
   }
 
@@ -57,21 +57,5 @@ class SignatureOpsSuite extends munit.FunSuite:
   // validation is preserved (the structural guarantee is that mutators dedup instead, exercised by the
   // idempotence laws in SignatureOpsLawSuite).
   test("create rejects duplicate field names at the boundary") {
-    assert(SignatureLayout.create("test", Vector(in("q"), out("q"))).isLeft)
-  }
-
-  // The ops require role-correct fields: a wrong-role spec would land in the wrong cohort and silently
-  // violate the cohort-isolation laws (L1), so it fails fast instead. This pins the guarded carrier: the
-  // laws are total over what the ops accept.
-  test("cohort ops reject wrong-role fields fast") {
-    val base = layout(in("question"), out("answer"))
-
-    val prependErr = intercept[IllegalArgumentException](base.prependOutput(in("sneaky_input")))
-    assert(prependErr.getMessage.contains("prependOutput requires an Output-role field"))
-
-    val appendErr = intercept[IllegalArgumentException](base.appendInput(out("sneaky_output")))
-    assert(appendErr.getMessage.contains("appendInput requires an Input-role field"))
-
-    val replaceErr = intercept[IllegalArgumentException](base.replaceOutputs(Vector(out("ok"), in("sneaky"))))
-    assert(replaceErr.getMessage.contains("replaceOutputs requires Output-role fields"))
+    assert(SignatureLayout.create("test", Vector(field("q")), Vector(field("q"))).isLeft)
   }

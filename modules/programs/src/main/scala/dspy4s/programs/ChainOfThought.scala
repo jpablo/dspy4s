@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, FieldRole, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
@@ -105,7 +105,6 @@ object ChainOfThought:
   // yields "Reasoning:", identical to the old literal (a true no-op on the wire).
   private[programs] val reasoningField: FieldSpec = FieldSpec.normalize(FieldSpec(
     name        = "reasoning",
-    role        = FieldRole.Output,
     typeRef     = TypeRef.string,
     description = Some("${reasoning}")
   ))

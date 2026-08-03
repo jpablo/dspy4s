@@ -1,6 +1,6 @@
 package dspy4s.typed.internal
 
-import dspy4s.core.contracts.{FieldRole, SignatureLayout}
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.quoted.*
@@ -137,14 +137,15 @@ private[typed] object SpecMacro:
     (inputType.asType, outputType.asType) match
       case ('[i], '[o]) =>
         '{
-          // Shapes are fully schema-backed; their `fieldSpecs` (names, wire typeRefs) come from the
-          // derived `Reflect`, with the role stamped per side. The layout is assembled from them.
-          val inputShape  = new Shape.SchemaTupleShape[i](FieldRole.Input,  Shape.canonicalSchema[i])
-          val outputShape = new Shape.SchemaTupleShape[o](FieldRole.Output, Shape.canonicalSchema[o])
+          // Shapes are fully schema-backed; their role-free `fieldSpecs` (names, wire typeRefs) come from the
+          // derived `Reflect`. The layout assigns them to the corresponding cohort.
+          val inputShape  = new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i])
+          val outputShape = new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o])
           val sig = SignatureLayout
             .create(
               name         = ${ sigNameExpr },
-              fields       = inputShape.fieldSpecs ++ outputShape.fieldSpecs,
+              inputFields  = inputShape.fieldSpecs,
+              outputFields = outputShape.fieldSpecs,
               instructions = Option(${ instructions }).filter(_.nonEmpty)
             )
             .fold(

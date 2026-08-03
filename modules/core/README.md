@@ -12,9 +12,9 @@ Four abstractions anchor the framework:
   `DynamicValue.Record`, a schema-typed discriminated-union value rather than `Map[String, Any]`. The `:=`
   operator and the `DynamicValues` helpers lift typed values onto this spine at the edges; internal codec paths
   produce `DynamicValue` directly so nothing is lost in round-trips.
-- **A signature/field model.** A `SignatureLayout` is an ordered list of `FieldSpec`s, each tagged with a
-  `FieldRole` (`Input`/`Output`), a wire `TypeRef`, a description, prefix, and constraints. Adapters and
-  programs read this to build prompts and parse responses.
+- **A signature/field model.** A `SignatureLayout` stores ordered input and output cohorts of role-free
+  `FieldSpec` metadata. Each field has a wire `TypeRef`, description, prefix, and constraints. Adapters and programs
+  read the cohorts to build prompts and parse responses.
 - **A partitioned execution context.** A `RuntimeContext` keeps runtime dependencies (`RuntimeServices`), policy
   (`RuntimeConfig`), dynamic correlation (`RuntimeScope`), and observable output (`RuntimeDelta`) distinct. It
   passes as a `using` parameter, so configuration is scoped, not global mutable state.
@@ -38,9 +38,8 @@ Four abstractions anchor the framework:
 
 | Type | Role |
 |------|------|
-| `SignatureLayout` | The runtime layout: name, optional instructions, ordered `FieldSpec`s. Built via `create` (validating), `parse` (DSL), or typed derivation. |
-| `FieldSpec` | Per-field metadata: name, role, wire type, description, prefix, default, constraints. `normalize` fills defaults so adapters see a uniform surface. |
-| `FieldRole` | `Input` (the LM receives) vs `Output` (the LM produces). |
+| `SignatureLayout` | The runtime layout: name, optional instructions, and separate ordered input/output `FieldSpec` cohorts. Built via `create` (validating), `parse` (DSL), or typed derivation. |
+| `FieldSpec` | Role-free per-field metadata: name, wire type, description, prefix, default, constraints. `normalize` fills defaults so adapters see a uniform surface. |
 | `TypeRef` | The wire-format type tag the LM sees (`string`, `bool`, `json`, …); unknown tokens pass through opaque. |
 | `Constraint` | Constraint algebra mirroring Python's `PYDANTIC_CONSTRAINT_MAP` (prose hint + JSON-Schema keyword). |
 
@@ -82,7 +81,7 @@ Four abstractions anchor the framework:
 | `contracts/RuntimeContext.scala` | `RuntimeContext`, services/config/scope partitions, and the flat compatibility surface |
 | `contracts/RuntimeOutput.scala` | `TraceEntry`, `HistoryEntry`, the `RuntimeDelta` monoid, and `Executed[A]` |
 | `contracts/Errors.scala` | the `DspyError` hierarchy |
-| `contracts/SignatureLayout.scala` | `SignatureLayout`, `FieldSpec`, `FieldRole`, `TypeRef`, `Constraint` |
+| `contracts/SignatureLayout.scala` | `SignatureLayout`, `FieldSpec`, `TypeRef`, `Constraint` |
 | `contracts/SignatureOps.scala` | idempotent layout-surgery extensions (prepend/append/replace) |
 | `contracts/Callbacks.scala` | `CallbackEvent` events + `CallbackHandler` |
 | `contracts/ToolCall.scala`, `CodeInterpreter.scala`, `ClosableIterator.scala`, `HistoryRenderer.scala` | tool calls, code-exec primitives, streaming iterator, history rendering |

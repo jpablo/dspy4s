@@ -4,7 +4,6 @@ import dspy4s.adapters.contracts.AdapterConstraints
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -18,11 +17,10 @@ class AdapterConstraintsSuite extends FunSuite:
   private def layout(constrained: Boolean): SignatureLayout =
     SignatureLayout.create(
       name = "S",
-      fields = Vector(
-        FieldSpec("question", FieldRole.Input),
+      inputFields = Vector(FieldSpec("question")),
+      outputFields = Vector(
         FieldSpec(
           name = "age",
-          role = FieldRole.Output,
           typeRef = TypeRef.int,
           constraints = if constrained then Vector(dspy4s.core.contracts.FieldConstraints.gt(0)) else Vector.empty
         )

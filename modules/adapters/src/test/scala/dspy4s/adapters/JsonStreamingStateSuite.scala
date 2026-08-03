@@ -1,14 +1,13 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import munit.FunSuite
 
 class JsonStreamingStateSuite extends FunSuite:
 
   private def output(name: String): FieldSpec =
-    FieldSpec(name = name, role = FieldRole.Output)
+    FieldSpec(name = name)
 
   private def drive(state: JsonStreamingState, deltas: String*): Vector[FieldChunk] =
     deltas.iterator.flatMap(state.receive).toVector ++ state.finish()

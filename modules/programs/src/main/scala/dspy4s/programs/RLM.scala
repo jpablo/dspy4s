@@ -4,7 +4,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.RuntimeContext
@@ -112,47 +111,41 @@ final case class RLM[I, O](
     */
   val actionSignature: SignatureLayout =
     baseLayout
-      .withFields(Vector(
+      .withInputFields(Vector(
         FieldSpec(
           "variables_info",
-          FieldRole.Input,
           typeRef = TypeRef.string,
           description = Some("Metadata about the variables available in the REPL")
         ),
         FieldSpec(
           "repl_history",
-          FieldRole.Input,
           typeRef = TypeRef.string,
           description = Some("Previous REPL code executions and their outputs")
         ),
         FieldSpec(
           "iteration",
-          FieldRole.Input,
           typeRef = TypeRef.string,
           description = Some("Current iteration number (1-indexed) out of max_iterations")
-        ),
-        RLM.reasoningField,
-        RLM.codeField
+        )
       ))
+      .withOutputFields(Vector(RLM.reasoningField, RLM.codeField))
       .withInstructions(Some(buildActionInstructions))
 
   /** Extract-fallback signature: `variables_info, repl_history -> <base outputs>`. */
   val extractSignature: SignatureLayout =
     baseLayout
-      .withFields(Vector(
+      .withInputFields(Vector(
         FieldSpec(
           "variables_info",
-          FieldRole.Input,
           typeRef = TypeRef.string,
           description = Some("Metadata about the variables available in the REPL")
         ),
         FieldSpec(
           "repl_history",
-          FieldRole.Input,
           typeRef = TypeRef.string,
           description = Some("Your REPL interactions so far")
         )
-      ) ++ baseLayout.outputFields)
+      ))
       .withInstructions(Some(buildExtractInstructions))
 
   /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a TYPED
@@ -165,7 +158,7 @@ final case class RLM[I, O](
       signature = Signature(
         name        = baseSignature.name,
         layout      = actionSignature,
-        inputShape  = Shape.derivedWithRole[RLM.ActionInputs](FieldRole.Input),
+        inputShape  = Shape.derived[RLM.ActionInputs],
         outputShape = RLM.actionStepShape
       ),
       name = Some(actionProgramName)
@@ -179,7 +172,7 @@ final case class RLM[I, O](
       signature = Signature(
         name        = baseSignature.name,
         layout      = extractSignature,
-        inputShape  = Shape.derivedWithRole[RLM.ExtractInputs](FieldRole.Input),
+        inputShape  = Shape.derived[RLM.ExtractInputs],
         outputShape = baseSignature.outputShape
       ),
       name = Some(extractProgramName)
@@ -365,13 +358,11 @@ object RLM:
   // ── The action signature's hand-declared output fields (static; shared by the layout and the typed shape) ──
   private[programs] val reasoningField: FieldSpec = FieldSpec(
     "reasoning",
-    FieldRole.Output,
     typeRef = TypeRef.string,
     description = Some("Think step-by-step: what do you know? What remains? Plan your next action.")
   )
   private[programs] val codeField: FieldSpec = FieldSpec(
     "code",
-    FieldRole.Output,
     typeRef = TypeRef.string,
     description = Some("Python code to execute. Use markdown code block format: ```python\\n<code>\\n```")
   )

@@ -341,9 +341,8 @@ typed programs do not delegate through a universal `DynamicPredict` substrate. T
 - **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so the typed
   agents stream without needing an untyped `DynamicModule` twin.
 
-The mutation helpers on `SignatureLayout` (`append`, `prepend`,
-`insert`, `delete`, `withFields`, `withUpdatedField*`,
-`updateField`) are `private[dspy4s]`. Composite programs use them
+The cohort mutation helpers on `SignatureLayout` (`withInputFields` and
+`withOutputFields`) are `private[dspy4s]`. Composite programs use them
 internally to augment a base layout with extra fields (e.g.
 `ChainOfThought` prepending a `reasoning` field). User code goes
 through the typed `Signature` surface instead. Python has no

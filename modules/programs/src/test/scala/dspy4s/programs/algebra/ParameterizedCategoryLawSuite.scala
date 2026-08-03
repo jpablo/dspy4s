@@ -8,7 +8,6 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.algebra.{IsEq, Lens, Monoid}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
@@ -130,7 +129,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     name = "RecordInput",
     layout = recordLayout,
     inputShape = Shape.MapShape(recordLayout.inputFields),
-    outputShape = Shape.derivedWithRole[Wrapped](FieldRole.Output)
+    outputShape = Shape.derived[Wrapped]
   )
 
   private final case class ProgramObservation[O](
@@ -350,7 +349,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
       given Schema[Boxed] = shiftedBoxSchema
 
       // The open Shape API intentionally honors an explicit custom schema.
-      assertEquals(Shape.derivedWithRole[Boxed](FieldRole.Input).decode(boxedWire), Right(Boxed(6)))
+      assertEquals(Shape.derived[Boxed].decode(boxedWire), Right(Boxed(6)))
       // Category-object derivation is closed and therefore remains a function of Boxed alone.
       assertEquals(summon[RecordCodec[Boxed]].decode(boxedWire), Right(Boxed(5)))
       assertEquals(
@@ -369,7 +368,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
 
       val ambientOuterSchema = Schema.derived[NestedBox]
       assertEquals(
-        Shape.derivedWithRole[NestedBox](FieldRole.Input)(using ambientOuterSchema).decode(nestedWire),
+        Shape.derived[NestedBox](using ambientOuterSchema).decode(nestedWire),
         Right(NestedBox(NestedValue(8)))
       )
       assertEquals(

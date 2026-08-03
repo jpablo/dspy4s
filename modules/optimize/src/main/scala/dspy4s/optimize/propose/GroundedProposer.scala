@@ -4,7 +4,6 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -131,10 +130,8 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
   private def summaryLayout: SignatureLayout =
     SignatureLayout.of(
       name = "SummarizeDataset",
-      fields = Vector(
-        FieldSpec(name = "examples", role = FieldRole.Input),
-        FieldSpec(name = "observations", role = FieldRole.Output)
-      ),
+      inputFields = Vector(FieldSpec(name = "examples")),
+      outputFields = Vector(FieldSpec(name = "observations")),
       instructions = Some(config.summaryMarker)
     )
 
@@ -173,16 +170,17 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     */
   private def instructionGenLayout(withSummary: Boolean, withDemos: Boolean, withTip: Boolean): SignatureLayout =
     val inputs =
-      (if withSummary then Vector(FieldSpec(name = "dataset_description", role = FieldRole.Input)) else Vector.empty) ++
+      (if withSummary then Vector(FieldSpec(name = "dataset_description")) else Vector.empty) ++
         Vector(
-          FieldSpec(name = "program_description", role = FieldRole.Input),
-          FieldSpec(name = "basic_instruction", role = FieldRole.Input)
+          FieldSpec(name = "program_description"),
+          FieldSpec(name = "basic_instruction")
         ) ++
-        (if withDemos then Vector(FieldSpec(name = "task_demos", role = FieldRole.Input)) else Vector.empty) ++
-        (if withTip then Vector(FieldSpec(name = "tip", role = FieldRole.Input)) else Vector.empty)
+        (if withDemos then Vector(FieldSpec(name = "task_demos")) else Vector.empty) ++
+        (if withTip then Vector(FieldSpec(name = "tip")) else Vector.empty)
     SignatureLayout.of(
       name = "GenerateModuleInstruction",
-      fields = inputs :+ FieldSpec(name = "proposed_instruction", role = FieldRole.Output),
+      inputFields = inputs,
+      outputFields = Vector(FieldSpec(name = "proposed_instruction")),
       instructions = Some(config.instructionMarker)
     )
 

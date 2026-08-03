@@ -1,7 +1,6 @@
 package dspy4s.core
 
 import dspy4s.core.contracts.FieldConstraints
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
@@ -38,7 +37,6 @@ class FieldConstraintsSuite extends FunSuite:
   test("FieldSpec carries constraints and normalize preserves them") {
     val field = FieldSpec(
       name        = "score",
-      role        = FieldRole.Output,
       typeRef     = TypeRef.int,
       constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
     )
@@ -51,11 +49,10 @@ class FieldConstraintsSuite extends FunSuite:
     val layout = SignatureLayout
       .create(
         name = "Constrained",
-        fields = Vector(
-          FieldSpec(name = "question", role = FieldRole.Input),
+        inputFields = Vector(FieldSpec(name = "question")),
+        outputFields = Vector(
           FieldSpec(
             name        = "score",
-            role        = FieldRole.Output,
             typeRef     = TypeRef.int,
             constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
           )
@@ -80,10 +77,8 @@ class FieldConstraintsSuite extends FunSuite:
     val layout = SignatureLayout
       .create(
         name = "Plain",
-        fields = Vector(
-          FieldSpec(name = "question", role = FieldRole.Input),
-          FieldSpec(name = "answer", role = FieldRole.Output)
-        )
+        inputFields = Vector(FieldSpec(name = "question")),
+        outputFields = Vector(FieldSpec(name = "answer"))
       )
       .toOption
       .get

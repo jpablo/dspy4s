@@ -49,7 +49,7 @@ L2 idempotent-by-name   prependOutput(f) ∘ prependOutput(f) = prependOutput(f)
 L3 cross-cohort comm.   appendInput(g) ∘ prependOutput(f) = prependOutput(f) ∘ appendInput(g)
 L4 replace absorbs/sets replaceOutputs(fs) ∘ prependOutput(g) = replaceOutputs(fs)
                         out(replaceOutputs(fs)(s)) = fs        in(replaceOutputs(fs)(s)) = in(s)
-L5 prepend effect       out(prependOutput(f)(s)) = if f.name ∈ names(out s) then out s else f +: out s
+L5 prepend effect       out(prependOutput(f)(s)) = if f.name ∈ names(s) then out s else f +: out s
 L6 instructions         withInstructions(a) ∘ withInstructions(b) = withInstructions(a)   (last write wins)
 ```
 
@@ -62,12 +62,10 @@ of the wrapped transform (not `==`), executed in `SignatureOpsLawSuite`. Within 
 idempotent by name but order-sensitive (two `prependOutput`s do not commute), which is the signature of an
 insertion-ordered, name-keyed map.
 
-**Carrier note (from the lawfulness review).** The laws quantify over role-correct fields, but `FieldSpec`
-itself carries no role restriction: a wrong-role field passed to a cohort op would land in the wrong cohort
-and silently violate L1. The ops now `require` the role (an `IllegalArgumentException` at the call site), so
-the lawful subset is enforced at the operation rather than assumed by the law suite's generators. A
-role-indexed `FieldSpec` would move the guard to compile time, but the ops are `private[dspy4s]` and the
-fail-fast check is proportionate to that internal surface.
+**Carrier note (from the lawfulness review).** `FieldSpec` is role-free metadata. Input/output role is represented
+exactly once by membership in `SignatureLayout.inputFields` or `outputFields`, so every cohort operation is total:
+`prependOutput(f)` makes `f` an output by construction and `appendInput(f)` makes it an input. There is no
+wrong-role field value to guard at runtime.
 
 **Design critique, resolved.** `SignatureLayout` used to enforce uniqueness with a runtime
 `require(distinct names)`. In ADD terms an invariant is a feature of the implementation, not the design:
@@ -75,11 +73,10 @@ the `require` is the tell that uniqueness should hold by construction. The first
 cohort as a `VectorMap[String, Field]`, but scoping found that a poor fit: field **order is semantically
 significant** (adapters render fields top-to-bottom; opening vs closing reasoning depends on it), whereas
 `VectorMap`'s equality is order-insensitive (it is a `Map`), so a `VectorMap` representation would give the
-wrong default equality. The chosen fix keeps `fields: Vector[FieldSpec]` (order-sensitive equality, the
-public read API, and serialization all preserved) and makes uniqueness closed by construction instead: the
-primary constructor is `private`, every field mutator routes through `withFields` which dedups by name, and
-`create` validates arbitrary input. The unique-name `require` is retired; no operation can throw on a
-duplicate and no public path can introduce one.
+wrong default equality. The chosen fix stores two order-sensitive vectors, `inputFields` and `outputFields`,
+and exposes `fields = inputFields ++ outputFields` as the canonical compatibility view. The primary constructor
+is private, cohort mutators dedup by name, and `create` validates arbitrary input across both cohorts. The
+unique-name `require` is retired; no operation can throw on a duplicate and no public path can introduce one.
 
 **Marks check.** Compositional, task-relevant, parsimonious (three combinators plus `withInstructions`;
 the mutators are implementation), orthogonal (input vs output cohorts), closed (the public combinators keep

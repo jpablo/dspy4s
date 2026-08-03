@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, FieldRole}
+import dspy4s.core.contracts.DspyError
 import dspy4s.typed.Shape
 import zio.blocks.schema.DynamicValue
 
@@ -36,10 +36,10 @@ object RecordCodec:
       scala.deriving.Mirror.ProductOf[A],
       scala.util.NotGiven[A =:= DynamicValue.Record]
   ): RecordCodec[A] =
-    fromShape(Shape.canonicalDerivedWithRole[A](FieldRole.Input))
+    fromShape(Shape.canonicalDerived[A])
 
   /** Decode named tuples through the same `SchemaTupleShape` path the `fromString` / `fromType` / `of[Spec]`
     * macros use for their input shapes, so codec-derived decoding coheres definitionally with those
     * signatures' own decode. */
   inline given fromNamedTupleSchema[A <: scala.NamedTuple.AnyNamedTuple]: RecordCodec[A] =
-    fromShape(Shape.SchemaTupleShape[A](FieldRole.Input, Shape.canonicalSchema[A]))
+    fromShape(Shape.SchemaTupleShape[A](Shape.canonicalSchema[A]))

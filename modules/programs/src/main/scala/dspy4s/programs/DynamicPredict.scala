@@ -15,7 +15,7 @@ import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
 
 /** The dynamic prediction module: the data-bag counterpart to statically typed [[Predict]]. Given a
-  * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (field names, roles, and wire types known only at
+  * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (input/output cohorts and wire types known only at
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
   * `Prediction[DynamicValue.Record]`. Its semantic output is the parsed value record; its `raw` field retains the
   * [[dspy4s.core.data.RawPrediction RawPrediction]] with completions and LM usage. The actual execution lives

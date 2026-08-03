@@ -89,7 +89,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   // ── Case-class API parity (Phase 2 surface, exercised end-to-end) ────────
 
-  test("case-class derived signature has expected field names and roles") {
+  test("case-class derived signature has expected field names and cohorts") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     assertEquals(sig.layout.inputFields.map(_.name), Vector("comment", "lang"))
     assertEquals(sig.layout.outputFields.map(_.name), Vector("toxic", "confidence"))
@@ -176,8 +176,12 @@ class Phase3SurfacesSuite extends FunSuite:
     assertEquals(fromBuilder.name, fromCases.name)
     assertEquals(fromBuilder.signatureString, fromCases.signatureString)
     assertEquals(
-      fromBuilder.fields.map(f => (f.name, f.role, f.typeRef.repr)),
-      fromCases.fields.map(f => (f.name, f.role, f.typeRef.repr))
+      fromBuilder.inputFields.map(f => (f.name, f.typeRef.repr)),
+      fromCases.inputFields.map(f => (f.name, f.typeRef.repr))
+    )
+    assertEquals(
+      fromBuilder.outputFields.map(f => (f.name, f.typeRef.repr)),
+      fromCases.outputFields.map(f => (f.name, f.typeRef.repr))
     )
   }
 

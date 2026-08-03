@@ -2,7 +2,7 @@ package dspy4s.optimize.propose
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldRole, FieldSpec, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
@@ -90,10 +90,8 @@ class GroundedProposerSuite extends FunSuite:
   private def taskLayout(name: String, instruction: String): SignatureLayout =
     SignatureLayout.of(
       name = name,
-      fields = Vector(
-        FieldSpec(name = "question", role = FieldRole.Input),
-        FieldSpec(name = "answer", role = FieldRole.Output)
-      ),
+      inputFields = Vector(FieldSpec(name = "question")),
+      outputFields = Vector(FieldSpec(name = "answer")),
       instructions = Some(instruction)
     )
 

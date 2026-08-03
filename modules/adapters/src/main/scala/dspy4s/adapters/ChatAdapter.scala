@@ -52,7 +52,7 @@ final case class ChatAdapter(
     val layout = invocation.layout
     // A `tool_calls`-typed output field is filled from the provider's structured tool_calls, never asked for as
     // text, so it is excluded from the rendered prompt. No-op for ordinary signatures (byte-identical output).
-    val renderLayout = layout.withFields(layout.fields.filterNot(NativeFunctionCalling.isToolCallsField))
+    val renderLayout = layout.withOutputFields(layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField))
 
     val systemMessage = Message(
       role = MessageRole.System,

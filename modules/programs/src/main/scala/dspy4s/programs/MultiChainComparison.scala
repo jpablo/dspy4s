@@ -3,7 +3,6 @@ package dspy4s.programs
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -82,7 +81,6 @@ final case class MultiChainComparison[I, O](
     (1 to m).toVector.map { idx =>
       FieldSpec(
         name        = s"reasoning_attempt_$idx",
-        role        = FieldRole.Input,
         description = Some(attemptDescription),
         prefix      = Some(s"Student Attempt #$idx:")
       )
@@ -90,7 +88,6 @@ final case class MultiChainComparison[I, O](
 
   private val rationaleField: FieldSpec = FieldSpec(
     name        = MultiChainComparison.rationaleName,
-    role        = FieldRole.Output,
     description = Some(rationaleDescription),
     prefix      = Some(rationalePrefix)
   )

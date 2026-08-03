@@ -1,7 +1,6 @@
 package dspy4s.core.signatures
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
@@ -18,23 +17,23 @@ final class SignatureParser:
       else
         val Array(inputSegment, outputSegment) = trimmed.split("->", 2).map(_.trim)
         for
-          inputs <- parseSegment(inputSegment, FieldRole.Input)
-          outputs <- parseSegment(outputSegment, FieldRole.Output)
-          signature <- SignatureLayout.create(name = name, fields = inputs ++ outputs)
+          inputs <- parseSegment(inputSegment)
+          outputs <- parseSegment(outputSegment)
+          signature <- SignatureLayout.create(name = name, inputFields = inputs, outputFields = outputs)
         yield signature
 
-  private def parseSegment(segment: String, role: FieldRole): Either[DspyError, Vector[FieldSpec]] =
+  private def parseSegment(segment: String): Either[DspyError, Vector[FieldSpec]] =
     if segment.isEmpty then Right(Vector.empty)
     else
       val tokens = segment.split(",").map(_.trim).filter(_.nonEmpty).toVector
       tokens.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, token) =>
         for
           fields <- acc
-          field <- parseField(token, role)
+          field <- parseField(token)
         yield fields :+ field
       }
 
-  private def parseField(token: String, role: FieldRole): Either[DspyError, FieldSpec] =
+  private def parseField(token: String): Either[DspyError, FieldSpec] =
     val parts = token.split(":", 2).map(_.trim)
     val fieldName = parts(0)
     if !FieldSpec.validateName(fieldName) then
@@ -43,4 +42,4 @@ final class SignatureParser:
       val typeRef =
         if parts.length == 1 || parts(1).isEmpty then TypeRef.string
         else TypeRef.fromToken(parts(1))
-      Right(FieldSpec(name = fieldName, role = role, typeRef = typeRef))
+      Right(FieldSpec(name = fieldName, typeRef = typeRef))

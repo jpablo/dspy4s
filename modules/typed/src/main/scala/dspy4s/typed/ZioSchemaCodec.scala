@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{
-  DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError, TypeRef, ValidationError
+  DspyError, DynamicValues, FieldSpec, NotFoundError, TypeRef, ValidationError
 }
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, Schema}
@@ -126,13 +126,12 @@ private[typed] object ZioSchemaCodec:
     val noSign = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
     noSign.filter(_ != ',')
 
-  /** Walk a `Reflect.Record` and produce the FieldSpec list with role applied. */
-  def fieldSpecsFromReflect(reflect: Reflect[?, ?], role: FieldRole): Vector[FieldSpec] = reflect match
+  /** Walk a `Reflect.Record` and produce its role-free field metadata. */
+  def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] = reflect match
     case rec: Reflect.Record[?, ?] =>
       rec.fields.toVector.map(term =>
         FieldSpec(
           name       = term.name,
-          role       = role,
           typeRef    = typeRefFor(term.value),
           enumValues = enumValuesOf(term.value)
         )
@@ -206,9 +205,9 @@ private[typed] object ZioSchemaCodec:
   /** Build a `Shape[A]` from a zio-blocks `Schema[A]`. Encode goes through `Schema.toDynamicValue` directly;
     * decode normalizes the input record against the target Reflect (so LM-shaped string primitives become the
     * right primitive types) and then delegates to `Schema.fromDynamicValue`. */
-  def derivedFromZioSchema[A](role: FieldRole)(using schema: Schema[A]): Shape[A] =
+  def derivedFromZioSchema[A](using schema: Schema[A]): Shape[A] =
     val rootReflect = schema.reflect
-    val specs       = fieldSpecsFromReflect(rootReflect, role)
+    val specs       = fieldSpecsFromReflect(rootReflect)
     // Option-typed fields are not required on the wire: an LM that omits the key entirely means None, the
     // same as an explicit null/"none". Collected once so decode can exempt them from the missing-field check.
     val optionalFieldNames: Set[String] = rootReflect match

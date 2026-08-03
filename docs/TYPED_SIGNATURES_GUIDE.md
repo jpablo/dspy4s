@@ -422,9 +422,8 @@ When you need to drop into the erased world (passing a signature to
 something that takes `SignatureLayout`), use `sig.layout`. When you
 need the typed value back, that's what `Prediction.output` is for.
 
-Note that `SignatureLayout`'s field-mutation helpers (`append`,
-`prepend`, `insert`, `delete`, `withFields`, `withUpdatedField*`,
-`updateField`) are `private[dspy4s]` — only composite programs like
+Note that `SignatureLayout`'s cohort-mutation helpers (`withInputFields` and
+`withOutputFields`) are `private[dspy4s]` — only composite programs like
 `CodeAct` and `MultiChainComparison` use them. User code stays on
 the typed surface.
 

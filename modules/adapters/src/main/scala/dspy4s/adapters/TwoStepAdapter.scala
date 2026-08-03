@@ -8,7 +8,6 @@ import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
@@ -75,12 +74,12 @@ final case class TwoStepAdapter(
     val inputName = Iterator.iterate("text")("_" + _).dropWhile(reserved.contains).next()
     val textInput = FieldSpec(
       name        = inputName,
-      role        = FieldRole.Input,
       description = Some("The text from which to extract the structured output fields")
     )
     SignatureLayout.create(
       name         = s"${layout.name}Extractor",
-      fields       = textInput +: layout.outputFields,
+      inputFields  = Vector(textInput),
+      outputFields = layout.outputFields,
       instructions = Some("Extract the structured output fields from the provided text.")
     )
 

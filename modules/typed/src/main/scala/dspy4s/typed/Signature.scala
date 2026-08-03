@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{DspyError, FieldRole, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, SignatureLayout, TypeRef}
 import zio.blocks.schema.DynamicValue
 
 /** A signature with compile-time knowledge of its input (`I`) and output
@@ -46,8 +46,8 @@ final case class Signature[I, O](
     * Needed because the typed derivation maps field types structurally (a `Vector[ToolCall]` becomes
     * `TypeRef.list`) and `zio-blocks` `Reflect` does not expose a type name to auto-detect the tool-calls type. */
   def markToolCalls(fieldName: String): Signature[I, O] =
-    copy(layout = layout.withFields(layout.fields.map { field =>
-      if field.role == FieldRole.Output && field.name == fieldName then field.copy(typeRef = TypeRef.toolCalls)
+    copy(layout = layout.withOutputFields(layout.outputFields.map { field =>
+      if field.name == fieldName then field.copy(typeRef = TypeRef.toolCalls)
       else field
     }))
 
@@ -71,13 +71,13 @@ object Signature:
       mi: scala.deriving.Mirror.ProductOf[I],
       mo: scala.deriving.Mirror.ProductOf[O]
   ): Signature[I, O] =
-    val inShape  = Shape.canonicalDerivedWithRole[I](FieldRole.Input)
-    val outShape = Shape.canonicalDerivedWithRole[O](FieldRole.Output)
-    val fields   = inShape.fieldSpecs ++ outShape.fieldSpecs
+    val inShape  = Shape.canonicalDerived[I]
+    val outShape = Shape.canonicalDerived[O]
     val sig = SignatureLayout
       .create(
         name = name,
-        fields = fields,
+        inputFields = inShape.fieldSpecs,
+        outputFields = outShape.fieldSpecs,
         instructions = Option(instructions).filter(_.nonEmpty)
       )
       .fold(

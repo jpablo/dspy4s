@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, FieldRole}
+import dspy4s.core.contracts.DspyError
 import dspy4s.typed.Shape
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -66,4 +66,4 @@ object RecordObject:
 
   /** Mint a fresh input object from custom product-schema semantics. */
   def fromSchema[A <: Product](schema: Schema[A]): RecordObject[A] =
-    fromShape(Shape.derivedWithRole[A](FieldRole.Input)(using schema))
+    fromShape(Shape.derived[A](using schema))

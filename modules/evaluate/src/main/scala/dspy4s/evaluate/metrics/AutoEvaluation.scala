@@ -4,7 +4,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -48,11 +47,11 @@ object AutoEvaluation:
     val r = math.max(0.0, math.min(1.0, recall))
     if p + r == 0.0 then 0.0 else 2.0 * (p * r) / (p + r)
 
-  private[metrics] def input(name: String): FieldSpec  = FieldSpec(name = name, role = FieldRole.Input)
+  private[metrics] def input(name: String): FieldSpec = FieldSpec(name = name)
   private[metrics] def output(name: String, desc: String): FieldSpec =
-    FieldSpec(name = name, role = FieldRole.Output, typeRef = TypeRef.double, description = Some(desc))
+    FieldSpec(name = name, typeRef = TypeRef.double, description = Some(desc))
   private[metrics] def textOutput(name: String, desc: String): FieldSpec =
-    FieldSpec(name = name, role = FieldRole.Output, typeRef = TypeRef.string, description = Some(desc))
+    FieldSpec(name = name, typeRef = TypeRef.string, description = Some(desc))
 
   /** Build the `reasoning`-augmented judge predictor for a layout (the analogue of Python's
     * `ChainOfThought(signature)`).
@@ -125,7 +124,12 @@ final case class SemanticF1(
       AutoEvaluation.output("precision", SemanticF1.precisionDesc)
     )
     val instructions = if decompositional then SemanticF1.decompositionalInstructions else SemanticF1.baseInstructions
-    SignatureLayout.of(name = "SemanticRecallPrecision", fields = inputs ++ outputs, instructions = Some(instructions))
+    SignatureLayout.of(
+      name = "SemanticRecallPrecision",
+      inputFields = inputs,
+      outputFields = outputs,
+      instructions = Some(instructions)
+    )
 
   // Built once per metric instance — the judge layout never changes between score() calls.
   private val judgePredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(layout)
@@ -176,10 +180,12 @@ final case class CompleteAndGrounded(
   private val completenessLayout: SignatureLayout =
     SignatureLayout.of(
       name = "AnswerCompleteness",
-      fields = Vector(
+      inputFields = Vector(
         AutoEvaluation.input("question"),
         AutoEvaluation.input("ground_truth"),
-        AutoEvaluation.input("system_response"),
+        AutoEvaluation.input("system_response")
+      ),
+      outputFields = Vector(
         AutoEvaluation.textOutput("ground_truth_key_ideas", "enumeration of key ideas in the ground truth"),
         AutoEvaluation.textOutput("system_response_key_ideas", "enumeration of key ideas in the system response"),
         AutoEvaluation.textOutput("discussion", "discussion of the overlap between ground truth and system response"),
@@ -191,10 +197,12 @@ final case class CompleteAndGrounded(
   private val groundednessLayout: SignatureLayout =
     SignatureLayout.of(
       name = "AnswerGroundedness",
-      fields = Vector(
+      inputFields = Vector(
         AutoEvaluation.input("question"),
         AutoEvaluation.input("retrieved_context"),
-        AutoEvaluation.input("system_response"),
+        AutoEvaluation.input("system_response")
+      ),
+      outputFields = Vector(
         AutoEvaluation.textOutput(
           "system_response_claims",
           "enumeration of non-trivial or check-worthy claims in the system response"

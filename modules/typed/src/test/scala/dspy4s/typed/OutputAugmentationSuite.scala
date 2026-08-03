@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.typed.OutputAugmentation.{PrependField, WithField}
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldRole, FieldSpec, NotFoundError, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError, ValidationError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import scala.NamedTuple
@@ -55,7 +55,7 @@ class OutputAugmentationSuite extends FunSuite:
 
   // A minimal named-tuple Shape that decodes `{ answer }` into `(answer: String)`.
   private def answerShape: Shape[(answer: String)] = new Shape[(answer: String)]:
-    val fieldSpecs: Vector[FieldSpec] = Vector(FieldSpec("answer", FieldRole.Output))
+    val fieldSpecs: Vector[FieldSpec] = Vector(FieldSpec("answer"))
     def encode(value: (answer: String)): DynamicValue.Record = rec("answer" -> str(value.answer))
     def decode(raw: DynamicValue.Record): Either[DspyError, (answer: String)] =
       DynamicValues.requireString(raw, "answer", "test").map(a => (answer = a))

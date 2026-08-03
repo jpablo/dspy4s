@@ -8,7 +8,6 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.FieldRole
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -191,10 +190,9 @@ object Refine:
         case Some(advice) =>
           val hintField = FieldSpec(
             name        = "hint_",
-            role        = FieldRole.Input,
             description = Some("A hint to the module from an earlier run")
           )
-          val layoutWithHint = invocation.layout.append(hintField)
+          val layoutWithHint = invocation.layout.withInputFields(invocation.layout.inputFields :+ hintField)
           val inputsWithHint = invocation.inputs.copy(
             values    = invocation.inputs.values.updated("hint_", DynamicValues.fromAny(advice)),
             inputKeys = invocation.inputs.inputKeys + "hint_"
@@ -214,45 +212,39 @@ object Refine:
   private[programs] val offerFeedbackLayout: SignatureLayout =
     SignatureLayout.create(
       name = "OfferFeedback",
-      fields = Vector(
+      inputFields = Vector(
         FieldSpec(
           "program_inputs",
-          FieldRole.Input,
           description = Some("The inputs to the program that we are analyzing")
         ),
         FieldSpec(
           "program_trajectory",
-          FieldRole.Input,
           description = Some("The trajectory of the program's execution, showing each module's I/O")
         ),
         FieldSpec(
           "program_outputs",
-          FieldRole.Input,
           description = Some("The outputs of the program that we are analyzing")
         ),
         FieldSpec(
           "reward_value",
-          FieldRole.Input,
           description = Some("The reward value assigned to the program's outputs")
         ),
         FieldSpec(
           "target_threshold",
-          FieldRole.Input,
           description = Some("The target threshold for the reward function")
         ),
         FieldSpec(
           "module_names",
-          FieldRole.Input,
           description = Some("The names of the modules in the program, for which we seek advice")
-        ),
+        )
+      ),
+      outputFields = Vector(
         FieldSpec(
           "discussion",
-          FieldRole.Output,
           description = Some("Discussing blame of where each module went wrong, if it did")
         ),
         FieldSpec(
           "advice",
-          FieldRole.Output,
           description = Some(
           "A JSON object mapping each module name (from module_names) to concrete, actionable advice for that " +
             "module: the specific scenarios in which it made mistakes and what it should do differently on the " +
@@ -309,7 +301,7 @@ object Refine:
     Signature(
       name        = "OfferFeedback",
       layout      = offerFeedbackLayout,
-      inputShape  = Shape.derivedWithRole[OfferFeedbackInputs](FieldRole.Input),
+      inputShape  = Shape.derived[OfferFeedbackInputs],
       outputShape = offerFeedbackOutputShape
     )
 

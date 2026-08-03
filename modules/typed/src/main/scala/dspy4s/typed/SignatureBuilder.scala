@@ -1,8 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.contracts.{
-  FieldRole, FieldSpec, SignatureLayout
-}
+import dspy4s.core.contracts.{FieldSpec, SignatureLayout}
 import zio.blocks.schema.Schema
 
 /** Fluent, type-driven builder for runtime `SignatureLayout` values.
@@ -31,12 +29,12 @@ final class SignatureBuilder private[typed] (
   /** Append an input field typed `T`. Order of `.input` calls becomes the
     * input-field order in the resulting `SignatureLayout`. */
   def input[T](name: String)(using Schema[T]): SignatureBuilder =
-    copy(inputs = inputs :+ fieldSpec(name, FieldRole.Input))
+    copy(inputs = inputs :+ fieldSpec(name))
 
   /** Append an output field typed `T`. Order of `.output` calls becomes the
     * output-field order in the resulting `SignatureLayout`. */
   def output[T](name: String)(using Schema[T]): SignatureBuilder =
-    copy(outputs = outputs :+ fieldSpec(name, FieldRole.Output))
+    copy(outputs = outputs :+ fieldSpec(name))
 
   /** Replace the signature-level instructions. Empty strings become `None`. */
   def instructions(text: String): SignatureBuilder =
@@ -55,7 +53,8 @@ final class SignatureBuilder private[typed] (
     SignatureLayout
       .create(
         name         = sigName,
-        fields       = inputs ++ outputs,
+        inputFields  = inputs,
+        outputFields = outputs,
         instructions = instructionsText
       )
       .fold(
@@ -63,10 +62,9 @@ final class SignatureBuilder private[typed] (
         identity
       )
 
-  private def fieldSpec[T](name: String, role: FieldRole)(using Schema[T]): FieldSpec =
+  private def fieldSpec[T](name: String)(using Schema[T]): FieldSpec =
     FieldSpec(
       name    = name,
-      role    = role,
       typeRef = ZioSchemaCodec.typeRefForSchema[T]
     )
 
