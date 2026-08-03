@@ -8,6 +8,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.SignatureOps.*
+import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
@@ -71,6 +72,24 @@ final case class ReAct[I, O](
   /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */
   private val allTools: Vector[ToolFunction] = tools :+ ReAct.finishTool(baseLayout)
   private val toolsByName: Map[String, ToolFunction] = allTools.map(tool => tool.name -> tool).toMap
+
+  /** Interpreter for ReAct's small action language: one named tool call with a record of arguments. Tool selection and
+    * invocation failures are recoverable observations, so the LM can react to them on its next turn.
+    */
+  private val actionInterpreter: ActionInterpreter[ToolCallRequest, String] =
+    new ActionInterpreter[ToolCallRequest, String]:
+      override def execute(request: ToolCallRequest)(using
+          RuntimeContext
+      ): Either[DspyError, ActionOutcome[String]] =
+        if request.name.isEmpty then Right(ActionOutcome.Failed("No tool was selected."))
+        else if !toolsByName.contains(request.name) then
+          Right(ActionOutcome.Failed(s"Execution error: tool `${request.name}` does not exist."))
+        else
+          ToolExecutor.invoke(request, allTools).map { callResult =>
+            callResult.result match
+              case Right(value) => ActionOutcome.Succeeded(DynamicValues.renderText(value))
+              case Left(error)  => ActionOutcome.Failed(s"Execution error in `${request.name}`: ${error.message}")
+          }
 
   /** Per-iteration signature: base inputs + `trajectory` -> `next_thought` / `next_tool_name` / `next_tool_args`. The
     * base output fields are intentionally dropped here — they are produced by the extractor, not the loop.
@@ -167,18 +186,25 @@ final case class ReAct[I, O](
       RuntimeContext
   ): (Vector[ReAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[ReAct.TrajectoryEntry]] =
     (view, iteration) =>
-      reactWithTruncation(call, view, remaining = 3).map {
+      reactWithTruncation(call, view, remaining = 3).flatMap {
         case (None, truncated) =>
           // Persistent context-window overflow: upstream logs a warning and BREAKS the loop — the extractor
           // still runs over whatever (truncated) trajectory remains, rather than failing the call.
-          AgentLoop.Step.Done(truncated)
+          Right(AgentLoop.Step.Done(truncated))
         case (Some(step), used) =>
-          val toolName    = step.nextToolName.trim
-          val observation = runTool(toolName, step.nextToolArgs)
-          val entry       = ReAct.TrajectoryEntry(iteration, step.nextThought, toolName, step.nextToolArgs, observation)
-          // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
-          if toolName == ReAct.FinishToolName || toolName.isEmpty then AgentLoop.Step.Done(used :+ entry)
-          else AgentLoop.Step.Continue(used :+ entry)
+          val toolName = step.nextToolName.trim
+          actionInterpreter.execute(ToolCallRequest(toolName, step.nextToolArgs)).map { outcome =>
+            val entry = ReAct.TrajectoryEntry(
+              iteration,
+              step.nextThought,
+              toolName,
+              step.nextToolArgs,
+              outcome.observation
+            )
+            // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
+            if toolName == ReAct.FinishToolName || toolName.isEmpty then AgentLoop.Step.Done(used :+ entry)
+            else AgentLoop.Step.Continue(used :+ entry)
+          }
       }
 
   /** Run the react predict over the trajectory, truncating the OLDEST step and retrying (up to `remaining` attempts
@@ -200,20 +226,6 @@ final case class ReAct[I, O](
       case Right(prediction)                   => Right((Some(prediction.output), used))
       case Left(_: ContextWindowExceededError) => Right((None, used))
       case Left(error)                         => Left(error)
-
-  /** Execute the named tool and render its result as an observation. Tool problems never fail the program: an unknown
-    * tool or an invocation error becomes an error observation the LM sees on the next turn (as in Python).
-    */
-  private def runTool(name: String, args: DynamicValue.Record)(using RuntimeContext): String =
-    if name.isEmpty then "No tool was selected."
-    else if !toolsByName.contains(name) then s"Execution error: tool `$name` does not exist."
-    else
-      ToolExecutor.invoke(ToolCallRequest(name, args), allTools) match
-        case Right(callResult) =>
-          callResult.result match
-            case Right(value) => DynamicValues.renderText(value)
-            case Left(error)  => s"Execution error in `$name`: ${error.message}"
-        case Left(error) => s"Execution error in `$name`: ${error.message}"
 
 object ReAct:
   val FinishToolName: String = "finish"

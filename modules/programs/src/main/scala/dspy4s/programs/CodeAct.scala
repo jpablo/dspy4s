@@ -9,6 +9,7 @@ import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.SignatureOps.*
+import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
@@ -86,6 +87,21 @@ final case class CodeAct[I, O](
 
   override val moduleName: String = "code_act"
   private val baseLayout: SignatureLayout = baseSignature.layout
+
+  /** Interpreter for CodeAct's action language. Python exceptions and runtime-interpreter failures become recoverable
+    * observations; other infrastructure errors remain fatal and propagate as `Left`.
+    */
+  private val actionInterpreter: ActionInterpreter[String, String] =
+    new ActionInterpreter[String, String]:
+      override def execute(code: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
+        interpreter.execute(code) match
+          case Right(result) if result.exitCode == 0 =>
+            Right(ActionOutcome.Succeeded(result.stdout.stripTrailing))
+          case Right(result) =>
+            Right(ActionOutcome.Failed(s"Failed to execute the generated code: ${result.stderr.stripTrailing}"))
+          case Left(err: RuntimeError) =>
+            Right(ActionOutcome.Failed(s"Interpreter failure (${err.component}): ${err.message}"))
+          case Left(other) => Left(other)
 
   /** SignatureLayout for the per-iteration code generator. Mirrors Python: inputs: baseSignature.inputs ∪ {trajectory}
     * outputs: {generated_code, finished}
@@ -211,32 +227,15 @@ final case class CodeAct[I, O](
             )
             Right(AgentLoop.Step.Continue(trajectory :+ entry))
           case Right(code) =>
-            interpreter.execute(code) match
-              case Right(result) if result.exitCode == 0 =>
-                val entry = CodeAct.TrajectoryEntry(
-                  iteration,
-                  code = code,
-                  observation = result.stdout.stripTrailing,
-                  isError = false
-                )
-                Right(stepFrom(finished, trajectory :+ entry))
-              case Right(result) =>
-                val entry = CodeAct.TrajectoryEntry(
-                  iteration,
-                  code = code,
-                  observation = s"Failed to execute the generated code: ${result.stderr.stripTrailing}",
-                  isError = true
-                )
-                Right(stepFrom(finished, trajectory :+ entry))
-              case Left(err: RuntimeError) =>
-                val entry = CodeAct.TrajectoryEntry(
-                  iteration,
-                  code = code,
-                  observation = s"Interpreter failure (${err.component}): ${err.message}",
-                  isError = true
-                )
-                Right(stepFrom(finished, trajectory :+ entry))
-              case Left(other) => Left(other)
+            actionInterpreter.execute(code).map { outcome =>
+              val entry = CodeAct.TrajectoryEntry(
+                iteration,
+                code = code,
+                observation = outcome.observation,
+                isError = outcome.isError
+              )
+              stepFrom(finished, trajectory :+ entry)
+            }
       }
 
   /** A successfully-executed (or error-but-recorded) iteration: stop when the LM declared `finished`, else keep
