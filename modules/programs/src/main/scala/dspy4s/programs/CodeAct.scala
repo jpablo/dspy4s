@@ -13,7 +13,7 @@ import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent
-import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionPreparation, StepGeneration}
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
 import zio.blocks.chunk.Chunk
@@ -216,7 +216,17 @@ final case class CodeAct[I, O](
       case Left(parseError) =>
         ActionPreparation.Rejected(s"Failed to parse the generated code: $parseError")
       case Right(code) =>
-        ActionPreparation.Ready(code, stopAfter = step.finished)
+        ActionPreparation.Ready(code)
+
+  /** Preserve upstream behavior: a successfully parsed action may finish the loop even when interpretation reports a
+    * recoverable failure. The shared transition records the outcome before applying the model's `finished` decision.
+    */
+  override protected def decide(
+      step: CodeAct.CodeStep,
+      @annotation.unused action: String,
+      @annotation.unused outcome: ActionOutcome[String]
+  ): ActionDecision =
+    if step.finished then ActionDecision.Stop else ActionDecision.Continue
 
   override protected def recordStep(
       iteration: Int,

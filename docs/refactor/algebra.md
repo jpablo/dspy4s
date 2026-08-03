@@ -205,7 +205,7 @@ be required before monoidal or Markov coherence becomes meaningful.
 - ~~`ReAct` / `CodeAct` / `RLM` are one `loop` written three times.~~ **Resolved (step 6.3).** All three (and
   PoT's `retryUntil`) run on the shared `AgentLoop.run` bounded-iteration primitive; ReAct/CodeAct also share
   `TrajectoryAgent.runAndExtract` (loop + extractor) and the final `InterpretedTrajectoryAgent` transition
-  (generate → prepare → interpret → record). Code-truth: the universal `env.step`/`classify`/`render`
+  (generate → prepare → interpret → record → decide). Code-truth: the universal `env.step`/`classify`/`render`
   decomposition was rejected; associated action/observation types preserve each language. `ProgramOfThought` is
   `retryUntil` (regenerate-on-error), not the trajectory agent and not `feedback`.
 

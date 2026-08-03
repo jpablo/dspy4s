@@ -127,14 +127,15 @@ also share [`runtime/InterpretedTrajectoryAgent.scala`](runtime/InterpretedTraje
 is:
 
 ```text
-generate model step → prepare action → interpret action → record outcome → continue or stop
+generate model step → prepare action → interpret action → record outcome → decide → continue or stop
 ```
 
 ReAct supplies the typed meanings: `ReactStep`, `ToolCallRequest`, a `ToolFunction`-backed `ActionInterpreter`, and
 `TrajectoryEntry`. The shared trait guarantees that a halted generation does not invoke or record an action, a rejected
 preparation records one failed observation without invocation, a ready action executes and records exactly once, and a
-fatal interpreter error appends nothing. These branches are executable in `InterpretedTrajectoryAgentLawSuite` rather
-than repeated in every concrete agent suite.
+fatal interpreter error appends nothing. For a ready action, ReAct's decision runs after recording and stops when the
+prepared tool name is `finish` or empty, regardless of whether that invocation succeeded. These branches are executable
+in `InterpretedTrajectoryAgentLawSuite` rather than repeated in every concrete agent suite.
 
 ## Tools and the synthetic `finish` tool
 

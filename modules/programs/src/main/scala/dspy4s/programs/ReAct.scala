@@ -14,7 +14,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent
-import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionPreparation, StepGeneration}
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.OutputAugmentation.PrependField
@@ -188,15 +188,21 @@ final case class ReAct[I, O](
       case (None, used)       => StepGeneration.Halted(used)
     }
 
-  /** Lower ReAct's typed model step to its small tool-call language. `finish` and a missing tool name both execute once
-    * and then end the loop, preserving the existing final trajectory entry.
-    */
+  /** Lower ReAct's typed model step to its small tool-call language. */
   override protected def prepareAction(step: ReAct.ReactStep): ActionPreparation[ToolCallRequest, String] =
     val toolName = step.nextToolName.trim
-    ActionPreparation.Ready(
-      ToolCallRequest(toolName, step.nextToolArgs),
-      stopAfter = toolName == ReAct.FinishToolName || toolName.isEmpty
-    )
+    ActionPreparation.Ready(ToolCallRequest(toolName, step.nextToolArgs))
+
+  /** `finish` and a missing tool name both execute once and then end the loop, regardless of their interpreted outcome.
+    * The shared transition records that outcome before applying this decision.
+    */
+  override protected def decide(
+      @annotation.unused step: ReAct.ReactStep,
+      action: ToolCallRequest,
+      @annotation.unused outcome: ActionOutcome[String]
+  ): ActionDecision =
+    if action.name == ReAct.FinishToolName || action.name.isEmpty then ActionDecision.Stop
+    else ActionDecision.Continue
 
   override protected def recordStep(
       iteration: Int,

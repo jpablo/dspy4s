@@ -107,9 +107,11 @@ TrajectoryAgent.runAndExtract[S, E](...)(step)(extract) : M[(E, String)]      //
 //   the extractor (OutputAugmentation.prependedStringShape) rather than in the module. (= ReAct, CodeAct)
 
 InterpretedTrajectoryAgent.trajectoryStep                                  // ReAct/CodeAct action transition [IMPLEMENTED]
-//   generate model step -> prepare action -> ActionInterpreter.execute -> record outcome -> Continue/Done.
+//   generate model step -> prepare action -> ActionInterpreter.execute -> record outcome -> decide -> Continue/Done.
 //   Associated ModelStep / Action / Observation types preserve the two action languages instead of forcing one
-//   universal agent vocabulary. The transition is final; ReAct and CodeAct supply only the typed phase operations.
+//   universal agent vocabulary. decide receives all three values after recording, so terminal behavior may depend on
+//   either the generated step/action or its interpreted outcome. The transition is final; ReAct and CodeAct supply only
+//   the typed phase operations.
 
 // retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
 //   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
@@ -145,8 +147,8 @@ TrajectoryAgent   Done or exhaustion runs extraction exactly once
 
 Interpreted step  Halted interprets nothing and records nothing
                   Rejected interprets nothing and records one failed outcome
-                  Ready interprets exactly once and records exactly one outcome
-                  stopAfter is applied after recording; interpreter Left appends nothing
+                  Ready interprets, records, and decides exactly once
+                  decide is applied after recording; interpreter Left neither appends nor decides
 
 OptimizableTraversal        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
                   read(c) = inspect(c).map(_.parameters)                    // parameter projection
@@ -373,10 +375,11 @@ So 6.3 extracted the bounded `Continue | Done | exhausted` iteration
 ReAct/CodeAct loop+extract postlude ([`TrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/TrajectoryAgent.scala)).
 A later refinement extracted one more genuine common layer for those two agents:
 [`InterpretedTrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgent.scala)
-owns generate → prepare → interpret → record, while associated types and protected phase operations retain each
-language's domain semantics. RLM and PoT remain directly on `AgentLoop` because their terminal-result shapes still do
-not fit trajectory-then-extract. Same discipline as the PoT and `parallel` corrections: extract the real shared core,
-do not force a universal vocabulary the code rejects.
+owns generate → prepare → interpret → record → decide, while associated types and protected phase operations retain
+each language's domain semantics. The post-outcome decision can depend on the generated step, prepared action, and
+interpreted result without allowing a subclass to reorder or omit recording. RLM and PoT remain directly on
+`AgentLoop` because their terminal-result shapes still do not fit trajectory-then-extract. Same discipline as the PoT
+and `parallel` corrections: extract the real shared core, do not force a universal vocabulary the code rejects.
 
 ## Resolved on paper vs deferred (fork 5)
 

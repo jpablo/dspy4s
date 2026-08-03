@@ -157,12 +157,13 @@ Two details are deliberate:
 The bounded recursion itself lives in `AgentLoop`, and `TrajectoryAgent` owns the final extraction. The intermediate
 transition is the same typed template used by ReAct: `InterpretedTrajectoryAgent` generates a `CodeStep`, lowers it to a
 code-string action (or a rejected parse), invokes `ActionInterpreter[String, String]`, and records one
-`TrajectoryEntry`. CodeAct supplies those typed operations; the shared final transition owns their ordering.
+`TrajectoryEntry`. Its post-outcome decision then reads `CodeStep.finished`. CodeAct supplies those typed operations;
+the shared final transition owns their ordering.
 
 This gives the branches explicit behavioral laws. Rejected code records one failed observation without calling the
-interpreter; ready code is interpreted and recorded exactly once; `finished` is checked only after recording; and a
-fatal interpreter `Left` appends nothing. `InterpretedTrajectoryAgentLawSuite` tests these guarantees independently of
-CodeAct's Python parsing and execution details.
+interpreter; ready code is interpreted, recorded, and decided exactly once; `finished` is checked only after recording;
+and a fatal interpreter `Left` neither appends nor decides. `InterpretedTrajectoryAgentLawSuite` tests these guarantees
+independently of CodeAct's Python parsing and execution details.
 
 ## How generated code is parsed
 

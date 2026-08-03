@@ -325,7 +325,7 @@ annotated with their current (post-grill, post-6.1) status.
 - **The agentic `loop`. DONE (6.3, commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
   `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
   ReAct/CodeAct/RLM all run on them. ReAct and CodeAct additionally share `InterpretedTrajectoryAgent`'s final
-  generate → prepare → interpret → record transition and the typed `ActionInterpreter` boundary. **Corrected:** the
+  generate → prepare → interpret → record → decide transition and the typed `ActionInterpreter` boundary. **Corrected:** the
   universal `env.step`/`classify`/`render` decomposition was NOT adopted (done-detection and terminal shapes still
   differ); associated types retain each action language, while RLM and PoT stay directly on `AgentLoop`.
   `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin these layers. The control
