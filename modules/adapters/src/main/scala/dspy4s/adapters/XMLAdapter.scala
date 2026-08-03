@@ -14,9 +14,6 @@ import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.MessageRole
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
 import scala.util.Try
@@ -39,24 +36,10 @@ final case class XMLAdapter(
       case None               => xmlInstruction
     val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
 
-    val demoMessages = invocation.demos.flatMap { demo =>
-      val userText = renderFields(invocation.layout.inputFields, demo.values)
-      val assistantXml = buildOutputXml(invocation.layout, demo.values)
-      Vector(
-        Message(role = MessageRole.User, text = Some(userText)),
-        Message(role = MessageRole.Assistant, text = Some(assistantXml))
-      )
-    }
-
-    val inputMessage = Message(
-      role = MessageRole.User,
-      text = Some(renderFields(invocation.layout.inputFields, invocation.inputs.values))
-    )
-
     Right(
       FormattedPrompt(
-        messages = Vector(Message(role = MessageRole.System, text = Some(systemText))) ++ demoMessages ++ Vector(
-          inputMessage
+        messages = AdapterTextSupport.fewShotMessages(invocation, systemText)(values =>
+          buildOutputXml(invocation.layout, values)
         )
       )
     )
@@ -76,19 +59,12 @@ final case class XMLAdapter(
         else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
 
   private def parseFields(layout: SignatureLayout, document: Elem, output: LmOutput): Either[DspyError, ParsedOutput] =
-    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
+    AdapterTextSupport.decodeOutputFields(layout) { field =>
       for
-        soFar <- acc
         raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
         coerced <- AdapterTextSupport.coerceText(field.typeRef, raw)
-      yield soFar :+ (field.name -> coerced)
-    }.map { entries =>
-      ParsedOutput(
-        values   = DynamicValue.Record(Chunk.from(entries)),
-        rawText  = Some(output.text),
-        metadata = Map("adapter" -> name)
-      )
-    }
+      yield coerced
+    }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
 
   private def buildOutputXml(layout: SignatureLayout, values: DynamicValue.Record): String =
     val body = layout.outputFields.flatMap { field =>
@@ -97,9 +73,6 @@ final case class XMLAdapter(
       }
     }.mkString
     s"<outputs>$body</outputs>"
-
-  private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: DynamicValue.Record): String =
-    AdapterTextSupport.renderFields(fields, values)
 
   private def extractXml(text: String): Either[DspyError, String] =
     val trimmed = text.trim

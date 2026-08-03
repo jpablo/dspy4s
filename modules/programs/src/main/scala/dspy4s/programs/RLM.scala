@@ -217,7 +217,7 @@ final case class RLM[I, O](
 
     val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ CodeAct.sandboxTools(tools)
     val outputFields =
-      baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, RLM.pythonTypeOf(f.typeRef)))
+      baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, f.typeRef.pythonTypeName))
     val interpreter  = interpreterFactory(sandboxTools, outputFields)
     try iterate(call, interpreter, inputVars, variablesMeta)
     finally interpreter.close()
@@ -653,15 +653,6 @@ object RLM:
   private def renderValue(value: DynamicValue): String = value match
     case DynamicValue.Primitive(_) => DynamicValues.renderText(value)
     case _                         => new String(dynamicJsonCodec.encode(value), StandardCharsets.UTF_8)
-
-  private def pythonTypeOf(typeRef: TypeRef): Option[String] = typeRef.repr match
-    case "string" => Some("str")
-    case "int"    => Some("int")
-    case "double" => Some("float")
-    case "bool"   => Some("bool")
-    case "list"   => Some("list")
-    case "json"   => Some("dict")
-    case _        => None
 
   /** Digit grouping like Python's `{:,}` (locale-independent). */
   private def groupDigits(n: Int): String =

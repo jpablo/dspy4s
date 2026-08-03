@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
+import dspy4s.adapters.internal.SingleUseAdapterStreamingState
 import dspy4s.core.contracts.FieldSpec
 
 import scala.collection.mutable
@@ -27,7 +27,7 @@ import scala.collection.mutable
   *     single output field, all received text is attributed to that
   *     field (matches the parser's single-output fallback).
   */
-final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterStreamingState:
+final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
 
   private val outputNames: Set[String] = outputFields.map(_.name).toSet
   private val singleFieldFallback: Option[FieldSpec] =
@@ -45,21 +45,14 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
   private val buffer = new StringBuilder
   private var currentField: Option[String] = None
   private var sawAnyMarker: Boolean = false
-  private var finished: Boolean = false
+  override protected def receiveOpen(textDelta: String): Vector[FieldChunk] =
+    buffer.append(textDelta)
+    drain(forceFlush = false)
 
-  override def receive(textDelta: String): Vector[FieldChunk] =
-    if finished || textDelta.isEmpty then Vector.empty
-    else
-      buffer.append(textDelta)
-      drain(forceFlush = false)
-
-  override def finish(): Vector[FieldChunk] =
-    if finished then Vector.empty
-    else
-      finished = true
-      val flushed = drain(forceFlush = true)
-      if flushed.isEmpty then Vector.empty
-      else flushed.init :+ flushed.last.copy(isLast = true)
+  override protected def finishOpen(): Vector[FieldChunk] =
+    val flushed = drain(forceFlush = true)
+    if flushed.isEmpty then Vector.empty
+    else flushed.init :+ flushed.last.copy(isLast = true)
 
   private def drain(forceFlush: Boolean): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]

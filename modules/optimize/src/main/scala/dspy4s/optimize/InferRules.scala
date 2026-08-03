@@ -91,11 +91,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
         (trainset.take(k), trainset.drop(k))
 
     if ps.read(student).isEmpty then
-      Right(OptimizationReport(
-        bestProgram = student,
-        candidates = Vector.empty,
-        metadata = Map("no_optimizable_leaves" -> true)
-      ))
+      Right(OptimizerSupport.noOptimizableLeavesReport(student))
     else
       // 2) Bootstrap few-shot demos first; the rule-augmented search starts from that program.
       val bootstrapConfig =

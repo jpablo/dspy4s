@@ -5,44 +5,10 @@ import dspy4s.typed.{Shape, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
+import MacroSignatureSupport.materialize
 import MacroTypeSupport.*
 
 private[typed] object FunctionMacro:
-
-  private def materialize[I : Type, O : Type](
-      sigNameExpr: Expr[String],
-      instructionsExpr: Expr[String],
-      errorName: String,
-      inputShapeExpr: Expr[Shape[I]],
-      outputShapeExpr: Expr[Shape[O]]
-  )(using Quotes): Expr[TypedSig[I, O]] =
-    val errorNameExpr = Expr(errorName)
-    '{
-      val name: String = ${ sigNameExpr }
-      // Shapes are schema-backed; their role-free `fieldSpecs` (names, wire typeRefs) come from the derived
-      // `Reflect`. The layout assigns them to the corresponding cohort.
-      val inputShape  = ${ inputShapeExpr }
-      val outputShape = ${ outputShapeExpr }
-      val sig = SignatureLayout
-        .create(
-          name         = name,
-          inputFields  = inputShape.fieldSpecs,
-          outputFields = outputShape.fieldSpecs,
-          instructions = Option(${ instructionsExpr }).filter(_.nonEmpty)
-        )
-        .fold(
-          err => throw new IllegalStateException(
-            s"Internal error materializing function signature '${${ errorNameExpr }}': ${err.message}"
-          ),
-          identity
-        )
-      TypedSig[I, O](
-        name        = name,
-        layout      = sig,
-        inputShape  = inputShape,
-        outputShape = outputShape
-      )
-    }
 
   /** Implementation of `Signature.from(method)`. The method itself is
     * never called; it is a declaration surface whose parameter names/types
@@ -115,9 +81,9 @@ private[typed] object FunctionMacro:
         outputShapeExpr: Expr[Shape[O]]
     ): Expr[TypedSig[I, O]] =
       materialize[I, O](
-        sigNameExpr = Expr(sigName),
+        nameExpr = Expr(sigName),
         instructionsExpr = Expr(""),
-        errorName = sigName,
+        errorContext = s"function signature '$sigName'",
         inputShapeExpr = inputShapeExpr,
         outputShapeExpr = outputShapeExpr
       )
@@ -282,9 +248,9 @@ private[typed] object FunctionMacro:
         outputShapeExpr: Expr[Shape[O]]
     ): Expr[TypedSig[I, O]] =
       materialize[I, O](
-        sigNameExpr = sigNameExpr,
+        nameExpr = sigNameExpr,
         instructionsExpr = instructions,
-        errorName = sigName,
+        errorContext = s"function signature '$sigName'",
         inputShapeExpr = '{ new Shape.SchemaTupleShape[I](Shape.canonicalSchema[I]) },
         outputShapeExpr = outputShapeExpr
       )
@@ -369,9 +335,9 @@ private[typed] object FunctionMacro:
     (namedTupleType(inputItems).asType, namedTupleType(outputItems).asType) match
       case ('[i], '[o]) =>
         materialize[i, o](
-          sigNameExpr      = Expr(layout.name),
+          nameExpr         = Expr(layout.name),
           instructionsExpr = instructions,
-          errorName        = layout.name,
+          errorContext     = s"function signature '${layout.name}'",
           inputShapeExpr   = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
           outputShapeExpr  = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
         )

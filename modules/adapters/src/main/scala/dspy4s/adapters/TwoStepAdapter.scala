@@ -16,9 +16,6 @@ import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
-import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.MessageRole
-import zio.blocks.schema.DynamicValue
 
 /** Two-stage adapter (port of Python dspy's `TwoStepAdapter`): the MAIN LM (resolved from the ambient
   * `RuntimeContext`, e.g. a reasoning model that struggles with structured output) is prompted in plain natural
@@ -36,17 +33,12 @@ final case class TwoStepAdapter(
 ) extends Adapter:
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout       = invocation.layout
-    val systemText   = taskDescription(layout)
-    val demoMessages = invocation.demos.flatMap { demo =>
-      Vector(
-        Message(role = MessageRole.User, text = Some(renderFields(layout.inputFields, demo.values))),
-        Message(role = MessageRole.Assistant, text = Some(renderFields(layout.outputFields, demo.values)))
-      )
-    }
-    val inputMessage = Message(role = MessageRole.User, text = Some(renderFields(layout.inputFields, invocation.inputs.values)))
+    val layout     = invocation.layout
+    val systemText = taskDescription(layout)
     Right(FormattedPrompt(
-      messages = Message(role = MessageRole.System, text = Some(systemText)) +: demoMessages :+ inputMessage
+      messages = AdapterTextSupport.fewShotMessages(invocation, systemText)(values =>
+        AdapterTextSupport.renderFields(layout.outputFields, values)
+      )
     ))
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
@@ -96,6 +88,3 @@ final case class TwoStepAdapter(
        |Answer in natural language; you do not need to follow any structured format. The following will be
        |extracted from your answer:
        |$outputs""".stripMargin
-
-  private def renderFields(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
-    AdapterTextSupport.renderFields(fields, values)

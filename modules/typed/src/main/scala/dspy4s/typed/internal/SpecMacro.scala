@@ -1,9 +1,9 @@
 package dspy4s.typed.internal
 
-import dspy4s.core.contracts.SignatureLayout
-import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig}
+import dspy4s.typed.{InputField, OutputField, Shape, Spec}
 import zio.blocks.schema.Schema
 import scala.quoted.*
+import MacroSignatureSupport.materialize
 import MacroTypeSupport.namedTupleType
 
 private[typed] object SpecMacro:
@@ -125,30 +125,12 @@ private[typed] object SpecMacro:
 
     (inputType.asType, outputType.asType) match
       case ('[i], '[o]) =>
-        '{
-          // Shapes are fully schema-backed; their role-free `fieldSpecs` (names, wire typeRefs) come from the
-          // derived `Reflect`. The layout assigns them to the corresponding cohort.
-          val inputShape  = new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i])
-          val outputShape = new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o])
-          val sig = SignatureLayout
-            .create(
-              name         = ${ sigNameExpr },
-              inputFields  = inputShape.fieldSpecs,
-              outputFields = outputShape.fieldSpecs,
-              instructions = Option(${ instructions }).filter(_.nonEmpty)
-            )
-            .fold(
-              err => throw new IllegalStateException(
-                s"Internal error materializing spec trait '${${ sigNameExpr }}': ${err.message}"
-              ),
-              identity
-            )
-          TypedSig[i, o](
-            name        = ${ sigNameExpr },
-            layout      = sig,
-            inputShape  = inputShape,
-            outputShape = outputShape
-          )
-        }
+        materialize[i, o](
+          nameExpr         = sigNameExpr,
+          instructionsExpr = instructions,
+          errorContext     = s"spec trait '$specName'",
+          inputShapeExpr   = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+          outputShapeExpr  = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
+        )
       case _ =>
         report.errorAndAbort(s"Internal error materializing spec trait '$specName'")

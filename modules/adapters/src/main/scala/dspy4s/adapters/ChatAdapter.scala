@@ -18,7 +18,6 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
 import scala.util.matching.Regex
@@ -99,28 +98,18 @@ final case class ChatAdapter(
         Map(textFields.head.name -> output.text.trim)
       else values
 
-    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
-      for
-        soFar <- acc
-        entry <-
-          if NativeFunctionCalling.isToolCallsField(field) then
-            Right(field.name -> NativeFunctionCalling.encodeToolCalls(output.toolCalls))
-          else
-            resolved.get(field.name) match
-              case Some(v) => coerce(field.typeRef, v).map(coerced => field.name -> coerced)
-              case None =>
-                // On a tool-call turn (tool_calls present) the text output fields can legitimately be absent; default
-                // them to Null rather than erroring (mirrors dspy's `setdefault(field, None)`). Otherwise it's a miss.
-                if output.toolCalls.nonEmpty then Right(field.name -> DynamicValue.Null)
-                else Left(AdapterErrors.missingField(field.name, Some(output.text)))
-      yield soFar :+ entry
-    }.map { entries =>
-      ParsedOutput(
-        values   = DynamicValue.Record(Chunk.from(entries)),
-        rawText  = Some(output.text),
-        metadata = Map("adapter" -> name)
-      )
-    }
+    AdapterTextSupport.decodeOutputFields(layout) { field =>
+      if NativeFunctionCalling.isToolCallsField(field) then
+        Right(NativeFunctionCalling.encodeToolCalls(output.toolCalls))
+      else
+        resolved.get(field.name) match
+          case Some(v) => coerce(field.typeRef, v)
+          case None =>
+            // On a tool-call turn (tool_calls present) the text output fields can legitimately be absent; default
+            // them to Null rather than erroring (mirrors dspy's `setdefault(field, None)`). Otherwise it's a miss.
+            if output.toolCalls.nonEmpty then Right(DynamicValue.Null)
+            else Left(AdapterErrors.missingField(field.name, Some(output.text)))
+    }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
 
   /** Walks the LM completion line by line, opening a new section every time a
     * line (after stripping) matches the `[[ ## name ## ]]` marker. Trailing
@@ -267,14 +256,7 @@ object ChatAdapter:
   /** Canonical type name to surface in the system prompt's field
     * description block. Maps dspy4s's internal `TypeRef.repr` to the
     * names users will recognise (and that match Python DSPy). */
-  def displayTypeName(t: TypeRef): String = t match
-    case TypeRef.string => "str"
-    case TypeRef.int    => "int"
-    case TypeRef.double => "float"
-    case TypeRef.bool   => "bool"
-    case TypeRef.json   => "dict"
-    case TypeRef.list   => "list"
-    case other          => other.repr
+  def displayTypeName(t: TypeRef): String = t.pythonTypeName.getOrElse(t.repr)
 
   /** Hint phrasing for the final-user-message reminder
     * ("Respond with `[[ ## answer ## ]]` (must be …)"). Returns `None`

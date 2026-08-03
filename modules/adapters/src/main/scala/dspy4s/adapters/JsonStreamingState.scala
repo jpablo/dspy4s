@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
+import dspy4s.adapters.internal.SingleUseAdapterStreamingState
 import dspy4s.core.contracts.FieldSpec
 
 import scala.collection.mutable
@@ -31,7 +31,7 @@ import scala.util.control.NonFatal
   * `\uXXXX` escapes, half-buffered keys, and mid-value pauses all resume
   * cleanly on the next call.
   */
-final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends AdapterStreamingState:
+final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
 
   private enum Phase derives CanEqual:
@@ -55,35 +55,28 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends AdapterS
   private var otherInString: Boolean = false
   private var otherStringEscape: Boolean = false
 
-  private var finished: Boolean = false
+  override protected def receiveOpen(delta: String): Vector[FieldChunk] =
+    val out = mutable.ArrayBuffer.empty[FieldChunk]
+    var i = 0
+    while i < delta.length do
+      processChar(delta.charAt(i), out)
+      i += 1
+    // Flush a tracked string value's decoded content accumulated so far as a partial chunk, so long string
+    // values stream token by token instead of arriving as one final chunk at the closing quote. Pending
+    // escape state (`stringEscape` / `unicodeRemaining`) lives outside the buffer, so this is boundary-safe.
+    if phase == InStringValue && isCurrentTracked && contentBuffer.nonEmpty then
+      out += FieldChunk(currentKey, contentBuffer.toString, isLast = false)
+      contentBuffer.clear()
+    out.toVector
 
-  override def receive(delta: String): Vector[FieldChunk] =
-    if finished || delta.isEmpty then Vector.empty
-    else
-      val out = mutable.ArrayBuffer.empty[FieldChunk]
-      var i = 0
-      while i < delta.length do
-        processChar(delta.charAt(i), out)
-        i += 1
-      // Flush a tracked string value's decoded content accumulated so far as a partial chunk, so long string
-      // values stream token by token instead of arriving as one final chunk at the closing quote. Pending
-      // escape state (`stringEscape` / `unicodeRemaining`) lives outside the buffer, so this is boundary-safe.
-      if phase == InStringValue && isCurrentTracked && contentBuffer.nonEmpty then
-        out += FieldChunk(currentKey, contentBuffer.toString, isLast = false)
-        contentBuffer.clear()
-      out.toVector
-
-  override def finish(): Vector[FieldChunk] =
-    if finished then Vector.empty
-    else
-      finished = true
-      val out = mutable.ArrayBuffer.empty[FieldChunk]
-      // A tracked value still open at stream end needs its isLast terminator even when the buffer is empty —
-      // string content may have already been flushed incrementally by receive().
-      if isInValuePhase && isCurrentTracked then
-        out += FieldChunk(currentKey, finalContent(), isLast = true)
-        contentBuffer.clear()
-      out.toVector
+  override protected def finishOpen(): Vector[FieldChunk] =
+    val out = mutable.ArrayBuffer.empty[FieldChunk]
+    // A tracked value still open at stream end needs its isLast terminator even when the buffer is empty —
+    // string content may have already been flushed incrementally by receive().
+    if isInValuePhase && isCurrentTracked then
+      out += FieldChunk(currentKey, finalContent(), isLast = true)
+      contentBuffer.clear()
+    out.toVector
 
   private def isCurrentTracked: Boolean = fieldNames.contains(currentKey)
 

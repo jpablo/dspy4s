@@ -96,11 +96,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
     val leafCount                = ps.read(student).size
 
     if leafCount == 0 then
-      Right(OptimizationReport(
-        bestProgram = student,
-        candidates = Vector.empty,
-        metadata = Map("no_optimizable_leaves" -> true)
-      ))
+      Right(OptimizerSupport.noOptimizableLeavesReport(student))
     else
       // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
       var current      = student

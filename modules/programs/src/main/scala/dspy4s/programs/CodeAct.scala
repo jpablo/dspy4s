@@ -337,20 +337,11 @@ object CodeAct:
       dspy4s.core.contracts.SandboxTool(
         name = tool.name,
         parameters = tool.argSchema.map { case (name, typeRef) =>
-          dspy4s.core.contracts.SandboxTool.Param(name, pythonTypeOf(typeRef))
+          dspy4s.core.contracts.SandboxTool.Param(name, typeRef.pythonTypeName)
         },
         invoke = kwargs => tool.invoke(kwargs)(using ctx)
       )
     }
-
-  private def pythonTypeOf(typeRef: dspy4s.core.contracts.TypeRef): Option[String] = typeRef.repr match
-    case "string" => Some("str")
-    case "int"    => Some("int")
-    case "double" => Some("float")
-    case "bool"   => Some("bool")
-    case "list"   => Some("list")
-    case "json"   => Some("dict")
-    case _        => None
 
   /** Matches a fenced code block, optionally tagged ```python. Captures the snippet body in group 1. Multiline-aware.
     */

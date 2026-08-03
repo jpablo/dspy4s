@@ -1,5 +1,6 @@
 package dspy4s.adapters.internal
 
+import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -9,6 +10,8 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.MessageRole
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -16,6 +19,55 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * input fields, coerce string field values, and apply the single-output text fallback identically — fixing a
   * defect in one adapter can no longer silently miss the others. */
 private[adapters] object AdapterTextSupport:
+
+  /** Standard system → demonstration pairs → live input message sequence used by structured text adapters. */
+  def fewShotMessages(
+      invocation: AdapterInvocation,
+      systemText: String
+  )(
+      renderDemoOutput: DynamicValue.Record => String
+  ): Vector[Message] =
+    val demos = invocation.demos.flatMap { demo =>
+      Vector(
+        Message(
+          role = MessageRole.User,
+          text = Some(renderFields(invocation.layout.inputFields, demo.values))
+        ),
+        Message(role = MessageRole.Assistant, text = Some(renderDemoOutput(demo.values)))
+      )
+    }
+    (Vector(Message(role = MessageRole.System, text = Some(systemText))) ++ demos) :+
+      Message(
+        role = MessageRole.User,
+        text = Some(renderFields(invocation.layout.inputFields, invocation.inputs.values))
+      )
+
+  /** Decode every output field in layout order, attaching the field name exactly once at this shared boundary. */
+  def decodeOutputFields(
+      layout: SignatureLayout
+  )(
+      decode: FieldSpec => Either[DspyError, DynamicValue]
+  ): Either[DspyError, Vector[(String, DynamicValue)]] =
+    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) {
+      (acc, field) =>
+        for
+          soFar <- acc
+          value <- decode(field)
+        yield soFar :+ (field.name -> value)
+    }
+
+  /** Build the common adapter parse result while preserving the model's exact raw text. */
+  def parsedOutput(
+      adapterName: String,
+      output: LmOutput,
+      entries: Vector[(String, DynamicValue)],
+      metadata: Map[String, Any] = Map.empty
+  ): ParsedOutput =
+    ParsedOutput(
+      values   = DynamicValue.Record(Chunk.from(entries)),
+      rawText  = Some(output.text),
+      metadata = Map("adapter" -> adapterName) ++ metadata
+    )
 
   /** Render fields as `prefix value` lines (prefix falls back to `name:`, value falls back to the field's
     * `defaultValue`). Used for demo / input user messages by the JSON, XML, and TwoStep adapters. */
@@ -65,13 +117,10 @@ private[adapters] object AdapterTextSupport:
     val field = layout.outputFields.head
     val trimmed = output.text.trim
     if trimmed.nonEmpty then
-      Right(
-        ParsedOutput(
-          values = DynamicValue.Record(Chunk.single(
-            field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))
-          )),
-          rawText = Some(output.text),
-          metadata = Map("adapter" -> adapterName, "fallback" -> "text")
-        )
-      )
+      Right(parsedOutput(
+        adapterName,
+        output,
+        Vector(field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))),
+        metadata = Map("fallback" -> "text")
+      ))
     else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))

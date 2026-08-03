@@ -11,9 +11,19 @@ import scala.util.matching.Regex
   * Scala-side encoding. A Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire
   * level (the LM sees a flat string like `"joy"`).
   *
-  * Five well-known refs cover the common cases. Anything outside that set passes through as an opaque token --
+  * Six well-known refs cover the common cases. Anything outside that set passes through as an opaque token --
   * adapters that don't recognize it fall back to rendering it as a free-form string. */
-final case class TypeRef(repr: String) derives CanEqual
+final case class TypeRef(repr: String) derives CanEqual:
+
+  /** Python/DSPy-facing name for well-known wire types. `None` means there is no safe direct Python equivalent. */
+  def pythonTypeName: Option[String] = repr match
+    case "string" => Some("str")
+    case "int"    => Some("int")
+    case "double" => Some("float")
+    case "bool"   => Some("bool")
+    case "list"   => Some("list")
+    case "json"   => Some("dict")
+    case _        => None
 
 object TypeRef:
   val string: TypeRef = TypeRef("string")

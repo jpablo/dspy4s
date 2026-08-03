@@ -6,12 +6,21 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
+import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.programs.optimization.OptimizableTraversal
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place so
   * the seed→rolloutId mapping and the Evaluate+ProgramRunner scoring wiring stay identical across optimizers.
   */
 private[optimize] object OptimizerSupport:
+
+  /** The common successful result when a program exposes no optimizable leaves. */
+  def noOptimizableLeavesReport[P](student: P): OptimizationReport[P] =
+    OptimizationReport(
+      bestProgram = student,
+      candidates = Vector.empty,
+      metadata = Map("no_optimizable_leaves" -> true)
+    )
 
   /** Apply `instruction` to the `idx`-th predictor of `program` (an instruction-only edit) via
     * [[dspy4s.programs.optimization.OptimizableTraversal.replace]]. The single home for the per-leaf instruction rewrite shared by the

@@ -21,8 +21,6 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.MessageRole
 import ujson.Value
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -64,33 +62,22 @@ final case class JSONAdapter(
       case None               => jsonInstruction
     val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
 
-    val demoMessages = invocation.demos.flatMap { demo =>
-      val userText = renderFields(invocation.layout.inputFields, demo.values)
+    val messages = AdapterTextSupport.fewShotMessages(invocation, systemText) { demoValues =>
       // Demo outputs must be NATIVE JSON values (int 42, not the string "42"): parse's coerce rejects
       // string-quoted numbers/booleans, so string-rendered demos would teach the model exactly the shape the
       // parser cannot accept. ujson.Obj preserves field order (signature order), unlike a Map round-trip.
       val assistantJson = ujson.Obj.from(
         textOutputFields.flatMap(field =>
-          DynamicValues.recordGet(demo.values, field.name)
+          DynamicValues.recordGet(demoValues, field.name)
             .map(dv => field.name -> JsonDynamic.toUjson(dv))
         )
       )
-      Vector(
-        Message(role = MessageRole.User, text = Some(userText)),
-        Message(role = MessageRole.Assistant, text = Some(ujson.write(assistantJson)))
-      )
+      ujson.write(assistantJson)
     }
-
-    val inputMessage = Message(
-      role = MessageRole.User,
-      text = Some(renderFields(invocation.layout.inputFields, invocation.inputs.values))
-    )
 
     Right(
       FormattedPrompt(
-        messages = Vector(Message(role = MessageRole.System, text = Some(systemText))) ++ demoMessages ++ Vector(
-          inputMessage
-        ),
+        messages = messages,
         // Merge native-tool options (disjoint keys: `tools`/`parallel_tool_calls`) with the structured-output
         // `response_format` option; both ride the same requestOptions seam.
         requestOptions = FormattedPrompt.mergeOptions(
@@ -197,27 +184,14 @@ final case class JSONAdapter(
           .map(coerced => field.name -> coerced)
           .getOrElse(field.name -> DynamicValue.Null)
     }
-    ParsedOutput(
-      values   = DynamicValue.Record(Chunk.from(entries)),
-      rawText  = Some(output.text),
-      metadata = Map("adapter" -> name)
-    )
+    AdapterTextSupport.parsedOutput(name, output, entries)
 
   private def parseFields(layout: SignatureLayout, root: Value, output: LmOutput): Either[DspyError, ParsedOutput] =
-    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { (acc, field) =>
-      for
-        soFar <- acc
-        value <- root.obj.get(field.name) match
-          case Some(raw) => coerce(field.typeRef, raw)
-          case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
-      yield soFar :+ (field.name -> value)
-    }.map { entries =>
-      ParsedOutput(
-        values   = DynamicValue.Record(Chunk.from(entries)),
-        rawText  = Some(output.text),
-        metadata = Map("adapter" -> name)
-      )
-    }
+    AdapterTextSupport.decodeOutputFields(layout) { field =>
+      root.obj.get(field.name) match
+        case Some(raw) => coerce(field.typeRef, raw)
+        case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
+    }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim
@@ -286,9 +260,6 @@ final case class JSONAdapter(
     value match
       case ujson.Str(v) => v
       case other        => other.render()
-
-  private def renderFields(fields: Vector[dspy4s.core.contracts.FieldSpec], values: DynamicValue.Record): String =
-    AdapterTextSupport.renderFields(fields, values)
 
 object JSONAdapter:
   /** Fenced ```json block extractor, compiled once (parse runs per LM completion). */

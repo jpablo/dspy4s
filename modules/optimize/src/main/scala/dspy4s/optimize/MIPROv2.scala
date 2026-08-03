@@ -106,11 +106,7 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     val leafCount                = ps.read(student).size
 
     if leafCount == 0 then
-      Right(OptimizationReport(
-        bestProgram = student,
-        candidates = Vector.empty,
-        metadata = Map("no_optimizable_leaves" -> true)
-      ))
+      Right(OptimizerSupport.noOptimizableLeavesReport(student))
     else
       // ── Phase 1: demo-set candidates (whole-program demo assignments) ──
       val demoCandidates: Vector[Vector[Vector[Example]]] = bootstrapDemoCandidates(student, trainset, teacher)

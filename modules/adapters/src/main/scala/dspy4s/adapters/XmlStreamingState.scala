@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
+import dspy4s.adapters.internal.SingleUseAdapterStreamingState
 import dspy4s.core.contracts.FieldSpec
 
 import scala.collection.mutable
@@ -22,7 +22,7 @@ import scala.util.control.NonFatal
   * Designed for incremental input: receive boundaries that split a tag
   * name, an entity, or content are all resumed cleanly on the next call.
   */
-final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends AdapterStreamingState:
+final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
 
   private enum Phase derives CanEqual:
@@ -37,27 +37,20 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends AdapterSt
   private val contentBuffer = new StringBuilder
   private val entityBuilder = new StringBuilder
   private var pendingTagMatch: Boolean = false
-  private var finished: Boolean = false
+  override protected def receiveOpen(delta: String): Vector[FieldChunk] =
+    val out = mutable.ArrayBuffer.empty[FieldChunk]
+    var i = 0
+    while i < delta.length do
+      processChar(delta.charAt(i), out)
+      i += 1
+    out.toVector
 
-  override def receive(delta: String): Vector[FieldChunk] =
-    if finished || delta.isEmpty then Vector.empty
-    else
-      val out = mutable.ArrayBuffer.empty[FieldChunk]
-      var i = 0
-      while i < delta.length do
-        processChar(delta.charAt(i), out)
-        i += 1
-      out.toVector
-
-  override def finish(): Vector[FieldChunk] =
-    if finished then Vector.empty
-    else
-      finished = true
-      val out = mutable.ArrayBuffer.empty[FieldChunk]
-      // If the model stopped mid-content, flush whatever we collected so far.
-      if currentField.isDefined && contentBuffer.nonEmpty then
-        emitFinal(out)
-      out.toVector
+  override protected def finishOpen(): Vector[FieldChunk] =
+    val out = mutable.ArrayBuffer.empty[FieldChunk]
+    // If the model stopped mid-content, flush whatever we collected so far.
+    if currentField.isDefined && contentBuffer.nonEmpty then
+      emitFinal(out)
+    out.toVector
 
   private def emitFinal(out: mutable.ArrayBuffer[FieldChunk]): Unit =
     currentField.foreach { name =>
