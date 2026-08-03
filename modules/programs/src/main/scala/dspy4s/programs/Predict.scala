@@ -110,16 +110,3 @@ final case class Predict[I, O](
       engine
         .execute(call.encoded(signature.inputShape))
         .flatMap(raw => Prediction.from(raw, signature.outputShape))
-
-  /** Convenience entry mirroring the prior caller signature. Encodes `input` into a [[ProgramCall]] and dispatches
-    * through the wrapped [[apply]].
-    *
-    * `config` is forwarded as `LmRequest.options` -- per-call LM options, cache / rollout controls, and anything else
-    * the underlying provider understands. `traceEnabled` controls whether this call writes a trace entry.
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    apply(ProgramCall(input, config, traceEnabled))

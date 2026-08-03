@@ -94,6 +94,17 @@ trait Module[I, O]:
           result
         }
 
+  /** Convenience entry for an ordinary typed input. Constructs the uniform [[ProgramCall]] envelope and dispatches
+    * through the lifecycle-wrapped [[apply]]. Call the envelope overload directly when setting controls such as
+    * `rolloutId` that are not represented here.
+    */
+  final def apply(
+      input: I,
+      config: DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean = true
+  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    apply(call = ProgramCall(input, config, traceEnabled))
+
   /** Async value-only compatibility entry. Worker trace/history is isolated; use [[applyAsyncExecuted]] when the
     * observable runtime output must be retained and explicitly joined into another execution.
     */

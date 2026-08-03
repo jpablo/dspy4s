@@ -222,14 +222,6 @@ final case class RLM[I, O](
     try iterate(call, interpreter, inputVars, variablesMeta)
     finally interpreter.close()
 
-  /** Convenience entry mirroring the typed caller signature. */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    apply(ProgramCall(input, config, traceEnabled))
-
   /** The REPL interaction loop on the shared [[AgentLoop]] skeleton: carry the [[RLM.ReplEntry]] history, each step
     * writing+running code and either continuing or finishing on an accepted SUBMIT; on the iteration budget running
     * out, [[extractFallback]] produces the outputs from the trajectory.

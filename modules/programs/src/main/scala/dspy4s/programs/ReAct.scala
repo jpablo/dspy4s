@@ -180,16 +180,6 @@ final case class ReAct[I, O](
       )
     )
 
-  /** Convenience entry mirroring the typed caller signature; builds a [[ProgramCall]] and dispatches through the
-    * wrapped [[apply]].
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    apply(ProgramCall(input, config, traceEnabled))
-
   /** One react iteration as a [[TrajectoryAgent]] step: run the react predict (truncating + possibly breaking on a
     * persistent context-window overflow), then run the chosen tool and append the observation. `finish` (or a step that
     * named no tool) ends the loop. The `AgentLoop` skeleton owns the iteration count + budget.

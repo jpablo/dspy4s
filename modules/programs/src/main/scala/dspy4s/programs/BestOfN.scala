@@ -8,7 +8,6 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.typed.Prediction
-import zio.blocks.schema.DynamicValue
 
 /** Typed `BestOfN`: runs an inner typed program up to `n` times and keeps the highest-reward `Prediction[O]`,
   * short-circuiting once `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O`
@@ -47,16 +46,6 @@ final case class BestOfN[P <: Module[I, O], I, O](
           .apply(call),
       reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction))
     )
-
-  /** Convenience entry mirroring the typed caller signature; builds a [[ProgramCall]] and dispatches through the
-    * wrapped [[apply]].
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    apply(ProgramCall(input, config, traceEnabled))
 
 object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any learnable

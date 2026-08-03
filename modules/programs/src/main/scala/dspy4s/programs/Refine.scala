@@ -122,16 +122,6 @@ final case class Refine[P <: Module[I, O], I, O](
       }
     )
 
-  /** Convenience entry mirroring the typed caller signature; builds a [[ProgramCall]] and dispatches through the
-    * wrapped [[apply]].
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    apply(ProgramCall(input, config, traceEnabled))
-
 object Refine:
 
   /** Addressability (the spec's `feedback` rule): `read = read(module) ++ [critic]`, the critic LAST. `replace` routes

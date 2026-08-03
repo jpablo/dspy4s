@@ -197,16 +197,6 @@ final case class CodeAct[I, O](
       )
     )
 
-  /** Convenience entry mirroring the typed caller signature; builds a [[ProgramCall]] and dispatches through the
-    * wrapped [[apply]].
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    apply(ProgramCall(input, config, traceEnabled))
-
   /** This program's [[tools]] bridged for a sandboxed interpreter — pass as `new DenoPyodideInterpreter(tools =
     * program.sandboxTools)` so the prompt's tool list and the sandbox's callable surface come from the same vector. See
     * [[CodeAct.sandboxTools]].

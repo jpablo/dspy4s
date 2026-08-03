@@ -189,16 +189,6 @@ final case class ProgramOfThought[I, O](
                 )
     yield Prediction(output = result.output, raw = result.raw)
 
-  /** Convenience entry mirroring the typed caller signature; builds a [[ProgramCall]] and dispatches through the
-    * wrapped [[apply]].
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    apply(ProgramCall(input, config, traceEnabled))
-
   /** The regenerate-until-execution-succeeds loop (the `retryUntil` shape of Algebra 2, on the shared [[AgentLoop]]
     * skeleton): the first attempt runs `generator`; each failure (parse or non-zero exit) carries `(previous_code,
     * error)` into `regenerator` for the next attempt; the first success wins; exhausting the budget surfaces the last

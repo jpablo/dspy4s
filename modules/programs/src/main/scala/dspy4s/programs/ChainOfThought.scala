@@ -56,16 +56,6 @@ final case class ChainOfThought[I, O](
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predictor.flatMap(_.apply(call))
 
-  /** Convenience entry mirroring the prior caller signature; builds a [[ProgramCall]] and dispatches through the
-    * wrapped [[apply]].
-    */
-  def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
-  )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    apply(ProgramCall(input, config, traceEnabled))
-
   /** The inner predictor, built once (memoized) — the analog of Python's `self.predict = Predict(extended_signature)`.
     * Left unnamed so it surfaces as a nested `predict` event under this program's `chain_of_thought` event.
     */
