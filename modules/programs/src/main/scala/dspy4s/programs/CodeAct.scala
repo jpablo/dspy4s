@@ -12,8 +12,8 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.runtime.AgentLoop
-import dspy4s.programs.runtime.TrajectoryAgent
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionPreparation, StepGeneration}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
 import zio.blocks.chunk.Chunk
@@ -80,10 +80,13 @@ final case class CodeAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), CodeAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
-) extends TrajectoryAgent[I, CodeAct.WithReasoning[O], CodeAct.TrajectoryEntry]:
+) extends InterpretedTrajectoryAgent[I, CodeAct.WithReasoning[O], CodeAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = CodeAct.WithReasoning[O]
+  override type ModelStep   = CodeAct.CodeStep
+  override type Action      = String
+  override type Observation = String
 
   override val moduleName: String = "code_act"
   private val baseLayout: SignatureLayout = baseSignature.layout
@@ -91,7 +94,7 @@ final case class CodeAct[I, O](
   /** Interpreter for CodeAct's action language. Python exceptions and runtime-interpreter failures become recoverable
     * observations; other infrastructure errors remain fatal and propagate as `Left`.
     */
-  private val actionInterpreter: ActionInterpreter[String, String] =
+  override protected val actionInterpreter: ActionInterpreter[String, String] =
     new ActionInterpreter[String, String]:
       override def execute(code: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
         interpreter.execute(code) match
@@ -188,11 +191,6 @@ final case class CodeAct[I, O](
   override protected def renderTrajectory(trajectory: Vector[CodeAct.TrajectoryEntry]): String =
     CodeAct.renderTrajectory(trajectory)
 
-  override protected def trajectoryStep(call: ProgramCall[I])(using
-      RuntimeContext
-  ): (Vector[CodeAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[CodeAct.TrajectoryEntry]] =
-    codeActStep(call)
-
   /** This program's [[tools]] bridged for a sandboxed interpreter — pass as `new DenoPyodideInterpreter(tools =
     * program.sandboxTools)` so the prompt's tool list and the sandbox's callable surface come from the same vector. See
     * [[CodeAct.sandboxTools]].
@@ -200,46 +198,38 @@ final case class CodeAct[I, O](
   def sandboxTools(using RuntimeContext): Vector[dspy4s.core.contracts.SandboxTool] =
     CodeAct.sandboxTools(tools)
 
-  /** One codeact iteration as a [[TrajectoryAgent]] step: render the trajectory into the generator's inputs, generate +
-    * parse + execute a code snippet, append the (success or error) observation, and stop when the LM set
-    * `finished=true` (ignored on a parse failure — an unparseable "final" snippet can't be final). The `AgentLoop`
-    * skeleton owns the iteration count + budget.
+  /** Generate the next typed code step from the original input and current rendered trajectory.
     */
-  private def codeActStep(call: ProgramCall[I])(using
-      RuntimeContext
-  ): (Vector[CodeAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[CodeAct.TrajectoryEntry]] =
-    (trajectory, iteration) =>
-      val rendered = CodeAct.renderTrajectory(trajectory)
-      val stepCall = call.mapInput(input => (input, rendered))
-      codeActPredict(stepCall).flatMap { prediction =>
-        val rawCode  = prediction.output.generatedCode
-        val finished = prediction.output.finished
+  override protected def generateStep(
+      call: ProgramCall[I],
+      trajectory: Vector[CodeAct.TrajectoryEntry]
+  )(using RuntimeContext): Either[DspyError, StepGeneration[CodeAct.CodeStep, CodeAct.TrajectoryEntry]] =
+    val rendered = CodeAct.renderTrajectory(trajectory)
+    val stepCall = call.mapInput(input => (input, rendered))
+    codeActPredict(stepCall).map(prediction => StepGeneration.Generated(prediction.output, trajectory))
 
-        CodeAct.parseCode(rawCode) match
-          case Left(parseError) =>
-            // Upstream `continue`s on a parse failure: the iteration is consumed, `finished` is IGNORED (an
-            // unparseable "final" snippet can't be final), and no code is recorded in the trajectory.
-            val entry = CodeAct.TrajectoryEntry(
-              iteration,
-              code = "",
-              observation = s"Failed to parse the generated code: $parseError",
-              isError = true
-            )
-            Right(AgentLoop.Step.Continue(trajectory :+ entry))
-          case Right(code) =>
-            actionInterpreter.execute(code).map { outcome =>
-              val entry = CodeAct.TrajectoryEntry(
-                iteration,
-                code = code,
-                observation = outcome.observation,
-                isError = outcome.isError
-              )
-              if finished then
-                AgentLoop.Step.Done(trajectory :+ entry)
-              else
-                AgentLoop.Step.Continue(trajectory :+ entry)
-            }
-      }
+  /** Parse the generated Python into an executable action. Upstream `continue`s after a parse failure, so rejection
+    * consumes the iteration, records an error entry, and deliberately ignores the model's `finished` flag.
+    */
+  override protected def prepareAction(step: CodeAct.CodeStep): ActionPreparation[String, String] =
+    CodeAct.parseCode(step.generatedCode) match
+      case Left(parseError) =>
+        ActionPreparation.Rejected(s"Failed to parse the generated code: $parseError")
+      case Right(code) =>
+        ActionPreparation.Ready(code, stopAfter = step.finished)
+
+  override protected def recordStep(
+      iteration: Int,
+      @annotation.unused step: CodeAct.CodeStep,
+      action: Option[String],
+      outcome: ActionOutcome[String]
+  ): CodeAct.TrajectoryEntry =
+    CodeAct.TrajectoryEntry(
+      iteration,
+      code = action.getOrElse(""),
+      observation = outcome.observation,
+      isError = outcome.isError
+    )
 
 object CodeAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */

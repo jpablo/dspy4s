@@ -13,9 +13,9 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.runtime.AgentLoop
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionPreparation, StepGeneration}
 import dspy4s.programs.runtime.ToolExecutor
-import dspy4s.programs.runtime.TrajectoryAgent
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
@@ -61,10 +61,13 @@ final case class ReAct[I, O](
     extractorPredictOverride: Option[Predict[(I, String), ReAct.WithReasoning[O]]] = None
 )(using
     prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
-) extends TrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]:
+) extends InterpretedTrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ReAct.WithReasoning[O]
+  override type ModelStep   = ReAct.ReactStep
+  override type Action      = ToolCallRequest
+  override type Observation = String
 
   override val moduleName: String = ReActKeys.reactModule
   private val baseLayout: SignatureLayout = baseSignature.layout
@@ -76,7 +79,7 @@ final case class ReAct[I, O](
   /** Interpreter for ReAct's small action language: one named tool call with a record of arguments. Tool selection and
     * invocation failures are recoverable observations, so the LM can react to them on its next turn.
     */
-  private val actionInterpreter: ActionInterpreter[ToolCallRequest, String] =
+  override protected val actionInterpreter: ActionInterpreter[ToolCallRequest, String] =
     new ActionInterpreter[ToolCallRequest, String]:
       override def execute(request: ToolCallRequest)(using
           RuntimeContext
@@ -173,39 +176,42 @@ final case class ReAct[I, O](
   override protected def renderTrajectory(trajectory: Vector[ReAct.TrajectoryEntry]): String =
     ReAct.renderTrajectory(trajectory)
 
-  override protected def trajectoryStep(call: ProgramCall[I])(using
-      RuntimeContext
-  ): (Vector[ReAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[ReAct.TrajectoryEntry]] =
-    reactStep(call)
-
-  /** One react iteration as a [[TrajectoryAgent]] step: run the react predict (truncating + possibly breaking on a
-    * persistent context-window overflow), then run the chosen tool and append the observation. `finish` (or a step that
-    * named no tool) ends the loop. The `AgentLoop` skeleton owns the iteration count + budget.
+  /** Generate one typed ReAct step, durably truncating the oldest trajectory entry on a context-window overflow. A
+    * persistent overflow halts the action loop so final extraction can still run over the remaining view.
     */
-  private def reactStep(call: ProgramCall[I])(using
-      RuntimeContext
-  ): (Vector[ReAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[ReAct.TrajectoryEntry]] =
-    (view, iteration) =>
-      reactWithTruncation(call, view, remaining = 3).flatMap {
-        case (None, truncated) =>
-          // Persistent context-window overflow: upstream logs a warning and BREAKS the loop — the extractor
-          // still runs over whatever (truncated) trajectory remains, rather than failing the call.
-          Right(AgentLoop.Step.Done(truncated))
-        case (Some(step), used) =>
-          val toolName = step.nextToolName.trim
-          actionInterpreter.execute(ToolCallRequest(toolName, step.nextToolArgs)).map { outcome =>
-            val entry = ReAct.TrajectoryEntry(
-              iteration,
-              step.nextThought,
-              toolName,
-              step.nextToolArgs,
-              outcome.observation
-            )
-            // `finish` (or a step that named no tool) ends the loop; otherwise gather more.
-            if toolName == ReAct.FinishToolName || toolName.isEmpty then AgentLoop.Step.Done(used :+ entry)
-            else AgentLoop.Step.Continue(used :+ entry)
-          }
-      }
+  override protected def generateStep(
+      call: ProgramCall[I],
+      trajectory: Vector[ReAct.TrajectoryEntry]
+  )(using RuntimeContext): Either[DspyError, StepGeneration[ReAct.ReactStep, ReAct.TrajectoryEntry]] =
+    reactWithTruncation(call, trajectory, remaining = 3).map {
+      case (Some(step), used) => StepGeneration.Generated(step, used)
+      case (None, used)       => StepGeneration.Halted(used)
+    }
+
+  /** Lower ReAct's typed model step to its small tool-call language. `finish` and a missing tool name both execute once
+    * and then end the loop, preserving the existing final trajectory entry.
+    */
+  override protected def prepareAction(step: ReAct.ReactStep): ActionPreparation[ToolCallRequest, String] =
+    val toolName = step.nextToolName.trim
+    ActionPreparation.Ready(
+      ToolCallRequest(toolName, step.nextToolArgs),
+      stopAfter = toolName == ReAct.FinishToolName || toolName.isEmpty
+    )
+
+  override protected def recordStep(
+      iteration: Int,
+      step: ReAct.ReactStep,
+      action: Option[ToolCallRequest],
+      outcome: ActionOutcome[String]
+  ): ReAct.TrajectoryEntry =
+    val request = action.getOrElse(ToolCallRequest(step.nextToolName.trim, step.nextToolArgs))
+    ReAct.TrajectoryEntry(
+      iteration,
+      step.nextThought,
+      request.name,
+      request.args,
+      outcome.observation
+    )
 
   /** Run the react predict over the trajectory, truncating the OLDEST step and retrying (up to `remaining` attempts
     * total) on a context-window overflow — Python's `_call_with_potential_trajectory_truncation` around `self.react`.
