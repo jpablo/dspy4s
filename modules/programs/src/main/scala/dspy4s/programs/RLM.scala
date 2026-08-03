@@ -18,6 +18,7 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -218,8 +219,9 @@ final case class RLM[I, O](
     val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ CodeAct.sandboxTools(tools)
     val outputFields =
       baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, f.typeRef.pythonTypeName))
-    val interpreter  = interpreterFactory(sandboxTools, outputFields)
-    try iterate(call, interpreter, inputVars, variablesMeta)
+    val interpreter       = interpreterFactory(sandboxTools, outputFields)
+    val actionInterpreter = replActionInterpreter(interpreter, inputVars)
+    try iterate(call, actionInterpreter, variablesMeta)
     finally interpreter.close()
 
   /** The REPL interaction loop on the shared [[AgentLoop]] skeleton: carry the [[RLM.ReplEntry]] history, each step
@@ -228,19 +230,17 @@ final case class RLM[I, O](
     */
   private def iterate(
       call: ProgramCall[I],
-      interpreter: ReplCodeInterpreter,
-      inputVars: Map[String, DynamicValue],
+      actionInterpreter: ActionInterpreter[RLM.ReplAction, RLM.ReplExecution],
       variablesMeta: Vector[RLM.ReplVariable]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     AgentLoop.run[Vector[RLM.ReplEntry], Prediction[O]](Vector.empty, 0, maxIterations)(
       onExhausted = history => extractFallback(call, variablesMeta, history)
-    )(rlmStep(call, interpreter, inputVars, variablesMeta))
+    )(rlmStep(call, actionInterpreter, variablesMeta))
 
   /** One REPL iteration as an [[AgentLoop]] step. */
   private def rlmStep(
       call: ProgramCall[I],
-      interpreter: ReplCodeInterpreter,
-      inputVars: Map[String, DynamicValue],
+      actionInterpreter: ActionInterpreter[RLM.ReplAction, RLM.ReplExecution],
       variablesMeta: Vector[RLM.ReplVariable]
   )(using
       RuntimeContext
@@ -259,49 +259,68 @@ final case class RLM[I, O](
           Console.err.println(
             s"RLM iteration ${iteration + 1}/$maxIterations\nReasoning: $reasoning\nCode:\n$rawCode"
           )
-        stepOutcome(interpreter, inputVars, reasoning, rawCode).flatMap {
-          case Left(entry) => // not final — record and continue
-            if verbose then Console.err.println(RLM.formatOutputBlock(entry.output, maxOutputChars))
-            Right(AgentLoop.Step.Continue(history :+ entry))
-          case Right((entry, outputsRecord)) => // SUBMIT accepted
-            finishWith(outputsRecord, reasoning, history :+ entry).map(AgentLoop.Step.Done(_))
+        val execution: Either[DspyError, ActionOutcome[RLM.ReplExecution]] =
+          RLM.stripCodeFences(rawCode) match
+            case Left(fenceError) =>
+              val entry = RLM.ReplEntry(reasoning, rawCode, s"[Error] $fenceError")
+              Right(ActionOutcome.Failed(RLM.ReplExecution.Observed(entry)))
+            case Right(code) =>
+              actionInterpreter.execute(RLM.ReplAction(reasoning, code))
+        execution.flatMap { outcome =>
+          outcome.observation match
+            case RLM.ReplExecution.Observed(entry) =>
+              if verbose then Console.err.println(RLM.formatOutputBlock(entry.output, maxOutputChars))
+              Right(AgentLoop.Step.Continue(history :+ entry))
+            case RLM.ReplExecution.Submitted(entry, outputsRecord) =>
+              finishWith(outputsRecord, reasoning, history :+ entry).map(AgentLoop.Step.Done(_))
         }
       }
 
-  /** One REPL step: strip fences, execute with the input variables, classify the result. Returns `Right(Left(entry))`
-    * to continue the loop, `Right(Right((entry, outputs)))` on an accepted SUBMIT.
+  /** Adapt this call's stateful REPL to the shared action-interpreter algebra. User-code, interpreter, and invalid
+    * SUBMIT failures are recoverable observations; a valid and type-correct SUBMIT is a distinct terminal observation.
+    * The caller owns the REPL lifecycle and closes it after the agent loop.
     */
-  private def stepOutcome(
+  private def replActionInterpreter(
       interpreter: ReplCodeInterpreter,
-      inputVars: Map[String, DynamicValue],
-      reasoning: String,
-      rawCode: String
-  ): Either[DspyError, Either[RLM.ReplEntry, (RLM.ReplEntry, DynamicValue.Record)]] =
-    RLM.stripCodeFences(rawCode) match
-      case Left(fenceError) =>
-        Right(Left(RLM.ReplEntry(reasoning, rawCode, s"[Error] $fenceError")))
-      case Right(code) =>
-        interpreter.execute(code, inputVars) match
+      inputVars: Map[String, DynamicValue]
+  ): ActionInterpreter[RLM.ReplAction, RLM.ReplExecution] =
+    new ActionInterpreter[RLM.ReplAction, RLM.ReplExecution]:
+      override def execute(action: RLM.ReplAction)(using
+          RuntimeContext
+      ): Either[DspyError, ActionOutcome[RLM.ReplExecution]] =
+        interpreter.execute(action.code, inputVars) match
           case Left(err) =>
             // Interpreter-level failure: upstream catches CodeInterpreterError into an [Error] observation and
             // keeps looping (our Deno interpreter restarts its process on the next execute).
-            Right(Left(RLM.ReplEntry(reasoning, code, s"[Error] ${err.message}")))
+            val entry = RLM.ReplEntry(action.reasoning, action.code, s"[Error] ${err.message}")
+            Right(ActionOutcome.Failed(RLM.ReplExecution.Observed(entry)))
           case Right(result) =>
             result.finalOutput match
               case Some(finalJson) =>
                 RLM.parseSubmitted(finalJson, outputFieldNames) match
-                  case Left(problem) => Right(Left(RLM.ReplEntry(reasoning, code, problem)))
+                  case Left(problem) =>
+                    val entry = RLM.ReplEntry(action.reasoning, action.code, problem)
+                    Right(ActionOutcome.Failed(RLM.ReplExecution.Observed(entry)))
                   case Right(record) =>
                     baseSignature.outputShape.decode(record) match
                       case Left(decodeError) =>
-                        Right(Left(RLM.ReplEntry(reasoning, code, s"[Type Error] ${decodeError.message}")))
+                        val entry = RLM.ReplEntry(
+                          action.reasoning,
+                          action.code,
+                          s"[Type Error] ${decodeError.message}"
+                        )
+                        Right(ActionOutcome.Failed(RLM.ReplExecution.Observed(entry)))
                       case Right(_) =>
-                        Right(Right((RLM.ReplEntry(reasoning, code, s"FINAL: $finalJson"), record)))
+                        val entry = RLM.ReplEntry(action.reasoning, action.code, s"FINAL: $finalJson")
+                        Right(ActionOutcome.Succeeded(RLM.ReplExecution.Submitted(entry, record)))
               case None =>
                 val output =
                   if result.exitCode == 0 then RLM.formatOutput(result.stdout.stripTrailing)
                   else s"[Error] ${result.stderr.stripTrailing}"
-                Right(Left(RLM.ReplEntry(reasoning, code, output)))
+                val entry     = RLM.ReplEntry(action.reasoning, action.code, output)
+                val execution = RLM.ReplExecution.Observed(entry)
+                if result.exitCode == 0 then Right(ActionOutcome.Succeeded(execution))
+                else Right(ActionOutcome.Failed(execution))
 
   private def finishWith(
       outputsRecord: DynamicValue.Record,
@@ -368,6 +387,16 @@ object RLM:
 
   /** The typed output of one action step. */
   final case class ActionStep(reasoning: String, code: String)
+
+  /** A parsed Python action ready for the per-call REPL. */
+  final case class ReplAction(reasoning: String, code: String)
+
+  /** Post-execution control signal: ordinary observations continue the loop; a validated SUBMIT carries terminal
+    * outputs back to the enclosing RLM program.
+    */
+  enum ReplExecution:
+    case Observed(entry: ReplEntry)
+    case Submitted(entry: ReplEntry, outputs: DynamicValue.Record)
 
   /** Hand-written LENIENT output shape mirroring the prior dynamic reads exactly: a missing `reasoning` / `code`
     * renders as "" (an empty code snippet becomes a fence-error observation, not a failed call). Decode never
