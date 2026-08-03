@@ -205,7 +205,7 @@ private[typed] object ZioSchemaCodec:
   /** Build a `Shape[A]` from a zio-blocks `Schema[A]`. Encode goes through `Schema.toDynamicValue` directly;
     * decode normalizes the input record against the target Reflect (so LM-shaped string primitives become the
     * right primitive types) and then delegates to `Schema.fromDynamicValue`. */
-  def derivedFromZioSchema[A](using schema: Schema[A]): Shape[A] =
+  def derivedFromZioSchema[A](using schema: Schema[A]): RoundTripShape[A] =
     val rootReflect = schema.reflect
     val specs       = fieldSpecsFromReflect(rootReflect)
     // Option-typed fields are not required on the wire: an LM that omits the key entirely means None, the
@@ -215,7 +215,7 @@ private[typed] object ZioSchemaCodec:
         rec.fields.iterator.filter(term => optionSomeValueReflect(term.value).isDefined).map(_.name).toSet
       case _ => Set.empty
 
-    new Shape[A]:
+    new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
       override lazy val jsonSchemaString: Option[String] =

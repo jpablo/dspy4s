@@ -15,6 +15,11 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * [[trajectoryStep]], plus a renderer and extractor; this trait owns the common module boundary and guarantees that
   * the complete trajectory is attached to the extractor's preserved raw prediction.
   *
+  * Because [[forward]] is final, every implementation has the same orchestration guarantees: extraction runs exactly
+  * once after either `Done` or budget exhaustion, never after a failed transition; the extractor's complete prediction
+  * envelope is preserved; and extractor-local overflow truncation never changes the complete trajectory attached to
+  * that envelope.
+  *
   * @tparam I
   *   the program input
   * @tparam O

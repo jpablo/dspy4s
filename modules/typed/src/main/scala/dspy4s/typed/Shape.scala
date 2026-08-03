@@ -3,6 +3,7 @@ package dspy4s.typed
 import dspy4s.core.contracts.{
   DspyError, DynamicValues, FieldSpec, NotFoundError
 }
+import dspy4s.core.algebra.{IsEq, Law, <->}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in
@@ -27,6 +28,19 @@ trait Shape[A]:
     * (e.g. `MapShape` from `Signature.fromStringDynamic`); adapters that use this fall back to their default
     * natural-language instruction in that case. */
   def jsonSchemaString: Option[String] = None
+
+/** A [[Shape]] whose typed carrier contains only values accepted by its decoder. Schema-backed product shapes have
+  * this property; [[Shape.MapShape]] deliberately does not, because a plain `DynamicValue.Record` can omit fields that
+  * its runtime layout requires.
+  */
+trait RoundTripShape[A] extends Shape[A]:
+
+  /** Encoding followed by decoding recovers the typed value. There is deliberately no law in the opposite direction:
+    * decoding may normalize LM-produced wire values and may accept records with fields outside this shape.
+    */
+  @Law("decoding an encoded value recovers the typed value")
+  final def decodeEncode(value: A): IsEq[Either[DspyError, A]] =
+    decode(encode(value)) <-> Right(value)
 
 object Shape:
 
@@ -91,7 +105,7 @@ object Shape:
 
   /** Canonical case-class/product shape. This path ignores ambient schemas and is closed over structural
     * derivation, making it suitable for type-indexed record-boundary objects. */
-  inline def canonicalDerived[A]: Shape[A] =
+  inline def canonicalDerived[A]: RoundTripShape[A] =
     ZioSchemaCodec.derivedFromZioSchema[A](using canonicalSchema[A])
 
   /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
@@ -124,8 +138,8 @@ object Shape:
     * decode path reuses [[ZioSchemaCodec]]'s LM-string coercion, the same path the case-class shapes use. */
   final class SchemaTupleShape[A](
       schema: Schema[A]
-  ) extends Shape[A]:
-    private val delegate: Shape[A] = ZioSchemaCodec.derivedFromZioSchema[A](using schema)
+  ) extends RoundTripShape[A]:
+    private val delegate: RoundTripShape[A] = ZioSchemaCodec.derivedFromZioSchema[A](using schema)
     val fieldSpecs: Vector[FieldSpec]                         = delegate.fieldSpecs
     def encode(value: A): DynamicValue.Record                 = delegate.encode(value)
     def decode(raw: DynamicValue.Record): Either[DspyError, A] = delegate.decode(raw)
@@ -134,5 +148,5 @@ object Shape:
   /** Derives a `Shape[A]` from any case class / product type with a `zio.blocks.schema.Schema[A]` in scope.
     * zio-blocks owns product encode/decode; dspy4s derives the DSPy-facing field metadata from the same
     * structural Reflect description (see [[ZioSchemaCodec]] for the metadata story). */
-  inline def derived[A <: Product](using schema: Schema[A]): Shape[A] =
+  inline def derived[A <: Product](using schema: Schema[A]): RoundTripShape[A] =
     ZioSchemaCodec.derivedFromZioSchema[A]

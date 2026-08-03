@@ -12,6 +12,11 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionPreparation, St
   *
   * Associated types keep the public agent type focused on input, output, and trajectory entry while allowing each
   * action language to choose its own model-step, action, and observation types.
+  *
+  * The final [[trajectoryStep]] supplies the shared branch laws: `Halted` neither interprets nor records; `Rejected`
+  * records one failed outcome without interpreting; `Ready` interprets exactly once and records exactly one outcome;
+  * `stopAfter` is applied only after that outcome is recorded; and a fatal interpreter `Left` propagates without
+  * appending an entry.
   */
 trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entry]:
 
