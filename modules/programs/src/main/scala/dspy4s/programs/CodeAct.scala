@@ -234,18 +234,12 @@ final case class CodeAct[I, O](
                 observation = outcome.observation,
                 isError = outcome.isError
               )
-              stepFrom(finished, trajectory :+ entry)
+              if finished then
+                AgentLoop.Step.Done(trajectory :+ entry)
+              else
+                AgentLoop.Step.Continue(trajectory :+ entry)
             }
       }
-
-  /** A successfully-executed (or error-but-recorded) iteration: stop when the LM declared `finished`, else keep
-    * gathering.
-    */
-  private def stepFrom(
-      finished: Boolean,
-      trajectory: Vector[CodeAct.TrajectoryEntry]
-  ): TrajectoryAgent.Step[CodeAct.TrajectoryEntry] =
-    if finished then AgentLoop.Step.Done(trajectory) else AgentLoop.Step.Continue(trajectory)
 
 object CodeAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
