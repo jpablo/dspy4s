@@ -2,7 +2,8 @@
 
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 and all of step 6 implemented on the branch (full `sbt test` green): 6.1 (`bestOf`),
-6.2 (`id`/`>>>`/`parallel`), 6.3 (`AgentLoop`/`TrajectoryAgent` for ReAct/CodeAct/RLM/PoT), 6.4 (typed
+6.2 (`id`/`>>>`/`parallel`), 6.3 (`AgentLoop`/`TrajectoryAgent`, with `InterpretedTrajectoryAgent` for
+ReAct/CodeAct), 6.4 (typed
 `augment`), 6.5 (`mode` middleware monoid). The authoritative step-6 contract is
 [algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
 are superseded where they disagree with that spec. Remaining work is optional/additive (CIO substrate, etc.).
@@ -39,7 +40,8 @@ shrank net while the duplication was removed.
   as the general `Thought`-form so the generalization stays additive.
 
 **Step 6 (complete):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`parallel` in
-`Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent` unifying ReAct/CodeAct/RLM and PoT's `retryUntil`),
+`Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent`, plus the ReAct/CodeAct
+`InterpretedTrajectoryAgent` transition; RLM and PoT use `AgentLoop` directly),
 6.4 (typed `augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
 middleware monoid) are all landed and law-tested. Remaining is optional/additive: the kyo-compat CIO substrate
 migration, `augment` closing position, execution-wrapping modes. Sequential usage merge now ships as part of the
@@ -322,10 +324,13 @@ annotated with their current (post-grill, post-6.1) status.
 
 - **The agentic `loop`. DONE (6.3, commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
   `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
-  ReAct/CodeAct/RLM all run on them. **Corrected:** the `env.step`/`classify`/`render` decomposition was NOT
-  adopted (done-detection is entangled with the action; the three classify/terminal shapes differ) — each
-  module keeps its own step closure. The control middleware (`mode`) and the kyo-compat substrate remain
-  later/optional; the [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted) stands.
+  ReAct/CodeAct/RLM all run on them. ReAct and CodeAct additionally share `InterpretedTrajectoryAgent`'s final
+  generate → prepare → interpret → record transition and the typed `ActionInterpreter` boundary. **Corrected:** the
+  universal `env.step`/`classify`/`render` decomposition was NOT adopted (done-detection and terminal shapes still
+  differ); associated types retain each action language, while RLM and PoT stay directly on `AgentLoop`.
+  `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin these layers. The control
+  middleware (`mode`) and the kyo-compat substrate remain later/optional; the
+  [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted) stands.
 - **Full `Refine` ↔ `BestOfN` unification. DONE (6.1, commit `96c9072`).** Both reduce to the shared
   `AttemptSelection.bestOf`. **Corrected:** the grill decided against "one mode-style middleware" — they are
   **two combinators sharing one reducer** (`selectBest` = independent / no feedback; `feedback` = sequential,

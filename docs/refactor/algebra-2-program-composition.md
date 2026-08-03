@@ -1,7 +1,8 @@
 # Algebra 2: program composition (step-6 spec)
 
-**Status:** spec. Operations and laws hardened by a design grill (the five forks below are resolved); this
-is what step 6 implements against. No pre-implementation spike is required.
+**Status:** implemented contract. Operations and laws were hardened by a design grill (the five forks below are
+resolved), then refined against code truth. The current implementation adds the typed `InterpretedTrajectoryAgent`
+layer and behavioral law suites described below.
 **Date:** 2026-06-27
 **Relation:** the sketch and the broader ADD context live in [algebra.md](algebra.md); the step-by-step
 extraction work that precedes this is [composite-primitives.md](composite-primitives.md); the kyo-compat
@@ -105,6 +106,11 @@ TrajectoryAgent.runAndExtract[S, E](...)(step)(extract) : M[(E, String)]      //
 //   are typed Predicts, so E = Prediction[WithReasoning[O]] and the reasoning-prepended decode happens INSIDE
 //   the extractor (OutputAugmentation.prependedStringShape) rather than in the module. (= ReAct, CodeAct)
 
+InterpretedTrajectoryAgent.trajectoryStep                                  // ReAct/CodeAct action transition [IMPLEMENTED]
+//   generate model step -> prepare action -> ActionInterpreter.execute -> record outcome -> Continue/Done.
+//   Associated ModelStep / Action / Observation types preserve the two action languages instead of forcing one
+//   universal agent vocabulary. The transition is final; ReAct and CodeAct supply only the typed phase operations.
+
 // retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
 //   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
 //   success wins (no reward, no keep-best); exhausting the budget surfaces the last failure. Not a separate
@@ -131,6 +137,16 @@ selectBest        ordered search: early stopping and ties preserve attempt order
                   n = 1 still rewrites rollout controls, so it is not operational identity
 
 feedback          feedback is NOT permutation-invariant       // carried hint = order matters
+
+TrajectoryAgent   Done or exhaustion runs extraction exactly once
+                  a failed transition runs no extraction
+                  extractor Prediction evidence is preserved
+                  extractor-local truncation does not shorten the attached complete trajectory
+
+Interpreted step  Halted interprets nothing and records nothing
+                  Rejected interprets nothing and records one failed outcome
+                  Ready interprets exactly once and records exactly one outcome
+                  stopAfter is applied after recording; interpreter Left appends nothing
 
 OptimizableTraversal        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
                   read(c) = inspect(c).map(_.parameters)                    // parameter projection
@@ -313,8 +329,8 @@ plus the new combinator law suites are green:
 | `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
 | `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
 | `ProgramOfThought` | `retryUntil(...)` then answer-step — DONE (6.3): `AgentLoop.run` regenerate-on-error. NOT feedback (see below). |
-| `ReAct` | DONE (6.3): `TrajectoryAgent.runAndExtract` + `reactStep` (tool dispatch; keeps per-iteration truncation+break) |
-| `CodeAct` | DONE (6.3): `TrajectoryAgent.runAndExtract` + `codeActStep` (interpreter) |
+| `ReAct` | DONE (6.3 + interpreted transition): `TrajectoryAgent` + `InterpretedTrajectoryAgent`; `ReactStep` lowers to a `ToolCallRequest` interpreted by the tool environment. |
+| `CodeAct` | DONE (6.3 + interpreted transition): `TrajectoryAgent` + `InterpretedTrajectoryAgent`; `CodeStep` lowers to Python interpreted by `ActionInterpreter[String, String]`. |
 | `RLM` | DONE (6.3): `AgentLoop.run` (SUBMIT = Done inside the loop; extract fallback = onExhausted) |
 | user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) — DONE (6.2): `AndThen` + `>>>`, plus `parallel` |
 
@@ -352,11 +368,15 @@ The grilled `agentLoop(policy, extractor, env, classify, render)` with `env.step
   a fallback). One `Action`/`Observation` vocabulary across tool-call vs code-string vs SUBMIT-record would be
   indirection, not dedup.
 
-So 6.3 extracted the part that IS genuinely shared — the bounded `Continue | Done | exhausted` iteration
-([`AgentLoop.run`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/AgentLoop.scala)) plus the
-ReAct/CodeAct loop+extract postlude ([`TrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/TrajectoryAgent.scala))
-— and left each module's per-step semantics in its own `step` closure. Same discipline as the PoT and
-`parallel` corrections: extract the real shared core, do not force a decomposition the code rejects.
+So 6.3 extracted the bounded `Continue | Done | exhausted` iteration
+([`AgentLoop.run`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/AgentLoop.scala)) and the
+ReAct/CodeAct loop+extract postlude ([`TrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/TrajectoryAgent.scala)).
+A later refinement extracted one more genuine common layer for those two agents:
+[`InterpretedTrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgent.scala)
+owns generate → prepare → interpret → record, while associated types and protected phase operations retain each
+language's domain semantics. RLM and PoT remain directly on `AgentLoop` because their terminal-result shapes still do
+not fit trajectory-then-extract. Same discipline as the PoT and `parallel` corrections: extract the real shared core,
+do not force a universal vocabulary the code rejects.
 
 ## Resolved on paper vs deferred (fork 5)
 
@@ -387,12 +407,15 @@ suites as the regression net:
    batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the typed fan-out
    `parallel(a, b)` is new. Category laws are stated on the threaded `.output` value (the carrier decision),
    not the full `Prediction` envelope.
-3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
+3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`, later interpreted-agent and law refinements).** Extracted `AgentLoop.run` (bounded
    `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
    ported ReAct, CodeAct, RLM onto them and recast `ProgramOfThought`'s retry as `AgentLoop.run`
-   (regenerate-on-error). `AgentLoopLawSuite` pins the primitive; the four module suites are green unchanged.
+   (regenerate-on-error). ReAct and CodeAct now also share the final `InterpretedTrajectoryAgent` transition and typed
+   `ActionInterpreter` boundary. `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and
+   `InterpretedTrajectoryAgentLawSuite` pin the three layers; the four module suites remain green.
    **Code-truth correction:** the `env.step`/`classify`/`render` decomposition was NOT adopted (see above) —
-   the shared core is the bounded loop, each module keeps its own step closure.
+   the shared core stops at the final loop/extraction/action-transition templates; each module supplies its typed
+   generation, preparation, interpretation, and recording operations.
 4. **`augment` generalization. DONE (commit `31aecbd`).** Raised `decodePrepended` to `decodeAugmented`
    (arbitrary typed field via a pluggable reader + optional post-decode hook); `decodePrepended` is its
    String/identity instance, so the five call sites are unchanged. Closing position stays additive (no

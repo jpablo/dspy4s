@@ -67,6 +67,10 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `Prediction[O]` | Typed output `O` + its `RawPrediction` evidence (completions, usage). |
 | `OptimizableTraversal[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
+| `ActionInterpreter[Action, Observation]` | Executes an agent action and distinguishes success, recoverable failure, and fatal `Left`. |
+| `AgentLoop` | The bounded `Continue` / `Done` / exhaustion state-machine kernel shared by ReAct, CodeAct, RLM, and ProgramOfThought. |
+| `TrajectoryAgent[I, O, S]` | Final loop-then-extract template used by ReAct and CodeAct; owns extraction count, failure short-circuiting, envelope preservation, and complete-trajectory attachment. |
+| `InterpretedTrajectoryAgent[I, O, Entry]` | Final generate → prepare → interpret → record transition shared by ReAct and CodeAct while leaving their action languages and observations typed independently. |
 | `Aggregation.majority` | Picks the most-common field value across candidate completions (ties to first). |
 | `KNN` / `EmbeddingsRetriever` | Brute-force in-memory retrievers (no FAISS): nearest trainset examples by dot product, top-k passages by cosine. |
 
@@ -89,6 +93,11 @@ their callbacks, trace, history, and optimizer-addressable predictors.
   function-calling; tool failures become trajectory observations, and context-window overflow triggers
   trajectory truncation and retry. The native function-calling path is adapter-level and deliberately not
   wired into ReAct (see the [design memory](../../README.md)).
+- **Agent templates own behavioral laws.** `TrajectoryAgent.forward` and
+  `InterpretedTrajectoryAgent.trajectoryStep` are final, so subclasses choose the typed action language but cannot
+  alter the orchestration. `TrajectoryAgentLawSuite` pins extract-once, short-circuit, raw-envelope, and full-history
+  behavior; `InterpretedTrajectoryAgentLawSuite` pins the `Halted`, `Rejected`, `Ready`, `stopAfter`, and fatal-error
+  branches.
 
 ## Source layout
 
@@ -100,11 +109,12 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `optimization/OptimizableLeaf.scala`, `OptimizableTraversal.scala` | leaf lens and composite optimizer-traversal typeclasses |
 | `optimization/CompositeOptimizableTraversalInstances.scala`, `OptimizableTraversalDerivation.scala` | built-in composite instances and strict Mirror derivation |
 | `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
-| `contracts/ToolFunction.scala`, `ToolCall.scala` | callable tools and their invocation messages |
+| `contracts/ToolFunction.scala`, `ToolCall.scala`, `ActionInterpreter.scala` | callable tools, action messages, and the typed action-execution boundary |
 | `ProgramRunner.scala` | the shared typed/dynamic record-running capability |
-| `ProgramInput.scala`, `RecordCodec.scala` | coherent decoding capabilities for the dynamic-to-typed input boundary |
+| `RecordCodec.scala` | sealed canonical decoding evidence for the dynamic-to-typed input boundary |
 | `retrievers/KNN.scala`, `EmbeddingsRetriever.scala` | in-memory retrieval |
-| `runtime/PredictEngine.scala`, `SettingsProgramRuntime.scala`, `ParallelExecutor.scala`, `ToolExecutor.scala` | the shared execution body, model/adapter resolution, concurrency, tool dispatch |
+| `runtime/AgentLoop.scala`, `TrajectoryAgent.scala`, `InterpretedTrajectoryAgent.scala` | bounded iteration, loop-then-extract, and interpreted-action templates |
+| `runtime/PredictEngine.scala`, `SettingsProgramRuntime.scala`, `ParallelExecutor.scala`, `ToolExecutor.scala` | the shared prediction body, model/adapter resolution, concurrency, tool dispatch |
 | `internal/ToolMacro.scala` | the `ToolFunction.fromMethod` derivation macro |
 
 ## Relation to dspy

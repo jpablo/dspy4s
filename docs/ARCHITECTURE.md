@@ -69,12 +69,12 @@ graph TD
 
 2. **`typed`** — typed surface over `SignatureLayout`. Depends on `core`.
    - `Signature[I, O]` — wraps a `SignatureLayout` plus `Shape[I]` / `Shape[O]`
-   - `Shape[A]` typeclass with three impls: a product Shape produced by
-     `ZioSchemaCodec.derivedFromZioSchema` (backed by `Schema[A]`),
-     `TupleShape` (for named-tuple outputs from `Signature.of[Spec]` /
-     `Signature.fromType[F]`), and `MapShape` (for string-DSL signatures
-     where I and O are `DynamicValue.Record`).
-   - `FieldCodec[A]` typeclass + `FieldCodec.FlatEnum[E]` helper
+   - `Shape[A]` is the general typed/record boundary. Schema-backed product
+     and named-tuple shapes implement `RoundTripShape[A]`, whose law is
+     `decode(encode(a)) == Right(a)`. `MapShape` (for runtime string-DSL
+     signatures where I and O are `DynamicValue.Record`) remains a plain
+     validating `Shape`: an unrestricted record can omit a required field,
+     so a total round-trip claim would be false.
    - `Spec` trait + `InputField[+A]` / `OutputField[+A]` opaque types
    - `Prediction[O]` typed wrapper
    - Macros: `Signature.from(method)`, `Signature.fromType[F]`,
@@ -122,7 +122,7 @@ graph TD
      `traceEnabled` / `rolloutId`)
    - `contracts/ProgramRuntime.scala` — model and adapter resolution
    - `contracts/ToolFunction.scala` / `ToolCall.scala` — callable tools and their invocation messages
-   - `ProgramInput`, `RecordCodec`, `ProgramRunner` — coherent dynamic-to-typed decoding and uniform execution
+   - `RecordCodec`, `ProgramRunner` — canonical object-side dynamic-to-typed decoding and uniform execution
 
 6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
@@ -174,6 +174,11 @@ runs the shared `PredictEngine` directly, then decodes the resulting
 `DynamicPredict` are sibling modules over that engine; neither calls the
 other. Decode failures surface as `Left(DspyError)` inside the typed
 module lifecycle, never via lazy field access.
+
+Schema-derived signature boundaries expose `RoundTripShape`, with the law
+stated on that trait and executed by `RoundTripShapeLawSuite`. The reverse
+equation is deliberately absent: decoding may normalize LM values and accept
+extra wire fields, so encoding the decoded value may canonicalize the record.
 
 ## Ways to make a `Signature`
 
@@ -321,13 +326,13 @@ For comparison with the upstream Python DSPy architecture:
   the codec spine.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `typed/Signature.scala` — typed wrapper + six factory entry points.
-- `typed/Shape.scala` — three shape implementations (`MapShape` for
-  string-DSL signatures, `TupleShape` for named-tuple outputs, and
-  the product shape produced by `ZioSchemaCodec.derivedFromZioSchema`).
-  All three speak `DynamicValue.Record` natively in
+- `typed/Shape.scala` — the general `Shape[A]` boundary, lawful
+  `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures,
+  `SchemaTupleShape` for named-tuple outputs, and the product shape produced
+  by `ZioSchemaCodec.derivedFromZioSchema`. All speak `DynamicValue.Record` natively in
   `encode` / `decode` — there is no `Map[String, Any]` shim.
 - `typed/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
-  the product `Shape[A]` factory (`derivedFromZioSchema`), `FieldSpec`
+  the product `RoundTripShape[A]` factory (`derivedFromZioSchema`), `FieldSpec`
   derivation from `Reflect.Record`, and `normalize(dv, target)` which
   coerces LM-shaped primitives against the target Reflect on the
   decode path. Encode uses `Schema.toDynamicValue` directly.

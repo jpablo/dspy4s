@@ -2,8 +2,8 @@
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
 algebra 2 (program composition) is specified and fully implemented (steps 6.1–6.5 landed: `bestOf`, the
-`id`/`>>>`/`parallel` combinators, the `AgentLoop` agentic-iteration core, the typed `augment`, and the `mode`
-middleware monoid; see the status section at the bottom).
+`id`/`>>>`/`parallel` combinators, the `AgentLoop` / `TrajectoryAgent` / `InterpretedTrajectoryAgent` iteration
+layers, the typed `augment`, and the `mode` middleware monoid; see the status section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
 downstream. Related: [composite-primitives.md](composite-primitives.md), [kyo-ai-comparison.md](kyo-ai-comparison.md).
@@ -204,9 +204,10 @@ be required before monoidal or Markov coherence becomes meaningful.
   instance (feedback = advice→adapter hook). The law `refine = bestOf + critic-hint` is structural.
 - ~~`ReAct` / `CodeAct` / `RLM` are one `loop` written three times.~~ **Resolved (step 6.3).** All three (and
   PoT's `retryUntil`) run on the shared `AgentLoop.run` bounded-iteration primitive; ReAct/CodeAct also share
-  `TrajectoryAgent.runAndExtract` (loop + extractor). Code-truth: the `env.step`/`classify`/`render`
-  decomposition was rejected (done-detection is entangled with the action); each module keeps its own step
-  closure. `ProgramOfThought` is `retryUntil` (regenerate-on-error), not the agent loop and not `feedback`.
+  `TrajectoryAgent.runAndExtract` (loop + extractor) and the final `InterpretedTrajectoryAgent` transition
+  (generate → prepare → interpret → record). Code-truth: the universal `env.step`/`classify`/`render`
+  decomposition was rejected; associated action/observation types preserve each language. `ProgramOfThought` is
+  `retryUntil` (regenerate-on-error), not the trajectory agent and not `feedback`.
 
 The conclusion: the step-6 plan and this algebra are the same object. ADD supplies the vocabulary (Category,
 Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carrier.
@@ -217,7 +218,8 @@ Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carr
 
 - **Clean / law-shaped:** `Either[DspyError, A]` (errors as values, a monad), `CIO` (monad),
   `decodePrepended` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
-  `Aggregation.majority` (a semilattice-flavored reduce).
+  schema-backed `RoundTripShape[A]` (`decode(encode(a)) = Right(a)`), and `Aggregation.majority`
+  (a semilattice-flavored reduce). Plain validating `Shape[A]` deliberately makes no round-trip claim.
 - **Ad-hoc (ADD would refactor):** `BestOfN` / `Refine` / `MultiChainComparison` sharing no middleware (no
   `Mode` monoid). (Resolved already: `Refine` reimplementing the selection loop — now the shared
   `AttemptSelection.bestOf`, step 6.1; sequential composition — now `>>>`/`AndThen`, step 6.2; the three
@@ -252,9 +254,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ComposeLawSuite` covers value-category laws, lifecycle-transparent association, ordered fan-out, and
     addressability. `fanout` is Arrow-like ordered pairing, not an Applicative or the batch-executor `Parallel`;
     `parallel` remains its compatibility name.
-  - **6.3 done** (commit `6faa94e`): `AgentLoop.run` + `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT
-    all reduced onto them; `AgentLoopLawSuite` pins the primitive. Code-truth correction recorded: the
-    `env.step`/`classify`/`render` decomposition was rejected; each module keeps its own step closure.
+  - **6.3 done** (commit `6faa94e`, later interpreted-agent and law refinements): `AgentLoop.run` +
+    `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT all reduced onto them. ReAct and CodeAct additionally share
+    `InterpretedTrajectoryAgent` and `ActionInterpreter` without erasing their action languages. `AgentLoopLawSuite`,
+    `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin the three layers.
   - **6.4 done** (commit `31aecbd`): `decodeAugmented` (typed field via a pluggable reader + post-decode hook);
     `decodePrepended` is its String/identity instance. Closing position left additive (no consumer).
   - **6.5 done** (commit `dca35e9`): `Mode` (the `Controls => Controls` monoid) + `Moded` + `Compose.mode`;
@@ -314,6 +317,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     read-only `OptimizableMetadata`). The focus had to be carved down to exactly the writable triple
     (instructions / demos / config) before these laws could hold; `OptimizableParametersSuite` executes all four
     statements per leaf instance (`DynamicPredict`, `Predict`, `ChainOfThought`).
+    The same placement rule now distinguishes `RoundTripShape[A]`, which carries `decodeEncode` on the abstract trait,
+    from the more general `Shape[A]`: `MapShape` is a deliberate counterexample because its unrestricted record carrier
+    can omit required fields. Effectful trajectory guarantees are instead documented on their final template traits
+    and executed by behavioral law suites, rather than forced into dishonest `IsEq` statements.
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
     audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and
     `fanout = copy >>> split`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not

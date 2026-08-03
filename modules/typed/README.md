@@ -21,7 +21,7 @@ model's reply into a validated `Prediction[O]`.
 case class Input(sentence: String)
 case class Output(sentiment: Emotion)
 
-val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Output], checked at compile time
+val sig = Signature.derived[Input, Output] // layout + RoundTripShape[Input] + RoundTripShape[Output]
 ```
 
 ## Key types
@@ -29,13 +29,32 @@ val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Ou
 | Type | Role |
 |------|------|
 | `Signature[I, O]` | The typed signature: `SignatureLayout` + `Shape[I]` + `Shape[O]`. Four entry points — `derived[I, O]` (case classes), `of[T <: Spec]` (trait spec), `from(method)` (method introspection), `fromType[F]`. |
-| `Shape[A]` | Holds a type's `fieldSpecs` (the dspy field metadata) plus encode (`A => Record`) and decode (`Record => A`). `SchemaTupleShape` is the schema-backed shape; `MapShape` is the dynamic fallback for raw records. |
-| `ZioSchemaCodec` | The bridge between a zio-blocks `Schema[A]`/`Reflect` and a dspy4s `Shape[A]`: derives `FieldSpec`s, maps wire `TypeRef`s (`typeRefFor`), and normalizes LM strings before decode. |
+| `Shape[A]` | The general typed/record boundary: `fieldSpecs`, encode (`A => Record`), and decode (`Record => Either[DspyError, A]`). It does not claim a total round trip for every possible carrier. |
+| `RoundTripShape[A]` | A lawful `Shape[A]` satisfying `decode(encode(a)) == Right(a)`. Schema-derived product and named-tuple shapes implement it. |
+| `Shape.MapShape` | The dynamic fallback for raw records. It validates required fields on decode and therefore is intentionally only a `Shape[DynamicValue.Record]`, not a `RoundTripShape`: its carrier can represent invalid records. |
+| `ZioSchemaCodec` | The bridge between a zio-blocks `Schema[A]`/`Reflect` and a dspy4s `RoundTripShape[A]`: derives `FieldSpec`s, maps wire `TypeRef`s (`typeRefFor`), and normalizes LM strings before decode. |
 | `Prediction[O]` | The typed output: decoded `O` plus its `RawPrediction` evidence, so token usage and schema-uninterpreted values stay inspectable. |
 | `SignatureBuilder` | A fluent, macro-free builder (`.input[T](name)` / `.output[T](name)`) for assembling a layout programmatically. |
 | `Spec` / `InputField[A]` / `OutputField[A]` | The declarative trait-spec surface: a `Spec` subclass declares fields as `InputField`/`OutputField` members. |
 | `OutputAugmentation` | Type-level machinery to prepend a named field to an output type (the `WithField[O, Name, T]` match type), idempotent and cast-free — how `ChainOfThought` adds `reasoning: String`. |
 | `SchemaInterop` | The public seam onto `ZioSchemaCodec` (`decodeValue[A]`, `typeRef[A]`) for code outside this module, e.g. tool-argument decoding. |
+
+## Shape law boundary
+
+Schema-backed shapes carry their law on the abstract `RoundTripShape[A]` trait:
+
+```scala
+shape.decode(shape.encode(value)) == Right(value)
+```
+
+There is no reverse law requiring `encode(decode(record)) == record`. Decode may normalize LM-shaped primitives and
+accept additional wire fields, so re-encoding can legitimately produce a canonicalized record.
+
+The distinction from `Shape[A]` matters for dynamic signatures. A `MapShape` can require a field named `answer`, while
+its Scala carrier remains the unrestricted type `DynamicValue.Record`; a record without `answer` is representable and
+correctly fails decoding. Claiming the round-trip law for that carrier would be false.
+[`RoundTripShapeLawSuite`](src/test/scala/dspy4s/typed/RoundTripShapeLawSuite.scala) executes the positive law and pins
+this dynamic counterexample.
 
 ## Design notes
 
@@ -48,6 +67,8 @@ val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Ou
   Option/Variant wrapping — so a loosely-formatted model reply still decodes into the strict typed value.
 - **Direction-neutral shapes.** `Shape[A]` derives role-free field metadata. `Signature.derived` assigns the input
   and output shapes' fields to the corresponding `SignatureLayout` cohorts.
+- **Law claims follow the carrier.** Schema-derived shapes return `RoundTripShape[A]`; validating raw-record shapes
+  remain plain `Shape[A]`. The API does not attach a stronger equation than a carrier can satisfy.
 - **Compile-time validation.** The macros (`FunctionMacro`, `SpecMacro`) fail compilation when a field type
   lacks a `Schema`, names collide, or the trait/method shape is invalid — type errors, not runtime surprises.
 
@@ -56,7 +77,7 @@ val sig = Signature.derived[Input, Output]   // layout + Shape[Input] + Shape[Ou
 | File | Contents |
 |------|----------|
 | `Signature.scala` | `Signature[I, O]` and its four entry points |
-| `Shape.scala` | `Shape[A]`, `SchemaTupleShape`, `MapShape`, derivation factories |
+| `Shape.scala` | `Shape[A]`, lawful `RoundTripShape[A]`, `SchemaTupleShape`, `MapShape`, derivation factories |
 | `ZioSchemaCodec.scala` | the Schema↔Shape bridge, `normalize`, `typeRefFor`, field-spec derivation |
 | `Prediction.scala` | `Prediction[O]` and its decoding factory |
 | `SignatureBuilder.scala` | the fluent, macro-free builder |

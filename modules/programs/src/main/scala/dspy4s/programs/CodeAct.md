@@ -154,7 +154,15 @@ Two details are deliberate:
 2. A successfully parsed snippet may stop the loop even when its execution failed. The failure is evidence in the
    trajectory, and the extractor may still be able to produce a useful answer from it.
 
-The bounded recursion itself lives in `AgentLoop`; CodeAct supplies the meaning of one step.
+The bounded recursion itself lives in `AgentLoop`, and `TrajectoryAgent` owns the final extraction. The intermediate
+transition is the same typed template used by ReAct: `InterpretedTrajectoryAgent` generates a `CodeStep`, lowers it to a
+code-string action (or a rejected parse), invokes `ActionInterpreter[String, String]`, and records one
+`TrajectoryEntry`. CodeAct supplies those typed operations; the shared final transition owns their ordering.
+
+This gives the branches explicit behavioral laws. Rejected code records one failed observation without calling the
+interpreter; ready code is interpreted and recorded exactly once; `finished` is checked only after recording; and a
+fatal interpreter `Left` appends nothing. `InterpretedTrajectoryAgentLawSuite` tests these guarantees independently of
+CodeAct's Python parsing and execution details.
 
 ## How generated code is parsed
 
@@ -498,21 +506,28 @@ clearer when the available actions should remain a small, explicitly named tool 
 A useful reading order is:
 
 1. [`CodeAct.scala`](CodeAct.scala): derived signatures, loop step, parsing, tools, and result assembly.
-2. [`runtime/TrajectoryAgent.scala`](runtime/TrajectoryAgent.scala): gather a trajectory, then extract.
-3. [`runtime/AgentLoop.scala`](runtime/AgentLoop.scala): bounded continue/done recursion.
-4. [`runtime/TrajectoryTruncation.scala`](runtime/TrajectoryTruncation.scala): oldest-first extractor retries.
-5. [`InputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
+2. [`runtime/InterpretedTrajectoryAgent.scala`](runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
+   record, and stop.
+3. [`contracts/ActionInterpreter.scala`](contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
+   action outcomes.
+4. [`runtime/TrajectoryAgent.scala`](runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
+5. [`runtime/AgentLoop.scala`](runtime/AgentLoop.scala): bounded continue/done recursion.
+6. [`runtime/TrajectoryTruncation.scala`](runtime/TrajectoryTruncation.scala): oldest-first extractor retries.
+7. [`InputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
    `(I, trajectory)` encoding.
-6. [`OutputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): final
+8. [`OutputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): final
    reasoning augmentation.
-7. [`CodeInterpreter.scala`](../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala): execution
+9. [`CodeInterpreter.scala`](../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala): execution
    result and sandbox-tool contracts.
-8. [`CompositeOptimizableTraversalInstances.scala`](optimization/CompositeOptimizableTraversalInstances.scala): the
+10. [`CompositeOptimizableTraversalInstances.scala`](optimization/CompositeOptimizableTraversalInstances.scala): the
    two-leaf optimizer traversal.
-9. [`Streamable.scala`](../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
-10. [`CodeActSuite.scala`](../../../../test/scala/dspy4s/programs/CodeActSuite.scala): executable examples of stopping,
+11. [`Streamable.scala`](../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
+12. [`CodeActSuite.scala`](../../../../test/scala/dspy4s/programs/CodeActSuite.scala): executable examples of stopping,
     parsing, interpreter failures, tools, subprocess execution, and truncation.
-11. [`Cheatsheet.scala`](../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise runnable
+13. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
+    and [`TrajectoryAgentLawSuite.scala`](../../../../test/scala/dspy4s/programs/runtime/TrajectoryAgentLawSuite.scala):
+    the shared transition and extraction contracts.
+14. [`Cheatsheet.scala`](../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise runnable
     example.
 
 ## Scope and assumptions
