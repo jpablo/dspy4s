@@ -110,8 +110,9 @@ InterpretedTrajectoryAgent.trajectoryStep                                  // Re
 //   generate model step -> prepare action -> ActionInterpreter.execute -> record outcome -> decide -> Continue/Done.
 //   Associated ModelStep / Action / Observation types preserve the two action languages instead of forcing one
 //   universal agent vocabulary. decide receives all three values after recording, so terminal behavior may depend on
-//   either the generated step/action or its interpreted outcome. The transition is final; ReAct and CodeAct supply only
-//   the typed phase operations.
+//   either the generated step/action or its interpreted outcome. Each phase is an explicit state ADT, and each private
+//   transition ADT lists only that phase's legal successors. The transition is final; ReAct and CodeAct supply only the
+//   typed phase operations.
 
 // retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
 //   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
@@ -149,6 +150,7 @@ Interpreted step  Halted interprets nothing and records nothing
                   Rejected interprets nothing and records one failed outcome
                   Ready interprets, records, and decides exactly once
                   decide is applied after recording; interpreter Left neither appends nor decides
+                  generation Left enters no later state
 
 OptimizableTraversal        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
                   read(c) = inspect(c).map(_.parameters)                    // parameter projection
@@ -376,10 +378,12 @@ ReAct/CodeAct loop+extract postlude ([`TrajectoryAgent`](../../modules/programs/
 A later refinement extracted one more genuine common layer for those two agents:
 [`InterpretedTrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgent.scala)
 owns generate → prepare → interpret → record → decide, while associated types and protected phase operations retain
-each language's domain semantics. The post-outcome decision can depend on the generated step, prepared action, and
-interpreted result without allowing a subclass to reorder or omit recording. RLM and PoT remain directly on
-`AgentLoop` because their terminal-result shapes still do not fit trajectory-then-extract. Same discipline as the PoT
-and `parallel` corrections: extract the real shared core, do not force a universal vocabulary the code rejects.
+each language's domain semantics. The phases and terminal states are explicit ADTs; state-specific transition ADTs
+encode the legal successor relation, including distinct rejection-recording and interpreted-outcome-recording states.
+The post-outcome decision can depend on the generated step, prepared action, and interpreted result without allowing a
+subclass to reorder or omit recording. RLM and PoT remain directly on `AgentLoop` because their terminal-result shapes
+still do not fit trajectory-then-extract. Same discipline as the PoT and `parallel` corrections: extract the real
+shared core, do not force a universal vocabulary the code rejects.
 
 ## Resolved on paper vs deferred (fork 5)
 

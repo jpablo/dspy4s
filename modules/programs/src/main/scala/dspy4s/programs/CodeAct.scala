@@ -228,15 +228,27 @@ final case class CodeAct[I, O](
   ): ActionDecision =
     if step.finished then ActionDecision.Stop else ActionDecision.Continue
 
-  override protected def recordStep(
+  override protected def recordRejection(
       iteration: Int,
       @annotation.unused step: CodeAct.CodeStep,
-      action: Option[String],
+      observation: String
+  ): CodeAct.TrajectoryEntry =
+    CodeAct.TrajectoryEntry(
+      iteration,
+      code = "",
+      observation = observation,
+      isError = true
+    )
+
+  override protected def recordOutcome(
+      iteration: Int,
+      @annotation.unused step: CodeAct.CodeStep,
+      action: String,
       outcome: ActionOutcome[String]
   ): CodeAct.TrajectoryEntry =
     CodeAct.TrajectoryEntry(
       iteration,
-      code = action.getOrElse(""),
+      code = action,
       observation = outcome.observation,
       isError = outcome.isError
     )

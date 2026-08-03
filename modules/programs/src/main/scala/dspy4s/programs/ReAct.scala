@@ -204,18 +204,30 @@ final case class ReAct[I, O](
     if action.name == ReAct.FinishToolName || action.name.isEmpty then ActionDecision.Stop
     else ActionDecision.Continue
 
-  override protected def recordStep(
+  override protected def recordRejection(
       iteration: Int,
       step: ReAct.ReactStep,
-      action: Option[ToolCallRequest],
-      outcome: ActionOutcome[String]
+      observation: String
   ): ReAct.TrajectoryEntry =
-    val request = action.getOrElse(ToolCallRequest(step.nextToolName.trim, step.nextToolArgs))
     ReAct.TrajectoryEntry(
       iteration,
       step.nextThought,
-      request.name,
-      request.args,
+      step.nextToolName.trim,
+      step.nextToolArgs,
+      observation
+    )
+
+  override protected def recordOutcome(
+      iteration: Int,
+      step: ReAct.ReactStep,
+      action: ToolCallRequest,
+      outcome: ActionOutcome[String]
+  ): ReAct.TrajectoryEntry =
+    ReAct.TrajectoryEntry(
+      iteration,
+      step.nextThought,
+      action.name,
+      action.args,
       outcome.observation
     )
 

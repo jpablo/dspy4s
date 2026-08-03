@@ -35,7 +35,8 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
       generation: Vector[String] => Either[DspyError, StepGeneration[String, String]],
       preparation: String => ActionPreparation[String, String],
       interpreterValue: ActionInterpreter[String, String],
-      recorder: (Int, String, Option[String], ActionOutcome[String]) => String,
+      rejectionRecorder: (Int, String, String) => String,
+      outcomeRecorder: (Int, String, String, ActionOutcome[String]) => String,
       decision: (String, String, ActionOutcome[String]) => ActionDecision
   ) extends InterpretedTrajectoryAgent[String, String, String]:
     type ModelStep   = String
@@ -65,12 +66,18 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
         outcome: ActionOutcome[String]
     ): ActionDecision = decision(step, action, outcome)
 
-    override protected def recordStep(
+    override protected def recordRejection(
         iteration: Int,
         step: String,
-        action: Option[String],
+        observation: String
+    ): String = rejectionRecorder(iteration, step, observation)
+
+    override protected def recordOutcome(
+        iteration: Int,
+        step: String,
+        action: String,
         outcome: ActionOutcome[String]
-    ): String = recorder(iteration, step, action, outcome)
+    ): String = outcomeRecorder(iteration, step, action, outcome)
 
     def advance(trajectory: Vector[String], iteration: Int)(using
         RuntimeContext
@@ -90,7 +97,10 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
         interpreterCalls.incrementAndGet()
         Right(ActionOutcome.Succeeded("unreachable"))
       },
-      recorder = (_, _, _, _) =>
+      rejectionRecorder = (_, _, _) =>
+        recordCalls.incrementAndGet()
+        "unreachable",
+      outcomeRecorder = (_, _, _, _) =>
         recordCalls.incrementAndGet()
         "unreachable",
       decision = (_, _, _) =>
@@ -107,7 +117,7 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
   test("Rejected records one failed outcome and does not invoke the interpreter") {
     val interpreterCalls = AtomicInteger(0)
     val decisionCalls    = AtomicInteger(0)
-    val recorded         = ArrayBuffer.empty[(Int, String, Option[String], ActionOutcome[String])]
+    val recorded         = ArrayBuffer.empty[(Int, String, String)]
     val agent = TestAgent(
       generation = _ => Right(StepGeneration.Generated("model-step", Vector("used"))),
       preparation = _ => ActionPreparation.Rejected("invalid action"),
@@ -115,9 +125,10 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
         interpreterCalls.incrementAndGet()
         Right(ActionOutcome.Succeeded("unreachable"))
       },
-      recorder = (iteration, step, action, outcome) =>
-        recorded += ((iteration, step, action, outcome))
+      rejectionRecorder = (iteration, step, observation) =>
+        recorded += ((iteration, step, observation))
         "rejected-entry",
+      outcomeRecorder = (_, _, _, _) => fail("Rejected must not record an interpreted outcome"),
       decision = (_, _, _) =>
         decisionCalls.incrementAndGet()
         ActionDecision.Continue
@@ -131,7 +142,7 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
     assertEquals(decisionCalls.get(), 0)
     assertEquals(
       recorded.toVector,
-      Vector((2, "model-step", None, ActionOutcome.Failed("invalid action")))
+      Vector((2, "model-step", "invalid action"))
     )
   }
 
@@ -147,9 +158,10 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
         assertEquals(action, "action")
         Right(ActionOutcome.Succeeded("observation"))
       },
-      recorder = (iteration, step, action, outcome) =>
+      rejectionRecorder = (_, _, _) => fail("Ready must not record a rejection"),
+      outcomeRecorder = (iteration, step, action, outcome) =>
         recordCalls.incrementAndGet()
-        assertEquals((iteration, step, action), (3, "model-step", Some("action")))
+        assertEquals((iteration, step, action), (3, "model-step", "action"))
         assertEquals(outcome, ActionOutcome.Succeeded("observation"))
         "ready-entry",
       decision = (step, action, outcome) =>
@@ -177,7 +189,8 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
         order += "interpret"
         Right(ActionOutcome.Succeeded("observation"))
       },
-      recorder = (_, _, _, _) =>
+      rejectionRecorder = (_, _, _) => fail("Ready must not record a rejection"),
+      outcomeRecorder = (_, _, _, _) =>
         order += "record"
         "final-entry",
       decision = (_, _, _) =>
@@ -195,7 +208,8 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
       generation = _ => Right(StepGeneration.Generated("model-step", Vector.empty)),
       preparation = _ => ActionPreparation.Ready("action"),
       interpreterValue = interpreter(_ => Right(ActionOutcome.Failed("retryable"))),
-      recorder = (_, _, _, outcome) =>
+      rejectionRecorder = (_, _, _) => fail("Ready must not record a rejection"),
+      outcomeRecorder = (_, _, _, outcome) =>
         assertEquals(outcome, ActionOutcome.Failed("retryable"))
         "failed-entry",
       decision = (_, _, outcome) =>
@@ -218,7 +232,10 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
       generation = _ => Right(StepGeneration.Generated("model-step", Vector("used"))),
       preparation = _ => ActionPreparation.Ready("action"),
       interpreterValue = interpreter(_ => Left(failure)),
-      recorder = (_, _, _, _) =>
+      rejectionRecorder = (_, _, _) =>
+        recordCalls.incrementAndGet()
+        "unreachable",
+      outcomeRecorder = (_, _, _, _) =>
         recordCalls.incrementAndGet()
         "unreachable",
       decision = (_, _, _) =>
@@ -227,6 +244,39 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
     )
 
     assertEquals(agent.advance(Vector("original"), 0), Left(failure))
+    assertEquals(recordCalls.get(), 0)
+    assertEquals(decisionCalls.get(), 0)
+  }
+
+  test("a fatal generation error propagates without entering a later state") {
+    val preparationCalls = AtomicInteger(0)
+    val interpreterCalls = AtomicInteger(0)
+    val recordCalls      = AtomicInteger(0)
+    val decisionCalls    = AtomicInteger(0)
+    val failure          = RuntimeError("interpreted-law", "generation failed")
+    val agent = TestAgent(
+      generation = _ => Left(failure),
+      preparation = _ =>
+        preparationCalls.incrementAndGet()
+        ActionPreparation.Ready("unreachable"),
+      interpreterValue = interpreter { _ =>
+        interpreterCalls.incrementAndGet()
+        Right(ActionOutcome.Succeeded("unreachable"))
+      },
+      rejectionRecorder = (_, _, _) =>
+        recordCalls.incrementAndGet()
+        "unreachable",
+      outcomeRecorder = (_, _, _, _) =>
+        recordCalls.incrementAndGet()
+        "unreachable",
+      decision = (_, _, _) =>
+        decisionCalls.incrementAndGet()
+        ActionDecision.Continue
+    )
+
+    assertEquals(agent.advance(Vector("original"), 0), Left(failure))
+    assertEquals(preparationCalls.get(), 0)
+    assertEquals(interpreterCalls.get(), 0)
     assertEquals(recordCalls.get(), 0)
     assertEquals(decisionCalls.get(), 0)
   }

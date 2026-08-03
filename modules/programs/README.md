@@ -70,7 +70,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `ActionInterpreter[Action, Observation]` | Executes an agent action and distinguishes success, recoverable failure, and fatal `Left`. |
 | `AgentLoop` | The bounded `Continue` / `Done` / exhaustion state-machine kernel shared by ReAct, CodeAct, RLM, and ProgramOfThought. |
 | `TrajectoryAgent[I, O, S]` | Final loop-then-extract template used by ReAct and CodeAct; owns extraction count, failure short-circuiting, envelope preservation, and complete-trajectory attachment. |
-| `InterpretedTrajectoryAgent[I, O, Entry]` | Final generate → prepare → interpret → record → decide transition shared by ReAct and CodeAct while leaving their action languages and observations typed independently. |
+| `InterpretedTrajectoryAgent[I, O, Entry]` | Explicit typed state machine for the final generate → prepare → interpret → record → decide transition shared by ReAct and CodeAct. |
 | `Aggregation.majority` | Picks the most-common field value across candidate completions (ties to first). |
 | `KNN` / `EmbeddingsRetriever` | Brute-force in-memory retrievers (no FAISS): nearest trainset examples by dot product, top-k passages by cosine. |
 
@@ -95,9 +95,11 @@ their callbacks, trace, history, and optimizer-addressable predictors.
   wired into ReAct (see the [design memory](../../README.md)).
 - **Agent templates own behavioral laws.** `TrajectoryAgent.forward` and
   `InterpretedTrajectoryAgent.trajectoryStep` are final, so subclasses choose the typed action language but cannot
-  alter the orchestration. `TrajectoryAgentLawSuite` pins extract-once, short-circuit, raw-envelope, and full-history
-  behavior; `InterpretedTrajectoryAgentLawSuite` pins the `Halted`, `Rejected`, `Ready`, post-outcome `decide`, and
-  fatal-error branches.
+  alter the orchestration. `InterpretedTrajectoryAgent.State` gives each phase exactly the data available there, while
+  state-specific transition ADTs enumerate its legal successors; rejection and interpreted-outcome recording are
+  separate states. `TrajectoryAgentLawSuite` pins extract-once, short-circuit, raw-envelope, and full-history behavior;
+  `InterpretedTrajectoryAgentLawSuite` pins the `Halted`, `Rejected`, `Ready`, post-outcome `decide`, and fatal-error
+  branches.
 
 ## Source layout
 

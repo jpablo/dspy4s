@@ -158,7 +158,8 @@ The bounded recursion itself lives in `AgentLoop`, and `TrajectoryAgent` owns th
 transition is the same typed template used by ReAct: `InterpretedTrajectoryAgent` generates a `CodeStep`, lowers it to a
 code-string action (or a rejected parse), invokes `ActionInterpreter[String, String]`, and records one
 `TrajectoryEntry`. Its post-outcome decision then reads `CodeStep.finished`. CodeAct supplies those typed operations;
-the shared final transition owns their ordering.
+the shared final transition owns their ordering through explicit phase states. Rejected preparation and interpreted
+outcomes have different recording states, so the rejected branch cannot contain an action or reach `decide`.
 
 This gives the branches explicit behavioral laws. Rejected code records one failed observation without calling the
 interpreter; ready code is interpreted, recorded, and decided exactly once; `finished` is checked only after recording;
