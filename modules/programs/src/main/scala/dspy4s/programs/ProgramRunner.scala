@@ -62,7 +62,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
     signatureBacked[I, O, Predict[I, O]](_.signature.inputShape)
 
   given fromChainOfThought[I, O]: ProgramRunner[ChainOfThought[I, O]] =
-    signatureBacked[I, ChainOfThought.WithReasoning[O], ChainOfThought[I, O]](_.signature.inputShape)
+    signatureBacked[I, ChainOfThought.WithReasoning[O], ChainOfThought[I, O]](_.baseSignature.inputShape)
 
   given fromReAct[I, O]: ProgramRunner[ReAct[I, O]] =
     signatureBacked[I, ReAct.WithReasoning[O], ReAct[I, O]](_.baseSignature.inputShape)

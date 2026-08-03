@@ -76,10 +76,10 @@ object OptimizableLeaf:
       prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
   ): OptimizableLeaf[ChainOfThought[I, O]] with
     private def augmented(program: ChainOfThought[I, O]) =
-      ChainOfThought.augmentLayout(program.signature.layout)
+      ChainOfThought.augmentLayout(program.baseSignature.layout)
 
     def get(program: ChainOfThought[I, O]): OptimizableParameters =
-      OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
+      OptimizableParameters(program.baseSignature.layout.instructions, program.demos, program.config)
 
     def metadata(program: ChainOfThought[I, O]): OptimizableMetadata =
       OptimizableMetadata.from(augmented(program), program.moduleName)
@@ -90,7 +90,7 @@ object OptimizableLeaf:
         program.copy(
           demos = updated.demos,
           config = updated.config,
-          signature = program.signature.withInstructions(updated.instructions)
+          baseSignature = program.baseSignature.withInstructions(updated.instructions)
         )
 
 /** Uniform syntax derived from the lawful [[OptimizableLeaf]] lens. Every current and third-party leaf receives the same

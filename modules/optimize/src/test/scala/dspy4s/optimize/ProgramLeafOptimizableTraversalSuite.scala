@@ -108,7 +108,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
     val leaf = predictorOf(cot)
     val cur  = leaf.get(cot)
     val out  = leaf.set(cot, cur.copy(instructions = Some("Reason step by step.")))
-    assertEquals(out.signature.instructions, Some("Reason step by step."))
+    assertEquals(out.baseSignature.instructions, Some("Reason step by step."))
   }
 
   // ── Resolution priority: leaf, not structural derivation ─────────────────

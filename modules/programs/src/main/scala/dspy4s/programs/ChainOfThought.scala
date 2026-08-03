@@ -34,7 +34,7 @@ import zio.blocks.schema.DynamicValue
   * returns `Left`" divergence is gone.
   */
 final case class ChainOfThought[I, O](
-    signature: Signature[I, O],
+    baseSignature: Signature[I, O],
     demos: Vector[Example] = Vector.empty,
     runtime: ProgramRuntime = new SettingsProgramRuntime {},
     name: Option[String] = None,
@@ -51,7 +51,7 @@ final case class ChainOfThought[I, O](
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
   override protected val lifecycle: ModuleLifecycle[I, Out] =
-    ModuleLifecycle.typed(signature.inputShape)
+    ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predictor.apply(call)
@@ -64,24 +64,24 @@ final case class ChainOfThought[I, O](
 
   private def augmentedSignature: Signature[I, Out] =
     Signature(
-      name        = signature.name,
+      name        = baseSignature.name,
       layout      = augmentedLayout,
-      inputShape  = signature.inputShape,
+      inputShape  = baseSignature.inputShape,
       outputShape = augmentedOutputShape
     )
 
   private def augmentedLayout: SignatureLayout =
-    ChainOfThought.augmentLayout(signature.layout)
+    ChainOfThought.augmentLayout(baseSignature.layout)
 
   // The shared opening-position augmentation shape (idempotent prepend, decodePrepended, base JSON schema
   // passthrough) — see [[OutputAugmentation.prependedStringShape]].
   private def augmentedOutputShape: Shape[Out] =
     OutputAugmentation.prependedStringShape(
-      signature.outputShape,
+      baseSignature.outputShape,
       ChainOfThought.reasoningField,
       ChainOfThought.reasoningName,
       "ChainOfThought",
-      signature.name
+      baseSignature.name
     )
 
 object ChainOfThought:
