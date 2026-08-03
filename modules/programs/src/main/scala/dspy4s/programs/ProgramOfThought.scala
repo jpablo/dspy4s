@@ -184,7 +184,7 @@ final case class ProgramOfThought[I, O](
     for
       codeAndOutput <- runCode(call)
       (code, codeOutput) = codeAndOutput
-      result <- answererPredict.apply(call.mapInput(input => ((input, code), codeOutput)))
+      result <- answererPredict(call.mapInput(input => ((input, code), codeOutput)))
     yield Prediction(output = result.output, raw = result.raw)
 
   /** The regenerate-until-execution-succeeds loop (the `retryUntil` shape of Algebra 2, on the shared [[AgentLoop]]
@@ -219,9 +219,9 @@ final case class ProgramOfThought[I, O](
       // have different typed inputs, so the dispatch happens at the call rather than on a shared predict value.
       val generated = previous match
         case None =>
-          generatorPredict.apply(call)
+          generatorPredict(call)
         case Some(attempt) =>
-          regeneratorPredict.apply(call.mapInput(input => ((input, attempt.code), attempt.error)))
+          regeneratorPredict(call.mapInput(input => ((input, attempt.code), attempt.error)))
 
       generated.flatMap { prediction =>
         prediction.output.generatedCode match

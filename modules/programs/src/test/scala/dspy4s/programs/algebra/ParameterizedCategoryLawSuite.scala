@@ -459,7 +459,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     // summoned and Program.of is a compile error. In the ambient Module world the same program runs fine but is
     // silently un-addressable; in the packaged category it cannot exist.
     val opaque = new Opaque
-    assertEquals(opaque.apply(ProgramCall(3)).map(_.output), Right(3)) // valid ambient program
+    assertEquals(opaque(ProgramCall(3)).map(_.output), Right(3)) // valid ambient program
     val errors = compileErrors("Program.of(new Opaque)")
     assert(errors.nonEmpty, "expected Program.of(new Opaque) to fail compilation")
     assert(errors.contains("OptimizableTraversal"), s"expected a missing-OptimizableTraversal error, got:\n$errors")

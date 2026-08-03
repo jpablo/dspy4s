@@ -42,8 +42,7 @@ final case class BestOfN[P <: Module[I, O], I, O](
     AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
       runAttempt = idx =>
         module
-          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))
-          .apply(call),
+          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(call),
       reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction))
     )
 

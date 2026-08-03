@@ -238,7 +238,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
           config    = DynamicValues.recordFromEntries(Vector("temperature" := config.initTemperature)),
           rolloutId = Some(rolloutId)
         )
-        gen.apply(call) match
+        gen(call) match
           case Right(pred) =>
             DynamicValues.recordGet(pred.output, "proposed_instruction")
               .map(DynamicValues.renderText)

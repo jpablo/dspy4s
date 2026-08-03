@@ -90,7 +90,7 @@ object Metrics:
       displayTable    = Right(5)
     ))
   // --8<-- [end:metric-evaluate]
-  // Launch: `evaluator(devset, metric).apply()(program)(using RuntimeContext)` — the `using` is the
+  // Launch: `evaluator(devset, metric)()(program)(using RuntimeContext)` — the `using` is the
   // ambient RuntimeContext; `program` is `Example => Either[DspyError, RawPrediction]`.
 
   // ── Snippet 6 (lines 101–116) — LLM-as-judge metric ──

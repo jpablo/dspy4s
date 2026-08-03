@@ -34,7 +34,7 @@ object Cache:
   def ask(lm: LanguageModel, question: String)(using RuntimeContext): Either[DspyError, String] =
     RuntimeEnvironment.withSettings(summon[RuntimeContext].copy(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      Predict(qa).apply((question = question)).map(_.output.answer)
+      Predict(qa)((question = question)).map(_.output.answer)
     }
 
   // ── Snippets 3/4 — disable vs enable caching (≈ dspy.configure_cache) ──
@@ -60,8 +60,8 @@ object Cache:
       ) {
         given RuntimeContext = RuntimeEnvironment.current
         for
-          _ <- Predict(qa).apply((question = question)) // miss: records usage
-          _ <- Predict(qa).apply((question = question)) // hit: fast, no new usage
+          _ <- Predict(qa)((question = question)) // miss: records usage
+          _ <- Predict(qa)((question = question)) // hit: fast, no new usage
         yield tracker.totalUsage
       }
     }

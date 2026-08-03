@@ -249,8 +249,7 @@ object ReactVsRlm:
     )
     // --8<-- [end:react-agent]
     val (report, lmCalls, ms) = measured {
-      agent
-        .apply((medications = medications, conditions = conditions))
+      agent((medications = medications, conditions = conditions))
         .map(_.output.risk_report)
         .fold(err => s"[error] ${err.message}", identity)
     }
@@ -266,7 +265,7 @@ object ReactVsRlm:
     )
     // --8<-- [end:rlm-agent]
     val (prediction, lmCalls, ms) = measured {
-      agent.apply((medications = medications, conditions = conditions))
+      agent((medications = medications, conditions = conditions))
     }
     val report     = prediction.map(_.output.risk_report).fold(err => s"[error] ${err.message}", identity)
     val trajectory = prediction.toOption.flatMap(_.raw.asString("trajectory").toOption)

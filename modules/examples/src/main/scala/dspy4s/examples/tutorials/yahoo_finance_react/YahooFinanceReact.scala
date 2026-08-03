@@ -65,7 +65,7 @@ object YahooFinanceReact:
     )
 
     def forward(financialQuery: String)(using RuntimeContext): Either[DspyError, String] =
-      react.apply((financial_query = financialQuery)).map(_.output.analysis_response)
+      react((financial_query = financialQuery)).map(_.output.analysis_response)
   // --8<-- [end:react-agent]
 
   // ── Snippet 4 — the demo queries ──

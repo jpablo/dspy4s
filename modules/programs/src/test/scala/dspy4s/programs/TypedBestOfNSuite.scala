@@ -82,7 +82,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = bestOfN.apply(ProgramCall(Q("x"), rolloutId = Some(7)))
+    val result           = bestOfN(ProgramCall(Q("x"), rolloutId = Some(7)))
 
     assert(result.isRight, s"expected success, got: $result")
     assertEquals(result.toOption.get.output, Cand("B", 0.9))
@@ -109,7 +109,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = bestOfN.apply(ProgramCall(Q("x")))
+    val result           = bestOfN(ProgramCall(Q("x")))
     assertEquals(result.toOption.map(_.output), Some(Cand("A", 0.95)))
     assertEquals(stub.calls.get(), 1)
   }
@@ -123,7 +123,7 @@ class TypedBestOfNSuite extends FunSuite:
     val bestOfN = BestOfN[TypedStub, Q, Cand](stub, n = AttemptCount(3), rewardFn = (_, _) => 1.0, threshold = 0.0)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = bestOfN.apply(ProgramCall(Q("x")))
+    val result           = bestOfN(ProgramCall(Q("x")))
     assert(result.isLeft)
     assertEquals(result.left.toOption.get.message, "f3")
   }
@@ -144,7 +144,7 @@ class TypedBestOfNSuite extends FunSuite:
       )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = bestOfN.apply(ProgramCall(Q("x")))
+    val result           = bestOfN(ProgramCall(Q("x")))
     assert(result.isLeft)
     assertEquals(stub.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
@@ -170,7 +170,7 @@ class TypedBestOfNSuite extends FunSuite:
       )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = bestOfN.apply(ProgramCall(Q("x")))
+    val result           = bestOfN(ProgramCall(Q("x")))
     assert(result.isLeft)
     assertEquals(stub.calls.get(), 4)                       // tolerated 3 failures, aborted on the 4th
     assertEquals(result.left.toOption.get.message, "f4")
@@ -195,7 +195,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = bestOfN.apply(ProgramCall(Q("x")))
+    val result           = bestOfN(ProgramCall(Q("x")))
     assertEquals(result.toOption.map(_.output), Some(Cand("D", 0.9)))
     assertEquals(stub.calls.get(), 5)
   }
@@ -215,7 +215,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = refine.apply(ProgramCall(Q("x")))
+    val result           = refine(ProgramCall(Q("x")))
     assertEquals(result.toOption.map(_.output), Some(Cand("A", 0.8)))
     assertEquals(stub.calls.get(), 1)
   }
@@ -357,7 +357,7 @@ class TypedBestOfNSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = refine.apply(ProgramCall(Q("Capital of Belgium?")))
+      val result           = refine(ProgramCall(Q("Capital of Belgium?")))
 
       // attempt 1 (no hint) scored 0.2; attempt 2 saw the hint and scored 1.0 -> the improved prediction wins.
       assertEquals(result.toOption.map(_.output), Some(Cand("Brussels", 1.0)))
@@ -385,7 +385,7 @@ class TypedBestOfNSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = refine.apply(ProgramCall(Q("Capital of Belgium?")))
+      val result           = refine(ProgramCall(Q("Capital of Belgium?")))
 
       assertEquals(result.toOption.map(_.output.answer), Some("Antwerp"))
       assertEquals(lm.offerFeedbackCalls.get(), 0)
@@ -409,7 +409,7 @@ class TypedBestOfNSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = refine.apply(ProgramCall(Q("Capital of Belgium?")))
+      val result           = refine(ProgramCall(Q("Capital of Belgium?")))
 
       assert(result.isRight, s"advice failure must not discard the best-so-far; got: $result")
       assertEquals(result.toOption.map(_.output), Some(Cand("Antwerp", 0.2)))
@@ -432,7 +432,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = refine.apply(ProgramCall(Q("x")))
+    val result           = refine(ProgramCall(Q("x")))
     assert(result.isLeft)
     assertEquals(stub.calls.get(), 2)
     assertEquals(result.left.toOption.get.message, "f2")
@@ -456,7 +456,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = refine.apply(ProgramCall(Q("x")))
+    val result           = refine(ProgramCall(Q("x")))
     assert(result.isLeft)
     assertEquals(stub.calls.get(), 4)
     assertEquals(result.left.toOption.get.message, "f4")

@@ -60,7 +60,7 @@ object ProgramPersistence:
     ) { case (acc, (rawId, rawParameters)) =>
       for
         entries <- acc
-        id <- OptimizableId.parse(rawId).left.map(ValidationError.apply)
+        id <- OptimizableId.parse(rawId).left.map(ValidationError(_))
         parameters <- decodeParameters(rawParameters, rawId)
       yield entries :+ (id -> parameters)
     }

@@ -83,7 +83,7 @@ final case class Moded[I, O, P <: Module[I, O]](mode: Mode, program: P)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val controls = mode.transform(Mode.Controls(call.config, call.traceEnabled, call.rolloutId))
-    program.apply(call.copy(
+    program(call.copy(
       config       = controls.config,
       traceEnabled = controls.traceEnabled,
       rolloutId    = controls.rolloutId

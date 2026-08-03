@@ -54,7 +54,7 @@ class ExactMatch(answerField: String = "answer") extends Metric:
   ): Either[DspyError, Double] =
     MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
-      val refsNorm = refTexts.map(NormalizeText.apply)
+      val refsNorm = refTexts.map(NormalizeText(_))
       if refsNorm.exists(_ == predNorm) then 1.0 else 0.0
     }
 
@@ -66,7 +66,7 @@ class ContainsMatch(answerField: String = "answer") extends Metric:
   ): Either[DspyError, Double] =
     MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
-      val refsNorm = refTexts.map(NormalizeText.apply)
+      val refsNorm = refTexts.map(NormalizeText(_))
       if refsNorm.exists(ref => predNorm.contains(ref)) then 1.0 else 0.0
     }
 

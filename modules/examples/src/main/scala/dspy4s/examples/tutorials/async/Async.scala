@@ -32,7 +32,7 @@ object Async:
   // --8<-- [start:ask-async]
   def askAsync(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
     ContextPropagation.future(
-      Predict(Signature.fromString("question -> answer")).apply((question = question)).map(_.output.answer)
+      Predict(Signature.fromString("question -> answer"))((question = question)).map(_.output.answer)
     )
   // --8<-- [end:ask-async]
 
@@ -54,7 +54,7 @@ object Async:
     /** Sequential-but-asynchronous, like Python's `aforward`: `>>>` builds the typed two-stage program, which runs
       * inside one context-propagating off-thread computation and returns a `Future`. */
     def aforward(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
-      ContextPropagation.future(pipeline.apply(ProgramCall((question = question))).map(_.output))
+      ContextPropagation.future(pipeline(ProgramCall((question = question))).map(_.output))
   // --8<-- [end:simplifier-module]
 
   // ── Snippets 2 / 3 — async tools (`dspy.Tool(async_fn)`, `tool.acall`, async→sync conversion) ──

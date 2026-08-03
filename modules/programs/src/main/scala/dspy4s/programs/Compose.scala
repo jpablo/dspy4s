@@ -52,10 +52,9 @@ final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
   override val moduleName: String = "and_then"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    first.apply(call).flatMap { predX =>
+    first(call).flatMap { predX =>
       // The outer call's controls pass through unchanged; combine the evidence envelopes after the carrier runs.
-      second
-        .apply(call.mapInput(_ => predX.output))
+      second(call.mapInput(_ => predX.output))
         .map(predO => predO.copy(raw = predX.raw.followedBy(predO.raw)))
     }
 
@@ -126,8 +125,8 @@ final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[(OA, OB)]] =
     for
-      predA <- first.apply(call)
-      predB <- second.apply(call)
+      predA <- first(call)
+      predB <- second(call)
     yield Prediction(
       output = (predA.output, predB.output),
       raw = RawPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
@@ -185,8 +184,8 @@ final case class Tensor[
       RuntimeContext
   ): Either[DspyError, Prediction[(A, B)]] =
     for
-      predA <- first.apply(call.mapInput(_._1))
-      predB <- second.apply(call.mapInput(_._2))
+      predA <- first(call.mapInput(_._1))
+      predB <- second(call.mapInput(_._2))
     yield Prediction(
       output = (predA.output, predB.output),
       raw = RawPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))

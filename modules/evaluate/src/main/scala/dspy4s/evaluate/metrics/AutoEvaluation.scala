@@ -70,7 +70,7 @@ object AutoEvaluation:
       readFields: Seq[String]
   )(using RuntimeContext): Either[DspyError, Vector[Double]] =
     for
-      prediction <- predictor.apply(ProgramCall(input = inputs, traceEnabled = false))
+      prediction <- predictor(ProgramCall(input = inputs, traceEnabled = false))
       values <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc

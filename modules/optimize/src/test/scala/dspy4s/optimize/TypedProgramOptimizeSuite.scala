@@ -42,8 +42,8 @@ object TwoStageQA:
     ): Either[DspyError, RawPrediction] =
       for
         i  <- program.classify.signature.inputShape.decode(call.input)
-        _  <- program.classify.apply(call.mapInput(_ => i))
-        p2 <- program.answer.apply(call.mapInput(_ => i))
+        _  <- program.classify(call.mapInput(_ => i))
+        p2 <- program.answer(call.mapInput(_ => i))
       yield p2.raw
 
 class TypedProgramOptimizeSuite extends FunSuite:

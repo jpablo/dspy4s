@@ -82,7 +82,7 @@ object Ensemble:
           .foldLeft[Either[DspyError, Vector[DynamicValue.Record]]](Right(Vector.empty)) { (acc, program) =>
             for
               soFar      <- acc
-              prediction <- program.apply(input)
+              prediction <- program(input)
             yield soFar :+ prediction.output
           }
           .flatMap(reduceFn)

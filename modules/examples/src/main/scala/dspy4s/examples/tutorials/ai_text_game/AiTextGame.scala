@@ -98,7 +98,7 @@ object AiTextGame:
     // --8<-- [start:generate-scene]
     def generateScene(player: Player, context: GameContext, recentActions: String = "")(using RuntimeContext)
         : Either[DspyError, Scene] =
-      storyGen.apply((
+      storyGen((
         location       = context.currentLocation,
         player_info    = player.info,
         story_progress = context.storyProgress,
@@ -114,7 +114,7 @@ object AiTextGame:
     def handleDialogue(npcName: String, playerInput: String, context: GameContext)(using RuntimeContext)
         : Either[DspyError, Dialogue] =
       val personality = personalityMap.getOrElse(npcName, "Friendly villager with local knowledge")
-      dialogueGen.apply((
+      dialogueGen((
         npc_name        = npcName,
         npc_personality = personality,
         player_input    = playerInput,
@@ -134,7 +134,7 @@ object AiTextGame:
         if Seq("fight", "battle", "attack").exists(lower.contains) then "hard"
         else if Seq("look", "examine", "talk").exists(lower.contains) then "easy"
         else "medium"
-      actionResolver.apply((
+      actionResolver((
         action       = action,
         player_stats = player.stats,
         context      = context.summary,

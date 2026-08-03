@@ -56,7 +56,7 @@ class RequestOptionsMergeSuite extends FunSuite:
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val adapterOpts = rec("response_format" := "json_object", "from_adapter" := true)
     val reqs = capture(new OptsAdapter(adapterOpts)) {
-      val _ = DynamicPredict(layout).apply(ProgramCall(input = rec("question" := "x")))
+      val _ = DynamicPredict(layout)(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -69,7 +69,7 @@ class RequestOptionsMergeSuite extends FunSuite:
     val adapterOpts = rec("temperature" := 0.0, "from_adapter" := true)
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.9))
     val reqs = capture(new OptsAdapter(adapterOpts)) {
-      val _ = module.apply(ProgramCall(input = rec("question" := "x")))
+      val _ = module(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -83,7 +83,7 @@ class RequestOptionsMergeSuite extends FunSuite:
     // supportsResponseSchema = true.
     val sig = dspy4s.typed.Signature.derived[MCQAInput, MCQAOutput]("QA")
     val reqs = capture(JSONAdapter()) {
-      val _ = Predict(sig).apply(MCQAInput("x"))
+      val _ = Predict(sig)(MCQAInput("x"))
     }
     assertEquals(reqs.size, 1)
     val rfType = DynamicValues.recordGet(reqs.head.options, "response_format").collect {

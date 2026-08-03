@@ -96,7 +96,7 @@ object LanguageModels:
   private def qa = ChainOfThought(Signature.fromString("question -> answer"))
 
   def ask(question: String)(using RuntimeContext): Either[DspyError, String] =
-    qa.apply((question = question)).map(_.output.answer)
+    qa((question = question)).map(_.output.answer)
 
   // ── Using multiple LMs (lines 174–195) ──
   // | dspy.configure(lm=dspy.LM('openai/gpt-4o-mini'))           # global default
@@ -134,7 +134,7 @@ object LanguageModels:
   def askWithConfig(question: String, temperature: Double, rolloutId: Int)(using
       RuntimeContext
   ): Either[DspyError, String] =
-    qa.apply(ProgramCall(
+    qa(ProgramCall(
       input     = (question = question),
       config    = DynamicValues.record("temperature" := temperature),
       rolloutId = Some(rolloutId)

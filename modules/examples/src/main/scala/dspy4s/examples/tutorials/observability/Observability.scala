@@ -64,7 +64,7 @@ object Observability:
   def runWithLogging(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
     RuntimeEnvironment.withCallbacks(ctx.callbacks :+ new AgentLoggingCallback) {
       given RuntimeContext = RuntimeEnvironment.current
-      agent.apply((question = question)).map(_.output.answer)
+      agent((question = question)).map(_.output.answer)
     }
   // --8<-- [end:callback-run]
 

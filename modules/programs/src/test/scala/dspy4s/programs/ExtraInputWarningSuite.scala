@@ -52,7 +52,7 @@ class ExtraInputWarningSuite extends FunSuite:
     val err = captureErr {
       RuntimeEnvironment.withSettings(defaultSettings) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(sig).apply(
+        val result = DynamicPredict(sig)(
           ProgramCall(input = rec("question" := "x", "bogus" := "y", "extra" := "z"))
         )
         assert(result.isRight, s"extra inputs must NOT fail the call, got: $result")
@@ -70,7 +70,7 @@ class ExtraInputWarningSuite extends FunSuite:
     val err = captureErr {
       RuntimeEnvironment.withSettings(defaultSettings) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result           = DynamicPredict(sig).apply(ProgramCall(input = rec("question" := "x")))
+        val result           = DynamicPredict(sig)(ProgramCall(input = rec("question" := "x")))
         assert(result.isRight)
       }
     }

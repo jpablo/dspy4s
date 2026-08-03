@@ -48,7 +48,7 @@ sealed trait Program[I, O]:
 
   /** Run the packaged program through the module's wrapped `apply`. */
   def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    program.apply(call)
+    program(call)
 
 object Program:
 
@@ -117,14 +117,14 @@ object Program:
     def run(program: Program[I, O], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
-      codec.decode(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
+      codec.decode(call.input).flatMap(input => program(call.mapInput(_ => input)).map(_.raw))
 
   /** Preserve the refined package type when an optimizer requires both traversal and record-running evidence. */
   given programWithArityRunner[I, O, N <: Int](using codec: RecordCodec[I]): ProgramRunner[WithArity[I, O, N]] with
     def run(program: WithArity[I, O, N], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
-      codec.decode(call.input).flatMap(input => program.apply(call.mapInput(_ => input)).map(_.raw))
+      codec.decode(call.input).flatMap(input => program(call.mapInput(_ => input)).map(_.raw))
 
   /** The parameterized category over packaged programs.
     *

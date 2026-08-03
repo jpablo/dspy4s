@@ -142,7 +142,7 @@ final case class MultiChainComparison[I, O](
         s"Number of attempts (${input.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
       ))
       .flatMap { attempts =>
-        comparePredict.apply(
+        comparePredict(
           call
             .mapInput(_ => (input.baseInput, attempts))
             .copy(config = call.config.updated("temperature", DynamicValues.fromAny(temperature)))

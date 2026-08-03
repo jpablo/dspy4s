@@ -87,7 +87,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((question = "what is 40 + 2?"))
+      val result = program((question = "what is 40 + 2?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "42")
@@ -122,7 +122,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((q = "?"))
+      val result = program((q = "?"))
       assert(result.isRight)
       assertEquals(interpreter.received.size, 3, "should run exactly maxIterations times")
     }
@@ -147,7 +147,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((q = "?"))
+      val result = program((q = "?"))
       assert(result.isRight, s"CodeAct should not propagate user-code errors as Left; got $result")
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
       assert(traj.contains("Failed to execute"), s"trajectory missing error label: $traj")
@@ -170,7 +170,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.apply((q = "?"))
+      val _ = program((q = "?"))
       assert(!interpreter.closed, "CodeAct must not auto-close — that's the caller's job")
     }
   }
@@ -194,7 +194,7 @@ class CodeActSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((q = "sum 0..9"))
+      val result = program((q = "sum 0..9"))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
       assert(traj.contains("45"), s"expected '45' in trajectory: $traj")
@@ -271,7 +271,7 @@ class CodeActSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((q = "x"))
+      val result = program((q = "x"))
       assert(result.isRight, result.toString)
       // Only iteration 2's snippet reached the interpreter — the loop continued past the "finished" parse failure.
       assertEquals(interpreter.received.toList, List("print('ok')"))
@@ -326,7 +326,7 @@ class CodeActSuite extends FunSuite:
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new CwFailingLm), adapter = Some(TruncationAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((q = "x"))
+      val result = program((q = "x"))
       assert(result.isRight, result.toString)
 
       // Two extractor attempts: the full trajectory, then the truncated retry (oldest iteration dropped).

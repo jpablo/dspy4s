@@ -69,12 +69,12 @@ object LlmsTxtGeneration:
         packageFiles: String
     )(using RuntimeContext): Either[DspyError, String] =
       for
-        repo <- analyzeRepo.apply((repo_url = repoUrl, file_tree = fileTree, readme_content = readmeContent))
-        structure <- analyzeStructure.apply((file_tree = fileTree, package_files = packageFiles))
-        examples <- generateExamples.apply(
+        repo <- analyzeRepo((repo_url = repoUrl, file_tree = fileTree, readme_content = readmeContent))
+        structure <- analyzeStructure((file_tree = fileTree, package_files = packageFiles))
+        examples <- generateExamples(
                       (repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: ${repo.output.key_concepts}")
                     )
-        llms <- generateLlmsTxt.apply((
+        llms <- generateLlmsTxt((
                   project_purpose       = repo.output.project_purpose,
                   key_concepts          = repo.output.key_concepts,
                   architecture_overview = repo.output.architecture_overview,

@@ -28,7 +28,7 @@ class EnsembleSuite extends FunSuite:
     val ensembled = Ensemble().compile(programs)
     given RuntimeContext = RuntimeEnvironment.current
 
-    val result = ensembled.apply(call)
+    val result = ensembled(call)
     assert(result.isRight, s"apply failed: ${result.left.toOption}")
     assertEquals(lookupString(result.toOption.get.output, "answer"), "A")
   }
@@ -37,7 +37,7 @@ class EnsembleSuite extends FunSuite:
     val ensembled = Ensemble().compile(Vector(fixedAnswer("only")))
     given RuntimeContext = RuntimeEnvironment.current
 
-    val result = ensembled.apply(call)
+    val result = ensembled(call)
     assertEquals(lookupString(result.toOption.get.output, "answer"), "only")
   }
 
@@ -47,8 +47,8 @@ class EnsembleSuite extends FunSuite:
     val optimizer = Ensemble(size = Some(EnsembleSize(3)), seed = 42L)
     given RuntimeContext = RuntimeEnvironment.current
 
-    val first = lookupString(optimizer.compile(programs).apply(call).toOption.get.output, "answer")
-    val second = lookupString(optimizer.compile(programs).apply(call).toOption.get.output, "answer")
+    val first = lookupString(optimizer.compile(programs)(call).toOption.get.output, "answer")
+    val second = lookupString(optimizer.compile(programs)(call).toOption.get.output, "answer")
     assertEquals(first, second, "same seed should pick the same sample deterministically")
   }
 
@@ -56,5 +56,5 @@ class EnsembleSuite extends FunSuite:
     val ensembled = Ensemble().compile(Vector.empty[ScriptedPredictProgram])
     given RuntimeContext = RuntimeEnvironment.current
 
-    assert(ensembled.apply(call).isLeft, "majority over zero outputs should be a Left")
+    assert(ensembled(call).isLeft, "majority over zero outputs should be a Left")
   }

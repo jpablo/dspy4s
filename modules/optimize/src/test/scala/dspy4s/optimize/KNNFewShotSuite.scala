@@ -71,7 +71,7 @@ class KNNFewShotSuite extends FunSuite:
 
       val compiled =
         new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedder).compile(student).toOption.get
-      val result   = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
+      val result   = compiled(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       // The final answer proves the demos steered the call (the LM answers "guided" only when a1 is in its prompt).
       assertEquals(result.toOption.flatMap(_.raw.asString("answer").toOption), Some("guided"))
@@ -105,7 +105,7 @@ class KNNFewShotSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val compiled =
         new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedderB).compile(student).toOption.get
-      val _                = compiled.apply(ProgramCall(input = DynamicValues.record("question" := "query")))
+      val _                = compiled(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       val finalPrompt = lm.prompts.last
       assert(finalPrompt.contains("a3") && finalPrompt.contains("a4"), s"cluster-B demos expected:\n$finalPrompt")

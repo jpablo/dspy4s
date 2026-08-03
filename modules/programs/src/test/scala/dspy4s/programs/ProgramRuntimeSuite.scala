@@ -101,7 +101,7 @@ class ProgramRuntimeSuite extends FunSuite:
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
       val program = EchoProgram()
-      val output           = program.apply(ProgramCall(input = rec("question" := "hello")))
+      val output           = program(ProgramCall(input = rec("question" := "hello")))
 
       assert(output.isRight)
       assertEquals(lookupString(output.toOption.get.output, "answer"), "ok")
@@ -115,7 +115,7 @@ class ProgramRuntimeSuite extends FunSuite:
   test("base predict program respects traceEnabled=false") {
     given RuntimeContext = RuntimeEnvironment.current
     val program = EchoProgram()
-    val output           = program.apply(ProgramCall(input = rec("question" := "hello"), traceEnabled = false))
+    val output           = program(ProgramCall(input = rec("question" := "hello"), traceEnabled = false))
 
     assert(output.isRight)
     assertEquals(RuntimeEnvironment.current.trace.size, 0)

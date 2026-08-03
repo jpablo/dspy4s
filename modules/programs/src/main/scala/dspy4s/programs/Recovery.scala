@@ -47,11 +47,11 @@ final case class RecoverWith[
   override val moduleName: String = "recover_with"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    primary.apply(call) match
+    primary(call) match
       case success @ Right(_) => success
       case denied @ Left(error) =>
         TransformResult.guard("program_recovery_policy")(Right(policy.allows(error))).flatMap { allowed =>
-          if allowed then fallback.apply(call) else denied
+          if allowed then fallback(call) else denied
         }
 
 object RecoverWith:

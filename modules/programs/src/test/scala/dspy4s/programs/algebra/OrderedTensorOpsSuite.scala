@@ -68,13 +68,13 @@ class OrderedTensorOpsSuite extends FunSuite:
   }
 
   test("tensor preserves values for identity programs") {
-    val result = C.tensor(C.id[Int], C.id[String]).apply(ProgramCall((5, "x"))).map(_.output)
+    val result = C.tensor(C.id[Int], C.id[String])(ProgramCall((5, "x"))).map(_.output)
     assertEquals(result, Right((5, "x")))
   }
 
   test("swap is involutive and copy is cocommutative on values") {
-    val swapped = (C.swap[Int, String] >>> C.swap[String, Int]).apply(ProgramCall((5, "x"))).map(_.output)
-    val copied  = (C.copy[Int] >>> C.swap[Int, Int]).apply(ProgramCall(7)).map(_.output)
+    val swapped = (C.swap[Int, String] >>> C.swap[String, Int])(ProgramCall((5, "x"))).map(_.output)
+    val copied  = (C.copy[Int] >>> C.swap[Int, Int])(ProgramCall(7)).map(_.output)
 
     assertEquals(swapped, Right((5, "x")))
     assertEquals(copied, Right((7, 7)))
@@ -82,9 +82,9 @@ class OrderedTensorOpsSuite extends FunSuite:
 
   test("discard equality on values hides an observable effect") {
     val f = new Counting
-    val lhs            = (f >>> C.discard[String]).apply(ProgramCall(5)).map(_.output)
+    val lhs            = (f >>> C.discard[String])(ProgramCall(5)).map(_.output)
     val callsAfterLeft = f.calls.get()
-    val rhs            = C.discard[Int].apply(ProgramCall(5)).map(_.output)
+    val rhs            = C.discard[Int](ProgramCall(5)).map(_.output)
 
     assertEquals(lhs, rhs)
     assertEquals(callsAfterLeft, 1)
@@ -93,15 +93,15 @@ class OrderedTensorOpsSuite extends FunSuite:
 
   test("copy commutes with deterministic programs but not effect-observing programs") {
     val deterministic = Fn[Int, String](i => s"v$i")
-    val deterministicLeft = (deterministic >>> C.copy[String]).apply(ProgramCall(5)).map(_.output)
+    val deterministicLeft = (deterministic >>> C.copy[String])(ProgramCall(5)).map(_.output)
     val deterministicRight =
-      (C.copy[Int] >>> C.tensor(deterministic, deterministic)).apply(ProgramCall(5)).map(_.output)
+      (C.copy[Int] >>> C.tensor(deterministic, deterministic))(ProgramCall(5)).map(_.output)
     assertEquals(deterministicLeft, deterministicRight)
 
     val effectful = new Counting
-    val effectfulLeft = (effectful >>> C.copy[String]).apply(ProgramCall(5)).map(_.output).toOption.get
+    val effectfulLeft = (effectful >>> C.copy[String])(ProgramCall(5)).map(_.output).toOption.get
     val effectfulRight =
-      (C.copy[Int] >>> C.tensor(effectful, effectful)).apply(ProgramCall(5)).map(_.output).toOption.get
+      (C.copy[Int] >>> C.tensor(effectful, effectful))(ProgramCall(5)).map(_.output).toOption.get
     assertEquals(effectfulLeft._1, effectfulLeft._2)
     assertNotEquals(effectfulRight._1, effectfulRight._2)
   }

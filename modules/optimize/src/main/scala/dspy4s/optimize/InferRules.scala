@@ -154,7 +154,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
           config    = DynamicValues.record("temperature" := config.initTemperature),
           rolloutId = Some(rolloutId)
         )
-        gen.apply(call) match
+        gen(call) match
           case Right(pred) =>
             DynamicValues.recordGet(pred.output, "natural_language_rules").map(DynamicValues.renderText).map(_.trim)
               .filter(_.nonEmpty)

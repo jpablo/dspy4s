@@ -122,7 +122,7 @@ class MultiChainComparisonSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = mcc.apply(ProgramCall(input, traceEnabled = false, rolloutId = Some(7)))
+      val result = mcc(ProgramCall(input, traceEnabled = false, rolloutId = Some(7)))
       assert(result.isRight, s"comparison failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       assertEquals(RuntimeEnvironment.current.trace, Vector.empty)
     }

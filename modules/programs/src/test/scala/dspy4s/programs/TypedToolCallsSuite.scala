@@ -50,7 +50,7 @@ class TypedToolCallsSuite extends FunSuite:
       RuntimeContext(lm = Some(new ToolLm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict.apply(Ask("capital of belgium?"))
+      val result = predict(Ask("capital of belgium?"))
 
       assert(result.isRight, s"expected success, got: $result")
       val plan = result.toOption.get.output

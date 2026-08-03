@@ -100,8 +100,7 @@ final case class Refine[P <: Module[I, O], I, O](
     AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
       runAttempt = idx =>
         module
-          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))
-          .apply(call),
+          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(call),
       reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction)),
       feedback = Some { (prediction, trace, score) =>
         // Generate per-module advice grounded in this attempt's trajectory + I/O + reward (under the ambient
@@ -326,7 +325,7 @@ object Refine:
       .map(e => DynamicValues.renderText(e.inputs))
       .getOrElse(input.toString)
     val programOutputs = DynamicValues.renderText(prediction.raw.values)
-    critic.apply(ProgramCall(input = OfferFeedbackInputs(
+    critic(ProgramCall(input = OfferFeedbackInputs(
       program_inputs     = programInputs,
       program_trajectory = renderTrajectory(trace),
       program_outputs    = programOutputs,

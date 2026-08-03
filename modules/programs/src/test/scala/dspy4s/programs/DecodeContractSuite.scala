@@ -73,7 +73,7 @@ class DecodeContractSuite extends FunSuite:
         |[[ ## completed ## ]]""".stripMargin
 
     val out = DecodeFixtures.runWith(ChatAdapter(), completion) {
-      ChainOfThought(signature).apply(TagInput("classify this")).map(_.output)
+      ChainOfThought(signature)(TagInput("classify this")).map(_.output)
     }
     // The augmented output is a named tuple: reasoning prepended to the base TagOutput fields.
     assertEquals(out.map(_.reasoning), Right("The email names two tags and one purchased item."))
@@ -86,7 +86,7 @@ class DecodeContractSuite extends FunSuite:
     // ChainOfThought's augmented output Shape must surface the base output JSON schema, or the nested shape of
     // items: List[TagItem] never reaches the LM and it emits strings → "Expected a record at: .items.each".
     val prompt = DecodeFixtures.capturePrompt(ChatAdapter()) {
-      ChainOfThought(signature).apply(TagInput("classify this"))
+      ChainOfThought(signature)(TagInput("classify this"))
     }
     assert(
       prompt.contains("score"),

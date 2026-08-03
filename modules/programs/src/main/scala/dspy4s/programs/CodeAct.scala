@@ -46,7 +46,7 @@ import scala.util.matching.Regex
   * functions; the dspy4s bridge is RPC, so Scala-implemented tools work too.)
   *
   * '''Per-call iteration override.''' Python accepts `max_iters` as a call kwarg; the dspy4s idiom is the immutable
-  * copy — `program.copy(maxIterations = IterationLimit(3)).apply(...)` — rather than a magic key in the per-call
+  * copy — `program.copy(maxIterations = IterationLimit(3))(...)` — rather than a magic key in the per-call
   * config bag (which is reserved for provider options). Runtime values cross the boundary through
   * `IterationLimit.either(n)`.
   *
@@ -180,7 +180,7 @@ final case class CodeAct[I, O](
         maxIterations,
         CodeAct.renderTrajectory
       )(codeActStep(call)) { rendered =>
-        extractorPredict.apply(call.mapInput(input => (input, rendered)))
+        extractorPredict(call.mapInput(input => (input, rendered)))
       }
       (extracted, rendered) = extractedAndTrajectory
     yield Prediction(
@@ -211,7 +211,7 @@ final case class CodeAct[I, O](
     (trajectory, iteration) =>
       val rendered = CodeAct.renderTrajectory(trajectory)
       val stepCall = call.mapInput(input => (input, rendered))
-      codeActPredict.apply(stepCall).flatMap { prediction =>
+      codeActPredict(stepCall).flatMap { prediction =>
         val rawCode  = prediction.output.generatedCode
         val finished = prediction.output.finished
 

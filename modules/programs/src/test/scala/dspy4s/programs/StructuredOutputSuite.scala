@@ -54,7 +54,7 @@ class StructuredOutputSuite extends FunSuite:
       RuntimeContext(lm = Some(new ScriptedLm(completion)), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val out = Predict(signature).apply(TagInput("classify this")).map(_.output)
+      val out = Predict(signature)(TagInput("classify this")).map(_.output)
       assertEquals(out.map(_.tags),   Right(List("urgent", "billing")))
       assertEquals(out.map(_.items),  Right(List(TagItem("MacBook Pro", 0.92))))
       assertEquals(out.map(_.amount), Right(Some(2399.0)))
@@ -97,7 +97,7 @@ class StructuredOutputSuite extends FunSuite:
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val cot = ChainOfThought(signature)
-      val _   = cot.apply(TagInput("classify this")) // result ignored; we assert on the captured prompt
+      val _   = cot(TagInput("classify this")) // result ignored; we assert on the captured prompt
     }
     val prompt = captured.mkString("\n")
     assert(
@@ -123,7 +123,7 @@ class StructuredOutputSuite extends FunSuite:
       RuntimeContext(lm = Some(new ScriptedLm(noneCompletion)), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val out = Predict(signature).apply(TagInput("nothing here")).map(_.output)
+      val out = Predict(signature)(TagInput("nothing here")).map(_.output)
       assertEquals(out.map(_.amount), Right(None))
       assertEquals(out.map(_.tags),   Right(Nil))
     }

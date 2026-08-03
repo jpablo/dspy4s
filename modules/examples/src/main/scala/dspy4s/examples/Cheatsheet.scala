@@ -72,27 +72,28 @@ object Cheatsheet:
   // | predict = dspy.Predict("question -> answer"); predict(question="1+1", config={"rollout_id": 1, "temperature": 1.0})
   // `rollout_id` is a framework control → the typed `rolloutId`; `temperature` is a provider knob → `config`.
   def predictWithConfig(using RuntimeContext): Either[DspyError, String] =
-    Predict(Signature.fromString("question -> answer"))
-      .apply(ProgramCall((question = "1+1"), config = rec("temperature" := 1.0), rolloutId = Some(1)))
+    Predict(Signature.fromString("question -> answer"))(
+      ProgramCall((question = "1+1"), config = rec("temperature" := 1.0), rolloutId = Some(1))
+    )
       .map(_.output.answer)
 
   // ── Snippet 3 (lines 34–40) — ChainOfThought ──
   // | generate_answer = dspy.ChainOfThought(BasicQA); generate_answer(question="What is the color of the sky?")
   def chainOfThought(question: String)(using RuntimeContext): Either[DspyError, String] =
-    ChainOfThought(Signature.of[BasicQA]).apply((question = question)).map(_.output.answer)
+    ChainOfThought(Signature.of[BasicQA])((question = question)).map(_.output.answer)
 
   // ── Snippet 4 (lines 44–52) — ProgramOfThought ──
   // | pot = dspy.ProgramOfThought(BasicQA); pot(question="Sarah has 5 apples...")
   // dspy4s PoT executes generated Python via a `CodeInterpreter` (here a python3 subprocess).
   def programOfThought(question: String)(using RuntimeContext): Either[DspyError, String] =
-    ProgramOfThought(Signature.of[BasicQA], interpreter = new SubprocessPythonInterpreter())
-      .apply((question = question)).map(_.output.answer)
+    val program = ProgramOfThought(Signature.of[BasicQA], interpreter = new SubprocessPythonInterpreter())
+    program((question = question)).map(_.output.answer)
 
   // ── Snippet 5 (lines 56–64) — ReAct ──
   // | react_module = dspy.ReAct(BasicQA); react_module(question="Sarah has 5 apples...")
   // ReAct needs a tool set; Python's `dspy.ReAct(BasicQA)` with no tools is degenerate (finish-only) — so is this.
   def react(question: String)(using RuntimeContext): Either[DspyError, String] =
-    ReAct(baseSignature = Signature.of[BasicQA], tools = Vector.empty).apply((question = question)).map(_.output.answer)
+    ReAct(baseSignature = Signature.of[BasicQA], tools = Vector.empty)((question = question)).map(_.output.answer)
 
   // ── Snippet 6 (lines 68–82) — retrieval ──
   // The legacy `dspy.ColBERTv2` / `dspy.Retrieve` global-RM path is deliberately not ported; the modern
@@ -108,8 +109,8 @@ object Cheatsheet:
   // interpreter so generated Python can call them. Here the model just writes the factorial itself.
   // --8<-- [start:code-act]
   def codeAct(n: Int)(using RuntimeContext): Either[DspyError, String] =
-    CodeAct(Signature.fromString("n: int -> factorial"), interpreter = new SubprocessPythonInterpreter())
-      .apply((n = n)).map(_.output.factorial)
+    val program = CodeAct(Signature.fromString("n: int -> factorial"), interpreter = new SubprocessPythonInterpreter())
+    program((n = n)).map(_.output.factorial)
   // --8<-- [end:code-act]
 
   // ── Snippet 8 (lines 102–114) — Parallel ──
@@ -117,7 +118,7 @@ object Cheatsheet:
   // --8<-- [start:parallel]
   def parallel(using RuntimeContext): Either[DspyError, Vector[Option[RawPrediction]]] =
     val predict = DynamicPredict(Signature.fromString("question -> answer").layout)
-    Parallel(numThreads = Some(ThreadCount(2))).apply(Vector(
+    Parallel(numThreads = Some(ThreadCount(2)))(Vector(
       predict -> ProgramCall(input = rec("question" := "1+1")),
       predict -> ProgramCall(input = rec("question" := "2+2"))
     )).map(_.results)
@@ -255,7 +256,7 @@ object Cheatsheet:
       RuntimeContext
   ): Either[DspyError, Map[String, dspy4s.lm.contracts.LmUsage]] =
     UsageTracking.withNewTracker { tracker =>
-      ChainOfThought(Signature.of[BasicQA]).apply((question = question)).map(_ => tracker.totalUsage)
+      ChainOfThought(Signature.of[BasicQA])((question = question)).map(_ => tracker.totalUsage)
     }
 
   // ── Snippet 31 (lines 461–469) — cache configuration ──
@@ -273,7 +274,7 @@ object Cheatsheet:
       n = AttemptCount(3),
       rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
       threshold = 1.0
-    ).apply((question = question)).map(_.output.answer)
+    )((question = question)).map(_.output.answer)
   // --8<-- [end:best-of-n]
 
   // ── Snippets 34/35 (lines 509–522) — Refine with fail_count ──
@@ -286,7 +287,7 @@ object Cheatsheet:
       rewardFn = (_, pred) => if pred.output.answer.length == 1 then 1.0 else 0.0,
       threshold = 1.0,
       failCount = Some(failCount)
-    ).apply((question = question)).map(_.output.answer)
+    )((question = question)).map(_.output.answer)
 
 // Pure surface check (no LM). Run with: sbt "examples/runMain dspy4s.examples.cheatsheetMain"
 @main def cheatsheetMain(): Unit =

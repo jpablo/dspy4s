@@ -54,12 +54,12 @@ final case class ChainOfThought[I, O](
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    predictor.apply(call)
+    predict(call)
 
-  /** The inner predictor, built once (memoized) — the analog of Python's `self.predict = Predict(extended_signature)`.
+  /** The inner `Predict`, built once (memoized) — the analog of Python's `self.predict = Predict(extended_signature)`.
     * Left unnamed so it surfaces as a nested `predict` event under this program's `chain_of_thought` event.
     */
-  private lazy val predictor: Predict[I, Out] =
+  private lazy val predict: Predict[I, Out] =
     Predict(signature = augmentedSignature, demos = demos, runtime = runtime, config = config)
 
   private def augmentedSignature: Signature[I, Out] =

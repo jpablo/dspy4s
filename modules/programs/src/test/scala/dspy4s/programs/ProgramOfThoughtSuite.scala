@@ -93,7 +93,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((question = "what is 6 * 7?"))
+      val result = program((question = "what is 6 * 7?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "42")
@@ -128,7 +128,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((question = "?"))
+      val result = program((question = "?"))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       assertEquals(interpreter.received.size, 2, "should have retried after error")
       assertEquals(result.toOption.get.output.answer, "ok")
@@ -160,7 +160,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((question = "?"))
+      val result = program((question = "?"))
       assert(result.isLeft, s"expected Left after maxIterations, got $result")
       val err = result.left.toOption.get.asInstanceOf[RuntimeError]
       assertEquals(err.component, "program_of_thought")
@@ -183,7 +183,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = program.apply((q = "?"))
+      val _ = program((q = "?"))
       assert(!interpreter.closed)
     }
   }
@@ -207,7 +207,7 @@ class ProgramOfThoughtSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((q = "sum 0..10"))
+      val result = program((q = "sum 0..10"))
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("?"))
       assertEquals(result.toOption.get.output.answer, "55")
     }
@@ -267,7 +267,7 @@ class ProgramOfThoughtSuite extends FunSuite:
     val program = ProgramOfThought(baseSignature = signature, interpreter = interpreter)
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(RecordingAnswerAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((question = "what is 6 * 7?"))
+      val result = program((question = "what is 6 * 7?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       // The answer step saw the SUBMIT payload, not the printed stdout noise.
       assertEquals(codeOutputs.toList, List("""{"answer": "42"}"""))

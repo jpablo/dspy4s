@@ -82,8 +82,8 @@ class StreamingLiveSuite extends FunSuite:
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
-          answer    <- predict1.apply(input)
-          judgement <- predict2.apply(input.copy(
+          answer    <- predict1(input)
+          judgement <- predict2(input.copy(
             input = input.input.updated(
                             "answer",
                             answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)

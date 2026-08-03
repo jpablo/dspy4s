@@ -364,8 +364,8 @@ class StreamListenerSuite extends FunSuite:
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
-          answer    <- predict1.apply(input)
-          judgement <- predict2.apply(input.copy(
+          answer    <- predict1(input)
+          judgement <- predict2(input.copy(
             input = input.input.updated(
                             "answer",
                             answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
@@ -459,8 +459,8 @@ class StreamListenerSuite extends FunSuite:
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
-          _      <- predict1.apply(input)
-          second <- predict2.apply(input)
+          _      <- predict1(input)
+          second <- predict2(input)
         yield second.raw
 
     RuntimeEnvironment.withSettings(
@@ -512,8 +512,8 @@ class StreamListenerSuite extends FunSuite:
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
-          _ <- p1.apply(input)
-          out <- p2.apply(input)
+          _ <- p1(input)
+          out <- p2(input)
         yield out.raw
 
     RuntimeEnvironment.withSettings(

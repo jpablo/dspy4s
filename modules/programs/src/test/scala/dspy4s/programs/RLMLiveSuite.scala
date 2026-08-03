@@ -71,7 +71,7 @@ class RLMLiveSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(actionLm), adapter = Some(ActionAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program.apply((context = "0123456789"))
+      val result = program((context = "0123456789"))
       assert(result.isRight, result.toString)
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "10-SUB") // len("0123456789") + the sub-LM's reply, both via REPL state

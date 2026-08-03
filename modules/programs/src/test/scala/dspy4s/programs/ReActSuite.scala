@@ -86,7 +86,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
-      val result = react.apply((question = "What is the capital of Belgium?"))
+      val result = react((question = "What is the capital of Belgium?"))
       assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "Brussels")
@@ -104,7 +104,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
-      val result = react.apply((question = "2+2 doubled?"))
+      val result = react((question = "2+2 doubled?"))
       assert(result.isRight)
       assertEquals(result.toOption.get.output.answer, "42")
       assertEquals(search.calls.get(), 0)
@@ -121,7 +121,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(2))
 
     withReact(lm) {
-      val result = react.apply((question = "x"))
+      val result = react((question = "x"))
       assert(result.isRight)
       assertEquals(result.toOption.get.output.answer, "extracted-after-cap")
       assertEquals(search.calls.get(), 2) // tool ran once per capped iteration
@@ -139,7 +139,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
-      val result = react.apply((question = "x"))
+      val result = react((question = "x"))
       assert(result.isRight)
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "done")
@@ -161,7 +161,7 @@ class ReActSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      assert(react.apply((question = "x")).isRight)
+      assert(react((question = "x")).isRight)
     }
 
     val toolStart = events.collectFirst { case e: ToolStartEvent => e }
@@ -216,7 +216,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, probe) {
-      val result = react.apply((question = "capital?"))
+      val result = react((question = "capital?"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "Brussels")
       // Two extractor attempts: full trajectory, then with the oldest step dropped.
@@ -242,7 +242,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, new ExtractProbeAdapter) {
-      val result = react.apply((question = "q?"))
+      val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
       // Step 1 (the search) was truncated away; only the finish step (iteration 2 -> "Step 2") remains.
@@ -260,7 +260,7 @@ class ReActSuite extends FunSuite:
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, probe) {
-      val result = react.apply((question = "q?"))
+      val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "best guess")
       assertEquals(probe.extractorTrajectories.toList, List("(empty)"))

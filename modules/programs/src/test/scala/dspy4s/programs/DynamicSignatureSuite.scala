@@ -53,7 +53,7 @@ class DynamicSignatureSuite extends FunSuite:
   test("s.predict() runs end-to-end: validating entry in, typed call, outputs on the raw envelope") {
     val program = qa.predict().withLm(new FixedLm("stub", "42"))
     val in      = qa.input(DynamicValues.record("question" := "meaning of life?")).toOption.get
-    val out     = underAdapter(program.apply(in)).toOption.get
+    val out     = underAdapter(program(in)).toOption.get
 
     assertEquals(field(out.raw.values, "answer"), Some("42"))
     // The validating entry rejects a record missing a declared field, at the boundary.
@@ -102,6 +102,6 @@ class DynamicSignatureSuite extends FunSuite:
     assert(summon[RecordCodec[qa.In]].decode(DynamicValue.Record.empty).isLeft)
 
     val in  = qa.input(DynamicValues.record("question" := "?")).toOption.get
-    val out = underAdapter(pipeline.apply(ProgramCall(in))).toOption.get
+    val out = underAdapter(pipeline(ProgramCall(in))).toOption.get
     assertEquals(field(out.raw.values, "verdict"), Some("valid"))
   }

@@ -55,9 +55,9 @@ class RefinePerModuleAdviceSuite extends FunSuite:
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       for
-        hintPred <- hinter.apply(ProgramCall(input = rec("q" := call.input.q)))
+        hintPred <- hinter(ProgramCall(input = rec("q" := call.input.q)))
         hint      = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
-        ansPred <- answerer.apply(ProgramCall(input = rec("q" := call.input.q, "hint" := hint)))
+        ansPred <- answerer(ProgramCall(input = rec("q" := call.input.q, "hint" := hint)))
         answer   <- ansPred.raw.asString("answer")
       yield Prediction(output = Cand(answer), raw = ansPred.raw)
 
@@ -127,7 +127,7 @@ class RefinePerModuleAdviceSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = refine.apply(ProgramCall(Q("Capital of France?")))
+      val result           = refine(ProgramCall(Q("Capital of France?")))
 
       // Both predictors got their own token on the retry, so the final answer is correct.
       assertEquals(result.toOption.map(_.output.answer), Some("Paris"))

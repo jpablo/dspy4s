@@ -116,7 +116,7 @@ class ChainOfThoughtSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = ChainOfThought(sig).apply((document = "..."))
+      val result = ChainOfThought(sig)((document = "..."))
       result match
         case Right(tp) =>
           // Typed dot-access for both reasoning and the base output field.
@@ -136,7 +136,7 @@ class ChainOfThoughtSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val tp = ChainOfThought(sig).apply((question = "Capital of France?")).toOption.get
+      val tp = ChainOfThought(sig)((question = "Capital of France?")).toOption.get
       val r: String = tp.output.reasoning
       val a: String = tp.output.answer
       val s: Double = tp.output.score
@@ -160,7 +160,7 @@ class ChainOfThoughtSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val tp = ChainOfThought(sig).apply((question = "Capital of France?")).toOption.get
+      val tp = ChainOfThought(sig)((question = "Capital of France?")).toOption.get
       assertEquals(NamedTuple.toTuple(tp.output).size, 2)
       assertEquals(tp.output.reasoning, "let us reason")
       assertEquals(tp.output.answer,    "Paris")
@@ -177,7 +177,7 @@ class ChainOfThoughtSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val tp = ChainOfThought(sig).apply((document = "...")).toOption.get
+      val tp = ChainOfThought(sig)((document = "...")).toOption.get
       assertEquals(tp.raw.lmUsage.map(_.totalTokens), Some(10L))
       assertEquals(tp.raw.asString("reasoning"), Right("short reasoning"))
       assertEquals(tp.raw.asString("summary"),   Right("short summary"))
@@ -191,7 +191,7 @@ class ChainOfThoughtSuite extends FunSuite:
     val adapter = new NoReasoningAdapter(Map("summary" -> "summary without reasoning"))
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = ChainOfThought(sig).apply((document = "..."))
+      val result = ChainOfThought(sig)((document = "..."))
       result match
         case Left(_: NotFoundError) => ()  // expected
         case Left(other)            => fail(s"expected NotFoundError, got: $other")
@@ -215,7 +215,7 @@ class ChainOfThoughtSuite extends FunSuite:
         )))
     RuntimeEnvironment.withSettings(settings(brokenAdapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = ChainOfThought(sig).apply((document = "..."))
+      val result = ChainOfThought(sig)((document = "..."))
       assert(result.isLeft, s"expected failure, got: $result")
       result match
         case Left(_: ValidationError) => ()
@@ -234,7 +234,7 @@ class ChainOfThoughtSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = ChainOfThought(sig).apply(TcotCaseInput("..."))
+      val result = ChainOfThought(sig)(TcotCaseInput("..."))
       result match
         case Right(tp) =>
           val reasoning: String = tp.output.reasoning

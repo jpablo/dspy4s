@@ -78,9 +78,9 @@ object Streaming:
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
       for
-        step1 <- predict1.apply(call)
+        step1 <- predict1(call)
         answer = textField(step1.output, "answer")
-        step2 <- predict2.apply(ProgramCall(input = DynamicValues.recordFromEntries(Vector("answer" := answer))))
+        step2 <- predict2(ProgramCall(input = DynamicValues.recordFromEntries(Vector("answer" := answer))))
       yield step2.raw
   // --8<-- [end:compose-module]
 
@@ -132,10 +132,10 @@ object Streaming:
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
       for
-        step1 <- predict1.apply(call)
+        step1 <- predict1(call)
         question = textField(call.input, "question")
         answer   = textField(step1.output, "answer")
-        step2 <- predict2.apply(ProgramCall(input =
+        step2 <- predict2(ProgramCall(input =
                    DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
                  ))
       yield step2.raw
@@ -176,7 +176,7 @@ object Streaming:
       ): Either[DspyError, RawPrediction] =
         for
           doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
-          out <- predict.apply(ProgramCall(input =
+          out <- predict(ProgramCall(input =
             DynamicValues.recordFromEntries(
                    Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
             )

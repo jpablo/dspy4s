@@ -68,7 +68,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict.apply(ProgramCall(input = DynamicValues.record("question" := "capital of belgium?")))
+      val result = predict(ProgramCall(input = DynamicValues.record("question" := "capital of belgium?")))
 
       assert(result.isRight, s"expected success, got: $result")
       val pred = result.toOption.get
@@ -97,7 +97,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict.apply(DynamicValues.record("question" := "capital of belgium?"))
+      val result = predict(DynamicValues.record("question" := "capital of belgium?"))
 
       assert(result.isRight, s"expected success, got: $result")
       assert(

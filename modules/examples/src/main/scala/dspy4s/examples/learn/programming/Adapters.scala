@@ -49,7 +49,7 @@ object Adapters:
   // | predict = dspy.Predict("question -> answer"); result = predict(question="What is the capital of France?")
   // The adapter is the one in the ambient RuntimeContext; `dspy.ChatAdapter()` is the default (Demo installs it).
   def ask(question: String)(using RuntimeContext): Either[DspyError, String] =
-    Predict(Signature.fromString("question -> answer")).apply((question = question)).map(_.output.answer)
+    Predict(Signature.fromString("question -> answer"))((question = question)).map(_.output.answer)
 
   // ── Snippet 3 — inspect what an adapter sends to the LM ──
   // | signature = dspy.Signature("question -> answer"); inputs = {...}; demos = [{...}]
@@ -87,8 +87,7 @@ object Adapters:
   // ── Snippets 5 & 6 — a structured-output Predict under ChatAdapter, then JSONAdapter ──
   // | predict = dspy.Predict(NewsQA); predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
   private def runNews(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
-    Predict(Signature.of[NewsQA])
-      .apply((science_field = "Computer Theory", year = 2022, num_of_outputs = 1))
+    Predict(Signature.of[NewsQA])((science_field = "Computer Theory", year = 2022, num_of_outputs = 1))
       .map(_.output.news)
 
   // --8<-- [start:adapter-select]
@@ -109,8 +108,7 @@ object Adapters:
       case Some(lm: LanguageModel) =>
         RuntimeEnvironment.withSettings(ctx.copy(lm = Some(ManagedLanguageModel(lm)))) {
           given RuntimeContext = RuntimeEnvironment.current
-          Predict(Signature.fromString("question -> answer"))
-            .apply((question = question))
+          Predict(Signature.fromString("question -> answer"))((question = question))
             .map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1)))
         }
       case _ => Left(RuntimeError("no_lm", "no ambient LanguageModel to record history"))

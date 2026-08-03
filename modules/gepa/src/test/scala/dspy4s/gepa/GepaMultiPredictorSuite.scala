@@ -37,10 +37,10 @@ object Pipeline:
     def run(program: Pipeline, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
-      program.hinter.apply(call).flatMap { hintPred =>
+      program.hinter(call).flatMap { hintPred =>
         val hint         = DynamicValues.recordGet(hintPred.output, "hint").getOrElse(DynamicValue.Null)
         val answerInputs = call.input.updated("hint", hint)
-        program.answerer.apply(call.mapInput(_ => answerInputs)).map(_.raw)
+        program.answerer(call.mapInput(_ => answerInputs)).map(_.raw)
       }
 
 class GepaMultiPredictorSuite extends FunSuite:

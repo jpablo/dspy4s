@@ -35,7 +35,7 @@ private[programs] trait LowPriorityProgramRunner:
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
       codec.decode(call.input).flatMap { decoded =>
-        program.apply(call.mapInput(_ => decoded)).map(_.raw)
+        program(call.mapInput(_ => decoded)).map(_.raw)
       }
 
 object ProgramRunner extends LowPriorityProgramRunner:
@@ -45,7 +45,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
-      program.apply(call).map(_.raw)
+      program(call).map(_.raw)
 
   private def signatureBacked[I, O, P <: Module[I, O]](
       inputShapeOf: P => Shape[I]
@@ -54,7 +54,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
       inputShapeOf(program).decode(call.input).flatMap { decoded =>
-        program.apply(call.mapInput(_ => decoded)).map(_.raw)
+        program(call.mapInput(_ => decoded)).map(_.raw)
       }
 
   // ── The framework leaves and composites, decoded through their own (base) signature ──────────────────────

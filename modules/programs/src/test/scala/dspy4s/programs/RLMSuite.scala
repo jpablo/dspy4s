@@ -75,7 +75,7 @@ class RLMSuite extends FunSuite:
     val program = rlm(repl)
 
     withRlm(lm, new ProbeAdapter) {
-      val result = program.apply((context = "the answer is 42", query = "what is it?"))
+      val result = program((context = "the answer is 42", query = "what is it?"))
       assert(result.isRight, result.toString)
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "42")
@@ -103,7 +103,7 @@ class RLMSuite extends FunSuite:
     val program = rlm(repl)
 
     withRlm(lm, probe) {
-      val result = program.apply((context = "a|b|c", query = "how many parts?"))
+      val result = program((context = "a|b|c", query = "how many parts?"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "3")
       assertEquals(probe.actionHistories.size, 2)
@@ -126,7 +126,7 @@ class RLMSuite extends FunSuite:
     val program = rlm(repl)
 
     withRlm(lm, new ProbeAdapter) {
-      val result = program.apply((context = "c", query = "q"))
+      val result = program((context = "c", query = "q"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "right")
       val traj = result.toOption.get.raw.asString("trajectory").toOption.getOrElse("")
@@ -147,7 +147,7 @@ class RLMSuite extends FunSuite:
     val program = rlm(repl, maxIterations = IterationLimit(2))
 
     withRlm(lm, probe) {
-      val result = program.apply((context = "c", query = "q"))
+      val result = program((context = "c", query = "q"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "fallback answer")
       assertEquals(result.toOption.get.raw.asString("final_reasoning").toOption, Some("Extract forced final output"))
@@ -240,7 +240,7 @@ class RLMSuite extends FunSuite:
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
       Console.withErr(captured) {
-        val result = program.apply((context = "abc", query = "q"))
+        val result = program((context = "abc", query = "q"))
         assert(result.isRight, result.toString)
         assertEquals(result.toOption.get.output.answer, "FALLBACK")
       }
@@ -270,7 +270,7 @@ class RLMSuite extends FunSuite:
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
       Console.withErr(captured) {
-        assert(program.apply((context = "abc", query = "q")).isLeft)
+        assert(program((context = "abc", query = "q")).isLeft)
       }
     }
     val logged = captured.toString
@@ -287,7 +287,7 @@ class RLMSuite extends FunSuite:
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
       Console.withErr(captured) {
-        assert(program.apply((context = "abc", query = "q")).isRight)
+        assert(program((context = "abc", query = "q")).isRight)
       }
     }
     val logged = captured.toString

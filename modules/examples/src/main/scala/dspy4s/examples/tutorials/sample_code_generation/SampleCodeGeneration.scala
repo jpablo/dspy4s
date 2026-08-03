@@ -88,7 +88,7 @@ object SampleCodeGeneration:
     /** Python's `learn_from_urls`, minus the fetching: analyze already-combined documentation text. */
     def learnFromDocs(libraryName: String, combinedContent: String)(using RuntimeContext)
         : Either[DspyError, LibraryInfo] =
-      analyzeDocs.apply((library_name = libraryName, documentation_content = combinedContent)).map { analysis =>
+      analyzeDocs((library_name = libraryName, documentation_content = combinedContent)).map { analysis =>
         LibraryInfo(
           library      = libraryName,
           coreConcepts = analysis.output.core_concepts,
@@ -109,7 +109,7 @@ object SampleCodeGeneration:
            |Key Methods: ${info.methods.mkString(", ")}
            |Installation: ${info.installation}
            |Example Code Snippets: ${info.examples.take(3).mkString("; ")}""".stripMargin
-      generateCode.apply((library_info = infoText, use_case = useCase, requirements = requirements)).map { r =>
+      generateCode((library_info = infoText, use_case = useCase, requirements = requirements)).map { r =>
         GeneratedExample(
           code          = r.output.code_example,
           explanation   = r.output.explanation,
@@ -120,7 +120,7 @@ object SampleCodeGeneration:
 
     /** Python's `refine_code` CoT: improve code given feedback, reporting the changes made. */
     def refine(code: String, feedback: String)(using RuntimeContext): Either[DspyError, (String, List[String])] =
-      refineCode.apply((code = code, feedback = feedback))
+      refineCode((code = code, feedback = feedback))
         .map(r => (r.output.improved_code, r.output.changes_made))
 
   // ── Snippets 2/3/4 — fetch docs, learn, generate per use case ──

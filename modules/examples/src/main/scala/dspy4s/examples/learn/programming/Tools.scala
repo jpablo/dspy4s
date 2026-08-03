@@ -57,7 +57,7 @@ object Tools:
     )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
-      reactAgent.apply((question = question)).map(_.output.answer)
+      reactAgent((question = question)).map(_.output.answer)
     // --8<-- [end:react-agent]
 
   // ── Snippet 9 (lines 270–288) — what makes a good tool ──────────────────────

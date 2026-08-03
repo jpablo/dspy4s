@@ -41,7 +41,7 @@ class FailureTraceSuite extends FunSuite:
       RuntimeContext(lm = Some(new BadLm), adapter = Some(ChatAdapter()), captureFailureTraces = true)
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(layout = layout).apply(call)
+      val result = DynamicPredict(layout = layout)(call)
       assert(result.isLeft, s"expected a parse failure, got: $result")
 
       val trace = RuntimeEnvironment.current.trace
@@ -60,7 +60,7 @@ class FailureTraceSuite extends FunSuite:
       RuntimeContext(lm = Some(new BadLm), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(layout = layout).apply(call)
+      val result = DynamicPredict(layout = layout)(call)
       assert(result.isLeft)
       assertEquals(RuntimeEnvironment.current.trace.size, 0)
     }

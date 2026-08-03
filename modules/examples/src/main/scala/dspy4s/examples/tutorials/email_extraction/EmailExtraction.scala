@@ -116,25 +116,25 @@ object EmailExtraction:
     )(using RuntimeContext): Either[DspyError, EmailAnalysis] =
       for
         // Step 1: Classify the email
-        classification <- classifier.apply((
+        classification <- classifier((
                             email_subject = emailSubject,
                             email_body    = emailBody,
                             sender        = sender
                           ))
         // Step 2: Extract entities
         fullContent = s"Subject: $emailSubject\n\nFrom: $sender\n\n$emailBody"
-        entities <- entityExtractor.apply((
+        entities <- entityExtractor((
                       email_content = fullContent,
                       email_type    = classification.output.email_type
                     ))
         // Step 3: Generate summary
-        summary <- summarizer.apply((
+        summary <- summarizer((
                      email_subject = emailSubject,
                      email_body    = emailBody,
                      key_entities  = entities.output.key_entities
                    ))
         // Step 4: Determine actions
-        actions <- actionGenerator.apply((
+        actions <- actionGenerator((
                      email_type         = classification.output.email_type,
                      urgency            = classification.output.urgency,
                      email_summary      = summary.output.summary,

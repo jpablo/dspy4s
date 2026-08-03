@@ -162,7 +162,7 @@ final case class ReAct[I, O](
         maxIterations,
         ReAct.renderTrajectory
       )(reactStep(call)) { rendered =>
-        extractorPredict.apply(call.mapInput(input => (input, rendered)))
+        extractorPredict(call.mapInput(input => (input, rendered)))
       }
       (extracted, rendered) = extractedAndTrajectory
     yield Prediction(
@@ -211,7 +211,7 @@ final case class ReAct[I, O](
       remaining: Int
   )(using RuntimeContext): Either[DspyError, (Option[ReAct.ReactStep], Vector[ReAct.TrajectoryEntry])] =
     val (result, used) = truncateOnOverflow(view, remaining)(ReAct.renderTrajectory) { rendered =>
-      reactPredict.apply(call.mapInput(input => (input, rendered)))
+      reactPredict(call.mapInput(input => (input, rendered)))
     }
     result match
       case Right(prediction)                   => Right((Some(prediction.output), used))

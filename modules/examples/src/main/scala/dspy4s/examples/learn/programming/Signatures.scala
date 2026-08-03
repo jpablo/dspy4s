@@ -12,7 +12,7 @@
  *
   * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named tuples, so call sites get typed dot-access:
  *
- *   Predict(sig).apply((field = "...")).map(_.output.field)
+ *   Predict(sig)((field = "...")).map(_.output.field)
  *
   * `ChainOfThought` augments the output named tuple with `reasoning: String` and delegates through typed `Predict`.
   * Snippets 3, 4, and 6 use it directly.
@@ -56,7 +56,7 @@ object ToxicityExample:
   val toxicity = Predict(signature)
 
   def call(comment: String)(using RuntimeContext): Either[DspyError, Boolean] =
-    toxicity.apply((comment = comment)).map(_.output.toxic)
+    toxicity((comment = comment)).map(_.output.toxic)
 // --8<-- [end:toxicity]
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -73,7 +73,7 @@ object SentimentExample:
   val classify = Predict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
-    classify.apply((sentence = sentence)).map(_.output.sentiment)
+    classify((sentence = sentence)).map(_.output.sentiment)
 // --8<-- [end:sentiment]
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -101,11 +101,11 @@ object SummarizeExample:
 
   /** Snippet 3: just the summary. */
   def call(document: String)(using RuntimeContext): Either[DspyError, String] =
-    program.apply((document = document)).map(_.output.summary)
+    program((document = document)).map(_.output.summary)
 
   /** Snippet 4: both reasoning and summary. */
   def callWithReasoning(document: String)(using RuntimeContext): Either[DspyError, (String, String)] =
-    program.apply((document = document)).map { tp =>
+    program((document = document)).map { tp =>
       (tp.output.reasoning, tp.output.summary)
     }
 // --8<-- [end:summarize]
@@ -142,7 +142,7 @@ object EmotionExample:
   val classify = Predict(Signature.of[EmotionSpec](instructions = "Classify emotion."))
 
   def call(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    classify.apply((sentence = sentence)).map(_.output.sentiment)
+    classify((sentence = sentence)).map(_.output.sentiment)
 // --8<-- [end:emotion]
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -205,7 +205,7 @@ object DogPictureExample:
   val program = Predict(signature)
 
   def call(imageUrl: String)(using RuntimeContext): Either[DspyError, String] =
-    program.apply((image_1 = Image(imageUrl))).map(_.output.answer)
+    program((image_1 = Image(imageUrl))).map(_.output.answer)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 8 (lines 190–204) — Working with Custom Types

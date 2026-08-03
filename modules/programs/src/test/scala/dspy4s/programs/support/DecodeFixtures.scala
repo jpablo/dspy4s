@@ -60,7 +60,7 @@ object DecodeFixtures:
       completion: String
   ): Either[DspyError, O] =
     runWith(adapter, completion) {
-      Predict(signature).apply(input).map(_.output)
+      Predict(signature)(input).map(_.output)
     }
 
   /** Codec self-consistency for an output type: encode a sample via the signature's output Shape, then decode

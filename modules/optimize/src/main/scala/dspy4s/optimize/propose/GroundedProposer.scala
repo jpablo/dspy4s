@@ -152,7 +152,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
       )
       // The dataset summary is best-effort grounding: a failed summary LM call degrades to "no grounding"
       // (Right(None)) rather than aborting the whole proposeInstructions / MIPROv2 compile.
-      gen.apply(call) match
+      gen(call) match
         case Right(pred) =>
           Right(
             DynamicValues.recordGet(pred.output, "observations")
@@ -225,7 +225,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
         config    = DynamicValues.record("temperature" := config.initTemperature),
         rolloutId = Some(rolloutId)
       )
-      gen.apply(call).map { pred =>
+      gen(call).map { pred =>
         DynamicValues.recordGet(pred.output, "proposed_instruction")
           .map(DynamicValues.renderText)
           .map(_.trim)

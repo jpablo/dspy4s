@@ -28,7 +28,8 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
 /** Build a `Signature` from two case classes — one for inputs, one for outputs. The resulting signature is fully typed
   * at the program boundary:
  *
-  *   - encode: `Predict.apply(EmotionInput("..."))` accepts a typed value; the typed shape encodes it into the dynamic
+  *   - encode: `Predict(signature)(EmotionInput("..."))` accepts a typed value; the typed shape encodes it into the
+  *     dynamic
   *     `ProgramCall.input` record.
   *   - decode: `Prediction.output` is a typed `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no
   *     runtime cast.
@@ -45,13 +46,12 @@ object CaseClassExample:
     )
   // --8<-- [end:derived-sig]
 
-  /** Illustrative call site. With an LM and adapter configured in `RuntimeContext`, `Predict(signature).apply(...)`
+  /** Illustrative call site. With an LM and adapter configured in `RuntimeContext`, `Predict(signature)(...)`
     * returns `Either[DspyError, Prediction[EmotionOutput]]`.
     */
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.Predict
-    Predict(signature)
-      .apply(EmotionInput(sentence))
+    Predict(signature)(EmotionInput(sentence))
       .map(_.output.sentiment)
 
   /** Offline demonstration: build a `Prediction` from a raw prediction map without invoking an LM. Useful for tests and

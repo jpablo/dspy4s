@@ -68,7 +68,7 @@ final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
   override val moduleName: String = "map_output"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[B]] =
-    program.apply(call).flatMap { prediction =>
+    program(call).flatMap { prediction =>
       TransformResult.guard("program_map_output")(Right(Prediction(map(prediction.output), prediction.raw)))
     }
 
@@ -87,7 +87,7 @@ final case class ContramapInput[J, I, O, P <: Module[I, O]](program: P, contrama
 
   override protected def forward(call: ProgramCall[J])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     TransformResult.guard("program_contramap_input")(Right(contramap(call.input))).flatMap { input =>
-      program.apply(call.mapInput(_ => input))
+      program(call.mapInput(_ => input))
     }
 
 object ContramapInput:
@@ -109,7 +109,7 @@ final case class Dimap[J, I, O, B, P <: Module[I, O]](
   override protected def forward(call: ProgramCall[J])(using RuntimeContext): Either[DspyError, Prediction[B]] =
     for
       input <- TransformResult.guard("program_dimap_input")(Right(contramap(call.input)))
-      prediction <- program.apply(call.mapInput(_ => input))
+      prediction <- program(call.mapInput(_ => input))
       output <- TransformResult.guard("program_dimap_output")(Right(map(prediction.output)))
     yield Prediction(output, prediction.raw)
 

@@ -33,7 +33,7 @@ object Modules:
     val classify = Predict(Signature.fromString("sentence -> sentiment: bool"))
 
     def call(sentence: String)(using RuntimeContext): Either[DspyError, Boolean] =
-      classify.apply((sentence = sentence)).map(_.output.sentiment)
+      classify((sentence = sentence)).map(_.output.sentiment)
 
   // ── Snippets 2 + 3 (lines 45–73) ────────────────
   // | question = "What's something great about the ColBERT retrieval model?"
@@ -59,7 +59,7 @@ object Modules:
 
     /** Returns the corrected reasoning and the answer (ChainOfThought prepends `reasoning`). */
     def call(question: String)(using RuntimeContext): Either[DspyError, (String, String)] =
-      classify.apply((question = question)).map(p => (p.output.reasoning, p.output.answer))
+      classify((question = question)).map(p => (p.output.reasoning, p.output.answer))
   // --8<-- [end:chain-of-thought]
 
   // ── Snippet 4 (lines 84–86) ────────────────────

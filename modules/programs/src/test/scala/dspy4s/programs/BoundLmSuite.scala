@@ -49,14 +49,14 @@ class BoundLmSuite extends FunSuite:
   test("DynamicPredict: a bound lm overrides the ambient RuntimeContext lm") {
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val module = DynamicPredict(layout = layout, lm = Some(boundLm))
-    val out    = underAmbient(module.apply(ProgramCall(input = rec("question" := "x"))))
+    val out    = underAmbient(module(ProgramCall(input = rec("question" := "x"))))
     assertEquals(lookupString(out.toOption.get.output, "answer"), "BOUND")
   }
 
   test("DynamicPredict: no bound lm falls back to the ambient RuntimeContext lm") {
     val layout = SignatureDsl.parse("question -> answer").toOption.get
     val module = DynamicPredict(layout = layout)
-    val out    = underAmbient(module.apply(ProgramCall(input = rec("question" := "x"))))
+    val out    = underAmbient(module(ProgramCall(input = rec("question" := "x"))))
     assertEquals(lookupString(out.toOption.get.output, "answer"), "AMBIENT")
   }
 
@@ -64,13 +64,13 @@ class BoundLmSuite extends FunSuite:
     val sig = Signature.derived[BlmInput, BlmOutput]("QA")
     val module = Predict(sig).withLm(boundLm)
     assertEquals(module.boundLm.map(_.id), Some("bound"))
-    val out = underAmbient(module.apply(BlmInput("x")))
+    val out = underAmbient(module(BlmInput("x")))
     assertEquals(out.toOption.get.output.answer, "BOUND")
   }
 
   test("Predict[I,O]: no bound lm falls back to ambient") {
     val sig = Signature.derived[BlmInput, BlmOutput]("QA")
     val module = Predict(sig)
-    val out = underAmbient(module.apply(BlmInput("x")))
+    val out = underAmbient(module(BlmInput("x")))
     assertEquals(out.toOption.get.output.answer, "AMBIENT")
   }

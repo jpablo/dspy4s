@@ -47,7 +47,7 @@ object BestOfNAndRefine:
     )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
-      bestOf3.apply((question = question)).map(_.output.answer)
+      bestOf3((question = question)).map(_.output.answer)
     // --8<-- [end:best-of-n]
 
   // ── Snippet 2 (lines 34–45) — BestOfN with fail_count ──
@@ -78,7 +78,7 @@ object BestOfNAndRefine:
       )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
-      refine.apply((question = question)).map(_.output.answer)
+      refine((question = question)).map(_.output.answer)
 
   // ── Snippet 5 (lines 96–120) — an LLM-judge reward ──
   // | factuality_judge = dspy.ChainOfThought(FactualityJudge)
@@ -94,14 +94,14 @@ object BestOfNAndRefine:
 
     def call(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
       def reward(answer: String): Double =
-        judge.apply((statement = answer)).map(r => if r.output.is_factual then 1.0 else 0.0).getOrElse(0.0)
+        judge((statement = answer)).map(r => if r.output.is_factual then 1.0 else 0.0).getOrElse(0.0)
       val refinedQa = Refine(
         module = qa,
         n = AttemptCount(3),
         rewardFn = (_, pred) => reward(pred.output.answer),
         threshold = 1.0
       )
-      refinedQa.apply((question = question)).map(_.output.answer)
+      refinedQa((question = question)).map(_.output.answer)
     // --8<-- [end:llm-judge]
 
   // ── Snippet 6 (lines 124–146) — a tapering length reward ──
@@ -125,7 +125,7 @@ object BestOfNAndRefine:
       )
 
     def call(text: String)(using RuntimeContext): Either[DspyError, String] =
-      optimizedSummarizer.apply((text = text)).map(_.output.summary)
+      optimizedSummarizer((text = text)).map(_.output.summary)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.output_refinement.bestOfNAndRefineMain"
 @main def bestOfNAndRefineMain(): Unit = Demo.withLm {

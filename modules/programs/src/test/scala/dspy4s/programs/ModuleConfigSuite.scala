@@ -57,7 +57,7 @@ class ModuleConfigSuite extends FunSuite:
     val layout = SignatureDsl.parse("question -> answer, score").toOption.get
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.7))
     val reqs = withCapture {
-      val _ = module.apply(ProgramCall(input = rec("question" := "x")))
+      val _ = module(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -68,7 +68,7 @@ class ModuleConfigSuite extends FunSuite:
     val layout = SignatureDsl.parse("question -> answer, score").toOption.get
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9))
     val reqs = withCapture {
-      val _ = module.apply(ProgramCall(
+      val _ = module(ProgramCall(
         input = rec("question" := "x"),
         config = DynamicValues.record("temperature" := 0.2)
       ))
@@ -84,7 +84,7 @@ class ModuleConfigSuite extends FunSuite:
     val module = DynamicPredict(layout)
     val callConfig = DynamicValues.record("temperature" := 0.42, "max_tokens" := 64)
     val reqs = withCapture {
-      val _ = module.apply(ProgramCall(input = rec("question" := "x"), config = callConfig))
+      val _ = module(ProgramCall(input = rec("question" := "x"), config = callConfig))
     }
     assertEquals(reqs.size, 1)
     assertEquals(DynamicValues.recordToMap(reqs.head.options), DynamicValues.recordToMap(callConfig))
@@ -96,7 +96,7 @@ class ModuleConfigSuite extends FunSuite:
     val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
     val module = Predict(sig, config = DynamicValues.record("temperature" := 0.7))
     val reqs = withCapture {
-      val _ = module.apply(MCQAInput("x"))
+      val _ = module(MCQAInput("x"))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -107,7 +107,7 @@ class ModuleConfigSuite extends FunSuite:
     val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
     val module = Predict(sig, config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9))
     val reqs = withCapture {
-      val _ = module.apply(MCQAInput("x"), config = DynamicValues.record("temperature" := 0.2))
+      val _ = module(MCQAInput("x"), config = DynamicValues.record("temperature" := 0.2))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
@@ -120,7 +120,7 @@ class ModuleConfigSuite extends FunSuite:
     val module = Predict(sig)
     val callConfig = DynamicValues.record("temperature" := 0.42, "max_tokens" := 64)
     val reqs = withCapture {
-      val _ = module.apply(MCQAInput("x"), config = callConfig)
+      val _ = module(MCQAInput("x"), config = callConfig)
     }
     assertEquals(reqs.size, 1)
     assertEquals(DynamicValues.recordToMap(reqs.head.options), DynamicValues.recordToMap(callConfig))
@@ -135,7 +135,7 @@ class ModuleConfigSuite extends FunSuite:
       config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9)
     )
     val reqs = withCapture {
-      val _ = module.apply(MCQAInput("x"), config = DynamicValues.record("temperature" := 0.2))
+      val _ = module(MCQAInput("x"), config = DynamicValues.record("temperature" := 0.2))
     }
 
     assertEquals(reqs.size, 1)
