@@ -56,9 +56,7 @@ object Streamable:
   /** `ChainOfThought` delegates to an inner `Predict` whose runtime signature contains the reasoning field. */
   given chainOfThought[I, O](using ProgramRunner[ChainOfThought[I, O]]): Streamable[ChainOfThought[I, O]] =
     from { program =>
-      val layout = ChainOfThought
-        .augmentLayout(program.signature.layout)
-        .fold(error => throw new IllegalStateException(error.message), identity)
+      val layout = ChainOfThought.augmentLayout(program.signature.layout)
       Vector("predict" -> layout)
     }
 

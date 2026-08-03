@@ -4,6 +4,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.quoted.*
+import MacroTypeSupport.namedTupleType
 
 private[typed] object SpecMacro:
 
@@ -110,18 +111,6 @@ private[typed] object SpecMacro:
       report.errorAndAbort(
         s"Spec trait '$specName' has duplicate field names: ${duplicates.mkString(", ")}"
       )
-
-    def tupleType(parts: List[TypeRepr]): TypeRepr =
-      parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
-        TypeRepr.of[*:].appliedTo(List(head, tail))
-      }
-
-    def namedTupleType(items: List[(String, TypeRepr)]): TypeRepr =
-      val nameTypes = items.map { (name, _) => ConstantType(StringConstant(name)) }
-      val valueTypes = items.map(_._2)
-      val namesTuple = tupleType(nameTypes)
-      val valuesTuple = tupleType(valueTypes)
-      TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, valuesTuple))
 
     val inputData  = fieldData.filter(_._2)
     val outputData = fieldData.filterNot(_._2)

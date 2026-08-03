@@ -5,6 +5,7 @@ import dspy4s.typed.{Shape, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
 import scala.quoted.*
+import MacroTypeSupport.*
 
 private[typed] object FunctionMacro:
 
@@ -96,55 +97,6 @@ private[typed] object FunctionMacro:
       if sym.name.startsWith("$anonfun") then
         methodDef(sym).rhs.flatMap(calledMethod).getOrElse(sym)
       else sym
-
-    def tupleType(parts: List[TypeRepr]): TypeRepr =
-      parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
-        TypeRepr.of[*:].appliedTo(List(head, tail))
-      }
-
-    def namedTupleType(items: List[(String, TypeRepr)]): TypeRepr =
-      val nameTypes = items.map { (name, _) => ConstantType(StringConstant(name)) }
-      val valueTypes = items.map(_._2)
-      val namesTuple = tupleType(nameTypes)
-      val valuesTuple = tupleType(valueTypes)
-      TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, valuesTuple))
-
-    def tupleParts(tpe: TypeRepr): List[TypeRepr] =
-      tpe.dealias match
-        case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
-          head :: tupleParts(tail)
-        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") =>
-          args
-        case other if other =:= TypeRepr.of[EmptyTuple] => Nil
-        case other =>
-          report.errorAndAbort(s"Expected tuple type, got: ${other.show}")
-
-    def namedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
-      tpe.dealias match
-        case AppliedType(tc, List(names, values))
-            if tc.typeSymbol == TypeRepr.of[NamedTuple.NamedTuple].typeSymbol =>
-          val nameParts = tupleParts(names).map {
-            case ConstantType(StringConstant(name)) => name
-            case other =>
-              report.errorAndAbort(s"Expected named-tuple label, got: ${other.show}")
-          }
-          val valueParts = tupleParts(values)
-          Some(nameParts.zip(valueParts))
-        case _ => None
-
-    def unnamedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
-      // Flatten the tuple into its element types FIRST, then label positionally (`_1`, `_2`, ...). Numbering
-      // inside the recursion from the tail's size reversed the labels for `*:`-spelled tuples — the first
-      // element got the highest index (`Int *: Boolean *: EmptyTuple` came out as `[_2: Int, _1: Boolean]`).
-      def elements(t: TypeRepr): Option[List[TypeRepr]] =
-        t.dealias match
-          case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
-            elements(tail).map(head :: _)
-          case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
-            Some(args)
-          case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
-          case _                                          => None
-      elements(tpe).map(_.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
 
     def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
       items.foreach { (fieldName, tpe) =>
@@ -263,56 +215,6 @@ private[typed] object FunctionMacro:
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
-    given CanEqual[Symbol, Symbol] = CanEqual.derived
-
-    def tupleType(parts: List[TypeRepr]): TypeRepr =
-      parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
-        TypeRepr.of[*:].appliedTo(List(head, tail))
-      }
-
-    def namedTupleType(items: List[(String, TypeRepr)]): TypeRepr =
-      val nameTypes = items.map { (name, _) => ConstantType(StringConstant(name)) }
-      val valueTypes = items.map(_._2)
-      val namesTuple = tupleType(nameTypes)
-      val valuesTuple = tupleType(valueTypes)
-      TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, valuesTuple))
-
-    def tupleParts(tpe: TypeRepr): List[TypeRepr] =
-      tpe.dealias match
-        case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
-          head :: tupleParts(tail)
-        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") =>
-          args
-        case other if other =:= TypeRepr.of[EmptyTuple] => Nil
-        case other =>
-          report.errorAndAbort(s"Expected tuple type, got: ${other.show}")
-
-    def namedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
-      tpe.dealias match
-        case AppliedType(tc, List(names, values))
-            if tc.typeSymbol == TypeRepr.of[NamedTuple.NamedTuple].typeSymbol =>
-          val nameParts = tupleParts(names).map {
-            case ConstantType(StringConstant(name)) => name
-            case other =>
-              report.errorAndAbort(s"Expected named-tuple label, got: ${other.show}")
-          }
-          val valueParts = tupleParts(values)
-          Some(nameParts.zip(valueParts))
-        case _ => None
-
-    def unnamedTupleParts(tpe: TypeRepr): Option[List[(String, TypeRepr)]] =
-      // Flatten the tuple into its element types FIRST, then label positionally (`_1`, `_2`, ...). Numbering
-      // inside the recursion from the tail's size reversed the labels for `*:`-spelled tuples — the first
-      // element got the highest index (`Int *: Boolean *: EmptyTuple` came out as `[_2: Int, _1: Boolean]`).
-      def elements(t: TypeRepr): Option[List[TypeRepr]] =
-        t.dealias match
-          case AppliedType(tc, List(head, tail)) if tc.typeSymbol == TypeRepr.of[*:].typeSymbol =>
-            elements(tail).map(head :: _)
-          case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
-            Some(args)
-          case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
-          case _                                          => None
-      elements(tpe).map(_.zipWithIndex.map { case (t, i) => s"_${i + 1}" -> t })
 
     def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
       items.foreach { (fieldName, tpe) =>
@@ -443,16 +345,6 @@ private[typed] object FunctionMacro:
     val layout = SignatureLayout.parse(literal) match
       case Right(parsed) => parsed
       case Left(err)     => report.errorAndAbort(s"""Invalid signature DSL "$literal": ${err.message}""")
-
-    def tupleType(parts: List[TypeRepr]): TypeRepr =
-      parts.foldRight(TypeRepr.of[EmptyTuple]) { (head, tail) =>
-        TypeRepr.of[*:].appliedTo(List(head, tail))
-      }
-
-    def namedTupleType(items: List[(String, TypeRepr)]): TypeRepr =
-      val nameTypes  = items.map { (fieldName, _) => ConstantType(StringConstant(fieldName)) }
-      val valueTypes = items.map(_._2)
-      TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(tupleType(nameTypes), tupleType(valueTypes)))
 
     def scalaType(field: dspy4s.core.contracts.FieldSpec): TypeRepr =
       field.typeRef.repr match

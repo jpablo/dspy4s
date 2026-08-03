@@ -244,7 +244,7 @@ class StreamListenerSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature).toOption.get)
+      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature))
       val stream = Streamify.streamify(
         program = program,
         streamListeners = Vector(
@@ -280,7 +280,7 @@ class StreamListenerSuite extends FunSuite:
         )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature).toOption.get)
+      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature))
       val stream = Streamify.streamify(
         program = program,
         streamListeners = Vector(

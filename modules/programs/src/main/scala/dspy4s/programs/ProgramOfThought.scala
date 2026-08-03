@@ -58,7 +58,7 @@ final case class ProgramOfThought[I, O](
       */
     answererPredictOverride: Option[Predict[((I, String), String), ProgramOfThought.WithReasoning[O]]] = None
 )(using
-    prepend: PrependField.Of["reasoning", String, O]
+    prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
 ) extends Module[I, ProgramOfThought.WithReasoning[O]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
@@ -168,7 +168,7 @@ final case class ProgramOfThought[I, O](
         outputShape = OutputAugmentation.prependedStringShape(
           baseSignature.outputShape,
           ChainOfThought.reasoningField,
-          "reasoning",
+          ChainOfThought.reasoningName,
           "ProgramOfThought",
           baseSignature.name
         )
@@ -184,9 +184,7 @@ final case class ProgramOfThought[I, O](
     for
       codeAndOutput <- runCode(call)
       (code, codeOutput) = codeAndOutput
-      result <- answererPredict.apply(
-        ProgramCall(((call.input, code), codeOutput), call.config, call.traceEnabled, call.rolloutId)
-                )
+      result <- answererPredict.apply(call.mapInput(input => ((input, code), codeOutput)))
     yield Prediction(output = result.output, raw = result.raw)
 
   /** The regenerate-until-execution-succeeds loop (the `retryUntil` shape of Algebra 2, on the shared [[AgentLoop]]
@@ -221,14 +219,9 @@ final case class ProgramOfThought[I, O](
       // have different typed inputs, so the dispatch happens at the call rather than on a shared predict value.
       val generated = previous match
         case None =>
-          generatorPredict.apply(ProgramCall(call.input, call.config, call.traceEnabled, call.rolloutId))
+          generatorPredict.apply(call)
         case Some(attempt) =>
-          regeneratorPredict.apply(ProgramCall(
-            ((call.input, attempt.code), attempt.error),
-            call.config,
-            call.traceEnabled,
-            call.rolloutId
-          ))
+          regeneratorPredict.apply(call.mapInput(input => ((input, attempt.code), attempt.error)))
 
       generated.flatMap { prediction =>
         prediction.output.generatedCode match
@@ -270,7 +263,7 @@ final case class ProgramOfThought[I, O](
 
 object ProgramOfThought:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
-  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+  type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
   /** A failed code attempt carried into the next regenerate step: the `code` that failed and its `error` (fed to the
     * regenerator as `previous_code` / `error`), plus the pre-built message used if the budget is exhausted.
@@ -286,11 +279,9 @@ object ProgramOfThought:
     */
   private[programs] object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
 
-  /** CoT-augment a step layout (prepend `reasoning`), failing fast at construction like the prior defaultPredict. */
+  /** CoT-augment a step layout by prepending `reasoning`. */
   private[programs] def augmented(layout: SignatureLayout): SignatureLayout =
-    ChainOfThought
-      .augmentLayout(layout)
-      .fold(error => throw new IllegalArgumentException(error.message), identity)
+    ChainOfThought.augmentLayout(layout)
 
   // ── The step signatures' hand-declared fields (static; hoisted so the typed shapes and the layouts share them).
   // dspy 3.2.1 alignment (item P3): the hardcoded `prefix =` markers were dropped. `FieldSpec.normalize` derives

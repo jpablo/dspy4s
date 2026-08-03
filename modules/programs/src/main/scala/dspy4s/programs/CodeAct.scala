@@ -81,7 +81,7 @@ final case class CodeAct[I, O](
       */
     extractorPredictOverride: Option[Predict[(I, String), CodeAct.WithReasoning[O]]] = None
 )(using
-    prepend: PrependField.Of["reasoning", String, O]
+    prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
 ) extends Module[I, CodeAct.WithReasoning[O]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
@@ -126,23 +126,19 @@ final case class CodeAct[I, O](
 
   /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
-    * `prepend` evidence this class already carries). Built fail-fast at construction (mirroring `require`): if the
-    * augmentation fails the error surfaces deterministically here, so both sub-predicts are always present and
-    * addressable. Tunable via [[extractorPredictOverride]].
+    * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
     */
   val extractorPredict: Predict[(I, String), CodeAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
         name   = baseSignature.name,
-        layout = ChainOfThought
-          .augmentLayout(extractorSignature)
-          .fold(error => throw new IllegalArgumentException(error.message), identity),
+        layout = ChainOfThought.augmentLayout(extractorSignature),
         inputShape = InputAugmentation
           .appendedStringInput(baseSignature.inputShape, CodeAct.extractTrajectoryField, "CodeAct extractor"),
         outputShape = OutputAugmentation.prependedStringShape(
           baseSignature.outputShape,
           ChainOfThought.reasoningField,
-          "reasoning",
+          ChainOfThought.reasoningName,
           "CodeAct extractor",
           baseSignature.name
         )
@@ -184,7 +180,7 @@ final case class CodeAct[I, O](
         maxIterations,
         CodeAct.renderTrajectory
       )(codeActStep(call)) { rendered =>
-        extractorPredict.apply(ProgramCall((call.input, rendered), call.config, call.traceEnabled, call.rolloutId))
+        extractorPredict.apply(call.mapInput(input => (input, rendered)))
       }
       (extracted, rendered) = extractedAndTrajectory
     yield Prediction(
@@ -214,7 +210,7 @@ final case class CodeAct[I, O](
   ): (Vector[CodeAct.TrajectoryEntry], Int) => Either[DspyError, TrajectoryAgent.Step[CodeAct.TrajectoryEntry]] =
     (trajectory, iteration) =>
       val rendered = CodeAct.renderTrajectory(trajectory)
-      val stepCall = ProgramCall((call.input, rendered), call.config, call.traceEnabled, call.rolloutId)
+      val stepCall = call.mapInput(input => (input, rendered))
       codeActPredict.apply(stepCall).flatMap { prediction =>
         val rawCode  = prediction.output.generatedCode
         val finished = prediction.output.finished
@@ -270,7 +266,7 @@ final case class CodeAct[I, O](
 
 object CodeAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
-  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+  type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(

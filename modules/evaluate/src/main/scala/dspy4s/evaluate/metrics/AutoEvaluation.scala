@@ -56,8 +56,8 @@ object AutoEvaluation:
   /** Build the `reasoning`-augmented judge predictor for a layout (the analogue of Python's
     * `ChainOfThought(signature)`).
     */
-  private[metrics] def judge(layout: SignatureLayout): Either[DspyError, DynamicPredict] =
-    ChainOfThought.augmentLayout(layout).map(augmented => DynamicPredict(layout = augmented, name = Some("judge")))
+  private[metrics] def judge(layout: SignatureLayout): DynamicPredict =
+    DynamicPredict(layout = ChainOfThought.augmentLayout(layout), name = Some("judge"))
 
   /** Run a judge predictor ONCE with the given input record and read one or more `[0, 1]` Double output fields from
     * that single prediction (returned in `readFields` order). One completion supplies every requested field — calling
@@ -65,13 +65,12 @@ object AutoEvaluation:
     * completions. Parse failures (missing / non-numeric field) surface as `Left`.
     */
   private[metrics] def runJudge(
-      predictor: Either[DspyError, DynamicPredict],
+      predictor: DynamicPredict,
       inputs: DynamicValue.Record,
       readFields: Seq[String]
   )(using RuntimeContext): Either[DspyError, Vector[Double]] =
     for
-      p          <- predictor
-      prediction <- p.apply(ProgramCall(input = inputs, traceEnabled = false))
+      prediction <- predictor.apply(ProgramCall(input = inputs, traceEnabled = false))
       values <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc
@@ -132,7 +131,7 @@ final case class SemanticF1(
     )
 
   // Built once per metric instance — the judge layout never changes between score() calls.
-  private val judgePredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(layout)
+  private val judgePredictor: DynamicPredict = AutoEvaluation.judge(layout)
 
   override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
@@ -218,8 +217,8 @@ final case class CompleteAndGrounded(
 
   // Built once per metric instance — the judge layouts never change between score() calls. These stay two
   // separate LM calls (unlike SemanticF1) because they judge against different layouts and inputs.
-  private val completenessPredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(completenessLayout)
-  private val groundednessPredictor: Either[DspyError, DynamicPredict] = AutoEvaluation.judge(groundednessLayout)
+  private val completenessPredictor: DynamicPredict = AutoEvaluation.judge(completenessLayout)
+  private val groundednessPredictor: DynamicPredict = AutoEvaluation.judge(groundednessLayout)
 
   override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext

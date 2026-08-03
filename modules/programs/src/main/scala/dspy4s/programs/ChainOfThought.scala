@@ -42,7 +42,7 @@ final case class ChainOfThought[I, O](
       * Per-call config still wins on key collisions.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty
-)(using prepend: PrependField.Of["reasoning", String, O])
+)(using prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O])
     extends Module[I, ChainOfThought.WithReasoning[O]]:
 
   /** The augmented output type — always a named tuple. See [[ChainOfThought.WithReasoning]]. */
@@ -54,27 +54,23 @@ final case class ChainOfThought[I, O](
     ModuleLifecycle.typed(signature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    predictor.flatMap(_.apply(call))
+    predictor.apply(call)
 
   /** The inner predictor, built once (memoized) — the analog of Python's `self.predict = Predict(extended_signature)`.
     * Left unnamed so it surfaces as a nested `predict` event under this program's `chain_of_thought` event.
     */
-  private lazy val predictor: Either[DspyError, Predict[I, Out]] =
-    augmentedSignature.map { sig =>
-      Predict(signature = sig, demos = demos, runtime = runtime, config = config)
-    }
+  private lazy val predictor: Predict[I, Out] =
+    Predict(signature = augmentedSignature, demos = demos, runtime = runtime, config = config)
 
-  private def augmentedSignature: Either[DspyError, Signature[I, Out]] =
-    augmentedLayout.map { layout =>
-      Signature(
-        name        = signature.name,
-        layout      = layout,
-        inputShape  = signature.inputShape,
-        outputShape = augmentedOutputShape
-      )
-    }
+  private def augmentedSignature: Signature[I, Out] =
+    Signature(
+      name        = signature.name,
+      layout      = augmentedLayout,
+      inputShape  = signature.inputShape,
+      outputShape = augmentedOutputShape
+    )
 
-  private def augmentedLayout: Either[DspyError, SignatureLayout] =
+  private def augmentedLayout: SignatureLayout =
     ChainOfThought.augmentLayout(signature.layout)
 
   // The shared opening-position augmentation shape (idempotent prepend, decodePrepended, base JSON schema
@@ -102,8 +98,8 @@ object ChainOfThought:
     description = Some("${reasoning}")
   ))
 
-  private[dspy4s] def augmentLayout(layout: SignatureLayout): Either[DspyError, SignatureLayout] =
-    Right(layout.prependOutput(reasoningField))
+  private[dspy4s] def augmentLayout(layout: SignatureLayout): SignatureLayout =
+    layout.prependOutput(reasoningField)
 
   /** The augmented output type — `reasoning: String` prepended to `O`'s named-tuple view, idempotently. A thin alias
     * over the shared [[dspy4s.typed.OutputAugmentation.WithField]]; see there for the full semantics.

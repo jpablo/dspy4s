@@ -252,7 +252,7 @@ final case class RLM[I, O](
         repl_history   = RLM.renderHistory(history, maxOutputChars),
         iteration      = s"${iteration + 1}/$maxIterations"
       )
-      actionPredict.apply(ProgramCall(actionInputs, call.config, call.traceEnabled, call.rolloutId)).flatMap { action =>
+      actionPredict.apply(call.mapInput(_ => actionInputs)).flatMap { action =>
         val reasoning = action.output.reasoning
         val rawCode   = action.output.code
         if verbose then
@@ -334,7 +334,7 @@ final case class RLM[I, O](
       variables_info = variablesMeta.map(_.format).mkString("\n\n"),
       repl_history   = RLM.renderHistory(history, maxOutputChars)
     )
-    extractPredict.apply(ProgramCall(extractInputs, call.config, call.traceEnabled, call.rolloutId)).map { extracted =>
+    extractPredict.apply(call.mapInput(_ => extractInputs)).map { extracted =>
       Prediction(
         output = extracted.output,
         raw = RawPrediction(values =

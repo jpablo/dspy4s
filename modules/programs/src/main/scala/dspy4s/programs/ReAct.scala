@@ -62,7 +62,7 @@ final case class ReAct[I, O](
       */
     extractorPredictOverride: Option[Predict[(I, String), ReAct.WithReasoning[O]]] = None
 )(using
-    prepend: PrependField.Of["reasoning", String, O]
+    prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
 ) extends Module[I, ReAct.WithReasoning[O]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
@@ -107,23 +107,19 @@ final case class ReAct[I, O](
 
   /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
-    * `prepend` evidence this class already carries). Built fail-fast at construction (mirroring `require`): if the
-    * augmentation fails the error surfaces deterministically here, so both sub-predicts are always present and
-    * addressable. Tunable via [[extractorPredictOverride]].
+    * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
     */
   val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
         name   = baseSignature.name,
-        layout = ChainOfThought
-          .augmentLayout(extractorSignature)
-          .fold(error => throw new IllegalArgumentException(error.message), identity),
+        layout = ChainOfThought.augmentLayout(extractorSignature),
         inputShape = InputAugmentation
           .appendedStringInput(baseSignature.inputShape, ReAct.extractTrajectoryField, "ReAct extractor"),
         outputShape = OutputAugmentation.prependedStringShape(
           baseSignature.outputShape,
           ChainOfThought.reasoningField,
-          "reasoning",
+          ChainOfThought.reasoningName,
           "ReAct extractor",
           baseSignature.name
         )
@@ -166,7 +162,7 @@ final case class ReAct[I, O](
         maxIterations,
         ReAct.renderTrajectory
       )(reactStep(call)) { rendered =>
-        extractorPredict.apply(ProgramCall((call.input, rendered), call.config, call.traceEnabled, call.rolloutId))
+        extractorPredict.apply(call.mapInput(input => (input, rendered)))
       }
       (extracted, rendered) = extractedAndTrajectory
     yield Prediction(
@@ -215,7 +211,7 @@ final case class ReAct[I, O](
       remaining: Int
   )(using RuntimeContext): Either[DspyError, (Option[ReAct.ReactStep], Vector[ReAct.TrajectoryEntry])] =
     val (result, used) = truncateOnOverflow(view, remaining)(ReAct.renderTrajectory) { rendered =>
-      reactPredict.apply(ProgramCall((call.input, rendered), call.config, call.traceEnabled, call.rolloutId))
+      reactPredict.apply(call.mapInput(input => (input, rendered)))
     }
     result match
       case Right(prediction)                   => Right((Some(prediction.output), used))
@@ -240,7 +236,7 @@ object ReAct:
   val FinishToolName: String = "finish"
 
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
-  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+  type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(

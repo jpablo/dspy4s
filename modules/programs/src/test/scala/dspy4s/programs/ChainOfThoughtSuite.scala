@@ -103,7 +103,7 @@ class ChainOfThoughtSuite extends FunSuite:
 
   test("ChainOfThought.augmentLayout prepends reasoning to the runtime output signature") {
     val sig = Signature.of[TcotSummarizeSpec]
-    val layout = ChainOfThought.augmentLayout(sig.layout).toOption.get
+    val layout = ChainOfThought.augmentLayout(sig.layout)
 
     assertEquals(layout.outputFields.map(_.name), Vector("reasoning", "summary"))
   }
@@ -149,7 +149,7 @@ class ChainOfThoughtSuite extends FunSuite:
   test("ChainOfThought is idempotent: an output that already declares `reasoning` gets no second one") {
     val sig = Signature.of[TcotHasReasoningSpec]
     // layout-level: reasoning is not duplicated
-    val layout = ChainOfThought.augmentLayout(sig.layout).toOption.get
+    val layout = ChainOfThought.augmentLayout(sig.layout)
     assertEquals(layout.outputFields.map(_.name), Vector("reasoning", "answer"))
 
     // type/value-level: the output named tuple has exactly the two declared fields (reasoning once),
@@ -254,7 +254,7 @@ class ChainOfThoughtSuite extends FunSuite:
   // "Reasoning:" -- a true no-op on the wire, now with no hardcoded literal.
   test("ChainOfThought: reasoning field prefix is derived as 'Reasoning:' (no hardcoded literal)") {
     val sig       = Signature.of[TcotSummarizeSpec]
-    val layout    = ChainOfThought.augmentLayout(sig.layout).toOption.get
+    val layout    = ChainOfThought.augmentLayout(sig.layout)
     val reasoning = layout.outputFields.find(_.name == "reasoning").get
     assertEquals(reasoning.prefix, Some("Reasoning:"))
   }

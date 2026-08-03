@@ -68,25 +68,15 @@ object OptimizableLeaf:
 
   /** [[OptimizableLeaf]] for the typed single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but
     * the exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
-    * `ChainOfThought.augmentLayout` returns an `Either`; it is resolved fail-fast here (consistent with the P3
-    * hand-written instances), and only fails for layouts that cannot be augmented.
     *
     * Optimizable parameters remain instructions, demos, and config. The augmented signature structure is metadata only;
     * writing parameters changes the base signature's instructions, from which the same augmented structure is rebuilt.
     */
   given chainOfThoughtOptimizableLeaf[I, O](using
-      prepend: PrependField.Of["reasoning", String, O]
+      prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
   ): OptimizableLeaf[ChainOfThought[I, O]] with
     private def augmented(program: ChainOfThought[I, O]) =
-      ChainOfThought
-        .augmentLayout(program.signature.layout)
-        .fold(
-          err =>
-            throw new IllegalStateException(
-              s"ChainOfThought '${program.moduleName}' has a non-augmentable layout: ${err.message}"
-            ),
-          identity
-        )
+      ChainOfThought.augmentLayout(program.signature.layout)
 
     def get(program: ChainOfThought[I, O]): OptimizableParameters =
       OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
