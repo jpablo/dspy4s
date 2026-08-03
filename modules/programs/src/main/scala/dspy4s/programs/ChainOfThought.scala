@@ -93,18 +93,21 @@ final case class ChainOfThought[I, O](
     OutputAugmentation.prependedStringShape(
       signature.outputShape,
       ChainOfThought.reasoningField,
-      "reasoning",
+      ChainOfThought.reasoningName,
       "ChainOfThought",
       signature.name
     )
 
 object ChainOfThought:
 
+  type ReasoningName = "reasoning"
+  private[programs] inline val reasoningName: ReasoningName = scala.compiletime.constValue[ReasoningName]
+
   // dspy 3.2.1 alignment (item P3): no hardcoded prefix. `FieldSpec.normalize`
   // derives the marker from the field name in the augment path -- inferPrefix
   // yields "Reasoning:", identical to the old literal (a true no-op on the wire).
   private[programs] val reasoningField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name        = "reasoning",
+    name        = reasoningName,
     typeRef     = TypeRef.string,
     description = Some("${reasoning}")
   ))
@@ -115,4 +118,4 @@ object ChainOfThought:
   /** The augmented output type — `reasoning: String` prepended to `O`'s named-tuple view, idempotently. A thin alias
     * over the shared [[dspy4s.typed.OutputAugmentation.WithField]]; see there for the full semantics.
     */
-  type WithReasoning[O] = OutputAugmentation.WithField[O, "reasoning", String]
+  type WithReasoning[O] = OutputAugmentation.WithField[O, ReasoningName, String]
