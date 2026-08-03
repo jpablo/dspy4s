@@ -79,9 +79,11 @@ class SignatureParserSuite extends FunSuite:
     val signature = SignatureDsl.parse("question: str -> answer: string").toOption.get
     val json = signature.dumpJson
 
-    // Clean, natural JSON -- a top-level object with a fields array, no ADT tags.
+    // Clean, natural JSON -- a top-level object with separate cohorts and no redundant role tags.
     assert(json.startsWith("{"), s"expected a JSON object, got: $json")
-    assert(json.contains("\"fields\""), s"expected a fields array, got: $json")
+    assert(json.contains("\"inputFields\""), s"expected an inputFields array, got: $json")
+    assert(json.contains("\"outputFields\""), s"expected an outputFields array, got: $json")
+    assert(!json.contains("\"role\""), s"did not expect role tags, got: $json")
 
     val rebuilt = SignatureLayout.fromJson(json)
     assert(rebuilt.isRight, s"expected Right, got $rebuilt")
@@ -109,18 +111,12 @@ class SignatureParserSuite extends FunSuite:
     assert(fromJson.exists(signature.equalsByStructure))
   }
 
-  test("signature fromState fails on invalid role") {
+  test("signature fromState requires both field cohorts") {
     val state = DynamicValue.Record(Chunk.from(Seq(
       "name"         -> DynamicValue.Primitive(PrimitiveValue.String("BadSignature")),
       "instructions" -> DynamicValue.Primitive(PrimitiveValue.String("test")),
-      "fields" -> DynamicValue.Sequence(Chunk.from(Seq(
-        DynamicValue.Record(Chunk.from(Seq(
-          "name"    -> DynamicValue.Primitive(PrimitiveValue.String("question")),
-          "role"    -> DynamicValue.Primitive(PrimitiveValue.String("invalid")),
-          "typeRef" -> DynamicValue.Primitive(PrimitiveValue.String("string"))
-        )))
-      ))
-    ))))
+      "inputFields"  -> DynamicValue.Sequence(Chunk.empty)
+    )))
 
     val rebuilt = SignatureLayout.fromState(state)
     assert(rebuilt.isLeft)

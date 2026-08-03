@@ -324,10 +324,9 @@ final case class SignatureLayout private (
   def dumpState: DynamicValue.Record =
     def str(s: String): DynamicValue        = DynamicValue.Primitive(PrimitiveValue.String(s))
     def opt(o: Option[Any]): DynamicValue   = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
-    def fieldRecord(field: FieldSpec, role: String): DynamicValue =
+    def fieldRecord(field: FieldSpec): DynamicValue =
       DynamicValue.Record(Chunk.from(Seq(
         "name"         -> str(field.name),
-        "role"         -> str(role),
         "typeRef"      -> str(field.typeRef.repr),
         "description"  -> opt(field.description),
         "prefix"       -> opt(field.prefix),
@@ -335,12 +334,11 @@ final case class SignatureLayout private (
         "enumValues"   -> DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))),
         "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue)))
       )))
-    val fieldRecords: Seq[DynamicValue] =
-      inputFields.map(fieldRecord(_, "Input")) ++ outputFields.map(fieldRecord(_, "Output"))
     DynamicValue.Record(Chunk.from(Seq(
       "name"         -> str(name),
       "instructions" -> opt(instructions),
-      "fields"       -> DynamicValue.Sequence(Chunk.from(fieldRecords))
+      "inputFields"  -> DynamicValue.Sequence(Chunk.from(inputFields.map(fieldRecord))),
+      "outputFields" -> DynamicValue.Sequence(Chunk.from(outputFields.map(fieldRecord)))
     )))
 
   /** Serialize the state to a JSON string via zio-blocks' `DynamicValue` JSON codec. Round-trips with
@@ -405,10 +403,6 @@ object SignatureLayout:
   ): SignatureLayout =
     SignatureLayout(name, inputFields, outputFields, instructions)
 
-  private enum StoredRole derives CanEqual:
-    case Input
-    case Output
-
   /** Re-hydrate a standalone layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]].
     * Program persistence is state-only and therefore does not use this codec. */
   def fromState(state: DynamicValue.Record): Either[DspyError, SignatureLayout] =
@@ -428,20 +422,10 @@ object SignatureLayout:
         case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(Some(s))
         case Some(_) => Left(ValidationError("Invalid 'instructions' value in signature state"))
 
-    def parseRole(role: String): Either[DspyError, StoredRole] =
-      role.trim.toLowerCase match
-        case "input"  => Right(StoredRole.Input)
-        case "output" => Right(StoredRole.Output)
-        case _        => Left(ValidationError(s"Invalid field role '$role' in signature state"))
-
-    def readField(raw: DynamicValue): Either[DspyError, (StoredRole, FieldSpec)] =
+    def readField(raw: DynamicValue): Either[DspyError, FieldSpec] =
       raw match
         case rec: DynamicValue.Record =>
-          for
-            name    <- getString(rec, "name").toRight(ValidationError("Field state is missing 'name'"))
-            roleStr <- getString(rec, "role").toRight(ValidationError(s"Field '$name' is missing role"))
-            role    <- parseRole(roleStr)
-          yield
+          getString(rec, "name").toRight(ValidationError("Field state is missing 'name'")).map { name =>
             val typeRef = getString(rec, "typeRef").map(TypeRef.fromToken).getOrElse(TypeRef.string)
             val defaultValue = DynamicValues.recordGet(rec, "defaultValue") match
               case None | Some(_: DynamicValue.Null.type) => None
@@ -456,7 +440,7 @@ object SignatureLayout:
               case Some(seq: DynamicValue.Sequence) =>
                 seq.elements.iterator.collect { case r: DynamicValue.Record => r }.flatMap(Constraint.fromState).toVector
               case _ => Vector.empty[Constraint]
-            role -> FieldSpec(
+            FieldSpec(
               name         = name,
               typeRef      = typeRef,
               description  = getString(rec, "description"),
@@ -465,28 +449,29 @@ object SignatureLayout:
               enumValues   = enumValues,
               constraints  = constraints
             )
+          }
         case _ => Left(ValidationError("Invalid field entry in signature state"))
 
-    def readFields: Either[DspyError, Vector[(StoredRole, FieldSpec)]] =
-      DynamicValues.recordGet(state, "fields") match
+    def readFields(key: String): Either[DspyError, Vector[FieldSpec]] =
+      DynamicValues.recordGet(state, key) match
         case Some(seq: DynamicValue.Sequence) =>
-          seq.elements.iterator.foldLeft[Either[DspyError, Vector[(StoredRole, FieldSpec)]]](Right(Vector.empty)) {
-            (acc, raw) =>
+          seq.elements.iterator.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, raw) =>
             for
               fields <- acc
               field  <- readField(raw)
             yield fields :+ field
           }
-        case _ => Left(ValidationError("SignatureLayout state is missing 'fields'"))
+        case _ => Left(ValidationError(s"SignatureLayout state is missing '$key'"))
 
     for
       name         <- readName
       instructions <- readInstructions
-      fields       <- readFields
+      inputFields  <- readFields("inputFields")
+      outputFields <- readFields("outputFields")
       signature <- create(
         name = name,
-        inputFields = fields.collect { case (StoredRole.Input, field) => field },
-        outputFields = fields.collect { case (StoredRole.Output, field) => field },
+        inputFields = inputFields,
+        outputFields = outputFields,
         instructions = instructions
       )
     yield signature
