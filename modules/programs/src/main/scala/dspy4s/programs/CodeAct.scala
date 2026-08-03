@@ -2,14 +2,12 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -171,27 +169,15 @@ final case class CodeAct[I, O](
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    for
-      // Bounded loop building the code/observation trajectory, then the extractor — the shared TrajectoryAgent
-      // flow (same as ReAct); only the per-iteration step (generate + execute) and the entry type differ. Both
-      // inner predicts are typed: the trajectory pairs with the TYPED base input, and the reasoning-prepended
-      // decode happens inside the extractor.
-      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[CodeAct.TrajectoryEntry, Prediction[Out]](
-        maxIterations,
-        CodeAct.renderTrajectory
-      )(codeActStep(call)) { rendered =>
-        extractorPredict(call.mapInput(input => (input, rendered)))
-      }
-      (extracted, rendered) = extractedAndTrajectory
-    yield Prediction(
-      output = extracted.output,
-      raw = RawPrediction(
-        values = extracted.raw.values
-          .updated("trajectory", DynamicValue.Primitive(PrimitiveValue.String(rendered))),
-        completions = extracted.raw.completions,
-        lmUsage     = extracted.raw.lmUsage
-      )
-    )
+    // Build the code/observation trajectory, run the typed extractor, then attach the complete trajectory to its
+    // preserved raw envelope. ReAct uses the same shared architecture; only the step semantics and entry type differ.
+    TrajectoryAgent.runAndExtractPrediction[CodeAct.TrajectoryEntry, Out](
+      maxIterations,
+      CodeAct.renderTrajectory,
+      CodeAct.extractTrajectoryField.name
+    )(codeActStep(call)) { rendered =>
+      extractorPredict(call.mapInput(input => (input, rendered)))
+    }
 
   /** This program's [[tools]] bridged for a sandboxed interpreter — pass as `new DenoPyodideInterpreter(tools =
     * program.sandboxTools)` so the prompt's tool list and the sandbox's callable surface come from the same vector. See

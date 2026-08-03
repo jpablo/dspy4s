@@ -2,6 +2,8 @@ package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
+import dspy4s.typed.Prediction
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The shared "gather a trajectory, then extract the answer from it" agent shape behind `ReAct` and `CodeAct` (the
   * trajectory-and-extractor flavor of `agentLoop`; see `docs/refactor/algebra-2-program-composition.md`).
@@ -50,3 +52,30 @@ object TrajectoryAgent:
       rendered    = render(trajectory)
       extracted  <- truncateOnOverflow(trajectory, extractAttempts)(render)(extract)._1
     yield (extracted, rendered)
+
+  /** Prediction-specialized [[runAndExtract]]: preserve the extractor's complete typed/raw result and add the full,
+    * pre-extractor-truncation trajectory to its raw values.
+    *
+    * The extractor may have seen an oldest-first truncated view after a context-window overflow; the attached value is
+    * still the complete trajectory returned by the loop. Using [[dspy4s.core.data.RawPrediction.withValue withValue]]
+    * rather than rebuilding the raw envelope also preserves completions, LM usage, and any future raw metadata.
+    */
+  def runAndExtractPrediction[S, O](
+      maxIterations: Int,
+      render: Vector[S] => String,
+      trajectoryKey: String,
+      extractAttempts: Int = 3
+  )(
+      step: (Vector[S], Int) => Either[DspyError, Step[S]]
+  )(
+      extract: String => Either[DspyError, Prediction[O]]
+  ): Either[DspyError, Prediction[O]] =
+    runAndExtract[S, Prediction[O]](maxIterations, render, extractAttempts)(step)(extract).map {
+      case (extracted, rendered) =>
+        extracted.copy(raw =
+          extracted.raw.withValue(
+            trajectoryKey,
+            DynamicValue.Primitive(PrimitiveValue.String(rendered))
+          )
+        )
+    }

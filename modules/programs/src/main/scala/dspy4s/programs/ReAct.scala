@@ -2,13 +2,11 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -153,28 +151,15 @@ final case class ReAct[I, O](
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
-    for
-      // Gather the trajectory (the react step truncates + may break on overflow) then run the extractor; the
-      // bounded loop + extractor truncation are the shared TrajectoryAgent flow (same as CodeAct). Both inner
-      // predicts are typed: the trajectory pairs with the TYPED base input, and each predict encodes/decodes
-      // through its own signature (the reasoning-prepended decode happens inside the extractor).
-      extractedAndTrajectory <- TrajectoryAgent.runAndExtract[ReAct.TrajectoryEntry, Prediction[Out]](
-        maxIterations,
-        ReAct.renderTrajectory
-      )(reactStep(call)) { rendered =>
-        extractorPredict(call.mapInput(input => (input, rendered)))
-      }
-      (extracted, rendered) = extractedAndTrajectory
-    yield Prediction(
-      output = extracted.output,
-      // Attach the (complete) trajectory to the raw prediction so callers can inspect the agent's reasoning.
-      raw = RawPrediction(
-        values = extracted.raw.values
-          .updated(ReActKeys.trajectory, DynamicValue.Primitive(PrimitiveValue.String(rendered))),
-        completions = extracted.raw.completions,
-        lmUsage     = extracted.raw.lmUsage
-      )
-    )
+    // Gather the trajectory (the react step truncates + may break on overflow), run the typed extractor, then attach
+    // the complete trajectory to its preserved raw envelope. CodeAct uses the same shared architecture.
+    TrajectoryAgent.runAndExtractPrediction[ReAct.TrajectoryEntry, Out](
+      maxIterations,
+      ReAct.renderTrajectory,
+      ReActKeys.trajectory
+    )(reactStep(call)) { rendered =>
+      extractorPredict(call.mapInput(input => (input, rendered)))
+    }
 
   /** One react iteration as a [[TrajectoryAgent]] step: run the react predict (truncating + possibly breaking on a
     * persistent context-window overflow), then run the chosen tool and append the observation. `finish` (or a step that
