@@ -232,6 +232,30 @@ consequences:
 - callbacks and runtime tracing can observe the nested predictor and tool calls;
 - immutable overrides can replace either predictor without changing the tools, schemas, runtime, or module names.
 
+The optimization traversal is a two-branch tree. Traversal order is stable: `react` is index 0 and `extractor` is
+index 1.
+
+```mermaid
+flowchart TD
+    root["ReAct[I, O]<br/>OptimizableTraversal arity = 2"]
+
+    root -->|"0: react"| react["reactPredict<br/>per-iteration policy"]
+    root -->|"1: extractor"| extractor["extractorPredict<br/>final synthesis"]
+
+    react --> reactParams["OptimizableParameters"]
+    reactParams --> reactInstructions["instructions"]
+    reactParams --> reactDemos["demos"]
+    reactParams --> reactConfig["config"]
+
+    extractor --> extractorParams["OptimizableParameters"]
+    extractorParams --> extractorInstructions["instructions"]
+    extractorParams --> extractorDemos["demos"]
+    extractorParams --> extractorConfig["config"]
+```
+
+This is the optimizer-visible tree, not the complete object graph. The base signature, tools, input/output shapes,
+runtime, bound LM, and module names remain outside `OptimizableParameters`, so replacing a leaf cannot alter them.
+
 The final returned `RawPrediction` is based on the extractor's raw prediction with the rendered trajectory added to its
 values. Detailed inner calls remain available through the runtime's callbacks, trace, and history.
 
