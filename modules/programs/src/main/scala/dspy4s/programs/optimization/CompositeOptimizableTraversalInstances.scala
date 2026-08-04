@@ -2,9 +2,9 @@ package dspy4s.programs.optimization
 
 import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
-/** Hand-written [[OptimizableTraversal]] instances for composite typed programs whose learnable sub-predicts are hoisted to
-  * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion keeps them in
-  * implicit scope without mixing concrete program traversal into the core typeclass definition.
+/** Hand-written [[OptimizableTraversal]] instances for composite typed programs whose learnable sub-predicts are
+  * hoisted to stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion
+  * keeps them in implicit scope without mixing concrete program traversal into the core typeclass definition.
   *
   * `replace` writes parameters through each current executable predictor. Unchanged parameters preserve the existing
   * override field exactly; changed parameters create an override with the same signature structure and execution
@@ -12,7 +12,7 @@ import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, 
   */
 private[optimization] trait CompositeOptimizableTraversalInstances:
   given reactOptimizableTraversal[I, O]: OptimizableTraversal.Of[ReAct[I, O], 2] with
-    def arity(@annotation.unused program: ReAct[I, O]): Int = 2
+    def arity(@annotation.unused program: ReAct[I, O]): Int    = 2
     def inspect(program: ReAct[I, O]): Vector[OptimizableView] =
       Vector(program.reactPredict.optimizableView, program.extractorPredict.optimizableView)
 
@@ -21,26 +21,29 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
 
     def replace(program: ReAct[I, O], updates: Vector[OptimizableParameters]): ReAct[I, O] =
       require(updates.size == 2, s"ReAct expects exactly 2 updates (react, extractor), got ${updates.size}")
-      val nextReact = updateOverride(program.reactPredict, program.reactPredictOverride, updates(0))
+      val nextReact     = updateOverride(program.reactPredict, program.reactPredictOverride, updates(0))
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
 
   given codeActOptimizableTraversal[I, O]: OptimizableTraversal.Of[CodeAct[I, O], 2] with
-    def arity(@annotation.unused program: CodeAct[I, O]): Int = 2
+    def arity(@annotation.unused program: CodeAct[I, O]): Int    = 2
     def inspect(program: CodeAct[I, O]): Vector[OptimizableView] =
       Vector(program.codeActPredict.optimizableView, program.extractorPredict.optimizableView)
 
     override def inspectNamed(program: CodeAct[I, O]): Vector[(String, OptimizableView)] =
-      Vector("codeact" -> program.codeActPredict.optimizableView, "extractor" -> program.extractorPredict.optimizableView)
+      Vector(
+        "codeact"   -> program.codeActPredict.optimizableView,
+        "extractor" -> program.extractorPredict.optimizableView
+      )
 
     def replace(program: CodeAct[I, O], updates: Vector[OptimizableParameters]): CodeAct[I, O] =
       require(updates.size == 2, s"CodeAct expects exactly 2 updates (codeact, extractor), got ${updates.size}")
-      val nextCodeAct = updateOverride(program.codeActPredict, program.codeActPredictOverride, updates(0))
+      val nextCodeAct   = updateOverride(program.codeActPredict, program.codeActPredictOverride, updates(0))
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
 
   given rlmOptimizableTraversal[I, O]: OptimizableTraversal.Of[RLM[I, O], 2] with
-    def arity(@annotation.unused program: RLM[I, O]): Int = 2
+    def arity(@annotation.unused program: RLM[I, O]): Int    = 2
     def inspect(program: RLM[I, O]): Vector[OptimizableView] =
       Vector(program.actionPredict.optimizableView, program.extractPredict.optimizableView)
 
@@ -49,12 +52,12 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
 
     def replace(program: RLM[I, O], updates: Vector[OptimizableParameters]): RLM[I, O] =
       require(updates.size == 2, s"RLM expects exactly 2 updates (action, extract), got ${updates.size}")
-      val nextAction = updateOverride(program.actionPredict, program.actionPredictOverride, updates(0))
+      val nextAction  = updateOverride(program.actionPredict, program.actionPredictOverride, updates(0))
       val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
       program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
   given programOfThoughtOptimizableTraversal[I, O]: OptimizableTraversal.Of[ProgramOfThought[I, O], 3] with
-    def arity(@annotation.unused program: ProgramOfThought[I, O]): Int = 3
+    def arity(@annotation.unused program: ProgramOfThought[I, O]): Int    = 3
     def inspect(program: ProgramOfThought[I, O]): Vector[OptimizableView] =
       Vector(
         program.generatorPredict.optimizableView,
@@ -76,7 +79,7 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       )
       if updates == inspect(program).map(_.parameters) then program
       else
-        val nextGenerator = updateOverride(program.generatorPredict, program.generatorPredictOverride, updates(0))
+        val nextGenerator   = updateOverride(program.generatorPredict, program.generatorPredictOverride, updates(0))
         val nextRegenerator =
           updateOverride(program.regeneratorPredict, program.regeneratorPredictOverride, updates(1))
         val nextAnswerer = updateOverride(program.answererPredict, program.answererPredictOverride, updates(2))
@@ -88,7 +91,7 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
 
   given multiChainComparisonOptimizableTraversal[I, O]
       : OptimizableTraversal.Of[MultiChainComparison[I, O], 1] with
-    def arity(@annotation.unused program: MultiChainComparison[I, O]): Int = 1
+    def arity(@annotation.unused program: MultiChainComparison[I, O]): Int    = 1
     def inspect(program: MultiChainComparison[I, O]): Vector[OptimizableView] =
       Vector(program.comparePredict.optimizableView)
 

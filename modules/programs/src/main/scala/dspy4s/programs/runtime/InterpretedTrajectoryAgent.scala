@@ -49,8 +49,8 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
       trajectory: Vector[Entry]
   )(using RuntimeContext): Either[DspyError, StepGeneration[ModelStep, Entry]]
 
-  /** Lower a model step into an executable action. A rejected preparation carries the failure observation to record
-    * and always continues to the next iteration.
+  /** Lower a model step into an executable action. A rejected preparation carries the failure observation to record and
+    * always continues to the next iteration.
     */
   protected def prepareAction(step: ModelStep): ActionPreparation[Action, Observation]
 
@@ -85,10 +85,8 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
       current: State.Generating[Entry]
   )(using RuntimeContext): GenerationTransition[ModelStep, Entry] =
     generateStep(call, current.trajectory) match
-      case Left(error) =>
-        GenerationTransition.Fail(State.Failed(error))
-      case Right(StepGeneration.Halted(used)) =>
-        GenerationTransition.Complete(State.Completed(used))
+      case Left(error)                        => GenerationTransition.Fail(State.Failed(error))
+      case Right(StepGeneration.Halted(used)) => GenerationTransition.Complete(State.Completed(used))
       case Right(StepGeneration.Generated(step, used)) =>
         GenerationTransition.Prepare(State.Preparing(step, used, current.iteration))
 

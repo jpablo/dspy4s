@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 object OptimizerSmokeTest:
 
-  val signatureDsl = "text -> label"
+  val signatureDsl             = "text -> label"
   val vagueBaselineInstruction = "Answer the question."
 
   def example(text: String, label: String): Example =
@@ -91,7 +91,7 @@ object OptimizerSmokeTest:
     "Children laughed on the playground"
   )
 
-  private def hasNum(s: String): Example = example(s, "HAS_NUM")
+  private def hasNum(s: String): Example  = example(s, "HAS_NUM")
   private def noNumEx(s: String): Example = example(s, "NO_NUM")
 
   // Train: 7 of each, interleaved (so bootstrap demos are class-balanced). Val: the remaining 5 of each.
@@ -110,10 +110,10 @@ object OptimizerSmokeTest:
     * is the general dspy4s observability hook — swap this for a logger/tracer as needed.
     */
   final class ProgressLmCallback extends CallbackHandler:
-    private val calls  = new AtomicInteger(0)
-    private val errors = new AtomicInteger(0)
-    def count: Int     = calls.get()
-    def errorCount: Int = errors.get()
+    private val calls                                                      = new AtomicInteger(0)
+    private val errors                                                     = new AtomicInteger(0)
+    def count: Int                                                         = calls.get()
+    def errorCount: Int                                                    = errors.get()
     override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
       case e: LmEndEvent =>
         val _ = calls.incrementAndGet()
@@ -155,7 +155,9 @@ object OptimizerSmokeTest:
             case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0
 
         def instructionOf(program: DynamicPredict): String =
-          summon[OptimizableTraversal[DynamicPredict]].read(program).headOption.flatMap(_.instructions).getOrElse("(none)")
+          summon[OptimizableTraversal[DynamicPredict]].read(
+            program
+          ).headOption.flatMap(_.instructions).getOrElse("(none)")
 
         def checkpoint(label: String): Unit =
           println(s"\n[smoke] $label  (${progress.count} LM calls so far${
@@ -200,7 +202,8 @@ object OptimizerSmokeTest:
           case Right(report) =>
             val best  = report.bestProgram
             val score = report.metadata.get("best_score").collect { case d: Double => d }.getOrElse(scoreOf(best))
-            val demos = summon[OptimizableTraversal[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
+            val demos =
+              summon[OptimizableTraversal[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
             checkpoint(f"MIPROv2  score: $score%.1f%%   (baseline $baseScore%.1f%%)")
             println(s"""[smoke] MIPROv2  chose instruction: "${instructionOf(best)}"  (+ $demos demos)""")
           case Left(err) => println(s"\n[smoke] MIPROv2 failed: ${err.message}")

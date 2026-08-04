@@ -84,8 +84,8 @@ final class RuntimeContext private (
 
   def withServices(updated: RuntimeServices): RuntimeContext = RuntimeContext.fromParts(updated, config, scope, delta)
   def withConfig(updated: RuntimeConfig): RuntimeContext     = RuntimeContext.fromParts(services, updated, scope, delta)
-  def withScope(updated: RuntimeScope): RuntimeContext       = RuntimeContext.fromParts(services, config, updated, delta)
-  def withDelta(updated: RuntimeDelta): RuntimeContext       = RuntimeContext.fromParts(services, config, scope, updated)
+  def withScope(updated: RuntimeScope): RuntimeContext = RuntimeContext.fromParts(services, config, updated, delta)
+  def withDelta(updated: RuntimeDelta): RuntimeContext = RuntimeContext.fromParts(services, config, scope, updated)
 
   def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext =
     withServices(services.copy(callbacks = updated))

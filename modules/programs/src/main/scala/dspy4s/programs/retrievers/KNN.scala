@@ -9,19 +9,21 @@ import dspy4s.lm.contracts.Embedder
 import zio.blocks.schema.DynamicValue
 
 /** k-nearest-neighbors retrieval over a trainset (a port of `dspy.predict.knn.KNN`, PORT_GAPS G-10): each example's
-  * INPUT fields are serialized to `"key: value | key2: value2"` and embedded once at construction; a query record
-  * is serialized the same way and scored against every trainset vector by raw dot product (upstream uses plain
-  * `np.dot`, deliberately unnormalized), returning the `k` highest-scoring examples, best first.
+  * INPUT fields are serialized to `"key: value | key2: value2"` and embedded once at construction; a query record is
+  * serialized the same way and scored against every trainset vector by raw dot product (upstream uses plain `np.dot`,
+  * deliberately unnormalized), returning the `k` highest-scoring examples, best first.
   *
-  * Construction embeds eagerly (like upstream's `__init__`), so it is effectful — build via [[KNN.create]]. */
+  * Construction embeds eagerly (like upstream's `__init__`), so it is effectful — build via [[KNN.create]].
+  */
 final class KNN private (
     val k: NeighborCount,
     val trainset: NonEmptyTrainset,
     embedder: Embedder,
     trainVectors: Vector[Vector[Float]]
 ):
-  /** The `k` trainset examples nearest to `inputs` (the query's input fields), best first. Ties break by the
-    * earlier trainset index, deterministically. */
+  /** The `k` trainset examples nearest to `inputs` (the query's input fields), best first. Ties break by the earlier
+    * trainset index, deterministically.
+    */
   def retrieve(inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, Vector[Example]] =
     embedder.embed(Vector(KNN.serialize(inputs))).flatMap { queryRows =>
       queryRows.headOption.toRight(RuntimeError("knn", "embedder returned no rows for the query")).map { query =>
@@ -38,7 +40,8 @@ object KNN:
     embedder.embed(trainset.map(ex => serialize(ex.inputs))).map(new KNN(k, trainset, embedder, _))
 
   /** Upstream's example-to-text casting: `"key: value | key2: value2"` over the record's fields, in field order.
-    * Callers pass the INPUT projection (`example.inputs`), matching upstream's `_input_keys` filter. */
+    * Callers pass the INPUT projection (`example.inputs`), matching upstream's `_input_keys` filter.
+    */
   private[retrievers] def serialize(record: DynamicValue.Record): String =
     record.fields.iterator.map { case (key, value) => s"$key: ${DynamicValues.renderText(value)}" }.mkString(" | ")
 

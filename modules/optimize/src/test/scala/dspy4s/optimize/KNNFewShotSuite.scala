@@ -21,7 +21,7 @@ import scala.collection.mutable.ArrayBuffer
 class KNNFewShotSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private val gold = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3", "q4" -> "a4")
 
@@ -41,9 +41,9 @@ class KNNFewShotSuite extends FunSuite:
     * carries a cluster-A demo answer. Records every prompt so the test can inspect what the demos rendered.
     */
   private final class ScriptedLm extends LanguageModel:
-    val prompts: ArrayBuffer[String] = ArrayBuffer.empty
-    override val id: String          = "scripted-knn"
-    override val mode: LmMode        = LmMode.Chat
+    val prompts: ArrayBuffer[String]                                                           = ArrayBuffer.empty
+    override val id: String                                                                    = "scripted-knn"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val full = request.messages.flatMap(_.text).mkString("\n")
       prompts += full
@@ -71,7 +71,7 @@ class KNNFewShotSuite extends FunSuite:
 
       val compiled =
         new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedder).compile(student).toOption.get
-      val result   = compiled(ProgramCall(input = DynamicValues.record("question" := "query")))
+      val result = compiled(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       // The final answer proves the demos steered the call (the LM answers "guided" only when a1 is in its prompt).
       assertEquals(result.toOption.flatMap(_.raw.asString("answer").toOption), Some("guided"))
@@ -103,9 +103,9 @@ class KNNFewShotSuite extends FunSuite:
     val lm = new ScriptedLm
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val compiled =
+      val compiled         =
         new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedderB).compile(student).toOption.get
-      val _                = compiled(ProgramCall(input = DynamicValues.record("question" := "query")))
+      val _ = compiled(ProgramCall(input = DynamicValues.record("question" := "query")))
 
       val finalPrompt = lm.prompts.last
       assert(finalPrompt.contains("a3") && finalPrompt.contains("a4"), s"cluster-B demos expected:\n$finalPrompt")

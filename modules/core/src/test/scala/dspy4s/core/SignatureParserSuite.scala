@@ -26,8 +26,8 @@ class SignatureParserSuite extends FunSuite:
     val parsed = parser.parse("question: str, top_k: int -> answer: string, score: double")
 
     assert(parsed.isRight)
-    val signature = parsed.toOption.get
-    val inputTypes = signature.inputFields.map(_.typeRef.repr)
+    val signature   = parsed.toOption.get
+    val inputTypes  = signature.inputFields.map(_.typeRef.repr)
     val outputTypes = signature.outputFields.map(_.typeRef.repr)
 
     assertEquals(inputTypes, Vector("string", "int"))
@@ -44,7 +44,7 @@ class SignatureParserSuite extends FunSuite:
 
   test("input augmentation preserves cohort ordering") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val updated = signature.appendInput(FieldSpec(name = "context"))
+    val updated   = signature.appendInput(FieldSpec(name = "context"))
 
     assertEquals(updated.inputFields.map(_.name), Vector("question", "context"))
     assertEquals(updated.outputFields.map(_.name), Vector("answer"))
@@ -52,8 +52,8 @@ class SignatureParserSuite extends FunSuite:
 
   test("signature dumpState and fromState roundtrip") {
     val signature = SignatureDsl.parse("question: str -> answer: string").toOption.get
-    val state = signature.dumpState
-    val rebuilt = SignatureLayout.fromState(state)
+    val state     = signature.dumpState
+    val rebuilt   = SignatureLayout.fromState(state)
 
     assert(rebuilt.isRight)
     assert(signature.equalsByStructure(rebuilt.toOption.get))
@@ -77,7 +77,7 @@ class SignatureParserSuite extends FunSuite:
 
   test("signature dumpJson and fromJson roundtrip through clean JSON") {
     val signature = SignatureDsl.parse("question: str -> answer: string").toOption.get
-    val json = signature.dumpJson
+    val json      = signature.dumpJson
 
     // Clean, natural JSON -- a top-level object with separate cohorts and no redundant role tags.
     assert(json.startsWith("{"), s"expected a JSON object, got: $json")
@@ -103,7 +103,7 @@ class SignatureParserSuite extends FunSuite:
     ).toOption.get
 
     val fromState = SignatureLayout.fromState(signature.dumpState)
-    val fromJson = SignatureLayout.fromJson(signature.dumpJson)
+    val fromJson  = SignatureLayout.fromJson(signature.dumpJson)
 
     assertEquals(fromState.map(_.outputFields.head.enumValues), Right(Vector("negative", "neutral", "positive")))
     assertEquals(fromJson.map(_.outputFields.head.enumValues), Right(Vector("negative", "neutral", "positive")))

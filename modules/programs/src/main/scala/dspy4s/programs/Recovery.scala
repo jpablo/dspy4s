@@ -48,7 +48,7 @@ final case class RecoverWith[
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     primary(call) match
-      case success @ Right(_) => success
+      case success @ Right(_)   => success
       case denied @ Left(error) =>
         TransformResult.guard("program_recovery_policy")(Right(policy.allows(error))).flatMap { allowed =>
           if allowed then fallback(call) else denied

@@ -3,9 +3,10 @@ package dspy4s.core
 import dspy4s.core.contracts.{FieldSpec, SignatureLayout}
 import dspy4s.core.contracts.SignatureOps.*
 
-/** Laws for the value-level signature algebra (`prependOutput` / `appendInput` / `replaceOutputs`). The
-  * composite suites (ChainOfThought / ReAct / CodeAct / MultiChainComparison) cover the migrated call
-  * sites; this pins the primitive itself. */
+/** Laws for the value-level signature algebra (`prependOutput` / `appendInput` / `replaceOutputs`). The composite
+  * suites (ChainOfThought / ReAct / CodeAct / MultiChainComparison) cover the migrated call sites; this pins the
+  * primitive itself.
+  */
 class SignatureOpsSuite extends munit.FunSuite:
 
   private def layout(inputs: Vector[FieldSpec], outputs: Vector[FieldSpec]): SignatureLayout =

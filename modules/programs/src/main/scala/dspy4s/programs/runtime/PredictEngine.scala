@@ -30,9 +30,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *
   * This is the raw engine -- module-level lifecycle (the `withModule` callback scope and trace/history recording) is
   * added by `Module.apply`. Two sibling `Module`s call this engine in their `forward`: the untyped `DynamicPredict`
-  * (`Module[DynamicValue.Record, DynamicValue.Record]`) and the typed `Predict[I, O]`
-  * (`Module[I, O]`, which encodes/decodes around `execute`). Neither wraps the other, so a
-  * call emits exactly one module event.
+  * (`Module[DynamicValue.Record, DynamicValue.Record]`) and the typed `Predict[I, O]` (`Module[I, O]`, which
+  * encodes/decodes around `execute`). Neither wraps the other, so a call emits exactly one module event.
   */
 private[dspy4s] final case class PredictEngine(
     layout: SignatureLayout,
@@ -66,7 +65,7 @@ private[dspy4s] final case class PredictEngine(
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
       for
-        model <- lm.fold(runtime.resolveModel)(Right(_))
+        model   <- lm.fold(runtime.resolveModel)(Right(_))
         adapter <- runtime.resolveAdapter
         invocation = buildInvocation(call, model)
         prompt <- CallbackDispatcher.withAdapter(
@@ -84,7 +83,7 @@ private[dspy4s] final case class PredictEngine(
           val mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
           model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
         }
-        parsed <- parseOutputs(adapter, response.outputs)
+        parsed     <- parseOutputs(adapter, response.outputs)
         prediction <-
           buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))
       yield prediction
@@ -148,7 +147,7 @@ private[dspy4s] final case class PredictEngine(
     outputs.zipWithIndex.foldLeft[Either[DspyError, Vector[ParsedOutput]]](Right(Vector.empty)) { (acc, pair) =>
       val (output, index) = pair
       for
-        soFar <- acc
+        soFar  <- acc
         parsed <- CallbackDispatcher.withAdapter(
           adapterName = adapter.name,
           inputs = DynamicValues.record("phase" := "parse", "index" := index)
@@ -165,8 +164,8 @@ private[dspy4s] final case class PredictEngine(
   ): Either[DspyError, RawPrediction] =
     for
       completions <- Completions.fromRows(parsedOutputs.map(_.values))
-      first <- RawPrediction.fromCompletions(completions)
-      withUsage = first.copy(lmUsage = response.usage)
+      first       <- RawPrediction.fromCompletions(completions)
+      withUsage  = first.copy(lmUsage = response.usage)
       prediction = withUsage.withValue(PredictEngine.ToolCallsKey, toToolCallPayload(toolCalls))
     yield prediction
 

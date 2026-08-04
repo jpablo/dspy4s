@@ -3,14 +3,15 @@ package dspy4s.programs
 import dspy4s.core.contracts.{ContextWindowExceededError, DspyError, RuntimeError}
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 
-/** Laws for the shared overflow loop. The migrated ReAct/CodeAct truncation paths are covered by their own
-  * suites; this pins drop-oldest order, exhaustion, the empty-view guard, and the non-overflow short-circuit. */
+/** Laws for the shared overflow loop. The migrated ReAct/CodeAct truncation paths are covered by their own suites; this
+  * pins drop-oldest order, exhaustion, the empty-view guard, and the non-overflow short-circuit.
+  */
 class TruncateOnOverflowSuite extends munit.FunSuite:
 
   private def cwe: DspyError = ContextWindowExceededError()
 
   test("no overflow: runs once, returns the result with the original view") {
-    var calls = 0
+    var calls          = 0
     val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3)(_.mkString(",")) { _ =>
       calls += 1
       Right("ok")
@@ -29,18 +30,18 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
   }
 
   test("persistent overflow: exhausts maxAttempts, returns the last Left with the truncated view") {
-    var calls = 0
+    var calls          = 0
     val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 2)(_.mkString(",")) { _ =>
       calls += 1
       Left(cwe)
     }
     assert(result.isLeft)
-    assertEquals(calls, 2)          // initial attempt + one retry
+    assertEquals(calls, 2)           // initial attempt + one retry
     assertEquals(used, Vector(2, 3)) // dropped the oldest exactly once
   }
 
   test("empty view overflow: stops immediately, no infinite loop") {
-    var calls = 0
+    var calls          = 0
     val (result, used) = truncateOnOverflow(Vector.empty[Int], maxAttempts = 5)(_.mkString(",")) { _ =>
       calls += 1
       Left(cwe)
@@ -51,7 +52,7 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
   }
 
   test("a non-overflow error is returned immediately, without retrying") {
-    var calls = 0
+    var calls       = 0
     val (result, _) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3)(_.mkString(",")) { _ =>
       calls += 1
       Left(RuntimeError("c", "boom"))

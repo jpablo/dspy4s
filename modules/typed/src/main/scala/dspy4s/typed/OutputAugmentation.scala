@@ -10,14 +10,15 @@ import scala.deriving.Mirror
   * program's output `O`, producing a named tuple — **idempotently** (skipped if `O` already declares `Name`) and
   * **cast-free**.
   *
-  * `O` is normalized to its named-tuple view via `NamedTuple.From` (identity for named tuples, the field tuple
-  * for case classes), so case-class outputs are supported and the result is always a named tuple. A case-class
-  * output is therefore *not* echoed back as the same nominal type — that type can't be synthesized with an extra
-  * field. The only unsupported `O` is one with no static fields (e.g. `DynamicValue.Record` from
-  * `Signature.fromStringDynamic`), handled by the low-priority [[PrependField.fallback]] returning `None`.
+  * `O` is normalized to its named-tuple view via `NamedTuple.From` (identity for named tuples, the field tuple for case
+  * classes), so case-class outputs are supported and the result is always a named tuple. A case-class output is
+  * therefore *not* echoed back as the same nominal type — that type can't be synthesized with an extra field. The only
+  * unsupported `O` is one with no static fields (e.g. `DynamicValue.Record` from `Signature.fromStringDynamic`),
+  * handled by the low-priority [[PrependField.fallback]] returning `None`.
   *
-  * Used by [[dspy4s.programs.ChainOfThought]] (`reasoning: String`) and available to any other program that adds
-  * an output field (e.g. a future `MultiChainComparison` with `rationale: String`). */
+  * Used by [[dspy4s.programs.ChainOfThought]] (`reasoning: String`) and available to any other program that adds an
+  * output field (e.g. a future `MultiChainComparison` with `rationale: String`).
+  */
 object OutputAugmentation:
 
   /** Type-level membership: is `X` one of the names in tuple `T`? Drives the idempotence check. */
@@ -26,25 +27,28 @@ object OutputAugmentation:
     case _ *: rest  => Contains[rest, X]
     case EmptyTuple => false
 
-  /** The augmented output type — **always a named tuple**. Normalizes `O` to its named-tuple view
-    * (`NamedTuple.From`), then prepends `Name: T` unless a `Name` field is already present (idempotent). */
+  /** The augmented output type — **always a named tuple**. Normalizes `O` to its named-tuple view (`NamedTuple.From`),
+    * then prepends `Name: T` unless a `Name` field is already present (idempotent).
+    */
   type WithField[O, Name <: String & Singleton, T] = NamedTuple.From[O] match
     case NamedTuple.NamedTuple[n, v] =>
       Contains[n, Name] match
         case true  => NamedTuple.NamedTuple[n, v]
         case false => NamedTuple.NamedTuple[Name *: n, T *: v]
 
-  /** Type-directed construction of [[WithField]] from a base output value, with no `asInstanceOf`. The abstract
-    * `Out` member lets each instance pin the exact type it builds (sidestepping match-type/`Mirror` alignment);
-    * consumers constrain it via `WithOutput[Name, T, O, WithField[O, Name, T]]`. Instances resolve where `O` is
-    * concrete (the program's call site), never against an abstract `O` — there only the fallback would match. */
+  /** Type-directed construction of [[WithField]] from a base output value, with no `asInstanceOf`. The abstract `Out`
+    * member lets each instance pin the exact type it builds (sidestepping match-type/`Mirror` alignment); consumers
+    * constrain it via `WithOutput[Name, T, O, WithField[O, Name, T]]`. Instances resolve where `O` is concrete (the
+    * program's call site), never against an abstract `O` — there only the fallback would match.
+    */
   trait PrependField[Name <: String & Singleton, T, O]:
     type Out
     def prepend(value: T, base: O): Option[Out]
 
   trait LowPriorityPrependField:
     /** Fallback for an `O` that is neither a named tuple nor a product — e.g. the `DynamicValue.Record` output of
-      * `Signature.fromStringDynamic`, which has no static fields. Unsupported: yields `None`. */
+      * `Signature.fromStringDynamic`, which has no static fields. Unsupported: yields `None`.
+      */
     given fallback[Name <: String & Singleton, T, O]
         : (PrependField[Name, T, O] { type Out = WithField[O, Name, T] }) =
       new PrependField[Name, T, O]:
@@ -60,7 +64,8 @@ object OutputAugmentation:
     type Of[Name <: String & Singleton, T, O] = WithOutput[Name, T, O, WithField[O, Name, T]]
 
     /** Named-tuple output without a `Name` field: prepend it via the supported whole-tuple constructor
-      * `NamedTuple.build`. */
+      * `NamedTuple.build`.
+      */
     given ntAbsent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using
         Contains[N, Name] =:= false
     ): WithOutput[Name, T, NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[Name *: N, T *: V]] =
@@ -77,8 +82,9 @@ object OutputAugmentation:
         type Out = NamedTuple.NamedTuple[N, V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] = Some(base)
 
-    /** Any product (case class): normalize to its named-tuple view through the `Mirror` and delegate to the
-      * named-tuple instances, so case-class outputs are supported and the result is always a named tuple. */
+    /** Any product (case class): normalize to its named-tuple view through the `Mirror` and delegate to the named-tuple
+      * instances, so case-class outputs are supported and the result is always a named tuple.
+      */
     given product[Name <: String & Singleton, T, O <: Product, N <: Tuple, V <: Tuple](using
         m: Mirror.ProductOf[O] { type MirroredElemLabels = N; type MirroredElemTypes = V },
         inner: PrependField[Name, T, NamedTuple.NamedTuple[N, V]]
@@ -88,15 +94,16 @@ object OutputAugmentation:
         def prepend(value: T, base: O): Option[Out] =
           inner.prepend(value, NamedTuple.build[N]()(Tuple.fromProductTyped(base)(using m)))
 
-  /** The general opening-position output augmentation decode (the realizable part of the `Thought`-shaped form):
-    * read the augment field `Name` as `T` via `readField`, decode the base output `O` via `shape`, prepend the
-    * field (idempotent, cast-free), mapping the fieldless-output case (a string-DSL `Signature`, no static
-    * fields) to a structured error, then run an optional post-decode `hook`.
+  /** The general opening-position output augmentation decode (the realizable part of the `Thought`-shaped form): read
+    * the augment field `Name` as `T` via `readField`, decode the base output `O` via `shape`, prepend the field
+    * (idempotent, cast-free), mapping the fieldless-output case (a string-DSL `Signature`, no static fields) to a
+    * structured error, then run an optional post-decode `hook`.
     *
-    * [[decodePrepended]] is the `T = String`, identity-hook instance every composite uses today. The one piece
-    * of the `Thought` ceiling left additive is the **closing position** (append a self-check field), which needs
-    * an `AppendField` dual and currently has no consumer (see `docs/refactor/algebra-2-program-composition.md`).
-    * `label` names the producing component in errors. */
+    * [[decodePrepended]] is the `T = String`, identity-hook instance every composite uses today. The one piece of the
+    * `Thought` ceiling left additive is the **closing position** (append a self-check field), which needs an
+    * `AppendField` dual and currently has no consumer (see `docs/refactor/algebra-2-program-composition.md`). `label`
+    * names the producing component in errors.
+    */
   def decodeAugmented[O, Name <: String & Singleton, T, Out](
       raw: DynamicValue.Record,
       shape: Shape[O],
@@ -115,7 +122,8 @@ object OutputAugmentation:
 
   /** The shared decode for an opening-`String` output augmentation: the `T = String`, identity-hook instance of
     * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `CodeAct` /
-    * `MultiChainComparison` / `ProgramOfThought`. */
+    * `MultiChainComparison` / `ProgramOfThought`.
+    */
   def decodePrepended[O, Name <: String & Singleton, Out](
       raw: DynamicValue.Record,
       shape: Shape[O],
@@ -124,17 +132,22 @@ object OutputAugmentation:
       signatureName: String
   )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Either[DspyError, Out] =
     decodeAugmented[O, Name, String, Out](
-      raw, shape, fieldName, label, signatureName,
+      raw,
+      shape,
+      fieldName,
+      label,
+      signatureName,
       readField = (record, field, lbl) => DynamicValues.requireString(record, field, lbl)
     )
 
-  /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands
-    * its inner typed `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
-    * `ProgramOfThought`'s CoT-augmented steps). `field` is prepended to `base`'s specs idempotently by name
-    * (matching the type-level [[WithField]] and the layout's `prependOutput` — an unconditional prepend would
-    * desync `encode`'s `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base JSON schema passes
-    * through so structured base-field shapes still reach the adapter (the prepended field is a plain `String`
-    * already covered by the adapter's field markers). */
+  /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands its
+    * inner typed `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
+    * `ProgramOfThought`'s CoT-augmented steps). `field` is prepended to `base`'s specs idempotently by name (matching
+    * the type-level [[WithField]] and the layout's `prependOutput` — an unconditional prepend would desync `encode`'s
+    * `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base JSON schema passes through so structured
+    * base-field shapes still reach the adapter (the prepended field is a plain `String` already covered by the
+    * adapter's field markers).
+    */
   def prependedStringShape[Name <: String & Singleton, O, Out](
       base: Shape[O],
       field: dspy4s.core.contracts.FieldSpec,
@@ -151,12 +164,12 @@ object OutputAugmentation:
     def encode(value: Out): DynamicValue.Record =
       val product: Product = value match
         case p: Product => p
-        case _ =>
+        case _          =>
           throw new IllegalArgumentException(
             s"$label output must be a named-tuple value (a Product); got a non-Product. " +
               "This shape is built only from an augmented Signature, which supplies named tuples."
           )
-      val values = product.productIterator.toVector
+      val values  = product.productIterator.toVector
       val entries = fieldSpecs.zip(values).map { (spec, raw) =>
         spec.name -> DynamicValues.fromAny(raw)
       }
@@ -165,12 +178,13 @@ object OutputAugmentation:
     def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
       decodePrepended[O, Name, Out](raw, base, fieldName, label, signatureName)(using prepend)
 
-  /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no
-    * static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a
-    * prepended field, so the augmentation is unsupported. */
+  /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no static
+    * fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a prepended field, so the
+    * augmentation is unsupported.
+    */
   private def productOutputRequired(label: String, signatureName: String, baseOut: Any): DspyError =
     ValidationError(
       s"$label requires a product output (named tuple or case class); the signature '$signatureName' has a " +
-      s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
-      s"(Signature.of / Signature.derived / Signature.fromType)."
+        s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
+        s"(Signature.of / Signature.derived / Signature.fromType)."
     )

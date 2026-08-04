@@ -88,11 +88,12 @@ object Optimize:
     if examples.isEmpty then 0.0
     else
       val student = planner(instructions)
-      val scores = examples.map { ex =>
+      val scores  = examples.map { ex =>
         val inputs = DynamicValues.recordFromEntries(ex.inputKeys.toVector.flatMap(k => ex.get(k).map(k -> _)))
         student(ProgramCall(input = inputs)) match
           case Left(_)     => 0.0
-          case Right(pred) => metric.feedback(ex, pred.raw, Vector.empty, None, Vector.empty).map(_.score).getOrElse(0.0)
+          case Right(pred) =>
+            metric.feedback(ex, pred.raw, Vector.empty, None, Vector.empty).map(_.score).getOrElse(0.0)
       }
       scores.sum / scores.size
 
@@ -108,7 +109,7 @@ object Optimize:
     */
   def run(reflectionLm: LanguageModel, budget: Int, minibatch: Int)(using RuntimeContext): OptimizationReport =
     val baseline = accuracy(Agent.plannerInstructionsBaseline, valset)
-    val gepa = new Gepa[DynamicPredict](
+    val gepa     = new Gepa[DynamicPredict](
       metric,
       reflectionLm = reflectionLm,
       GepaConfig(
@@ -118,7 +119,7 @@ object Optimize:
         seed = 0L
       )
     )
-    val result = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
+    val result   = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
     val optInstr = result.bestCandidate
       .get(OptimizableId(0))
       .flatten

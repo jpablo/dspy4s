@@ -21,14 +21,14 @@ final case class QAInput(question: String) derives Schema
 final case class QAOutput(answer: String) derives Schema
 
 /** A small USER composite of two typed `Predict` programs. It is a plain `case class` of typed programs:
-  *   - `OptimizableTraversal[TwoStageQA]` is structurally derived (each `Predict` field resolves to the `predictOptimizableLeaf` leaf,
-  *     so the composite reads as 2 predictors and replaces them positionally);
+  *   - `OptimizableTraversal[TwoStageQA]` is structurally derived (each `Predict` field resolves to the
+  *     `predictOptimizableLeaf` leaf, so the composite reads as 2 predictors and replaces them positionally);
   *   - it supplies its OWN `ProgramRunner` (a one-liner) because a bare composite does not expose a signature.
   * This is the worked example of how user composites participate in the unified optimize spine.
   */
 final case class TwoStageQA(
     classify: Predict[QAInput, QAOutput],
-    answer:   Predict[QAInput, QAOutput]
+    answer: Predict[QAInput, QAOutput]
 )
 
 object TwoStageQA:
@@ -62,20 +62,20 @@ class TypedProgramOptimizeSuite extends FunSuite:
 
   /** Answers each question with the answer scripted for it (defaults to "unknown"). */
   private final class ScriptedLm(answers: Map[String, String]) extends LanguageModel:
-    override val id: String   = "scripted-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val q = request.messages.lastOption.flatMap(_.text).getOrElse("")
       Right(LmResponse(
         outputs = Vector(LmOutput(text = answers.getOrElse(q, "unknown"))),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   private def settings(answers: Map[String, String]): RuntimeContext =
     RuntimeContext(lm = Some(new ScriptedLm(answers)), adapter = Some(EchoAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private val sig = Signature.derived[QAInput, QAOutput]("QA")
 
@@ -90,7 +90,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
   test("BootstrapFewShot optimizes a TYPED Predict[I, O] via the ProgramRunner spine") {
     val student = Predict[QAInput, QAOutput](sig)
     // Teacher (== student here) answers each training question correctly, so every example bootstraps.
-    val answers = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
+    val answers   = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
     val optimizer = new BootstrapFewShot[Predict[QAInput, QAOutput]](
       BootstrapFewShotConfig(
         metric = Some(new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")),
@@ -100,7 +100,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(answers)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset)
+      val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best = result.toOption.get.bestProgram
       // Demos were attached to the typed Predict (predictOptimizableLeaf.set is demos-only).
@@ -114,12 +114,12 @@ class TypedProgramOptimizeSuite extends FunSuite:
   test("LabeledFewShot attaches demos to BOTH predictors of a user composite (derived OptimizableTraversal)") {
     val student = TwoStageQA(
       classify = Predict[QAInput, QAOutput](sig, name = Some("classify")),
-      answer   = Predict[QAInput, QAOutput](sig, name = Some("answer"))
+      answer = Predict[QAInput, QAOutput](sig, name = Some("answer"))
     )
     val optimizer = LabeledFewShot[TwoStageQA](LabeledFewShotConfig(k = DemoCount(2), seed = 7L))
     RuntimeEnvironment.withSettings(settings(Map.empty)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset)
+      val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best = result.toOption.get.bestProgram
       // OptimizableTraversal derivation reads 2 predictors; replace writes the same 2 demos to each Predict leaf.
@@ -135,9 +135,9 @@ class TypedProgramOptimizeSuite extends FunSuite:
   test("BootstrapFewShot over a user composite runs the spine and produces a runnable program") {
     val student = TwoStageQA(
       classify = Predict[QAInput, QAOutput](sig, name = Some("classify")),
-      answer   = Predict[QAInput, QAOutput](sig, name = Some("answer"))
+      answer = Predict[QAInput, QAOutput](sig, name = Some("answer"))
     )
-    val answers = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
+    val answers   = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
     val optimizer = new BootstrapFewShot[TwoStageQA](
       BootstrapFewShotConfig(
         metric = Some(new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")),
@@ -147,7 +147,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings(answers)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset)
+      val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best = result.toOption.get.bestProgram
       assertEquals(best.classify.demos.size, 2)

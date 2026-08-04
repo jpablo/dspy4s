@@ -31,8 +31,8 @@ class GepaEngineSuite extends FunSuite:
     * instruction genuinely raises the score, and GEPA must discover it.
     */
   private final class TaskLm extends LanguageModel:
-    override val id: String   = "task"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "task"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt = request.messages.flatMap(_.text).mkString("\n")
       val answer = if prompt.contains("CITY") then "Paris" else "WRONG"
@@ -40,8 +40,8 @@ class GepaEngineSuite extends FunSuite:
 
   /** Reflection LM: proposes an improved instruction containing the magic token. */
   private final class ReflectionLm extends LanguageModel:
-    override val id: String   = "reflect"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "reflect"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = "```\nAnswer with the CITY name only.\n```"))))
 
@@ -70,7 +70,7 @@ class GepaEngineSuite extends FunSuite:
 
   test("GEPA discovers a better instruction and improves the program's validation score") {
     val adapter = new GepaAdapter(program, metric)
-    val engine =
+    val engine  =
       new GepaEngine(
         adapter,
         new ReflectionLm,
@@ -151,7 +151,7 @@ class GepaEngineSuite extends FunSuite:
     )
     val seedCandidate = Candidate.seed(program)
 
-    val lm1 = new CountingTaskLm
+    val lm1   = new CountingTaskLm
     val first = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm1), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
@@ -161,7 +161,7 @@ class GepaEngineSuite extends FunSuite:
     assert(java.nio.file.Files.exists(dir.resolve(GepaStatePersistence.fileName)), "a checkpoint was written")
 
     // Second run, same dir: it loads the saved state and must NOT re-evaluate the seed.
-    val lm2 = new CountingTaskLm
+    val lm2    = new CountingTaskLm
     val second = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm2), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
@@ -173,7 +173,7 @@ class GepaEngineSuite extends FunSuite:
   }
 
   test("metric-call budget is a hard upper bound between atomic iterations") {
-    val lm = new CountingTaskLm
+    val lm     = new CountingTaskLm
     val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       new GepaEngine(
@@ -193,7 +193,7 @@ class GepaEngineSuite extends FunSuite:
   }
 
   test("a fresh run rejects a budget too small for seed validation before calling the LM") {
-    val lm = new CountingTaskLm
+    val lm    = new CountingTaskLm
     val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       intercept[IllegalArgumentException] {

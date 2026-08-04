@@ -19,8 +19,8 @@ import zio.blocks.schema.DynamicValue
 /** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a TYPED
   * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction
   * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the distinction
-  * between record-running and optimization: an upcast `Program[I, O]` remains runnable but has erased the arity required
-  * by optimizers, while a shape-preserving composed pipeline remains both runnable and optimizable.
+  * between record-running and optimization: an upcast `Program[I, O]` remains runnable but has erased the arity
+  * required by optimizers, while a shape-preserving composed pipeline remains both runnable and optimizable.
   */
 class ParaCompileSuite extends FunSuite:
 
@@ -48,7 +48,7 @@ class ParaCompileSuite extends FunSuite:
     override val name: String = "instruction-aware"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
-      val q =
+      val q     =
         DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
       val bi =
         DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
@@ -68,7 +68,7 @@ class ParaCompileSuite extends FunSuite:
     override val mode: LmMode = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
-      val out =
+      val out  =
         if text.contains(instrGenMarker) then
           proposalPool(math.floorMod(request.rolloutId.getOrElse(0), proposalPool.size))
         else
@@ -151,7 +151,7 @@ class ParaCompileSuite extends FunSuite:
     assertEquals(erased.params.size, 1)
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran = summon[ProgramRunner[Program[QAInput, QAOutput]]].run(erased, rec("question" := "q1"))
+      val ran              = summon[ProgramRunner[Program[QAInput, QAOutput]]].run(erased, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the erased program failed: ${ran.left.toOption}")
     }
     val errors = compileErrors(
@@ -197,7 +197,7 @@ class ParaCompileSuite extends FunSuite:
     // The runtime-string counterpart of test 1: the student's signature exists only as a parsed value, but the
     // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (OptimizableTraversal +
     // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.
-    val bundle  = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
+    val bundle = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
     import bundle.given // the object codec, for the record-boundary runner `.copro` demands
     val student = bundle.packaged()
     RuntimeEnvironment.withSettings(settings) {
@@ -213,12 +213,12 @@ class ParaCompileSuite extends FunSuite:
   // ── 5. Codec-equipped objects: an id-headed pipeline evaluates and optimizes ─────────────────────────────
 
   test("an explicitly packaged zero-arity identity remains optimizable at the head of a pipeline") {
-    val identity = Program.of(dspy4s.programs.Compose.id[QAInput])
+    val identity                                          = Program.of(dspy4s.programs.Compose.id[QAInput])
     val pipeline: Program.WithArity[QAInput, QAOutput, 1] =
       identity >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran = summon[ProgramRunner[Program.WithArity[QAInput, QAOutput, 1]]]
+      val ran              = summon[ProgramRunner[Program.WithArity[QAInput, QAOutput, 1]]]
         .run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
       val report = pipeline.copro(config(), trainset).toOption.get

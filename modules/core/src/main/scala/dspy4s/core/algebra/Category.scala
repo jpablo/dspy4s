@@ -14,12 +14,10 @@ trait Category[P[_], Hom[_, _]]:
     infix def >>>[C](g: Hom[B, C]): Hom[A, C]
 
   @Law("left unit")
-  def identityLeft[A: P, B](f: Hom[A, B]): IsEq[Hom[A, B]] =
-    (id[A] >>> f) <-> f
+  def identityLeft[A: P, B](f: Hom[A, B]): IsEq[Hom[A, B]] = (id[A] >>> f) <-> f
 
   @Law("right unit")
-  def identityRight[A, B: P](f: Hom[A, B]): IsEq[Hom[A, B]] =
-    (f >>> id[B]) <-> f
+  def identityRight[A, B: P](f: Hom[A, B]): IsEq[Hom[A, B]] = (f >>> id[B]) <-> f
 
   @Law("associativity")
   def associativity[A, B, C, D](f: Hom[A, B], g: Hom[B, C], h: Hom[C, D]): IsEq[Hom[A, D]] =

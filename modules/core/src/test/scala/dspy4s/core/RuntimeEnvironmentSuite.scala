@@ -24,7 +24,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("withContext restores previous context after scope") {
-    val baseAsync = RuntimeEnvironment.current.asyncTaskId
+    val baseAsync     = RuntimeEnvironment.current.asyncTaskId
     val scopedContext = RuntimeContext(asyncTaskId = Some("scoped"))
 
     RuntimeEnvironment.withContext(scopedContext) {
@@ -68,7 +68,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
   test("globally-configured captureFailureTraces and callbackMetadata reach the current context (fillFrom)") {
     // Regression: fillFrom omitted these two fields, so a global `configure` of them was silently lost in `current`.
     val meta = DynamicValues.record("run" := "abc")
-    val _ = RuntimeEnvironment.configure(RuntimeContext(captureFailureTraces = true, callbackMetadata = meta))
+    val _    = RuntimeEnvironment.configure(RuntimeContext(captureFailureTraces = true, callbackMetadata = meta))
     assertEquals(RuntimeEnvironment.current.captureFailureTraces, true)
     assertEquals(RuntimeEnvironment.current.callbackMetadata, meta)
   }
@@ -88,7 +88,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
     assertEquals(first, Right(()))
 
     val threadResult = ArrayBuffer.empty[Either[Throwable, Either[?, ?]]]
-    val worker = Thread(
+    val worker       = Thread(
       new Runnable:
         override def run(): Unit =
           try
@@ -110,7 +110,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
 
   test("configure is allowed repeatedly within the same async task id") {
     val result = RuntimeEnvironment.withAsyncTask("task-a") {
-      val first = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(1))))
+      val first  = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(1))))
       val second = RuntimeEnvironment.configure(RuntimeContext(numThreads = Some(ThreadCount(2))))
       (first, second, RuntimeEnvironment.current.numThreads)
     }

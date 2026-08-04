@@ -42,8 +42,8 @@ import java.util.concurrent.atomic.AtomicInteger
   * SUBMIT, an extract predict produces the outputs from the trajectory (the fallback). Reference: "Recursive Language
   * Models" (Zhang, Kraska, Khattab, 2025).
   *
-  * `RLM[I, O]` is a `Module[I, O]` — SUBMIT's payload (or the extract's reply) is decoded into
-  * the typed outputs `O`; the rendered trajectory and `final_reasoning` ride on `.raw`.
+  * `RLM[I, O]` is a `Module[I, O]` — SUBMIT's payload (or the extract's reply) is decoded into the typed outputs `O`;
+  * the rendered trajectory and `final_reasoning` ride on `.raw`.
   *
   * ==Deltas from Python==
   *   - `llm_query_batched` runs its prompts SEQUENTIALLY (upstream uses an 8-worker thread pool); per-prompt failures
@@ -90,8 +90,8 @@ final case class RLM[I, O](
       * `Predict` over the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
       */
     actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
-    /** Optional override for the max-iterations extract-fallback predict — a TYPED `Predict` over the two declared
-      * meta inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
+    /** Optional override for the max-iterations extract-fallback predict — a TYPED `Predict` over the two declared meta
+      * inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
       */
     extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None
 ) extends Module[I, O]:
@@ -104,7 +104,7 @@ final case class RLM[I, O](
     )
   }
 
-  private val baseLayout: SignatureLayout = baseSignature.layout
+  private val baseLayout: SignatureLayout      = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
 
   /** Per-iteration action signature: `variables_info, repl_history, iteration -> reasoning, code`, instructed with the
@@ -150,16 +150,15 @@ final case class RLM[I, O](
       .withInstructions(Some(buildExtractInstructions))
 
   /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a TYPED
-    * `Predict[ActionInputs, ActionStep]`: the action signature's I/O is fully synthetic (base inputs reach the LM
-    * only as REPL variable metadata), so both shapes are static. Output decode is lenient (see
-    * [[RLM.actionStepShape]]).
+    * `Predict[ActionInputs, ActionStep]`: the action signature's I/O is fully synthetic (base inputs reach the LM only
+    * as REPL variable metadata), so both shapes are static. Output decode is lenient (see [[RLM.actionStepShape]]).
     */
   val actionPredict: Predict[RLM.ActionInputs, RLM.ActionStep] =
     actionPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name        = baseSignature.name,
-        layout      = actionSignature,
-        inputShape  = Shape.derived[RLM.ActionInputs],
+        name = baseSignature.name,
+        layout = actionSignature,
+        inputShape = Shape.derived[RLM.ActionInputs],
         outputShape = RLM.actionStepShape
       ),
       name = Some(actionProgramName)
@@ -171,9 +170,9 @@ final case class RLM[I, O](
   val extractPredict: Predict[RLM.ExtractInputs, O] =
     extractPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name        = baseSignature.name,
-        layout      = extractSignature,
-        inputShape  = Shape.derived[RLM.ExtractInputs],
+        name = baseSignature.name,
+        layout = extractSignature,
+        inputShape = Shape.derived[RLM.ExtractInputs],
         outputShape = baseSignature.outputShape
       ),
       name = Some(extractProgramName)
@@ -182,12 +181,12 @@ final case class RLM[I, O](
   private def buildActionInstructions: String =
     val inputs           = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
     val finalOutputNames = outputFieldNames.mkString(", ")
-    val outputFields = baseLayout.outputFields.map { f =>
+    val outputFields     = baseLayout.outputFields.map { f =>
       val desc = f.description.filterNot(_.startsWith("${")).fold("")(d => s": $d")
       s"- ${f.name} (${f.typeRef.repr})$desc"
     }.mkString("\n")
     val taskInstructions = baseLayout.instructions.fold("")(_ + "\n\n")
-    val toolDocs =
+    val toolDocs         =
       if tools.isEmpty then ""
       else
         val lines = tools.map { tool =>
@@ -209,9 +208,11 @@ final case class RLM[I, O](
     ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
-    val inputs = call.encodedInput(baseSignature.inputShape)
+    val inputs                               = call.encodedInput(baseSignature.inputShape)
     val inputVars: Map[String, DynamicValue] =
-      baseLayout.inputFields.map(f => f.name -> DynamicValues.recordGet(inputs, f.name).getOrElse(DynamicValue.Null)).toMap
+      baseLayout.inputFields.map(f =>
+        f.name -> DynamicValues.recordGet(inputs, f.name).getOrElse(DynamicValue.Null)
+      ).toMap
     val variablesMeta = baseLayout.inputFields.map { f =>
       RLM.ReplVariable.fromValue(f.name, inputVars(f.name), Some(f))
     }
@@ -249,8 +250,8 @@ final case class RLM[I, O](
       // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
       val actionInputs = RLM.ActionInputs(
         variables_info = variablesMeta.map(_.format).mkString("\n\n"),
-        repl_history   = RLM.renderHistory(history, maxOutputChars),
-        iteration      = s"${iteration + 1}/$maxIterations"
+        repl_history = RLM.renderHistory(history, maxOutputChars),
+        iteration = s"${iteration + 1}/$maxIterations"
       )
       actionPredict(call.mapInput(_ => actionInputs)).flatMap { action =>
         val reasoning = action.output.reasoning
@@ -351,7 +352,7 @@ final case class RLM[I, O](
     // Only the declared meta inputs — base inputs reach the LM solely as REPL variable metadata (upstream parity).
     val extractInputs = RLM.ExtractInputs(
       variables_info = variablesMeta.map(_.format).mkString("\n\n"),
-      repl_history   = RLM.renderHistory(history, maxOutputChars)
+      repl_history = RLM.renderHistory(history, maxOutputChars)
     )
     extractPredict(call.mapInput(_ => extractInputs)).map { extracted =>
       Prediction(
@@ -378,8 +379,9 @@ object RLM:
     description = Some("Python code to execute. Use markdown code block format: ```python\\n<code>\\n```")
   )
 
-  /** The action predict's typed input: the three declared meta fields, names matching the layout exactly (base
-    * inputs reach the LM only as REPL variable metadata). */
+  /** The action predict's typed input: the three declared meta fields, names matching the layout exactly (base inputs
+    * reach the LM only as REPL variable metadata).
+    */
   final case class ActionInputs(variables_info: String, repl_history: String, iteration: String) derives Schema
 
   /** The extract-fallback predict's typed input. */
@@ -399,8 +401,9 @@ object RLM:
     case Submitted(entry: ReplEntry, outputs: DynamicValue.Record)
 
   /** Hand-written LENIENT output shape mirroring the prior dynamic reads exactly: a missing `reasoning` / `code`
-    * renders as "" (an empty code snippet becomes a fence-error observation, not a failed call). Decode never
-    * fails; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction. */
+    * renders as "" (an empty code snippet becomes a fence-error observation, not a failed call). Decode never fails;
+    * `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
+    */
   private[programs] val actionStepShape: Shape[ActionStep] = new Shape[ActionStep]:
     val fieldSpecs: Vector[FieldSpec] = Vector(reasoningField, codeField)
 
@@ -413,7 +416,7 @@ object RLM:
     def decode(raw: DynamicValue.Record): Either[DspyError, ActionStep] =
       Right(ActionStep(
         reasoning = DynamicValues.recordGet(raw, "reasoning").map(DynamicValues.renderText).getOrElse(""),
-        code      = DynamicValues.recordGet(raw, "code").map(DynamicValues.renderText).getOrElse("")
+        code = DynamicValues.recordGet(raw, "code").map(DynamicValues.renderText).getOrElse("")
       ))
 
   /** Builds the per-forward REPL from the sandbox tools and the typed-SUBMIT output fields. */
@@ -484,7 +487,7 @@ object RLM:
       */
     def fromValue(name: String, value: DynamicValue, field: Option[FieldSpec], previewChars: Int = 1000): ReplVariable =
       val rendered = renderValue(value)
-      val preview =
+      val preview  =
         if rendered.length > previewChars then
           val half = previewChars / 2
           rendered.take(half) + "..." + rendered.takeRight(half)
@@ -511,7 +514,7 @@ object RLM:
   /** Upstream `REPLEntry.format_output`: head+tail truncation with the true length in the header. */
   private[programs] def formatOutputBlock(output: String, maxOutputChars: OutputCharLimit): String =
     val rawLen = output.length
-    val body =
+    val body   =
       if rawLen > maxOutputChars then
         val half    = maxOutputChars / 2
         val omitted = rawLen - maxOutputChars
@@ -602,7 +605,7 @@ object RLM:
     def queryLm(prompt: String): Either[DspyError, String] =
       val lm = subLm.orElse(ctx.lm.collect { case m: LanguageModel => m })
       lm match
-        case None => Left(RuntimeError("rlm", "No LM configured. Configure an ambient LM or pass subLm to RLM."))
+        case None        => Left(RuntimeError("rlm", "No LM configured. Configure an ambient LM or pass subLm to RLM."))
         case Some(model) =>
           model
             .call(LmRequest(
@@ -669,7 +672,7 @@ object RLM:
         case _: PrimitiveValue.Int | _: PrimitiveValue.Long | _: PrimitiveValue.Short | _: PrimitiveValue.Byte |
             _: PrimitiveValue.BigInt => "int"
         case _: PrimitiveValue.Double | _: PrimitiveValue.Float | _: PrimitiveValue.BigDecimal => "float"
-        case _ => "str"
+        case _                                                                                 => "str"
     case _: DynamicValue.Sequence  => "list"
     case _: DynamicValue.Record    => "dict"
     case _: DynamicValue.Map       => "dict"

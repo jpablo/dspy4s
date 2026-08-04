@@ -23,8 +23,8 @@ private[optimize] object OptimizerSupport:
     )
 
   /** Apply `instruction` to the `idx`-th predictor of `program` (an instruction-only edit) via
-    * [[dspy4s.programs.optimization.OptimizableTraversal.replace]]. The single home for the per-leaf instruction rewrite shared by the
-    * positional instruction optimizers (COPRO, InferRules).
+    * [[dspy4s.programs.optimization.OptimizableTraversal.replace]]. The single home for the per-leaf instruction
+    * rewrite shared by the positional instruction optimizers (COPRO, InferRules).
     */
   def applyInstruction[P](program: P, idx: Int, instruction: String)(using ps: OptimizableTraversal[P]): P =
     val leaves = ps.read(program)

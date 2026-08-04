@@ -5,10 +5,11 @@ import dspy4s.core.contracts.{FieldSpec, InputTransform, OutputTransform, Signat
 import dspy4s.core.contracts.SignatureOps.laws
 import org.scalacheck.{Gen, Prop}
 
-/** The laws of the signature algebra (see docs/refactor/algebra.md). The equations now live ON the structure
-  * as `@Law` statements ([[dspy4s.core.contracts.SignatureOps.laws]]); this suite EXECUTES those statements
-  * over random layouts, checking each under the honest observation. The example-based `SignatureOpsSuite`
-  * stays as readable documentation; this suite is the contract. */
+/** The laws of the signature algebra (see docs/refactor/algebra.md). The equations now live ON the structure as `@Law`
+  * statements ([[dspy4s.core.contracts.SignatureOps.laws]]); this suite EXECUTES those statements over random layouts,
+  * checking each under the honest observation. The example-based `SignatureOpsSuite` stays as readable documentation;
+  * this suite is the contract.
+  */
 class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
 
   // ── Generators (built via the public constructor; small, OVERLAPPING name pools so the dedup /
@@ -21,8 +22,8 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
       extraIns <- Gen.someOf(List("b", "c"))
       outs     <- Gen.someOf(outputPool)
     yield
-      val ins    = ("a" +: extraIns.toVector).distinct
-      val inputs = ins.map(FieldSpec(_))
+      val ins     = ("a" +: extraIns.toVector).distinct
+      val inputs  = ins.map(FieldSpec(_))
       val outputs = outs.toVector.distinct.map(FieldSpec(_))
       SignatureLayout.create("test", inputs, outputs).fold(e => throw new IllegalStateException(e.message), identity)
 
@@ -32,7 +33,7 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
   private val genInField: Gen[FieldSpec]           = Gen.oneOf("a", "b", "n").map(FieldSpec(_))
   private val genOutFields: Gen[Vector[FieldSpec]] =
     Gen.someOf(outputPool).map(_.toVector.distinct.map(FieldSpec(_)))
-  private val genInstr: Gen[String]                = Gen.oneOf("inst-1", "inst-2", "inst-3")
+  private val genInstr: Gen[String] = Gen.oneOf("inst-1", "inst-2", "inst-3")
 
   // ── The two honest observations the @Law statements are checked under ────────────────────────────────────
 
@@ -54,7 +55,7 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
 
   /** Execute a stated `Monoid[OutputTransform]` law under output-observational equality of the transform. */
   private def outEq(eq: IsEq[OutputTransform], s: SignatureLayout): Boolean = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
-  private def inEq(eq: IsEq[InputTransform], s: SignatureLayout): Boolean    = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
+  private def inEq(eq: IsEq[InputTransform], s: SignatureLayout): Boolean   = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
 
   /** Execute a stated layout equation under observational equality. */
   private def holdsLayout(eq: IsEq[SignatureLayout]): Boolean = obsEq(eq.lhs, eq.rhs)

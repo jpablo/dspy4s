@@ -54,8 +54,8 @@ object ToolFunction:
     val toolDesc = description
     val toolFn   = invoke // alias: avoid the method-name shadowing the param in the body below
     new ToolFunction:
-      override val name: String        = toolName
-      override val description: String = toolDesc
+      override val name: String                                                                             = toolName
+      override val description: String                                                                      = toolDesc
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
         toolFn(args)
 

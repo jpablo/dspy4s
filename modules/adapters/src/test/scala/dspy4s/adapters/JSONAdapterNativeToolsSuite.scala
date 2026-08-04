@@ -24,9 +24,9 @@ import zio.blocks.schema.DynamicValue
 class JSONAdapterNativeToolsSuite extends FunSuite:
 
   private final class StubLm(fnCalling: Boolean) extends LanguageModel:
-    override val id: String                      = "stub"
-    override val mode: LmMode                      = LmMode.Chat
-    override def supportsFunctionCalling: Boolean  = fnCalling
+    override val id: String                                                                    = "stub"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def supportsFunctionCalling: Boolean                                              = fnCalling
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Left(RuntimeError("stub", "unused"))
 
@@ -41,17 +41,20 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
     ).toOption.get
 
   private val tools: Vector[ToolSpec] = Vector(
-    ToolSpec("search", Some("Search the web"),
-      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true)))
+    ToolSpec(
+      "search",
+      Some("Search the web"),
+      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+    )
   )
 
   private def invocation: AdapterInvocation =
     AdapterInvocation(
       layout = layout,
-      demos  = Vector.empty,
+      demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "capital of belgium?"), inputKeys = Set("question")),
       request = LmRequest(model = "stub"),
-      tools  = tools
+      tools = tools
     )
 
   private def field(value: DynamicValue, key: String): DynamicValue =
@@ -60,7 +63,7 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
       case other                  => fail(s"expected a record to read '$key' from, got $other")
 
   test("JSONAdapter native function-calling injects tools and omits the tool_calls key from the instruction") {
-    val adapter = JSONAdapter(useNativeFunctionCalling = true)
+    val adapter          = JSONAdapter(useNativeFunctionCalling = true)
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val prompt = adapter.format(invocation).toOption.get
@@ -71,7 +74,7 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
   }
 
   test("JSONAdapter parse fills the tool_calls field and defaults other fields on a tool turn") {
-    val adapter = JSONAdapter(useNativeFunctionCalling = true)
+    val adapter          = JSONAdapter(useNativeFunctionCalling = true)
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val output = LmOutput(

@@ -13,15 +13,19 @@ class InstructionProposerSuite extends FunSuite:
 
   /** Records the prompt it saw and returns a fenced new instruction (with surrounding chatter to be stripped). */
   private final class ReflectionLm(response: String) extends LanguageModel:
-    @volatile var lastPrompt: Option[String] = None
-    override val id: String   = "reflect"
-    override val mode: LmMode = LmMode.Chat
+    @volatile var lastPrompt: Option[String]                                                   = None
+    override val id: String                                                                    = "reflect"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       lastPrompt = Some(request.messages.flatMap(_.text).mkString("\n"))
       Right(LmResponse(outputs = Vector(LmOutput(text = response))))
 
   private val records = Vector(
-    ReflectiveRecord(inputs = "question: Capital of France?", generatedOutputs = "Lyon", feedback = "expected 'Paris', got 'Lyon'")
+    ReflectiveRecord(
+      inputs = "question: Capital of France?",
+      generatedOutputs = "Lyon",
+      feedback = "expected 'Paris', got 'Lyon'"
+    )
   )
 
   test("propose prompts with the current instruction + dataset and extracts the fenced rewrite") {
@@ -42,5 +46,8 @@ class InstructionProposerSuite extends FunSuite:
   }
 
   test("extractInstruction tolerates a missing closing fence") {
-    assertEquals(InstructionProposer.extractInstruction("```\nNew instruction without a close"), "New instruction without a close")
+    assertEquals(
+      InstructionProposer.extractInstruction("```\nNew instruction without a close"),
+      "New instruction without a close"
+    )
   }

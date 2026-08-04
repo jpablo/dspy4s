@@ -45,7 +45,7 @@ class StreamingLiveSuite extends FunSuite:
     sys.env.getOrElse("OPENAI_LIVE_MODEL", sys.props.getOrElse("OPENAI_LIVE_MODEL", "gpt-4o-mini"))
 
   private def hasOptIn: Boolean =
-    val env = sys.env.getOrElse("OPENAI_LIVE_ENABLED", "")
+    val env  = sys.env.getOrElse("OPENAI_LIVE_ENABLED", "")
     val prop = sys.props.getOrElse("OPENAI_LIVE_ENABLED", "")
     (env.nonEmpty && env != "0" && env != "false") ||
     (prop.nonEmpty && prop != "0" && prop != "false")
@@ -61,7 +61,7 @@ class StreamingLiveSuite extends FunSuite:
     OpenAiLanguageModel(model = model, client = client)
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def collectStream(events: dspy4s.core.contracts.ClosableIterator[StreamEvent]): Vector[StreamEvent] =
     val buf = ArrayBuffer.empty[StreamEvent]
@@ -76,8 +76,8 @@ class StreamingLiveSuite extends FunSuite:
     val sig2 = SignatureDsl.parse("question, answer -> judgement").toOption.get
     new DynamicModule:
       override val moduleName: String = "my_program"
-      private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
-      private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
+      private val predict1            = DynamicPredict(layout = sig1, name = Some("predict1"))
+      private val predict2            = DynamicPredict(layout = sig2, name = Some("predict2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
@@ -85,10 +85,10 @@ class StreamingLiveSuite extends FunSuite:
           answer    <- predict1(input)
           judgement <- predict2(input.copy(
             input = input.input.updated(
-                            "answer",
-                            answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
-                          )
-                        ))
+              "answer",
+              answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+            )
+          ))
         yield judgement.raw
 
   /** Direct dspy4s port of Python DSPy's `tests/streaming/test_streaming.py::test_stream_listener_chat_adapter`.
@@ -103,17 +103,17 @@ class StreamingLiveSuite extends FunSuite:
     */
   test("live: stream_listener_chat_adapter parity (two Predicts, two listeners)") {
     requireLive()
-    val lm = buildLm()
+    val lm        = buildLm()
     val composite = buildComposite()
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = composite,
         streamListeners = Vector(
           StreamListener("answer"),
@@ -150,17 +150,17 @@ class StreamingLiveSuite extends FunSuite:
     */
   test("live: sync_streaming parity (two Predicts, sync iteration)") {
     requireLive()
-    val lm = buildLm()
+    val lm        = buildLm()
     val composite = buildComposite()
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = composite,
         streamListeners = Vector(
           StreamListener("answer"),
@@ -194,17 +194,17 @@ class StreamingLiveSuite extends FunSuite:
     */
   test("live: stream_listener_json_adapter parity (two Predicts, two listeners)") {
     requireLive()
-    val lm = buildLm()
+    val lm        = buildLm()
     val composite = buildComposite()
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(JSONAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(JSONAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = composite,
         streamListeners = Vector(
           StreamListener("answer"),

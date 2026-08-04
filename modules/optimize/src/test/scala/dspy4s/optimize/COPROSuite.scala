@@ -15,13 +15,13 @@ import munit.FunSuite
   *
   * The scripted LM serves two distinct sub-tasks through the single ambient model:
   *
-  *   1. Instruction generation. The COPRO instruction-generation `DynamicPredict` asks for a
-  *      `proposed_instruction`. The scripted LM hands back a different candidate per call by keying on the
-  *      `rolloutId` COPRO threads through (so candidates are distinct, mirroring upstream's `n=breadth`).
-  *   2. The actual task. The task `DynamicPredict` answers a `question`. The scripted LM returns the GOLD
-  *      answer only when the WINNING instruction is the one currently in effect (the test adapter renders the
-  *      active `layout.instructions` into the prompt, so the LM can see which candidate is applied); otherwise
-  *      it returns a wrong answer. This forces exactly one instruction to score perfectly.
+  *   1. Instruction generation. The COPRO instruction-generation `DynamicPredict` asks for a `proposed_instruction`.
+  *      The scripted LM hands back a different candidate per call by keying on the `rolloutId` COPRO threads through
+  *      (so candidates are distinct, mirroring upstream's `n=breadth`).
+  *   2. The actual task. The task `DynamicPredict` answers a `question`. The scripted LM returns the GOLD answer only
+  *      when the WINNING instruction is the one currently in effect (the test adapter renders the active
+  *      `layout.instructions` into the prompt, so the LM can see which candidate is applied); otherwise it returns a
+  *      wrong answer. This forces exactly one instruction to score perfectly.
   */
 class COPROSuite extends FunSuite:
 
@@ -30,8 +30,9 @@ class COPROSuite extends FunSuite:
   /** The instruction COPRO must discover as the winner. */
   private val winningInstruction = "INSTR_C: answer precisely"
 
-  /** Candidate instruction pool the scripted LM proposes; selected by `rolloutId % size` so ANY rolloutId
-    * COPRO threads through maps into this pool (and the winner is always reachable). */
+  /** Candidate instruction pool the scripted LM proposes; selected by `rolloutId % size` so ANY rolloutId COPRO threads
+    * through maps into this pool (and the winner is always reachable).
+    */
   private val proposalPool: Vector[String] =
     Vector(
       "INSTR_A: be brief",
@@ -49,27 +50,31 @@ class COPROSuite extends FunSuite:
   /** Test adapter that renders the ACTIVE instruction into the prompt so the scripted LM can branch on it. */
   private object InstructionAwareAdapter extends Adapter:
     override val name: String = "instruction-aware"
-    override def format(invocation: AdapterInvocation)(using RuntimeContext)
+    override def format(invocation: AdapterInvocation)(using
+        RuntimeContext
+    )
         : Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
       val q     =
         DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
-      val bi    =
+      val bi =
         DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
           .getOrElse("")
       // Single user message carrying instruction + inputs; the scripted LM keys on its contents.
       val body = s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    )
         : Either[DspyError, ParsedOutput] =
       // Route the LM text into whichever output field the layout declares (task: answer, instr-gen: proposed_instruction).
       val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
-    override val id: String   = "scripted-copro-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted-copro-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
       val out  =
@@ -84,7 +89,7 @@ class COPROSuite extends FunSuite:
           else "WRONG"
       Right(LmResponse(
         outputs = Vector(LmOutput(text = out)),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   private def extractBetween(s: String, start: String, end: String): String =
@@ -99,7 +104,7 @@ class COPROSuite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private val taskLayout: SignatureLayout =
     SignatureLayout.of(
@@ -127,14 +132,14 @@ class COPROSuite extends FunSuite:
   // ── 1. Happy path: single-Predict student, COPRO selects the winner ───────
 
   test("COPRO selects the winning instruction for a single-predictor student") {
-    val student = DynamicPredict(layout = taskLayout)
+    val student   = DynamicPredict(layout = taskLayout)
     val optimizer = new COPRO[DynamicPredict](config())
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset)
+      val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
-      val report = result.toOption.get
-      val best   = report.bestProgram
+      val report  = result.toOption.get
+      val best    = report.bestProgram
       val applied = summon[OptimizableTraversal[DynamicPredict]].read(best).head.instructions
       assertEquals(applied, Some(winningInstruction))
       // The winner scored 100% (gold on every example).
@@ -145,7 +150,7 @@ class COPROSuite extends FunSuite:
   // ── 2. Determinism: same seed -> same chosen instruction ──────────────────
 
   test("COPRO is deterministic for a fixed seed") {
-    val student = DynamicPredict(layout = taskLayout)
+    val student               = DynamicPredict(layout = taskLayout)
     def run(): Option[String] =
       val optimizer = new COPRO[DynamicPredict](config(seed = 42L))
       RuntimeEnvironment.withSettings(settings) {
@@ -167,7 +172,7 @@ class COPROSuite extends FunSuite:
     val optimizer = new COPRO[DynamicPredict](config(breadth = CoproBreadth(5), depth = RoundCount(3)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset)
+      val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best    = result.toOption.get.bestProgram
       val applied = summon[OptimizableTraversal[DynamicPredict]].read(best).head.instructions
@@ -182,7 +187,7 @@ class COPROSuite extends FunSuite:
     val optimizer = new COPRO[DynamicPredict](config())
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val report = optimizer.compile(student, trainset).toOption.get
+      val report           = optimizer.compile(student, trainset).toOption.get
       assert(report.candidates.nonEmpty, "report should track candidates")
       // Candidates are sorted descending by score.
       val scores = report.candidates.map(_.score)

@@ -77,13 +77,13 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
 
     val result = optimizer.compile(zeroShotStudent, trainset, teacher = Some(oracleTeacher))
     assert(result.isRight)
-    val report = result.toOption.get
+    val report       = result.toOption.get
     val stoppedEarly = report.metadata.get("stopped_early").collect { case b: Boolean => b }.getOrElse(false)
     assert(stoppedEarly, s"should have stopped early but metadata was: ${report.metadata}")
   }
 
   test("BootstrapFewShotWithRandomSearch handles empty trainset gracefully") {
-    val metric = new ExactMatch(answerField = "answer")
+    val metric    = new ExactMatch(answerField = "answer")
     val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
       RandomSearchConfig(metric = metric, numCandidates = SearchCandidateCount(2))
     )

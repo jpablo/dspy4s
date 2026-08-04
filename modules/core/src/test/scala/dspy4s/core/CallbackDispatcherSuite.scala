@@ -33,7 +33,7 @@ class CallbackDispatcherSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("withModule emits start and end events for successful calls") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
@@ -51,7 +51,7 @@ class CallbackDispatcherSuite extends FunSuite:
   }
 
   test("withModule emits end event and rethrows on exceptions") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
@@ -73,8 +73,8 @@ class CallbackDispatcherSuite extends FunSuite:
 
   test("a throwing end observer is isolated, attempted once, and does not hide the result") {
     val endAttempts = AtomicInteger(0)
-    val observed = ArrayBuffer.empty[CallbackEvent]
-    val throwing = new CallbackHandler:
+    val observed    = ArrayBuffer.empty[CallbackEvent]
+    val throwing    = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
         case _: ModuleEndEvent =>
           endAttempts.incrementAndGet()
@@ -117,7 +117,7 @@ class CallbackDispatcherSuite extends FunSuite:
   }
 
   test("withLm and withAdapter emit typed callback events") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
@@ -142,7 +142,7 @@ class CallbackDispatcherSuite extends FunSuite:
   }
 
   test("nested module callbacks carry parent call id and stable call ids") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
@@ -157,9 +157,9 @@ class CallbackDispatcherSuite extends FunSuite:
 
     assertEquals(events.size, 4)
     val parentStart = events(0).asInstanceOf[ModuleStartEvent]
-    val childStart = events(1).asInstanceOf[ModuleStartEvent]
-    val childEnd = events(2).asInstanceOf[ModuleEndEvent]
-    val parentEnd = events(3).asInstanceOf[ModuleEndEvent]
+    val childStart  = events(1).asInstanceOf[ModuleStartEvent]
+    val childEnd    = events(2).asInstanceOf[ModuleEndEvent]
+    val parentEnd   = events(3).asInstanceOf[ModuleEndEvent]
 
     assertEquals(parentStart.parentCallId, None)
     assertEquals(parentEnd.parentCallId, None)
@@ -170,7 +170,7 @@ class CallbackDispatcherSuite extends FunSuite:
   }
 
   test("callback parent call id is preserved across propagated future work") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
@@ -192,9 +192,9 @@ class CallbackDispatcherSuite extends FunSuite:
 
     assertEquals(events.size, 4)
     val outerStart = events(0).asInstanceOf[ModuleStartEvent]
-    val lmStart = events(1).asInstanceOf[LmStartEvent]
-    val lmEnd = events(2).asInstanceOf[LmEndEvent]
-    val outerEnd = events(3).asInstanceOf[ModuleEndEvent]
+    val lmStart    = events(1).asInstanceOf[LmStartEvent]
+    val lmEnd      = events(2).asInstanceOf[LmEndEvent]
+    val outerEnd   = events(3).asInstanceOf[ModuleEndEvent]
 
     assertEquals(outerStart.parentCallId, None)
     assertEquals(lmStart.parentCallId, Some(outerStart.callId))
@@ -203,7 +203,7 @@ class CallbackDispatcherSuite extends FunSuite:
   }
 
   test("withTool emits tool start and end events with call ids") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
@@ -216,7 +216,7 @@ class CallbackDispatcherSuite extends FunSuite:
 
     assertEquals(events.size, 2)
     val start = events.head.asInstanceOf[ToolStartEvent]
-    val end = events.last.asInstanceOf[ToolEndEvent]
+    val end   = events.last.asInstanceOf[ToolEndEvent]
     assertEquals(start.toolName, "search")
     assertEquals(end.toolName, "search")
     assertEquals(start.callId, end.callId)

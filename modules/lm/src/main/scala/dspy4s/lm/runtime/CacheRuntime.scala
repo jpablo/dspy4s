@@ -33,29 +33,34 @@ object RequestHash:
     sha256(encodeRequest(request))
 
   private def encodeRequest(request: LmRequest): String =
-    val messages = request.messages.map(encodeMessage).mkString("[", ",", "]")
-    val options = normalizeDynamic(request.options)
+    val messages  = request.messages.map(encodeMessage).mkString("[", ",", "]")
+    val options   = normalizeDynamic(request.options)
     val requestId = request.requestId.map(quote).getOrElse("null")
     val rolloutId = request.rolloutId.map(_.toString).getOrElse("null")
-    s"""{"model":${quote(request.model)},"mode":${quote(request.mode.toString)},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
+    s"""{"model":${quote(request.model)},"mode":${quote(
+        request.mode.toString
+      )},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
 
   private def encodeMessage(message: Message): String =
     val parts = message.parts.map(encodePart).mkString("[", ",", "]")
-    s"""{"role":${quote(message.role.toString)},"text":${message.text.map(quote).getOrElse("null")},"parts":$parts,"metadata":${normalizeStringMap(message.metadata)}}"""
+    s"""{"role":${quote(message.role.toString)},"text":${message.text.map(
+        quote
+      ).getOrElse("null")},"parts":$parts,"metadata":${normalizeStringMap(message.metadata)}}"""
 
   private def encodePart(part: ContentPart): String =
     s"""{"kind":${quote(part.kind)},"payload":${quote(part.payload)},"metadata":${normalizeStringMap(part.metadata)}}"""
 
   /** Canonical, order-independent string for the cache key. Records and Maps sort their keys so that two requests
-    * differing only in option insertion order collide onto the same entry (which `Schema.dynamic.jsonCodec` would
-    * not, since it preserves insertion order). Primitives are tagged by their case-class name so a string `"1"`
-    * cannot collide with an int `1`. */
+    * differing only in option insertion order collide onto the same entry (which `Schema.dynamic.jsonCodec` would not,
+    * since it preserves insertion order). Primitives are tagged by their case-class name so a string `"1"` cannot
+    * collide with an int `1`.
+    */
   private def normalizeDynamic(value: DynamicValue): String =
     value match
-      case DynamicValue.Primitive(p)      => quote(p.toString)
-      case DynamicValue.Sequence(elems)   => elems.iterator.map(normalizeDynamic).mkString("[", ",", "]")
-      case DynamicValue.Variant(name, v)  => s"{${quote(name)}:${normalizeDynamic(v)}}"
-      case DynamicValue.Record(fields) =>
+      case DynamicValue.Primitive(p)     => quote(p.toString)
+      case DynamicValue.Sequence(elems)  => elems.iterator.map(normalizeDynamic).mkString("[", ",", "]")
+      case DynamicValue.Variant(name, v) => s"{${quote(name)}:${normalizeDynamic(v)}}"
+      case DynamicValue.Record(fields)   =>
         fields.iterator
           .map { case (k, v) => quote(k) -> normalizeDynamic(v) }
           .toVector
@@ -122,7 +127,7 @@ final class InMemoryLmCache(maxEntries: CacheCapacity = CacheCapacity(1024)) ext
     }
 
 object NoopLmCache extends LmCache:
-  override def get(request: LmRequest): Option[LmResponse] = None
+  override def get(request: LmRequest): Option[LmResponse]         = None
   override def put(request: LmRequest, response: LmResponse): Unit = ()
 
 private object DiskCacheModel:
@@ -170,7 +175,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
   Files.createDirectories(directory)
 
   override def get(request: LmRequest): Option[LmResponse] =
-    val key = RequestHash.forRequest(request)
+    val key  = RequestHash.forRequest(request)
     val path = keyPath(key)
     this.synchronized {
       if !Files.exists(path) then None
@@ -187,12 +192,12 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
     }
 
   override def put(request: LmRequest, response: LmResponse): Unit =
-    val key = RequestHash.forRequest(request)
+    val key  = RequestHash.forRequest(request)
     val path = keyPath(key)
     this.synchronized {
       try
         val bytes = serialize(response)
-        val temp = path.resolveSibling(path.getFileName.toString + ".tmp")
+        val temp  = path.resolveSibling(path.getFileName.toString + ".tmp")
         Files.write(
           temp,
           bytes,
@@ -229,8 +234,8 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
 
   private def serialize(response: LmResponse): Array[Byte] =
     val persisted = toPersisted(response)
-    val bytes = ByteArrayOutputStream()
-    val out = ObjectOutputStream(bytes)
+    val bytes     = ByteArrayOutputStream()
+    val out       = ObjectOutputStream(bytes)
     try
       out.writeObject(persisted)
       out.flush()
@@ -351,7 +356,7 @@ final case class LmCacheConfig(
 object LmCaches:
   def build(config: LmCacheConfig): LmCache =
     val memory = if config.enableMemoryCache then Some(new InMemoryLmCache(config.memoryMaxEntries)) else None
-    val disk = buildDisk(config)
+    val disk   = buildDisk(config)
     CompositeLmCache(memory, disk) match
       case CompositeLmCache(Some(single), None) => single
       case CompositeLmCache(None, Some(single)) => single

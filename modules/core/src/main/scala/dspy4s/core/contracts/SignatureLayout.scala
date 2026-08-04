@@ -8,11 +8,12 @@ import scala.util.matching.Regex
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
   * This is the *adapter / prompt* type, not the Scala type -- the typed layer's `Shape[A]` carries the static
-  * Scala-side encoding. A Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire
-  * level (the LM sees a flat string like `"joy"`).
+  * Scala-side encoding. A Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level
+  * (the LM sees a flat string like `"joy"`).
   *
-  * Six well-known refs cover the common cases. Anything outside that set passes through as an opaque token --
-  * adapters that don't recognize it fall back to rendering it as a free-form string. */
+  * Six well-known refs cover the common cases. Anything outside that set passes through as an opaque token -- adapters
+  * that don't recognize it fall back to rendering it as a free-form string.
+  */
 final case class TypeRef(repr: String) derives CanEqual:
 
   /** Python/DSPy-facing name for well-known wire types. `None` means there is no safe direct Python equivalent. */
@@ -32,15 +33,18 @@ object TypeRef:
   val bool: TypeRef   = TypeRef("bool")
   val json: TypeRef   = TypeRef("json")
   val list: TypeRef   = TypeRef("list")
-  /** Sentinel for the output field that receives native provider tool calls (the analogue of Python dspy's
-    * `ToolCalls` output annotation). An adapter with native function-calling enabled fills this field from the
-    * provider's `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b. */
+
+  /** Sentinel for the output field that receives native provider tool calls (the analogue of Python dspy's `ToolCalls`
+    * output annotation). An adapter with native function-calling enabled fills this field from the provider's
+    * `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b.
+    */
   val toolCalls: TypeRef = TypeRef("tool_calls")
 
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
-    * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`)
-    * and is case-insensitive. Unknown tokens become opaque `TypeRef(other)`. An empty / missing token defaults to
-    * [[TypeRef.string]] (DSPy convention -- fields without a type annotation are strings). */
+    * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
+    * case-insensitive. Unknown tokens become opaque `TypeRef(other)`. An empty / missing token defaults to
+    * [[TypeRef.string]] (DSPy convention -- fields without a type annotation are strings).
+    */
   def fromToken(token: String): TypeRef =
     token.trim.toLowerCase match
       case "" | "str" | "string"         => string
@@ -55,21 +59,20 @@ object TypeRef:
   *
   *   - [[name]] is the canonical field key used in input / output records.
   *   - [[typeRef]] is the wire-format type the LM sees in the prompt -- see [[TypeRef]].
-  *   - [[description]] is a per-field hint shown in adapter prompts (e.g. `"the question to answer"`). When
-  *     `None`, [[FieldSpec.normalize]] defaults it to a placeholder like `"${question}"` so the prompt always
-  *     names the slot.
+  *   - [[description]] is a per-field hint shown in adapter prompts (e.g. `"the question to answer"`). When `None`,
+  *     [[FieldSpec.normalize]] defaults it to a placeholder like `"${question}"` so the prompt always names the slot.
   *   - [[prefix]] is the section header in adapter prompts (e.g. `"Question:"`); inferred from `name` by
   *     [[FieldSpec.inferPrefix]] when `None`.
-  *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo
-  *     example omits this field. (Not used for live-call inputs.)
-  *   - [[constraints]] are human-readable constraint hints (e.g. `"greater than: 0"`, `"maximum length: 10"`)
-  *     surfaced after the field description in prose adapters. Build them with [[FieldConstraints]] so the text
-  *     matches Python DSPy's `PYDANTIC_CONSTRAINT_MAP`. Empty by default; only emitted when non-empty.
+  *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo example
+  *     omits this field. (Not used for live-call inputs.)
+  *   - [[constraints]] are human-readable constraint hints (e.g. `"greater than: 0"`, `"maximum length: 10"`) surfaced
+  *     after the field description in prose adapters. Build them with [[FieldConstraints]] so the text matches Python
+  *     DSPy's `PYDANTIC_CONSTRAINT_MAP`. Empty by default; only emitted when non-empty.
   *
   * '''Constraint provenance (v1).''' Constraints are settable programmatically -- via this `FieldSpec` or
-  * [[SignatureLayout.create]]. Deriving them automatically from the typed (`zio-blocks Schema`) surface is a
-  * documented follow-up: the typed derivation has no constraint-annotation mechanism yet, so there is no path
-  * from `Schema[A]` to these strings today.
+  * [[SignatureLayout.create]]. Deriving them automatically from the typed (`zio-blocks Schema`) surface is a documented
+  * follow-up: the typed derivation has no constraint-annotation mechanism yet, so there is no path from `Schema[A]` to
+  * these strings today.
   */
 final case class FieldSpec(
     name: String,
@@ -81,11 +84,12 @@ final case class FieldSpec(
     constraints: Vector[Constraint] = Vector.empty
 ) derives CanEqual
 
-/** A single field constraint. Carries BOTH the human-readable rendering prose adapters show after a field's
-  * description (matching Python DSPy's `PYDANTIC_CONSTRAINT_MAP`, `dspy/signatures/field.py`, byte-for-byte) AND a
-  * JSON-Schema keyword/value, so adapters that emit a schema can embed the constraint structurally (e.g.
-  * `exclusiveMinimum`). Build these with [[FieldConstraints]]; they round-trip through layout state as `{op, value}`
-  * records via [[Constraint.dumpState]] / [[Constraint.fromState]]. */
+/** A single field constraint. Carries BOTH the human-readable rendering prose adapters show after a field's description
+  * (matching Python DSPy's `PYDANTIC_CONSTRAINT_MAP`, `dspy/signatures/field.py`, byte-for-byte) AND a JSON-Schema
+  * keyword/value, so adapters that emit a schema can embed the constraint structurally (e.g. `exclusiveMinimum`). Build
+  * these with [[FieldConstraints]]; they round-trip through layout state as `{op, value}` records via
+  * [[Constraint.dumpState]] / [[Constraint.fromState]].
+  */
 enum Constraint derives CanEqual:
   case Gt(value: Double)
   case Ge(value: Double)
@@ -182,9 +186,10 @@ object Constraint:
     case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n)
     case _                                                => None
 
-/** Builders for field [[Constraint]]s. Mirrors Python DSPy's `PYDANTIC_CONSTRAINT_MAP` (`dspy/signatures/field.py`)
-  * so dspy4s prompts match upstream byte-for-byte: `gt(0).render == "greater than: 0"`, etc. Numeric helpers accept
-  * `Double` (integral or fractional bounds); length helpers take `Int`. */
+/** Builders for field [[Constraint]]s. Mirrors Python DSPy's `PYDANTIC_CONSTRAINT_MAP` (`dspy/signatures/field.py`) so
+  * dspy4s prompts match upstream byte-for-byte: `gt(0).render == "greater than: 0"`, etc. Numeric helpers accept
+  * `Double` (integral or fractional bounds); length helpers take `Int`.
+  */
 object FieldConstraints:
   def gt(n: Double): Constraint         = Constraint.Gt(n)
   def ge(n: Double): Constraint         = Constraint.Ge(n)
@@ -198,13 +203,15 @@ object FieldSpec:
   private val identifierPattern: Regex = raw"[A-Za-z_][A-Za-z0-9_]*".r
 
   /** True if `name` is a valid Scala-style identifier (alphanumeric + underscore, must start with letter or
-    * underscore). Adapters require this -- field names appear as keys in `Map[String, Any]` payloads and as
-    * named-tuple labels in the typed layer, so non-identifier names would break the typed surface. */
+    * underscore). Adapters require this -- field names appear as keys in `Map[String, Any]` payloads and as named-tuple
+    * labels in the typed layer, so non-identifier names would break the typed surface.
+    */
   def validateName(name: String): Boolean = identifierPattern.matches(name)
 
   /** Convert a camelCase or snake_case field name into a human-readable prompt label (e.g. `"scoreValue"` →
-    * `"Score Value"`). Used by [[normalize]] to default the [[FieldSpec.prefix]] when one isn't explicitly set.
-    * Handles letter-digit boundaries (`"v2"` → `"V 2"`) and preserves all-caps acronyms unchanged. */
+    * `"Score Value"`). Used by [[normalize]] to default the [[FieldSpec.prefix]] when one isn't explicitly set. Handles
+    * letter-digit boundaries (`"v2"` → `"V 2"`) and preserves all-caps acronyms unchanged.
+    */
   def inferPrefix(name: String): String =
     val step1 = name.replaceAll("(.)([A-Z][a-z]+)", "$1_$2")
     val step2 = step1.replaceAll("([a-z0-9])([A-Z])", "$1_$2")
@@ -221,11 +228,12 @@ object FieldSpec:
       .mkString(" ")
 
   /** Fill in adapter-friendly defaults for a [[FieldSpec]]: if `prefix` is `None`, derive one from `name` via
-    * [[inferPrefix]] and append `":"`; if `description` is `None`, default to a `${name}` placeholder. Existing
-    * values are preserved -- this only ever adds.
+    * [[inferPrefix]] and append `":"`; if `description` is `None`, default to a `${name}` placeholder. Existing values
+    * are preserved -- this only ever adds.
     *
-    * Applied to every field by [[SignatureLayout.create]], so adapters always see uniform prefix / description
-    * surfaces regardless of which factory built the layout. */
+    * Applied to every field by [[SignatureLayout.create]], so adapters always see uniform prefix / description surfaces
+    * regardless of which factory built the layout.
+    */
   def normalize(field: FieldSpec): FieldSpec =
     val inferredPrefix = inferPrefix(field.name) + ":"
     field.copy(
@@ -242,26 +250,26 @@ object FieldSpec:
   *   - Typed surface (`dspy4s.typed.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
   *     primary path; the resulting `Signature.layout` is the value adapters see.
   *   - [[SignatureLayout.create]] -- validating + normalizing factory for programmatic construction.
-  *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.typed.Signature.fromString`
-  *     from user code.
-  *   - [[SignatureLayout.fromState]] -- re-hydrate from the `DynamicValue.Record` produced by [[dumpState]]
-  *     (or from JSON via [[SignatureLayout.fromJson]]).
+  *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.typed.Signature.fromString` from
+  *     user code.
+  *   - [[SignatureLayout.fromState]] -- re-hydrate from the `DynamicValue.Record` produced by [[dumpState]] (or from
+  *     JSON via [[SignatureLayout.fromJson]]).
   *
-  * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name
-  * uniqueness closed by construction (see Invariants) rather than relying on a runtime precondition.
+  * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name uniqueness
+  * closed by construction (see Invariants) rather than relying on a runtime precondition.
   *
-  * '''Field mutation.''' The `withInputFields` / `withOutputFields` methods are `private[dspy4s]`. They exist
-  * because composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to
-  * augment a base layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a
-  * `DynamicPredict`. User code should mutate at the typed `Signature` surface (use a different `Spec` trait, a
-  * different `Signature.derived[I, O]`, etc.) rather than reaching into the layout directly.
+  * '''Field mutation.''' The `withInputFields` / `withOutputFields` methods are `private[dspy4s]`. They exist because
+  * composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base
+  * layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User
+  * code should mutate at the typed `Signature` surface (use a different `Spec` trait, a different
+  * `Signature.derived[I, O]`, etc.) rather than reaching into the layout directly.
   *
   * '''Invariants.''' A field's role is represented exactly once by cohort membership. Name uniqueness across both
-  * cohorts is maintained by construction, not by a precondition: the primary constructor is `private`, so every
-  * layout comes from [[SignatureLayout.create]] (which rejects duplicate names) or from a cohort mutator, which
-  * dedups by name and resolves cross-cohort collisions in favor of inputs. A built layout therefore always has
-  * unique field names; adapters can rely on that without re-checking. The constructor still requires a non-empty
-  * `name` and identifier-shaped field names.
+  * cohorts is maintained by construction, not by a precondition: the primary constructor is `private`, so every layout
+  * comes from [[SignatureLayout.create]] (which rejects duplicate names) or from a cohort mutator, which dedups by name
+  * and resolves cross-cohort collisions in favor of inputs. A built layout therefore always has unique field names;
+  * adapters can rely on that without re-checking. The constructor still requires a non-empty `name` and
+  * identifier-shaped field names.
   */
 final case class SignatureLayout private (
     name: String,
@@ -284,7 +292,8 @@ final case class SignatureLayout private (
   def withInstructions(text: Option[String]): SignatureLayout = copy(instructions = text)
 
   /** Same as the `Option` overload, but treats the empty string as "no change" so callers can pass
-    * `withInstructions("")` to leave instructions intact. */
+    * `withInstructions("")` to leave instructions intact.
+    */
   def withInstructions(text: String): SignatureLayout =
     if text.isEmpty then this else withInstructions(Some(text))
 
@@ -313,14 +322,16 @@ final case class SignatureLayout private (
   // ── Read helpers ────────────────────────────────────────────────────
 
   /** Render the DSPy-style string DSL for this layout (e.g. `"comment, lang -> toxic, confidence"`). Inverse of
-    * [[SignatureLayout.parse]] for the shape only -- types / instructions / metadata are dropped. */
+    * [[SignatureLayout.parse]] for the shape only -- types / instructions / metadata are dropped.
+    */
   def signatureString: String =
-    val inputs = inputFields.map(_.name).mkString(", ")
+    val inputs  = inputFields.map(_.name).mkString(", ")
     val outputs = outputFields.map(_.name).mkString(", ")
     s"$inputs -> $outputs"
 
   /** Equality that ignores the [[name]]. Useful for comparing two layouts that describe the same shape but were
-    * constructed with different anonymous names (e.g. `"Signature"` from `fromType` vs `"X"` from a builder). */
+    * constructed with different anonymous names (e.g. `"Signature"` from `fromType` vs `"X"` from a builder).
+    */
   def equalsByStructure(other: SignatureLayout): Boolean =
     instructions == other.instructions &&
       inputFields.sameElements(other.inputFields) &&
@@ -330,10 +341,11 @@ final case class SignatureLayout private (
     * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
     * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
     * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller
-    * `OptimizableParameters` contract instead of serializing a whole layout. */
+    * `OptimizableParameters` contract instead of serializing a whole layout.
+    */
   def dumpState: DynamicValue.Record =
-    def str(s: String): DynamicValue        = DynamicValue.Primitive(PrimitiveValue.String(s))
-    def opt(o: Option[Any]): DynamicValue   = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
+    def str(s: String): DynamicValue                = DynamicValue.Primitive(PrimitiveValue.String(s))
+    def opt(o: Option[Any]): DynamicValue           = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
     def fieldRecord(field: FieldSpec): DynamicValue =
       DynamicValue.Record(Chunk.from(Seq(
         "name"         -> str(field.name),
@@ -352,19 +364,22 @@ final case class SignatureLayout private (
     )))
 
   /** Serialize the state to a JSON string via zio-blocks' `DynamicValue` JSON codec. Round-trips with
-    * [[SignatureLayout.fromJson]]. */
+    * [[SignatureLayout.fromJson]].
+    */
   def dumpJson: String =
     new String(SignatureLayout.dynamicJsonCodec.encode(dumpState), java.nio.charset.StandardCharsets.UTF_8)
 
 object SignatureLayout:
 
   /** JSON codec for the `DynamicValue`-shaped state, backed by zio-blocks' schema for `DynamicValue`. Encodes
-    * `dumpState` to clean, natural JSON (records → objects, `Null` → `null`). */
+    * `dumpState` to clean, natural JSON (records → objects, `Null` → `null`).
+    */
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a `SignatureLayout`. Prefer
-    * `dspy4s.typed.Signature.fromString` from user code; this is the lower-level entry point that the typed
-    * surface delegates to. */
+    * `dspy4s.typed.Signature.fromString` from user code; this is the lower-level entry point that the typed surface
+    * delegates to.
+    */
   def parse(
       dsl: String,
       instructions: String = ""
@@ -376,9 +391,10 @@ object SignatureLayout:
         else layout.withInstructions(instructions)
       )
 
-  /** Validating + normalizing factory. Returns `Left` with a structured `DspyError` when validation fails (empty
-    * name, no fields, duplicate names, invalid identifiers); on success, applies `FieldSpec.normalize` to each
-    * field so adapters see consistent prefixes / descriptions. */
+  /** Validating + normalizing factory. Returns `Left` with a structured `DspyError` when validation fails (empty name,
+    * no fields, duplicate names, invalid identifiers); on success, applies `FieldSpec.normalize` to each field so
+    * adapters see consistent prefixes / descriptions.
+    */
   def create(
       name: String,
       inputFields: Vector[FieldSpec],
@@ -402,9 +418,10 @@ object SignatureLayout:
 
   /** Trusted internal construction WITHOUT normalization: framework code builds a signature from known-good,
     * already-separated cohorts and wants a `SignatureLayout` directly (not an `Either`). The (private) constructor
-    * still enforces a non-empty `name` and identifier-shaped field names; field-name uniqueness is the
-    * caller's responsibility here (pass already-distinct fields; use [[create]] to validate arbitrary input).
-    * Replaces the former public case-class apply for the framework's internal call sites. */
+    * still enforces a non-empty `name` and identifier-shaped field names; field-name uniqueness is the caller's
+    * responsibility here (pass already-distinct fields; use [[create]] to validate arbitrary input). Replaces the
+    * former public case-class apply for the framework's internal call sites.
+    */
   private[dspy4s] def of(
       name: String,
       inputFields: Vector[FieldSpec],
@@ -413,8 +430,9 @@ object SignatureLayout:
   ): SignatureLayout =
     SignatureLayout(name, inputFields, outputFields, instructions)
 
-  /** Re-hydrate a standalone layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]].
-    * Program persistence is state-only and therefore does not use this codec. */
+  /** Re-hydrate a standalone layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]]. Program
+    * persistence is state-only and therefore does not use this codec.
+    */
   def fromState(state: DynamicValue.Record): Either[DspyError, SignatureLayout] =
     def getString(rec: DynamicValue.Record, key: String): Option[String] =
       DynamicValues.recordGet(rec, key) match
@@ -436,10 +454,10 @@ object SignatureLayout:
       raw match
         case rec: DynamicValue.Record =>
           getString(rec, "name").toRight(ValidationError("Field state is missing 'name'")).map { name =>
-            val typeRef = getString(rec, "typeRef").map(TypeRef.fromToken).getOrElse(TypeRef.string)
+            val typeRef      = getString(rec, "typeRef").map(TypeRef.fromToken).getOrElse(TypeRef.string)
             val defaultValue = DynamicValues.recordGet(rec, "defaultValue") match
               case None | Some(_: DynamicValue.Null.type) => None
-              case Some(dv)                                => Some(DynamicValues.toAny(dv))
+              case Some(dv)                               => Some(DynamicValues.toAny(dv))
             val enumValues = DynamicValues.recordGet(rec, "enumValues") match
               case Some(seq: DynamicValue.Sequence) =>
                 seq.elements.iterator.collect {
@@ -448,16 +466,18 @@ object SignatureLayout:
               case _ => Vector.empty[String]
             val constraints = DynamicValues.recordGet(rec, "constraints") match
               case Some(seq: DynamicValue.Sequence) =>
-                seq.elements.iterator.collect { case r: DynamicValue.Record => r }.flatMap(Constraint.fromState).toVector
+                seq.elements.iterator.collect { case r: DynamicValue.Record => r }.flatMap(
+                  Constraint.fromState
+                ).toVector
               case _ => Vector.empty[Constraint]
             FieldSpec(
-              name         = name,
-              typeRef      = typeRef,
-              description  = getString(rec, "description"),
-              prefix       = getString(rec, "prefix"),
+              name = name,
+              typeRef = typeRef,
+              description = getString(rec, "description"),
+              prefix = getString(rec, "prefix"),
               defaultValue = defaultValue,
-              enumValues   = enumValues,
-              constraints  = constraints
+              enumValues = enumValues,
+              constraints = constraints
             )
           }
         case _ => Left(ValidationError("Invalid field entry in signature state"))
@@ -478,7 +498,7 @@ object SignatureLayout:
       instructions <- readInstructions
       inputFields  <- readFields("inputFields")
       outputFields <- readFields("outputFields")
-      signature <- create(
+      signature    <- create(
         name = name,
         inputFields = inputFields,
         outputFields = outputFields,

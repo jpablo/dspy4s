@@ -21,7 +21,8 @@ case class P2TwoOutputs(answer: String, score: Double) derives Schema
 
 /** Phase 2 typed-core suite per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *
-  * Maps 1:1 to the plan's Phase 2 test list. */
+  * Maps 1:1 to the plan's Phase 2 test list.
+  */
 class Phase2TypedCoreSuite extends FunSuite:
 
   // ── Shape derivation: field metadata ─────────────────────────────────────
@@ -37,7 +38,7 @@ class Phase2TypedCoreSuite extends FunSuite:
   }
 
   test("Signature.derived assigns fields to the input and output cohorts") {
-    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
+    val sig     = Signature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
     val inputs  = sig.layout.inputFields.map(_.name)
     val outputs = sig.layout.outputFields.map(_.name)
     assertEquals(inputs, Vector("sentence"))
@@ -63,7 +64,7 @@ class Phase2TypedCoreSuite extends FunSuite:
   }
 
   test("Signature.withInstructions preserves typed shapes") {
-    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+    val sig        = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
     val instructed = sig.withInstructions("Classify emotion.")
 
     assertEquals(instructed.instructions, Some("Classify emotion."))
@@ -83,19 +84,19 @@ class Phase2TypedCoreSuite extends FunSuite:
   // ── Shape encode/decode round-trip ────────────────────────────────────────
 
   test("Shape.encode produces a DynamicValue.Record keyed by field name") {
-    val shape = Shape.derived[P2ScoredSentiment]
+    val shape   = Shape.derived[P2ScoredSentiment]
     val encoded = shape.encode(P2ScoredSentiment("joy", 0.92))
     assertEquals(encoded, rec("sentiment" := "joy", "confidence" := 0.92))
   }
 
   test("Shape.decode round-trips a typed value") {
-    val shape = Shape.derived[P2ScoredSentiment]
+    val shape   = Shape.derived[P2ScoredSentiment]
     val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := 0.92))
     assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.92)))
   }
 
   test("Shape.decode tolerates primitive coercion (string -> double)") {
-    val shape = Shape.derived[P2ScoredSentiment]
+    val shape   = Shape.derived[P2ScoredSentiment]
     val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := "0.5"))
     assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.5)))
   }
@@ -103,46 +104,46 @@ class Phase2TypedCoreSuite extends FunSuite:
   // ── Failure modes: missing / invalid fields ──────────────────────────────
 
   test("missing required output field produces a NotFoundError") {
-    val shape = Shape.derived[P2ScoredSentiment]
+    val shape   = Shape.derived[P2ScoredSentiment]
     val decoded = shape.decode(rec("sentiment" := "joy"))
     decoded match
       case Left(_: NotFoundError) => ()
-      case other => fail(s"expected NotFoundError, got: $other")
+      case other                  => fail(s"expected NotFoundError, got: $other")
   }
 
   test("invalid primitive conversion produces a ValidationError") {
-    val shape = Shape.derived[P2ScoredSentiment]
+    val shape   = Shape.derived[P2ScoredSentiment]
     val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := "not-a-number"))
     decoded match
       case Left(_: ValidationError) => ()
-      case other => fail(s"expected ValidationError, got: $other")
+      case other                    => fail(s"expected ValidationError, got: $other")
   }
 
   // ── Enum decoding ────────────────────────────────────────────────────────
 
   test("enum output decodes case names from raw strings through the field's Schema") {
     val shape = Shape.derived[P2EnumOutput]
-    assertEquals(shape.decode(rec("sentiment" := "joy")),     Right(P2EnumOutput(P2Sentiment.joy)))
+    assertEquals(shape.decode(rec("sentiment" := "joy")), Right(P2EnumOutput(P2Sentiment.joy)))
     assertEquals(shape.decode(rec("sentiment" := "sadness")), Right(P2EnumOutput(P2Sentiment.sadness)))
   }
 
   test("enum-like outputs reject values outside the declared set") {
-    val shape = Shape.derived[P2EnumOutput]
+    val shape   = Shape.derived[P2EnumOutput]
     val decoded = shape.decode(rec("sentiment" := "confused"))
     decoded match
       case Left(_: ValidationError) => () // zio-blocks Schema error format is opaque; just verify it's a Left
-      case other => fail(s"expected ValidationError, got: $other")
+      case other                    => fail(s"expected ValidationError, got: $other")
   }
 
   test("enum field uses TypeRef.string at the wire boundary") {
     val shape = Shape.derived[P2EnumOutput]
-    val fs = shape.fieldSpecs.head
+    val fs    = shape.fieldSpecs.head
     assertEquals(fs.name, "sentiment")
     assertEquals(fs.typeRef, dspy4s.core.contracts.TypeRef.string)
   }
 
   test("enum output round-trips through Shape encode/decode by case name") {
-    val shape = Shape.derived[P2EnumOutput]
+    val shape   = Shape.derived[P2EnumOutput]
     val encoded = shape.encode(P2EnumOutput(P2Sentiment.love))
     // Encoded wire form carries the flat case-name string, not a discriminated object.
     assertEquals(lookup(encoded, "sentiment"), Some("love": Any))
@@ -152,15 +153,15 @@ class Phase2TypedCoreSuite extends FunSuite:
   // ── Prediction: never constructed after a decode failure ───────────
 
   test("Prediction is never constructed when decode fails") {
-    val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = RawPrediction(values = rec("sentiment" := "joy"))  // missing 'confidence'
+    val shape  = Shape.derived[P2ScoredSentiment]
+    val raw    = RawPrediction(values = rec("sentiment" := "joy")) // missing 'confidence'
     val result = Prediction.from(raw, shape)
     assert(result.isLeft, s"expected failure but got: $result")
   }
 
   test("Prediction.from succeeds when all required outputs decode") {
-    val shape = Shape.derived[P2ScoredSentiment]
-    val raw   = RawPrediction(values = rec("sentiment" := "joy", "confidence" := 0.92))
+    val shape  = Shape.derived[P2ScoredSentiment]
+    val raw    = RawPrediction(values = rec("sentiment" := "joy", "confidence" := 0.92))
     val result = Prediction.from(raw, shape)
     result match
       case Right(tp) =>
@@ -180,7 +181,7 @@ class Phase2TypedCoreSuite extends FunSuite:
   // ── End-to-end: Signature round-trip ────────────────────────────────
 
   test("Signature encodes inputs and decodes outputs end-to-end") {
-    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+    val sig   = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
     val input = P2SentenceInput("i started feeling vulnerable")
 
     // Encode input → Record (what Predict will hand to ProgramCall)

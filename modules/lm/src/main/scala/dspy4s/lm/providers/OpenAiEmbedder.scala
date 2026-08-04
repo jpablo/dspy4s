@@ -11,10 +11,11 @@ import dspy4s.lm.contracts.Embedder
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
-/** OpenAI embeddings provider (`POST /embeddings`) — the hosted-model half of `dspy.Embedder` (G-10). Splits the
-  * input into `batchSize`-sized requests (upstream's `batch_size`, default 200) and concatenates the rows, each
-  * row ordered by the response's `index` field. `options` carries extra request fields (e.g. `dimensions`),
-  * merged into every payload. */
+/** OpenAI embeddings provider (`POST /embeddings`) — the hosted-model half of `dspy.Embedder` (G-10). Splits the input
+  * into `batchSize`-sized requests (upstream's `batch_size`, default 200) and concatenates the rows, each row ordered
+  * by the response's `index` field. `options` carries extra request fields (e.g. `dimensions`), merged into every
+  * payload.
+  */
 final case class OpenAiEmbedder(
     model: String,
     apiKey: String,
@@ -96,8 +97,9 @@ final case class OpenAiEmbedder(
   private def asInt(dv: DynamicValue): Option[Int] = asFloat(dv).map(_.toInt)
 
 object OpenAiEmbedder:
-  /** Build from `OPENAI_API_KEY` (or `envVar`), mirroring [[OpenAiLanguageModel.fromEnv]]. `baseUrl` points at
-    * any OpenAI-compatible server's `/embeddings` endpoint. */
+  /** Build from `OPENAI_API_KEY` (or `envVar`), mirroring [[OpenAiLanguageModel.fromEnv]]. `baseUrl` points at any
+    * OpenAI-compatible server's `/embeddings` endpoint.
+    */
   def fromEnv(
       model: String,
       baseUrl: String = OpenAiClient.defaultBaseUrl,
@@ -108,6 +110,7 @@ object OpenAiEmbedder:
       case _ => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
 
   /** Embedder against a LOCAL OpenAI-compatible server that does not check credentials (e.g. Ollama's
-    * `http://localhost:11434/v1`), mirroring [[OpenAiLanguageModel.local]]. */
+    * `http://localhost:11434/v1`), mirroring [[OpenAiLanguageModel.local]].
+    */
   def local(model: String, baseUrl: String, apiKey: String = "local"): OpenAiEmbedder =
     OpenAiEmbedder(model = model, apiKey = apiKey, baseUrl = baseUrl)

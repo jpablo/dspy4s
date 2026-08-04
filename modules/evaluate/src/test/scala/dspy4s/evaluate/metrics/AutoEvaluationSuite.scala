@@ -28,18 +28,21 @@ class AutoEvaluationSuite extends FunSuite:
 
   /** A dummy LM that does nothing useful — the scripted adapter produces the canned output regardless. */
   private object DummyLm extends LanguageModel:
-    override val id: String = "dummy-judge-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "dummy-judge-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
 
-  /** A scripted adapter: ignores the prompt and emits the supplied output fields (e.g. recall/precision)
-    * verbatim as the parsed record, so the judge sub-program's outputs are deterministic and offline. */
+  /** A scripted adapter: ignores the prompt and emits the supplied output fields (e.g. recall/precision) verbatim as
+    * the parsed record, so the judge sub-program's outputs are deterministic and offline.
+    */
   private final class ScriptedAdapter(fields: Map[String, DynamicValue]) extends Adapter:
     override val name: String = "scripted-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("judge")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = DynamicValues.recordFromEntries(fields.toSeq)))
 
   private def runWith[A](fields: Map[String, DynamicValue])(body: RuntimeContext ?=> A): A =
@@ -71,8 +74,8 @@ class AutoEvaluationSuite extends FunSuite:
 
   test("SemanticF1 returns f1_score(precision, recall) from the judged outputs") {
     val metric = SemanticF1()
-    val ex = example("What is the capital of France?", "Paris is the capital of France.")
-    val pred = prediction("The capital is Paris.")
+    val ex     = example("What is the capital of France?", "Paris is the capital of France.")
+    val pred   = prediction("The capital is Paris.")
     val result = runWith(Map("recall" := 1.0, "precision" := 0.5)) {
       metric.score(ex, pred)
     }
@@ -82,8 +85,8 @@ class AutoEvaluationSuite extends FunSuite:
 
   test("SemanticF1 returns 0.0 when precision is 0") {
     val metric = SemanticF1()
-    val ex = example("Q?", "ground truth")
-    val pred = prediction("system response")
+    val ex     = example("Q?", "ground truth")
+    val pred   = prediction("system response")
     val result = runWith(Map("recall" := 1.0, "precision" := 0.0)) {
       metric.score(ex, pred)
     }
@@ -92,8 +95,8 @@ class AutoEvaluationSuite extends FunSuite:
 
   test("SemanticF1 returns Left when a judged score does not parse as a number") {
     val metric = SemanticF1()
-    val ex = example("Q?", "ground truth")
-    val pred = prediction("system response")
+    val ex     = example("Q?", "ground truth")
+    val pred   = prediction("system response")
     val result = runWith(Map("recall" := "not-a-number", "precision" := 0.5)) {
       metric.score(ex, pred)
     }
@@ -102,8 +105,8 @@ class AutoEvaluationSuite extends FunSuite:
 
   test("CompleteAndGrounded combines completeness and groundedness via f1_score") {
     val metric = CompleteAndGrounded()
-    val ex = example("What is the capital of France?", "Paris is the capital of France.")
-    val pred = RawPrediction(
+    val ex     = example("What is the capital of France?", "Paris is the capital of France.")
+    val pred   = RawPrediction(
       rec("response" := "Paris is the capital.", "context" := "France's capital city is Paris.")
     )
     // completeness=1.0, groundedness=0.5 -> f1_score(0.5, 1.0) ≈ 0.6667

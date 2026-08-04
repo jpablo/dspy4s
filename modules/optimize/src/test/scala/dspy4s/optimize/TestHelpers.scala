@@ -32,7 +32,7 @@ final case class ScriptedPredictProgram(
   ): Either[DspyError, RawPrediction] =
     failsWith match
       case Some(err) => throw err
-      case None =>
+      case None      =>
         val q = lookupString(input.input, "question")
         Right(RawPrediction(rec("answer" := answers.getOrElse(q, "unknown"))))
 
@@ -67,10 +67,10 @@ object DemoAwarePredictProgram:
       if updated == get(program) then program
       else
         program.copy(
-        layout = program.layout.withInstructions(updated.instructions),
-        demos = updated.demos,
-        config = updated.config
-      )
+          layout = program.layout.withInstructions(updated.instructions),
+          demos = updated.demos,
+          config = updated.config
+        )
 
 object ScriptedPredictProgram:
   given scriptedOptimizable: OptimizableLeaf[ScriptedPredictProgram] with
@@ -82,7 +82,7 @@ object ScriptedPredictProgram:
       if updated == get(program) then program
       else
         program.copy(
-        layout = program.layout.withInstructions(updated.instructions),
-        demos = updated.demos,
-        config = updated.config
-      )
+          layout = program.layout.withInstructions(updated.instructions),
+          demos = updated.demos,
+          config = updated.config
+        )

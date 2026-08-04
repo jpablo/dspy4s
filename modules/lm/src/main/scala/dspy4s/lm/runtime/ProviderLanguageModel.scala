@@ -27,15 +27,16 @@ final case class ProviderLanguageModel(
     defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends LanguageModel:
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    val effectiveMode = request.mode
+    val effectiveMode     = request.mode
     val normalizedRequest = ProviderRequestNormalizer.normalize(request, defaultOptions = defaultOptions)
     invoke(normalizedRequest).flatMap(raw => ProviderResponseParser.parse(raw, effectiveMode))
 
 object ProviderRequestNormalizer:
   private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
-  /** Build the provider request payload as a `DynamicValue.Record`: the merged option bag (defaults overlaid by
-    * the request's options), plus model / mode / request_id and the encoded messages or prompt. */
+  /** Build the provider request payload as a `DynamicValue.Record`: the merged option bag (defaults overlaid by the
+    * request's options), plus model / mode / request_id and the encoded messages or prompt.
+    */
   def normalize(
       request: LmRequest,
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
@@ -52,19 +53,20 @@ object ProviderRequestNormalizer:
         rec.updated(WireKeys.prompt, str(prompt))
 
   private def encodeMessage(message: Message): DynamicValue =
-    val role = message.role.toString.toLowerCase
+    val role                  = message.role.toString.toLowerCase
     val content: DynamicValue =
       if message.parts.nonEmpty then DynamicValue.Sequence(Chunk.from(message.parts.map(encodePart)))
       else str(message.text.getOrElse(""))
     DynamicValue.Record(Chunk(WireKeys.role -> str(role), WireKeys.content -> content))
 
   private def encodePart(part: ContentPart): DynamicValue =
-    val base = Vector(WireKeys.`type` -> str(part.kind), WireKeys.text -> str(part.payload))
+    val base   = Vector(WireKeys.`type` -> str(part.kind), WireKeys.text -> str(part.payload))
     val fields =
       if part.metadata.nonEmpty then
-        base :+ (WireKeys.metadata -> DynamicValue.Record(
-          Chunk.from(part.metadata.iterator.map((k, v) => k -> str(v)).toSeq)
-        ))
+        base :+
+          (WireKeys.metadata -> DynamicValue.Record(
+            Chunk.from(part.metadata.iterator.map((k, v) => k -> str(v)).toSeq)
+          ))
       else base
     DynamicValue.Record(Chunk.from(fields))
 
@@ -96,11 +98,12 @@ object ProviderResponseParser:
   private def parseChatOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
     seqField(raw, WireKeys.choices).map { choices =>
       choices.flatMap { choice =>
-        val rec = asRecord(choice)
+        val rec             = asRecord(choice)
         val textFromMessage = rec.flatMap(r => field(r, WireKeys.message)).flatMap(extractText)
         val textFromChoice  = rec.flatMap(r => field(r, WireKeys.text)).flatMap(asString)
-        val text = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
-        val toolCalls = rec.flatMap(r => field(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
+        val text            = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
+        val toolCalls       =
+          rec.flatMap(r => field(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
         // Emit an output when there is EITHER text OR tool calls. A function-calling response typically has
         // content:null and only a `tool_calls` array, so gating solely on text would drop the call entirely.
         Option.when(text.nonEmpty || toolCalls.nonEmpty) {
@@ -149,13 +152,13 @@ object ProviderResponseParser:
   private def parseArgs(raw: Option[DynamicValue]): DynamicValue.Record =
     raw.flatMap(asRecord) match
       case Some(rec) => rec
-      case None =>
+      case None      =>
         raw.flatMap(asString) match
           // OpenAI sends `function.arguments` as a JSON STRING; decode it into a Record (the ToolCall contract:
           // args are decoded at the parse boundary). Shares ToolCallAssembler.parseArguments with the streaming
           // path so both decode identically; non-JSON strings fall back to `{input: raw}` there.
           case Some(value) if value.trim.nonEmpty => ToolCallAssembler.parseArguments(value)
-          case _ =>
+          case _                                  =>
             raw match
               case Some(other) => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
               case None        => DynamicValue.Record.empty
@@ -165,7 +168,7 @@ object ProviderResponseParser:
       case Some(content) =>
         asString(content) match
           case Some(text) => Some(text)
-          case None =>
+          case None       =>
             val fromParts = DynamicJson.asSequence(content).iterator
               .flatMap(item => asRecord(item).flatMap(r => field(r, WireKeys.text)).flatMap(asString).map(_.trim))
               .mkString("\n").trim
@@ -175,13 +178,13 @@ object ProviderResponseParser:
       case None =>
         field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty)
 
-  /** A response field treated as an array: absent or null -> empty; a sequence -> its elements; anything else
-    * -> a parse error (mirrors the old `asVector`). */
+  /** A response field treated as an array: absent or null -> empty; a sequence -> its elements; anything else -> a
+    * parse error (mirrors the old `asVector`).
+    */
   private def seqField(value: DynamicValue, name: String): Either[DspyError, Vector[DynamicValue]] =
     field(value, name) match
-      case None                              => Right(Vector.empty)
-      case Some(_: DynamicValue.Null.type)   => Right(Vector.empty)
-      case Some(seq: DynamicValue.Sequence)  => Right(seq.elements.iterator.toVector)
-      case Some(other) =>
+      case None                             => Right(Vector.empty)
+      case Some(_: DynamicValue.Null.type)  => Right(Vector.empty)
+      case Some(seq: DynamicValue.Sequence) => Right(seq.elements.iterator.toVector)
+      case Some(other)                      =>
         Left(ParseError("lm", s"Expected array-like response field '$name', found: ${other.getClass.getSimpleName}"))
-

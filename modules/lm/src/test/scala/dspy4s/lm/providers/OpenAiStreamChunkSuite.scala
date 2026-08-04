@@ -19,7 +19,10 @@ class OpenAiStreamChunkSuite extends FunSuite:
   }
 
   test("decodes finish_reason when present") {
-    assertEquals(decode("""{"choices":[{"delta":{"content":" there"},"finish_reason":"stop"}]}""").toLmChunk.finishReason, Some("stop"))
+    assertEquals(
+      decode("""{"choices":[{"delta":{"content":" there"},"finish_reason":"stop"}]}""").toLmChunk.finishReason,
+      Some("stop")
+    )
   }
 
   test("decodes tool-call deltas with index fallback and partial function fragments") {

@@ -1,17 +1,15 @@
-/**
- * Use and Customize DSPy Cache
- *
- * Source:   docs/docs/tutorials/cache/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/cache/index.md
- * Status:   translated (the caching + usage-tracking model, snippets 1/3/4/5/6/7/9). The key shape
- *           difference: dspy4s has no global `dspy.configure_cache(...)` / `dspy.cache` — caching is a
- *           *per-LM composition*. You wrap a `LanguageModel` in `ManagedLanguageModel(delegate, cache =
- *           Some(...))`, choosing the cache implementation: `NoopLmCache` (disable), `InMemoryLmCache`
- *           (memory), `DiskLmCache(dir)` (disk), or your own `LmCache`. Usage tracking (snippet 1's
- *           `track_usage=True`) is `RuntimeContext(trackUsage = Some(true))` read inside a
- *           `UsageTracking.withNewTracker`. The Anthropic `cache_control_injection_points` (snippet 2)
- *           is a provider-specific prompt-caching hint with no dspy4s surface and is out of scope.
- */
+/** Use and Customize DSPy Cache
+  *
+  * Source: docs/docs/tutorials/cache/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/cache/index.md Status: translated (the caching +
+  * usage-tracking model, snippets 1/3/4/5/6/7/9). The key shape difference: dspy4s has no global
+  * `dspy.configure_cache(...)` / `dspy.cache` — caching is a *per-LM composition*. You wrap a `LanguageModel` in
+  * `ManagedLanguageModel(delegate, cache = Some(...))`, choosing the cache implementation: `NoopLmCache` (disable),
+  * `InMemoryLmCache` (memory), `DiskLmCache(dir)` (disk), or your own `LmCache`. Usage tracking (snippet 1's
+  * `track_usage=True`) is `RuntimeContext(trackUsage = Some(true))` read inside a `UsageTracking.withNewTracker`. The
+  * Anthropic `cache_control_injection_points` (snippet 2) is a provider-specific prompt-caching hint with no dspy4s
+  * surface and is out of scope.
+  */
 package dspy4s.examples.tutorials.cache
 
 import dspy4s.adapters.ChatAdapter
@@ -41,7 +39,7 @@ object Cache:
   // | dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)   # → NoopLmCache (or no cache)
   // | dspy.configure_cache(enable_disk_cache=True,  enable_memory_cache=True)    # → InMemory / Disk caches
   // --8<-- [start:cache-variants]
-  def uncached(lm: LanguageModel): LanguageModel  = ManagedLanguageModel(lm, cache = Some(NoopLmCache))
+  def uncached(lm: LanguageModel): LanguageModel     = ManagedLanguageModel(lm, cache = Some(NoopLmCache))
   def memoryCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()))
   def diskCached(lm: LanguageModel, dir: Path): LanguageModel =
     ManagedLanguageModel(lm, cache = Some(new DiskLmCache(dir)))
@@ -51,7 +49,9 @@ object Cache:
   // | dspy.configure(lm=..., track_usage=True); result.get_lm_usage()
   // The second call hits the memory cache, so it's fast and contributes no usage — exactly the snippet's point.
   // --8<-- [start:cache-usage]
-  def usageAcrossCachedCalls(lm: LanguageModel, question: String)(using RuntimeContext)
+  def usageAcrossCachedCalls(lm: LanguageModel, question: String)(using
+      RuntimeContext
+  )
       : Either[DspyError, Map[String, LmUsage]] =
     val managed = memoryCached(lm)
     UsageTracking.withNewTracker { tracker =>
@@ -74,9 +74,10 @@ object Cache:
   // The dspy4s analogue is implementing `LmCache`. This one keys *only on the messages* (ignoring model and
   // sampling options), so the same prompt to a different model still hits the cache.
   final class MessagesOnlyCache extends LmCache:
-    private val store = TrieMap.empty[String, LmResponse]
-    private def key(request: LmRequest): String = RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
-    override def get(request: LmRequest): Option[LmResponse] = store.get(key(request))
+    private val store                           = TrieMap.empty[String, LmResponse]
+    private def key(request: LmRequest): String =
+      RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
+    override def get(request: LmRequest): Option[LmResponse]         = store.get(key(request))
     override def put(request: LmRequest, response: LmResponse): Unit = { store.update(key(request), response); () }
 
   def customCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new MessagesOnlyCache))

@@ -1,21 +1,21 @@
 /** Streaming
- *
+  *
   * Source: docs/docs/tutorials/streaming/index.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/streaming/index.md Status: translated (the
   * streamify surface + listeners + status provider, snippets 1–9).
- *
+  *
   * The big shape difference: dspy4s `streamify` is *synchronous*. It returns a `DynamicValue.Record =>
   * ClosableIterator[StreamEvent]`, so there is no `asyncio` / `async for` and no `async_streaming` flag — every
   * snippet's "consume the stream" loop is the same `while iterator.hasNext` over a sealed `StreamEvent` ADT
   * (`TokenEvent` / `StatusEvent` / `PredictionEvent` / `ErrorEvent`) rather than Python's `isinstance(chunk,
   * StreamResponse | Prediction | StatusMessage)`. Snippets 1/2/3/9 therefore collapse onto one example, as do the
   * async/sync variants.
- *
+  *
   * `dspy.streaming.StreamListener(signature_field_name=..., predict=..., predict_name=..., allow_reuse=...)` becomes
   * `StreamListener(signatureFieldName, predictName, allowReuse)` (the predictor is selected by name, not by object
   * identity). A composite `dspy.Module` becomes a `DynamicModule` whose `forward` threads named `DynamicPredict`s. The
   * LM must be a `StreamingLanguageModel` (the OpenAI provider is one).
- */
+  */
 package dspy4s.examples.tutorials.streaming
 
 import dspy4s.core.contracts.{ClosableIterator, DspyError, DynamicValues, RuntimeContext, :=}
@@ -54,9 +54,9 @@ object Streaming:
   // | output = stream_predict(question="why did a chicken cross the kitchen?")  # async or sync — same here
   // --8<-- [start:stream-basic]
   def streamAnswer(question: String)(using RuntimeContext): Option[RawPrediction] =
-    val predict = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
+    val predict       = DynamicPredict(layout = Signature.fromString("question -> answer").layout)
     val streamPredict = Streamify.streamify(
-      program         = predict,
+      program = predict,
       streamListeners = Vector(StreamListener("answer"))
     )
     consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
@@ -86,7 +86,7 @@ object Streaming:
 
   def streamSimplify(question: String)(using RuntimeContext): Option[RawPrediction] =
     val streamPredict = Streamify.streamify(
-      program         = new SimplifyModule,
+      program = new SimplifyModule,
       streamListeners = Vector(StreamListener("answer"), StreamListener("simplified_answer"))
     )
     consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
@@ -108,11 +108,11 @@ object Streaming:
   def streamReactThoughts(question: String)(using RuntimeContext): Option[RawPrediction] =
     val react = ReAct(
       baseSignature = Signature.fromString("question -> answer"),
-      tools         = Vector(ToolFunction.fromMethod(fetch_user_info), ToolFunction.fromMethod(get_sports_news))
+      tools = Vector(ToolFunction.fromMethod(fetch_user_info), ToolFunction.fromMethod(get_sports_news))
     )
     // ReAct's per-step predictor emits `next_thought`; allowReuse=true keeps the listener firing each iteration.
     val streamReact = Streamify.streamify(
-      program         = react,
+      program = react,
       streamListeners = Vector(StreamListener("next_thought", allowReuse = true))
     )
     consume(streamReact(DynamicValues.recordFromEntries(Vector("question" := question))))
@@ -136,8 +136,8 @@ object Streaming:
         question = textField(call.input, "question")
         answer   = textField(step1.output, "answer")
         step2 <- predict2(ProgramCall(input =
-                   DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
-                 ))
+          DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
+        ))
       yield step2.raw
 
   def streamScoring(question: String)(using RuntimeContext): Option[RawPrediction] =
@@ -166,27 +166,27 @@ object Streaming:
   def streamReasoningWithTool(question: String)(using RuntimeContext): Option[RawPrediction] =
     // ChainOfThought's built-in `reasoning` field is modelled by naming it in the layout; the tool runs in
     // `forward`, so its start/end status messages flow through the custom provider.
-    val tool = ToolFunction.fromMethod(double_the_number)
+    val tool    = ToolFunction.fromMethod(double_the_number)
     val program = new DynamicModule:
       override val moduleName: String = "reasoning_module"
-      private val predict =
+      private val predict             =
         DynamicPredict(Signature.fromString("question, doubled -> reasoning, answer").layout, name = Some("predict"))
       override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
           doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
-          out <- predict(ProgramCall(input =
+          out     <- predict(ProgramCall(input =
             DynamicValues.recordFromEntries(
-                   Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
+              Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
             )
           ))
         yield out.raw
 
     val streamPredict = Streamify.streamify(
-      program               = program,
+      program = program,
       statusMessageProvider = Some(new MyStatusMessageProvider),
-      streamListeners       = Vector(StreamListener("reasoning"))
+      streamListeners = Vector(StreamListener("reasoning"))
     )
     consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
 

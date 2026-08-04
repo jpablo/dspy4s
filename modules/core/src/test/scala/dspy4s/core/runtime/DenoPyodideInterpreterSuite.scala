@@ -14,9 +14,10 @@ import zio.blocks.schema.DynamicValue
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
-/** Live-gated suite for the Deno+Pyodide sandbox: skips (assume) when `deno` is not on PATH. The first-ever run
-  * on a machine downloads Pyodide from npm into Deno's cache (network needed once); afterwards it's offline.
-  * Interpreters are shared across tests where possible — sandbox startup costs seconds. */
+/** Live-gated suite for the Deno+Pyodide sandbox: skips (assume) when `deno` is not on PATH. The first-ever run on a
+  * machine downloads Pyodide from npm into Deno's cache (network needed once); afterwards it's offline. Interpreters
+  * are shared across tests where possible — sandbox startup costs seconds.
+  */
 class DenoPyodideInterpreterSuite extends FunSuite:
 
   override def munitTimeout: scala.concurrent.duration.Duration =
@@ -61,7 +62,9 @@ class DenoPyodideInterpreterSuite extends FunSuite:
     assertEquals(plain.execute("print('alive')").toOption.get.stdout.trim, "alive")
   }
 
-  test("variable injection defines host values as Python variables (strings with quotes/newlines, numbers, lists, records)") {
+  test(
+    "variable injection defines host values as Python variables (strings with quotes/newlines, numbers, lists, records)"
+  ) {
     assumeDeno()
     val variables = Map[String, DynamicValue](
       "v_text" -> DynamicValues.fromAny("it's a \"test\"\nline two"),
@@ -85,7 +88,9 @@ class DenoPyodideInterpreterSuite extends FunSuite:
       name = "greet",
       parameters = Vector(SandboxTool.Param("who", Some("str"))),
       invoke = kwargs =>
-        Right(DynamicValues.fromAny(s"hello-${DynamicValues.recordGet(kwargs, "who").map(DynamicValues.renderText).getOrElse("?")}"))
+        Right(DynamicValues.fromAny(
+          s"hello-${DynamicValues.recordGet(kwargs, "who").map(DynamicValues.renderText).getOrElse("?")}"
+        ))
     )
     val interp = new DenoPyodideInterpreter(
       tools = Vector(greet),
@@ -107,14 +112,17 @@ class DenoPyodideInterpreterSuite extends FunSuite:
 
   test("a sandbox-to-host tool call emits a ToolStartEvent/ToolEndEvent pair on the active callbacks") {
     assumeDeno()
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val recorder = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
     val shout = SandboxTool(
       name = "shout",
       parameters = Vector(SandboxTool.Param("text", Some("str"))),
       invoke = kwargs =>
-        Right(DynamicValues.fromAny(DynamicValues.recordGet(kwargs, "text").map(DynamicValues.renderText).getOrElse("?").toUpperCase))
+        Right(DynamicValues.fromAny(DynamicValues.recordGet(
+          kwargs,
+          "text"
+        ).map(DynamicValues.renderText).getOrElse("?").toUpperCase))
     )
     val interp = new DenoPyodideInterpreter(tools = Vector(shout))
     try

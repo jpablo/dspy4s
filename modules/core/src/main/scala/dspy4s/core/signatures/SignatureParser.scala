@@ -17,8 +17,8 @@ final class SignatureParser:
       else
         val Array(inputSegment, outputSegment) = trimmed.split("->", 2).map(_.trim)
         for
-          inputs <- parseSegment(inputSegment)
-          outputs <- parseSegment(outputSegment)
+          inputs    <- parseSegment(inputSegment)
+          outputs   <- parseSegment(outputSegment)
           signature <- SignatureLayout.create(name = name, inputFields = inputs, outputFields = outputs)
         yield signature
 
@@ -29,12 +29,12 @@ final class SignatureParser:
       tokens.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, token) =>
         for
           fields <- acc
-          field <- parseField(token)
+          field  <- parseField(token)
         yield fields :+ field
       }
 
   private def parseField(token: String): Either[DspyError, FieldSpec] =
-    val parts = token.split(":", 2).map(_.trim)
+    val parts     = token.split(":", 2).map(_.trim)
     val fieldName = parts(0)
     if !FieldSpec.validateName(fieldName) then
       Left(ValidationError(s"Invalid field name '$fieldName' in signature token '$token'"))

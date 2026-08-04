@@ -8,11 +8,10 @@ import munit.FunSuite
 // Characterization fixture: a structured product field for the builder matrix.
 case class PinProduct(a: String, b: Int) derives Schema
 
-/** Pins the `TypeRef` the `SignatureBuilder` assigns to each supported field
-  * type. Primitives and enums are pinned in `Phase3SurfacesSuite`; this suite
-  * locks the remaining types (collections, Option, structured products) so the
-  * `FieldCodec` -> `Schema` consolidation of the builder is provably
-  * behavior-preserving. */
+/** Pins the `TypeRef` the `SignatureBuilder` assigns to each supported field type. Primitives and enums are pinned in
+  * `Phase3SurfacesSuite`; this suite locks the remaining types (collections, Option, structured products) so the
+  * `FieldCodec` -> `Schema` consolidation of the builder is provably behavior-preserving.
+  */
 class BuilderTypeRefPinSuite extends FunSuite:
 
   private def builderTypeRef(build: SignatureBuilder => SignatureBuilder): TypeRef =

@@ -44,12 +44,12 @@ final case class NestedValue(n: Int) derives Schema
 final case class NestedBox(value: NestedValue) derives Schema
 final case class ArrayBox(values: Array[Int]) derives Schema
 
-/** Executes the `@Law` statements of the parameterized program structures ([[Category]] / [[ParameterizedCategory]] over [[Program]],
-  * the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural `==` for
-  * parameter vectors and delooping morphisms, observational equality (complete prediction / params / coherent decode /
-  * lifecycle) for `Program` morphisms. Also pins the two construction gates (no `OptimizableTraversal`, no `Program`; no `RecordCodec`, no
-  * `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying is not natural for effectful
-  * morphisms).
+/** Executes the `@Law` statements of the parameterized program structures ([[Category]] / [[ParameterizedCategory]]
+  * over [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it:
+  * structural `==` for parameter vectors and delooping morphisms, observational equality (complete prediction / params
+  * / coherent decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no
+  * `OptimizableTraversal`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
+  * shares its input; copying is not natural for effectful morphisms).
   */
 class ParameterizedCategoryLawSuite extends FunSuite:
 
@@ -73,16 +73,16 @@ class ParameterizedCategoryLawSuite extends FunSuite:
 
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
-      def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
+      def get(program: Step[I, O]): OptimizableParameters    = program.predict.optimizableParameters
       def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
-  /** A NON-product module: no `OptimizableLeaf` leaf, no `Mirror`, hence no `OptimizableTraversal` instance. Used to prove the
-    * construction gate below.
+  /** A NON-product module: no `OptimizableLeaf` leaf, no `Mirror`, hence no `OptimizableTraversal` instance. Used to
+    * prove the construction gate below.
     */
   private final class Opaque extends Module[Int, Int]:
-    override val moduleName: String = "opaque"
+    override val moduleName: String                             = "opaque"
     override protected val lifecycle: ModuleLifecycle[Int, Int] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
@@ -142,7 +142,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
   /** Observe the executable semantics retained by Category equality. Structural nodes must not perturb lifecycle. */
   private def observe[I, O](program: Program[I, O], input: I): ProgramObservation[O] =
     RuntimeEnvironment.resetForTests()
-    val starts = Vector.newBuilder[String]
+    val starts   = Vector.newBuilder[String]
     val callback = new CallbackHandler:
       def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
         case start: ModuleStartEvent => starts += start.moduleName
@@ -159,7 +159,8 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     }
 
   /** Execute an IsEq under the documented Program observation (params + complete prediction + executable semantics;
-    * decoding is a property of the object, so it no longer varies between the two sides by construction). */
+    * decoding is a property of the object, so it no longer varies between the two sides by construction).
+    */
   private def assertObsEq[I, O](
       eq: IsEq[Program[I, O]],
       input: I
@@ -218,14 +219,14 @@ class ParameterizedCategoryLawSuite extends FunSuite:
   test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
     val inferred = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
     val program: Program.WithArity[Boxed, Wrapped, 1] = inferred
-    val lens = summon[Lens[
+    val lens                                          = summon[Lens[
       Program.WithArity[Boxed, Wrapped, 1],
       SizedVector[OptimizableParameters, 1]
     ]]
     val current: SizedVector[OptimizableParameters, 1] = lens.get(program)
     val updated = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
-    val second = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
-    val composed: Program.WithArity[Boxed, Boxed, 2] = program >>> second
+    val second  = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
+    val composed: Program.WithArity[Boxed, Boxed, 2]              = program >>> second
     val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams
     val arityAgreement = composed.optimizableParameters.arityAgreement(composed.program)
 
@@ -253,7 +254,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
 
   test("copy is NOT natural: h >>> fanout(f, g) shares h; fanout(h >>> f, h >>> g) re-runs it") {
     val runs = AtomicInteger(0)
-    val h = pack(step[Int, Int]("h", "i -> j") { i =>
+    val h    = pack(step[Int, Int]("h", "i -> j") { i =>
       val _ = runs.incrementAndGet(); i * 10
     })
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
@@ -358,8 +359,8 @@ class ParameterizedCategoryLawSuite extends FunSuite:
       )
     }
 
-    val canonicalNested = Signature.derived[NestedBox, Wrapped]("CanonicalNested")
-    val nestedWire      = canonicalNested.inputShape.encode(NestedBox(NestedValue(7)))
+    val canonicalNested     = Signature.derived[NestedBox, Wrapped]("CanonicalNested")
+    val nestedWire          = canonicalNested.inputShape.encode(NestedBox(NestedValue(7)))
     val shiftedNestedSchema =
       Schema.derived[NestedValue].transform(value => NestedValue(value.n + 1), value => NestedValue(value.n - 1))
 
@@ -387,11 +388,11 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     assertEquals(decoded, Right(Boxed(6)))
     assertEquals(summon[RecordCodec[Boxed]].decode(DynamicValues.record("n" := 5)), Right(Boxed(5)))
 
-    val same = shiftedBoxObject.stable
-    val again = same
+    val same                            = shiftedBoxObject.stable
+    val again                           = same
     val branded: shiftedBoxObject.Value = shiftedBoxObject.wrap(Boxed(1))
-    val captured: same.Value = branded
-    val aliased: again.Value = captured
+    val captured: same.Value            = branded
+    val aliased: again.Value            = captured
     assertEquals(again.unwrap(aliased), Boxed(1))
 
     val crossing = compileErrors(
@@ -420,10 +421,10 @@ class ParameterizedCategoryLawSuite extends FunSuite:
   }
 
   test("stable preserves a bundle's fresh types across an ordinary inferred alias") {
-    val same = qaBundle.stable
-    val again = same
-    val input: qaBundle.In = qaBundle.input(DynamicValues.record("question" := "hi")).toOption.get
-    val aliased: same.In = input
+    val same                   = qaBundle.stable
+    val again                  = same
+    val input: qaBundle.In     = qaBundle.input(DynamicValues.record("question" := "hi")).toOption.get
+    val aliased: same.In       = input
     val aliasedAgain: again.In = aliased
     assertEquals(same.signature.inputShape.encode(aliasedAgain), qaBundle.signature.inputShape.encode(input))
   }

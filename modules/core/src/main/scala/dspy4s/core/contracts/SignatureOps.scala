@@ -4,20 +4,19 @@ import dspy4s.core.algebra.{IsEq, Law, Monoid, <->}
 
 /** The value-level "signature algebra": idempotent, cohort-aware, named transforms over [[SignatureLayout]].
   *
-  * The low-level `withInputFields` / `withOutputFields` mutators on [[SignatureLayout]] stay
-  * `private[dspy4s]`; this object names the augmentations composite programs actually perform, guarantees
-  * their idempotence, and gives them laws, so `ChainOfThought` / `ReAct` / `CodeAct` /
-  * `MultiChainComparison` stop hand-rolling layout surgery. Kept `private[dspy4s]` for the same reason as
-  * the mutators: user code shapes I/O at the typed `Signature` surface, not by editing a layout.
+  * The low-level `withInputFields` / `withOutputFields` mutators on [[SignatureLayout]] stay `private[dspy4s]`; this
+  * object names the augmentations composite programs actually perform, guarantees their idempotence, and gives them
+  * laws, so `ChainOfThought` / `ReAct` / `CodeAct` / `MultiChainComparison` stop hand-rolling layout surgery. Kept
+  * `private[dspy4s]` for the same reason as the mutators: user code shapes I/O at the typed `Signature` surface, not by
+  * editing a layout.
   */
 private[dspy4s] object SignatureOps:
 
   extension (layout: SignatureLayout)
 
-    /** Prepend `field` at the head of the output cohort, unless a field of the same name already
-      * exists (idempotent). This is the prior `ChainOfThought.augmentLayout`
-      * (`insert(0, _)`) and the `MultiChainComparison` guarded `prepend`, generalized off the hard-coded
-      * field: both reconstruct the layout as `inputs ++ (field +: outputs)`.
+    /** Prepend `field` at the head of the output cohort, unless a field of the same name already exists (idempotent).
+      * This is the prior `ChainOfThought.augmentLayout` (`insert(0, _)`) and the `MultiChainComparison` guarded
+      * `prepend`, generalized off the hard-coded field: both reconstruct the layout as `inputs ++ (field +: outputs)`.
       *
       * Output role is established by the target cohort rather than stored redundantly on `field`.
       */
@@ -34,22 +33,22 @@ private[dspy4s] object SignatureOps:
       if layout.fields.exists(_.name == field.name) then layout
       else layout.withInputFields(layout.inputFields :+ field)
 
-    /** Keep the inputs, replace every output field with `fields`. The loop-step signatures of `ReAct` and
-      * `CodeAct` use this to drop the base outputs (which their extractor produces) in favor of the
-      * per-iteration control outputs.
+    /** Keep the inputs, replace every output field with `fields`. The loop-step signatures of `ReAct` and `CodeAct` use
+      * this to drop the base outputs (which their extractor produces) in favor of the per-iteration control outputs.
       *
       * Output role is established by the target cohort.
       */
     def replaceOutputs(fields: Vector[FieldSpec]): SignatureLayout =
       layout.withOutputFields(fields)
 
-  /** The signature-algebra laws stated ON the structure as `@Law` methods returning [[IsEq]] (the
-    * math-with-scala statement style; see `core.algebra.Laws` and `docs/refactor/algebra.md`). `SignatureOpsLawSuite`
-    * EXECUTES these over generated layouts, checking layout equations by their public cohort observations
-    * (`in` / `out` / `instructions` / `name`) and field-cohort equations by `sameElements`. The equations are the
-    * contract; the suite is how they run.
+  /** The signature-algebra laws stated ON the structure as `@Law` methods returning [[IsEq]] (the math-with-scala
+    * statement style; see `core.algebra.Laws` and `docs/refactor/algebra.md`). `SignatureOpsLawSuite` EXECUTES these
+    * over generated layouts, checking layout equations by their public cohort observations (`in` / `out` /
+    * `instructions` / `name`) and field-cohort equations by `sameElements`. The equations are the contract; the suite
+    * is how they run.
     *
-    * Cohort membership is structural, so these laws are total over every [[FieldSpec]]. */
+    * Cohort membership is structural, so these laws are total over every [[FieldSpec]].
+    */
   private[dspy4s] object laws:
 
     // L1 — cohort isolation: each combinator touches exactly one cohort.
@@ -106,14 +105,17 @@ private[dspy4s] object SignatureOps:
 // Each is wrapped as a newtype carrying a `Monoid` instance; laws hold up to OUTPUT-observational equality of
 // the wrapped transform (the same discipline as `Mode` / `SignatureOpsLawSuite`), not `==` on the function.
 
-/** The output-cohort endomorphism submonoid: `prependOutput` (idempotent by name) and `replaceOutputs`
-  * (left-absorbing) under composition, identity = the no-op transform. Apply with [[runOn]]. */
+/** The output-cohort endomorphism submonoid: `prependOutput` (idempotent by name) and `replaceOutputs` (left-absorbing)
+  * under composition, identity = the no-op transform. Apply with [[runOn]].
+  */
 private[dspy4s] final case class OutputTransform(runOn: SignatureLayout => SignatureLayout)
 
 private[dspy4s] object OutputTransform:
   import SignatureOps.*
+
   /** Generator: prepend an output field (idempotent by name). */
   def prepend(field: FieldSpec): OutputTransform = OutputTransform(_.prependOutput(field))
+
   /** Generator: replace all output fields (left-absorbing). */
   def replace(fields: Vector[FieldSpec]): OutputTransform = OutputTransform(_.replaceOutputs(fields))
 
@@ -122,12 +124,14 @@ private[dspy4s] object OutputTransform:
     extension (a: OutputTransform)
       infix def combine(b: OutputTransform): OutputTransform = OutputTransform(a.runOn.andThen(b.runOn))
 
-/** The input-cohort endomorphism submonoid: `appendInput` (idempotent by name) under composition, identity =
-  * the no-op transform. Apply with [[runOn]]. */
+/** The input-cohort endomorphism submonoid: `appendInput` (idempotent by name) under composition, identity = the no-op
+  * transform. Apply with [[runOn]].
+  */
 private[dspy4s] final case class InputTransform(runOn: SignatureLayout => SignatureLayout)
 
 private[dspy4s] object InputTransform:
   import SignatureOps.*
+
   /** Generator: append an input field (idempotent by name). */
   def append(field: FieldSpec): InputTransform = InputTransform(_.appendInput(field))
 
@@ -136,9 +140,10 @@ private[dspy4s] object InputTransform:
     extension (a: InputTransform)
       infix def combine(b: InputTransform): InputTransform = InputTransform(a.runOn.andThen(b.runOn))
 
-/** The law RELATING the two submonoids (not a within-monoid law, so not on `Monoid`): they commute, because
-  * they act on disjoint field cohorts (the direct-product factorization; = `SignatureOps.laws.crossCohortCommute`
-  * at the newtype level). */
+/** The law RELATING the two submonoids (not a within-monoid law, so not on `Monoid`): they commute, because they act on
+  * disjoint field cohorts (the direct-product factorization; = `SignatureOps.laws.crossCohortCommute` at the newtype
+  * level).
+  */
 private[dspy4s] object SignatureTransformLaws:
   @Law("the input and output cohort submonoids commute")
   def submonoidsCommute(i: InputTransform, o: OutputTransform, s: SignatureLayout): IsEq[SignatureLayout] =

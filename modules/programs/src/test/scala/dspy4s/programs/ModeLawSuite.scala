@@ -25,7 +25,7 @@ import scala.collection.mutable.ArrayBuffer
 class ModeLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
@@ -34,8 +34,8 @@ class ModeLawSuite extends FunSuite:
     * learnable leaf (for the addressability law).
     */
   private final case class Recorder(predict: DynamicPredict) extends Module[Int, Int]:
-    val seen: ArrayBuffer[Mode.Controls] = ArrayBuffer.empty
-    override val moduleName: String = "recorder"
+    val seen: ArrayBuffer[Mode.Controls]                        = ArrayBuffer.empty
+    override val moduleName: String                             = "recorder"
     override protected val lifecycle: ModuleLifecycle[Int, Int] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
@@ -44,8 +44,8 @@ class ModeLawSuite extends FunSuite:
 
   private object Recorder:
     given recorderOptimizable: OptimizableLeaf[Recorder] with
-      def get(program: Recorder): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: Recorder): OptimizableMetadata = program.predict.optimizableView.metadata
+      def get(program: Recorder): OptimizableParameters                    = program.predict.optimizableParameters
+      def metadata(program: Recorder): OptimizableMetadata                 = program.predict.optimizableView.metadata
       def set(program: Recorder, updated: OptimizableParameters): Recorder =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -66,10 +66,10 @@ class ModeLawSuite extends FunSuite:
     samples.foreach(c => assertEquals(eq.lhs.transform(c), eq.rhs.transform(c)))
 
   test("Mode is a lawful monoid: the Monoid[Mode] instance's laws, executed") {
-    val M  = Monoid[Mode]
-    val m1 = Mode.temperature(0.5)
-    val m2 = Mode.model("gpt-x")
-    val m3 = Mode.rolloutId(3)
+    val M       = Monoid[Mode]
+    val m1      = Mode.temperature(0.5)
+    val m2      = Mode.model("gpt-x")
+    val m3      = Mode.rolloutId(3)
     val samples = Vector(
       Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None),
       Mode.Controls(DynamicValues.record("temperature" := 0.1), traceEnabled = false, rolloutId = Some(2))

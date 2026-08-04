@@ -47,7 +47,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val encoded = sig.inputShape.encode((sentence = "I missed the train"))
     assertEquals(encoded, rec("sentence" := "I missed the train"))
 
-    val decoded = sig.outputShape.decode(rec("result" := "joy")).toOption.get
+    val decoded           = sig.outputShape.decode(rec("result" := "joy")).toOption.get
     val result: P7Emotion = decoded.result
     assertEquals(result, P7Emotion.joy)
   }
@@ -56,7 +56,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val sig = Signature.from(p7NamedEmotion)
     assertEquals(sig.layout.outputFields.map(_.name), Vector("sentiment"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" := "sadness")).toOption.get
+    val decoded              = sig.outputShape.decode(rec("sentiment" := "sadness")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
     assertEquals(sentiment, P7Emotion.sadness)
   }
@@ -69,9 +69,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val encoded = sig.inputShape.encode((sentence = "hi", hint = "warm"))
     assertEquals(encoded, rec("sentence" := "hi", "hint" := "warm"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" := "love", "confidence" := "0.75")).toOption.get
+    val decoded              = sig.outputShape.decode(rec("sentiment" := "love", "confidence" := "0.75")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
-    val confidence: Double = decoded.confidence
+    val confidence: Double   = decoded.confidence
     assertEquals(sentiment, P7Emotion.love)
     assertEquals(confidence, 0.75)
   }
@@ -104,7 +104,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
   }
 
   test("method signature enum output uses TypeRef.string at the wire boundary") {
-    val sig = Signature.from(p7NamedEmotion)
+    val sig   = Signature.from(p7NamedEmotion)
     val field = sig.layout.outputFields.head
     assertEquals(field.typeRef, TypeRef.string)
   }
@@ -120,7 +120,7 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val encoded = sig.inputShape.encode((input = "I missed the train"))
     assertEquals(encoded, rec("input" := "I missed the train"))
 
-    val decoded = sig.outputShape.decode(rec("result" := "joy")).toOption.get
+    val decoded           = sig.outputShape.decode(rec("result" := "joy")).toOption.get
     val result: P7Emotion = decoded.result
     assertEquals(result, P7Emotion.joy)
   }
@@ -143,9 +143,9 @@ class Phase7FunctionMacroSuite extends FunSuite:
     val encoded = sig.inputShape.encode((sentence = "hi", hint = "warm"))
     assertEquals(encoded, rec("sentence" := "hi", "hint" := "warm"))
 
-    val decoded = sig.outputShape.decode(rec("sentiment" := "love", "confidence" := "0.75")).toOption.get
+    val decoded              = sig.outputShape.decode(rec("sentiment" := "love", "confidence" := "0.75")).toOption.get
     val sentiment: P7Emotion = decoded.sentiment
-    val confidence: Double = decoded.confidence
+    val confidence: Double   = decoded.confidence
     assertEquals(sentiment, P7Emotion.love)
     assertEquals(confidence, 0.75)
   }
@@ -176,8 +176,10 @@ class Phase7FunctionMacroSuite extends FunSuite:
       def badInput(value: NotDecodable): String = ""
       val sig = dspy4s.typed.Signature.from(badInput)
     """)
-    assert(errors.contains("No Schema"),
-      s"expected helpful error about missing Schema, got:\n$errors")
+    assert(
+      errors.contains("No Schema"),
+      s"expected helpful error about missing Schema, got:\n$errors"
+    )
   }
 
   test("compile error: Unit output") {
@@ -185,14 +187,18 @@ class Phase7FunctionMacroSuite extends FunSuite:
       def noOutput(sentence: String): Unit = ()
       val sig = dspy4s.typed.Signature.from(noOutput)
     """)
-    assert(errors.contains("not Unit"),
-      s"expected helpful error about Unit output, got:\n$errors")
+    assert(
+      errors.contains("not Unit"),
+      s"expected helpful error about Unit output, got:\n$errors"
+    )
   }
 
   test("compile error: fromType Unit output") {
     val errors = compileErrors("""
       val sig = dspy4s.typed.Signature.fromType[String => Unit]("Bad")
     """)
-    assert(errors.contains("not Unit"),
-      s"expected helpful error about Unit output, got:\n$errors")
+    assert(
+      errors.contains("not Unit"),
+      s"expected helpful error about Unit output, got:\n$errors"
+    )
   }

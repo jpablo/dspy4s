@@ -29,18 +29,18 @@ class ExtraInputWarningSuite extends FunSuite:
       Right(ParsedOutput(values = rec("answer" := output.text, "score" := 0.5)))
 
   private object FixedLm extends LanguageModel:
-    override val id: String   = "fixed-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "fixed-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(
         outputs = Vector(LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.95))),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   private val defaultSettings: RuntimeContext = RuntimeContext(lm = Some(FixedLm), adapter = Some(EchoQuestionAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def captureErr(thunk: => Unit): String =
     val buffer = new ByteArrayOutputStream()
@@ -52,7 +52,7 @@ class ExtraInputWarningSuite extends FunSuite:
     val err = captureErr {
       RuntimeEnvironment.withSettings(defaultSettings) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(sig)(
+        val result           = DynamicPredict(sig)(
           ProgramCall(input = rec("question" := "x", "bogus" := "y", "extra" := "z"))
         )
         assert(result.isRight, s"extra inputs must NOT fail the call, got: $result")

@@ -1,15 +1,15 @@
 /** DSPy Optimizers (formerly Teleprompters)
- *
+  *
   * Source: docs/docs/learn/optimization/optimizers.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/optimization/optimizers.md Status: translated
   * (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
- *
+  *
   * This translation states the optimizer generically over the two capabilities every student needs
   * (`OptimizableTraversal` + `ProgramRunner`); the main below drives it with a runtime-string student built through
-  * `DynamicSignature` (parse once, mint fresh types, build a typed `Predict` over them). `compile(student,
-  * trainset)` returns an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
- * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
- */
+  * `DynamicSignature` (parse once, mint fresh types, build a typed `Predict` over them). `compile(student, trainset)`
+  * returns an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
+  * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
+  */
 package dspy4s.examples.learn.optimization
 
 import dspy4s.core.contracts.{:=, DspyError, RuntimeContext, ThreadCount}
@@ -40,11 +40,11 @@ object Optimizers:
       trainset: Vector[Example]
   )(using RuntimeContext): Either[DspyError, P] =
     val teleprompter = BootstrapFewShotWithRandomSearch[P](RandomSearchConfig(
-      metric               = metric,
+      metric = metric,
       maxBootstrappedDemos = DemoCount(4),
-      maxLabeledDemos      = DemoCount(4),
-      numCandidates        = SearchCandidateCount(10),
-      numThreads           = Some(ThreadCount(4))
+      maxLabeledDemos = DemoCount(4),
+      numCandidates = SearchCandidateCount(10),
+      numThreads = Some(ThreadCount(4))
     ))
     teleprompter.compile(program, trainset).map(_.bestProgram)
   // --8<-- [end:optimize-bootstrap]

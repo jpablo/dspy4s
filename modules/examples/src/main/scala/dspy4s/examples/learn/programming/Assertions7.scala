@@ -1,12 +1,11 @@
-/**
- * DSPy Assertions
- *
- * Source:   docs/docs/learn/programming/7-assertions.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/7-assertions.md
- * Status:   blocked (7 python snippets) — dspy4s has no `dspy.Assert` / `dspy.Suggest` backtracking API.
- *           Upstream deprecated assertions in favor of `Refine` / `BestOfN`, which dspy4s does provide —
- *           see tutorials/output_refinement/BestOfNAndRefine.scala for the supported approach.
- */
+/** DSPy Assertions
+  *
+  * Source: docs/docs/learn/programming/7-assertions.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/7-assertions.md Status: blocked (7 python
+  * snippets) — dspy4s has no `dspy.Assert` / `dspy.Suggest` backtracking API. Upstream deprecated assertions in favor
+  * of `Refine` / `BestOfN`, which dspy4s does provide — see tutorials/output_refinement/BestOfNAndRefine.scala for the
+  * supported approach.
+  */
 package dspy4s.examples.learn.programming
 
 object Assertions7 {

@@ -26,7 +26,7 @@ import zio.blocks.schema.DynamicValue
 // Top-level spec trait (Mirror derivation requires a top-level type).
 trait MccQaSpec extends Spec:
   def question: InputField[String]
-  def answer:   OutputField[String]
+  def answer: OutputField[String]
 
 /** Typed port of Python DSPy's `tests/predict/test_multi_chain_comparison.py`. */
 class MultiChainComparisonSuite extends FunSuite:
@@ -34,8 +34,9 @@ class MultiChainComparisonSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-  /** Scripted Adapter that ignores the LM output and returns a fixed `(rationale, answer)`. Mirrors Python's
-    * `DummyLM` returning a canned `{"rationale": ..., "answer": ...}`. */
+  /** Scripted Adapter that ignores the LM output and returns a fixed `(rationale, answer)`. Mirrors Python's `DummyLM`
+    * returning a canned `{"rationale": ..., "answer": ...}`.
+    */
   private object ScriptedAdapter extends Adapter:
     override val name: String = "scripted-mcc-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
@@ -46,15 +47,15 @@ class MultiChainComparisonSuite extends FunSuite:
       Right(ParsedOutput(values = rec("rationale" := "my rationale", "answer" := "blue")))
 
   private object DummyLm extends LanguageModel:
-    override val id: String   = "dummy-mcc-lm"
-    override val mode: LmMode  = LmMode.Chat
+    override val id: String                                                                    = "dummy-mcc-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = "irrelevant"))))
 
   private def settings: RuntimeContext = RuntimeContext(lm = Some(DummyLm), adapter = Some(ScriptedAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   test("AttemptCount: rejects non-positive literals at compile time") {
     val zeroErrors     = compileErrors("dspy4s.programs.AttemptCount(0)")
@@ -81,40 +82,46 @@ class MultiChainComparisonSuite extends FunSuite:
 
     val outputNames = sig.outputFields.map(_.name)
     assertEquals(outputNames.head, "rationale") // prepended
-    assert(outputNames.contains("answer"))       // carries through
+    assert(outputNames.contains("answer"))      // carries through
   }
 
   test("MultiChainComparison: runs the augmented predict and returns the corrected reasoning + answer") {
     val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
 
     val completions = Vector(
-      RawPrediction(values = rec(
-        "rationale" := "I recall that during clear days, the sky often appears this color.",
-        "answer"    := "blue"
-      )),
-      RawPrediction(values = rec(
-        "rationale" := "Based on common knowledge, I believe the sky is typically seen as this color.",
-        "answer"    := "green"
-      )),
-      RawPrediction(values = rec(
-        "rationale" := "From images and depictions in media, the sky is frequently represented with this hue.",
-        "answer"    := "blue"
-      ))
+      RawPrediction(values =
+        rec(
+          "rationale" := "I recall that during clear days, the sky often appears this color.",
+          "answer"    := "blue"
+        )
+      ),
+      RawPrediction(values =
+        rec(
+          "rationale" := "Based on common knowledge, I believe the sky is typically seen as this color.",
+          "answer"    := "green"
+        )
+      ),
+      RawPrediction(values =
+        rec(
+          "rationale" := "From images and depictions in media, the sky is frequently represented with this hue.",
+          "answer"    := "blue"
+        )
+      )
     )
 
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = mcc.compare((question = "What is the color of the sky?"), completions)
+      val result           = mcc.compare((question = "What is the color of the sky?"), completions)
       assert(result.isRight, s"compare failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
       // typed dot-access on the augmented named tuple
       assertEquals(pred.output.rationale, "my rationale")
-      assertEquals(pred.output.answer,    "blue")
+      assertEquals(pred.output.answer, "blue")
     }
   }
 
   test("MultiChainComparison: uses the uniform ProgramCall envelope") {
-    val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
+    val mcc   = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     val input = MultiChainInput(
       baseInput = (question = "What is the color of the sky?"),
       attempts = Vector.fill(3)(RawPrediction.empty)
@@ -122,7 +129,7 @@ class MultiChainComparisonSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = mcc(ProgramCall(input, traceEnabled = false, rolloutId = Some(7)))
+      val result           = mcc(ProgramCall(input, traceEnabled = false, rolloutId = Some(7)))
       assert(result.isRight, s"comparison failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       assertEquals(RuntimeEnvironment.current.trace, Vector.empty)
     }
@@ -132,7 +139,7 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = mcc.compare((question = "?"), Vector(RawPrediction.empty))
+      val result           = mcc.compare((question = "?"), Vector(RawPrediction.empty))
       assert(result.isLeft)
       assert(
         result.left.toOption.get.message.contains("doesn't match the configured m"),
@@ -146,8 +153,8 @@ class MultiChainComparisonSuite extends FunSuite:
     assert(mcc.attemptInputs.validate(Vector("one", "two")).isLeft)
 
     val attempts = mcc.attemptInputs.validate(Vector("one", "two", "three")).toOption.get
-    val encoded = mcc.attemptInputs.shape.encode(((question = "?"), attempts))
-    val keys = DynamicValues.recordKeys(encoded)
+    val encoded  = mcc.attemptInputs.shape.encode(((question = "?"), attempts))
+    val keys     = DynamicValues.recordKeys(encoded)
     assertEquals(
       keys,
       Vector("question", "reasoning_attempt_1", "reasoning_attempt_2", "reasoning_attempt_3")

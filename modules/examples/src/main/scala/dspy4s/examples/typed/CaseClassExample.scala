@@ -1,10 +1,10 @@
 /** Typed signatures — case-class surface.
- *
+  *
   * Mirrors DSPy's class-based signature style (snippet "Emotion" from docs/docs/learn/programming/signatures.md).
   * Compiles against the dspy4s typed engine; no live LM calls. Run shapes below are illustrative.
- *
- * Status: example
- */
+  *
+  * Status: example
+  */
 package dspy4s.examples.typed
 
 import zio.blocks.schema.Schema
@@ -27,27 +27,26 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
 
 /** Build a `Signature` from two case classes — one for inputs, one for outputs. The resulting signature is fully typed
   * at the program boundary:
- *
+  *
   *   - encode: `Predict(signature)(EmotionInput("..."))` accepts a typed value; the typed shape encodes it into the
-  *     dynamic
-  *     `ProgramCall.input` record.
+  *     dynamic `ProgramCall.input` record.
   *   - decode: `Prediction.output` is a typed `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no
   *     runtime cast.
   *   - enum constraints reach the LM via `Shape.jsonSchemaString` (rendered from the backing `Schema[O]`); the
   *     `JSONAdapter` inlines that schema into its prompt.
- */
+  */
 object CaseClassExample:
 
   // --8<-- [start:derived-sig]
   val signature: Signature[EmotionInput, EmotionOutput] =
     Signature.derived[EmotionInput, EmotionOutput](
-      name         = "Emotion",
+      name = "Emotion",
       instructions = "Classify emotion in the given sentence."
     )
   // --8<-- [end:derived-sig]
 
-  /** Illustrative call site. With an LM and adapter configured in `RuntimeContext`, `Predict(signature)(...)`
-    * returns `Either[DspyError, Prediction[EmotionOutput]]`.
+  /** Illustrative call site. With an LM and adapter configured in `RuntimeContext`, `Predict(signature)(...)` returns
+    * `Either[DspyError, Prediction[EmotionOutput]]`.
     */
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.Predict

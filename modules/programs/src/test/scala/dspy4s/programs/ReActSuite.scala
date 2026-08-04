@@ -33,11 +33,12 @@ import scala.collection.mutable.ArrayBuffer
 class ReActSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   /** Test adapter. For a react step (its outputs include `next_tool_name`) it parses the convention
     * `thought || tool_name || key=value` into the three react fields (`key=value` -> `{key: value}` args, blank ->
-    * `{}`). For the extractor step it assigns the full text to every output field. */
+    * `{}`). For the extractor step it assigns the full text to every output field.
+    */
   private object ScriptedAdapter extends Adapter:
     override val name: String = "scripted-react-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
@@ -46,24 +47,26 @@ class ReActSuite extends FunSuite:
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       val outputNames = layout.outputFields.map(_.name).toSet
-      val text = output.text
+      val text        = output.text
       if outputNames.contains("next_tool_name") then
-        val parts = text.split("\\|\\|", -1)
-        val thought = if parts.length >= 1 then parts(0).trim else ""
+        val parts    = text.split("\\|\\|", -1)
+        val thought  = if parts.length >= 1 then parts(0).trim else ""
         val toolName = if parts.length >= 2 then parts(1).trim else ""
-        val args =
+        val args     =
           if parts.length >= 3 && parts(2).trim.nonEmpty then
             parts(2).trim.split("=", 2) match
               case Array(k, v) => rec(k.trim := v.trim)
               case _           => DynamicValue.Record.empty
           else DynamicValue.Record.empty
-        Right(ParsedOutput(values = rec("next_thought" := thought, "next_tool_name" := toolName, "next_tool_args" -> args)))
+        Right(ParsedOutput(values =
+          rec("next_thought" := thought, "next_tool_name" := toolName, "next_tool_args" -> args)
+        ))
       else
         Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := text)*)))
 
   private final class SearchTool extends ToolFunction:
-    val calls: AtomicInteger = AtomicInteger(0)
-    override val name: String = "search"
+    val calls: AtomicInteger         = AtomicInteger(0)
+    override val name: String        = "search"
     override val description: String = "Look up a fact about the world."
     override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
       calls.incrementAndGet()
@@ -78,10 +81,10 @@ class ReActSuite extends FunSuite:
 
   test("react runs a tool, finishes, and extracts the answer from the trajectory") {
     val search = new SearchTool
-    val lm = new ScriptedLm(Vector(
+    val lm     = new ScriptedLm(Vector(
       "I should look it up||search||query=capital of Belgium", // step 1 -> search
-      "I have what I need||finish||", // step 2 -> finish
-      "Brussels" // extractor -> answer
+      "I have what I need||finish||",                          // step 2 -> finish
+      "Brussels"                                               // extractor -> answer
     ))
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
@@ -100,8 +103,8 @@ class ReActSuite extends FunSuite:
 
   test("react can finish on the first step without calling any tool") {
     val search = new SearchTool
-    val lm = new ScriptedLm(Vector("I already know||finish||", "42"))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+    val lm     = new ScriptedLm(Vector("I already know||finish||", "42"))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withReact(lm) {
       val result = react((question = "2+2 doubled?"))
@@ -113,7 +116,7 @@ class ReActSuite extends FunSuite:
 
   test("react stops at maxIterations when the model never finishes, then extracts") {
     val search = new SearchTool
-    val lm = new ScriptedLm(Vector(
+    val lm     = new ScriptedLm(Vector(
       "keep going||search||query=a",
       "keep going||search||query=b",
       "extracted-after-cap" // extractor, reached after the 2 capped react steps
@@ -125,13 +128,13 @@ class ReActSuite extends FunSuite:
       assert(result.isRight)
       assertEquals(result.toOption.get.output.answer, "extracted-after-cap")
       assertEquals(search.calls.get(), 2) // tool ran once per capped iteration
-      assertEquals(lm.calls.get(), 3) // 2 react steps + 1 extractor
+      assertEquals(lm.calls.get(), 3)     // 2 react steps + 1 extractor
     }
   }
 
   test("react records an error observation for an unknown tool and keeps going") {
     val search = new SearchTool
-    val lm = new ScriptedLm(Vector(
+    val lm     = new ScriptedLm(Vector(
       "try this||nonexistent||", // unknown tool -> error observation, continue
       "ok now finish||finish||",
       "done"
@@ -149,13 +152,13 @@ class ReActSuite extends FunSuite:
   }
 
   test("react emits tool callback events parented to the react module call") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
 
     val search = new SearchTool
-    val lm = new ScriptedLm(Vector("look||search||query=x", "done||finish||", "Brussels"))
-    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+    val lm     = new ScriptedLm(Vector("look||search||query=x", "done||finish||", "Brussels"))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
@@ -165,7 +168,7 @@ class ReActSuite extends FunSuite:
     }
 
     val toolStart = events.collectFirst { case e: ToolStartEvent => e }
-    val toolEnd = events.collectFirst { case e: ToolEndEvent => e }
+    val toolEnd   = events.collectFirst { case e: ToolEndEvent => e }
     assert(toolStart.exists(_.toolName == "search"), "expected a ToolStartEvent for search")
     assert(toolEnd.exists(_.toolName == "search"), "expected a ToolEndEvent for search")
     // The react module's own start event exists; the tool call is parented under some active module call.
@@ -176,9 +179,9 @@ class ReActSuite extends FunSuite:
 
   /** Scripted LM whose responses can be failures — used to inject ContextWindowExceededError mid-run. */
   private final class EitherLm(responses: Vector[Either[DspyError, String]]) extends LanguageModel:
-    val calls: AtomicInteger = AtomicInteger(0)
-    override val id: String = "either-react-lm"
-    override val mode: LmMode = LmMode.Chat
+    val calls: AtomicInteger                                                                   = AtomicInteger(0)
+    override val id: String                                                                    = "either-react-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val i = calls.getAndIncrement()
       if i >= responses.size then Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
@@ -187,13 +190,15 @@ class ReActSuite extends FunSuite:
   /** ScriptedAdapter variant that records the rendered trajectory of every EXTRACTOR call. */
   private final class ExtractProbeAdapter extends Adapter:
     val extractorTrajectories: ArrayBuffer[String] = ArrayBuffer.empty
-    override val name: String = "extract-probe"
+    override val name: String                      = "extract-probe"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       if !invocation.layout.outputFields.exists(_.name == "next_tool_name") then
         dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")
           .map(dspy4s.core.contracts.DynamicValues.renderText).foreach(extractorTrajectories += _)
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       ScriptedAdapter.parse(layout, output)
 
   private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError(model = Some("either-react-lm"))
@@ -255,7 +260,7 @@ class ReActSuite extends FunSuite:
     val search = new SearchTool
     // The very first react call overflows with an EMPTY trajectory: nothing to truncate -> upstream's
     // ValueError path -> break. The extractor then runs over the empty trajectory.
-    val lm = new EitherLm(Vector(Left(cwError), Right("best guess")))
+    val lm    = new EitherLm(Vector(Left(cwError), Right("best guess")))
     val probe = new ExtractProbeAdapter
     val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 

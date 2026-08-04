@@ -11,13 +11,14 @@ import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Semantics of the shared best-of-`n` search loop ([[AttemptSelection.bestOf]]). The end-to-end module behavior
-  * is covered by TypedBestOfNSuite / RefinePerModuleAdviceSuite; this suite distinguishes exhaustive finite-score
-  * selection properties from ordered early-stop and feedback behavior. */
+/** Semantics of the shared best-of-`n` search loop ([[AttemptSelection.bestOf]]). The end-to-end module behavior is
+  * covered by TypedBestOfNSuite / RefinePerModuleAdviceSuite; this suite distinguishes exhaustive finite-score
+  * selection properties from ordered early-stop and feedback behavior.
+  */
 class AttemptSelectionLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def attemptCount(value: Int): AttemptCount =
     AttemptCount.either(value) match
@@ -28,14 +29,14 @@ class AttemptSelectionLawSuite extends FunSuite:
   private def scripted(rewards: Vector[Double], threshold: Double, failCount: Option[FailureCount] = None) =
     AttemptSelection.bestOf[Double](attemptCount(rewards.size), threshold, failCount, "law")(
       runAttempt = idx => Right(rewards(idx)),
-      reward     = d => Right(d)
+      reward = d => Right(d)
     )
 
   test("the reducer returns its only successful attempt, regardless of threshold") {
-    val calls = AtomicInteger(0)
+    val calls  = AtomicInteger(0)
     val result = AttemptSelection.bestOf[Double](AttemptCount(1), threshold = 0.9, None, "law")(
       runAttempt = _ => { calls.incrementAndGet(); Right(0.2) }, // below threshold
-      reward     = d => Right(d)
+      reward = d => Right(d)
     )
     assertEquals(result, Right(0.2))
     assertEquals(calls.get(), 1)
@@ -49,7 +50,7 @@ class AttemptSelectionLawSuite extends FunSuite:
   }
 
   test("exhaustive distinct-score selection is invariant under attempt permutation") {
-    val base = Vector(0.1, 0.9, 0.5)
+    val base  = Vector(0.1, 0.9, 0.5)
     val perms = Vector(
       Vector(0.1, 0.9, 0.5),
       Vector(0.9, 0.5, 0.1),
@@ -60,10 +61,10 @@ class AttemptSelectionLawSuite extends FunSuite:
 
   // ── threshold short-circuit: the first attempt at/above threshold ends the loop ───────────────────────────
   test("short-circuits at the first attempt that reaches the threshold") {
-    val calls = AtomicInteger(0)
+    val calls  = AtomicInteger(0)
     val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.9, None, "law")(
       runAttempt = idx => { calls.incrementAndGet(); Right(Vector(0.95, 0.1, 0.99)(idx)) },
-      reward     = d => Right(d)
+      reward = d => Right(d)
     )
     assertEquals(result, Right(0.95))
     assertEquals(calls.get(), 1) // attempts 2 and 3 never ran
@@ -73,13 +74,13 @@ class AttemptSelectionLawSuite extends FunSuite:
   test("surfaces the last error after exhausting the default fail budget") {
     val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.0, None, "law")(
       runAttempt = idx => Left(RuntimeError("law", s"f$idx")),
-      reward     = d => Right(d)
+      reward = d => Right(d)
     )
     assertEquals(result.left.toOption.map(_.message), Some("f2"))
   }
 
   test("a custom fail budget aborts earlier and keeps no best when all attempts failed") {
-    val calls = AtomicInteger(0)
+    val calls  = AtomicInteger(0)
     val result = AttemptSelection.bestOf[Double](
       AttemptCount(3),
       threshold = 0.0,
@@ -87,7 +88,7 @@ class AttemptSelectionLawSuite extends FunSuite:
       "law"
     )(
       runAttempt = idx => { calls.incrementAndGet(); Left(RuntimeError("law", s"f$idx")) },
-      reward     = d => Right(d)
+      reward = d => Right(d)
     )
     assertEquals(result.left.toOption.map(_.message), Some("f1"))
     assertEquals(calls.get(), 2) // tolerated 1 failure, aborted on the 2nd
@@ -100,9 +101,10 @@ class AttemptSelectionLawSuite extends FunSuite:
       failCount = Some(FailureCount(1)),
       "law"
     )(
-      runAttempt = idx => idx match
-        case 3 => Left(RuntimeError("law", "boom"))
-        case other => Right(Vector(0.1, 0.7, 0.3)(other)),
+      runAttempt = idx =>
+        idx match
+          case 3     => Left(RuntimeError("law", "boom"))
+          case other => Right(Vector(0.1, 0.7, 0.3)(other)),
       reward = d => Right(d)
     )
     assertEquals(result, Right(0.7)) // best survives the in-budget failure
@@ -113,11 +115,15 @@ class AttemptSelectionLawSuite extends FunSuite:
     val feedbackFired = AtomicInteger(0)
 
     // The attempt's value is whether the marker adapter is in scope; reward rewards its presence.
-    def runWithFeedback(feedback: Option[(Boolean, Vector[dspy4s.core.contracts.TraceEntry], Double) => Either[DspyError, Option[AdapterRef]]]) =
+    def runWithFeedback(feedback: Option[(
+        Boolean,
+        Vector[dspy4s.core.contracts.TraceEntry],
+        Double
+    ) => Either[DspyError, Option[AdapterRef]]]) =
       AttemptSelection.bestOf[Boolean](AttemptCount(2), threshold = 1.0, None, "law")(
         runAttempt = _ => Right(summon[RuntimeContext].adapter.contains(AttemptSelectionLawSuite.MarkerAdapter)),
-        reward     = sawMarker => Right(if sawMarker then 1.0 else 0.2),
-        feedback   = feedback
+        reward = sawMarker => Right(if sawMarker then 1.0 else 0.2),
+        feedback = feedback
       )
 
     // With feedback: attempt 1 is sub-threshold (no marker), the hook installs the marker, attempt 2 sees it.

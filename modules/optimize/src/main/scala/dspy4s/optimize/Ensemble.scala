@@ -16,13 +16,13 @@ import zio.blocks.schema.DynamicValue
   * majority vote (`dspy.majority` upstream), which is the default here via [[Aggregation.majority]].
   *
   * Shape choice: dspy4s splits programs into a typed surface (`Predict[I, O]`, `ChainOfThought[I, O]`, ...) and an
-  * dynamic spine (`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`). An ensemble is
-  * inherently heterogeneous and generic over its members — Python's `EnsembledProgram` just forwards `*args, **kwargs`
-  * to each member and reduces a list of arbitrary outputs. A faithful generic typed shape would require all members to
-  * share an exact `Module[I, O]` and a typed reducer; that's both more restrictive than upstream and awkward. So we
-  * build on the dynamic spine: members are `DynamicModule`s, the reducer folds their semantic output records,
-  * and the result is itself a `DynamicModule` (so an ensemble can nest / be used anywhere a program is). This matches
-  * the "prefer the dynamic spine for genuinely-generic edges" guidance.
+  * dynamic spine (`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`). An ensemble is inherently
+  * heterogeneous and generic over its members — Python's `EnsembledProgram` just forwards `*args, **kwargs` to each
+  * member and reduces a list of arbitrary outputs. A faithful generic typed shape would require all members to share an
+  * exact `Module[I, O]` and a typed reducer; that's both more restrictive than upstream and awkward. So we build on the
+  * dynamic spine: members are `DynamicModule`s, the reducer folds their semantic output records, and the result is
+  * itself a `DynamicModule` (so an ensemble can nest / be used anywhere a program is). This matches the "prefer the
+  * dynamic spine for genuinely-generic edges" guidance.
   *
   * Upstream's `deterministic` flag must be `False` (it asserts), so there is no deterministic example-hashing path to
   * port. We keep a `seed` instead so the `size`-sampling is reproducible in tests and runs.

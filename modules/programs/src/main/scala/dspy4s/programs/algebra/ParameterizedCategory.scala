@@ -30,8 +30,8 @@ trait ParameterizedCategory[P[_], Hom[_, _]] extends Category[P, Hom]:
     id[A].params <-> Vector.empty
 
   @Law("composition concatenates parameters")
-  def paramsCompose[A, B, C](f: Hom[A, B], g: Hom[B, C]): IsEq[Vector[OptimizableParameters]] =
-    (f >>> g).params <-> (f.params ++ g.params)
+  def paramsCompose[A, B, C](f: Hom[A, B], g: Hom[B, C]): IsEq[Vector[OptimizableParameters]] = (f >>> g).params <->
+    (f.params ++ g.params)
 
   @Law("fan-out concatenates parameters")
   def paramsFanout[I, A, B](f: Hom[I, A], g: Hom[I, B]): IsEq[Vector[OptimizableParameters]] =

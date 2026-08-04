@@ -87,6 +87,13 @@ Run the test suite:
 sbt test
 ```
 
+Format all Scala and sbt sources, or check formatting without changing files:
+
+```bash
+sbt fmt
+sbt fmtCheck
+```
+
 Run one of the bundled examples (reads `OPENAI_API_KEY` from the environment):
 
 ```bash

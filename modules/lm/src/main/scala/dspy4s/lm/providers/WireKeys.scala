@@ -5,7 +5,8 @@ package dspy4s.lm.providers
   * string literals.
   *
   * The typed DTOs in this package ([[OpenAiUsage]], [[OpenAiStreamChunk]]) derive their keys from the `Schema`
-  * field-name mapper instead, so their wire keys do not appear here — only the hand-navigated/handwritten ones do. */
+  * field-name mapper instead, so their wire keys do not appear here — only the hand-navigated/handwritten ones do.
+  */
 private[lm] object WireKeys:
   // Request payload
   final val model     = "model"

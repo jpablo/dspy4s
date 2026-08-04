@@ -39,7 +39,7 @@ final case class OpenAiClient(
     }
 
   def stream(payload: DynamicValue): Either[DspyError, ClosableIterator[LmChunk]] =
-    val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
+    val url           = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
     val withStreaming = payload match
       case rec: DynamicValue.Record =>
         val streamOptions = DynamicValues.recordFromEntries(Seq(WireKeys.includeUsage := true))
@@ -61,7 +61,7 @@ final case class OpenAiClient(
 
   private def parseSse(lines: ClosableIterator[String]): ClosableIterator[LmChunk] =
     new ClosableIterator[LmChunk]:
-      private var innerClosed = false
+      private var innerClosed             = false
       private var pending: LmChunk | Null = null
 
       private def advance(): Unit =
@@ -69,7 +69,7 @@ final case class OpenAiClient(
         else
           pending = null
           while lines.hasNext do
-            val line = lines.next()
+            val line    = lines.next()
             val trimmed = line.trim
             if trimmed.isEmpty then ()
             else if trimmed.startsWith("data:") then
@@ -122,8 +122,9 @@ final case class OpenAiClient(
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"
 
-  /** Context-window overflow markers, mirroring upstream dspy `clients/lm.py`
-    * (`is_litellm_context_window_error`). Matched case-insensitively against the HTTP 400 response body. */
+  /** Context-window overflow markers, mirroring upstream dspy `clients/lm.py` (`is_litellm_context_window_error`).
+    * Matched case-insensitively against the HTTP 400 response body.
+    */
   private val contextWindowMarkers: Seq[String] =
     Seq("context_length_exceeded", "maximum context length", "context window", "reduce the length")
 

@@ -20,8 +20,9 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
-/** G-7 v1: JSONAdapter emits an OpenAI `response_format` into `FormattedPrompt.requestOptions` when the ambient
-  * LM declares `supportsResponseSchema` and a JSON Schema is available. */
+/** G-7 v1: JSONAdapter emits an OpenAI `response_format` into `FormattedPrompt.requestOptions` when the ambient LM
+  * declares `supportsResponseSchema` and a JSON Schema is available.
+  */
 class JSONAdapterResponseFormatSuite extends FunSuite:
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
@@ -37,13 +38,13 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
 
   /** Minimal stub LM whose only meaningful trait is its capability flag. */
   private final class StubLm(override val supportsResponseSchema: Boolean) extends LanguageModel:
-    override val id: String   = "stub"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "stub"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector.empty))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private val schemaString =
     """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
@@ -51,19 +52,19 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
   private def invocationWithSchema(schema: Option[String]): AdapterInvocation =
     val signature = SignatureDsl.parse("question -> answer").toOption.get
     AdapterInvocation(
-      layout           = signature,
-      demos            = Vector.empty,
-      inputs           = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request          = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      layout = signature,
+      demos = Vector.empty,
+      inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
       outputJsonSchema = schema
     )
 
   test("response_format is emitted when the LM supports response schema and a schema is present") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
-    val formatted = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
+    val formatted        = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
     assert(formatted.isRight, s"expected Right, got $formatted")
     val opts = formatted.toOption.get.requestOptions
-    val rf = DynamicValues.recordGet(opts, "response_format")
+    val rf   = DynamicValues.recordGet(opts, "response_format")
     assert(rf.isDefined, s"expected response_format in requestOptions, got: $opts")
     val rfv = rf.get
     assertEquals(stringField(rfv, "type"), Some("json_schema"))
@@ -83,25 +84,27 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
 
   test("response_format embeds field constraints as JSON-Schema keywords on the matching property") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
-    val layout = SignatureLayout.create(
+    val layout           = SignatureLayout.create(
       name = "Scored",
       inputFields = Vector(FieldSpec("question")),
       outputFields = Vector(
         FieldSpec(
-          name = "score", typeRef = TypeRef.int,
+          name = "score",
+          typeRef = TypeRef.int,
           constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
         )
       )
     ).toOption.get
-    val schema = """{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}"""
+    val schema     = """{"type":"object","properties":{"score":{"type":"integer"}},"required":["score"]}"""
     val invocation = AdapterInvocation(
-      layout = layout, demos = Vector.empty,
+      layout = layout,
+      demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test", mode = LmMode.Chat),
       outputJsonSchema = Some(schema)
     )
 
-    val opts = JSONAdapter().format(invocation).toOption.get.requestOptions
+    val opts      = JSONAdapter().format(invocation).toOption.get.requestOptions
     val scoreProp = DynamicValues.recordGet(opts, "response_format")
       .flatMap(field(_, "json_schema")).flatMap(field(_, "schema"))
       .flatMap(field(_, "properties")).flatMap(field(_, "score"))
@@ -120,9 +123,9 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
 
   test("response_format embeds the sanitized signature name") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
-    val formatted = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
-    val opts = formatted.toOption.get.requestOptions
-    val name = DynamicValues.recordGet(opts, "response_format")
+    val formatted        = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
+    val opts             = formatted.toOption.get.requestOptions
+    val name             = DynamicValues.recordGet(opts, "response_format")
       .flatMap(field(_, "json_schema"))
       .flatMap(stringField(_, "name"))
     assert(name.isDefined, "expected a name field")
@@ -134,25 +137,25 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
 
   test("no response_format when the LM does not support response schema") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = false)))
-    val formatted = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
+    val formatted        = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
   }
 
   test("no response_format when no JSON schema is present (even if supported)") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
-    val formatted = JSONAdapter().format(invocationWithSchema(None))
+    val formatted        = JSONAdapter().format(invocationWithSchema(None))
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
   }
 
   test("no response_format when there is no ambient LM") {
     given RuntimeContext = RuntimeContext()
-    val formatted = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
+    val formatted        = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
   }
 
   test("malformed schema string yields no response_format but format still succeeds with prose") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
-    val formatted = JSONAdapter().format(invocationWithSchema(Some("{not valid json")))
+    val formatted        = JSONAdapter().format(invocationWithSchema(Some("{not valid json")))
     assert(formatted.isRight, s"format must not fail over a malformed schema, got: $formatted")
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
     // prose fallback: the malformed schema string is still inlined into the system message

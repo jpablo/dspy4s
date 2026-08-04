@@ -21,31 +21,38 @@ import munit.FunSuite
   */
 class InferRulesSuite extends FunSuite:
 
-  private val RuleToken = "RULE_TOKEN"
+  private val RuleToken                 = "RULE_TOKEN"
   private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3", "q4" -> "a4")
 
-  /** Renders the active instruction + input fields into one message, tagged with the requested output field so the
-    * LM can tell rule-induction (`natural_language_rules`) from task (`answer`). */
+  /** Renders the active instruction + input fields into one message, tagged with the requested output field so the LM
+    * can tell rule-induction (`natural_language_rules`) from task (`answer`).
+    */
   private object InstructionAwareAdapter extends Adapter:
     override val name: String = "instruction-aware"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val instr  = invocation.layout.instructions.getOrElse("")
       val out    = invocation.layout.outputFields.map(_.name).mkString(",")
       val inputs = invocation.layout.inputFields
-        .map(f => s"${f.name}=[${DynamicValues.recordGet(invocation.inputs.values, f.name).map(DynamicValues.renderText).getOrElse("")}]")
+        .map(f =>
+          s"${f.name}=[${DynamicValues.recordGet(invocation.inputs.values, f.name).map(DynamicValues.renderText).getOrElse("")}]"
+        )
         .mkString(" ")
-      Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(s"OUT=[$out] INSTRUCTION=[$instr] $inputs")))))
+      Right(FormattedPrompt(messages =
+        Vector(Message(role = MessageRole.User, text = Some(s"OUT=[$out] INSTRUCTION=[$instr] $inputs")))
+      ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = DynamicValues.record(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
-    override val id: String   = "scripted-infer-rules"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted-infer-rules"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
-      val out =
+      val out  =
         if text.contains("natural_language_rules") then s"Always answer with the gold label. $RuleToken"
         else
           val q = extractBetween(text, "question=[", "]")
@@ -54,12 +61,14 @@ class InferRulesSuite extends FunSuite:
 
   private def extractBetween(s: String, start: String, end: String): String =
     val i = s.indexOf(start)
-    if i < 0 then "" else { val from = i + start.length; val j = s.indexOf(end, from); if j < 0 then "" else s.substring(from, j) }
+    if i < 0 then ""
+    else { val from = i + start.length; val j = s.indexOf(end, from); if j < 0 then "" else s.substring(from, j) }
 
-  private def settings: RuntimeContext = RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
+  private def settings: RuntimeContext =
+    RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private val taskLayout: SignatureLayout =
     SignatureLayout.of(
@@ -69,7 +78,8 @@ class InferRulesSuite extends FunSuite:
       instructions = Some("BASELINE: answer the question.")
     )
 
-  private def ex(q: String): Example = Example(DynamicValues.record("question" := q, "answer" := gold(q)), inputKeys = Set("question"))
+  private def ex(q: String): Example =
+    Example(DynamicValues.record("question" := q, "answer" := gold(q)), inputKeys = Set("question"))
   private val metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
   private def instructionOf(report: dspy4s.optimize.contracts.OptimizationReport[DynamicPredict]): String =
@@ -82,7 +92,8 @@ class InferRulesSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2")), valset = Some(Vector(ex("q3"), ex("q4"))))
+      val result           =
+        optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2")), valset = Some(Vector(ex("q3"), ex("q4"))))
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
 
@@ -101,7 +112,7 @@ class InferRulesSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2"), ex("q3"), ex("q4")))
+      val result           = optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2"), ex("q3"), ex("q4")))
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       assert(instructionOf(result.toOption.get).contains(RuleToken))
     }

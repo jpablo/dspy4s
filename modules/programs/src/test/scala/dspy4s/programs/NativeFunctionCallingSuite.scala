@@ -25,20 +25,20 @@ import zio.blocks.schema.DynamicValue
 class NativeFunctionCallingSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   /** Records the options of the request it received and returns a tool-only response. */
   private final class RecordingLm extends LanguageModel:
-    @volatile var lastOptions: Option[DynamicValue.Record] = None
-    override val id: String                       = "rec"
-    override val mode: LmMode                       = LmMode.Chat
-    override def supportsFunctionCalling: Boolean   = true
+    @volatile var lastOptions: Option[DynamicValue.Record]                                     = None
+    override val id: String                                                                    = "rec"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def supportsFunctionCalling: Boolean                                              = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       lastOptions = Some(request.options)
       Right(LmResponse(outputs =
         Vector(LmOutput(
-        text      = "",
-        toolCalls = Vector(ToolCall("search", DynamicValues.record("query" := "capital of belgium")))
+          text = "",
+          toolCalls = Vector(ToolCall("search", DynamicValues.record("query" := "capital of belgium")))
         ))
       ))
 
@@ -68,7 +68,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict(ProgramCall(input = DynamicValues.record("question" := "capital of belgium?")))
+      val result           = predict(ProgramCall(input = DynamicValues.record("question" := "capital of belgium?")))
 
       assert(result.isRight, s"expected success, got: $result")
       val pred = result.toOption.get
@@ -97,7 +97,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict(DynamicValues.record("question" := "capital of belgium?"))
+      val result           = predict(DynamicValues.record("question" := "capital of belgium?"))
 
       assert(result.isRight, s"expected success, got: $result")
       assert(

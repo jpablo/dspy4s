@@ -18,11 +18,11 @@ import zio.blocks.schema.Schema
 final case class RlmIn(question: String) derives Schema
 final case class RlmOut(answer: String) derives Schema
 
-/** Round-trip and distribution laws for the `OptimizableTraversal` instances added for the remaining composites ([[BestOfN]]
-  * pass-through, [[Refine]] `read = inner ++ [critic]`, [[RLM]] action+extract) — the gap-closing counterpart of
-  * `ComposeLawSuite` / `ModeLawSuite`'s addressability sections. The invariant under test is the spec's homomorphism
-  * contract: `read` distributes structurally, `replace(p, read(p)) == p`, and a genuine replace writes back
-  * positionally.
+/** Round-trip and distribution laws for the `OptimizableTraversal` instances added for the remaining composites
+  * ([[BestOfN]] pass-through, [[Refine]] `read = inner ++ [critic]`, [[RLM]] action+extract) — the gap-closing
+  * counterpart of `ComposeLawSuite` / `ModeLawSuite`'s addressability sections. The invariant under test is the spec's
+  * homomorphism contract: `read` distributes structurally, `replace(p, read(p)) == p`, and a genuine replace writes
+  * back positionally.
   */
 class CompositeOptimizableTraversalSuite extends FunSuite:
 
@@ -37,7 +37,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
   /** A typed program stub with one learnable leaf (same pattern as ComposeLawSuite's Step). */
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
-    override val moduleName: String = "leaf"
+    override val moduleName: String                         = "leaf"
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -45,7 +45,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
 
   private object Leaf:
     given leafOptimizable[I, O]: OptimizableLeaf[Leaf[I, O]] with
-      def get(program: Leaf[I, O]): OptimizableParameters = program.predict.optimizableParameters
+      def get(program: Leaf[I, O]): OptimizableParameters    = program.predict.optimizableParameters
       def metadata(program: Leaf[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Leaf[I, O], updated: OptimizableParameters): Leaf[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
@@ -94,13 +94,14 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
     val first    = Leaf[Int, String](i => s"v$i", predict("a -> b"))
     val second   = Leaf[String, Int](_.length, predict("b -> c"))
     val composed = AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]](first, second)
-    val b = BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int](
+    val b        = BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int](
       composed,
       n = AttemptCount(2),
       rewardFn = (_, _) => 1.0,
       threshold = 1.0
     )
-    val P = summon[OptimizableTraversal[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
+    val P =
+      summon[OptimizableTraversal[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
     assertEquals(P.read(b), Vector(first.predict.optimizableParameters, second.predict.optimizableParameters))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("first", "second"))
   }

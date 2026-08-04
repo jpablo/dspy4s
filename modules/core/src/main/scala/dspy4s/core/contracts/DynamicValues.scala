@@ -5,18 +5,20 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.util.Objects
 
-/** `"name" := value` builds a schema-lifted `(name, DynamicValue)` entry for the data-bag constructors
-  * (`Example(...)`, [[DynamicValues.recordFromEntries]], the dynamic `ProgramRuntime.run`). The value is
-  * converted with zio-blocks' `Schema.toDynamicValue`, so it is lifted losslessly and a value type without a
-  * `Schema` is a compile error (contrast the legacy `Any`-based [[DynamicValues.fromAny]]). Import via
-  * `dspy4s.core.contracts.:=`. A value that is already a `DynamicValue` can use the plain `"name" -> value`. */
+/** `"name" := value` builds a schema-lifted `(name, DynamicValue)` entry for the data-bag constructors (`Example(...)`,
+  * [[DynamicValues.recordFromEntries]], the dynamic `ProgramRuntime.run`). The value is converted with zio-blocks'
+  * `Schema.toDynamicValue`, so it is lifted losslessly and a value type without a `Schema` is a compile error (contrast
+  * the legacy `Any`-based [[DynamicValues.fromAny]]). Import via `dspy4s.core.contracts.:=`. A value that is already a
+  * `DynamicValue` can use the plain `"name" -> value`.
+  */
 extension (key: String)
   infix def :=[A](value: A)(using schema: Schema[A]): (String, DynamicValue) =
     (key, schema.toDynamicValue(value))
 
 /** `record.updated(name, value)` updates or appends a field by name: if the record already has `name`, replace its
   * value in place (preserving insertion order); otherwise append at the end. Import via
-  * `dspy4s.core.contracts.updated`. */
+  * `dspy4s.core.contracts.updated`.
+  */
 extension (record: DynamicValue.Record)
   def updated(name: String, value: DynamicValue): DynamicValue.Record =
     if record.fields.iterator.exists(_._1 == name) then
@@ -27,43 +29,45 @@ extension (record: DynamicValue.Record)
     else
       DynamicValue.Record(Chunk.from(record.fields.iterator.toSeq :+ (name -> value)))
 
-/** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the
-  * user-input boundary — `Example("q" -> "hello")`, `DynamicValues.record("text" := text)` — where
-  * callers pass plain Scala values that need to be lifted into the spine type. The codec spine
-  * (`Shape.encode` / `Shape.decode` backed by zio-blocks Schema) never goes through these helpers;
-  * it produces and consumes `DynamicValue` directly.
+/** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the user-input boundary
+  * — `Example("q" -> "hello")`, `DynamicValues.record("text" := text)` — where callers pass plain Scala values that
+  * need to be lifted into the spine type. The codec spine (`Shape.encode` / `Shape.decode` backed by zio-blocks Schema)
+  * never goes through these helpers; it produces and consumes `DynamicValue` directly.
   */
 object DynamicValues:
 
-  /** Lift a plain Scala value into a `DynamicValue`. Pass-through for values that are already a
-    * `DynamicValue`. Used only at user-facing boundaries — not in the codec spine. */
+  /** Lift a plain Scala value into a `DynamicValue`. Pass-through for values that are already a `DynamicValue`. Used
+    * only at user-facing boundaries — not in the codec spine.
+    */
   def fromAny(value: Any): DynamicValue =
     if Objects.isNull(value) then DynamicValue.Null
     else
       value match
-        case dv: DynamicValue  => dv
-        case s: String         => DynamicValue.Primitive(PrimitiveValue.String(s))
-        case b: Boolean        => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
-        case i: Int            => DynamicValue.Primitive(PrimitiveValue.Int(i))
-        case l: Long           => DynamicValue.Primitive(PrimitiveValue.Long(l))
-        case f: Float          => DynamicValue.Primitive(PrimitiveValue.Float(f))
-        case d: Double         => DynamicValue.Primitive(PrimitiveValue.Double(d))
-        case seq: Seq[?]       =>
+        case dv: DynamicValue => dv
+        case s: String        => DynamicValue.Primitive(PrimitiveValue.String(s))
+        case b: Boolean       => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
+        case i: Int           => DynamicValue.Primitive(PrimitiveValue.Int(i))
+        case l: Long          => DynamicValue.Primitive(PrimitiveValue.Long(l))
+        case f: Float         => DynamicValue.Primitive(PrimitiveValue.Float(f))
+        case d: Double        => DynamicValue.Primitive(PrimitiveValue.Double(d))
+        case seq: Seq[?]      =>
           DynamicValue.Sequence(Chunk.from(seq.map(fromAny)))
         case m: collection.Map[?, ?] =>
           val entries = m.iterator.collect { case (k: String, v) => k -> fromAny(v) }.toSeq
           DynamicValue.Record(Chunk.from(entries))
-        case other             => DynamicValue.Primitive(PrimitiveValue.String(other.toString))
+        case other => DynamicValue.Primitive(PrimitiveValue.String(other.toString))
 
   /** Build a `DynamicValue.Record` from already-lifted `(name, DynamicValue)` pairs — typically produced by the
     * `"name" := value` extension. Convenience for varargs APIs like `Example.apply` and the dynamic
-    * `ProgramRuntime.run`. */
+    * `ProgramRuntime.run`.
+    */
   def recordFromEntries(entries: Seq[(String, DynamicValue)]): DynamicValue.Record =
     DynamicValue.Record(Chunk.from(entries))
 
   /** Varargs convenience for building a `DynamicValue.Record` from `:=` entries, e.g.
-    * `record("temperature" := 0.7, "max_tokens" := 256)`. The JSON-shaped counterpart to a `Map(...)` literal
-    * for provider config / option bags. */
+    * `record("temperature" := 0.7, "max_tokens" := 256)`. The JSON-shaped counterpart to a `Map(...)` literal for
+    * provider config / option bags.
+    */
   def record(entries: (String, DynamicValue)*): DynamicValue.Record =
     recordFromEntries(entries)
 
@@ -71,25 +75,27 @@ object DynamicValues:
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
     rec.fields.iterator.collectFirst { case (k, v) if k == name => v }
 
-  /** Read a required `String` field from a record, with structured errors: a non-String value is a
-    * [[ValidationError]], a missing field a [[NotFoundError]] on the `prediction_field` resource. `label`
-    * names the producing component in both messages. The shared body of the `extractReasoning` /
-    * `extractRationale` helpers across the composite programs. */
+  /** Read a required `String` field from a record, with structured errors: a non-String value is a [[ValidationError]],
+    * a missing field a [[NotFoundError]] on the `prediction_field` resource. `label` names the producing component in
+    * both messages. The shared body of the `extractReasoning` / `extractRationale` helpers across the composite
+    * programs.
+    */
   def requireString(rec: DynamicValue.Record, field: String, label: String): Either[DspyError, String] =
     recordGet(rec, field) match
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other) =>
+      case Some(other)                                            =>
         Left(ValidationError(s"$label field '$field' must be a String, got: $other"))
       case None =>
         Left(NotFoundError(
           resource = "prediction_field",
-          message  = s"Required field '$field' is missing from the $label prediction"
+          message = s"Required field '$field' is missing from the $label prediction"
         ))
 
-  /** Merge `overlay` onto `base`: every field in `overlay` is upserted into `base` via [[updated]] — `overlay`
-    * wins on a key collision, `base`'s insertion order is preserved, and new keys append at the end. The record
-    * analogue of `base ++ overlay` for a `Map`. The single home for the "spread one option bag under another"
-    * semantics shared by adapter request-options, predictor config, and provider default-options merges. */
+  /** Merge `overlay` onto `base`: every field in `overlay` is upserted into `base` via [[updated]] — `overlay` wins on
+    * a key collision, `base`'s insertion order is preserved, and new keys append at the end. The record analogue of
+    * `base ++ overlay` for a `Map`. The single home for the "spread one option bag under another" semantics shared by
+    * adapter request-options, predictor config, and provider default-options merges.
+    */
   def mergeRecords(base: DynamicValue.Record, overlay: DynamicValue.Record): DynamicValue.Record =
     overlay.fields.iterator.foldLeft(base)((acc, kv) => acc.updated(kv._1, kv._2))
 
@@ -105,57 +111,59 @@ object DynamicValues:
   def recordEntries(rec: DynamicValue.Record): Vector[(String, DynamicValue)] =
     rec.fields.iterator.toVector
 
-  /** Reverse of [[fromAny]]: project a `DynamicValue` back into plain Scala values. Records become
-    * `Map[String, Any]`, sequences become `List[Any]`, variants flatten to their case-name string (DSPy wire
-    * convention), primitives unwrap to their host type. Used at observability boundaries (TraceEntry payloads,
-    * callback event bags) where the consumer expects a free-form Map. */
+  /** Reverse of [[fromAny]]: project a `DynamicValue` back into plain Scala values. Records become `Map[String, Any]`,
+    * sequences become `List[Any]`, variants flatten to their case-name string (DSPy wire convention), primitives unwrap
+    * to their host type. Used at observability boundaries (TraceEntry payloads, callback event bags) where the consumer
+    * expects a free-form Map.
+    */
   def toAny(dv: DynamicValue): Any = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s))  => s
-    case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => b
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))     => n
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))    => n
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))   => n
-    case DynamicValue.Primitive(PrimitiveValue.Double(n))  => n
-    case DynamicValue.Primitive(PrimitiveValue.Short(n))   => n
-    case DynamicValue.Primitive(PrimitiveValue.Byte(n))    => n
-    case DynamicValue.Primitive(PrimitiveValue.Char(c))    => c
+    case DynamicValue.Primitive(PrimitiveValue.String(s))    => s
+    case DynamicValue.Primitive(PrimitiveValue.Boolean(b))   => b
+    case DynamicValue.Primitive(PrimitiveValue.Int(n))       => n
+    case DynamicValue.Primitive(PrimitiveValue.Long(n))      => n
+    case DynamicValue.Primitive(PrimitiveValue.Float(n))     => n
+    case DynamicValue.Primitive(PrimitiveValue.Double(n))    => n
+    case DynamicValue.Primitive(PrimitiveValue.Short(n))     => n
+    case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n
+    case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c
     case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => ()
-    case DynamicValue.Primitive(other)                     => other.toString
-    case variant: DynamicValue.Variant                     =>
+    case DynamicValue.Primitive(other)                       => other.toString
+    case variant: DynamicValue.Variant                       =>
       variant.caseName.getOrElse(toAny(variant.value))
-    case seq: DynamicValue.Sequence                        =>
+    case seq: DynamicValue.Sequence =>
       seq.elements.iterator.map(toAny).toList
-    case rec: DynamicValue.Record                          =>
+    case rec: DynamicValue.Record =>
       rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
-    case m: DynamicValue.Map                               =>
+    case m: DynamicValue.Map =>
       m.entries.iterator.map((k, v) => toAny(k) -> toAny(v)).toMap
-    case _: DynamicValue.Null.type                         => null
+    case _: DynamicValue.Null.type => null
 
   /** Convenience: `toAny` specialized to a `Record`, returning a `Map[String, Any]`. */
   def recordToMap(rec: DynamicValue.Record): Map[String, Any] =
     rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
 
-  /** Plain-text rendering for `DynamicValue` -- used by adapters to render input field values into
-    * the prompt. Recursively flattens records / sequences / variants into a JSON-ish textual form.
-    * Primitives use their natural `toString`; null renders as `null`. */
+  /** Plain-text rendering for `DynamicValue` -- used by adapters to render input field values into the prompt.
+    * Recursively flattens records / sequences / variants into a JSON-ish textual form. Primitives use their natural
+    * `toString`; null renders as `null`.
+    */
   def renderText(dv: DynamicValue): String = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s))  => s
-    case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => b.toString
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))     => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))    => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))   => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Double(n))  => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Short(n))   => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Byte(n))    => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Char(c))    => c.toString
+    case DynamicValue.Primitive(PrimitiveValue.String(s))    => s
+    case DynamicValue.Primitive(PrimitiveValue.Boolean(b))   => b.toString
+    case DynamicValue.Primitive(PrimitiveValue.Int(n))       => n.toString
+    case DynamicValue.Primitive(PrimitiveValue.Long(n))      => n.toString
+    case DynamicValue.Primitive(PrimitiveValue.Float(n))     => n.toString
+    case DynamicValue.Primitive(PrimitiveValue.Double(n))    => n.toString
+    case DynamicValue.Primitive(PrimitiveValue.Short(n))     => n.toString
+    case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n.toString
+    case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c.toString
     case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => "()"
-    case DynamicValue.Primitive(other)                     => other.toString
-    case variant: DynamicValue.Variant                     =>
+    case DynamicValue.Primitive(other)                       => other.toString
+    case variant: DynamicValue.Variant                       =>
       variant.caseName.getOrElse(renderText(variant.value))
-    case seq: DynamicValue.Sequence                        =>
+    case seq: DynamicValue.Sequence =>
       seq.elements.iterator.map(renderText).mkString("[", ", ", "]")
-    case rec: DynamicValue.Record                          =>
+    case rec: DynamicValue.Record =>
       rec.fields.iterator.map((k, v) => s"\"$k\": ${renderText(v)}").mkString("{", ", ", "}")
-    case m: DynamicValue.Map                               =>
+    case m: DynamicValue.Map =>
       m.entries.iterator.map((k, v) => s"${renderText(k)}: ${renderText(v)}").mkString("{", ", ", "}")
-    case _: DynamicValue.Null.type                         => "null"
+    case _: DynamicValue.Null.type => "null"

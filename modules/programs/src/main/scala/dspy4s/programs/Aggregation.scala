@@ -8,34 +8,35 @@ import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.ValidationError
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** Aggregation utilities for collapsing multiple candidate completions into a single [[RawPrediction]]. Port
-  * of Python DSPy's `dspy.predict.aggregation`.
+/** Aggregation utilities for collapsing multiple candidate completions into a single [[RawPrediction]]. Port of Python
+  * DSPy's `dspy.predict.aggregation`.
   *
-  * The primary entry point is [[majority]], which picks the most-common value for a given output field across a
-  * set of candidate completions. Ties are broken by first occurrence (Python parity).
+  * The primary entry point is [[majority]], which picks the most-common value for a given output field across a set of
+  * candidate completions. Ties are broken by first occurrence (Python parity).
   *
   * The default normalizer is a minimal trim-and-blank-check — pass `NormalizeText.normalize` from
-  * `dspy4s.evaluate.metrics` (or any custom function) for the heavier normalization. We keep the default minimal
-  * so `programs` doesn't need to depend on `evaluate` (which already depends on `programs`).
+  * `dspy4s.evaluate.metrics` (or any custom function) for the heavier normalization. We keep the default minimal so
+  * `programs` doesn't need to depend on `evaluate` (which already depends on `programs`).
   */
 object Aggregation:
 
   /** Minimal default: stringify the value, trim whitespace; treat blank as absent. */
   val defaultNormalize: DynamicValue => Option[String] = {
-    case _: DynamicValue.Null.type                          => None
-    case DynamicValue.Primitive(PrimitiveValue.String(s))   => Option(s.trim).filter(_.nonEmpty)
-    case other =>
+    case _: DynamicValue.Null.type                        => None
+    case DynamicValue.Primitive(PrimitiveValue.String(s)) => Option(s.trim).filter(_.nonEmpty)
+    case other                                            =>
       val rendered = DynamicValues.renderText(other).trim
       Option(rendered).filter(_.nonEmpty)
   }
 
-  /** Returns a [[RawPrediction]] whose chosen completion's value for the given field is the majority across
-    * `rows`. Ties are broken by first occurrence.
+  /** Returns a [[RawPrediction]] whose chosen completion's value for the given field is the majority across `rows`.
+    * Ties are broken by first occurrence.
     *
-    *   - `field = None` picks the **last** key in the first row (matches Python's "last output field" default
-    *     when no signature is available).
-    *   - `normalize` returns `None` to exclude a row from the count entirely. If every row normalizes to `None`,
-    *     the count falls back to raw values so we still pick a winner. */
+    *   - `field = None` picks the **last** key in the first row (matches Python's "last output field" default when no
+    *     signature is available).
+    *   - `normalize` returns `None` to exclude a row from the count entirely. If every row normalizes to `None`, the
+    *     count falls back to raw values so we still pick a winner.
+    */
   def majority(
       rows: Vector[DynamicValue.Record],
       field: Option[String] = None,
@@ -62,8 +63,8 @@ object Aggregation:
           yield soFar :+ (row -> normalize(rawValue))
       }.flatMap { paired =>
         val filtered = paired.filter(_._2.isDefined)
-        val counted = if filtered.nonEmpty then filtered else paired.map { case (r, _) => r -> Some("") }
-        val tally = counted.foldLeft(Map.empty[String, Int]) { (m, pair) =>
+        val counted  = if filtered.nonEmpty then filtered else paired.map { case (r, _) => r -> Some("") }
+        val tally    = counted.foldLeft(Map.empty[String, Int]) { (m, pair) =>
           pair._2 match
             case Some(k) => m.updated(k, m.getOrElse(k, 0) + 1)
             case None    => m
@@ -80,8 +81,9 @@ object Aggregation:
           RawPrediction.fromRows(Vector(winner))
       }
 
-  /** Run majority over the [[Completions]] embedded in a [[RawPrediction]], falling back to a single-row vote
-    * when the prediction has no completions attached. */
+  /** Run majority over the [[Completions]] embedded in a [[RawPrediction]], falling back to a single-row vote when the
+    * prediction has no completions attached.
+    */
   def majorityOf(
       prediction: RawPrediction,
       field: Option[String] = None,

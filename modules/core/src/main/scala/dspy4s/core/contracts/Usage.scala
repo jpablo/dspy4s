@@ -30,9 +30,8 @@ object TokenCategory:
   /** Recognize a provider/JSON key as a known category, or preserve it as [[Other]]. */
   def fromWire(name: String): TokenCategory = byWireName.getOrElse(name, Other(name))
 
-/** Typed token accounting for one LM call. Usage is core execution metadata: both
-  * [[dspy4s.core.data.RawPrediction]] and the LM
-  * boundary carry this exact value, so no string-map conversion separates the two layers.
+/** Typed token accounting for one LM call. Usage is core execution metadata: both [[dspy4s.core.data.RawPrediction]]
+  * and the LM boundary carry this exact value, so no string-map conversion separates the two layers.
   *
   * Pointwise addition forms a commutative monoid: universal counters add and provider-specific counters combine by
   * category. [[empty]] is the all-zero usage value.

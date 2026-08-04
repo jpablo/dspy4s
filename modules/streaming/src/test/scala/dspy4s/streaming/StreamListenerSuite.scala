@@ -35,15 +35,15 @@ class StreamListenerSuite extends FunSuite:
 
   /** Scripted streaming LM that just plays back a fixed sequence of LmChunks. */
   private final class ScriptedLm(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
-    override val id: String = "scripted"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = chunks.map(_.text).mkString))))
     override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
       chunks.iterator
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def collectStream(events: ClosableIterator[StreamEvent]): Vector[StreamEvent] =
     val buf = ArrayBuffer.empty[StreamEvent]
@@ -60,17 +60,17 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## answer ## ]]\n42\n"),
       LmChunk(text = "[[ ## completed ## ]]", finishReason = Some("stop"))
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener(signatureFieldName = "answer"))
       )(rec("question" := "x"))
@@ -90,17 +90,17 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## reasoning ## ]]\nthinking"),
       LmChunk(text = "\n[[ ## answer ## ]]\nok\n[[ ## completed ## ]]", finishReason = Some("stop"))
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(
           StreamListener("reasoning"),
@@ -108,8 +108,8 @@ class StreamListenerSuite extends FunSuite:
         )
       )(rec("q" := "x"))
 
-      val events = collectStream(stream)
-      val tokens = events.collect { case e: TokenEvent => e }
+      val events  = collectStream(stream)
+      val tokens  = events.collect { case e: TokenEvent => e }
       val grouped = tokens.groupMapReduce(_.fieldName)(_.chunk)(_ + _)
       assertEquals(grouped.get("reasoning"), Some("thinking"))
       assertEquals(grouped.get("answer"), Some("ok"))
@@ -123,17 +123,17 @@ class StreamListenerSuite extends FunSuite:
         finishReason = Some("stop")
       )
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(rec("q" := "x"))
@@ -152,17 +152,17 @@ class StreamListenerSuite extends FunSuite:
         finishReason = Some("stop")
       )
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector.empty
       )(rec("q" := "x"))
@@ -178,17 +178,17 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = """{"reasoning": "think","""),
       LmChunk(text = """ "answer": "42"}""", finishReason = Some("stop"))
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(JSONAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(JSONAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(rec("q" := "x"))
@@ -205,17 +205,17 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "<outputs><reasoning>think</reasoning>"),
       LmChunk(text = "<answer>42</answer></outputs>", finishReason = Some("stop"))
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> reasoning, answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(XMLAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(XMLAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(rec("q" := "x"))
@@ -234,18 +234,18 @@ class StreamListenerSuite extends FunSuite:
         finishReason = Some("stop")
       )
     )
-    val lm = new ScriptedLm(chunks)
+    val lm            = new ScriptedLm(chunks)
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature))
-      val stream = Streamify.streamify(
+      val program          = DynamicPredict(ChainOfThought.augmentLayout(baseSignature))
+      val stream           = Streamify.streamify(
         program = program,
         streamListeners = Vector(
           StreamListener("reasoning"),
@@ -253,8 +253,8 @@ class StreamListenerSuite extends FunSuite:
         )
       )(rec("q" := "x"))
 
-      val events = collectStream(stream)
-      val tokens = events.collect { case e: TokenEvent => e }
+      val events  = collectStream(stream)
+      val tokens  = events.collect { case e: TokenEvent => e }
       val grouped = tokens.groupMapReduce(_.fieldName)(_.chunk)(_ + _)
       assertEquals(grouped.get("reasoning"), Some("walked through it"))
       assertEquals(grouped.get("answer"), Some("42"))
@@ -270,18 +270,18 @@ class StreamListenerSuite extends FunSuite:
         finishReason = Some("stop")
       )
     )
-    val lm = new ScriptedLm(chunks)
+    val lm            = new ScriptedLm(chunks)
     val baseSignature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = DynamicPredict(ChainOfThought.augmentLayout(baseSignature))
-      val stream = Streamify.streamify(
+      val program          = DynamicPredict(ChainOfThought.augmentLayout(baseSignature))
+      val stream           = Streamify.streamify(
         program = program,
         streamListeners = Vector(
           StreamListener("answer", predictName = Some("predict"))
@@ -302,8 +302,8 @@ class StreamListenerSuite extends FunSuite:
       "[[ ## reasoning ## ]]\nrecall\n[[ ## answer ## ]]\n42\n[[ ## completed ## ]]"
     )
     val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
-    val lm = new StreamingLanguageModel:
-      override val id: String = "scripted-react-stream"
+    val lm      = new StreamingLanguageModel:
+      override val id: String   = "scripted-react-stream"
       override val mode: LmMode = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
@@ -316,13 +316,13 @@ class StreamListenerSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val react = ReAct(baseSignature = signature, tools = Vector.empty, maxIterations = IterationLimit(2))
-      val stream = Streamify.streamify(
+      val react            = ReAct(baseSignature = signature, tools = Vector.empty, maxIterations = IterationLimit(2))
+      val stream           = Streamify.streamify(
         program = react,
         streamListeners = Vector(StreamListener("answer"))
       )(rec("q" := "x"))
@@ -342,10 +342,10 @@ class StreamListenerSuite extends FunSuite:
       "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
       "[[ ## judgement ## ]]\nconfident\n[[ ## completed ## ]]"
     )
-    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val callIdx     = new java.util.concurrent.atomic.AtomicInteger(0)
     val multiCallLm = new StreamingLanguageModel:
-      override val id: String = "multi-scripted"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "multi-scripted"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
         Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
@@ -358,8 +358,8 @@ class StreamListenerSuite extends FunSuite:
 
     val composite = new DynamicModule:
       override val moduleName: String = "my_program"
-      private val predict1 = DynamicPredict(layout = sig1, name = Some("predict1"))
-      private val predict2 = DynamicPredict(layout = sig2, name = Some("predict2"))
+      private val predict1            = DynamicPredict(layout = sig1, name = Some("predict1"))
+      private val predict2            = DynamicPredict(layout = sig2, name = Some("predict2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
@@ -367,20 +367,20 @@ class StreamListenerSuite extends FunSuite:
           answer    <- predict1(input)
           judgement <- predict2(input.copy(
             input = input.input.updated(
-                            "answer",
-                            answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
-                          )
-                        ))
+              "answer",
+              answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+            )
+          ))
         yield judgement.raw
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(multiCallLm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(multiCallLm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = composite,
         streamListeners = Vector(
           StreamListener("answer"),
@@ -408,17 +408,17 @@ class StreamListenerSuite extends FunSuite:
     val chunks = Vector(
       LmChunk(text = "[[ ## answer ## ]]\n1\n[[ ## completed ## ]]", finishReason = Some("stop"))
     )
-    val lm = new ScriptedLm(chunks)
+    val lm        = new ScriptedLm(chunks)
     val signature = SignatureDsl.parse("q -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer", predictName = Some("other-predict"))),
         warningSink = _ => () // suppress the expected validation warning
@@ -435,10 +435,10 @@ class StreamListenerSuite extends FunSuite:
       "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
       "[[ ## answer ## ]]\nlondon\n[[ ## completed ## ]]"
     )
-    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val callIdx     = new java.util.concurrent.atomic.AtomicInteger(0)
     val multiCallLm = new StreamingLanguageModel:
-      override val id: String = "multi-scripted"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "multi-scripted"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
         Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
@@ -450,11 +450,11 @@ class StreamListenerSuite extends FunSuite:
     // field. Without allowReuse=false the listener would emit chunks from
     // both LM calls; with allowReuse=false only the first call's chunks
     // should appear.
-    val sig = SignatureDsl.parse("question -> answer").toOption.get
+    val sig       = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new DynamicModule:
       override val moduleName: String = "my_program"
-      private val predict1 = DynamicPredict(layout = sig, name = Some("predict1"))
-      private val predict2 = DynamicPredict(layout = sig, name = Some("predict2"))
+      private val predict1            = DynamicPredict(layout = sig, name = Some("predict1"))
+      private val predict2            = DynamicPredict(layout = sig, name = Some("predict2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
@@ -465,12 +465,12 @@ class StreamListenerSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(multiCallLm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(multiCallLm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = composite,
         streamListeners = Vector(StreamListener("answer", allowReuse = false)),
         warningSink = _ => ()
@@ -492,10 +492,10 @@ class StreamListenerSuite extends FunSuite:
       "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
       "[[ ## answer ## ]]\nlondon\n[[ ## completed ## ]]"
     )
-    val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
+    val callIdx     = new java.util.concurrent.atomic.AtomicInteger(0)
     val multiCallLm = new StreamingLanguageModel:
-      override val id: String = "multi-scripted"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "multi-scripted"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
         Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
@@ -503,27 +503,27 @@ class StreamListenerSuite extends FunSuite:
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
         Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
 
-    val sig = SignatureDsl.parse("question -> answer").toOption.get
+    val sig       = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new DynamicModule:
       override val moduleName: String = "my_program"
-      private val p1 = DynamicPredict(layout = sig, name = Some("p1"))
-      private val p2 = DynamicPredict(layout = sig, name = Some("p2"))
+      private val p1                  = DynamicPredict(layout = sig, name = Some("p1"))
+      private val p2                  = DynamicPredict(layout = sig, name = Some("p2"))
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
-          _ <- p1(input)
+          _   <- p1(input)
           out <- p2(input)
         yield out.raw
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(multiCallLm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(multiCallLm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = composite,
         streamListeners = Vector(StreamListener("answer"))
       )(rec("question" := "x"))
@@ -534,8 +534,8 @@ class StreamListenerSuite extends FunSuite:
   }
 
   test("validation: listener for an unknown field emits a warning") {
-    val sig = SignatureDsl.parse("q -> answer").toOption.get
-    val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sig                  = SignatureDsl.parse("q -> answer").toOption.get
+    val warnings             = scala.collection.mutable.ArrayBuffer.empty[String]
     val sink: String => Unit = warnings.append
 
     val lm = new ScriptedLm(Vector(
@@ -543,12 +543,12 @@ class StreamListenerSuite extends FunSuite:
     ))
     val _ = RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = sig),
         streamListeners = Vector(
           StreamListener("nonexistent_field"),
@@ -564,8 +564,8 @@ class StreamListenerSuite extends FunSuite:
   }
 
   test("validation: listener with unknown predictName emits a warning") {
-    val sig = SignatureDsl.parse("q -> answer").toOption.get
-    val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
+    val sig                  = SignatureDsl.parse("q -> answer").toOption.get
+    val warnings             = scala.collection.mutable.ArrayBuffer.empty[String]
     val sink: String => Unit = warnings.append
 
     val lm = new ScriptedLm(Vector(
@@ -573,12 +573,12 @@ class StreamListenerSuite extends FunSuite:
     ))
     val _ = RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(ChatAdapter())
-        )
+        lm = Some(lm),
+        adapter = Some(ChatAdapter())
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = sig),
         streamListeners = Vector(StreamListener("answer", predictName = Some("nonexistent_predict"))),
         warningSink = sink
@@ -590,7 +590,7 @@ class StreamListenerSuite extends FunSuite:
   }
 
   test("validation: opaque user composite skips validation (no warnings)") {
-    val warnings = scala.collection.mutable.ArrayBuffer.empty[String]
+    val warnings             = scala.collection.mutable.ArrayBuffer.empty[String]
     val sink: String => Unit = warnings.append
 
     val opaqueProgram = new DynamicModule:

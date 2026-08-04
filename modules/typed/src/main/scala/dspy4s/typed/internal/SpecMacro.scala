@@ -8,30 +8,28 @@ import MacroTypeSupport.namedTupleType
 
 private[typed] object SpecMacro:
 
-  /** Implementation of `Signature.of[T <: Spec]`. Inspects T's
-    * abstract methods at compile time, validates each returns
-    * `InputField[X]` or `OutputField[X]`, confirms a `Schema[X]` is in
-    * scope, and emits a `Signature[I, O]` whose `I` and `O` are named
-    * tuples carrying the spec's input and output fields. Field metadata
-    * (`TypeRef`) and the value codec are both derived from the named
-    * tuple's `Schema` -- there is no per-field `FieldCodec`.
+  /** Implementation of `Signature.of[T <: Spec]`. Inspects T's abstract methods at compile time, validates each returns
+    * `InputField[X]` or `OutputField[X]`, confirms a `Schema[X]` is in scope, and emits a `Signature[I, O]` whose `I`
+    * and `O` are named tuples carrying the spec's input and output fields. Field metadata (`TypeRef`) and the value
+    * codec are both derived from the named tuple's `Schema` -- there is no per-field `FieldCodec`.
     *
     * Compile errors:
     *   - concrete (non-abstract) methods on the spec trait
     *   - methods that don't return `InputField[X]` or `OutputField[X]`
     *   - methods with parameters
     *   - duplicate field names
-    *   - missing `Schema[X]` for any wrapped type */
-  def ofImpl[T <: Spec : Type](
+    *   - missing `Schema[X]` for any wrapped type
+    */
+  def ofImpl[T <: Spec: Type](
       name: Expr[String],
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
     given CanEqual[Symbol, Symbol] = CanEqual.derived
 
-    val tpe        = TypeRepr.of[T]
-    val typeSym    = tpe.typeSymbol
-    val specName   = typeSym.name
+    val tpe      = TypeRepr.of[T]
+    val typeSym  = tpe.typeSymbol
+    val specName = typeSym.name
 
     val inputFieldSym  = TypeRepr.of[InputField[Any]].typeSymbol
     val outputFieldSym = TypeRepr.of[OutputField[Any]].typeSymbol
@@ -48,10 +46,10 @@ private[typed] object SpecMacro:
     if concrete.nonEmpty then
       report.errorAndAbort(
         s"Spec trait '$specName' must declare only abstract field methods; " +
-        s"found concrete method(s): ${concrete.map(_.name).mkString(", ")}"
+          s"found concrete method(s): ${concrete.map(_.name).mkString(", ")}"
       )
 
-    val methods = allDeclared  // all deferred by construction
+    val methods = allDeclared // all deferred by construction
 
     if methods.isEmpty then
       report.errorAndAbort(
@@ -77,15 +75,15 @@ private[typed] object SpecMacro:
         // `tpe.memberType(m)` produces for parameterless `def`s.
         val returnType = m.tree match
           case dd: DefDef => dd.returnTpt.tpe
-          case _ =>
+          case _          =>
             report.errorAndAbort(
               s"Spec member '$specName.$name' must be a `def` declaration"
             )
 
         val (isInput, innerType) = returnType match
-          case AppliedType(tc, List(arg)) if tc.typeSymbol == inputFieldSym  => (true,  arg)
+          case AppliedType(tc, List(arg)) if tc.typeSymbol == inputFieldSym  => (true, arg)
           case AppliedType(tc, List(arg)) if tc.typeSymbol == outputFieldSym => (false, arg)
-          case other =>
+          case other                                                         =>
             report.errorAndAbort(
               s"Spec method '$specName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
             )
@@ -97,7 +95,7 @@ private[typed] object SpecMacro:
             if Expr.summon[Schema[t]].isEmpty then
               report.errorAndAbort(
                 s"No Schema[${innerType.show}] in scope for spec field '$specName.$name'. Spec field " +
-                "types must have a zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
+                  "types must have a zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
               )
 
         (name, isInput, innerType)
@@ -126,11 +124,11 @@ private[typed] object SpecMacro:
     (inputType.asType, outputType.asType) match
       case ('[i], '[o]) =>
         materialize[i, o](
-          nameExpr         = sigNameExpr,
+          nameExpr = sigNameExpr,
           instructionsExpr = instructions,
-          errorContext     = s"spec trait '$specName'",
-          inputShapeExpr   = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
-          outputShapeExpr  = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
+          errorContext = s"spec trait '$specName'",
+          inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+          outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
         )
       case _ =>
         report.errorAndAbort(s"Internal error materializing spec trait '$specName'")

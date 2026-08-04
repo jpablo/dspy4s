@@ -2,9 +2,8 @@ package dspy4s.lm.contracts
 
 import dspy4s.core.contracts.RuntimeContext
 
-/** A single tool-call delta extracted from one streaming LM chunk. OpenAI emits
-  * `id`/`function.name` on the first delta for an index and `function.arguments`
-  * fragments on subsequent deltas; consumers accumulate by `index`.
+/** A single tool-call delta extracted from one streaming LM chunk. OpenAI emits `id`/`function.name` on the first delta
+  * for an index and `function.arguments` fragments on subsequent deltas; consumers accumulate by `index`.
   */
 final case class LmToolCallDelta(
     index: Int,

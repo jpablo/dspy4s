@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class StreamingQueueSuite extends FunSuite:
 
   test("queue delivers items in offer order") {
-    val queue = StreamingQueue[Int](8)
+    val queue    = StreamingQueue[Int](8)
     val producer = new Thread(() => {
       val _ = queue.offer(1)
       val _ = queue.offer(2)
@@ -22,9 +22,9 @@ class StreamingQueueSuite extends FunSuite:
   }
 
   test("iterator blocks until items arrive and completes on close") {
-    val queue = StreamingQueue[String](8)
+    val queue    = StreamingQueue[String](8)
     val received = new java.util.concurrent.CopyOnWriteArrayList[String]()
-    val done = new AtomicBoolean(false)
+    val done     = new AtomicBoolean(false)
 
     val consumer = new Thread(() => {
       val iter = queue.asIterator
@@ -57,9 +57,9 @@ class StreamingQueueSuite extends FunSuite:
 
   test("closing iterator stops consumption") {
     val queue = StreamingQueue[Int](8)
-    val _ = queue.offer(1)
-    val _ = queue.offer(2)
-    val iter = queue.asIterator
+    val _     = queue.offer(1)
+    val _     = queue.offer(2)
+    val iter  = queue.asIterator
     assertEquals(iter.hasNext, true)
     assertEquals(iter.next(), 1)
     iter.close()
@@ -68,7 +68,7 @@ class StreamingQueueSuite extends FunSuite:
 
   test("close is idempotent") {
     val queue = StreamingQueue[Int](8)
-    val _ = queue.offer(1)
+    val _     = queue.offer(1)
     queue.close()
     queue.close()
     val iter = queue.asIterator
@@ -86,8 +86,8 @@ class StreamingQueueSuite extends FunSuite:
 
   test("a producer parked on a full buffer is released when the consumer abandons the stream") {
     // Regression: blocking put() + a consumer close() that didn't drain left the producer parked forever.
-    val queue   = StreamingQueue[Int](2) // tiny buffer so the producer blocks quickly
-    val stopped = new AtomicBoolean(false)
+    val queue    = StreamingQueue[Int](2) // tiny buffer so the producer blocks quickly
+    val stopped  = new AtomicBoolean(false)
     val producer = new Thread(() => {
       var i = 0
       while queue.offer(i) do i += 1 // keep producing until offer reports the consumer is gone

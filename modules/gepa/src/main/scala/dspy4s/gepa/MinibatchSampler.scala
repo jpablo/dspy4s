@@ -3,8 +3,9 @@ package dspy4s.gepa
 import scala.collection.mutable
 import scala.util.Random
 
-/** Chooses the train-example indices for an iteration's reflection minibatch. Stateful: created once per
-  * `optimize` run and advanced by iteration index (gepa's `BatchSampler`). */
+/** Chooses the train-example indices for an iteration's reflection minibatch. Stateful: created once per `optimize` run
+  * and advanced by iteration index (gepa's `BatchSampler`).
+  */
 trait MinibatchSampler:
   /** The train indices (each in `[0, trainsetSize)`) for the minibatch of `iteration` (0-based). */
   def sample(trainsetSize: Int, iteration: Int): Vector[Int]
@@ -19,23 +20,25 @@ object MinibatchSampler:
     case BatchSamplerKind.EpochShuffled => new EpochShuffled(minibatchSize, seed)
     case BatchSamplerKind.RandomDraw    => new RandomDraw(minibatchSize, seed)
 
-  /** Independent random draw (without replacement within a draw) each iteration — GEPA v0's sampler. Simple, but
-    * a given example can be starved or over-sampled across iterations since draws are independent. */
+  /** Independent random draw (without replacement within a draw) each iteration — GEPA v0's sampler. Simple, but a
+    * given example can be starved or over-sampled across iterations since draws are independent.
+    */
   final class RandomDraw(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
-    private val rng = new Random(seed)
+    private val rng                                            = new Random(seed)
     def sample(trainsetSize: Int, iteration: Int): Vector[Int] =
       require(trainsetSize > 0, "cannot sample from an empty trainset")
       rng.shuffle((0 until trainsetSize).toVector).take(minibatchSize)
 
   /** gepa's default `EpochShuffledBatchSampler`: shuffle the trainset once per epoch and walk it in sequential
-    * minibatch-sized windows, so every example is used once per epoch before any repeats (sampling WITHOUT
-    * replacement across an epoch — better coverage than [[RandomDraw]]). The shuffled list is padded to a multiple
-    * of `minibatchSize` with the least-frequently-used ids so the final window is full; a new shuffle is drawn each
-    * time the walk wraps into the next epoch.
+    * minibatch-sized windows, so every example is used once per epoch before any repeats (sampling WITHOUT replacement
+    * across an epoch — better coverage than [[RandomDraw]]). The shuffled list is padded to a multiple of
+    * `minibatchSize` with the least-frequently-used ids so the final window is full; a new shuffle is drawn each time
+    * the walk wraps into the next epoch.
     *
-    * Deltas from gepa: the iteration index starts at 0 (gepa's at 1, a harmless one-window offset), and padding
-    * ties break by smallest id (gepa uses `Counter` insertion order) — both change only WHICH example fills a pad
-    * slot, not the coverage guarantee. Deterministic for a given `seed`. */
+    * Deltas from gepa: the iteration index starts at 0 (gepa's at 1, a harmless one-window offset), and padding ties
+    * break by smallest id (gepa uses `Counter` insertion order) — both change only WHICH example fills a pad slot, not
+    * the coverage guarantee. Deterministic for a given `seed`.
+    */
   final class EpochShuffled(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
     private val rng                   = new Random(seed)
     private var shuffled: Vector[Int] = Vector.empty

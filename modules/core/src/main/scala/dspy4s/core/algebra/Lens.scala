@@ -1,15 +1,13 @@
 package dspy4s.core.algebra
 
-/** A lawful lens: a focused `get`/`set` pair from a whole `S` onto a part `A`, carrying the three classic
-  * optic laws ON the trait as `@Law`/[[IsEq]] statements (the same shape as [[Monoid]]; see `Laws.scala`).
-  * Concrete types provide `given` instances; the law suites execute the statements under the equality honest
-  * for each carrier.
+/** A lawful lens: a focused `get`/`set` pair from a whole `S` onto a part `A`, carrying the three classic optic laws ON
+  * the trait as `@Law`/[[IsEq]] statements (the same shape as [[Monoid]]; see `Laws.scala`). Concrete types provide
+  * `given` instances; the law suites execute the statements under the equality honest for each carrier.
   *
-  * An instance is only lawful when `A` is exactly the writable part of `S`: a focus smaller than what `set`
-  * touches breaks Put-Get, one larger than what `set` accepts breaks Get-Put. The prime example is
-  * `dspy4s.programs.optimization.OptimizableLeaf`, whose focus
-  * `dspy4s.programs.optimization.OptimizableParameters` was carved out of the executable predictor precisely so these
-  * laws hold.
+  * An instance is only lawful when `A` is exactly the writable part of `S`: a focus smaller than what `set` touches
+  * breaks Put-Get, one larger than what `set` accepts breaks Get-Put. The prime example is
+  * `dspy4s.programs.optimization.OptimizableLeaf`, whose focus `dspy4s.programs.optimization.OptimizableParameters` was
+  * carved out of the executable predictor precisely so these laws hold.
   */
 trait Lens[S, A]:
   /** Read the focused part. */

@@ -1,14 +1,17 @@
 ThisBuild / organization := "io.github.jpablo"
-ThisBuild / version := "0.1.0-SNAPSHOT"
+ThisBuild / version      := "0.1.0-SNAPSHOT"
 ThisBuild / scalaVersion := "3.8.4"
 
-lazy val munitVersion     = "1.3.4"
+addCommandAlias("fmt", ";scalafmtAll;scalafmtSbt")
+addCommandAlias("fmtCheck", ";scalafmtCheckAll;scalafmtSbtCheck")
+
+lazy val munitVersion           = "1.3.4"
 lazy val munitScalacheckVersion = "1.3.0" // own line; munit-scalacheck has no 1.3.1 (patch-compatible with munit 1.3.1)
-lazy val zioBlocksVersion = "0.0.41"
-lazy val ujsonVersion     = "4.4.3"
-lazy val dotenvVersion    = "3.2.0"
-lazy val scalaXmlVersion  = "2.4.0"
-lazy val ironVersion      = "3.3.2"
+lazy val zioBlocksVersion       = "0.0.41"
+lazy val ujsonVersion           = "4.4.3"
+lazy val dotenvVersion          = "3.2.0"
+lazy val scalaXmlVersion        = "2.4.0"
+lazy val ironVersion            = "3.3.2"
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -45,7 +48,7 @@ lazy val root = (project in file("."))
   )
   .settings(commonSettings)
   .settings(
-    name := "dspy4s",
+    name           := "dspy4s",
     publish / skip := true
   )
 
@@ -59,10 +62,10 @@ lazy val core = (project in file("modules/core"))
   .settings(name := "dspy4s-core")
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"           %% "zio-blocks-schema" % zioBlocksVersion,
-      "io.github.iltotore" %% "iron"             % ironVersion,
-      "org.scalameta"     %% "munit"             % munitVersion % Test,
-      "org.scalameta"     %% "munit-scalacheck"  % munitScalacheckVersion % Test
+      "dev.zio"            %% "zio-blocks-schema" % zioBlocksVersion,
+      "io.github.iltotore" %% "iron"              % ironVersion,
+      "org.scalameta"      %% "munit"             % munitVersion           % Test,
+      "org.scalameta"      %% "munit-scalacheck"  % munitScalacheckVersion % Test
     ),
     Test / parallelExecution := false
   )
@@ -87,9 +90,9 @@ lazy val lm = (project in file("modules/lm"))
   .settings(name := "dspy4s-lm")
   .settings(
     libraryDependencies ++= Seq(
-      "io.github.iltotore" %% "iron" % ironVersion,
-      "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % ujsonVersion,
+      "io.github.iltotore" %% "iron"        % ironVersion,
+      "org.scalameta"      %% "munit"       % munitVersion  % Test,
+      "com.lihaoyi"        %% "ujson"       % ujsonVersion,
       "io.github.cdimascio" % "dotenv-java" % dotenvVersion % Test
     ),
     Test / fork := true,
@@ -102,8 +105,8 @@ lazy val adapters = (project in file("modules/adapters"))
   .settings(name := "dspy4s-adapters")
   .settings(
     libraryDependencies ++= Seq(
-      "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % ujsonVersion,
+      "org.scalameta"          %% "munit"     % munitVersion % Test,
+      "com.lihaoyi"            %% "ujson"     % ujsonVersion,
       "org.scala-lang.modules" %% "scala-xml" % scalaXmlVersion
     )
   )
@@ -126,7 +129,7 @@ lazy val evaluate = (project in file("modules/evaluate"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi" %% "ujson" % ujsonVersion
+      "com.lihaoyi"   %% "ujson" % ujsonVersion
     )
   )
 

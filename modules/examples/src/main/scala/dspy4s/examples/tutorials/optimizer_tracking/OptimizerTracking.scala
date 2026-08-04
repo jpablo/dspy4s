@@ -1,18 +1,16 @@
-/**
- * Tracking DSPy Optimizers
- *
- * Source:   docs/docs/tutorials/optimizer_tracking/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/optimizer_tracking/index.md
- * Status:   translated (the optimizer run + its observability). MLflow autolog (snippet 1) has no dspy4s
- *           equivalent; its role — observing the optimization process — maps onto a `CallbackHandler`
- *           registered in the `RuntimeContext` (the general dspy4s observability seam; see
- *           tutorials/observability). MIPROv2 (snippet 2) is ported (`dspy4s.optimize.MIPROv2`); the GSM8K
- *           dataset is swapped for a small hand-built trainset (no `dspy.datasets`, PORT_GAPS G-21). The
- *           MLflow artifact reload (snippet 3) maps onto `ProgramPersistence.load` (PORT_GAPS G-4).
- *
- *           Delta from Python: dspy4s MIPROv2 takes explicit knobs (no `auto="light"` run mode), and dspy4s
- *           has no experiment-tracking server — the callback stream is where you wire logging / metrics export.
- */
+/** Tracking DSPy Optimizers
+  *
+  * Source: docs/docs/tutorials/optimizer_tracking/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/optimizer_tracking/index.md Status: translated
+  * (the optimizer run + its observability). MLflow autolog (snippet 1) has no dspy4s equivalent; its role — observing
+  * the optimization process — maps onto a `CallbackHandler` registered in the `RuntimeContext` (the general dspy4s
+  * observability seam; see tutorials/observability). MIPROv2 (snippet 2) is ported (`dspy4s.optimize.MIPROv2`); the
+  * GSM8K dataset is swapped for a small hand-built trainset (no `dspy.datasets`, PORT_GAPS G-21). The MLflow artifact
+  * reload (snippet 3) maps onto `ProgramPersistence.load` (PORT_GAPS G-4).
+  *
+  * Delta from Python: dspy4s MIPROv2 takes explicit knobs (no `auto="light"` run mode), and dspy4s has no
+  * experiment-tracking server — the callback stream is where you wire logging / metrics export.
+  */
 package dspy4s.examples.tutorials.optimizer_tracking
 
 import dspy4s.core.contracts.{:=, CallbackEvent, CallbackHandler, DspyError, LmEndEvent, RuntimeContext}
@@ -37,8 +35,8 @@ object OptimizerTracking:
   // optimizer run — swap it for a logger / tracer / metrics exporter to "track" however you need.
   // --8<-- [start:tracking-callback]
   final class CompileTrackingCallback extends CallbackHandler:
-    private val lmCalls = new AtomicInteger(0)
-    def calls: Int = lmCalls.get()
+    private val lmCalls                                                    = new AtomicInteger(0)
+    def calls: Int                                                         = lmCalls.get()
     override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
       case _: LmEndEvent => val _ = lmCalls.incrementAndGet()
       case _             => ()
@@ -66,7 +64,9 @@ object OptimizerTracking:
   // | optimized_program = teleprompter.compile(program, trainset=trainset)
   // The tracking callback is installed in the RuntimeContext, so it observes every LM call the optimizer makes.
   // --8<-- [start:optimize-with-tracking]
-  def optimizeWithTracking(student: DynamicPredict)(using ctx: RuntimeContext)
+  def optimizeWithTracking(student: DynamicPredict)(using
+      ctx: RuntimeContext
+  )
       : Either[DspyError, (DynamicPredict, Int)] =
     val tracker = new CompileTrackingCallback
     RuntimeEnvironment.withCallbacks(ctx.callbacks :+ tracker) {

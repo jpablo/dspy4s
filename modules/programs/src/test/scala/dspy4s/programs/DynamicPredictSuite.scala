@@ -58,13 +58,13 @@ class PredictSuite extends FunSuite:
         ParsedOutput(
           values = rec(
             "answer" := output.text,
-            "score" -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
+            "score"  -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
           )
         )
       )
 
   private object DummyLanguageModel extends LanguageModel:
-    override val id: String = "dummy-lm"
+    override val id: String   = "dummy-lm"
     override val mode: LmMode = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
@@ -79,7 +79,7 @@ class PredictSuite extends FunSuite:
       )
 
   private object DummyToolCallLanguageModel extends LanguageModel:
-    override val id: String = "dummy-lm-tools"
+    override val id: String   = "dummy-lm-tools"
     override val mode: LmMode = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
@@ -106,20 +106,20 @@ class PredictSuite extends FunSuite:
 
   test("predict runs adapter and lm pipeline with callbacks and completions") {
     val signature = SignatureDsl.parse("question -> answer, score").toOption.get
-    val events = ArrayBuffer.empty[CallbackEvent]
-    val callback = new CallbackHandler:
+    val events    = ArrayBuffer.empty[CallbackEvent]
+    val callback  = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(DummyLanguageModel),
-          adapter = Some(DummyAdapter)
-        )
+        lm = Some(DummyLanguageModel),
+        adapter = Some(DummyAdapter)
+      )
     ) {
       RuntimeEnvironment.withCallbacks(Vector(callback)) {
         given RuntimeContext = RuntimeEnvironment.current
-        val result = DynamicPredict(signature)(ProgramCall(input = rec("question" := "Capital of France?")))
+        val result           = DynamicPredict(signature)(ProgramCall(input = rec("question" := "Capital of France?")))
 
         assert(result.isRight)
         val prediction = result.toOption.get
@@ -154,8 +154,8 @@ class PredictSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(DummyLanguageModel)
-        )
+        lm = Some(DummyLanguageModel)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = DynamicPredict(signature)(ProgramCall(input = rec("question" := "x")))
@@ -170,9 +170,9 @@ class PredictSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(DummyToolCallLanguageModel),
-          adapter = Some(DummyAdapter)
-        )
+        lm = Some(DummyToolCallLanguageModel),
+        adapter = Some(DummyAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = DynamicPredict(signature)(ProgramCall(input = rec("question" := "x")))

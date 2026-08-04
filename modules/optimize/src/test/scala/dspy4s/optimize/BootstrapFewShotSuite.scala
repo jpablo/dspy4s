@@ -20,8 +20,8 @@ class BootstrapFewShotSuite extends FunSuite:
   private val signature = SignatureDsl.parse("question: str -> answer: str").toOption.get
 
   test("BootstrapFewShot returns original student when trainset is empty") {
-    val student = ScriptedPredictProgram(Map.empty, signature)
-    val optimizer = new BootstrapFewShot[ScriptedPredictProgram]()
+    val student          = ScriptedPredictProgram(Map.empty, signature)
+    val optimizer        = new BootstrapFewShot[ScriptedPredictProgram]()
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = optimizer.compile(student, Vector.empty)
@@ -30,13 +30,13 @@ class BootstrapFewShotSuite extends FunSuite:
   }
 
   test("BootstrapFewShot bootstraps demos from examples where teacher succeeds") {
-    val teacher = ScriptedPredictProgram(Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3"), signature)
+    val teacher  = ScriptedPredictProgram(Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3"), signature)
     val trainset = Vector(
       Example(rec("question" := "q1", "answer" := "a1"), inputKeys = Set("question")),
       Example(rec("question" := "q2", "answer" := "a2"), inputKeys = Set("question")),
       Example(rec("question" := "q3", "answer" := "a3"), inputKeys = Set("question"))
     )
-    val student = ScriptedPredictProgram(Map.empty, signature)
+    val student   = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
       BootstrapFewShotConfig(
         maxBootstrappedDemos = DemoCount(2),
@@ -56,7 +56,7 @@ class BootstrapFewShotSuite extends FunSuite:
   }
 
   test("BootstrapFewShot uses metric to filter which traces to keep") {
-    val teacher = ScriptedPredictProgram(Map("q1" -> "wrong", "q2" -> "expected", "q3" -> "also-wrong"), signature)
+    val teacher  = ScriptedPredictProgram(Map("q1" -> "wrong", "q2" -> "expected", "q3" -> "also-wrong"), signature)
     val trainset = Vector(
       Example(rec("question" := "q1", "answer" := "expected"), inputKeys = Set("question")),
       Example(rec("question" := "q2", "answer" := "expected"), inputKeys = Set("question")),
@@ -65,7 +65,7 @@ class BootstrapFewShotSuite extends FunSuite:
 
     val exactMatch = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
-    val student = ScriptedPredictProgram(Map.empty, signature)
+    val student   = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
       BootstrapFewShotConfig(
         metric = Some(exactMatch),
@@ -105,12 +105,12 @@ class BootstrapFewShotSuite extends FunSuite:
   test("BootstrapFewShot fills remaining slots from labeled examples that failed bootstrap") {
     // Teacher knows only q1; other questions get "unknown" answers (mismatch),
     // so other examples go into the failed pool and fill labeled slots.
-    val teacher = ScriptedPredictProgram(Map("q1" -> "a1"), signature)
+    val teacher  = ScriptedPredictProgram(Map("q1" -> "a1"), signature)
     val trainset = (1 to 5).map(i =>
       Example(rec("question" := s"q$i", "answer" := s"a$i"), inputKeys = Set("question"))
     ).toVector
 
-    val student = ScriptedPredictProgram(Map.empty, signature)
+    val student   = ScriptedPredictProgram(Map.empty, signature)
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
       BootstrapFewShotConfig(
         maxBootstrappedDemos = DemoCount(1),
@@ -125,7 +125,7 @@ class BootstrapFewShotSuite extends FunSuite:
     assert(result.isRight)
     val demos = result.toOption.get.bestProgram.demos
     assert(demos.size <= 3, s"got ${demos.size} demos, expected at most 3")
-    val augmentedCount = demos.count(_.augmented)
+    val augmentedCount    = demos.count(_.augmented)
     val nonAugmentedCount = demos.size - augmentedCount
     assertEquals(augmentedCount, 1)
     assert(nonAugmentedCount <= 2, s"got $nonAugmentedCount labeled demos, expected <= 2")

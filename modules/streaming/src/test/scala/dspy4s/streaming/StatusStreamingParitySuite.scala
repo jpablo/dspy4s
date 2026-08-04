@@ -30,7 +30,7 @@ import scala.collection.mutable.ArrayBuffer
 class StatusStreamingParitySuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   /** A program that invokes a tool and then "predicts" a fixed answer. We keep it minimal — no LM is configured because
     * the test only inspects status events.
@@ -49,10 +49,10 @@ class StatusStreamingParitySuite extends FunSuite:
     // Two streamify calls run on independent threads, each with a distinct
     // provider. Each consumer must see only its own provider's messages.
     val toolA = new ToolFunction:
-      override val name: String = "tool_a"
+      override val name: String                                            = "tool_a"
       override def invoke(args: DynamicValue.Record)(using RuntimeContext) = Right(ToolFunction.result("a-done"))
     val toolB = new ToolFunction:
-      override val name: String = "tool_b"
+      override val name: String                                            = "tool_b"
       override def invoke(args: DynamicValue.Record)(using RuntimeContext) = Right(ToolFunction.result("b-done"))
 
     val providerA = new StatusMessageProvider:
@@ -66,7 +66,7 @@ class StatusStreamingParitySuite extends FunSuite:
       override def toolEnd(name: String, output: Either[DspyError, DynamicValue]): Option[String] =
         Some(s"ProviderB: $name finished!")
 
-    val pool = Executors.newFixedThreadPool(2)
+    val pool  = Executors.newFixedThreadPool(2)
     val ready = new CountDownLatch(2)
 
     @volatile var messagesA: Vector[String] = Vector.empty
@@ -75,7 +75,7 @@ class StatusStreamingParitySuite extends FunSuite:
     val runA: Runnable = () => {
       RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
-        val stream = Streamify.streamify(
+        val stream           = Streamify.streamify(
           program = buildToolProgram(toolA, DynamicValue.Record.empty),
           statusMessageProvider = Some(providerA)
         )(rec())
@@ -92,7 +92,7 @@ class StatusStreamingParitySuite extends FunSuite:
     val runB: Runnable = () => {
       RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
-        val stream = Streamify.streamify(
+        val stream           = Streamify.streamify(
           program = buildToolProgram(toolB, DynamicValue.Record.empty),
           statusMessageProvider = Some(providerB)
         )(rec())
@@ -128,14 +128,14 @@ class StatusStreamingParitySuite extends FunSuite:
     // demonstrating that the start event is consumable before the tool
     // returns.
     val sleepMillis = 200L
-    val slowTool = new ToolFunction:
-      override val name: String = "slow"
+    val slowTool    = new ToolFunction:
+      override val name: String                                            = "slow"
       override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
         Thread.sleep(sleepMillis)
         Right(ToolFunction.result("done"))
 
     given RuntimeContext = RuntimeEnvironment.current
-    val stream = Streamify.streamify(
+    val stream           = Streamify.streamify(
       program = buildToolProgram(slowTool, DynamicValue.Record.empty),
       statusMessageProvider = Some(StatusMessageProvider.default)
     )(rec())
@@ -150,7 +150,7 @@ class StatusStreamingParitySuite extends FunSuite:
     // We expect at least a "Calling tool slow..." start and a
     // "Tool calling finished!..." end status.
     val startTs = statusTimestamps.find(_._1.contains("Calling tool slow")).map(_._2)
-    val endTs = statusTimestamps.find(_._1.contains("Tool calling finished")).map(_._2)
+    val endTs   = statusTimestamps.find(_._1.contains("Tool calling finished")).map(_._2)
     assert(startTs.isDefined, s"no tool-start status: ${statusTimestamps.map(_._1)}")
     assert(endTs.isDefined, s"no tool-end status: ${statusTimestamps.map(_._1)}")
     val delta = endTs.get - startTs.get

@@ -7,9 +7,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The complete optimizer-writable parameters of one optimizable leaf.
   *
-  * This value is deliberately smaller than [[DynamicPredict]]. A leaf's signature shape, module name, runtime,
-  * output schema, bound language model, and tools describe or execute the leaf; they are not prompt parameters and
-  * must not be replaceable by an optimizer. Keeping only the three fields every supported predictor can write makes
+  * This value is deliberately smaller than [[DynamicPredict]]. A leaf's signature shape, module name, runtime, output
+  * schema, bound language model, and tools describe or execute the leaf; they are not prompt parameters and must not be
+  * replaceable by an optimizer. Keeping only the three fields every supported predictor can write makes
   * [[OptimizableLeaf]] a lawful lens and gives [[OptimizableTraversal]] and the parameterized program algebra one
   * homogeneous parameter carrier.
   *
@@ -62,7 +62,7 @@ object OptimizableParameters:
             (acc, raw) =>
               for
                 demos <- acc
-                demo <- raw match
+                demo  <- raw match
                   case record: DynamicValue.Record => Example.fromState(record)
                   case _ => Left(ValidationError("OptimizableParameters 'demos' must contain records"))
               yield demos :+ demo
@@ -74,7 +74,7 @@ object OptimizableParameters:
       DynamicValues.recordGet(state, "config") match
         case Some(record: DynamicValue.Record) => Right(record)
         case None                              => Left(ValidationError("OptimizableParameters is missing 'config'"))
-        case Some(_)                           => Left(ValidationError("OptimizableParameters 'config' must be a record"))
+        case Some(_) => Left(ValidationError("OptimizableParameters 'config' must be a record"))
 
     for
       instructions <- readInstructions

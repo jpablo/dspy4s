@@ -15,23 +15,25 @@ case class TagInput(text: String) derives Schema
 case class TagItem(name: String, score: Double) derives Schema
 case class TagOutput(tags: List[String], items: List[TagItem], amount: Option[Double]) derives Schema
 
-/** Reproduces the second email_extraction failure: structured output fields — `List[String]`,
-  * `List[case class]`, and `Option[Double]` — must decode under the default `ChatAdapter`.
+/** Reproduces the second email_extraction failure: structured output fields — `List[String]`, `List[case class]`, and
+  * `Option[Double]` — must decode under the default `ChatAdapter`.
   *
   * Today `ChatAdapter.coerce` leaves every non-scalar (`json`) field as a raw `String` primitive instead of
-  * JSON-parsing it, so list/record fields fail with "Expected a sequence", and `Option` fields have no
-  * normalize support at all (zio-blocks needs a `Some`/`None` Variant shape), failing with
-  * "Missing field 'value' at: .amount.when[Some]". */
+  * JSON-parsing it, so list/record fields fail with "Expected a sequence", and `Option` fields have no normalize
+  * support at all (zio-blocks needs a `Some`/`None` Variant shape), failing with "Missing field 'value' at:
+  * .amount.when[Some]".
+  */
 class StructuredOutputSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
-  /** A scripted LM returning ChatAdapter marker-framed output: a JSON array for each list field, a JSON
-    * object array for the record list, and a bare number for the optional field. */
+  /** A scripted LM returning ChatAdapter marker-framed output: a JSON array for each list field, a JSON object array
+    * for the record list, and a bare number for the optional field.
+    */
   private final class ScriptedLm(text: String) extends LanguageModel:
-    override val id: String   = "scripted"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
@@ -54,9 +56,9 @@ class StructuredOutputSuite extends FunSuite:
       RuntimeContext(lm = Some(new ScriptedLm(completion)), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val out = Predict(signature)(TagInput("classify this")).map(_.output)
-      assertEquals(out.map(_.tags),   Right(List("urgent", "billing")))
-      assertEquals(out.map(_.items),  Right(List(TagItem("MacBook Pro", 0.92))))
+      val out              = Predict(signature)(TagInput("classify this")).map(_.output)
+      assertEquals(out.map(_.tags), Right(List("urgent", "billing")))
+      assertEquals(out.map(_.items), Right(List(TagItem("MacBook Pro", 0.92))))
       assertEquals(out.map(_.amount), Right(Some(2399.0)))
     }
   }
@@ -65,14 +67,14 @@ class StructuredOutputSuite extends FunSuite:
     // Without the nested schema, the LM doesn't know `items` is a list of {name, score} objects and emits
     // a list of strings → "Expected a record at: .items.each". The prompt must surface the nested field names.
     val invocation = AdapterInvocation(
-      layout           = signature.layout,
-      demos            = Vector.empty,
-      inputs           = Example(values = DynamicValues.recordFromEntries(Seq("text" := "x")), inputKeys = Set("text")),
-      request          = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      layout = signature.layout,
+      demos = Vector.empty,
+      inputs = Example(values = DynamicValues.recordFromEntries(Seq("text" := "x")), inputKeys = Set("text")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
       outputJsonSchema = signature.outputShape.jsonSchemaString
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
     assert(
       system.contains("score"),
       s"expected the nested field name 'score' (from items: List[TagItem]) in the ChatAdapter system prompt " +
@@ -84,10 +86,10 @@ class StructuredOutputSuite extends FunSuite:
     // The email_extraction example builds every step with ChainOfThought. CoT's augmented output Shape must
     // still carry the base output JSON schema, or the nested structure (items: List[TagItem]) never reaches
     // the LM and it emits a list of strings → "Expected a record at: .items.each".
-    val captured = scala.collection.mutable.ArrayBuffer.empty[String]
+    val captured    = scala.collection.mutable.ArrayBuffer.empty[String]
     val capturingLm = new LanguageModel:
-      override val id: String   = "capturing"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "capturing"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         request.messages.foreach(m => m.text.foreach(captured += _))
         Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
@@ -96,8 +98,8 @@ class StructuredOutputSuite extends FunSuite:
       RuntimeContext(lm = Some(capturingLm), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val cot = ChainOfThought(signature)
-      val _   = cot(TagInput("classify this")) // result ignored; we assert on the captured prompt
+      val cot              = ChainOfThought(signature)
+      val _                = cot(TagInput("classify this")) // result ignored; we assert on the captured prompt
     }
     val prompt = captured.mkString("\n")
     assert(
@@ -123,8 +125,8 @@ class StructuredOutputSuite extends FunSuite:
       RuntimeContext(lm = Some(new ScriptedLm(noneCompletion)), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val out = Predict(signature)(TagInput("nothing here")).map(_.output)
+      val out              = Predict(signature)(TagInput("nothing here")).map(_.output)
       assertEquals(out.map(_.amount), Right(None))
-      assertEquals(out.map(_.tags),   Right(Nil))
+      assertEquals(out.map(_.tags), Right(Nil))
     }
   }

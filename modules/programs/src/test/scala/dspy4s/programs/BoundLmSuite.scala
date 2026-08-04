@@ -29,8 +29,8 @@ class BoundLmSuite extends FunSuite:
       Right(ParsedOutput(values = rec("answer" := output.text)))
 
   private final class FixedLm(id0: String, reply: String) extends LanguageModel:
-    override val id: String   = id0
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = id0
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = reply))))
 
@@ -38,7 +38,7 @@ class BoundLmSuite extends FunSuite:
   private val boundLm   = new FixedLm("bound", "BOUND")
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def underAmbient[A](body: RuntimeContext ?=> A): A =
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(ambientLm), adapter = Some(EchoAdapter))) {
@@ -61,7 +61,7 @@ class BoundLmSuite extends FunSuite:
   }
 
   test("Predict[I,O]: withLm pins a bound lm used in preference to ambient") {
-    val sig = Signature.derived[BlmInput, BlmOutput]("QA")
+    val sig    = Signature.derived[BlmInput, BlmOutput]("QA")
     val module = Predict(sig).withLm(boundLm)
     assertEquals(module.boundLm.map(_.id), Some("bound"))
     val out = underAmbient(module(BlmInput("x")))
@@ -69,8 +69,8 @@ class BoundLmSuite extends FunSuite:
   }
 
   test("Predict[I,O]: no bound lm falls back to ambient") {
-    val sig = Signature.derived[BlmInput, BlmOutput]("QA")
+    val sig    = Signature.derived[BlmInput, BlmOutput]("QA")
     val module = Predict(sig)
-    val out = underAmbient(module(BlmInput("x")))
+    val out    = underAmbient(module(BlmInput("x")))
     assertEquals(out.toOption.get.output.answer, "AMBIENT")
   }

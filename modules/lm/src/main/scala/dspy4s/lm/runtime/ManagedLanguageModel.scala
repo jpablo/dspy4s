@@ -48,8 +48,8 @@ object RetryPolicies:
 
       override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
         val exponent = if attempt <= 0 then 0 else attempt
-        val factor = 1L << math.min(exponent, 20)
-        val bounded =
+        val factor   = 1L << math.min(exponent, 20)
+        val bounded  =
           if baseDelayMillis == 0L then 0L
           else if baseDelayMillis > maxDelayMillis / factor then maxDelayMillis
           else baseDelayMillis * factor
@@ -57,7 +57,7 @@ object RetryPolicies:
         else
           val headroom  = maxDelayMillis - bounded
           val maxJitter = math.min(math.max((bounded.toDouble * jitterFactor).toLong, 0L), headroom)
-          val jitter = if maxJitter == 0L then 0L else ThreadLocalRandom.current().nextLong(maxJitter + 1L)
+          val jitter    = if maxJitter == 0L then 0L else ThreadLocalRandom.current().nextLong(maxJitter + 1L)
           bounded + jitter
 
 final class UsageTracker:
@@ -94,8 +94,7 @@ object UsageTracking:
           val previous = activeTrackers.get()
           activeTrackers.set(captured)
           try thunk
-          finally activeTrackers.set(previous)
-  )
+          finally activeTrackers.set(previous))
 
   def withTracker[A](tracker: UsageTracker)(thunk: => A): A =
     val previous = activeTrackers.get()
@@ -116,7 +115,7 @@ final case class ManagedLanguageModel(
     retryPolicy: RetryPolicy = RetryPolicies.never,
     sleep: Long => Unit = ManagedLanguageModel.defaultSleep
 ) extends StreamingLanguageModel:
-  override val id: String = delegate.id
+  override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
   // Capability flags pass through — wrapping must not hide what the delegate supports (adapters consult
   // these to decide e.g. whether to emit `response_format` or native tools).
@@ -124,18 +123,19 @@ final case class ManagedLanguageModel(
   override def supportsResponseSchema: Boolean  = delegate.supportsResponseSchema
   override def supportsReasoning: Boolean       = delegate.supportsReasoning
 
-  /** Streaming passthrough, so wrapping a streaming provider in ManagedLanguageModel does not silently disable
-    * token streaming (streamify only wraps `StreamingLanguageModel`s).
+  /** Streaming passthrough, so wrapping a streaming provider in ManagedLanguageModel does not silently disable token
+    * streaming (streamify only wraps `StreamingLanguageModel`s).
     *
     *   - Streaming delegate: tokens come straight from the delegate. The cache and retry policy do NOT apply to
     *     streamed calls (same as calling the provider's `stream` directly).
-    *   - Non-streaming delegate: falls back to one terminal chunk assembled from the managed [[call]] (which
-    *     keeps cache / retries / history / usage), or a reified `finishReason = "error"` chunk on failure —
-    *     the same error convention providers use. */
+    *   - Non-streaming delegate: falls back to one terminal chunk assembled from the managed [[call]] (which keeps
+    *     cache / retries / history / usage), or a reified `finishReason = "error"` chunk on failure — the same error
+    *     convention providers use.
+    */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match
       case streaming: StreamingLanguageModel => streaming.stream(request)
-      case _ =>
+      case _                                 =>
         call(request) match
           case Right(response) =>
             Iterator.single(LmChunk(
@@ -169,7 +169,7 @@ final case class ManagedLanguageModel(
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     @tailrec def loop(attempt: Int): Either[DspyError, LmResponse] =
       delegate.call(request) match
-        case ok @ Right(_) => ok
+        case ok @ Right(_)                                          => ok
         case Left(error) if retryPolicy.shouldRetry(attempt, error) =>
           val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
           if delay > 0L then sleep(delay)
@@ -183,10 +183,10 @@ final case class ManagedLanguageModel(
         HistoryEntry(
           component = s"lm:$id",
           payload = DynamicValues.record(
-            "model" := request.model,
+            "model"     := request.model,
             "cache_hit" := cacheHit,
-            "outputs" := response.outputs.size,
-            "mode" := request.mode.toString
+            "outputs"   := response.outputs.size,
+            "mode"      := request.mode.toString
           )
         )
       )
@@ -197,9 +197,9 @@ final case class ManagedLanguageModel(
         HistoryEntry(
           component = s"lm:$id",
           payload = DynamicValues.record(
-            "model" := request.model,
-            "cache_hit" := false,
-            "error_code" := error.code,
+            "model"         := request.model,
+            "cache_hit"     := false,
+            "error_code"    := error.code,
             "error_message" := error.message
           )
         )

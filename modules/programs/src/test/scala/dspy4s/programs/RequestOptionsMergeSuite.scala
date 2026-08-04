@@ -34,15 +34,15 @@ class RequestOptionsMergeSuite extends FunSuite:
       Right(ParsedOutput(values = rec("answer" := output.text)))
 
   private final class CapturingLm(val sink: scala.collection.mutable.ArrayBuffer[LmRequest]) extends LanguageModel:
-    override val id: String   = "capturing-lm"
-    override val mode: LmMode = LmMode.Chat
-    override val supportsResponseSchema: Boolean = true
+    override val id: String                                                                    = "capturing-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override val supportsResponseSchema: Boolean                                               = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       sink += request
       Right(LmResponse(outputs = Vector(LmOutput(text = "Paris"))))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit  = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def capture(adapter: Adapter)(body: RuntimeContext ?=> Unit): Vector[LmRequest] =
     val sink = scala.collection.mutable.ArrayBuffer.empty[LmRequest]
@@ -53,27 +53,27 @@ class RequestOptionsMergeSuite extends FunSuite:
     sink.toVector
 
   test("engine merges adapter requestOptions into the LM request options") {
-    val layout = SignatureDsl.parse("question -> answer").toOption.get
+    val layout      = SignatureDsl.parse("question -> answer").toOption.get
     val adapterOpts = rec("response_format" := "json_object", "from_adapter" := true)
-    val reqs = capture(new OptsAdapter(adapterOpts)) {
+    val reqs        = capture(new OptsAdapter(adapterOpts)) {
       val _ = DynamicPredict(layout)(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
     assertEquals(opts.get("response_format"), Some("json_object": Any))
-    assertEquals(opts.get("from_adapter"),    Some(true: Any))
+    assertEquals(opts.get("from_adapter"), Some(true: Any))
   }
 
   test("per-call/module options WIN over adapter requestOptions on key collision") {
-    val layout = SignatureDsl.parse("question -> answer").toOption.get
+    val layout      = SignatureDsl.parse("question -> answer").toOption.get
     val adapterOpts = rec("temperature" := 0.0, "from_adapter" := true)
-    val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.9))
-    val reqs = capture(new OptsAdapter(adapterOpts)) {
+    val module      = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.9))
+    val reqs        = capture(new OptsAdapter(adapterOpts)) {
       val _ = module(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
-    assertEquals(opts.get("temperature"),  Some(0.9: Any))  // module config wins over adapter's
+    assertEquals(opts.get("temperature"), Some(0.9: Any))   // module config wins over adapter's
     assertEquals(opts.get("from_adapter"), Some(true: Any)) // non-colliding adapter option preserved
   }
 
@@ -81,7 +81,7 @@ class RequestOptionsMergeSuite extends FunSuite:
     // The typed Predict path supplies outputJsonSchema (rendered from Schema[O]); JSONAdapter emits a
     // response_format that the engine merges into request.options. The capturing LM declares
     // supportsResponseSchema = true.
-    val sig = dspy4s.typed.Signature.derived[MCQAInput, MCQAOutput]("QA")
+    val sig  = dspy4s.typed.Signature.derived[MCQAInput, MCQAOutput]("QA")
     val reqs = capture(JSONAdapter()) {
       val _ = Predict(sig)(MCQAInput("x"))
     }

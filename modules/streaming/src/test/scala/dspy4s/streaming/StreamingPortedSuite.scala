@@ -43,11 +43,11 @@ import scala.collection.mutable.ArrayBuffer
 class StreamingPortedSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private final class ScriptedLm(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
-    override val id: String = "scripted"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = chunks.map(_.text).mkString))))
     override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
@@ -78,7 +78,7 @@ class StreamingPortedSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(rec("question" := "What is the capital of France?"))
@@ -92,7 +92,7 @@ class StreamingPortedSuite extends FunSuite:
 
   test("missing_completion_marker_chat: tokens are not lost when [[ ## completed ## ]] is absent") {
     val expected = "This is a test response with many tokens to ensure buffering works correctly."
-    val chunks = Vector(
+    val chunks   = Vector(
       LmChunk(text = "[[ ##"),
       LmChunk(text = " answer"),
       LmChunk(text = " ## ]]\n\n"),
@@ -121,13 +121,13 @@ class StreamingPortedSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("answer"))
       )(rec("question" := "Test question"))
 
-      val events = collectStream(stream)
-      val tokens = events.collect { case e: TokenEvent => e }
+      val events          = collectStream(stream)
+      val tokens          = events.collect { case e: TokenEvent => e }
       val finalPrediction = events.collectFirst { case e: PredictionEvent => e.prediction }
 
       assertEquals(tokens.map(_.chunk).mkString, expected, "concatenated tokens should equal full content")
@@ -157,14 +157,14 @@ class StreamingPortedSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("reasoning"), StreamListener("answer"))
       )(rec("question" := "Why did the chicken cross the kitchen?"))
 
-      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      val tokens          = collectStream(stream).collect { case e: TokenEvent => e }
       val reasoningChunks = tokens.filter(_.fieldName == "reasoning")
-      val answerChunks = tokens.filter(_.fieldName == "answer")
+      val answerChunks    = tokens.filter(_.fieldName == "answer")
 
       assert(reasoningChunks.nonEmpty, "expected reasoning chunks")
       assert(answerChunks.nonEmpty, "expected answer chunks")
@@ -193,14 +193,14 @@ class StreamingPortedSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("reasoning"), StreamListener("answer"))
       )(rec("question" := "Why did the chicken cross the kitchen?"))
 
-      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
+      val tokens          = collectStream(stream).collect { case e: TokenEvent => e }
       val reasoningChunks = tokens.filter(_.fieldName == "reasoning")
-      val answerChunks = tokens.filter(_.fieldName == "answer")
+      val answerChunks    = tokens.filter(_.fieldName == "answer")
 
       assert(reasoningChunks.nonEmpty)
       assert(answerChunks.nonEmpty)
@@ -231,7 +231,7 @@ class StreamingPortedSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("response"))
       )(rec("question" := "Generate complex JSON"))
@@ -265,13 +265,13 @@ class StreamingPortedSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         streamListeners = Vector(StreamListener("first"), StreamListener("second"))
       )(rec("question" := "Generate two responses"))
 
-      val tokens = collectStream(stream).collect { case e: TokenEvent => e }
-      val firstChunks = tokens.filter(_.fieldName == "first")
+      val tokens       = collectStream(stream).collect { case e: TokenEvent => e }
+      val firstChunks  = tokens.filter(_.fieldName == "first")
       val secondChunks = tokens.filter(_.fieldName == "second")
 
       assert(firstChunks.nonEmpty, "expected first-field chunks")
@@ -289,7 +289,7 @@ class StreamingPortedSuite extends FunSuite:
     // (no LM call at all) — the assertion target is just the status
     // messages, not LM output.
     val tool = new ToolFunction:
-      override val name: String = "generate_question"
+      override val name: String                                            = "generate_question"
       override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
         Right(ToolFunction.result("What color is the sky?"))
 
@@ -303,7 +303,7 @@ class StreamingPortedSuite extends FunSuite:
         }
 
     given RuntimeContext = RuntimeEnvironment.current
-    val stream = Streamify.streamify(program = program)(rec())
+    val stream           = Streamify.streamify(program = program)(rec())
 
     val statusMessages = ArrayBuffer.empty[String]
     while stream.hasNext do

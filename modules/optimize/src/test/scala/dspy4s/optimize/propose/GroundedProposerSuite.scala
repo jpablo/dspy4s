@@ -16,15 +16,15 @@ import zio.blocks.schema.DynamicValue
 
 /** Offline GroundedProposer suite.
   *
-  * The scripted LM serves two distinct sub-tasks through the single ambient model, branching on markers the
-  * proposer weaves into each signature's instructions (rendered into the prompt by the test adapter):
+  * The scripted LM serves two distinct sub-tasks through the single ambient model, branching on markers the proposer
+  * weaves into each signature's instructions (rendered into the prompt by the test adapter):
   *
-  *   1. Dataset summary. The summary `DynamicPredict` asks for `observations`. The scripted LM returns a canned
-  *      summary string AND bumps a call counter (so the test can assert the summary call is skipped when
+  *   1. Dataset summary. The summary `DynamicPredict` asks for `observations`. The scripted LM returns a canned summary
+  *      string AND bumps a call counter (so the test can assert the summary call is skipped when
   *      `useDatasetSummary = false`).
-  *   2. Instruction generation. The instruction-generation `DynamicPredict` asks for a `proposed_instruction`.
-  *      The scripted LM returns a distinct candidate per call (keyed on the `rolloutId` the proposer threads
-  *      through) and echoes part of the dataset summary into the proposal — proving the summary grounding is wired.
+  *   2. Instruction generation. The instruction-generation `DynamicPredict` asks for a `proposed_instruction`. The
+  *      scripted LM returns a distinct candidate per call (keyed on the `rolloutId` the proposer threads through) and
+  *      echoes part of the dataset summary into the proposal — proving the summary grounding is wired.
   */
 class GroundedProposerSuite extends FunSuite:
 
@@ -33,19 +33,23 @@ class GroundedProposerSuite extends FunSuite:
   private val summaryMarker     = "SUMMARIZE_THE_DATASET"
   private val instructionMarker = "PROPOSE_THE_INSTRUCTION"
 
-  /** The canned dataset-summary string the scripted LM returns for summary calls; a fragment is echoed into
-    * proposals so grounding is observable. */
+  /** The canned dataset-summary string the scripted LM returns for summary calls; a fragment is echoed into proposals
+    * so grounding is observable.
+    */
   private val cannedSummary         = "DATASET=arithmetic word problems"
   private val cannedSummaryFragment = "arithmetic word problems"
 
   /** Counts summary-sub-task LM calls so the test can assert `useDatasetSummary = false` skips them. */
   private val summaryCalls = new AtomicInteger(0)
 
-  /** Test adapter that renders the active instruction + all input fields into a single prompt so the scripted LM
-    * can branch on the marker and read the grounded inputs. */
+  /** Test adapter that renders the active instruction + all input fields into a single prompt so the scripted LM can
+    * branch on the marker and read the grounded inputs.
+    */
   private object GroundingAwareAdapter extends Adapter:
     override val name: String = "grounding-aware"
-    override def format(invocation: AdapterInvocation)(using RuntimeContext)
+    override def format(invocation: AdapterInvocation)(using
+        RuntimeContext
+    )
         : Either[DspyError, FormattedPrompt] =
       val instr  = invocation.layout.instructions.getOrElse("")
       val inputs = DynamicValues.recordEntries(invocation.inputs.values)
@@ -54,14 +58,16 @@ class GroundedProposerSuite extends FunSuite:
       val body = s"INSTRUCTION=[$instr] $inputs"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    )
         : Either[DspyError, ParsedOutput] =
       val outField = layout.outputFields.headOption.map(_.name).getOrElse("observations")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
-    override val id: String   = "scripted-grounded-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted-grounded-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
       val out  =
@@ -70,13 +76,13 @@ class GroundedProposerSuite extends FunSuite:
           cannedSummary
         else if text.contains(instructionMarker) then
           // Distinct candidate per rolloutId; echo the dataset summary fragment IF it was grounded into the prompt.
-          val r          = request.rolloutId.getOrElse(0)
-          val grounded   = if text.contains(cannedSummaryFragment) then s" [grounded:$cannedSummaryFragment]" else ""
+          val r        = request.rolloutId.getOrElse(0)
+          val grounded = if text.contains(cannedSummaryFragment) then s" [grounded:$cannedSummaryFragment]" else ""
           s"INSTRUCTION_CANDIDATE_$r$grounded"
         else "UNKNOWN"
       Right(LmResponse(
         outputs = Vector(LmOutput(text = out)),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   private def settings: RuntimeContext =
@@ -123,7 +129,7 @@ class GroundedProposerSuite extends FunSuite:
     val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = CandidateCount(5)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = proposer.proposeInstructions(program, trainset)
+      val result           = proposer.proposeInstructions(program, trainset)
       assert(result.isRight, s"propose failed: ${result.left.toOption}")
       val perPred = result.toOption.get
       assertEquals(perPred.size, 1, "one predictor -> one candidate vector")
@@ -143,7 +149,7 @@ class GroundedProposerSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val candidates = proposer.proposeInstructions(program, trainset).toOption.get.head
+      val candidates       = proposer.proposeInstructions(program, trainset).toOption.get.head
       assert(
         candidates.forall(_.contains(cannedSummaryFragment)),
         s"expected every proposal to echo the grounded summary fragment, got $candidates"
@@ -161,7 +167,7 @@ class GroundedProposerSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val candidates = proposer.proposeInstructions(program, trainset).toOption.get.head
+      val candidates       = proposer.proposeInstructions(program, trainset).toOption.get.head
       assertEquals(summaryCalls.get(), 0, "no summary call should have happened")
       assert(
         candidates.forall(!_.contains(cannedSummaryFragment)),
@@ -175,14 +181,14 @@ class GroundedProposerSuite extends FunSuite:
   // ── 4. Multi-predictor: one candidate vector per predictor ────────────────
 
   test("multi-predictor program returns one candidate vector per predictor") {
-    val program  = TwoStage(
+    val program = TwoStage(
       first = DynamicPredict(layout = taskLayout("First", "INSTR_FIRST")),
       second = DynamicPredict(layout = taskLayout("Second", "INSTR_SECOND"))
     )
     val proposer = new GroundedProposer[TwoStage](config(numInstructions = CandidateCount(4)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = proposer.proposeInstructions(program, trainset)
+      val result           = proposer.proposeInstructions(program, trainset)
       assert(result.isRight, s"propose failed: ${result.left.toOption}")
       val perPred = result.toOption.get
       assertEquals(perPred.size, 2, "two predictors -> two candidate vectors")
@@ -194,7 +200,7 @@ class GroundedProposerSuite extends FunSuite:
   // ── 5. Determinism: same seed -> same proposals ───────────────────────────
 
   test("proposeInstructions is deterministic for a fixed seed") {
-    val program = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
+    val program               = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
     def run(): Vector[String] =
       val proposer = new GroundedProposer[DynamicPredict](config(numInstructions = CandidateCount(4), seed = 42L))
       RuntimeEnvironment.withSettings(settings) {
@@ -214,5 +220,7 @@ class GroundedProposerSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-/** A two-predictor program for the multi-predictor test; `OptimizableTraversal` is structurally derived over its fields. */
+/** A two-predictor program for the multi-predictor test; `OptimizableTraversal` is structurally derived over its
+  * fields.
+  */
 final case class TwoStage(first: DynamicPredict, second: DynamicPredict)

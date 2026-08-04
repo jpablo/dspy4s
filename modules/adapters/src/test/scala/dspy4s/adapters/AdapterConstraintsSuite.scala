@@ -30,7 +30,7 @@ class AdapterConstraintsSuite extends FunSuite:
   private def invocation(constrained: Boolean): AdapterInvocation =
     AdapterInvocation(
       layout = layout(constrained),
-      demos  = Vector.empty,
+      demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "q"), inputKeys = Set("question")),
       request = LmRequest(model = "x")
     )
@@ -47,7 +47,7 @@ class AdapterConstraintsSuite extends FunSuite:
 
   test("XMLAdapter appends the field-constraints block to its system instruction") {
     given RuntimeContext = RuntimeContext()
-    val sys = systemText(XMLAdapter().format(invocation(constrained = true)).toOption.get)
+    val sys              = systemText(XMLAdapter().format(invocation(constrained = true)).toOption.get)
     assert(sys.contains("Field constraints:") && sys.contains("greater than: 0"), sys)
 
     val plain = systemText(XMLAdapter().format(invocation(constrained = false)).toOption.get)
@@ -56,7 +56,7 @@ class AdapterConstraintsSuite extends FunSuite:
 
   test("JSONAdapter appends the field-constraints block to its system instruction") {
     given RuntimeContext = RuntimeContext()
-    val sys = systemText(JSONAdapter().format(invocation(constrained = true)).toOption.get)
+    val sys              = systemText(JSONAdapter().format(invocation(constrained = true)).toOption.get)
     assert(sys.contains("Field constraints:") && sys.contains("greater than: 0"), sys)
 
     val plain = systemText(JSONAdapter().format(invocation(constrained = false)).toOption.get)

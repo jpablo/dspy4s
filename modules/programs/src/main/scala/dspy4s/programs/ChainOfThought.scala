@@ -64,9 +64,9 @@ final case class ChainOfThought[I, O](
 
   private def augmentedSignature: Signature[I, Out] =
     Signature(
-      name        = baseSignature.name,
-      layout      = augmentedLayout,
-      inputShape  = baseSignature.inputShape,
+      name = baseSignature.name,
+      layout = augmentedLayout,
+      inputShape = baseSignature.inputShape,
       outputShape = augmentedOutputShape
     )
 
@@ -93,8 +93,8 @@ object ChainOfThought:
   // derives the marker from the field name in the augment path -- inferPrefix
   // yields "Reasoning:", identical to the old literal (a true no-op on the wire).
   private[programs] val reasoningField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name        = reasoningName,
-    typeRef     = TypeRef.string,
+    name = reasoningName,
+    typeRef = TypeRef.string,
     description = Some("${reasoning}")
   ))
 

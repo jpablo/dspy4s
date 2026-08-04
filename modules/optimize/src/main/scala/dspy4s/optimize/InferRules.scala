@@ -74,8 +74,8 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
 
   override val name: String = "infer_rules"
 
-  private val ps: OptimizableTraversal[P]   = summon[OptimizableTraversal[P]]
-  private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
+  private val ps: OptimizableTraversal[P] = summon[OptimizableTraversal[P]]
+  private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
       student: P,
@@ -86,7 +86,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
     // 1) Split if no valset (upstream's 50/50 holdout).
     val (effTrain, effVal) = valset match
       case Some(v) => (trainset, v)
-      case None =>
+      case None    =>
         val k = trainset.size / 2
         (trainset.take(k), trainset.drop(k))
 
@@ -104,7 +104,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
         val originalInstructions = ps.read(base).map(_.instructions.getOrElse(""))
 
         // 4) Generate + score `numCandidates` rule-augmented candidates.
-        val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+        val candidates                = mutable.ArrayBuffer.empty[CandidateProgram[P]]
         var best: Option[(P, Double)] = None
 
         (0 until config.numCandidates).foreach { candIdx =>
@@ -127,16 +127,16 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
           bestProgram = bestProgram,
           candidates = candidates.toVector.sortBy(-_.score),
           metadata = Map(
-            "optimizer"      -> name,
-            "num_candidates" -> candidates.size,
-            "best_score"     -> best.map(_._2).getOrElse(0.0),
+            "optimizer"          -> name,
+            "num_candidates"     -> candidates.size,
+            "best_score"         -> best.map(_._2).getOrElse(0.0),
             "optimizable_leaves" -> ps.read(base).size
           )
         )
       }
 
-  /** Induce rules for one leaf from the trainset, narrowing the example set on a context-window overflow. Returns
-    * the induced rules text, or `None` if even a single example can't produce rules.
+  /** Induce rules for one leaf from the trainset, narrowing the example set on a context-window overflow. Returns the
+    * induced rules text, or `None` if even a single example can't produce rules.
     */
   private def induceRules(leaf: OptimizableView, trainset: Vector[Example], candIdx: Int, leafIdx: Int)(using
       RuntimeContext
@@ -151,7 +151,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
       else
         val call = ProgramCall(
           input = DynamicValues.record("examples_text" := formatExamples(demos, leaf)),
-          config    = DynamicValues.record("temperature" := config.initTemperature),
+          config = DynamicValues.record("temperature" := config.initTemperature),
           rolloutId = Some(rolloutId)
         )
         gen(call) match
@@ -163,8 +163,7 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
 
     attempt(trainset)
 
-  /** Render demos as upstream's `format_examples` text, projecting each example to the leaf's own input/output
-    * fields.
+  /** Render demos as upstream's `format_examples` text, projecting each example to the leaf's own input/output fields.
     */
   private def formatExamples(demos: Vector[Example], leaf: OptimizableView): String =
     def render(fields: Vector[FieldSpec], ex: Example): String =

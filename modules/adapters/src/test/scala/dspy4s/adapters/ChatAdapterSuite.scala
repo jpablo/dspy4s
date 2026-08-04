@@ -21,7 +21,6 @@ class ChatAdapterSuite extends FunSuite:
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
     DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
 
-
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
 
@@ -44,7 +43,7 @@ class ChatAdapterSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val formatted = ChatAdapter().format(invocation)
+    val formatted        = ChatAdapter().format(invocation)
 
     assert(formatted.isRight)
     val messages = formatted.toOption.get.messages
@@ -78,7 +77,7 @@ class ChatAdapterSuite extends FunSuite:
   }
 
   test("format emits type hints in the system prompt's structure example for non-string outputs") {
-    val signature = SignatureDsl.parse("question -> answer: int, score: float, flag: bool, payload: json").toOption.get
+    val signature  = SignatureDsl.parse("question -> answer: int, score: float, flag: bool, payload: json").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
@@ -86,7 +85,7 @@ class ChatAdapterSuite extends FunSuite:
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
 
     // The structure example must annotate each non-string output with a
     // `# note:` comment showing the typing constraint.
@@ -100,7 +99,7 @@ class ChatAdapterSuite extends FunSuite:
   }
 
   test("format emits type hints in the final user reminder for non-string outputs") {
-    val signature = SignatureDsl.parse("q -> answer: int, summary").toOption.get
+    val signature  = SignatureDsl.parse("q -> answer: int, summary").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
@@ -108,7 +107,7 @@ class ChatAdapterSuite extends FunSuite:
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val mainUser = ChatAdapter().format(invocation).toOption.get.messages.last.text.get
+    val mainUser         = ChatAdapter().format(invocation).toOption.get.messages.last.text.get
 
     // Output reminder names each output marker; non-string fields get a
     // parenthetical type hint, strings don't.
@@ -149,7 +148,7 @@ class ChatAdapterSuite extends FunSuite:
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
 
     // The custom description should appear.
     assert(system.contains("The user's question to answer."), s"missing custom desc in: $system")
@@ -170,7 +169,7 @@ class ChatAdapterSuite extends FunSuite:
       .withOutputFields(
         Vector(
           dspy4s.core.contracts.FieldSpec(
-            name        = "answer",
+            name = "answer",
             description = Some("The model's answer."),
             constraints = Vector(
               dspy4s.core.contracts.FieldConstraints.gt(0),
@@ -186,7 +185,7 @@ class ChatAdapterSuite extends FunSuite:
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
 
     // Constraints render after the description, joined by ", ".
     assert(
@@ -204,7 +203,7 @@ class ChatAdapterSuite extends FunSuite:
       .withOutputFields(
         Vector(
           dspy4s.core.contracts.FieldSpec(
-            name        = "answer",
+            name = "answer",
             constraints = Vector(dspy4s.core.contracts.FieldConstraints.ge(1))
           )
         )
@@ -216,7 +215,7 @@ class ChatAdapterSuite extends FunSuite:
       request = LmRequest(model = "x", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val system = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
+    val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
     assert(
       system.contains("Constraints: greater than or equal to: 1"),
       s"missing constraints (no-description case) in: $system"
@@ -227,7 +226,7 @@ class ChatAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val completion =
+    val completion       =
       """[[ ## answer ## ]]
         |Brussels
         |
@@ -244,7 +243,7 @@ class ChatAdapterSuite extends FunSuite:
   }
 
   test("parse preserves multi-line field values verbatim") {
-    val signature = SignatureDsl.parse("question -> reasoning, answer").toOption.get
+    val signature        = SignatureDsl.parse("question -> reasoning, answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
 
     val completion =
@@ -268,33 +267,33 @@ class ChatAdapterSuite extends FunSuite:
   }
 
   test("parse tolerates a missing completed marker") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = ChatAdapter().parse(signature, LmOutput(text = "[[ ## answer ## ]]\nBrussels"))
+    val parsed           = ChatAdapter().parse(signature, LmOutput(text = "[[ ## answer ## ]]\nBrussels"))
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
   }
 
   test("parse falls back to full text for single output signatures when no markers present") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = ChatAdapter().parse(signature, LmOutput(text = "Brussels"))
+    val parsed           = ChatAdapter().parse(signature, LmOutput(text = "Brussels"))
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
   }
 
   test("parse fails when a required output field is missing from the markers") {
-    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer, score: float").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = ChatAdapter().parse(signature, LmOutput(text = "[[ ## answer ## ]]\nBrussels"))
+    val parsed           = ChatAdapter().parse(signature, LmOutput(text = "[[ ## answer ## ]]\nBrussels"))
     assert(parsed.isLeft)
     assert(parsed.left.toOption.get.isInstanceOf[ParseError])
   }
 
   test("parse skips unknown markers without polluting tracked fields") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
-    val completion =
+    val completion       =
       """[[ ## thinking ## ]]
         |hallucinated section
         |
@@ -314,7 +313,7 @@ class ChatAdapterSuite extends FunSuite:
   // yields no marker sections and the single-output text fallback only fires for
   // non-empty text, so the required field is missing -> ParseError.
   test("C1: parse of an empty response for a single-output signature is a ParseError") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
     for blank <- Vector("", "   ", "\n\n") do
       val parsed = ChatAdapter().parse(signature, LmOutput(text = blank))
@@ -326,7 +325,7 @@ class ChatAdapterSuite extends FunSuite:
   }
 
   test("C1: parse of an empty response for a multi-output signature is a ParseError") {
-    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer, score: float").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
     for blank <- Vector("", "   ", "\n\n") do
       val parsed = ChatAdapter().parse(signature, LmOutput(text = blank))
@@ -341,7 +340,7 @@ class ChatAdapterSuite extends FunSuite:
   // ChatAdapter renders demo/field values as plain text (no JSON escaping), so
   // diacritics and CJK must survive verbatim in the formatted prompt.
   test("A1: format emits non-ASCII demo/input values literally (no \\uXXXX escaping)") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature  = SignatureDsl.parse("question -> answer").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector(
@@ -354,7 +353,7 @@ class ChatAdapterSuite extends FunSuite:
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val all = ChatAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")
+    val all              = ChatAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")
 
     assert(all.contains("café"), s"expected literal 'café' in prompt: $all")
     assert(all.contains("naïve"), s"expected literal 'naïve' in prompt: $all")

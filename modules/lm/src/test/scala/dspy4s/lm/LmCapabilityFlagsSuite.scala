@@ -12,8 +12,8 @@ import munit.FunSuite
 
 class LmCapabilityFlagsSuite extends FunSuite:
   private object BareLm extends LanguageModel:
-    override val id: String = "bare"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "bare"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Left(RuntimeError("bare_lm", "not implemented"))
 

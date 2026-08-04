@@ -35,8 +35,8 @@ class ParallelSuite extends FunSuite:
 
   test("parallel executes programs and preserves task ordering") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(behavior = value => Right(RawPrediction(values = rec("output" := value * 2))))
-    val tasks = (1 to 5).toVector.map { value =>
+    val program          = StubProgram(behavior = value => Right(RawPrediction(values = rec("output" := value * 2))))
+    val tasks            = (1 to 5).toVector.map { value =>
       program -> ProgramCall(input = rec("value" := value))
     }
 
@@ -49,7 +49,7 @@ class ParallelSuite extends FunSuite:
 
   test("parallel keeps partial results when failures are below threshold") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(
+    val program          = StubProgram(
       behavior = value =>
         if value == 3 then Left(ValidationError("boom"))
         else Right(RawPrediction(values = rec("output" := value)))
@@ -69,7 +69,7 @@ class ParallelSuite extends FunSuite:
 
   test("parallel returns cancellation error when threshold is met") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(
+    val program          = StubProgram(
       behavior = value =>
         if value % 2 == 0 then Left(ValidationError("fail"))
         else Right(RawPrediction(values = rec("output" := value)))
@@ -94,12 +94,12 @@ class ParallelSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          numThreads = Some(ThreadCount(2)),
-          maxErrors = Some(ErrorLimit(1))
-        )
+        numThreads = Some(ThreadCount(2)),
+        maxErrors = Some(ErrorLimit(1))
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Parallel().run(tasks)
+      val result           = Parallel().run(tasks)
       assert(result.isLeft)
       assert(result.left.toOption.get.isInstanceOf[RuntimeError])
     }
@@ -118,7 +118,7 @@ class ParallelSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(numThreads = Some(ThreadCount(42)))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
+      val result           = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
       assert(result.isRight)
       val values = result.toOption.get.results.flatten.map(p => lookupString(p.values, "sample"))
       assertEquals(values, Vector("42", "42", "42", "42"))
@@ -127,12 +127,12 @@ class ParallelSuite extends FunSuite:
 
   test("parallel preserves mixed answer and tool_calls outputs") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = StubProgram(
+    val program          = StubProgram(
       behavior = value =>
         Right(
           RawPrediction(
             values = rec(
-              "answer" := s"answer-$value",
+              "answer"     := s"answer-$value",
               "tool_calls" -> DynamicValues.fromAny(Vector(
                 Map("name" -> "search", "args" -> Map("query" -> s"q-$value"))
               ))

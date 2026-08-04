@@ -61,7 +61,7 @@ class ProgramPersistenceSuite extends FunSuite:
 
   test("DynamicPredict loading restores only state and preserves the fresh executable environment") {
     val trainedLayout = qaSignature.layout.withInstructions(Some("Use the trained prompt."))
-    val freshLayout = SignatureLayout.of(
+    val freshLayout   = SignatureLayout.of(
       name = "FreshQA",
       inputFields = qaSignature.layout.inputFields,
       outputFields = qaSignature.layout.outputFields,
@@ -75,7 +75,7 @@ class ProgramPersistenceSuite extends FunSuite:
       config = DynamicValues.record("temperature" := 0.2)
     )
     val freshRuntime = new SettingsProgramRuntime {}
-    val fresh = DynamicPredict(
+    val fresh        = DynamicPredict(
       layout = freshLayout,
       name = Some("deployment_predictor"),
       runtime = freshRuntime,
@@ -151,7 +151,7 @@ class ProgramPersistenceSuite extends FunSuite:
   test("keyed optimizable state loads by id rather than JSON object order") {
     val firstDemo  = demo.take(1)
     val secondDemo = demo.drop(1)
-    val trained = Pipe2(
+    val trained    = Pipe2(
       a = Predict(qaSignature, demos = firstDemo, name = Some("ask")),
       b = Predict(qaSignature, demos = secondDemo, name = Some("answer"))
     )
@@ -160,7 +160,7 @@ class ProgramPersistenceSuite extends FunSuite:
       b = Predict(qaSignature, name = Some("answer"))
     )
     val dumped = ProgramPersistence.dumpState(trained)
-    val keyed = dumped.fields.toVector.collectFirst {
+    val keyed  = dumped.fields.toVector.collectFirst {
       case ("optimizableParameters", record: DynamicValue.Record) => record
     }.getOrElse(fail("expected an optimizable-id record"))
     val reversed = DynamicValue.Record(Chunk.from(keyed.fields.toVector.reverse))
@@ -176,7 +176,7 @@ class ProgramPersistenceSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = Predict(qaSignature, name = Some("answer"))
     )
-    val oneState = summon[OptimizableTraversal[Pipe2]].read(program).head.dumpState
+    val oneState  = summon[OptimizableTraversal[Pipe2]].read(program).head.dumpState
     val malformed = DynamicValue.Record(Chunk.from(Seq(
       "optimizableParameters" -> DynamicValue.Record(Chunk.from(Seq(
         OptimizableId(0).render -> oneState,
@@ -191,7 +191,7 @@ class ProgramPersistenceSuite extends FunSuite:
   }
 
   test("loadState rejects positional optimizable arrays") {
-    val program = Predict(qaSignature, name = Some("ask"))
+    val program    = Predict(qaSignature, name = Some("ask"))
     val positional = DynamicValue.Record(Chunk.from(Seq(
       "optimizableParameters" -> DynamicValue.Sequence(Chunk.from(Seq(
         DynamicValue.Record.empty: DynamicValue

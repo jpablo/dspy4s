@@ -8,14 +8,16 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 
-/** GEPA's reflective mutation operator for a single component: prompt the reflection LM with the component's
-  * CURRENT instruction plus its reflective dataset (the failures/feedback), and extract the rewritten instruction.
-  * A faithful port of gepa's `InstructionProposalSignature` default proposer (the prompt template + ``` extraction).
-  * See PORT_GAPS G-12. */
+/** GEPA's reflective mutation operator for a single component: prompt the reflection LM with the component's CURRENT
+  * instruction plus its reflective dataset (the failures/feedback), and extract the rewritten instruction. A faithful
+  * port of gepa's `InstructionProposalSignature` default proposer (the prompt template + ``` extraction). See PORT_GAPS
+  * G-12.
+  */
 object InstructionProposer:
 
-  /** Propose a new instruction. `Left` only if the reflection LM call itself fails; the extracted text (even if
-    * the model omitted the ``` fences) is returned as-is. */
+  /** Propose a new instruction. `Left` only if the reflection LM call itself fails; the extracted text (even if the
+    * model omitted the ``` fences) is returned as-is.
+    */
   def propose(
       currentInstruction: String,
       records: Vector[ReflectiveRecord],
@@ -61,8 +63,9 @@ object InstructionProposer:
          |Feedback: ${r.feedback}""".stripMargin
     }.mkString("\n\n")
 
-  /** Extract the instruction from the model's response: the text inside the first ``` fenced block, or — if the
-    * model omitted the fences — the whole trimmed response. Tolerates a missing closing fence. */
+  /** Extract the instruction from the model's response: the text inside the first ``` fenced block, or — if the model
+    * omitted the fences — the whole trimmed response. Tolerates a missing closing fence.
+    */
   private[gepa] def extractInstruction(response: String): String =
     val fence = "```"
     val open  = response.indexOf(fence)

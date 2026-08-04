@@ -30,8 +30,9 @@ final case class EvaluateConfig(
     saveAsJson: Option[String] = None,
     provideTraceback: Boolean = false,
     timeout: FiniteDuration = 120.seconds,
-    /** Metadata carried into the evaluation scope's [[RuntimeContext.callbackMetadata]], so callbacks firing during
-      * the run can read it (Python's `Evaluate(callback_metadata=…)`). Empty default → scope unchanged. */
+    /** Metadata carried into the evaluation scope's [[RuntimeContext.callbackMetadata]], so callbacks firing during the
+      * run can read it (Python's `Evaluate(callback_metadata=…)`). Empty default → scope unchanged.
+      */
     callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
 )
 
@@ -68,7 +69,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       cfg: EvaluateConfig
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val dataset = cfg.devset
-    val metric = cfg.metric
+    val metric  = cfg.metric
 
     if dataset.isEmpty then
       return Right(
@@ -92,7 +93,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
           given RuntimeContext = RuntimeEnvironment.current
           fn(ex).flatMap { prediction =>
             metric.score(ex, prediction).map(score => (prediction, score))
-          },
+          }
+        ,
         data = dataset
       )
     }
@@ -111,14 +113,14 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       }.toVector
 
       val totalScore = evaluations.map(_.score).sum
-      val aggregate = if evaluations.nonEmpty then (totalScore / evaluations.size) * 100.0 else 0.0
-      val result = EvaluationResult(
+      val aggregate  = if evaluations.nonEmpty then (totalScore / evaluations.size) * 100.0 else 0.0
+      val result     = EvaluationResult(
         score = aggregate,
         results = evaluations,
         metricName = metric.name,
         metadata = Map(
           "num_threads" -> cfg.numThreads.getOrElse("default"),
-          "max_errors" -> cfg.maxErrors.getOrElse("default"),
+          "max_errors"  -> cfg.maxErrors.getOrElse("default"),
           "devset_size" -> dataset.size
         )
       )
@@ -159,8 +161,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
   /** Resolves the `displayTable` config into an optional row limit to pass to `renderTable`.
     *   - `Left(false)` -> `None` (no table)
-    *   - `Left(true)`  -> `Some(None)` (render all rows)
-    *   - `Right(n)`    -> `Some(Some(n))` (render at most n rows)
+    *   - `Left(true)` -> `Some(None)` (render all rows)
+    *   - `Right(n)` -> `Some(Some(n))` (render at most n rows)
     */
   private def tableLimit(spec: Either[Boolean, Int]): Option[Option[Int]] =
     spec match
@@ -169,7 +171,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       case Right(n)    => Some(Some(n))
 
   private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
-    val ctx = summon[RuntimeContext]
+    val ctx                = summon[RuntimeContext]
     val resolvedNumThreads = cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8)))
     val resolvedMaxErrors  = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10)))
     ParallelExecutor(

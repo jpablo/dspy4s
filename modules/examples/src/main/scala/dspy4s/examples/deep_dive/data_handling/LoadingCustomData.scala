@@ -1,17 +1,15 @@
-/**
- * Creating a Custom Dataset
- *
- * Source:   docs/docs/deep-dive/data-handling/loading-custom-data.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/deep-dive/data-handling/loading-custom-data.md
- * Status:   translated (the DSPy part: building `Example`s from rows + a train/dev split, snippets 2/4).
- *           The `pandas.read_csv` I/O (snippet 1) and snippet 3's repr output are out of scope — CSV/dataframe
- *           loading is plain I/O, not a dspy feature; rows are supplied in-memory here. dspy4s has no
- *           `dspy.datasets.dataset.Dataset` base class, so the `CSVDataset(Dataset)` subclass becomes a plain
- *           holder with `train` / `dev` produced by slicing the row list.
- *
- * `dspy.Example(context=..., question=..., answer=...).with_inputs("context", "question")` →
- * `Example("context" := ..., "question" := ..., "answer" := ...).withInputs(Set("context", "question"))`.
- */
+/** Creating a Custom Dataset
+  *
+  * Source: docs/docs/deep-dive/data-handling/loading-custom-data.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/deep-dive/data-handling/loading-custom-data.md Status:
+  * translated (the DSPy part: building `Example`s from rows + a train/dev split, snippets 2/4). The `pandas.read_csv`
+  * I/O (snippet 1) and snippet 3's repr output are out of scope — CSV/dataframe loading is plain I/O, not a dspy
+  * feature; rows are supplied in-memory here. dspy4s has no `dspy.datasets.dataset.Dataset` base class, so the
+  * `CSVDataset(Dataset)` subclass becomes a plain holder with `train` / `dev` produced by slicing the row list.
+  *
+  * `dspy.Example(context=..., question=..., answer=...).with_inputs("context", "question")` →
+  * `Example("context" := ..., "question" := ..., "answer" := ...).withInputs(Set("context", "question"))`.
+  */
 package dspy4s.examples.deep_dive.data_handling
 
 import dspy4s.core.contracts.:=
@@ -19,8 +17,9 @@ import dspy4s.core.data.Example
 
 object LoadingCustomData:
 
-  /** One source row — what a `pandas` dataframe row (`context, question, answer`) carries. In a real program
-    * you'd read these from a CSV/Parquet/HTTP source; that loading is plain I/O and out of scope here. */
+  /** One source row — what a `pandas` dataframe row (`context, question, answer`) carries. In a real program you'd read
+    * these from a CSV/Parquet/HTTP source; that loading is plain I/O and out of scope here.
+    */
   final case class Row(context: String, question: String, answer: String)
 
   // ── Snippet 2 (lines 30–37) — turn rows into input-marked Examples ──
@@ -55,10 +54,16 @@ object LoadingCustomData:
 @main def loadingCustomDataMain(): Unit =
   val rows = Vector(
     LoadingCustomData.Row("", "Which is a species of fish? Tope or Rope", "Tope"),
-    LoadingCustomData.Row("", "Why can camels survive for long without water?",
-      "Camels use the fat in their humps to keep them filled with energy and hydration for long periods."),
-    LoadingCustomData.Row("", "Alice's parents have three daughters: Amy, Jessy, and what's the third's name?",
-      "Alice")
+    LoadingCustomData.Row(
+      "",
+      "Why can camels survive for long without water?",
+      "Camels use the fat in their humps to keep them filled with energy and hydration for long periods."
+    ),
+    LoadingCustomData.Row(
+      "",
+      "Alice's parents have three daughters: Amy, Jessy, and what's the third's name?",
+      "Alice"
+    )
   )
   val dataset = LoadingCustomData.CustomDataset.fromRows(rows, trainSize = 2)
   println(s"train=${dataset.train.size}, dev=${dataset.dev.size}")

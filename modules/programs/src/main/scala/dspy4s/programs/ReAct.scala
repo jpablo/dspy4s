@@ -33,10 +33,10 @@ import java.nio.charset.StandardCharsets
   * `finish` tool (or `maxIterations` is reached). A separate reasoning-augmented extractor then reads the full
   * trajectory and produces the user-visible outputs declared in `baseSignature`.
   *
-  * `ReAct[I, O]` is a `Module[I, WithReasoning[O]]`: the input is encoded from `I`, and the
-  * extractor's reply is decoded into the base outputs `O` with a `reasoning: String` prepended (always a named tuple;
-  * see [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection. The loop's tool
-  * protocol runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
+  * `ReAct[I, O]` is a `Module[I, WithReasoning[O]]`: the input is encoded from `I`, and the extractor's reply is
+  * decoded into the base outputs `O` with a `reasoning: String` prepended (always a named tuple; see
+  * [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection. The loop's tool protocol
+  * runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
   *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling. Tool
   * failures (unknown tool, invocation error) are recorded as trajectory observations rather than failing the program,
@@ -48,10 +48,10 @@ final case class ReAct[I, O](
     override val maxIterations: IterationLimit = IterationLimit(5),
     reactProgramName: String = ReActKeys.reactModule,
     extractorProgramName: String = ReActKeys.extractModule,
-    /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the
-      * rendered trajectory, producing a lenient [[ReAct.ReactStep]]. When `None` (the default), the predict is built
-      * from [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable
-      * sub-predict addressable + immutably replaceable (see the `OptimizableTraversal[ReAct]` instance).
+    /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the rendered
+      * trajectory, producing a lenient [[ReAct.ReactStep]]. When `None` (the default), the predict is built from
+      * [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable sub-predict
+      * addressable + immutably replaceable (see the `OptimizableTraversal[ReAct]` instance).
       */
     reactPredictOverride: Option[Predict[(I, String), ReAct.ReactStep]] = None,
     /** Optional override for the final extractor predict (CoT-augmented, typed over the base input plus the rendered
@@ -64,16 +64,16 @@ final case class ReAct[I, O](
 ) extends InterpretedTrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
-  type Out = ReAct.WithReasoning[O]
+  type Out                  = ReAct.WithReasoning[O]
   override type ModelStep   = ReAct.ReactStep
   override type Action      = ToolCallRequest
   override type Observation = String
 
-  override val moduleName: String = ReActKeys.reactModule
+  override val moduleName: String         = ReActKeys.reactModule
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */
-  private val allTools: Vector[ToolFunction] = tools :+ ReAct.finishTool(baseLayout)
+  private val allTools: Vector[ToolFunction]         = tools :+ ReAct.finishTool(baseLayout)
   private val toolsByName: Map[String, ToolFunction] = allTools.map(tool => tool.name -> tool).toMap
 
   /** Interpreter for ReAct's small action language: one named tool call with a record of arguments. Tool selection and
@@ -116,9 +116,10 @@ final case class ReAct[I, O](
   val reactPredict: Predict[(I, String), ReAct.ReactStep] =
     reactPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name        = baseSignature.name,
-        layout      = reactSignature,
-        inputShape  = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.loopTrajectoryField, "ReAct"),
+        name = baseSignature.name,
+        layout = reactSignature,
+        inputShape =
+          InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.loopTrajectoryField, "ReAct"),
         outputShape = ReAct.reactStepShape
       ),
       name = Some(reactProgramName)
@@ -131,7 +132,7 @@ final case class ReAct[I, O](
   override val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name   = baseSignature.name,
+        name = baseSignature.name,
         layout = ChainOfThought.augmentLayout(extractorSignature),
         inputShape = InputAugmentation
           .appendedStringInput(baseSignature.inputShape, ReAct.extractTrajectoryField, "ReAct extractor"),
@@ -150,10 +151,10 @@ final case class ReAct[I, O](
     * next_thought / next_tool_name / next_tool_args protocol, and lists the selectable tools (name + description).
     */
   private def buildInstructions: String =
-    val inputs = baseLayout.inputFields.map(field => s"`${field.name}`").mkString(", ")
-    val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
+    val inputs      = baseLayout.inputFields.map(field => s"`${field.name}`").mkString(", ")
+    val outputs     = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
     val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
-    val toolList = allTools.zipWithIndex.map { case (tool, idx) =>
+    val toolList    = allTools.zipWithIndex.map { case (tool, idx) =>
       val args = if tool.argSchema.nonEmpty then
         tool.argSchema.map((argName, typeRef) => s"$argName: ${typeRef.repr}").mkString("(", ", ", ")")
       else ""
@@ -259,28 +260,28 @@ object ReAct:
 
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
-    name        = ReActKeys.trajectory,
-    typeRef     = TypeRef.string,
+    name = ReActKeys.trajectory,
+    typeRef = TypeRef.string,
     description = Some("The sequence of thoughts, tool calls, and observations so far.")
   )
   private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
-    name        = ReActKeys.trajectory,
-    typeRef     = TypeRef.string,
+    name = ReActKeys.trajectory,
+    typeRef = TypeRef.string,
     description = Some("The completed sequence of thoughts, tool calls, and observations.")
   )
   private[programs] val nextThoughtField: FieldSpec = FieldSpec(
-    name        = ReActKeys.nextThought,
-    typeRef     = TypeRef.string,
+    name = ReActKeys.nextThought,
+    typeRef = TypeRef.string,
     description = Some("Reasoning about the current situation and what to do next.")
   )
   private[programs] val nextToolNameField: FieldSpec = FieldSpec(
-    name        = ReActKeys.nextToolName,
-    typeRef     = TypeRef.string,
+    name = ReActKeys.nextToolName,
+    typeRef = TypeRef.string,
     description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
   )
   private[programs] val nextToolArgsField: FieldSpec = FieldSpec(
-    name        = ReActKeys.nextToolArgs,
-    typeRef     = TypeRef.json,
+    name = ReActKeys.nextToolArgs,
+    typeRef = TypeRef.json,
     description = Some("Arguments for the next tool, as a JSON object.")
   )
 
@@ -293,9 +294,10 @@ object ReAct:
 
   /** Hand-written LENIENT output shape mirroring the prior dynamic reads EXACTLY: a missing `next_thought` /
     * `next_tool_name` renders as "" (a step that names no tool ends the loop rather than failing the call), and
-    * `next_tool_args` accepts a JSON object (JSONAdapter), a JSON-object string (ChatAdapter has no `json`
-    * coercion), or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the
-    * prior direct `DynamicPredict` construction. */
+    * `next_tool_args` accepts a JSON object (JSONAdapter), a JSON-object string (ChatAdapter has no `json` coercion),
+    * or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the prior direct
+    * `DynamicPredict` construction.
+    */
   private[programs] val reactStepShape: Shape[ReactStep] = new Shape[ReactStep]:
     val fieldSpecs: Vector[FieldSpec] = Vector(nextThoughtField, nextToolNameField, nextToolArgsField)
 
@@ -308,7 +310,7 @@ object ReAct:
 
     def decode(raw: DynamicValue.Record): Either[DspyError, ReactStep] =
       Right(ReactStep(
-        nextThought  = DynamicValues.recordGet(raw, ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse(""),
+        nextThought = DynamicValues.recordGet(raw, ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse(""),
         nextToolName = DynamicValues.recordGet(raw, ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse(""),
         nextToolArgs = toolArgsRecord(DynamicValues.recordGet(raw, ReActKeys.nextToolArgs))
       ))
@@ -340,7 +342,7 @@ object ReAct:
   private def finishTool(baseLayout: SignatureLayout): ToolFunction =
     val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
     new ToolFunction:
-      override val name: String = FinishToolName
+      override val name: String        = FinishToolName
       override val description: String =
         s"Marks the task complete: signals that all information needed to produce $outputs is now available."
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =

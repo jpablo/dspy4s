@@ -24,17 +24,17 @@ import zio.blocks.schema.DynamicValue
   *   1. '''`Mode` is a monoid''' under `++` (left-to-right control transform) with unit [[Mode.id]] — concretely the
   *      endomorphism monoid on `Controls` (`++` = function composition, `Mode.id` = the identity transform), witnessed
   *      by the [[Mode.monoid]] `given Monoid[Mode]` (`combine` = `++`, `empty` = `id`). Its laws come from the
-  *      [[dspy4s.core.algebra.Monoid]] trait and hold up to '''extensional equality''' of the wrapped transform (`m1
-  *      ≡ m2` iff `∀ c. m1.transform(c) == m2.transform(c)`), NOT the case class's structural `==` — `++` allocates a
+  *      [[dspy4s.core.algebra.Monoid]] trait and hold up to '''extensional equality''' of the wrapped transform (`m1 ≡
+  *      m2` iff `∀ c. m1.transform(c) == m2.transform(c)`), NOT the case class's structural `==` — `++` allocates a
   *      fresh closure each time, so `==` (reference equality on the function field) would reject even `Mode.id ++ m ≡
   *      m`. `ModeLawSuite` executes the trait's laws through the instance under that extensional equality.
   *      Non-commutative, as an endomorphism monoid is (last write wins: `temperature(0.5)
-  *      ++ temperature(0.9)` sets 0.9).
+  * ++ temperature(0.9)` sets 0.9).
   *
-  * 2. '''`mode` is a monoid homomorphism''' from that monoid into program endomorphisms: `mode(m1 ++ m2) = mode(m1) ∘
-  * mode(m2)` and `mode(Mode.id) = id` (a monoid ACTION on programs, distinct from fact 1). This holds on the result
-  * and, because `mode` is trace-transparent, on the trace too; it is checked observationally via the recorder in
-  * `ModeLawSuite`.
+  *   2. '''`mode` is a monoid homomorphism''' from that monoid into program endomorphisms: `mode(m1 ++ m2) = mode(m1) ∘
+  *      mode(m2)` and `mode(Mode.id) = id` (a monoid ACTION on programs, distinct from fact 1). This holds on the
+  *      result and, because `mode` is trace-transparent, on the trace too; it is checked observationally via the
+  *      recorder in `ModeLawSuite`.
   *
   * Scope: `mode` covers pure control transforms. Execution-wrapping modes (retry, pre/post hooks) are the additive
   * extension — not built until a consumer needs them.
@@ -70,7 +70,7 @@ object Mode:
     * the recorder in that suite.
     */
   given monoid: Monoid[Mode] with
-    def empty: Mode = Mode.id
+    def empty: Mode                                      = Mode.id
     extension (a: Mode) infix def combine(b: Mode): Mode = a ++ b
 
 /** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Lifecycle-transparent — it records no callback,
@@ -84,9 +84,9 @@ final case class Moded[I, O, P <: Module[I, O]](mode: Mode, program: P)
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val controls = mode.transform(Mode.Controls(call.config, call.traceEnabled, call.rolloutId))
     program(call.copy(
-      config       = controls.config,
+      config = controls.config,
       traceEnabled = controls.traceEnabled,
-      rolloutId    = controls.rolloutId
+      rolloutId = controls.rolloutId
     ))
 
 object Moded:
@@ -94,7 +94,7 @@ object Moded:
   given modedOptimizableTraversal[I, O, P <: Module[I, O], N <: Int](using
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[Moded[I, O, P], N] with
-    def arity(program: Moded[I, O, P]): Int = inner.arity(program.program)
+    def arity(program: Moded[I, O, P]): Int                       = inner.arity(program.program)
     def inspect(program: Moded[I, O, P]): Vector[OptimizableView] = inner.inspect(program.program)
     def replace(program: Moded[I, O, P], updates: Vector[OptimizableParameters]): Moded[I, O, P] =
       program.copy(program = inner.replace(program.program, updates))

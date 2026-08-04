@@ -27,9 +27,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *      `previous_code` + `error` and emits a fix. Loops up to `maxIterations`. 3. **answer** — inputs +
   *      `final_generated_code` + `code_output` → original outputs declared in `baseSignature`.
   *
-  * `ProgramOfThought[I, O]` is a `Module[I, WithReasoning[O]]`: it encodes the typed input,
-  * runs the three passes internally over the data-bag layer, and decodes the final answer step into the base outputs
-  * `O` with `reasoning: String` prepended (see [[OutputAugmentation]]).
+  * `ProgramOfThought[I, O]` is a `Module[I, WithReasoning[O]]`: it encodes the typed input, runs the three passes
+  * internally over the data-bag layer, and decodes the final answer step into the base outputs `O` with
+  * `reasoning: String` prepended (see [[OutputAugmentation]]).
   *
   * '''SUBMIT vs print.''' This port instructs the LM to **print** its result (typically JSON) and the answer step
   * parses the printed output — the convention every [[CodeInterpreter]] supports. When the interpreter is
@@ -43,14 +43,14 @@ final case class ProgramOfThought[I, O](
     baseSignature: Signature[I, O],
     interpreter: CodeInterpreter,
     maxIterations: IterationLimit = IterationLimit(3),
-    /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing
-      * an explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
+    /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing an
+      * explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
       * Carrying it as a defaulted, `copy`-reachable field makes this learnable sub-predict addressable + immutably
       * replaceable (see the `OptimizableTraversal[ProgramOfThought]` instance).
       */
     generatorPredictOverride: Option[Predict[I, ProgramOfThought.CodeOut]] = None,
-    /** Optional override for the code-regeneration predict used after a failed attempt (typed over the base input
-      * plus `previous_code` and `error`).
+    /** Optional override for the code-regeneration predict used after a failed attempt (typed over the base input plus
+      * `previous_code` and `error`).
       */
     regeneratorPredictOverride: Option[Predict[((I, String), String), ProgramOfThought.CodeOut]] = None,
     /** Optional override for the final answer-extraction predict (CoT-augmented, typed over the base input plus
@@ -64,7 +64,7 @@ final case class ProgramOfThought[I, O](
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ProgramOfThought.WithReasoning[O]
 
-  override val moduleName: String = "program_of_thought"
+  override val moduleName: String         = "program_of_thought"
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   import ProgramOfThought.{codeOutputField, errorField, finalGeneratedCodeField, generatedCodeField, previousCodeField}
@@ -115,20 +115,20 @@ final case class ProgramOfThought[I, O](
         s"Given the final Python code and its printed output, produce the final $outputs."
       }))
 
-  /** The initial code-generation predict, built once from the CoT-augmented [[generateSignature]] and exposed as
-    * stable optimizer state — a TYPED `Predict[I, CodeOut]` (the base input shape unchanged, with missing code modeled
-    * explicitly by [[ProgramOfThought.codeOutShape]]). Addressable + tunable via [[generatorPredictOverride]]; [[forward]]
-    * executes this member rather than rebuilding a local predictor for each call.
+  /** The initial code-generation predict, built once from the CoT-augmented [[generateSignature]] and exposed as stable
+    * optimizer state — a TYPED `Predict[I, CodeOut]` (the base input shape unchanged, with missing code modeled
+    * explicitly by [[ProgramOfThought.codeOutShape]]). Addressable + tunable via [[generatorPredictOverride]];
+    * [[forward]] executes this member rather than rebuilding a local predictor for each call.
     */
   val generatorPredict: Predict[I, ProgramOfThought.CodeOut] =
     generatorPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name        = baseSignature.name,
-        layout      = ProgramOfThought.augmented(generateSignature),
-        inputShape  = baseSignature.inputShape,
+        name = baseSignature.name,
+        layout = ProgramOfThought.augmented(generateSignature),
+        inputShape = baseSignature.inputShape,
         outputShape = ProgramOfThought.codeOutShape
       ),
-      name    = Some(ProgramOfThought.generatorModuleName),
+      name = Some(ProgramOfThought.generatorModuleName),
       runtime = ProgramOfThought.SignatureProgramRuntime
     ))
 
@@ -138,7 +138,7 @@ final case class ProgramOfThought[I, O](
   val regeneratorPredict: Predict[((I, String), String), ProgramOfThought.CodeOut] =
     regeneratorPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name   = baseSignature.name,
+        name = baseSignature.name,
         layout = ProgramOfThought.augmented(regenerateSignature),
         inputShape = InputAugmentation.appendedStringInput(
           InputAugmentation.appendedStringInput(baseSignature.inputShape, previousCodeField, "ProgramOfThought"),
@@ -147,7 +147,7 @@ final case class ProgramOfThought[I, O](
         ),
         outputShape = ProgramOfThought.codeOutShape
       ),
-      name    = Some(ProgramOfThought.regeneratorModuleName),
+      name = Some(ProgramOfThought.regeneratorModuleName),
       runtime = ProgramOfThought.SignatureProgramRuntime
     ))
 
@@ -158,7 +158,7 @@ final case class ProgramOfThought[I, O](
   val answererPredict: Predict[((I, String), String), ProgramOfThought.WithReasoning[O]] =
     answererPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name   = baseSignature.name,
+        name = baseSignature.name,
         layout = ProgramOfThought.augmented(answerSignature),
         inputShape = InputAugmentation.appendedStringInput(
           InputAugmentation.appendedStringInput(baseSignature.inputShape, finalGeneratedCodeField, "ProgramOfThought"),
@@ -173,7 +173,7 @@ final case class ProgramOfThought[I, O](
           baseSignature.name
         )
       ),
-      name    = Some(ProgramOfThought.answererModuleName),
+      name = Some(ProgramOfThought.answererModuleName),
       runtime = ProgramOfThought.SignatureProgramRuntime
     ))
 
@@ -330,14 +330,14 @@ object ProgramOfThought:
     def encode(value: CodeOut): DynamicValue.Record =
       value.generatedCode match
         case Some(code) => DynamicValue.Record(Chunk(
-          "generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(code))
-        ))
+            "generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(code))
+          ))
         case None => DynamicValue.Record.empty
 
     def decode(raw: DynamicValue.Record): Either[DspyError, CodeOut] =
       DynamicValues.recordGet(raw, "generated_code") match
-        case None => Right(CodeOut(None))
+        case None                                                      => Right(CodeOut(None))
         case Some(DynamicValue.Primitive(PrimitiveValue.String(code))) => Right(CodeOut(Some(code)))
-        case Some(other) => Left(ValidationError(
-          s"ProgramOfThought generated_code must be a String, got: $other"
-        ))
+        case Some(other)                                               => Left(ValidationError(
+            s"ProgramOfThought generated_code must be a String, got: $other"
+          ))

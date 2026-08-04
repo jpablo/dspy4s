@@ -10,8 +10,9 @@ import dspy4s.core.contracts.ToolCall
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** Provider `tool_choice` setting for native function-calling, mirroring OpenAI's string-or-object form:
-  * `"auto"` / `"required"` / `"none"`, or force a specific tool via `{type:"function", function:{name}}`. */
+/** Provider `tool_choice` setting for native function-calling, mirroring OpenAI's string-or-object form: `"auto"` /
+  * `"required"` / `"none"`, or force a specific tool via `{type:"function", function:{name}}`.
+  */
 enum ToolChoice derives CanEqual:
   case Auto
   case Required
@@ -21,11 +22,13 @@ enum ToolChoice derives CanEqual:
 /** Shared helpers for adapter-level native (provider) function-calling, used by [[dspy4s.adapters.ChatAdapter]] and
   * [[dspy4s.adapters.JSONAdapter]] so the gating, tool-schema injection, and `tool_calls` encoding stay identical.
   * Ported from dspy's `use_native_function_calling` (adapters/base.py). ReAct is intentionally unaffected — it keeps
-  * the text protocol, matching upstream. See PORT_GAPS G-7b. */
+  * the text protocol, matching upstream. See PORT_GAPS G-7b.
+  */
 object NativeFunctionCalling:
 
-  /** True for the output field that receives native provider tool calls (`typeRef == TypeRef.toolCalls`). Such a
-    * field is filled from the structured response, never rendered/parsed as text. */
+  /** True for the output field that receives native provider tool calls (`typeRef == TypeRef.toolCalls`). Such a field
+    * is filled from the structured response, never rendered/parsed as text.
+    */
   def isToolCallsField(field: FieldSpec): Boolean =
     field.typeRef == TypeRef.toolCalls
 
@@ -35,9 +38,10 @@ object NativeFunctionCalling:
       case Some(lm: LanguageModel) => lm.supportsFunctionCalling
       case _                       => false
 
-  /** The provider `tools` (and optional `parallel_tool_calls`) request options to contribute, or an empty record
-    * when native calling is not active. Active iff `useNative` is on AND `tools` were supplied AND the layout
-    * declares a `tool_calls` output field AND the LM supports function calling (mirrors dspy's gate). */
+  /** The provider `tools` (and optional `parallel_tool_calls`) request options to contribute, or an empty record when
+    * native calling is not active. Active iff `useNative` is on AND `tools` were supplied AND the layout declares a
+    * `tool_calls` output field AND the LM supports function calling (mirrors dspy's gate).
+    */
   def toolOptions(
       layout: SignatureLayout,
       tools: Vector[ToolSpec],
@@ -51,12 +55,15 @@ object NativeFunctionCalling:
     else
       val entries =
         Vector("tools" -> ToolSchemaBridge.toOpenAiToolsDynamic(tools)) ++
-          parallelToolCalls.map(b => "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))).toVector ++
+          parallelToolCalls.map(b =>
+            "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))
+          ).toVector ++
           toolChoice.map(tc => "tool_choice" -> encodeToolChoice(tc)).toVector
       DynamicValues.recordFromEntries(entries)
 
   /** Encode a [[ToolChoice]] as the provider `tool_choice` value: a string for the modes, an object for a forced
-    * function. */
+    * function.
+    */
   private def encodeToolChoice(choice: ToolChoice): DynamicValue =
     choice match
       case ToolChoice.Auto        => str("auto")
@@ -71,7 +78,8 @@ object NativeFunctionCalling:
   private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
   /** Encode native tool calls as the value of a `tool_calls` output field: a sequence of `{name, args}` records,
-    * matching the shape `PredictEngine` attaches to predictions. */
+    * matching the shape `PredictEngine` attaches to predictions.
+    */
   def encodeToolCalls(calls: Vector[ToolCall]): DynamicValue =
     DynamicValue.Sequence(Chunk.from(calls.map { call =>
       DynamicValue.Record(Chunk(

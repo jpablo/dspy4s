@@ -14,15 +14,15 @@ import munit.FunSuite
 
 /** Offline MIPROv2 suite.
   *
-  * The single ambient scripted LM serves THREE sub-tasks, branched on markers MIPROv2's composed phases weave
-  * into each signature's instructions (the test adapter renders the active instruction into the prompt):
+  * The single ambient scripted LM serves THREE sub-tasks, branched on markers MIPROv2's composed phases weave into each
+  * signature's instructions (the test adapter renders the active instruction into the prompt):
   *
   *   1. Dataset summary (GroundedProposer phase A): returns a canned observations string.
-  *   2. Instruction generation (GroundedProposer phase A): returns a distinct candidate per `rolloutId`, and the
-  *      pool always contains the WINNING instruction (so it is reachable as a candidate).
+  *   2. Instruction generation (GroundedProposer phase A): returns a distinct candidate per `rolloutId`, and the pool
+  *      always contains the WINNING instruction (so it is reachable as a candidate).
   *   3. The task itself: answers a `question`. It returns the GOLD answer ONLY when the winning instruction is in
-  *      effect; otherwise it returns a wrong answer. The bootstrap teacher runs this same task path, so the
-  *      teacher (which is configured to already carry the winning instruction) produces correct demos.
+  *      effect; otherwise it returns a wrong answer. The bootstrap teacher runs this same task path, so the teacher
+  *      (which is configured to already carry the winning instruction) produces correct demos.
   *
   * This forces exactly one (instruction, demo-set) assignment to score perfectly: the one carrying the winning
   * instruction. MIPROv2's search must discover it.
@@ -35,7 +35,8 @@ class MIPROv2Suite extends FunSuite:
   private val winningInstruction = "INSTR_WIN: answer precisely"
 
   /** Candidate instruction pool the scripted LM proposes for instruction-generation calls; selected by
-    * `rolloutId % size` so the winner is always reachable. */
+    * `rolloutId % size` so the winner is always reachable.
+    */
   private val proposalPool: Vector[String] =
     Vector(
       "INSTR_A: be brief",
@@ -58,25 +59,29 @@ class MIPROv2Suite extends FunSuite:
   /** Test adapter that renders the ACTIVE instruction into the prompt so the scripted LM can branch on it. */
   private object InstructionAwareAdapter extends Adapter:
     override val name: String = "instruction-aware"
-    override def format(invocation: AdapterInvocation)(using RuntimeContext)
+    override def format(invocation: AdapterInvocation)(using
+        RuntimeContext
+    )
         : Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
-      val q =
+      val q     =
         DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
       val body = s"INSTRUCTION=[$instr] QUESTION=[$q]"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext)
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    )
         : Either[DspyError, ParsedOutput] =
       val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
-    override val id: String   = "scripted-mipro-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted-mipro-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
-      val out =
+      val out  =
         if text.contains(summaryMarker) then cannedSummary
         else if text.contains(instrGenMarker) then
           val r = request.rolloutId.getOrElse(0)
@@ -88,7 +93,7 @@ class MIPROv2Suite extends FunSuite:
           else "WRONG"
       Right(LmResponse(
         outputs = Vector(LmOutput(text = out)),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   private def extractBetween(s: String, start: String, end: String): String =
@@ -103,7 +108,7 @@ class MIPROv2Suite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit  = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private val taskLayout: SignatureLayout =
     SignatureLayout.of(
@@ -157,7 +162,7 @@ class MIPROv2Suite extends FunSuite:
     val optimizer = new MIPROv2[DynamicPredict](config())
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset))
+      val result           = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset))
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report  = result.toOption.get
       val applied = traversal.read(report.bestProgram).head.instructions
@@ -175,7 +180,7 @@ class MIPROv2Suite extends FunSuite:
     val optimizer = new MIPROv2[DynamicPredict](config())
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val report  = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
+      val report   = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
       val maxScore = report.candidates.map(_.score).max
       assertEquals(report.metadata.get("best_score"), Some(maxScore))
       assertEquals(maxScore, 100.0)
@@ -185,8 +190,8 @@ class MIPROv2Suite extends FunSuite:
   // ── 3. Determinism for a fixed seed ────────────────────────────────────────
 
   test("MIPROv2 is deterministic for a fixed seed") {
-    val student = DynamicPredict(layout = taskLayout)
-    val teacher = DynamicPredict(layout = teacherLayout)
+    val student               = DynamicPredict(layout = taskLayout)
+    val teacher               = DynamicPredict(layout = teacherLayout)
     def run(): Option[String] =
       val optimizer = new MIPROv2[DynamicPredict](config(seed = 7L))
       RuntimeEnvironment.withSettings(settings) {

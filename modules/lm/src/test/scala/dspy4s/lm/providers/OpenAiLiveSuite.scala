@@ -12,20 +12,18 @@ import io.github.cdimascio.dotenv.Dotenv
 import java.io.File
 import munit.FunSuite
 
-/**
- * Integration tests that hit the real OpenAI chat-completions endpoint.
- *
- * Run conditions:
- *   - Set OPENAI_API_KEY in the environment, in JVM system properties, or in a
- *     `.env` file at the project root (resolved by walking up from the test cwd).
- *     If the variable is missing or empty these tests are marked "ignored" via
- *     MUnit's `assume(...)`, so `sbt test` still succeeds without credentials.
- *   - Optionally set OPENAI_BASE_URL to point at Azure OpenAI, OpenRouter,
- *     LiteLLM proxy, or any OpenAI-compatible endpoint.
- *
- * Cost: each test pins `max_tokens` to a tiny value and `temperature` to 0,
- * so a full suite run costs roughly 0.01 USD on gpt-4o-mini.
- */
+/** Integration tests that hit the real OpenAI chat-completions endpoint.
+  *
+  * Run conditions:
+  *   - Set OPENAI_API_KEY in the environment, in JVM system properties, or in a `.env` file at the project root
+  *     (resolved by walking up from the test cwd). If the variable is missing or empty these tests are marked "ignored"
+  *     via MUnit's `assume(...)`, so `sbt test` still succeeds without credentials.
+  *   - Optionally set OPENAI_BASE_URL to point at Azure OpenAI, OpenRouter, LiteLLM proxy, or any OpenAI-compatible
+  *     endpoint.
+  *
+  * Cost: each test pins `max_tokens` to a tiny value and `temperature` to 0, so a full suite run costs roughly 0.01 USD
+  * on gpt-4o-mini.
+  */
 class OpenAiLiveSuite extends FunSuite:
 
   private val dotenv: Dotenv =
@@ -44,9 +42,9 @@ class OpenAiLiveSuite extends FunSuite:
       .orElse(Option(dotenv.get(key)))
       .filter(_.nonEmpty)
 
-  private val apiKey: Option[String] = lookup("OPENAI_API_KEY")
+  private val apiKey: Option[String]  = lookup("OPENAI_API_KEY")
   private val baseUrl: Option[String] = lookup("OPENAI_BASE_URL")
-  private val model: String = lookup("OPENAI_LIVE_MODEL").getOrElse("gpt-4o-mini")
+  private val model: String           = lookup("OPENAI_LIVE_MODEL").getOrElse("gpt-4o-mini")
 
   private def hasOptIn: Boolean =
     lookup("OPENAI_LIVE_ENABLED").exists(v => v != "0" && v != "false")
@@ -63,13 +61,14 @@ class OpenAiLiveSuite extends FunSuite:
 
   test("live: call() returns a real chat completion with usage accounting") {
     requireLive()
-    val lm = buildLm()
+    val lm               = buildLm()
     given RuntimeContext = RuntimeEnvironment.current
 
     val request = LmRequest(
       model = model,
       mode = LmMode.Chat,
-      messages = Vector(Message(role = MessageRole.User, text = Some("Reply with exactly the text: integration-test-passed"))),
+      messages =
+        Vector(Message(role = MessageRole.User, text = Some("Reply with exactly the text: integration-test-passed"))),
       options = DynamicValues.record("max_tokens" := 10, "temperature" := 0.0)
     )
     val result = lm.call(request)
@@ -90,7 +89,7 @@ class OpenAiLiveSuite extends FunSuite:
 
   test("live: stream() yields multiple text chunks and a final usage chunk") {
     requireLive()
-    val lm = buildLm()
+    val lm               = buildLm()
     given RuntimeContext = RuntimeEnvironment.current
 
     val request = LmRequest(
@@ -121,16 +120,22 @@ class OpenAiLiveSuite extends FunSuite:
     )
 
     val usageChunks = chunks.filter(_.usage.isDefined)
-    assert(usageChunks.nonEmpty, s"no usage chunk observed; check stream_options.include_usage=true is still sent. chunk count=${chunks.size}")
+    assert(
+      usageChunks.nonEmpty,
+      s"no usage chunk observed; check stream_options.include_usage=true is still sent. chunk count=${chunks.size}"
+    )
     val usage = usageChunks.last.usage.get
     assert(usage.completionTokens > 0L)
   }
 
   test("live: client reports openai_auth on a bogus API key") {
-    val badClient = OpenAiClient(apiKey = "sk-this-key-does-not-exist-12345", baseUrl = baseUrl.getOrElse(OpenAiClient.defaultBaseUrl))
-    val lm = OpenAiLanguageModel(model = model, client = badClient)
+    val badClient = OpenAiClient(
+      apiKey = "sk-this-key-does-not-exist-12345",
+      baseUrl = baseUrl.getOrElse(OpenAiClient.defaultBaseUrl)
+    )
+    val lm               = OpenAiLanguageModel(model = model, client = badClient)
     given RuntimeContext = RuntimeEnvironment.current
-    val request = LmRequest(
+    val request          = LmRequest(
       model = model,
       messages = Vector(Message(role = MessageRole.User, text = Some("x"))),
       options = DynamicValues.record("max_tokens" := 1)

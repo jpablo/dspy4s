@@ -26,14 +26,14 @@ object CallObservation:
       def outputs(prediction: Prediction[Output]): DynamicValue.Record = outputProjection(prediction)
 
 /** Whether a module boundary is observable and, when it is, how its uniform [[ProgramCall]] and result project into
-  * runtime records. Like [[Module]], the first type parameter is the semantic input inside `ProgramCall[I]`.
-  * Structural composition uses [[ModuleLifecycle.Transparent]]; executable leaves and observable wrappers use
+  * runtime records. Like [[Module]], the first type parameter is the semantic input inside `ProgramCall[I]`. Structural
+  * composition uses [[ModuleLifecycle.Transparent]]; executable leaves and observable wrappers use
   * [[ModuleLifecycle.Observed]].
   */
 sealed trait ModuleLifecycle[I, O]
 
 object ModuleLifecycle:
-  final case class Transparent[I, O]() extends ModuleLifecycle[I, O]
+  final case class Transparent[I, O]()                                             extends ModuleLifecycle[I, O]
   final case class Observed[I, O](observation: CallObservation[ProgramCall[I], O]) extends ModuleLifecycle[I, O]
 
   def transparent[I, O]: ModuleLifecycle[I, O] = Transparent()

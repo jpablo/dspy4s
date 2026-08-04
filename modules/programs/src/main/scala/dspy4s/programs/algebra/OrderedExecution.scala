@@ -41,28 +41,23 @@ trait CDCategory[Hom[_, _]] extends OrderedTensorOps[Hom]:
       g1: Hom[B, D],
       f2: Hom[C, E],
       g2: Hom[D, F2]
-  ): IsEq[Hom[(A, B), (E, F2)]] =
-    (tensor(f1, g1) >>> tensor(f2, g2)) <-> tensor(f1 >>> f2, g1 >>> g2)
+  ): IsEq[Hom[(A, B), (E, F2)]] = (tensor(f1, g1) >>> tensor(f2, g2)) <-> tensor(f1 >>> f2, g1 >>> g2)
 
   @Law("tensor preserves identities")
   def tensorIdentity[A, B]: IsEq[Hom[(A, B), (A, B)]] =
     tensor(id[A], id[B]) <-> id[(A, B)]
 
   @Law("swap is involutive (symmetry)")
-  def swapInvolution[A, B]: IsEq[Hom[(A, B), (A, B)]] =
-    (swap[A, B] >>> swap[B, A]) <-> id[(A, B)]
+  def swapInvolution[A, B]: IsEq[Hom[(A, B), (A, B)]] = (swap[A, B] >>> swap[B, A]) <-> id[(A, B)]
 
   @Law("copy is cocommutative")
-  def cocommutativity[A]: IsEq[Hom[A, (A, A)]] =
-    (copy[A] >>> swap[A, A]) <-> copy[A]
+  def cocommutativity[A]: IsEq[Hom[A, (A, A)]] = (copy[A] >>> swap[A, A]) <-> copy[A]
 
   @Law("discard is natural (unit terminal) — under output-observational equality")
-  def discardNatural[A, B](f: Hom[A, B]): IsEq[Hom[A, Unit]] =
-    (f >>> discard[B]) <-> discard[A]
+  def discardNatural[A, B](f: Hom[A, B]): IsEq[Hom[A, Unit]] = (f >>> discard[B]) <-> discard[A]
 
   /** `copy` commutes with `f` iff `f` is deterministic. This is deliberately not annotated as a law. */
-  def copyNaturality[A, B](f: Hom[A, B]): IsEq[Hom[A, (B, B)]] =
-    (f >>> copy[B]) <-> (copy[A] >>> tensor(f, f))
+  def copyNaturality[A, B](f: Hom[A, B]): IsEq[Hom[A, (B, B)]] = (f >>> copy[B]) <-> (copy[A] >>> tensor(f, f))
 
 /** Unrestricted executable programs with ordered tensor-like operations.
   *

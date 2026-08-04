@@ -6,7 +6,8 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import zio.blocks.schema.DynamicValue
 
 /** Laws for the attempt-isolation helpers shared by BestOfN / Refine. The migrated loops are covered by
-  * TypedBestOfNSuite / RefinePerModuleAdviceSuite; this pins the primitive. */
+  * TypedBestOfNSuite / RefinePerModuleAdviceSuite; this pins the primitive.
+  */
 class IsolatedAttemptSuite extends munit.FunSuite:
 
   private def hist(n: Int): HistoryEntry   = HistoryEntry("c", DynamicValues.record("n" := n))

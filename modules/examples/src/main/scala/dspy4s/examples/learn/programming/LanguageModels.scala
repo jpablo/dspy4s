@@ -1,5 +1,5 @@
 /** Language Models
- *
+  *
   * Source: docs/docs/learn/programming/language_models.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/language_models.md Status: translated (LM
   * setup, direct calls, use-with-modules, multiple LMs, generation config, usage/errors). dspy4s ships a single
@@ -7,15 +7,15 @@
   * OpenAI-compatible endpoint (Azure / Ollama / vLLM / SGLang / OpenRouter) are supported via the `baseUrl` overload;
   * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. Also out of scope: the Responses API
   * (`model_type= "responses"` — dspy4s only has `LmMode.Chat`), and custom-LM save/load (`dump_state`/`load_state`/
- *           `copy`, since dspy4s has no program persistence).
- *
- * Key shape differences:
+  * `copy`, since dspy4s has no program persistence).
+  *
+  * Key shape differences:
   *   - `dspy.configure(lm=…)` → `RuntimeEnvironment.configure(RuntimeContext(lm = Some(lm), adapter = Some(…)))`; `with
   *     dspy.context(lm=…):` → `RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) { … }`.
- *   - dspy4s never throws on LM failure: `lm.call` / a program returns `Either[DspyError, …]`.
- *   - There is no global `lm.history`; per-call usage is on `LmResponse.usage`, and aggregate usage is via
- *     `ManagedLanguageModel` + `UsageTracking` (see tutorials/cache/Cache.scala).
- */
+  *   - dspy4s never throws on LM failure: `lm.call` / a program returns `Either[DspyError, …]`.
+  *   - There is no global `lm.history`; per-call usage is on `LmResponse.usage`, and aggregate usage is via
+  *     `ManagedLanguageModel` + `UsageTracking` (see tutorials/cache/Cache.scala).
+  */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.ChatAdapter
@@ -82,7 +82,7 @@ object LanguageModels:
     ctx.lm match
       case Some(lm: LanguageModel) =>
         val request = LmRequest(
-          model    = lm.id,
+          model = lm.id,
           messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
         )
         lm.call(request).map(_.outputs.headOption.map(_.text).getOrElse(""))
@@ -109,12 +109,12 @@ object LanguageModels:
       ctx: RuntimeContext
   ): Either[DspyError, (String, String)] =
     for
-      base  <- ask(question) // current/global LM
-      other <- OpenAiLanguageModel.fromEnv(overrideModel)
+      base   <- ask(question) // current/global LM
+      other  <- OpenAiLanguageModel.fromEnv(overrideModel)
       scoped <- RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) {
-                  given RuntimeContext = RuntimeEnvironment.current
-                  ask(question)
-                }
+        given RuntimeContext = RuntimeEnvironment.current
+        ask(question)
+      }
     yield (base, scoped)
   // --8<-- [end:scoped-override]
 
@@ -135,8 +135,8 @@ object LanguageModels:
       RuntimeContext
   ): Either[DspyError, String] =
     qa(ProgramCall(
-      input     = (question = question),
-      config    = DynamicValues.record("temperature" := temperature),
+      input = (question = question),
+      config = DynamicValues.record("temperature" := temperature),
       rolloutId = Some(rolloutId)
     )).map(_.output.answer)
   // --8<-- [end:lm-config]

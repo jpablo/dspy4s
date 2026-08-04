@@ -87,7 +87,7 @@ object Example:
     def readInputKeys: Either[DspyError, Set[String]] =
       DynamicValues.recordGet(state, "inputKeys") match
         case None | Some(_: DynamicValue.Null.type) => Right(Set.empty)
-        case Some(seq: DynamicValue.Sequence) =>
+        case Some(seq: DynamicValue.Sequence)       =>
           seq.elements.iterator.foldLeft[Either[DspyError, Set[String]]](Right(Set.empty)) { (acc, raw) =>
             acc.flatMap { keys =>
               raw match

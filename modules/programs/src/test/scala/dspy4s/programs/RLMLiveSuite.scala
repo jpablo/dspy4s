@@ -15,17 +15,18 @@ import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
-/** Live RLM end-to-end against the REAL Deno+Pyodide sandbox (assume-skipped without `deno`): a scripted action
-  * LM drives real Python through the default interpreter, proving the whole tower in one flow — input variables
-  * injected into the REPL, state persisting across iterations, the `llm_query` host-tool bridge calling the
-  * sub-LM from INSIDE sandboxed code, and `SUBMIT` carrying a value computed from all three back out. */
+/** Live RLM end-to-end against the REAL Deno+Pyodide sandbox (assume-skipped without `deno`): a scripted action LM
+  * drives real Python through the default interpreter, proving the whole tower in one flow — input variables injected
+  * into the REPL, state persisting across iterations, the `llm_query` host-tool bridge calling the sub-LM from INSIDE
+  * sandboxed code, and `SUBMIT` carrying a value computed from all three back out.
+  */
 class RLMLiveSuite extends FunSuite:
 
   override def munitTimeout: scala.concurrent.duration.Duration =
     scala.concurrent.duration.Duration(180, "s")
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private lazy val denoAvailable: Boolean =
     try new ProcessBuilder("deno", "--version").start().waitFor() == 0
@@ -37,19 +38,23 @@ class RLMLiveSuite extends FunSuite:
     override val name: String = "rlm-live-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    override def parse(layout: SignatureLayout, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
       val names = layout.outputFields.map(_.name)
       if names.contains("code") then
         val parts = output.text.split("\\|\\|", 2)
-        Right(ParsedOutput(values = rec("reasoning" := parts(0).trim, "code" := (if parts.length > 1 then parts(1) else ""))))
+        Right(ParsedOutput(values =
+          rec("reasoning" := parts(0).trim, "code" := (if parts.length > 1 then parts(1) else ""))
+        ))
       else Right(ParsedOutput(values = rec(names.map(_ := output.text)*)))
 
   test("live: RLM explores an injected variable, calls llm_query from sandboxed code, and SUBMITs the result") {
     assume(denoAvailable, "deno not installed — skipping live RLM test")
 
     val subLm: LanguageModel = new LanguageModel:
-      override val id: String = "sub-lm"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "sub-lm"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         Right(LmResponse(outputs = Vector(LmOutput(text = "SUB"))))
 
@@ -71,7 +76,7 @@ class RLMLiveSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(actionLm), adapter = Some(ActionAdapter))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = program((context = "0123456789"))
+      val result           = program((context = "0123456789"))
       assert(result.isRight, result.toString)
       val pred = result.toOption.get
       assertEquals(pred.output.answer, "10-SUB") // len("0123456789") + the sub-LM's reply, both via REPL state

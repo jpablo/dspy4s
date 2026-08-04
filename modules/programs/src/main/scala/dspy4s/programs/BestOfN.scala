@@ -11,9 +11,9 @@ import dspy4s.typed.Prediction
 
 /** Typed `BestOfN`: runs an inner typed program up to `n` times and keeps the highest-reward `Prediction[O]`,
   * short-circuiting once `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O`
-  * unchanged (a `Module[I, O]`), so it composes around any typed program (`Predict`,
-  * `ChainOfThought`, …). The repeated samples are made distinct by a per-attempt `rolloutId` (cache-busting);
-  * `failCount` bounds tolerated failures before giving up (defaults to `n`).
+  * unchanged (a `Module[I, O]`), so it composes around any typed program (`Predict`, `ChainOfThought`, …). The repeated
+  * samples are made distinct by a per-attempt `rolloutId` (cache-busting); `failCount` bounds tolerated failures before
+  * giving up (defaults to `n`).
   *
   * Its lifecycle observation records empty inputs: a generic wrapper has no `Signature` to encode `I` for its own trace
   * entry, so the meaningful inputs live on the nested inner program's event. The best-of-`n` selection loop lives in
@@ -21,9 +21,9 @@ import dspy4s.typed.Prediction
   * `BestOfN` is its independent-samples instance (no inter-attempt feedback).
   *
   * @tparam P
-  *   the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the pass-through `OptimizableTraversal`
-  *   instance ([[BestOfN.bestOfNOptimizableTraversal]]) can delegate to the inner program's own instance; an abstract
-  *   `Module[...]` field would erase that evidence.
+  *   the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the pass-through
+  *   `OptimizableTraversal` instance ([[BestOfN.bestOfNOptimizableTraversal]]) can delegate to the inner program's own
+  *   instance; an abstract `Module[...]` field would erase that evidence.
   */
 final case class BestOfN[P <: Module[I, O], I, O](
     module: P,
@@ -53,7 +53,7 @@ object BestOfN:
   given bestOfNOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[BestOfN[P, I, O], N] with
-    def arity(program: BestOfN[P, I, O]): Int = inner.arity(program.module)
+    def arity(program: BestOfN[P, I, O]): Int                       = inner.arity(program.module)
     def inspect(program: BestOfN[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module)
 

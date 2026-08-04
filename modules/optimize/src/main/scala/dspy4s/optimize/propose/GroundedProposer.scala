@@ -102,8 +102,8 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     * @param trainset
     *   task data; a sample grounds the dataset-summary step
     * @param demoCandidates
-    *   per-leaf bootstrapped demo sets (outer index aligns with [[OptimizableTraversal.read]] order); empty (the default)
-    *   means no demos are rendered into proposals
+    *   per-leaf bootstrapped demo sets (outer index aligns with [[OptimizableTraversal.read]] order); empty (the
+    *   default) means no demos are rendered into proposals
     * @return
     *   for each leaf (in read order) a vector of `numInstructions` candidate instruction strings, or the first
     *   [[DspyError]] encountered
@@ -117,9 +117,9 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     for
       summary <- datasetSummary(trainset)
       perLeaf <- traverse(leaves.zipWithIndex.toVector) { case (leaf, idx) =>
-                   val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
-                   proposeForLeaf(leaf, idx, summary, demoSet)
-                 }
+        val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
+        proposeForLeaf(leaf, idx, summary, demoSet)
+      }
     yield perLeaf
 
   // ── Dataset summary (the create_dataset_summary analogue) ──────────────────
@@ -145,9 +145,9 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
       val sample   = trainset.take(config.datasetSampleSize)
       val rendered = sample.iterator.map(renderExample).mkString("\n\n")
       val gen      = DynamicPredict(layout = summaryLayout, name = Some("grounded_summary"))
-      val call = ProgramCall(
+      val call     = ProgramCall(
         input = DynamicValues.record("examples" := rendered),
-        config    = DynamicValues.record("temperature" := config.initTemperature),
+        config = DynamicValues.record("temperature" := config.initTemperature),
         rolloutId = Some(OptimizerSupport.seedBase(config.seed))
       )
       // The dataset summary is best-effort grounding: a failed summary LM call degrades to "no grounding"
@@ -222,7 +222,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
 
       val call = ProgramCall(
         input = DynamicValues.recordFromEntries(entries),
-        config    = DynamicValues.record("temperature" := config.initTemperature),
+        config = DynamicValues.record("temperature" := config.initTemperature),
         rolloutId = Some(rolloutId)
       )
       gen(call).map { pred =>

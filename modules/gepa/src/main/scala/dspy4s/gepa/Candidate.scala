@@ -18,8 +18,8 @@ object Candidate:
       entry.id -> entry.parameters.instructions
     }.toMap
 
-  /** Apply a candidate's instructions back onto the same traversal identities. OptimizableTraversal absent from the candidate
-    * keep their instruction.
+  /** Apply a candidate's instructions back onto the same traversal identities. OptimizableTraversal absent from the
+    * candidate keep their instruction.
     */
   def applyTo[P](program: P, candidate: Candidate)(using ps: OptimizableTraversal[P]): P =
     val updated = ps.readIdentified(program).map { entry =>

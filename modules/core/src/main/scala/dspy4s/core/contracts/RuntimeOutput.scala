@@ -11,10 +11,9 @@ import java.time.Instant
   * record, and `outputs` is the successful result projected by the module's lifecycle observation.
   *
   * Appended to [[RuntimeContext.trace]] when the underlying `ProgramCall.traceEnabled` is `true`. A successful call
-  * records `failure = None`. A FAILED call is recorded only when
-  * [[RuntimeContext.captureFailureTraces]] is set (e.g. by GEPA's reflective evaluation): `failure` carries the error
-  * message and `outputs` carries the raw model response (`raw_response`) when the error is a parse failure. See
-  * PORT_GAPS G-12 (P-a).
+  * records `failure = None`. A FAILED call is recorded only when [[RuntimeContext.captureFailureTraces]] is set (e.g.
+  * by GEPA's reflective evaluation): `failure` carries the error message and `outputs` carries the raw model response
+  * (`raw_response`) when the error is a parse failure. See PORT_GAPS G-12 (P-a).
   */
 final case class TraceEntry(
     component: String,

@@ -47,7 +47,7 @@ object AutoEvaluation:
     val r = math.max(0.0, math.min(1.0, recall))
     if p + r == 0.0 then 0.0 else 2.0 * (p * r) / (p + r)
 
-  private[metrics] def input(name: String): FieldSpec = FieldSpec(name = name)
+  private[metrics] def input(name: String): FieldSpec                = FieldSpec(name = name)
   private[metrics] def output(name: String, desc: String): FieldSpec =
     FieldSpec(name = name, typeRef = TypeRef.double, description = Some(desc))
   private[metrics] def textOutput(name: String, desc: String): FieldSpec =
@@ -71,7 +71,7 @@ object AutoEvaluation:
   )(using RuntimeContext): Either[DspyError, Vector[Double]] =
     for
       prediction <- predictor(ProgramCall(input = inputs, traceEnabled = false))
-      values <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
+      values     <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
         for
           soFar <- acc
           value <- prediction.raw.asDouble(field)

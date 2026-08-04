@@ -41,11 +41,11 @@ import scala.compiletime.ops.int.+
   * that is routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
   *
   * '''Per-module advice (parity with Python).''' OfferFeedback returns a JSON object `{componentName: advice}` keyed by
-  * the inner program's named predictors ([[OptimizableTraversal.inspectNamed]], the dspy4s analogue of `named_predictors()`).
-  * Each predictor's call is matched to its advice by its [[SignatureLayout]] — the dspy4s stand-in for Python's
-  * `signature2name[signature]` object-identity routing — and only that predictor's `hint_` is injected. A predictor
-  * whose advice is absent or `N/A` gets no hint. When OfferFeedback returns a bare (non-JSON) string, it degrades to
-  * uniform advice across every component.
+  * the inner program's named predictors ([[OptimizableTraversal.inspectNamed]], the dspy4s analogue of
+  * `named_predictors()`). Each predictor's call is matched to its advice by its [[SignatureLayout]] — the dspy4s
+  * stand-in for Python's `signature2name[signature]` object-identity routing — and only that predictor's `hint_` is
+  * injected. A predictor whose advice is absent or `N/A` gets no hint. When OfferFeedback returns a bare (non-JSON)
+  * string, it degrades to uniform advice across every component.
   *
   * Like [[BestOfN]], the winning attempt's isolated trace/history are propagated to the caller; `failCount` bounds
   * tolerated failures before giving up (defaults to `n`).
@@ -71,8 +71,8 @@ final case class Refine[P <: Module[I, O], I, O](
     failCount: Option[FailureCount] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
       * [[Refine.offerFeedbackSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
-      * addressable + immutably replaceable (see [[Refine.refineOptimizableTraversal]]), mirroring the ReAct/CodeAct override
-      * pattern.
+      * addressable + immutably replaceable (see [[Refine.refineOptimizableTraversal]]), mirroring the ReAct/CodeAct
+      * override pattern.
       */
     criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
@@ -130,7 +130,7 @@ object Refine:
   given refineOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[Refine[P, I, O], N + 1] with
-    def arity(program: Refine[P, I, O]): Int = inner.arity(program.module) + 1
+    def arity(program: Refine[P, I, O]): Int                       = inner.arity(program.module) + 1
     def inspect(program: Refine[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module) :+ program.criticPredict.optimizableView
 
@@ -144,7 +144,7 @@ object Refine:
         if updates(innerArity) == program.criticPredict.optimizableParameters then program.criticPredictOverride
         else Some(program.criticPredict.withOptimizableParameters(updates(innerArity)))
       program.copy(
-        module                = inner.replace(program.module, updates.take(innerArity)),
+        module = inner.replace(program.module, updates.take(innerArity)),
         criticPredictOverride = nextCritic
       )
 
@@ -175,15 +175,15 @@ object Refine:
 
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       adviceByLayout.get(invocation.layout).map(_.trim).filter(a => a.nonEmpty && a != "N/A") match
-        case None => baseAdapter.format(invocation) // no advice routed to this predictor
+        case None         => baseAdapter.format(invocation) // no advice routed to this predictor
         case Some(advice) =>
           val hintField = FieldSpec(
-            name        = "hint_",
+            name = "hint_",
             description = Some("A hint to the module from an earlier run")
           )
           val layoutWithHint = invocation.layout.withInputFields(invocation.layout.inputFields :+ hintField)
           val inputsWithHint = invocation.inputs.copy(
-            values    = invocation.inputs.values.updated("hint_", DynamicValues.fromAny(advice)),
+            values = invocation.inputs.values.updated("hint_", DynamicValues.fromAny(advice)),
             inputKeys = invocation.inputs.inputKeys + "hint_"
           )
           baseAdapter.format(invocation.copy(layout = layoutWithHint, inputs = inputsWithHint))
@@ -235,11 +235,11 @@ object Refine:
         FieldSpec(
           "advice",
           description = Some(
-          "A JSON object mapping each module name (from module_names) to concrete, actionable advice for that " +
-            "module: the specific scenarios in which it made mistakes and what it should do differently on the " +
-            "same or similar inputs in the future. Each module will NOT see its own history, so its advice must be " +
-            "entirely self-contained. Use \"N/A\" for a module that is not to blame. Example: " +
-            "{\"module_a\": \"...\", \"module_b\": \"N/A\"}."
+            "A JSON object mapping each module name (from module_names) to concrete, actionable advice for that " +
+              "module: the specific scenarios in which it made mistakes and what it should do differently on the " +
+              "same or similar inputs in the future. Each module will NOT see its own history, so its advice must be " +
+              "entirely self-contained. Use \"N/A\" for a module that is not to blame. Example: " +
+              "{\"module_a\": \"...\", \"module_b\": \"N/A\"}."
           )
         )
       ),
@@ -253,7 +253,8 @@ object Refine:
     ).getOrElse(throw new IllegalStateException("OfferFeedback layout failed to construct"))
 
   /** The critic's typed input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout
-    * exactly. */
+    * exactly.
+    */
   private[programs] final case class OfferFeedbackInputs(
       program_inputs: String,
       program_trajectory: String,
@@ -264,33 +265,35 @@ object Refine:
   ) derives Schema
 
   /** The critic's typed output. `discussion` is prompt-guidance only ([[generateAdvice]] never reads it), which the
-    * lenient shape below reflects. */
+    * lenient shape below reflects.
+    */
   private[programs] final case class OfferFeedbackAdvice(discussion: String, advice: String)
 
   /** Hand-written LENIENT output shape mirroring the prior dynamic consumption exactly: `advice` is required (with
-    * `RawPrediction.asString`'s primitive coercion, the accessor the dynamic path used), `discussion` tolerates
-    * absence (defaults to ""). A derived shape would reject completions that omit `discussion`, which today's critic
-    * consumers accept; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict`
-    * construction. */
+    * `RawPrediction.asString`'s primitive coercion, the accessor the dynamic path used), `discussion` tolerates absence
+    * (defaults to ""). A derived shape would reject completions that omit `discussion`, which today's critic consumers
+    * accept; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
+    */
   private val offerFeedbackOutputShape: Shape[OfferFeedbackAdvice] = new Shape[OfferFeedbackAdvice]:
-    val fieldSpecs: Vector[FieldSpec] = offerFeedbackLayout.outputFields
+    val fieldSpecs: Vector[FieldSpec]                           = offerFeedbackLayout.outputFields
     def encode(value: OfferFeedbackAdvice): DynamicValue.Record =
       DynamicValues.record("discussion" := value.discussion, "advice" := value.advice)
     def decode(raw: DynamicValue.Record): Either[DspyError, OfferFeedbackAdvice] =
       RawPrediction(values = raw).asString("advice").map { advice =>
         OfferFeedbackAdvice(
           discussion = DynamicValues.recordGet(raw, "discussion").map(DynamicValues.renderText).getOrElse(""),
-          advice     = advice
+          advice = advice
         )
       }
 
   /** The critic's typed signature: the hand-built [[offerFeedbackLayout]] (descriptions + instructions preserved
-    * verbatim, so prompt rendering is unchanged) paired with a derived input shape and the lenient output shape. */
+    * verbatim, so prompt rendering is unchanged) paired with a derived input shape and the lenient output shape.
+    */
   private[programs] val offerFeedbackSignature: Signature[OfferFeedbackInputs, OfferFeedbackAdvice] =
     Signature(
-      name        = "OfferFeedback",
-      layout      = offerFeedbackLayout,
-      inputShape  = Shape.derived[OfferFeedbackInputs],
+      name = "OfferFeedback",
+      layout = offerFeedbackLayout,
+      inputShape = Shape.derived[OfferFeedbackInputs],
       outputShape = offerFeedbackOutputShape
     )
 
@@ -325,14 +328,16 @@ object Refine:
       .map(e => DynamicValues.renderText(e.inputs))
       .getOrElse(input.toString)
     val programOutputs = DynamicValues.renderText(prediction.raw.values)
-    critic(ProgramCall(input = OfferFeedbackInputs(
-      program_inputs     = programInputs,
-      program_trajectory = renderTrajectory(trace),
-      program_outputs    = programOutputs,
-      reward_value       = reward,
-      target_threshold   = threshold,
-      module_names       = moduleNames.mkString(", ")
-    ))).map(result => parseAdvice(result.output.advice, moduleNames))
+    critic(ProgramCall(input =
+      OfferFeedbackInputs(
+        program_inputs = programInputs,
+        program_trajectory = renderTrajectory(trace),
+        program_outputs = programOutputs,
+        reward_value = reward,
+        target_threshold = threshold,
+        module_names = moduleNames.mkString(", ")
+      )
+    )).map(result => parseAdvice(result.output.advice, moduleNames))
 
   /** Parse the OfferFeedback `advice` output into a per-module advice map. Faithful path: the output is a JSON object
     * `{module_name: advice}`, decoded leniently (an embedded object is extracted first, tolerating prose or code fences

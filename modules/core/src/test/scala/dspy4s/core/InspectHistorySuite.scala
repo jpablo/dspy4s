@@ -18,8 +18,8 @@ class InspectHistorySuite extends FunSuite:
     HistoryEntry(
       component = "lm:test-model",
       payload = DynamicValues.record(
-        "model" := "test-model",
-        "prompt" := prompt,
+        "model"      := "test-model",
+        "prompt"     := prompt,
         "completion" := completion
       )
     )

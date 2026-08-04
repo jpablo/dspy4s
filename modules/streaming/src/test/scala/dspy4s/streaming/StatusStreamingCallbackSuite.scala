@@ -26,12 +26,12 @@ class StatusStreamingCallbackSuite extends FunSuite:
   private def drain(queue: StreamingQueue[StreamEvent]): Vector[StreamEvent] =
     queue.close()
     val iter = queue.asIterator
-    val buf = scala.collection.mutable.ArrayBuffer.empty[StreamEvent]
+    val buf  = scala.collection.mutable.ArrayBuffer.empty[StreamEvent]
     while iter.hasNext do buf += iter.next()
     buf.toVector
 
   test("status callback emits tool start and end messages") {
-    val queue = StreamingQueue[StreamEvent](16)
+    val queue    = StreamingQueue[StreamEvent](16)
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -48,7 +48,7 @@ class StatusStreamingCallbackSuite extends FunSuite:
   }
 
   test("status callback skips tool named finish") {
-    val queue = StreamingQueue[StreamEvent](16)
+    val queue    = StreamingQueue[StreamEvent](16)
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -58,7 +58,7 @@ class StatusStreamingCallbackSuite extends FunSuite:
   }
 
   test("status callback skips completed tool outputs") {
-    val queue = StreamingQueue[StreamEvent](16)
+    val queue    = StreamingQueue[StreamEvent](16)
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -68,7 +68,7 @@ class StatusStreamingCallbackSuite extends FunSuite:
   }
 
   test("default provider emits no message for module/lm events") {
-    val queue = StreamingQueue[StreamEvent](16)
+    val queue    = StreamingQueue[StreamEvent](16)
     val callback = new StatusStreamingCallback(StatusMessageProvider.default, queue)
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -87,7 +87,7 @@ class StatusStreamingCallbackSuite extends FunSuite:
       override def lmStart(modelId: String, inputs: DynamicValue.Record): Option[String] =
         Some(s"Calling $modelId")
 
-    val queue = StreamingQueue[StreamEvent](16)
+    val queue    = StreamingQueue[StreamEvent](16)
     val callback = new StatusStreamingCallback(provider, queue)
 
     given RuntimeContext = RuntimeEnvironment.current

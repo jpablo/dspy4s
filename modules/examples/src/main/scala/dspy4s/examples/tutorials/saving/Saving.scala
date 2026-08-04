@@ -1,20 +1,17 @@
-/**
- * Tutorial: Saving and Loading your DSPy program
- *
- * Source:   docs/docs/tutorials/saving/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md
- * Status:   translated — program state `save` / `load` is now ported (PORT_GAPS G-4,
- *           `dspy4s.optimize.ProgramPersistence`). dspy4s serializes each leaf's writable `OptimizableParameters`
- *           (instructions + demos + module config) to clean JSON — the analogue of Python's `save(...,
- *           save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset
- *           (no `dspy.datasets`, PORT_GAPS G-21).
- *
- *           Out of scope: the "whole-program" `save_program=True` directory form (snippets 6–8). That
- *           cloudpickles the program's *architecture/code* so it can be reloaded without re-declaring it.
- *           dspy4s programs are immutable Scala values — you recreate the program in code (snippet 4) and
- *           reload its STATE into it. There is no code/pickle serialization, hence no `.pkl` variant
- *           (snippets 3/5) and no `modules_to_serialize` (snippet 8); dspy4s has one clean JSON state format.
- */
+/** Tutorial: Saving and Loading your DSPy program
+  *
+  * Source: docs/docs/tutorials/saving/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md Status: translated — program state
+  * `save` / `load` is now ported (PORT_GAPS G-4, `dspy4s.optimize.ProgramPersistence`). dspy4s serializes each leaf's
+  * writable `OptimizableParameters` (instructions + demos + module config) to clean JSON — the analogue of Python's
+  * `save(..., save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset (no
+  * `dspy.datasets`, PORT_GAPS G-21).
+  *
+  * Out of scope: the "whole-program" `save_program=True` directory form (snippets 6–8). That cloudpickles the program's
+  * *architecture/code* so it can be reloaded without re-declaring it. dspy4s programs are immutable Scala values — you
+  * recreate the program in code (snippet 4) and reload its STATE into it. There is no code/pickle serialization, hence
+  * no `.pkl` variant (snippets 3/5) and no `modules_to_serialize` (snippet 8); dspy4s has one clean JSON state format.
+  */
 package dspy4s.examples.tutorials.saving
 
 import dspy4s.core.contracts.{:=, DspyError, RuntimeContext}
@@ -29,9 +26,10 @@ import java.nio.file.Files
 
 object Saving:
 
-  /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`.
-    * This tutorial uses `DynamicPredict` for a compact runtime-layout example; typed `Predict` and
-    * `ChainOfThought` are supported through the same `OptimizableTraversal` / `OptimizableParameters` contract. */
+  /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`. This
+    * tutorial uses `DynamicPredict` for a compact runtime-layout example; typed `Predict` and `ChainOfThought` are
+    * supported through the same `OptimizableTraversal` / `OptimizableParameters` contract.
+    */
   // --8<-- [start:program]
   def program(): DynamicPredict =
     DynamicPredict(Signature.fromString("question -> answer").layout)
@@ -45,7 +43,9 @@ object Saving:
   // GSM8K is not ported (PORT_GAPS G-21) — bring your own `Example`s (see deep_dive/data_handling/LoadingCustomData).
   // BootstrapFewShot runs the program over an LM to collect demo traces, so this step needs `OPENAI_API_KEY`.
   // --8<-- [start:compile]
-  def compile(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using RuntimeContext)
+  def compile(metric: Metric, student: DynamicPredict, trainset: Vector[Example])(using
+      RuntimeContext
+  )
       : Either[DspyError, DynamicPredict] =
     new BootstrapFewShot[DynamicPredict](BootstrapFewShotConfig(
       metric = Some(metric),
@@ -81,9 +81,10 @@ object Saving:
   // (snippet 4) and reload its STATE (above). No code/pickle serialization, hence no `modules_to_serialize`.
   // The former state entries containing a full `signature` layout are unsupported; regenerate those artifacts.
 
-/** Demonstrates the save → recreate → load → compare round-trip OFFLINE (no LM): we hand-attach a couple of
-  * demos (standing in for the output of `Saving.compile`, which needs an LM) so the persistence round-trip is
-  * self-contained and assertable. Run with: sbt "examples/runMain dspy4s.examples.tutorials.saving.savingMain" */
+/** Demonstrates the save → recreate → load → compare round-trip OFFLINE (no LM): we hand-attach a couple of demos
+  * (standing in for the output of `Saving.compile`, which needs an LM) so the persistence round-trip is self-contained
+  * and assertable. Run with: sbt "examples/runMain dspy4s.examples.tutorials.saving.savingMain"
+  */
 @main def savingMain(): Unit =
   // A "compiled" program: the same predictor with a few demos attached (what BootstrapFewShot would produce).
   val demos = Vector(
@@ -92,7 +93,7 @@ object Saving:
   )
   val compiled = Saving.program().copy(demos = demos)
 
-  val path = Files.createTempFile("dspy4s_program", ".json").toString
+  val path      = Files.createTempFile("dspy4s_program", ".json").toString
   val roundTrip =
     for
       _      <- Saving.save(compiled, path)
@@ -100,7 +101,7 @@ object Saving:
     yield loaded
 
   roundTrip match
-    case Left(err) => sys.error(s"save/load failed: ${err.message}")
+    case Left(err)     => sys.error(s"save/load failed: ${err.message}")
     case Right(loaded) =>
       val ps     = summon[OptimizableTraversal[DynamicPredict]]
       val before = ps.read(compiled).head.demos.size

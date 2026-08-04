@@ -13,8 +13,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class DataSuite extends FunSuite:
 
-  private def str(s: String): DynamicValue   = DynamicValue.Primitive(PrimitiveValue.String(s))
-  private def dbl(d: Double): DynamicValue   = DynamicValue.Primitive(PrimitiveValue.Double(d))
+  private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
+  private def dbl(d: Double): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Double(d))
 
   test("example inputs and labels split by input keys") {
     val example = Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question"))

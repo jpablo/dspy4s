@@ -21,10 +21,12 @@ import zio.blocks.schema.DynamicValue
 
 class ProgramOptimizableTraversalSuite extends FunSuite:
 
-  /** Resolves the right [[OptimizableTraversal]] instance from the program's *static* type, so the `[I, O]` of the given are
-    * inferred at the call site (accessing the `given ... with` object directly would pin them to `Nothing`).
+  /** Resolves the right [[OptimizableTraversal]] instance from the program's *static* type, so the `[I, O]` of the
+    * given are inferred at the call site (accessing the `given ... with` object directly would pin them to `Nothing`).
     */
-  private def predictorsOf[P](@annotation.unused program: P)(using ps: OptimizableTraversal[P]): OptimizableTraversal[P] = ps
+  private def predictorsOf[P](@annotation.unused program: P)(using
+      ps: OptimizableTraversal[P]
+  ): OptimizableTraversal[P] = ps
 
   private val qaSignature = Signature.fromString("question -> answer")
 
@@ -36,7 +38,7 @@ class ProgramOptimizableTraversalSuite extends FunSuite:
 
   private object NoopInterpreter extends CodeInterpreter:
     def execute(code: String): Either[DspyError, CodeResult] = Right(CodeResult("", "", 0))
-    override def close(): Unit                                 = ()
+    override def close(): Unit                               = ()
 
   private val demo = Vector(Example(rec("question" := "q", "answer" := "x")))
 
@@ -114,8 +116,8 @@ class ProgramOptimizableTraversalSuite extends FunSuite:
   // ── MultiChainComparison ─────────────────────────────────────────────────
 
   test("MultiChainComparison: inspect returns the single hoisted compare predictor view") {
-    val mcc  = MultiChainComparison(baseSignature = qaSignature, m = AttemptCount(3))
-    val ps   = predictorsOf(mcc)
+    val mcc   = MultiChainComparison(baseSignature = qaSignature, m = AttemptCount(3))
+    val ps    = predictorsOf(mcc)
     val views = ps.inspect(mcc)
     assertEquals(views.size, 1)
     assertEquals(views.head.parameters, ps.read(mcc).head)

@@ -73,12 +73,14 @@ trait LanguageModel extends LanguageModelRef:
   def id: String
   def mode: LmMode
 
-  /** Whether this model can be invoked with tool/function definitions and may return [[ToolCall]]s.
-    * Defaults to `false`; providers that support the chat-completions tool protocol override to `true`. */
+  /** Whether this model can be invoked with tool/function definitions and may return [[ToolCall]]s. Defaults to
+    * `false`; providers that support the chat-completions tool protocol override to `true`.
+    */
   def supportsFunctionCalling: Boolean = false
 
-  /** Whether this model can be constrained to a structured/JSON response schema (e.g. OpenAI's
-    * `response_format`). Defaults to `false`. */
+  /** Whether this model can be constrained to a structured/JSON response schema (e.g. OpenAI's `response_format`).
+    * Defaults to `false`.
+    */
   def supportsResponseSchema: Boolean = false
 
   /** Whether this model exposes reasoning/thinking output (e.g. reasoning-token models). Defaults to `false`. */

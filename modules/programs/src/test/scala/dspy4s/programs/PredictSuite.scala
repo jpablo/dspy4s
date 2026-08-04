@@ -22,14 +22,14 @@ case class P4StrictOutput(answer: String, score: Int) derives Schema
 
 trait P4QASpec extends Spec:
   def question: InputField[String]
-  def answer:   OutputField[String]
-  def score:    OutputField[Double]
+  def answer: OutputField[String]
+  def score: OutputField[Double]
 
 trait P4QAMissingInputSpec extends Spec:
   def question: InputField[String]
-  def context:  InputField[String]
-  def answer:   OutputField[String]
-  def score:    OutputField[Double]
+  def context: InputField[String]
+  def answer: OutputField[String]
+  def score: OutputField[Double]
 
 def p4QaMethod(question: String): (answer: String, score: Double) = ???
 
@@ -44,7 +44,7 @@ class TypedPredictSuite extends FunSuite:
       val q = lookupString(invocation.inputs.values, "question")
       Right(FormattedPrompt(messages =
         Vector(
-        Message(role = MessageRole.User, text = Some(q))
+          Message(role = MessageRole.User, text = Some(q))
         )
       ))
 
@@ -53,8 +53,8 @@ class TypedPredictSuite extends FunSuite:
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values =
         rec(
-        "answer" := output.text,
-        "score"  -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
+          "answer" := output.text,
+          "score"  -> DynamicValues.fromAny(DynamicValues.recordToMap(output.metadata).getOrElse("score", 0.0))
         )
       ))
 
@@ -65,7 +65,7 @@ class TypedPredictSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(
         outputs = Vector(
-          LmOutput(text = "Paris",  metadata = DynamicValues.record("score" := 0.95)),
+          LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.95)),
           LmOutput(text = "London", metadata = DynamicValues.record("score" := 0.33))
         ),
         usage = Some(LmUsage(totalTokens = 12, promptTokens = 7, completionTokens = 5))
@@ -77,7 +77,7 @@ class TypedPredictSuite extends FunSuite:
   )
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   // ── Happy path ──────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)(P4QAInput("Capital of France?"))
+      val result           = Predict(sig)(P4QAInput("Capital of France?"))
       result match
         case Right(tp) =>
           assertEquals(tp.output, P4QAOutput("Paris", 0.95))
@@ -97,11 +97,11 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.of[P4QASpec]
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)((question = "Capital of France?"))
+      val result           = Predict(sig)((question = "Capital of France?"))
       result match
         case Right(tp) =>
           val answer: String = tp.output.answer
-          val score:  Double = tp.output.score
+          val score: Double  = tp.output.score
           assertEquals(answer, "Paris")
           assertEquals(score, 0.95)
         case Left(err) => fail(s"expected success, got: $err")
@@ -112,11 +112,11 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.from(p4QaMethod)
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)((question = "Capital of France?"))
+      val result           = Predict(sig)((question = "Capital of France?"))
       result match
         case Right(tp) =>
           val answer: String = tp.output.answer
-          val score:  Double = tp.output.score
+          val score: Double  = tp.output.score
           assertEquals(answer, "Paris")
           assertEquals(score, 0.95)
         case Left(err) => fail(s"expected success, got: $err")
@@ -130,21 +130,21 @@ class TypedPredictSuite extends FunSuite:
     // back through the LM request -- if encoding ever dropped or renamed
     // the field, the assertion below would still pass (the LM is fixed),
     // so we instrument with a capturing adapter.
-    val capturedInputs = scala.collection.mutable.ArrayBuffer.empty[Map[String, Any]]
+    val capturedInputs   = scala.collection.mutable.ArrayBuffer.empty[Map[String, Any]]
     val capturingAdapter = new Adapter:
-      override val name = "capturing"
+      override val name                                                        = "capturing"
       override def format(invocation: AdapterInvocation)(using RuntimeContext) =
         capturedInputs += dspy4s.core.contracts.DynamicValues.recordToMap(invocation.inputs.values)
         Right(FormattedPrompt(messages =
           Vector(
-          Message(role = MessageRole.User, text = Some("hi"))
+            Message(role = MessageRole.User, text = Some("hi"))
           )
         ))
       override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values =
           rec(
-          "answer" := "x",
-          "score"  := 0.5
+            "answer" := "x",
+            "score"  := 0.5
           )
         ))
 
@@ -154,7 +154,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(capturingAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = Predict(sig)(P4QAInput("Capital of France?"))
+      val _                = Predict(sig)(P4QAInput("Capital of France?"))
     }
 
     assertEquals(capturedInputs.size, 1)
@@ -167,7 +167,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)(P4QAInput("Capital of France?")).toOption.get
+      val result           = Predict(sig)(P4QAInput("Capital of France?")).toOption.get
       assertEquals(result.raw.completions.map(_.size), Some(2))
       assertEquals(result.raw.lmUsage.map(_.totalTokens), Some(12L))
     }
@@ -176,12 +176,12 @@ class TypedPredictSuite extends FunSuite:
   test("Predict.erase preserves engine state and commutes with valid typed execution") {
     val sig     = Signature.derived[P4QAInput, P4QAOutput]("QA")
     val runtime = new SettingsProgramRuntime {}
-    val demos = Vector(
+    val demos   = Vector(
       Example("question" := "Capital of Germany?", "answer" := "Berlin", "score" := 1.0)
         .withInputs(Set("question"))
     )
-    val config = DynamicValues.record("temperature" := 0.2)
-    val tools  = Vector(ToolSpec("search", description = Some("Search the corpus")))
+    val config  = DynamicValues.record("temperature" := 0.2)
+    val tools   = Vector(ToolSpec("search", description = Some("Search the corpus")))
     val program = Predict(
       signature = sig,
       demos = demos,
@@ -219,7 +219,7 @@ class TypedPredictSuite extends FunSuite:
     // LM returns a Double for `score`; P4StrictOutput expects Int.
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)(P4QAInput("Capital of France?"))
+      val result           = Predict(sig)(P4QAInput("Capital of France?"))
       assert(result.isLeft, s"expected decode failure but got: $result")
     }
   }
@@ -228,14 +228,14 @@ class TypedPredictSuite extends FunSuite:
 
   test("Predict.run forwards `config` into ProgramCall.config (then LmRequest.options)") {
     val capturedRequests = scala.collection.mutable.ArrayBuffer.empty[LmRequest]
-    val capturingLm = new LanguageModel:
-      val id   = "capturing-lm"
-      val mode = LmMode.Chat
+    val capturingLm      = new LanguageModel:
+      val id                                         = "capturing-lm"
+      val mode                                       = LmMode.Chat
       def call(req: LmRequest)(using RuntimeContext) =
         capturedRequests += req
         Right(LmResponse(
           outputs = Vector(LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.5))),
-          usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+          usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
         ))
 
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
@@ -244,7 +244,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(EchoQuestionAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = Predict(sig)(
+      val _                = Predict(sig)(
         P4QAInput("hi"),
         config = DynamicValues.record("temperature" := 0.7, "max_tokens" := 50)
       )
@@ -252,14 +252,14 @@ class TypedPredictSuite extends FunSuite:
     assertEquals(capturedRequests.size, 1)
     val opts = DynamicValues.recordToMap(capturedRequests.head.options)
     assertEquals(opts.get("temperature"), Some(0.7: Any))
-    assertEquals(opts.get("max_tokens"),  Some(50: Any))
+    assertEquals(opts.get("max_tokens"), Some(50: Any))
   }
 
   test("Predict.run with traceEnabled=false suppresses the trace entry") {
     val sig = Signature.derived[P4QAInput, P4QAOutput]("QA")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val _ = Predict(sig)(P4QAInput("Capital of France?"), traceEnabled = false)
+      val _                = Predict(sig)(P4QAInput("Capital of France?"), traceEnabled = false)
       assertEquals(RuntimeEnvironment.current.trace.size, 0)
     }
   }
@@ -271,16 +271,16 @@ class TypedPredictSuite extends FunSuite:
     // could silently omit a declared input. The defensive check in
     // Predict.run catches this before any LM call is dispatched.
     val specSig = Signature.of[P4QAMissingInputSpec]
-    val sig = Signature(
+    val sig     = Signature(
       name = specSig.name,
       layout = specSig.layout,
       inputShape = new Shape.MapShape(specSig.layout.inputFields),
       outputShape = specSig.outputShape
     )
-    var lmCalled = false
+    var lmCalled   = false
     val sentinelLm = new LanguageModel:
-      val id   = "sentinel"
-      val mode = LmMode.Chat
+      val id                                         = "sentinel"
+      val mode                                       = LmMode.Chat
       def call(req: LmRequest)(using RuntimeContext) =
         lmCalled = true
         Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
@@ -290,7 +290,7 @@ class TypedPredictSuite extends FunSuite:
       adapter = Some(EchoQuestionAdapter)
     )) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)(rec("question" := "Capital of France?"))
+      val result           = Predict(sig)(rec("question" := "Capital of France?"))
       // Missing 'context' input -> Left, LM never invoked.
       assert(result.isLeft, s"expected missing-input failure, got: $result")
       assert(!lmCalled, "expected LM not to be called when required inputs are missing")
@@ -308,7 +308,7 @@ class TypedPredictSuite extends FunSuite:
     val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = Predict(sig)(P4QAInput("Capital of France?"))
+      val result           = Predict(sig)(P4QAInput("Capital of France?"))
       assert(result.isLeft, s"expected decode failure but got: $result")
       assertEquals(RuntimeEnvironment.current.trace.size, 0)
       assertEquals(RuntimeEnvironment.current.history.size, 0)

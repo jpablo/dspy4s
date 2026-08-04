@@ -59,15 +59,15 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val teacherProgram: P = teacher.getOrElse(student)
 
-    var errorCount = 0
-    val bootstrapped = scala.collection.mutable.ArrayBuffer.empty[Example]
+    var errorCount    = 0
+    val bootstrapped  = scala.collection.mutable.ArrayBuffer.empty[Example]
     val failedIndices = scala.collection.mutable.ArrayBuffer.empty[Int]
 
     boundary {
       trainset.zipWithIndex.foreach { case (example, idx) =>
         if bootstrapped.size >= config.maxBootstrappedDemos then ()
         else
-          var round = 0
+          var round   = 0
           var success = false
           while round < config.maxRounds && !success do
             try
@@ -77,15 +77,15 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
                   summon[ProgramRunner[P]].run(teacherProgram, example.inputs)
                 }
               runOutcome match
-                case Left(_) => ()
+                case Left(_)           => ()
                 case Right(prediction) =>
                   val metricOk = config.metric match
-                    case None => true
+                    case None    => true
                     case Some(m) =>
                       m.score(example, prediction) match
                         case Right(score) =>
                           config.metricThreshold match
-                            case None => score > 0.0
+                            case None            => score > 0.0
                             case Some(threshold) => score >= threshold
                         case Left(_) => false
 
@@ -115,11 +115,11 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
 
           if !success then failedIndices += idx
       }
-      val ps = summon[OptimizableTraversal[P]]
-      val rng = new scala.util.Random(config.seed)
-      val labeledPool = failedIndices.toVector.map(idx => trainset(idx))
+      val ps                  = summon[OptimizableTraversal[P]]
+      val rng                 = new scala.util.Random(config.seed)
+      val labeledPool         = failedIndices.toVector.map(idx => trainset(idx))
       val labeledPoolShuffled = Vector.from(rng.shuffle(labeledPool))
-      val labeledCount = math.min(
+      val labeledCount        = math.min(
         config.maxLabeledDemos - math.min(bootstrapped.size, config.maxBootstrappedDemos),
         labeledPoolShuffled.size
       ).max(0)
@@ -136,20 +136,20 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
               program = compiled,
               score = 0.0,
               metadata = Map(
-                "optimizer" -> name,
+                "optimizer"              -> name,
                 "num_bootstrapped_demos" -> bootstrapped.size,
-                "num_labeled_demos" -> rawDemos.size,
-                "num_errors" -> errorCount,
-                "num_failed_examples" -> failedIndices.size
+                "num_labeled_demos"      -> rawDemos.size,
+                "num_errors"             -> errorCount,
+                "num_failed_examples"    -> failedIndices.size
               )
             )
           ),
           metadata = Map(
             "max_bootstrapped_demos" -> config.maxBootstrappedDemos,
-            "max_labeled_demos" -> config.maxLabeledDemos,
-            "max_rounds" -> config.maxRounds,
-            "max_errors" -> config.maxErrors,
-            "seed" -> config.seed
+            "max_labeled_demos"      -> config.maxLabeledDemos,
+            "max_rounds"             -> config.maxRounds,
+            "max_errors"             -> config.maxErrors,
+            "seed"                   -> config.seed
           )
         )
       )

@@ -32,7 +32,7 @@ import scala.collection.mutable.ArrayBuffer
 
 class ProgramRuntimeSuite extends FunSuite:
   private object DummyLanguageModel extends LanguageModel:
-    override val id: String = "dummy-lm"
+    override val id: String   = "dummy-lm"
     override val mode: LmMode = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
@@ -63,8 +63,8 @@ class ProgramRuntimeSuite extends FunSuite:
     ): Either[DspyError, RawPrediction] =
       Right(RawPrediction(values =
         call.input.updated(
-        "answer",
-        zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))
+          "answer",
+          zio.blocks.schema.DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("ok"))
         )
       ))
 
@@ -93,14 +93,14 @@ class ProgramRuntimeSuite extends FunSuite:
   }
 
   test("base predict program emits callbacks and appends trace/history") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         events += event
 
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
-      val program = EchoProgram()
+      val program          = EchoProgram()
       val output           = program(ProgramCall(input = rec("question" := "hello")))
 
       assert(output.isRight)
@@ -114,7 +114,7 @@ class ProgramRuntimeSuite extends FunSuite:
 
   test("base predict program respects traceEnabled=false") {
     given RuntimeContext = RuntimeEnvironment.current
-    val program = EchoProgram()
+    val program          = EchoProgram()
     val output           = program(ProgramCall(input = rec("question" := "hello"), traceEnabled = false))
 
     assert(output.isRight)

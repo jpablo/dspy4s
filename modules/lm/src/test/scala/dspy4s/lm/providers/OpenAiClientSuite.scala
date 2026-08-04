@@ -16,9 +16,9 @@ class OpenAiClientSuite extends FunSuite:
       streamingResponses: Vector[Either[DspyError, HttpStreamResponse]] = Vector.empty
   ) extends HttpTransport:
     private var nonStreamingIdx = 0
-    private var streamingIdx = 0
-    val sentBodies = scala.collection.mutable.ArrayBuffer.empty[(String, String, String)]
-    val sentStreamBodies = scala.collection.mutable.ArrayBuffer.empty[(String, String, String)]
+    private var streamingIdx    = 0
+    val sentBodies              = scala.collection.mutable.ArrayBuffer.empty[(String, String, String)]
+    val sentStreamBodies        = scala.collection.mutable.ArrayBuffer.empty[(String, String, String)]
 
     override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
       sentBodies += ((url, body, headers.get("Authorization").getOrElse("")))
@@ -29,7 +29,11 @@ class OpenAiClientSuite extends FunSuite:
         nonStreamingIdx += 1
         r
 
-    override def streamSse(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpStreamResponse] =
+    override def streamSse(
+        url: String,
+        headers: Map[String, String],
+        body: String
+    ): Either[DspyError, HttpStreamResponse] =
       sentStreamBodies += ((url, body, headers.get("Authorization").getOrElse("")))
       if streamingIdx >= streamingResponses.size then
         Left(RuntimeError("test", "No more streaming responses scripted"))
@@ -51,10 +55,10 @@ class OpenAiClientSuite extends FunSuite:
   )
 
   private final class VectorClosableIterator[A](items: Vector[A]) extends ClosableIterator[A]:
-    private var idx = 0
-    var closed = false
+    private var idx               = 0
+    var closed                    = false
     override def hasNext: Boolean = idx < items.size && !closed
-    override def next(): A =
+    override def next(): A        =
       val v = items(idx); idx += 1; v
     override def close(): Unit = closed = true
 
@@ -64,7 +68,10 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "sk-test", baseUrl = "https://api.example.com/v1", transport = transport)
 
-    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini", "messages" -> Vector(Map("role" -> "user", "content" -> "hi")))))
+    val result = client.invoke(DynamicValues.fromAny(Map(
+      "model"    -> "gpt-4o-mini",
+      "messages" -> Vector(Map("role" -> "user", "content" -> "hi"))
+    )))
 
     assert(result.isRight)
     val payload = result.toOption.get
@@ -147,7 +154,10 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.stream(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini", "messages" -> Vector(Map("role" -> "user", "content" -> "hi")))))
+    val result = client.stream(DynamicValues.fromAny(Map(
+      "model"    -> "gpt-4o-mini",
+      "messages" -> Vector(Map("role" -> "user", "content" -> "hi"))
+    )))
     assert(result.isRight)
     val iter = result.toOption.get
 
@@ -166,7 +176,7 @@ class OpenAiClientSuite extends FunSuite:
   }
 
   test("stream closes the underlying connection once the SSE stream is fully consumed") {
-    val source = new VectorClosableIterator(sampleStreamLines)
+    val source    = new VectorClosableIterator(sampleStreamLines)
     val transport = new ScriptedTransport(
       streamingResponses = Vector(Right(HttpStreamResponse(
         status = 200,
@@ -191,7 +201,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val _ = client.stream(DynamicValues.fromAny(Map("model" -> "m")))
+    val _      = client.stream(DynamicValues.fromAny(Map("model" -> "m")))
 
     val (_, body, _) = transport.sentStreamBodies.head
     assert(body.contains("\"stream\":true"))
@@ -230,7 +240,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
+    val iter   = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
     val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
     while iter.hasNext do chunks += iter.next()
 
@@ -260,7 +270,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
+    val iter   = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
     val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
     while iter.hasNext do chunks += iter.next()
     assertEquals(chunks.size, 1)

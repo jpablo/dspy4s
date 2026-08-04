@@ -57,7 +57,7 @@ trait Module[I, O]:
 
   final def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     lifecycle match
-      case ModuleLifecycle.Transparent() => forward(call)
+      case ModuleLifecycle.Transparent()         => forward(call)
       case ModuleLifecycle.Observed(observation) =>
         val inputBag = observation.inputs(call)
         CallbackDispatcher.withModule(moduleName, inputBag) {

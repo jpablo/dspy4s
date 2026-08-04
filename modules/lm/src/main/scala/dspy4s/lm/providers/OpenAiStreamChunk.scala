@@ -8,20 +8,22 @@ import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Typed wire model of one OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), parsed straight from
-  * the SSE `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror
-  * the wire shape (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is
-  * lenient exactly where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and
-  * unknown fields (`id`, `object`, `role`, `type`, …) are ignored.
+/** Typed wire model of one OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), parsed straight from the
+  * SSE `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror the wire
+  * shape (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is lenient
+  * exactly where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and unknown fields
+  * (`id`, `object`, `role`, `type`, …) are ignored.
   *
-  * The domain mapping to `LmChunk` lives on the DTO, reading typed fields only. */
+  * The domain mapping to `LmChunk` lives on the DTO, reading typed fields only.
+  */
 private[providers] final case class OpenAiStreamChunk(
     choices: Vector[OpenAiStreamChoice] = Vector.empty,
     usage: Option[OpenAiUsage] = None
 ) derives Schema:
 
-  /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk);
-    * usage rides the final, choice-less chunk. */
+  /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk); usage
+    * rides the final, choice-less chunk.
+    */
   def toLmChunk: LmChunk =
     val choice = choices.headOption
     LmChunk(

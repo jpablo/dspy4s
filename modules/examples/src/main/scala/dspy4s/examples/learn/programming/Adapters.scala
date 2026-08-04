@@ -1,20 +1,18 @@
-/**
- * Understanding DSPy Adapters
- *
- * Source:   docs/docs/learn/programming/adapters.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/adapters.md
- * Status:   translated (snippets 1–6, incl. `inspect_history`). dspy4s's analogue of
- *           `dspy.inspect_history(n)` is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, which
- *           renders the per-thread `RuntimeContext.history`. There is no global per-LM buffer: history is
- *           populated by a `ManagedLanguageModel` (per-LM composition), so wrap the ambient LM in one to
- *           record calls (see `askThenInspect`). Everything else (the Predict calls, the explicit
- *           ChatAdapter/JSONAdapter selection, the `adapter.format(...)` / system-message inspection) ports directly.
- *
- * Python's `adapter.format(signature, demos, inputs)` becomes `adapter.format(AdapterInvocation(layout,
- * demos, inputs, request))`, which returns a `FormattedPrompt`; the "system message" is just its first
- * message. The adapter is selected via the ambient `RuntimeContext` (here swapped with `withAdapter`),
- * mirroring `dspy.configure(adapter=...)`. Pydantic `BaseModel` outputs become `Schema`-deriving case classes.
- */
+/** Understanding DSPy Adapters
+  *
+  * Source: docs/docs/learn/programming/adapters.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/adapters.md Status: translated (snippets
+  * 1–6, incl. `inspect_history`). dspy4s's analogue of `dspy.inspect_history(n)` is
+  * `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, which renders the per-thread `RuntimeContext.history`.
+  * There is no global per-LM buffer: history is populated by a `ManagedLanguageModel` (per-LM composition), so wrap the
+  * ambient LM in one to record calls (see `askThenInspect`). Everything else (the Predict calls, the explicit
+  * ChatAdapter/JSONAdapter selection, the `adapter.format(...)` / system-message inspection) ports directly.
+  *
+  * Python's `adapter.format(signature, demos, inputs)` becomes `adapter.format(AdapterInvocation(layout, demos, inputs,
+  * request))`, which returns a `FormattedPrompt`; the "system message" is just its first message. The adapter is
+  * selected via the ambient `RuntimeContext` (here swapped with `withAdapter`), mirroring
+  * `dspy.configure(adapter=...)`. Pydantic `BaseModel` outputs become `Schema`-deriving case classes.
+  */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
@@ -35,8 +33,8 @@ case class ScienceNews(text: String, scientists_involved: List[String]) derives 
 
 // | class NewsQA(dspy.Signature): """Get news about the given science field"""
 trait NewsQA extends Spec:
-  def science_field:  InputField[String]
-  def year:           InputField[Int]
+  def science_field: InputField[String]
+  def year: InputField[Int]
   def num_of_outputs: InputField[Int]
   def news: OutputField[List[ScienceNews]]
 
@@ -57,7 +55,7 @@ object Adapters:
   def formattedPrompt(using RuntimeContext): Either[DspyError, String] =
     val invocation = AdapterInvocation(
       layout = Signature.fromString("question -> answer").layout,
-      demos  = Vector(Example(values = rec("question" := "What is 1+1?", "answer" := "2"), inputKeys = Set("question"))),
+      demos = Vector(Example(values = rec("question" := "What is 1+1?", "answer" := "2"), inputKeys = Set("question"))),
       inputs = Example(values = rec("question" := "What is 2+2?"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
     )
@@ -70,15 +68,16 @@ object Adapters:
   // dspy4s has no separate `format_system_message`; the system message is the formatted prompt's first message.
   def systemMessage(using RuntimeContext): Either[DspyError, String] =
     val invocation = AdapterInvocation(
-      layout  = Signature.fromString("question -> answer").layout,
-      demos   = Vector.empty,
-      inputs  = Example(values = rec("question" := ""), inputKeys = Set("question")),
+      layout = Signature.fromString("question -> answer").layout,
+      demos = Vector.empty,
+      inputs = Example(values = rec("question" := ""), inputKeys = Set("question")),
       request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
     )
     ChatAdapter().format(invocation).map(_.messages.headOption.flatMap(_.text).getOrElse(""))
 
   /** Run `body` with `adapter` installed in the RuntimeContext — the dspy4s analogue of swapping
-    * `dspy.configure(adapter=...)` for snippets 5 (ChatAdapter) and 6 (JSONAdapter). */
+    * `dspy.configure(adapter=...)` for snippets 5 (ChatAdapter) and 6 (JSONAdapter).
+    */
   private def withAdapter[A](adapter: Adapter)(body: RuntimeContext ?=> A)(using ctx: RuntimeContext): A =
     RuntimeEnvironment.withSettings(ctx.copy(adapter = Some(adapter))) {
       body(using RuntimeEnvironment.current)

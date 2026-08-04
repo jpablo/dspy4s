@@ -36,18 +36,20 @@ final class OptimizableParametersSuite extends FunSuite:
   )
 
   private object BoundLm extends LanguageModel:
-    val id: String   = "bound-state-test"
-    val mode: LmMode = LmMode.Chat
+    val id: String                                                                    = "bound-state-test"
+    val mode: LmMode                                                                  = LmMode.Chat
     def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Left(RuntimeError("bound-state-test", s"unexpected call to ${request.model}"))
 
-  /** Execute a stated `@Law` equation under structural equality (honest for these carriers: `set` short-circuits
-    * or `copy`s, sharing every execution binding by reference). */
+  /** Execute a stated `@Law` equation under structural equality (honest for these carriers: `set` short-circuits or
+    * `copy`s, sharing every execution binding by reference).
+    */
   private def holds[A](law: String, eq: IsEq[A]): Unit =
     assert(eq.lhs.equals(eq.rhs), s"$law: ${eq.lhs} != ${eq.rhs}")
 
   /** Runs the four `@Law` statements the [[OptimizableLeaf]] lens carries (Get-Put / Put-Get / Put-Put inherited from
-    * `Lens`, plus the metadata frame), then the view/extension-syntax invariants. */
+    * `Lens`, plus the metadata frame), then the view/extension-syntax invariants.
+    */
   private def assertLeafLaws[P](program: P, first: OptimizableParameters, second: OptimizableParameters)(using
       leaf: OptimizableLeaf[P]
   ): Unit =
@@ -81,7 +83,7 @@ final class OptimizableParametersSuite extends FunSuite:
   }
 
   test("OptimizableParameters decoding requires every key and rejects invalid field types") {
-    val missing = OptimizableParameters.fromState(DynamicValue.Record.empty)
+    val missing             = OptimizableParameters.fromState(DynamicValue.Record.empty)
     val invalidInstructions = OptimizableParameters.fromState(DynamicValues.record(
       "instructions" := 42,
       "demos"        -> DynamicValue.Sequence(Chunk.empty),
@@ -122,7 +124,7 @@ final class OptimizableParametersSuite extends FunSuite:
 
   test("OptimizableLeaf[Predict] satisfies Get-Put, Put-Get, Put-Put, and the metadata frame") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Answer directly."))
-    val program = Predict(
+    val program   = Predict(
       signature,
       demos = demos,
       name = Some("typed_predict"),
@@ -133,7 +135,7 @@ final class OptimizableParametersSuite extends FunSuite:
 
   test("OptimizableLeaf[ChainOfThought] satisfies the lens laws and includes config in optimizable parameters") {
     val signature = Signature.fromString("question -> answer").withInstructions(Some("Reason carefully."))
-    val program = ChainOfThought(
+    val program   = ChainOfThought(
       signature,
       demos = demos,
       name = Some("typed_cot"),

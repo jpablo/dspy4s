@@ -14,12 +14,16 @@ class OpenAiEmbedderSuite extends FunSuite:
   /** Replays scripted responses and records each request body (to assert payload shape and batching). */
   private final class ScriptedTransport(responses: Vector[Either[DspyError, HttpResponse]]) extends HttpTransport:
     private var idx = 0
-    val sent = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
+    val sent        = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
     override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
       sent += ((url, body))
       if idx >= responses.size then Left(RuntimeError("test", "No more responses scripted"))
       else { val r = responses(idx); idx += 1; r }
-    override def streamSse(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpStreamResponse] =
+    override def streamSse(
+        url: String,
+        headers: Map[String, String],
+        body: String
+    ): Either[DspyError, HttpStreamResponse] =
       Left(RuntimeError("test", "streaming not used by embeddings"))
 
   private def okBody(rows: (Int, Seq[Double])*): String =
@@ -31,8 +35,9 @@ class OpenAiEmbedderSuite extends FunSuite:
 
   test("embeds a batch: request carries model+input, response rows are ordered by index") {
     // Rows scripted OUT of order — the provider must sort by the response `index` field.
-    val transport = new ScriptedTransport(Vector(Right(HttpResponse(200, Map.empty, okBody(1 -> Seq(0.3, 0.4), 0 -> Seq(0.1, 0.2))))))
-    val result    = embedder(transport).embed(Vector("hello", "world"))
+    val transport =
+      new ScriptedTransport(Vector(Right(HttpResponse(200, Map.empty, okBody(1 -> Seq(0.3, 0.4), 0 -> Seq(0.1, 0.2))))))
+    val result = embedder(transport).embed(Vector("hello", "world"))
     assertEquals(result, Right(Vector(Vector(0.1f, 0.2f), Vector(0.3f, 0.4f))))
     val (url, body) = transport.sent.head
     assert(url.endsWith("/embeddings"), url)
@@ -52,11 +57,14 @@ class OpenAiEmbedderSuite extends FunSuite:
   }
 
   test("a non-2xx response surfaces as a Left, and a 400 context-window body maps to the typed error") {
-    val plainFailure = embedder(new ScriptedTransport(Vector(Right(HttpResponse(500, Map.empty, "boom"))))).embed(Vector("x"))
+    val plainFailure =
+      embedder(new ScriptedTransport(Vector(Right(HttpResponse(500, Map.empty, "boom"))))).embed(Vector("x"))
     assert(plainFailure.left.exists(_.isInstanceOf[RuntimeError]), plainFailure.toString)
 
-    val ctxBody    = """{"error":{"message":"This model's maximum context length is 8192 tokens","code":"context_length_exceeded"}}"""
-    val ctxFailure = embedder(new ScriptedTransport(Vector(Right(HttpResponse(400, Map.empty, ctxBody))))).embed(Vector("x"))
+    val ctxBody =
+      """{"error":{"message":"This model's maximum context length is 8192 tokens","code":"context_length_exceeded"}}"""
+    val ctxFailure =
+      embedder(new ScriptedTransport(Vector(Right(HttpResponse(400, Map.empty, ctxBody))))).embed(Vector("x"))
     assert(ctxFailure.left.exists(_.isInstanceOf[ContextWindowExceededError]), ctxFailure.toString)
   }
 

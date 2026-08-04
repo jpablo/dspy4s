@@ -49,7 +49,11 @@ trait TrajectoryAgent[I, O, S] extends Module[I, O]:
   final override protected def forward(call: ProgramCall[I])(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
-    TrajectoryAgent.runAndExtractPrediction[S, O](maxIterations, renderTrajectory, trajectoryKey)(trajectoryStep(call)) {
+    TrajectoryAgent.runAndExtractPrediction[S, O](
+      maxIterations,
+      renderTrajectory,
+      trajectoryKey
+    )(trajectoryStep(call)) {
       rendered =>
         extractorPredict(call.mapInput(input => (input, rendered)))
     }
@@ -95,8 +99,8 @@ object TrajectoryAgent:
   ): Either[DspyError, (E, String)] =
     for
       trajectory <- AgentLoop.run[Vector[S], Vector[S]](Vector.empty, 0, maxIterations)(onExhausted = Right(_))(step)
-      rendered    = render(trajectory)
-      extracted  <- truncateOnOverflow(trajectory, extractAttempts)(render)(extract)._1
+      rendered = render(trajectory)
+      extracted <- truncateOnOverflow(trajectory, extractAttempts)(render)(extract)._1
     yield (extracted, rendered)
 
   /** Prediction-specialized [[runAndExtract]]: preserve the extractor's complete typed/raw result and add the full,

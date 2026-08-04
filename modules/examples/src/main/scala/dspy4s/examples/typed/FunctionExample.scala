@@ -1,17 +1,13 @@
-/**
- * Typed signatures — method/function surface.
- *
- * A Scala function type can declare a dspy4s typed signature without a
- * throwaway method body. `Signature.fromType[F]` inspects the
- * function type at compile time and lowers it into the same typed runtime
- * path used by trait specs and case classes. Runtime name and instructions
- * can be supplied when useful.
- *
- * If an implementation method already exists, `Signature.from(method)`
- * can inspect that method's signature directly.
- *
- * Status: example
- */
+/** Typed signatures — method/function surface.
+  *
+  * A Scala function type can declare a dspy4s typed signature without a throwaway method body. `Signature.fromType[F]`
+  * inspects the function type at compile time and lowers it into the same typed runtime path used by trait specs and
+  * case classes. Runtime name and instructions can be supplied when useful.
+  *
+  * If an implementation method already exists, `Signature.from(method)` can inspect that method's signature directly.
+  *
+  * Status: example
+  */
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
@@ -24,15 +20,15 @@ object FunctionExample:
   val emotion =
     Signature.fromType[(sentence: String) => (sentiment: Emotion)]
 
-  /** Multi-output named tuple: signature string is
-    * `sentence -> sentiment, confidence`. */
+  /** Multi-output named tuple: signature string is `sentence -> sentiment, confidence`.
+    */
   val scored =
     Signature.fromType[
       (sentence: String) => (sentiment: Emotion, confidence: Double)
     ]
 
-  /** Anonymous input and scalar output: signature string is
-    * `input -> result`. */
+  /** Anonymous input and scalar output: signature string is `input -> result`.
+    */
   val anonymous =
     Signature.fromType[String => Emotion]
 

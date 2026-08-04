@@ -6,11 +6,11 @@ import dspy4s.typed.OutputAugmentation.PrependField
 
 /** A program that is one independently optimizable leaf of the introspection tree.
   *
-  * This is a lawful [[dspy4s.core.algebra.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the
-  * Get-Put / Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins
-  * what makes the focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which
-  * excludes signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite`
-  * executes all four statements per instance.
+  * This is a lawful [[dspy4s.core.algebra.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the Get-Put
+  * / Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins what makes
+  * the focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which excludes
+  * signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all
+  * four statements per instance.
   */
 trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
   def metadata(program: P): OptimizableMetadata
@@ -42,8 +42,8 @@ object OptimizableLeaf:
         )
 
   /** [[OptimizableLeaf]] for the typed single-leaf program [[Predict]]. A `Predict` field inside a user composite
-    * resolves here (via [[OptimizableTraversal.fromOptimizableLeaf]], 1 element) rather than being structurally torn apart
-    * by [[OptimizableTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
+    * resolves here (via [[OptimizableTraversal.fromOptimizableLeaf]], 1 element) rather than being structurally torn
+    * apart by [[OptimizableTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
     * [[OptimizableLeaf]] companion so it is in implicit scope without an explicit import.
     *
     * Optimizable parameters are exactly instructions, demos, and module config. The signature field structure, output
@@ -66,8 +66,8 @@ object OptimizableLeaf:
           signature = program.signature.withInstructions(updated.instructions)
         )
 
-  /** [[OptimizableLeaf]] for the typed single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but
-    * the exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
+  /** [[OptimizableLeaf]] for the typed single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but the
+    * exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
     *
     * Optimizable parameters remain instructions, demos, and config. The augmented signature structure is metadata only;
     * writing parameters changes the base signature's instructions, from which the same augmented structure is rebuilt.
@@ -93,10 +93,10 @@ object OptimizableLeaf:
           baseSignature = program.baseSignature.withInstructions(updated.instructions)
         )
 
-/** Uniform syntax derived from the lawful [[OptimizableLeaf]] lens. Every current and third-party leaf receives the same
-  * parameter and inspection operations from its typeclass instance.
+/** Uniform syntax derived from the lawful [[OptimizableLeaf]] lens. Every current and third-party leaf receives the
+  * same parameter and inspection operations from its typeclass instance.
   */
 extension [P](program: P)(using optimizableLeaf: OptimizableLeaf[P])
-  def optimizableParameters: OptimizableParameters                    = optimizableLeaf.get(program)
-  def optimizableView: OptimizableView                                = optimizableLeaf.inspect(program)
+  def optimizableParameters: OptimizableParameters                 = optimizableLeaf.get(program)
+  def optimizableView: OptimizableView                             = optimizableLeaf.inspect(program)
   def withOptimizableParameters(updated: OptimizableParameters): P = optimizableLeaf.set(program, updated)

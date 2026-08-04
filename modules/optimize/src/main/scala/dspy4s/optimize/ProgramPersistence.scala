@@ -15,21 +15,21 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
 
-/** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's
-  * `BaseModule.dump_state` / `load_state` and `save` / `load`.
+/** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's `BaseModule.dump_state` / `load_state`
+  * and `save` / `load`.
   *
   * Built entirely on [[OptimizableTraversal]], so a single typed or dynamic prediction module and an arbitrary
   * composite use the same path: [[dumpState]] serializes every writable [[OptimizableParameters]], and [[loadState]]
   * writes those parameter values into a fresh program through `OptimizableTraversal.replace`.
   *
-  * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature
-  * field structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the
-  * fresh target program and are preserved during loading. Loading therefore requires the same optimizable-leaf
-  * traversal/order and a compatible architecture; ordinal IDs detect missing or extra entries, not a
-  * same-cardinality reorder.
+  * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature field
+  * structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the fresh
+  * target program and are preserved during loading. Loading therefore requires the same optimizable-leaf
+  * traversal/order and a compatible architecture; ordinal IDs detect missing or extra entries, not a same-cardinality
+  * reorder.
   *
-  * The JSON is produced by zio-blocks' `DynamicValue` JSON codec (the same codec
-  * `SignatureLayout.dumpJson` uses) — clean, natural JSON with no ADT tags.
+  * The JSON is produced by zio-blocks' `DynamicValue` JSON codec (the same codec `SignatureLayout.dumpJson` uses) —
+  * clean, natural JSON with no ADT tags.
   */
 object ProgramPersistence:
 
@@ -38,7 +38,8 @@ object ProgramPersistence:
 
   /** Serialize a program's optimizable parameters to
     * `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`. [[OptimizableId]] keys make
-    * loading independent of JSON object order and detect missing/unknown ordinals. */
+    * loading independent of JSON object order and detect missing/unknown ordinals.
+    */
   def dumpState[P](program: P)(using traversal: OptimizableTraversal[P]): DynamicValue.Record =
     val parameters: Seq[(String, DynamicValue)] = traversal.readIdentified(program).map { identified =>
       identified.id.render -> (identified.parameters.dumpState: DynamicValue)
@@ -59,18 +60,19 @@ object ProgramPersistence:
       Right(Vector.empty)
     ) { case (acc, (rawId, rawParameters)) =>
       for
-        entries <- acc
-        id <- OptimizableId.parse(rawId).left.map(ValidationError(_))
+        entries    <- acc
+        id         <- OptimizableId.parse(rawId).left.map(ValidationError(_))
         parameters <- decodeParameters(rawParameters, rawId)
       yield entries :+ (id -> parameters)
     }
 
     parsed.flatMap { entries =>
-      val duplicateIds = entries.groupMap(_._1)(_._2).collect { case (id, values) if values.size > 1 => id }.toVector.sorted
-      val actualIds     = entries.map(_._1).toSet
-      val expectedSet   = expectedIds.toSet
-      val missing       = (expectedSet -- actualIds).toVector.sorted
-      val unknown       = (actualIds -- expectedSet).toVector.sorted
+      val duplicateIds =
+        entries.groupMap(_._1)(_._2).collect { case (id, values) if values.size > 1 => id }.toVector.sorted
+      val actualIds   = entries.map(_._1).toSet
+      val expectedSet = expectedIds.toSet
+      val missing     = (expectedSet -- actualIds).toVector.sorted
+      val unknown     = (actualIds -- expectedSet).toVector.sorted
       if duplicateIds.nonEmpty then
         Left(ValidationError(s"Program state has duplicate optimizable ids: ${duplicateIds.mkString(", ")}"))
       else if missing.nonEmpty || unknown.nonEmpty then
@@ -85,14 +87,17 @@ object ProgramPersistence:
     }
 
   /** Rebuild a program from the state produced by [[dumpState]], matching state by stable optimizable id. */
-  def loadState[P](program: P, state: DynamicValue.Record)(using traversal: OptimizableTraversal[P]): Either[DspyError, P] =
+  def loadState[P](program: P, state: DynamicValue.Record)(using
+      traversal: OptimizableTraversal[P]
+  ): Either[DspyError, P] =
     DynamicValues.recordGet(state, "optimizableParameters") match
       case Some(record: DynamicValue.Record) => loadById(program, record)
       case Some(_) => Left(ValidationError("Program state 'optimizableParameters' must be an id-keyed record"))
       case None    => Left(ValidationError("Program state is missing 'optimizableParameters'"))
 
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
-    * [[loadJson]]. */
+    * [[loadJson]].
+    */
   def dumpJson[P](program: P)(using OptimizableTraversal[P]): String =
     new String(dynamicJsonCodec.encode(dumpState(program)), StandardCharsets.UTF_8)
 
@@ -112,8 +117,9 @@ object ProgramPersistence:
       case error: Throwable =>
         Left(RuntimeError("program_save", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
 
-  /** Read a program's state JSON from `path` and rebuild it. IO failures are wrapped into a [[RuntimeError]];
-    * malformed JSON / state surfaces as the [[loadJson]] error. */
+  /** Read a program's state JSON from `path` and rebuild it. IO failures are wrapped into a [[RuntimeError]]; malformed
+    * JSON / state surfaces as the [[loadJson]] error.
+    */
   def load[P](program: P, path: String)(using OptimizableTraversal[P]): Either[DspyError, P] =
     val read: Either[DspyError, String] =
       try Right(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8))

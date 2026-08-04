@@ -15,19 +15,18 @@ import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
-/** Opens and closes callback scopes around the units of work a program runs -- module executions, LM calls,
-  * adapter format/parse passes, and tool invocations. Each `with*` helper emits a `*StartEvent` before the
-  * wrapped thunk and the matching `*EndEvent` after, correlated by a shared `callId`, so handlers observe a
-  * properly nested call tree (see [[dspy4s.core.contracts.CallbackEvent]] for the correlation model).
+/** Opens and closes callback scopes around the units of work a program runs -- module executions, LM calls, adapter
+  * format/parse passes, and tool invocations. Each `with*` helper emits a `*StartEvent` before the wrapped thunk and
+  * the matching `*EndEvent` after, correlated by a shared `callId`, so handlers observe a properly nested call tree
+  * (see [[dspy4s.core.contracts.CallbackEvent]] for the correlation model).
   *
   * Two guarantees hold for every scope whose start event was emitted successfully:
   *
-  *   - The dispatcher attempts exactly one end emission -- on success, on a `Left(DspyError)`, and even when
-  *     the thunk throws. A thrown body exception is reported as a
-  *     `Left(RuntimeError("callback_dispatch", ...))` end event and then rethrown. If an end observer itself
-  *     throws, that end is not emitted a second time.
-  *   - The scope's `callId` is installed as the active call for the duration of the thunk, so any scope opened
-  *     inside it inherits that id as its `parentCallId`.
+  *   - The dispatcher attempts exactly one end emission -- on success, on a `Left(DspyError)`, and even when the thunk
+  *     throws. A thrown body exception is reported as a `Left(RuntimeError("callback_dispatch", ...))` end event and
+  *     then rethrown. If an end observer itself throws, that end is not emitted a second time.
+  *   - The scope's `callId` is installed as the active call for the duration of the thunk, so any scope opened inside
+  *     it inherits that id as its `parentCallId`.
   *
   * Events reach the registered handlers through [[RuntimeEnvironment.emit]].
   */
@@ -38,7 +37,10 @@ object CallbackDispatcher:
     RuntimeEnvironment.emit(event)
 
   /** Wrap a module execution in a `ModuleStartEvent` / `ModuleEndEvent` pair. */
-  def withModule[A](moduleName: String, inputs: DynamicValue.Record)(thunk: => Either[DspyError, A]): Either[DspyError, A] =
+  def withModule[A](
+      moduleName: String,
+      inputs: DynamicValue.Record
+  )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope(prefix = "module") { (callId, parentCallId) =>
       emit(
         ModuleStartEvent(
@@ -109,8 +111,9 @@ object CallbackDispatcher:
       }
     }
 
-  /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. Fixed to `DynamicValue` (not generic
-    * like the other scopes) because tool args and results travel the spine as `DynamicValue` end to end. */
+  /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. Fixed to `DynamicValue` (not generic like the
+    * other scopes) because tool args and results travel the spine as `DynamicValue` end to end.
+    */
   def withTool(
       toolName: String,
       args: DynamicValue.Record
@@ -136,22 +139,24 @@ object CallbackDispatcher:
       }
     }
 
-  /** Allocate a fresh `prefix`-tagged `callId`, capture the enclosing scope's id as the parent, and run `thunk`
-    * with the new id installed as the active call so any nested scope nests under it. The thunk receives
-    * `(callId, parentCallId)` to stamp onto its start/end events. */
+  /** Allocate a fresh `prefix`-tagged `callId`, capture the enclosing scope's id as the parent, and run `thunk` with
+    * the new id installed as the active call so any nested scope nests under it. The thunk receives
+    * `(callId, parentCallId)` to stamp onto its start/end events.
+    */
   private def withCallScope[A](
       prefix: String
   )(thunk: (String, Option[String]) => Either[DspyError, A]): Either[DspyError, A] =
     val parentCallId = RuntimeEnvironment.activeCallId
-    val callId = RuntimeEnvironment.nextCallId(prefix)
+    val callId       = RuntimeEnvironment.nextCallId(prefix)
     RuntimeEnvironment.withActiveCall(callId) {
       thunk(callId, parentCallId)
     }
 
   /** Run `thunk` and attempt `emitEnd` exactly once with its outcome. If the body throws, an end carrying a
     * callback-dispatch error is attempted before the original exception is rethrown. An observer failure while
-    * reporting that body exception is attached as suppressed; an observer failure after an ordinary result
-    * propagates directly. */
+    * reporting that body exception is attached as suppressed; an observer failure after an ordinary result propagates
+    * directly.
+    */
   private def runWithEnd[A](
       thunk: => Either[DspyError, A]
   )(emitEnd: Either[DspyError, A] => Unit): Either[DspyError, A] =

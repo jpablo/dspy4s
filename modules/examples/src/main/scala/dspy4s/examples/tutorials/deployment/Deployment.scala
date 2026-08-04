@@ -1,11 +1,10 @@
-/**
- * Tutorial: Deploying your DSPy program
- *
- * Source:   docs/docs/tutorials/deployment/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/deployment/index.md
- * Status:   blocked (4 python snippets) — dspy4s has no model-serving integration (no FastAPI app
- *           scaffold, no MLflow model serving). Programs are plain values; wrap one in your own HTTP layer.
- */
+/** Tutorial: Deploying your DSPy program
+  *
+  * Source: docs/docs/tutorials/deployment/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/deployment/index.md Status: blocked (4 python
+  * snippets) — dspy4s has no model-serving integration (no FastAPI app scaffold, no MLflow model serving). Programs are
+  * plain values; wrap one in your own HTTP layer.
+  */
 package dspy4s.examples.tutorials.deployment
 
 object Deployment {

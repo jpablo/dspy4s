@@ -41,7 +41,8 @@ trait OptimizableTraversal[P]:
     * dotted field paths: `"self"` for a standalone leaf, the field label for a composite's leaf field, and
     * `"field.sub"` when nested. They describe the current syntax tree and therefore are not identity: reassociating an
     * anonymous composition node can change its `first`/`second` path. This traversal is aligned with [[inspect]]. The
-    * default uses positional names; [[OptimizableTraversal.DerivedOptimizableTraversal]] overrides with Mirror field labels.
+    * default uses positional names; [[OptimizableTraversal.DerivedOptimizableTraversal]] overrides with Mirror field
+    * labels.
     */
   def inspectNamed(program: P): Vector[(String, OptimizableView)] =
     inspect(program).zipWithIndex.map { case (view, i) => i.toString -> view }
@@ -89,17 +90,17 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
   given parameterLens[P, N <: Int](using
       traversal: WithArity[P, N]
   ): Lens[P, SizedVector[OptimizableParameters, N]] with
-    def get(program: P): SizedVector[OptimizableParameters, N] = traversal.readSized(program)
+    def get(program: P): SizedVector[OptimizableParameters, N]             = traversal.readSized(program)
     def set(program: P, updates: SizedVector[OptimizableParameters, N]): P =
       traversal.replaceSized(program, updates)
 
-  /** Lifts a single [[OptimizableLeaf]] leaf to a 1-element [[OptimizableTraversal]]. A type that is itself a leaf (e.g.
-    * [[dspy4s.programs.DynamicPredict]], which is also a `Product`) resolves here and is not torn into its case-class
-    * fields by structural derivation.
+  /** Lifts a single [[OptimizableLeaf]] leaf to a 1-element [[OptimizableTraversal]]. A type that is itself a leaf
+    * (e.g. [[dspy4s.programs.DynamicPredict]], which is also a `Product`) resolves here and is not torn into its
+    * case-class fields by structural derivation.
     */
   given fromOptimizableLeaf[P](using leaf: OptimizableLeaf[P]): OptimizableTraversal.Of[P, 1] with
-    def arity(@annotation.unused program: P): Int = 1
-    def inspect(program: P): Vector[OptimizableView] = Vector(leaf.inspect(program))
+    def arity(@annotation.unused program: P): Int                      = 1
+    def inspect(program: P): Vector[OptimizableView]                   = Vector(leaf.inspect(program))
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.size == 1, s"OptimizableLeaf expects exactly 1 update, got ${updates.size}")
       leaf.set(program, updates.head)
@@ -114,8 +115,8 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     * instance a compile error instead of silently hiding a potentially learnable subtree.
     */
   def empty[P]: OptimizableTraversal.WithArity[P, 0] = new OptimizableTraversal.Of[P, 0]:
-    def arity(@annotation.unused program: P): Int = 0
-    def inspect(program: P): Vector[OptimizableView] = Vector.empty
+    def arity(@annotation.unused program: P): Int                      = 0
+    def inspect(program: P): Vector[OptimizableView]                   = Vector.empty
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
       program
@@ -138,8 +139,8 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
         acc ++ inst.inspect(program.productElement(i))
       }
 
-    /** Names each optimizable leaf by its case-class field path (P-c). A field whose value is a leaf predict gets just the
-      * field label (its leaf name "self" is collapsed); a nested composite field yields `"field.sub"`.
+    /** Names each optimizable leaf by its case-class field path (P-c). A field whose value is a leaf predict gets just
+      * the field label (its leaf name "self" is collapsed); a nested composite field yields `"field.sub"`.
       */
     override def inspectNamed(program: P): Vector[(String, OptimizableView)] =
       fieldInstances.zip(labels).zipWithIndex.flatMap { case ((inst, label), i) =>
@@ -154,7 +155,7 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
       }
       val expected = arities.sum
       require(expected == updates.size, s"OptimizableTraversal.replace expected $expected updates, got ${updates.size}")
-      var cursor = 0
+      var cursor      = 0
       val rebuiltArgs = fieldInstances.zipWithIndex.map { case (inst, i) =>
         val value = program.productElement(i)
         val arity = arities(i)
@@ -167,10 +168,10 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
   /** Recurse over the Mirror's element types, summoning each field's fixed-arity traversal.
     *
     * The widening to `OptimizableTraversal[Any]` is the single, narrowly-scoped accommodation needed to hold the
-    * heterogeneous per-field instances in one homogeneous list. It is type-safe: the i-th instance is only ever applied to
-    * `program.productElement(i)`, whose runtime value the Mirror guarantees to be of the corresponding element type. No
-    * `asInstanceOf` is used on program values; the cast is confined to the instance witness, which never inspects more
-    * than its own field.
+    * heterogeneous per-field instances in one homogeneous list. It is type-safe: the i-th instance is only ever applied
+    * to `program.productElement(i)`, whose runtime value the Mirror guarantees to be of the corresponding element type.
+    * No `asInstanceOf` is used on program values; the cast is confined to the instance witness, which never inspects
+    * more than its own field.
     *
     * This compiler evidence retains the sum of field arities in the derived result type.
     */

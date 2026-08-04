@@ -13,12 +13,12 @@ import scala.util.Random
 final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accepted: Boolean, metricCalls: Int)
 
 /** GEPA's merge proposer — the crossover ("genetic") half of Genetic-Pareto. It combines two Pareto-frontier
-  * descendants of a common ancestor: for each component, it takes the version from whichever descendant
-  * IMPROVED it relative to the ancestor, yielding a child that stacks the two lineages' complementary gains. A faithful
-  * port of gepa's `MergeProposer` / `sample_and_attempt_merge_programs_by_common_predictors`.
+  * descendants of a common ancestor: for each component, it takes the version from whichever descendant IMPROVED it
+  * relative to the ancestor, yielding a child that stacks the two lineages' complementary gains. A faithful port of
+  * gepa's `MergeProposer` / `sample_and_attempt_merge_programs_by_common_predictors`.
   *
-  * Merge only fires for multi-component programs with branching lineage: the triplet must have a desirable component
-  * (a component exactly one descendant changed), which a single-component program can never satisfy, so merge is a safe
+  * Merge only fires for multi-component programs with branching lineage: the triplet must have a desirable component (a
+  * component exactly one descendant changed), which a single-component program can never satisfy, so merge is a safe
   * no-op there.
   *
   * Stateful, mirroring gepa: the engine schedules merges after each accepted reflective mutation
@@ -82,8 +82,8 @@ final class MergeProposer[P](
         val subIdx = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), subsampleSize, rng)
         if subIdx.isEmpty then None
         else
-          val before1 = subIdx.iterator.map(state.valSubscores(id1)).sum
-          val before2 = subIdx.iterator.map(state.valSubscores(id2)).sum
+          val before1            = subIdx.iterator.map(state.valSubscores(id1)).sum
+          val before2            = subIdx.iterator.map(state.valSubscores(id2)).sum
           val (mergedScores, ev) =
             cache.scores(merged, subIdx.map(valset)) // cached so the later full-eval reuses these
           Some(MergeProposal(
@@ -145,9 +145,9 @@ object MergeProposer:
       rng: Random
   ): (Candidate, Vector[Int]) =
     val components = ancestor.keys.toVector.sorted
-    val chosen = components.map { component =>
+    val chosen     = components.map { component =>
       val (anc, v1, v2) = (ancestor(component), cand1(component), cand2(component))
-      val src =
+      val src           =
         if (anc == v1 || anc == v2) && v1 != v2 then if anc == v1 then id2 else id1
         else if anc != v1 && anc != v2 then
           if aggregateScore(id1) > aggregateScore(id2) then id1

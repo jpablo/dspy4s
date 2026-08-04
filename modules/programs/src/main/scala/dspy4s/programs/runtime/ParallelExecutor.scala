@@ -52,9 +52,9 @@ final class ParallelExecutor(
     if data.isEmpty then
       return Right(ParallelExecutionResult(results = Vector.empty, failedIndices = Vector.empty, errors = Map.empty))
 
-    val captured = ContextPropagation.captureAll
-    val pool = Executors.newFixedThreadPool(numThreads)
-    val completion = ExecutorCompletionService[(Int, Option[Either[DspyError, B]])](pool)
+    val captured        = ContextPropagation.captureAll
+    val pool            = Executors.newFixedThreadPool(numThreads)
+    val completion      = ExecutorCompletionService[(Int, Option[Either[DspyError, B]])](pool)
     val cancelRequested = AtomicBoolean(false)
 
     try
@@ -77,23 +77,22 @@ final class ParallelExecutor(
                         )
                   index -> Some(value)
               }
-            }
-        )
+            })
 
       var submitted = 0
       var completed = 0
-      var next = 0
+      var next      = 0
 
       while submitted < numThreads && next < data.size do
         submit(next)
         submitted += 1
         next += 1
 
-      val resultBuffer = Array.fill[Option[B]](data.size)(None)
-      val failedIndices = Vector.newBuilder[Int]
-      val errors = scala.collection.mutable.Map.empty[Int, DspyError]
+      val resultBuffer      = Array.fill[Option[B]](data.size)(None)
+      val failedIndices     = Vector.newBuilder[Int]
+      val errors            = scala.collection.mutable.Map.empty[Int, DspyError]
       var cancelledByErrors = false
-      var timedOut = false
+      var timedOut          = false
 
       while completed < submitted && !cancelledByErrors && !timedOut do
         val completedFuture = completion.poll(timeout.toMillis, TimeUnit.MILLISECONDS)
@@ -104,7 +103,7 @@ final class ParallelExecutor(
           completed += 1
 
           maybeOutcome match
-            case None => ()
+            case None          => ()
             case Some(outcome) =>
               outcome match
                 case Right(value) =>
@@ -150,6 +149,6 @@ object ParallelExecutor:
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
       numThreads = ctx.numThreads.getOrElse(ThreadCount(8)),
-      maxErrors  = ctx.maxErrors.getOrElse(ErrorLimit(10)),
-      timeout    = timeout
+      maxErrors = ctx.maxErrors.getOrElse(ErrorLimit(10)),
+      timeout = timeout
     )

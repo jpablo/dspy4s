@@ -26,9 +26,9 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot samples k demos from trainset with seed-based determinism") {
-    val trainset = (1 to 20).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
-    val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(5), seed = 42L))
+    val trainset         = (1 to 20).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
+    val student          = DynamicPredict(layout = signature)
+    val optimizer        = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(5), seed = 42L))
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = optimizer.compile(student, trainset)
@@ -37,13 +37,14 @@ class LabeledFewShotSuite extends FunSuite:
     assertEquals(compiled.demos.size, 5)
 
     val firstRunDemos = compiled.demos.map((d => lookupString(d.values, "question")))
-    val rerun = optimizer.compile(student, trainset).toOption.get.bestProgram.demos.map((d => lookupString(d.values, "question")))
+    val rerun         =
+      optimizer.compile(student, trainset).toOption.get.bestProgram.demos.map((d => lookupString(d.values, "question")))
     assertEquals(firstRunDemos, rerun, "sampling should be deterministic under the same seed")
   }
 
   test("LabeledFewShot returns no demos when trainset is empty") {
-    val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict]()
+    val student          = DynamicPredict(layout = signature)
+    val optimizer        = LabeledFewShot[DynamicPredict]()
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = optimizer.compile(student, Vector.empty)
@@ -52,9 +53,9 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot with sample=false takes the first k examples in input order") {
-    val trainset = (1 to 10).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
-    val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(3), sample = false))
+    val trainset         = (1 to 10).map(i => Example(rec("question" := s"q$i", "answer" := s"a$i"))).toVector
+    val student          = DynamicPredict(layout = signature)
+    val optimizer        = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(3), sample = false))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
@@ -63,9 +64,9 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot caps demo count at trainset size when k exceeds it") {
-    val trainset = Vector(Example(rec("question" := "only", "answer" := "one")))
-    val student = DynamicPredict(layout = signature)
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(10)))
+    val trainset         = Vector(Example(rec("question" := "only", "answer" := "one")))
+    val student          = DynamicPredict(layout = signature)
+    val optimizer        = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(10)))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
@@ -73,12 +74,12 @@ class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot preserves student signature") {
-    val student = DynamicPredict(layout = signature)
+    val student  = DynamicPredict(layout = signature)
     val trainset = Vector(
       Example(rec("question" := "q1", "answer" := "a1")),
       Example(rec("question" := "q2", "answer" := "a2"))
     )
-    val optimizer = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(1), sample = false))
+    val optimizer        = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(1), sample = false))
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram

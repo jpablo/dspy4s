@@ -1,18 +1,17 @@
-/**
- * Extracting Information from Emails with DSPy
- *
- * Source:   docs/docs/tutorials/email_extraction/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/email_extraction/index.md
- * Status:   translated (the typed signatures + the composed processor, snippets 3/4/5/6). The MLflow
- *           autolog setup (snippets 1/2) is observability glue, not a dspy feature, and is out of scope.
- *
- * Pydantic `BaseModel`s / `str, Enum`s become Scala `case class`es / `enum`s that `derive Schema`, so the
- * `email_type: EmailType` / `key_entities: list[ExtractedEntity]` / `financial_amount: Optional[float]`
- * fields keep their structure across the typed boundary (enum → wire string, case class / list → JSON,
- * `Optional` → `Option`). Python's `class EmailProcessor(dspy.Module)` composing four `ChainOfThought`s
- * becomes a plain class threading their typed outputs through an `Either` for-comprehension. DSPy's
- * per-field `desc=` is not part of the dspy4s `Spec` surface, so those hints are dropped.
- */
+/** Extracting Information from Emails with DSPy
+  *
+  * Source: docs/docs/tutorials/email_extraction/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/email_extraction/index.md Status: translated (the
+  * typed signatures + the composed processor, snippets 3/4/5/6). The MLflow autolog setup (snippets 1/2) is
+  * observability glue, not a dspy feature, and is out of scope.
+  *
+  * Pydantic `BaseModel`s / `str, Enum`s become Scala `case class`es / `enum`s that `derive Schema`, so the
+  * `email_type: EmailType` / `key_entities: list[ExtractedEntity]` / `financial_amount: Optional[float]` fields keep
+  * their structure across the typed boundary (enum → wire string, case class / list → JSON, `Optional` → `Option`).
+  * Python's `class EmailProcessor(dspy.Module)` composing four `ChainOfThought`s becomes a plain class threading their
+  * typed outputs through an `Either` for-comprehension. DSPy's per-field `desc=` is not part of the dspy4s `Spec`
+  * surface, so those hints are dropped.
+  */
 package dspy4s.examples.tutorials.email_extraction
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
@@ -26,7 +25,7 @@ import zio.blocks.schema.Schema
 // --8<-- [start:email-type]
 enum EmailType derives Schema:
   case order_confirmation, support_request, meeting_invitation, newsletter,
-       promotional, invoice, shipping_notification, other
+    promotional, invoice, shipping_notification, other
 // --8<-- [end:email-type]
 
 // | class UrgencyLevel(str, Enum): LOW = "low"; MEDIUM = "medium"; HIGH = "high"; CRITICAL = "critical"
@@ -41,42 +40,43 @@ case class ExtractedEntity(entity_type: String, value: String, confidence: Doubl
 // --8<-- [start:signatures]
 trait ClassifyEmail extends Spec:
   def email_subject: InputField[String]
-  def email_body:    InputField[String]
-  def sender:        InputField[String]
+  def email_body: InputField[String]
+  def sender: InputField[String]
   def email_type: OutputField[EmailType]
-  def urgency:    OutputField[UrgencyLevel]
-  def reasoning:  OutputField[String]
+  def urgency: OutputField[UrgencyLevel]
+  def reasoning: OutputField[String]
 // --8<-- [end:signatures]
 
 // | class ExtractEntities(dspy.Signature): """Extract key entities and information from email content."""
 trait ExtractEntities extends Spec:
   def email_content: InputField[String]
-  def email_type:    InputField[EmailType]
-  def key_entities:     OutputField[List[ExtractedEntity]]
+  def email_type: InputField[EmailType]
+  def key_entities: OutputField[List[ExtractedEntity]]
   def financial_amount: OutputField[Option[Double]]
-  def important_dates:  OutputField[List[String]]
-  def contact_info:     OutputField[List[String]]
+  def important_dates: OutputField[List[String]]
+  def contact_info: OutputField[List[String]]
 
 // | class GenerateActionItems(dspy.Signature): """Determine what actions are needed ..."""
 trait GenerateActionItems extends Spec:
-  def email_type:         InputField[EmailType]
-  def urgency:            InputField[UrgencyLevel]
-  def email_summary:      InputField[String]
+  def email_type: InputField[EmailType]
+  def urgency: InputField[UrgencyLevel]
+  def email_summary: InputField[String]
   def extracted_entities: InputField[List[ExtractedEntity]]
   def action_required: OutputField[Boolean]
-  def action_items:    OutputField[List[String]]
-  def deadline:        OutputField[Option[String]]
-  def priority_score:  OutputField[Int]
+  def action_items: OutputField[List[String]]
+  def deadline: OutputField[Option[String]]
+  def priority_score: OutputField[Int]
 
 // | class SummarizeEmail(dspy.Signature): """Create a concise summary of the email content."""
 trait SummarizeEmail extends Spec:
   def email_subject: InputField[String]
-  def email_body:    InputField[String]
-  def key_entities:  InputField[List[ExtractedEntity]]
+  def email_body: InputField[String]
+  def key_entities: InputField[List[ExtractedEntity]]
   def summary: OutputField[String]
 
-/** The aggregated result Python builds with `dspy.Prediction(...)` in snippet 5 — a single typed value
-  * holding the merged outputs of the four steps. */
+/** The aggregated result Python builds with `dspy.Prediction(...)` in snippet 5 — a single typed value holding the
+  * merged outputs of the four steps.
+  */
 case class EmailAnalysis(
     email_type: EmailType,
     urgency: UrgencyLevel,
@@ -117,43 +117,43 @@ object EmailExtraction:
       for
         // Step 1: Classify the email
         classification <- classifier((
-                            email_subject = emailSubject,
-                            email_body    = emailBody,
-                            sender        = sender
-                          ))
+          email_subject = emailSubject,
+          email_body = emailBody,
+          sender = sender
+        ))
         // Step 2: Extract entities
         fullContent = s"Subject: $emailSubject\n\nFrom: $sender\n\n$emailBody"
         entities <- entityExtractor((
-                      email_content = fullContent,
-                      email_type    = classification.output.email_type
-                    ))
+          email_content = fullContent,
+          email_type = classification.output.email_type
+        ))
         // Step 3: Generate summary
         summary <- summarizer((
-                     email_subject = emailSubject,
-                     email_body    = emailBody,
-                     key_entities  = entities.output.key_entities
-                   ))
+          email_subject = emailSubject,
+          email_body = emailBody,
+          key_entities = entities.output.key_entities
+        ))
         // Step 4: Determine actions
         actions <- actionGenerator((
-                     email_type         = classification.output.email_type,
-                     urgency            = classification.output.urgency,
-                     email_summary      = summary.output.summary,
-                     extracted_entities = entities.output.key_entities
-                   ))
+          email_type = classification.output.email_type,
+          urgency = classification.output.urgency,
+          email_summary = summary.output.summary,
+          extracted_entities = entities.output.key_entities
+        ))
       // Step 5: Structure the results
       yield EmailAnalysis(
-        email_type       = classification.output.email_type,
-        urgency          = classification.output.urgency,
-        summary          = summary.output.summary,
-        key_entities     = entities.output.key_entities,
+        email_type = classification.output.email_type,
+        urgency = classification.output.urgency,
+        summary = summary.output.summary,
+        key_entities = entities.output.key_entities,
         financial_amount = entities.output.financial_amount,
-        important_dates  = entities.output.important_dates,
-        action_required  = actions.output.action_required,
-        action_items     = actions.output.action_items,
-        deadline         = actions.output.deadline,
-        priority_score   = actions.output.priority_score,
-        reasoning        = classification.output.reasoning,
-        contact_info     = entities.output.contact_info
+        important_dates = entities.output.important_dates,
+        action_required = actions.output.action_required,
+        action_items = actions.output.action_items,
+        deadline = actions.output.deadline,
+        priority_score = actions.output.priority_score,
+        reasoning = classification.output.reasoning,
+        contact_info = entities.output.contact_info
       )
   // --8<-- [end:processor]
 
@@ -221,7 +221,7 @@ object EmailExtraction:
   def describe(email: SampleEmail)(using RuntimeContext): String =
     new EmailProcessor().forward(email.subject, email.body, email.sender) match
       case Left(err) => s"   ⚠️  ${err.message}"
-      case Right(r) =>
+      case Right(r)  =>
         val amount   = r.financial_amount.fold("")(a => f"\n   💰 Amount: $$$a%,.2f")
         val deadline = if r.action_required then r.deadline.fold("")(d => s"\n   ⏰ Deadline: $d") else ""
         s"""   📊 Type: ${r.email_type}

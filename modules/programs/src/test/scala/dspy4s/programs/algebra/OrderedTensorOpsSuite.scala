@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class OrderedTensorOpsSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
@@ -31,22 +31,22 @@ class OrderedTensorOpsSuite extends FunSuite:
   }
 
   private final case class Fn[I, O](f: I => O) extends Module[I, O]:
-    override val moduleName: String = "fn"
+    override val moduleName: String                         = "fn"
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction.empty))
 
   private final case class Fail[I, O](label: String) extends Module[I, O]:
-    override val moduleName: String = s"fail_$label"
+    override val moduleName: String                         = s"fail_$label"
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Left(ValidationError(label))
 
   private final class Counting extends Module[Int, String]:
-    val calls: AtomicInteger = AtomicInteger(0)
-    override val moduleName: String = "counting"
+    val calls: AtomicInteger                                       = AtomicInteger(0)
+    override val moduleName: String                                = "counting"
     override protected val lifecycle: ModuleLifecycle[Int, String] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
@@ -81,7 +81,7 @@ class OrderedTensorOpsSuite extends FunSuite:
   }
 
   test("discard equality on values hides an observable effect") {
-    val f = new Counting
+    val f              = new Counting
     val lhs            = (f >>> C.discard[String])(ProgramCall(5)).map(_.output)
     val callsAfterLeft = f.calls.get()
     val rhs            = C.discard[Int](ProgramCall(5)).map(_.output)
@@ -92,16 +92,14 @@ class OrderedTensorOpsSuite extends FunSuite:
   }
 
   test("copy commutes with deterministic programs but not effect-observing programs") {
-    val deterministic = Fn[Int, String](i => s"v$i")
-    val deterministicLeft = (deterministic >>> C.copy[String])(ProgramCall(5)).map(_.output)
-    val deterministicRight =
-      (C.copy[Int] >>> C.tensor(deterministic, deterministic))(ProgramCall(5)).map(_.output)
+    val deterministic      = Fn[Int, String](i => s"v$i")
+    val deterministicLeft  = (deterministic >>> C.copy[String])(ProgramCall(5)).map(_.output)
+    val deterministicRight = (C.copy[Int] >>> C.tensor(deterministic, deterministic))(ProgramCall(5)).map(_.output)
     assertEquals(deterministicLeft, deterministicRight)
 
-    val effectful = new Counting
-    val effectfulLeft = (effectful >>> C.copy[String])(ProgramCall(5)).map(_.output).toOption.get
-    val effectfulRight =
-      (C.copy[Int] >>> C.tensor(effectful, effectful))(ProgramCall(5)).map(_.output).toOption.get
+    val effectful      = new Counting
+    val effectfulLeft  = (effectful >>> C.copy[String])(ProgramCall(5)).map(_.output).toOption.get
+    val effectfulRight = (C.copy[Int] >>> C.tensor(effectful, effectful))(ProgramCall(5)).map(_.output).toOption.get
     assertEquals(effectfulLeft._1, effectfulLeft._2)
     assertNotEquals(effectfulRight._1, effectfulRight._2)
   }

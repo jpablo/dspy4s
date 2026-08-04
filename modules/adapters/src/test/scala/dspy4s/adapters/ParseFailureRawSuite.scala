@@ -6,8 +6,9 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.lm.contracts.LmOutput
 import munit.FunSuite
 
-/** G-12 P-b: a parse failure must carry the raw (unparseable) model response in `ParseError.raw`, so GEPA's
-  * reflective evaluation can show the reflection LM what the model actually produced. */
+/** G-12 P-b: a parse failure must carry the raw (unparseable) model response in `ParseError.raw`, so GEPA's reflective
+  * evaluation can show the reflection LM what the model actually produced.
+  */
 class ParseFailureRawSuite extends FunSuite:
 
   // Two output fields, so the single-output text fallback does NOT apply and a missing field is a real parse error.

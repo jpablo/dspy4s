@@ -7,12 +7,13 @@ import munit.FunSuite
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Laws for the bounded agentic-iteration primitive [[AgentLoop.run]] (Algebra 2; the shared core of
-  * ReAct/CodeAct/RLM/PoT). The end-to-end agent behavior is covered by their own suites; this pins the
-  * control-flow primitive with pure synthetic steps. */
+  * ReAct/CodeAct/RLM/PoT). The end-to-end agent behavior is covered by their own suites; this pins the control-flow
+  * primitive with pure synthetic steps.
+  */
 class AgentLoopLawSuite extends FunSuite:
 
   test("maxIterations = 0 runs no steps and returns onExhausted(initialState)") {
-    val steps = AtomicInteger(0)
+    val steps  = AtomicInteger(0)
     val result = AgentLoop.run[Vector[Int], String](Vector(1, 2), iteration = 0, maxIterations = 0)(
       onExhausted = state => Right(s"exhausted:${state.mkString(",")}")
     ) { (state, _) =>
@@ -24,7 +25,7 @@ class AgentLoopLawSuite extends FunSuite:
   }
 
   test("Done short-circuits at the first finishing step") {
-    val steps = AtomicInteger(0)
+    val steps  = AtomicInteger(0)
     val result = AgentLoop.run[Vector[Int], Int](Vector.empty, 0, maxIterations = 5)(
       onExhausted = _ => Right(-1)
     ) { (state, iteration) =>
@@ -46,9 +47,9 @@ class AgentLoopLawSuite extends FunSuite:
   }
 
   test("a Left from a step short-circuits the loop") {
-    val steps = AtomicInteger(0)
+    val steps           = AtomicInteger(0)
     val boom: DspyError = RuntimeError("loop", "boom")
-    val result = AgentLoop.run[Vector[Int], Int](Vector.empty, 0, maxIterations = 10)(
+    val result          = AgentLoop.run[Vector[Int], Int](Vector.empty, 0, maxIterations = 10)(
       onExhausted = _ => Right(0)
     ) { (state, iteration) =>
       steps.incrementAndGet()
@@ -61,7 +62,7 @@ class AgentLoopLawSuite extends FunSuite:
 
   test("the iteration index is 0-based and increments by one") {
     val seen = scala.collection.mutable.ArrayBuffer.empty[Int]
-    val _ = AgentLoop.run[Unit, Unit]((), 0, maxIterations = 4)(
+    val _    = AgentLoop.run[Unit, Unit]((), 0, maxIterations = 4)(
       onExhausted = _ => Right(())
     ) { (_, iteration) =>
       seen += iteration

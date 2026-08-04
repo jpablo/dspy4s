@@ -61,7 +61,7 @@ class ProgramOfThoughtRunnerSuite extends FunSuite:
 
   test("ProgramRunner decodes ProgramOfThought input, executes it, and returns the final raw prediction") {
     val interpreter = new RecordingInterpreter
-    val program = ProgramOfThought(
+    val program     = ProgramOfThought(
       baseSignature = Signature.derived[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]("PoTRunner"),
       interpreter = interpreter
     )

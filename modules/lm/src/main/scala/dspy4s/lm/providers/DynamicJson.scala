@@ -6,10 +6,11 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
 
-/** JSON (de)serialization and navigation for the provider layer, on `DynamicValue` — the principled replacement
-  * for the hand-rolled `Any`-based `JsonCodec`. Serialization delegates to zio-blocks' total `DynamicValue`
-  * JSON codec; [[stripNull]] mirrors the old `stripNone` (providers distinguish an absent field from `null`).
-  * The navigation helpers replace the `asMap`/`asVector`/`asLong` projections the `Map[String, Any]` parser used. */
+/** JSON (de)serialization and navigation for the provider layer, on `DynamicValue` — the principled replacement for the
+  * hand-rolled `Any`-based `JsonCodec`. Serialization delegates to zio-blocks' total `DynamicValue` JSON codec;
+  * [[stripNull]] mirrors the old `stripNone` (providers distinguish an absent field from `null`). The navigation
+  * helpers replace the `asMap`/`asVector`/`asLong` projections the `Map[String, Any]` parser used.
+  */
 private[lm] object DynamicJson:
   private val codec = Schema.dynamic.jsonCodec
 
@@ -19,8 +20,8 @@ private[lm] object DynamicJson:
 
   def decode(json: String): Either[DspyError, DynamicValue] =
     codec.decode(json.getBytes(StandardCharsets.UTF_8)) match
-      case Right(dv)  => Right(dv)
-      case Left(err)  => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
+      case Right(dv) => Right(dv)
+      case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
 
   /** Recursively drop record fields whose value is `Null`. */
   def stripNull(value: DynamicValue): DynamicValue = value match

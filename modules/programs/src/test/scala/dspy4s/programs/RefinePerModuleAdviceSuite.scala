@@ -34,31 +34,32 @@ import scala.collection.mutable
 class RefinePerModuleAdviceSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private case class Q(q: String)
   private case class Cand(answer: String)
 
   private val HinterToken   = "HINTER_SECRET"
-  private val AnswererToken  = "ANSWERER_SECRET"
+  private val AnswererToken = "ANSWERER_SECRET"
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
 
   /** Two-stage introspectable program: `hinter` (q -> hint) feeds `answerer` (q, hint -> answer). A case class of
-    * `DynamicPredict`s, so `OptimizableTraversal` is structurally derived with field-label names ("hinter", "answerer").
+    * `DynamicPredict`s, so `OptimizableTraversal` is structurally derived with field-label names ("hinter",
+    * "answerer").
     */
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
       extends Module[Q, Cand]:
-    override val moduleName: String = "hint_then_answer"
+    override val moduleName: String                            = "hint_then_answer"
     override protected val lifecycle: ModuleLifecycle[Q, Cand] =
       ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       for
         hintPred <- hinter(ProgramCall(input = rec("q" := call.input.q)))
-        hint      = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
+        hint = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
         ansPred <- answerer(ProgramCall(input = rec("q" := call.input.q, "hint" := hint)))
-        answer   <- ansPred.raw.asString("answer")
+        answer  <- ansPred.raw.asString("answer")
       yield Prediction(output = Cand(answer), raw = ansPred.raw)
 
   /** Generic adapter that tags each prompt with its requested OUTPUT fields (so the LM and the test can route), and
@@ -70,7 +71,7 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     override val name: String                = "recording"
 
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-      val tag = invocation.layout.outputFields.map(_.name).mkString(",")
+      val tag      = invocation.layout.outputFields.map(_.name).mkString(",")
       val rendered = invocation.layout.inputFields.map { field =>
         val v =
           DynamicValues.recordGet(invocation.inputs.values, field.name).map(DynamicValues.renderText).getOrElse("")
@@ -89,13 +90,13 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       Right(ParsedOutput(values = DynamicValues.recordFromEntries(entries)))
 
   /** One LM that plays both task and reflection roles, routed by the prompt's OUTPUTS tag:
-    *   - `advice`  -> returns a per-module JSON advice dict telling each predictor its own secret token.
-    *   - `hint`    -> emits "good" iff the hinter's prompt carries the hinter token (via injected `hint_`).
+    *   - `advice` -> returns a per-module JSON advice dict telling each predictor its own secret token.
+    *   - `hint` -> emits "good" iff the hinter's prompt carries the hinter token (via injected `hint_`).
     *   - `answer` -> emits "Paris" iff the answerer's prompt carries the answerer token AND a "good" hint.
     */
   private final class TaskAndFeedbackLm extends LanguageModel:
-    override val id: String   = "task-and-feedback"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "task-and-feedback"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt = request.messages.flatMap(_.text).mkString("\n")
       if prompt.contains("advice") then
@@ -119,9 +120,9 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     val adapter = RecordingAdapter()
     val lm      = TaskAndFeedbackLm()
     val refine  = Refine[HintThenAnswer, Q, Cand](
-      module    = program,
-      n         = AttemptCount(2),
-      rewardFn  = (_, p) => if p.output.answer == "Paris" then 1.0 else 0.0,
+      module = program,
+      n = AttemptCount(2),
+      rewardFn = (_, p) => if p.output.answer == "Paris" then 1.0 else 0.0,
       threshold = 1.0
     )
 

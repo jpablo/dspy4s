@@ -8,28 +8,22 @@ import scala.collection.mutable
 
 /** Streaming state machine for [[ChatAdapter]] output.
   *
-  * Detects `[[ ## field_name ## ]]` markers in the streamed text and routes
-  * the content between them to per-field [[FieldChunk]]s. Mirrors Python
-  * DSPy's `ChatAdapter` framing (start markers + `[[ ## completed ## ]]`
-  * terminator).
+  * Detects `[[ ## field_name ## ]]` markers in the streamed text and routes the content between them to per-field
+  * [[FieldChunk]]s. Mirrors Python DSPy's `ChatAdapter` framing (start markers + `[[ ## completed ## ]]` terminator).
   *
   * Streaming discipline:
-  *   - Recognised markers must be at the start of a (logical) line — i.e.
-  *     immediately following a newline or at the beginning of the stream.
-  *     This matches Python's `line.strip()` + `re.match()` behaviour.
-  *   - Mid-stream emission holds back the tail of the buffer that could
-  *     still be the start of a marker. The hold-back window is the
-  *     longest possible marker, which guarantees a partial `[[ ## foo`
-  *     prefix is never emitted as content.
-  *   - On `finish()`, anything held back is flushed to the current field
-  *     and the last chunk is marked `isLast = true`.
-  *   - When the model never emits any marker and the signature has a
-  *     single output field, all received text is attributed to that
-  *     field (matches the parser's single-output fallback).
+  *   - Recognised markers must be at the start of a (logical) line — i.e. immediately following a newline or at the
+  *     beginning of the stream. This matches Python's `line.strip()` + `re.match()` behaviour.
+  *   - Mid-stream emission holds back the tail of the buffer that could still be the start of a marker. The hold-back
+  *     window is the longest possible marker, which guarantees a partial `[[ ## foo` prefix is never emitted as
+  *     content.
+  *   - On `finish()`, anything held back is flushed to the current field and the last chunk is marked `isLast = true`.
+  *   - When the model never emits any marker and the signature has a single output field, all received text is
+  *     attributed to that field (matches the parser's single-output fallback).
   */
 final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
 
-  private val outputNames: Set[String] = outputFields.map(_.name).toSet
+  private val outputNames: Set[String]               = outputFields.map(_.name).toSet
   private val singleFieldFallback: Option[FieldSpec] =
     Option.when(outputFields.size == 1)(outputFields.head)
 
@@ -42,9 +36,9 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
   private val markerMaxLen: Int =
     (outputFields.map(f => s"[[ ## ${f.name} ## ]]".length) :+ ChatAdapter.CompletedMarker.length).max
 
-  private val buffer = new StringBuilder
-  private var currentField: Option[String] = None
-  private var sawAnyMarker: Boolean = false
+  private val buffer                                                        = new StringBuilder
+  private var currentField: Option[String]                                  = None
+  private var sawAnyMarker: Boolean                                         = false
   override protected def receiveOpen(textDelta: String): Vector[FieldChunk] =
     buffer.append(textDelta)
     drain(forceFlush = false)
@@ -55,7 +49,7 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     else flushed.init :+ flushed.last.copy(isLast = true)
 
   private def drain(forceFlush: Boolean): Vector[FieldChunk] =
-    val out = mutable.ArrayBuffer.empty[FieldChunk]
+    val out  = mutable.ArrayBuffer.empty[FieldChunk]
     var done = false
     while !done do
       findMarker(buffer.toString) match
@@ -98,16 +92,16 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
           done = true
     out.toVector
 
-  /** What's the active output field, taking the single-output fallback into
-    * account when the model has not yet emitted any marker. Once any marker
-    * has been seen we trust the marker stream exclusively — no fallback. */
+  /** What's the active output field, taking the single-output fallback into account when the model has not yet emitted
+    * any marker. Once any marker has been seen we trust the marker stream exclusively — no fallback.
+    */
   private def effectiveActiveField: Option[String] =
     currentField.orElse(if sawAnyMarker then None else singleFieldFallback.map(_.name))
 
-  /** Returns the length of the prefix of `text` that is safe to emit (or
-    * discard) without risking truncation of a partial marker. When
-    * `forceFlush` is true, the whole buffer is safe. Otherwise, we must
-    * hold back any tail that could be the start of a marker. */
+  /** Returns the length of the prefix of `text` that is safe to emit (or discard) without risking truncation of a
+    * partial marker. When `forceFlush` is true, the whole buffer is safe. Otherwise, we must hold back any tail that
+    * could be the start of a marker.
+    */
   private def safeEmittablePrefixLength(text: String, forceFlush: Boolean): Int =
     if forceFlush then text.length
     else
@@ -115,29 +109,29 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
       // chars. They might still grow into a marker on the next receive.
       math.max(0, text.length - (markerMaxLen - 1))
 
-  /** Find the earliest line-aligned `[[ ## name ## ]]` marker in `text`,
-    * or `None`. "Line-aligned" means the match must start at position 0
-    * or be preceded by a newline + optional whitespace. */
+  /** Find the earliest line-aligned `[[ ## name ## ]]` marker in `text`, or `None`. "Line-aligned" means the match must
+    * start at position 0 or be preceded by a newline + optional whitespace.
+    */
   private def findMarker(text: String): Option[MarkerHit] =
     var result: Option[MarkerHit] = None
-    val it = ChatAdapter.MarkerPattern.findAllMatchIn(text)
+    val it                        = ChatAdapter.MarkerPattern.findAllMatchIn(text)
     while result.isEmpty && it.hasNext do
       val m = it.next()
       if isLineAligned(text, m.start) then
         result = Some(MarkerHit(m.group(1), markerStart = lineAlignedStart(text, m.start), markerEnd = m.end))
     result
 
-  /** True if position `i` is at the start of a line — either position 0,
-    * or preceded only by spaces / tabs since the most recent newline. */
+  /** True if position `i` is at the start of a line — either position 0, or preceded only by spaces / tabs since the
+    * most recent newline.
+    */
   private def isLineAligned(text: String, i: Int): Boolean =
     var k = i - 1
     while k >= 0 && (text.charAt(k) == ' ' || text.charAt(k) == '\t') do k -= 1
     k < 0 || text.charAt(k) == '\n'
 
-  /** Returns the position of the newline that precedes the marker (or 0
-    * if the marker starts at the beginning of `text`). Used to ensure we
-    * don't leave dangling indentation in the buffer after consuming the
-    * marker. */
+  /** Returns the position of the newline that precedes the marker (or 0 if the marker starts at the beginning of
+    * `text`). Used to ensure we don't leave dangling indentation in the buffer after consuming the marker.
+    */
   private def lineAlignedStart(text: String, markerStart: Int): Int =
     var k = markerStart - 1
     while k >= 0 && (text.charAt(k) == ' ' || text.charAt(k) == '\t') do k -= 1
@@ -147,10 +141,10 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
 
   /** Trim leading/trailing newlines left over from marker framing.
     *
-    * Markers reliably emit a `\n` *after* themselves and the LM typically
-    * adds `\n\n` *before* the next marker, so the framing artifacts can be
-    * multiple newlines on either side. Inner blank lines are preserved
-    * because we only strip from the boundaries. */
+    * Markers reliably emit a `\n` *after* themselves and the LM typically adds `\n\n` *before* the next marker, so the
+    * framing artifacts can be multiple newlines on either side. Inner blank lines are preserved because we only strip
+    * from the boundaries.
+    */
   private def stripFramingNewlines(s: String): String =
     var start = 0
     while start < s.length && s.charAt(start) == '\n' do start += 1
@@ -161,16 +155,14 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
   private final case class MarkerHit(field: String, markerStart: Int, markerEnd: Int)
 
 object ChatStreamingState:
-  /** True iff `text`'s tail or interior could still grow into a
-    * `[[ ## field_name ## ]]` (or `[[ ## completed ## ]]`) marker. Used by
-    * the per-token holdback heuristic — when this returns `false`, every
-    * pending token in the wrapper's queue is safe to flush.
+  /** True iff `text`'s tail or interior could still grow into a `[[ ## field_name ## ]]` (or `[[ ## completed ## ]]`)
+    * marker. Used by the per-token holdback heuristic — when this returns `false`, every pending token in the wrapper's
+    * queue is safe to flush.
     *
-    * Ported from Python `StreamListener._could_form_end_identifier` for
-    * `ChatAdapter`. Returns true when the buffer ends with any of the
-    * marker-prefix snippets, or already contains `[[ ##` anywhere
-    * (a partial-marker tail can no longer be distinguished without further
-    * tokens). */
+    * Ported from Python `StreamListener._could_form_end_identifier` for `ChatAdapter`. Returns true when the buffer
+    * ends with any of the marker-prefix snippets, or already contains `[[ ##` anywhere (a partial-marker tail can no
+    * longer be distinguished without further tokens).
+    */
   def couldFormEndIdentifier(text: String): Boolean =
     val endPrefixes = Seq("[", "[[", "[[ ", "[[ #", "[[ ##")
     endPrefixes.exists(text.endsWith) || text.contains("[[ ##")

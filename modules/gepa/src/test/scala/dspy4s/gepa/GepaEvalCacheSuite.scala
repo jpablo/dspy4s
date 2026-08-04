@@ -30,9 +30,9 @@ class GepaEvalCacheSuite extends FunSuite:
 
   /** Counts how many times the model is actually called, so we can prove cache hits skip the LM. */
   private final class CountingLm extends LanguageModel:
-    val calls: AtomicInteger  = AtomicInteger(0)
-    override val id: String   = "counting"
-    override val mode: LmMode = LmMode.Chat
+    val calls: AtomicInteger                                                                   = AtomicInteger(0)
+    override val id: String                                                                    = "counting"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val _ = calls.incrementAndGet()
       Right(LmResponse(outputs = Vector(LmOutput(text = "[[ ## answer ## ]]\nParis\n\n[[ ## completed ## ]]"))))

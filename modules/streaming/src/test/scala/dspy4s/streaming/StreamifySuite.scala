@@ -36,8 +36,8 @@ import scala.collection.mutable.ArrayBuffer
 class StreamifySuite extends FunSuite:
 
   private final class ScriptedStreamingLm(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
-    val calls = AtomicInteger(0)
-    override val id: String = "scripted-stream"
+    val calls                 = AtomicInteger(0)
+    override val id: String   = "scripted-stream"
     override val mode: LmMode = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
@@ -71,23 +71,23 @@ class StreamifySuite extends FunSuite:
       LmChunk(text = "there"),
       LmChunk(text = ".", finishReason = Some("stop"))
     )
-    val lm = new ScriptedStreamingLm(chunks)
+    val lm        = new ScriptedStreamingLm(chunks)
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val program = DynamicPredict(layout = signature)
+    val program   = DynamicPredict(layout = signature)
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(PassthroughAdapter)
-        )
+        lm = Some(lm),
+        adapter = Some(PassthroughAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(program)(rec("question" := "x"))
+      val stream           = Streamify.streamify(program)(rec("question" := "x"))
 
       val events = ArrayBuffer.empty[StreamEvent]
       while stream.hasNext do events += stream.next()
 
-      val tokenEvents = events.collect { case e: TokenEvent => e }
+      val tokenEvents      = events.collect { case e: TokenEvent => e }
       val predictionEvents = events.collect { case e: PredictionEvent => e }
 
       assertEquals(predictionEvents.size, 1)
@@ -99,22 +99,21 @@ class StreamifySuite extends FunSuite:
   }
 
   test("streamify emits status events for lm calls with custom provider") {
-    val lm = new ScriptedStreamingLm(Vector(LmChunk(text = "final", finishReason = Some("stop"))))
+    val lm        = new ScriptedStreamingLm(Vector(LmChunk(text = "final", finishReason = Some("stop"))))
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(PassthroughAdapter)
-        )
+        lm = Some(lm),
+        adapter = Some(PassthroughAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(new StatusMessageProvider:
           override def lmStart(modelId: String, inputs: DynamicValue.Record): Option[String] =
-            Some(s"Calling $modelId...")
-        )
+            Some(s"Calling $modelId..."))
       )(rec("question" := "x"))
 
       val statuses = ArrayBuffer.empty[StatusEvent]
@@ -128,26 +127,26 @@ class StreamifySuite extends FunSuite:
 
   test("streamify works with non-streaming LM — only status and prediction events") {
     val nonStreaming = new LanguageModel:
-      override val id: String = "non-streaming"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "non-streaming"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         Right(LmResponse(outputs = Vector(LmOutput(text = "complete answer"))))
 
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature      = SignatureDsl.parse("question -> answer").toOption.get
     val receivedStatus = new AtomicInteger(0)
-    val provider = new StatusMessageProvider:
+    val provider       = new StatusMessageProvider:
       override def moduleStart(instanceName: String, inputs: DynamicValue.Record): Option[String] =
         receivedStatus.incrementAndGet()
         Some("starting")
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(nonStreaming),
-          adapter = Some(PassthroughAdapter)
-        )
+        lm = Some(nonStreaming),
+        adapter = Some(PassthroughAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val stream = Streamify.streamify(
+      val stream           = Streamify.streamify(
         program = DynamicPredict(layout = signature),
         statusMessageProvider = Some(provider)
       )(rec("question" := "x"))
@@ -155,9 +154,9 @@ class StreamifySuite extends FunSuite:
       val events = ArrayBuffer.empty[StreamEvent]
       while stream.hasNext do events += stream.next()
 
-      val statuses = events.collect { case e: StatusEvent => e }
+      val statuses    = events.collect { case e: StatusEvent => e }
       val predictions = events.collect { case e: PredictionEvent => e }
-      val tokens = events.collect { case e: TokenEvent => e }
+      val tokens      = events.collect { case e: TokenEvent => e }
 
       assertEquals(predictions.size, 1)
       assertEquals(lookupString(predictions.head.prediction.values, "answer"), "complete answer")
@@ -175,7 +174,7 @@ class StreamifySuite extends FunSuite:
         Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
     given RuntimeContext = RuntimeEnvironment.current
-    val stream = Streamify.streamify(program = failing)(rec())
+    val stream           = Streamify.streamify(program = failing)(rec())
 
     val events = ArrayBuffer.empty[StreamEvent]
     while stream.hasNext do events += stream.next()
@@ -185,17 +184,17 @@ class StreamifySuite extends FunSuite:
   }
 
   test("streamify can be called multiple times producing independent streams") {
-    val lm = new ScriptedStreamingLm(Vector(LmChunk(text = "a", finishReason = Some("stop"))))
+    val lm        = new ScriptedStreamingLm(Vector(LmChunk(text = "a", finishReason = Some("stop"))))
     val signature = SignatureDsl.parse("q -> a").toOption.get
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(
-          lm = Some(lm),
-          adapter = Some(PassthroughAdapter)
-        )
+        lm = Some(lm),
+        adapter = Some(PassthroughAdapter)
+      )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val streamFn = Streamify.streamify(DynamicPredict(layout = signature))
+      val streamFn         = Streamify.streamify(DynamicPredict(layout = signature))
 
       val first = ArrayBuffer.empty[StreamEvent]
       val iter1 = streamFn(rec("q" := "1"))
@@ -203,11 +202,11 @@ class StreamifySuite extends FunSuite:
       iter1.close()
 
       val second = ArrayBuffer.empty[StreamEvent]
-      val iter2 = streamFn(rec("q" := "2"))
+      val iter2  = streamFn(rec("q" := "2"))
       while iter2.hasNext do second += iter2.next()
       iter2.close()
 
-      val firstPredictions = first.collect { case e: PredictionEvent => lookupString(e.prediction.values, "a") }
+      val firstPredictions  = first.collect { case e: PredictionEvent => lookupString(e.prediction.values, "a") }
       val secondPredictions = second.collect { case e: PredictionEvent => lookupString(e.prediction.values, "a") }
       assertEquals(firstPredictions.size, 1)
       assertEquals(secondPredictions.size, 1)

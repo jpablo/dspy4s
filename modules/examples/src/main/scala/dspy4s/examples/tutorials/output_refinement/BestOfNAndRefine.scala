@@ -1,14 +1,13 @@
-/**
- * Output Refinement: BestOfN and Refine
- *
- * Source:   docs/docs/tutorials/output_refinement/best-of-n-and-refine.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/output_refinement/best-of-n-and-refine.md
- * Status:   translated (6/6 snippets)
- *
- * Typed `BestOfN[I, O]` / `Refine[I, O]` wrap an inner typed program and take a typed reward
- * `(I, Prediction[O]) => Double`. Wrapping a `ChainOfThought("q -> a")` makes the inner output the
- * augmented named tuple `(reasoning, a)`, so the reward reads `pred.output.<field>`.
- */
+/** Output Refinement: BestOfN and Refine
+  *
+  * Source: docs/docs/tutorials/output_refinement/best-of-n-and-refine.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/output_refinement/best-of-n-and-refine.md Status:
+  * translated (6/6 snippets)
+  *
+  * Typed `BestOfN[I, O]` / `Refine[I, O]` wrap an inner typed program and take a typed reward
+  * `(I, Prediction[O]) => Double`. Wrapping a `ChainOfThought("q -> a")` makes the inner output the augmented named
+  * tuple `(reasoning, a)`, so the reward reads `pred.output.<field>`.
+  */
 package dspy4s.examples.tutorials.output_refinement
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
@@ -22,7 +21,7 @@ import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 // |     statement: str = dspy.InputField()
 // |     is_factual: bool = dspy.OutputField()
 trait FactualityJudge extends Spec:
-  def statement:  InputField[String]
+  def statement: InputField[String]
   def is_factual: OutputField[Boolean]
 
 object BestOfNAndRefine:
@@ -54,8 +53,13 @@ object BestOfNAndRefine:
   // | best_of_3 = dspy.BestOfN(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0, fail_count=1)
   object BestOfNWithFailCount:
     // --8<-- [start:fail-count]
-    val bestOf3 = BestOfN(module = qa, n = AttemptCount(3), rewardFn = (_, pred) => oneWord(pred.output.answer),
-                          threshold = 1.0, failCount = Some(FailureCount(1)))
+    val bestOf3 = BestOfN(
+      module = qa,
+      n = AttemptCount(3),
+      rewardFn = (_, pred) => oneWord(pred.output.answer),
+      threshold = 1.0,
+      failCount = Some(FailureCount(1))
+    )
     // --8<-- [end:fail-count]
 
   // ── Snippets 3 + 4 (lines 53–83) — Refine (same shape; sequential refinement) ──

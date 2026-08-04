@@ -81,7 +81,7 @@ object GepaSmokeTest:
       val gold    = example.get("label").map(DynamicValues.renderText).getOrElse("")
       val got     = prediction.get("label").map(DynamicValues.renderText).getOrElse("")
       val correct = got.trim.equalsIgnoreCase(gold.trim)
-      val fb =
+      val fb      =
         if correct then s"Correct ('$got')."
         else
           s"""Incorrect. For the text "$text" the correct label is '$gold', but you produced '$got'. """ +
@@ -93,8 +93,8 @@ object GepaSmokeTest:
 
   /** Prints a char per LM call so the otherwise-silent reflective loop visibly makes progress. */
   final class ProgressLmCallback extends CallbackHandler:
-    private val calls = new AtomicInteger(0)
-    def count: Int    = calls.get()
+    private val calls                                                      = new AtomicInteger(0)
+    def count: Int                                                         = calls.get()
     override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
       case _: LmEndEvent => val _ = calls.incrementAndGet(); System.out.print("."); System.out.flush()
       case _             => ()

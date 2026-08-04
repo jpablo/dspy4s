@@ -36,8 +36,8 @@ class MergeProposerSuite extends FunSuite:
     * unlocks the correct answer.
     */
   private final class PipelineLm extends LanguageModel:
-    override val id: String   = "pipeline"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "pipeline"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt = request.messages.flatMap(_.text).mkString("\n")
       if prompt.contains("## answer ##") then
@@ -85,7 +85,7 @@ class MergeProposerSuite extends FunSuite:
   }
 
   test("crossover breaks a both-changed component toward the higher-scoring descendant") {
-    val ancestor = Map(first -> Some("A0"))
+    val ancestor    = Map(first -> Some("A0"))
     val (merged, _) = MergeProposer.crossover(
       ancestor,
       1,
@@ -133,7 +133,7 @@ class MergeProposerSuite extends FunSuite:
     val seedCand = Map(first -> Some("Stage one."), second -> Some("Stage two."))
     val cand1    = Map(first -> Some("Use TOKEN1 to produce a good_hint."), second -> Some("Stage two."))
     val cand2    = Map(first -> Some("Stage one."), second -> Some("Use TOKEN2 with the good_hint to answer."))
-    val state = GepaState(
+    val state    = GepaState(
       candidates = CandidatePool.applyUnsafe(Vector(seedCand, cand1, cand2)),
       valSubscores = Vector(Vector(0.0, 0.0), Vector(1.0, 0.0), Vector(0.0, 1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0)),
@@ -163,7 +163,7 @@ class MergeProposerSuite extends FunSuite:
 
   test("propose returns None when there are fewer than three candidates (no ancestor to merge over)") {
     val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
-    val state = GepaState(
+    val state   = GepaState(
       candidates = CandidatePool.applyUnsafe(Vector(
         Map(first -> Some("a"), second -> Some("b")),
         Map(first -> Some("c"), second -> Some("d"))

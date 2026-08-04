@@ -34,8 +34,8 @@ private[programs] object UnaryOptimizableTraversal:
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[W, N] =
     new OptimizableTraversal.Of[W, N]:
-      def arity(program: W): Int = inner.arity(get(program))
-      def inspect(program: W): Vector[OptimizableView] = inner.inspect(get(program))
+      def arity(program: W): Int                                         = inner.arity(get(program))
+      def inspect(program: W): Vector[OptimizableView]                   = inner.inspect(get(program))
       def replace(program: W, updates: Vector[OptimizableParameters]): W =
         replaceInner(program, inner.replace(get(program), updates))
       override def inspectNamed(program: W): Vector[(String, OptimizableView)] = inner.inspectNamed(get(program))
@@ -108,9 +108,9 @@ final case class Dimap[J, I, O, B, P <: Module[I, O]](
 
   override protected def forward(call: ProgramCall[J])(using RuntimeContext): Either[DspyError, Prediction[B]] =
     for
-      input <- TransformResult.guard("program_dimap_input")(Right(contramap(call.input)))
+      input      <- TransformResult.guard("program_dimap_input")(Right(contramap(call.input)))
       prediction <- program(call.mapInput(_ => input))
-      output <- TransformResult.guard("program_dimap_output")(Right(map(prediction.output)))
+      output     <- TransformResult.guard("program_dimap_output")(Right(map(prediction.output)))
     yield Prediction(output, prediction.raw)
 
 object Dimap:

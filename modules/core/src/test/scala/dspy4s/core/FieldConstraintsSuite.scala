@@ -36,8 +36,8 @@ class FieldConstraintsSuite extends FunSuite:
 
   test("FieldSpec carries constraints and normalize preserves them") {
     val field = FieldSpec(
-      name        = "score",
-      typeRef     = TypeRef.int,
+      name = "score",
+      typeRef = TypeRef.int,
       constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
     )
     assertEquals(field.constraints.map(_.render), Vector("greater than: 0", "maximum length: 10"))
@@ -52,8 +52,8 @@ class FieldConstraintsSuite extends FunSuite:
         inputFields = Vector(FieldSpec(name = "question")),
         outputFields = Vector(
           FieldSpec(
-            name        = "score",
-            typeRef     = TypeRef.int,
+            name = "score",
+            typeRef = TypeRef.int,
             constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
           )
         )
@@ -61,7 +61,7 @@ class FieldConstraintsSuite extends FunSuite:
       .toOption
       .get
 
-    val rebuilt = SignatureLayout.fromState(layout.dumpState).toOption.get
+    val rebuilt    = SignatureLayout.fromState(layout.dumpState).toOption.get
     val scoreField = rebuilt.outputFields.find(_.name == "score").get
     // Structured round-trip: the rebuilt constraints equal the originals (not just their rendering).
     assertEquals(scoreField.constraints, Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10)))

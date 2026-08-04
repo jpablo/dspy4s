@@ -22,8 +22,8 @@ enum ActionOutcome[+Observation]:
 
 /** Evaluates actions expressed in some agent language.
   *
-  * Configuration and capabilities belong to the interpreter value itself. Parsing model output, deciding when an
-  * agent is finished, rendering its trajectory, and owning interpreter resources remain separate concerns.
+  * Configuration and capabilities belong to the interpreter value itself. Parsing model output, deciding when an agent
+  * is finished, rendering its trajectory, and owning interpreter resources remain separate concerns.
   *
   * `Right(ActionOutcome.Failed(observation))` means execution failed in a way the agent can observe and recover from;
   * `Left(error)` means the surrounding agent cannot continue.

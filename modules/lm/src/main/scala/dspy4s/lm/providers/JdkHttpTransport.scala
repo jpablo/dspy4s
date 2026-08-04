@@ -23,7 +23,7 @@ final class JdkHttpTransport(timeoutMillis: Long) extends HttpTransport:
       body: String
   ): Either[DspyError, HttpResponse] =
     runWithErrorMap {
-      val request = buildRequest(url, headers, body)
+      val request  = buildRequest(url, headers, body)
       val response = client.send(request, JHttpResponse.BodyHandlers.ofString())
       HttpResponse(
         status = response.statusCode(),
@@ -38,16 +38,16 @@ final class JdkHttpTransport(timeoutMillis: Long) extends HttpTransport:
       body: String
   ): Either[DspyError, HttpStreamResponse] =
     runWithErrorMap {
-      val request = buildRequest(url, headers, body)
-      val response = client.send(request, JHttpResponse.BodyHandlers.ofLines())
-      val stream = response.body()
-      val iter: java.util.Iterator[String] = stream.iterator()
+      val request                            = buildRequest(url, headers, body)
+      val response                           = client.send(request, JHttpResponse.BodyHandlers.ofLines())
+      val stream                             = response.body()
+      val iter: java.util.Iterator[String]   = stream.iterator()
       val closable: ClosableIterator[String] = new ClosableIterator[String]:
-        private var closed = false
+        private var closed            = false
         override def hasNext: Boolean =
           if closed then false else iter.hasNext
         override def next(): String = iter.next()
-        override def close(): Unit =
+        override def close(): Unit  =
           if !closed then
             closed = true
             stream.close()

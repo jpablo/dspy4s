@@ -41,7 +41,7 @@ object GepaStatePersistence:
       // a malformed snapshot must surface as a clean Left here, not an IndexOutOfBounds deep in the search.
       val candidates = s.candidates.foldLeft[Either[String, Vector[Candidate]]](Right(Vector.empty)) { (acc, raw) =>
         for
-          parsed <- acc
+          parsed    <- acc
           candidate <- raw.foldLeft[Either[String, Candidate]](Right(Map.empty)) { case (candidateAcc, (key, value)) =>
             for
               candidate <- candidateAcc
@@ -52,7 +52,7 @@ object GepaStatePersistence:
       }
       candidates.flatMap { parsed =>
         for
-          pool <- CandidatePool.either(parsed).left.map(_ => "invalid GEPA state snapshot: candidate pool is empty")
+          pool  <- CandidatePool.either(parsed).left.map(_ => "invalid GEPA state snapshot: candidate pool is empty")
           calls <- MetricCallCount
             .either(s.totalMetricCalls)
             .left
@@ -69,7 +69,8 @@ object GepaStatePersistence:
     val _ = Files.write(dir.resolve(fileName), toJson(state).getBytes(StandardCharsets.UTF_8))
 
   /** Load a previously-saved state from `dir`. Absence is distinct from an unreadable or invalid checkpoint: a corrupt
-    * file must never be silently treated as a fresh run and overwritten. */
+    * file must never be silently treated as a fresh run and overwritten.
+    */
   def load(dir: Path): Either[String, Option[GepaState]] =
     val file = dir.resolve(fileName)
     if !Files.exists(file) then Right(None)

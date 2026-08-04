@@ -1,15 +1,15 @@
 /** DSPy Cheatsheet
- *
+  *
   * Source: docs/docs/cheatsheet.md Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/cheatsheet.md
- * Status:   translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, retrieval 6, optimizers
+  * Status: translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, retrieval 6, optimizers
   * 12/13/18/19/21/22/23/24, save/load 16/17, tools 27, streaming 28, usage 30, cache 31, refinement 32–35). The few
   * that remain depend on subsystems dspy4s doesn't have and are marked inline:
- *             - LLM-as-judge metric (10): now expressible (G-6) — see learn/evaluation/Metrics + `SemanticF1`
- *             - async `asyncify` (29): no async program path
- *             - optimizers not ported: BootstrapFinetune/HFModel (20, G-16), Optuna (25, G-17), SIMBA (26, G-13)
+  *   - LLM-as-judge metric (10): now expressible (G-6) — see learn/evaluation/Metrics + `SemanticF1`
+  *   - async `asyncify` (29): no async program path
+  *   - optimizers not ported: BootstrapFinetune/HFModel (20, G-16), Optuna (25, G-17), SIMBA (26, G-13)
   * These constructs are demonstrated more fully in the dedicated tutorial examples (output_refinement, streaming,
   * cache, learn/evaluation, learn/optimization, tutorials/saving).
- */
+  */
 package dspy4s.examples
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, ErrorLimit, RuntimeContext, ThreadCount}
@@ -62,7 +62,7 @@ import zio.blocks.schema.DynamicValue
 // (dspy4s `Spec` carries no per-field `desc`; the hint is dropped.)
 trait BasicQA extends Spec:
   def question: InputField[String]
-  def answer:   OutputField[String]
+  def answer: OutputField[String]
 
 object Cheatsheet:
 
@@ -128,8 +128,8 @@ object Cheatsheet:
   // | def gsm8k_metric(gold, pred, trace=None): return parse_integer_answer(gold.answer) == parse_integer_answer(pred.answer)
   private def parseIntegerAnswer(answer: String): Int =
     answer.trim.split("\n").headOption.getOrElse("")
-      .split("\\s+").reverse.find(_.exists(_.isDigit))                 // last token containing a digit
-      .map(_.takeWhile(_ != '.').filter(_.isDigit))                    // up to a '.', digits only
+      .split("\\s+").reverse.find(_.exists(_.isDigit)) // last token containing a digit
+      .map(_.takeWhile(_ != '.').filter(_.isDigit))    // up to a '.', digits only
       .flatMap(_.toIntOption).getOrElse(0)
 
   val gsm8kMetric: FunctionMetric = FunctionMetric.bool("gsm8k_metric") { (gold, pred) =>

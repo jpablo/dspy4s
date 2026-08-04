@@ -11,7 +11,8 @@ import zio.blocks.schema.DynamicValue
   *
   * The entry [[HistoryEntry.payload]] is a caller-defined `DynamicValue.Record`, so rendering is generic over its
   * fields: each `(key, value)` is emitted on its own line via [[DynamicValues.renderText]]. A handful of well-known
-  * keys are surfaced with friendlier labels to read like a chat transcript, but no field is required or dropped. */
+  * keys are surfaced with friendlier labels to read like a chat transcript, but no field is required or dropped.
+  */
 object HistoryRenderer:
 
   private val Separator = "=" * 60
@@ -26,8 +27,9 @@ object HistoryRenderer:
     "mode"       -> "Mode"
   )
 
-  /** Render `entries` (already limited to the last n by the caller) as a single string. Empty input yields a short
-    * "no history" notice rather than an empty string, so callers can print the result unconditionally. */
+  /** Render `entries` (already limited to the last n by the caller) as a single string. Empty input yields a short "no
+    * history" notice rather than an empty string, so callers can print the result unconditionally.
+    */
   def render(entries: Vector[HistoryEntry]): String =
     if entries.isEmpty then "No LM history recorded."
     else entries.iterator.map(renderEntry).mkString("\n")

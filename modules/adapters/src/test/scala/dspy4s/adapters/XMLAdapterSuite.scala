@@ -21,7 +21,6 @@ class XMLAdapterSuite extends FunSuite:
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
     DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
 
-
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
 
@@ -29,7 +28,7 @@ class XMLAdapterSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("format injects xml schema instructions and demo xml") {
-    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    val signature  = SignatureDsl.parse("question -> answer, score: float").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector(
@@ -43,7 +42,7 @@ class XMLAdapterSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val formatted = XMLAdapter().format(invocation)
+    val formatted        = XMLAdapter().format(invocation)
 
     assert(formatted.isRight)
     val messages = formatted.toOption.get.messages
@@ -55,10 +54,10 @@ class XMLAdapterSuite extends FunSuite:
 
   test("parse reads xml fields and coerces scalar types") {
     val signature = SignatureDsl.parse("question -> answer, score: float, ok: bool").toOption.get
-    val xml = "<outputs><answer>Brussels</answer><score>0.91</score><ok>true</ok></outputs>"
+    val xml       = "<outputs><answer>Brussels</answer><score>0.91</score><ok>true</ok></outputs>"
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = XMLAdapter().parse(signature, LmOutput(text = xml))
+    val parsed           = XMLAdapter().parse(signature, LmOutput(text = xml))
 
     assert(parsed.isRight)
     val values = parsed.toOption.get.values
@@ -69,13 +68,13 @@ class XMLAdapterSuite extends FunSuite:
 
   test("parse supports fenced xml payloads") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val text =
+    val text      =
       """```xml
         |<outputs><answer>Brussels</answer></outputs>
         |```""".stripMargin
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = XMLAdapter().parse(signature, LmOutput(text = text))
+    val parsed           = XMLAdapter().parse(signature, LmOutput(text = text))
 
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
@@ -85,7 +84,7 @@ class XMLAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = XMLAdapter().parse(signature, LmOutput(text = "<outputs><answer>oops</outputs>"))
+    val parsed           = XMLAdapter().parse(signature, LmOutput(text = "<outputs><answer>oops</outputs>"))
 
     assert(parsed.isLeft)
     assert(parsed.left.toOption.get.isInstanceOf[ParseError])
@@ -95,7 +94,7 @@ class XMLAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = XMLAdapter().parse(signature, LmOutput(text = "Brussels"))
+    val parsed           = XMLAdapter().parse(signature, LmOutput(text = "Brussels"))
 
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))

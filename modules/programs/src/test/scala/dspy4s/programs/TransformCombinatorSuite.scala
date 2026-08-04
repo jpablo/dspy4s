@@ -29,7 +29,7 @@ class TransformCombinatorSuite extends FunSuite:
 
   private final case class Step[I, O](tag: String, run: I => Either[DspyError, O], predict: DynamicPredict)
       extends Module[I, O]:
-    override val moduleName: String = s"step_$tag"
+    override val moduleName: String                         = s"step_$tag"
     override protected val lifecycle: ModuleLifecycle[I, O] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -37,7 +37,7 @@ class TransformCombinatorSuite extends FunSuite:
 
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
-      def get(program: Step[I, O]): OptimizableParameters = program.predict.optimizableParameters
+      def get(program: Step[I, O]): OptimizableParameters    = program.predict.optimizableParameters
       def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
@@ -68,10 +68,10 @@ class TransformCombinatorSuite extends FunSuite:
   }
 
   test("mapOutput obeys identity/composition on output and preserves raw prediction evidence") {
-    val base       = step[Int, String]("base", "i -> s")(i => s"v$i")
+    val base           = step[Int, String]("base", "i -> s")(i => s"v$i")
     val mappedIdentity = base.mapOutput(identity[String])
-    val sequential = base.mapOutput(_.length).mapOutput(_ * 2)
-    val composed   = base.mapOutput(s => s.length * 2)
+    val sequential     = base.mapOutput(_.length).mapOutput(_ * 2)
+    val composed       = base.mapOutput(s => s.length * 2)
     val direct         = base(ProgramCall(12))
 
     assertEquals(mappedIdentity(ProgramCall(12)), direct)
@@ -82,7 +82,7 @@ class TransformCombinatorSuite extends FunSuite:
 
   test("contramapInput obeys identity/composition and forwards call controls") {
     val observed = ArrayBuffer.empty[ProgramCall[Int]]
-    val base = Step[Int, String](
+    val base     = Step[Int, String](
       "base",
       i => { observed += ProgramCall(i); Right(s"v$i") },
       predictor("i -> s")
@@ -107,8 +107,8 @@ class TransformCombinatorSuite extends FunSuite:
   }
 
   test("dimap is observationally equivalent to contramapInput followed by mapOutput") {
-    val base = step[Int, String]("base", "i -> s")(i => s"v$i")
-    val direct = base.dimap[String, Int](_.toInt)(_.length)
+    val base    = step[Int, String]("base", "i -> s")(i => s"v$i")
+    val direct  = base.dimap[String, Int](_.toInt)(_.length)
     val derived = base.contramapInput[String](_.toInt).mapOutput(_.length)
 
     assertEquals(direct(ProgramCall("42")), derived(ProgramCall("42")))
@@ -116,7 +116,7 @@ class TransformCombinatorSuite extends FunSuite:
   }
 
   test("transform wrappers are lifecycle-transparent") {
-    val starts = ArrayBuffer.empty[String]
+    val starts   = ArrayBuffer.empty[String]
     val callback = new CallbackHandler:
       def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
         case start: ModuleStartEvent => starts += start.moduleName

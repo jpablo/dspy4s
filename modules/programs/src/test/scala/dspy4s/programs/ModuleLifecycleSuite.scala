@@ -13,7 +13,7 @@ class ModuleLifecycleSuite extends FunSuite:
   private final case class Echo(
       lifecycleStrategy: ModuleLifecycle[Int, Int]
   ) extends Module[Int, Int]:
-    override val moduleName: String                                                      = "echo"
+    override val moduleName: String                             = "echo"
     override protected val lifecycle: ModuleLifecycle[Int, Int] = lifecycleStrategy
 
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
@@ -39,7 +39,7 @@ class ModuleLifecycleSuite extends FunSuite:
   }
 
   test("transparent lifecycle contributes no callbacks, trace, or history") {
-    val events = ArrayBuffer.empty[CallbackEvent]
+    val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
 

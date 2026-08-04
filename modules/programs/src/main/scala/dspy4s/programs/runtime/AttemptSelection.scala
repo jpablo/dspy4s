@@ -12,37 +12,39 @@ import dspy4s.programs.FailureCount
 
 import scala.util.control.NonFatal
 
-/** The shared best-of-`n` reducer behind [[dspy4s.programs.BestOfN]] and [[dspy4s.programs.Refine]] (the
-  * `bestOf` operation of the program-composition algebra; see `docs/refactor/algebra-2-program-composition.md`).
+/** The shared best-of-`n` reducer behind [[dspy4s.programs.BestOfN]] and [[dspy4s.programs.Refine]] (the `bestOf`
+  * operation of the program-composition algebra; see `docs/refactor/algebra-2-program-composition.md`).
   *
-  * Generic over the attempt result `A`. Each attempt runs in an isolated trace/history context; the winning
-  * attempt's trace/history are propagated to the caller. The reducer keeps the highest-reward attempt,
-  * short-circuits at `threshold`, and tolerates up to `failCount` failures.
+  * Generic over the attempt result `A`. Each attempt runs in an isolated trace/history context; the winning attempt's
+  * trace/history are propagated to the caller. The reducer keeps the highest-reward attempt, short-circuits at
+  * `threshold`, and tolerates up to `failCount` failures.
   *
   * The two combinators differ in the state carried between attempts:
   *
-  *   - '''selectBest''' (= [[dspy4s.programs.BestOfN]]) passes no `feedback`: attempts vary only by `rolloutId`
-  *     / `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier attempts.
+  *   - '''selectBest''' (= [[dspy4s.programs.BestOfN]]) passes no `feedback`: attempts vary only by `rolloutId` /
+  *     `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier attempts.
   *   - '''feedback''' (sequential stream, = [[dspy4s.programs.Refine]]) passes a `feedback` hook: after a
-  *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the
-  *     adapter override the NEXT attempt runs under (Refine's `hint_`-injecting adapter), making the stream
-  *     order-dependent. */
+  *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the adapter
+  *     override the NEXT attempt runs under (Refine's `hint_`-injecting adapter), making the stream order-dependent.
+  */
 object AttemptSelection:
 
   /** Drive up to `n` attempts, keeping the highest-reward result and short-circuiting once `reward` reaches
     * `threshold`. `label` names the loop in the no-success error.
     *
-    * @param runAttempt builds and runs attempt `idx` under the isolated [[RuntimeContext]] supplied here (the
-    *                   caller varies `rolloutId` / `config` by index).
-    * @param reward     scores a successful attempt; a `Left` charges the failure budget and the reduction
-    *                   continues with the best-so-far retained (upstream parity: reward_fn exceptions count
-    *                   toward fail_count).
-    * @param feedback   optional inter-attempt hook. After a sub-threshold attempt that is not the last, it is
-    *                   given the attempt's `(value, trace, score)` and returns the `Option[AdapterRef]` the
-    *                   next attempt's isolated context runs under (`None` keeps the base adapter). The hook is
-    *                   AUXILIARY: a `Left` charges the failure budget and keeps the best-so-far (the prior
-    *                   carried adapter is retained), mirroring the module-failure path. Omitted (`None`) for
-    *                   best-of-`n` without carried feedback. */
+    * @param runAttempt
+    *   builds and runs attempt `idx` under the isolated [[RuntimeContext]] supplied here (the caller varies `rolloutId`
+    *   / `config` by index).
+    * @param reward
+    *   scores a successful attempt; a `Left` charges the failure budget and the reduction continues with the
+    *   best-so-far retained (upstream parity: reward_fn exceptions count toward fail_count).
+    * @param feedback
+    *   optional inter-attempt hook. After a sub-threshold attempt that is not the last, it is given the attempt's
+    *   `(value, trace, score)` and returns the `Option[AdapterRef]` the next attempt's isolated context runs under
+    *   (`None` keeps the base adapter). The hook is AUXILIARY: a `Left` charges the failure budget and keeps the
+    *   best-so-far (the prior carried adapter is retained), mirroring the module-failure path. Omitted (`None`) for
+    *   best-of-`n` without carried feedback.
+    */
   private[programs] def bestOf[A](
       n: AttemptCount,
       threshold: Double,
@@ -53,11 +55,11 @@ object AttemptSelection:
       reward: A => Either[DspyError, Double],
       feedback: Option[(A, Vector[TraceEntry], Double) => Either[DspyError, Option[AdapterRef]]] = None
   ): Either[DspyError, A] =
-    val baseContext       = RuntimeEnvironment.current
-    var remainingFailures = failCount.getOrElse(n)
-    var bestReward        = Double.NegativeInfinity
-    var best: Option[A]   = None
-    var bestDelta         = RuntimeDelta.empty
+    val baseContext                  = RuntimeEnvironment.current
+    var remainingFailures            = failCount.getOrElse(n)
+    var bestReward                   = Double.NegativeInfinity
+    var best: Option[A]              = None
+    var bestDelta                    = RuntimeDelta.empty
     var lastError: Option[DspyError] = None
     // Adapter override carried from a sub-threshold attempt's feedback into the next attempt (None until the
     // first feedback fires; for Refine this is the hint-injecting adapter derived from the generated advice).
@@ -80,8 +82,8 @@ object AttemptSelection:
             case Right(score) =>
               if score > bestReward then
                 bestReward = score
-                best       = Some(value)
-                bestDelta  = executed.delta
+                best = Some(value)
+                bestDelta = executed.delta
 
               if score >= threshold then
                 idx = n // short-circuit at threshold
@@ -91,11 +93,11 @@ object AttemptSelection:
                 // Produce the next attempt's adapter override from this attempt's feedback. Auxiliary: a
                 // failure charges the failure budget and keeps `best`, retaining the prior carried adapter.
                 feedback match
-                  case None => ()
+                  case None           => ()
                   case Some(generate) =>
                     generate(value, executed.delta.trace, score) match
                       case Right(nextAdapter) => carriedAdapter = nextAdapter
-                      case Left(error) =>
+                      case Left(error)        =>
                         lastError = Some(error)
                         if remainingFailures <= 0 then return Left(error)
                         remainingFailures -= 1

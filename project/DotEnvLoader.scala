@@ -1,12 +1,11 @@
 import sbt._
 import sbt.Keys._
 
-/**
- * Loads variables from `.env` and feeds them into every forked test JVM
- * via `Test / envVars`, so tests can see them via `sys.env.get(...)`.
- *
- * The `.env` file itself is gitignored. See `.env.example` for the shape.
- */
+/** Loads variables from `.env` and feeds them into every forked test JVM via `Test / envVars`, so tests can see them
+  * via `sys.env.get(...)`.
+  *
+  * The `.env` file itself is gitignored. See `.env.example` for the shape.
+  */
 object DotEnvLoader extends AutoPlugin {
   override def trigger = allRequirements
 

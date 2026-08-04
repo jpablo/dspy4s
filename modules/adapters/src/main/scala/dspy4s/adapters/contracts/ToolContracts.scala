@@ -29,21 +29,21 @@ object ToolSchemaBridge:
     tools.map { tool =>
       val properties = tool.parameters.map { parameter =>
         val paramSchema = Map(
-          "type" -> toJsonType(parameter.typeRef),
+          "type"        -> toJsonType(parameter.typeRef),
           "description" -> parameter.description.getOrElse("")
         )
         parameter.name -> paramSchema
       }.toMap
       val required = tool.parameters.filter(_.required).map(_.name)
       Map(
-        "type" -> "function",
+        "type"     -> "function",
         "function" -> Map(
-          "name" -> tool.name,
+          "name"        -> tool.name,
           "description" -> tool.description.getOrElse(""),
-          "parameters" -> Map(
-            "type" -> "object",
+          "parameters"  -> Map(
+            "type"       -> "object",
             "properties" -> properties,
-            "required" -> required
+            "required"   -> required
           )
         )
       )
@@ -51,9 +51,10 @@ object ToolSchemaBridge:
 
   /** Build the OpenAI `tools` array as a [[DynamicValue]] so it can be injected into a request's option bag
     * ([[dspy4s.adapters.contracts.FormattedPrompt.requestOptions]]) and spread verbatim into the provider body by
-    * `ProviderRequestNormalizer`. Each tool becomes `{type:"function", function:{name, description, parameters}}`
-    * where `parameters` is a JSON-schema object (`type:"object"`, `properties`, `required`). This is the
-    * DynamicValue-native counterpart of [[toOpenAiTools]] (which yields the `Any`-typed map form). */
+    * `ProviderRequestNormalizer`. Each tool becomes `{type:"function", function:{name, description, parameters}}` where
+    * `parameters` is a JSON-schema object (`type:"object"`, `properties`, `required`). This is the DynamicValue-native
+    * counterpart of [[toOpenAiTools]] (which yields the `Any`-typed map form).
+    */
   def toOpenAiToolsDynamic(tools: Vector[ToolSpec]): DynamicValue =
     DynamicValue.Sequence(Chunk.from(tools.map(toolToDynamic)))
 
@@ -64,7 +65,7 @@ object ToolSchemaBridge:
         "description" -> str(parameter.description.getOrElse(""))
       ))
     }))
-    val required = DynamicValue.Sequence(Chunk.from(tool.parameters.filter(_.required).map(p => str(p.name))))
+    val required   = DynamicValue.Sequence(Chunk.from(tool.parameters.filter(_.required).map(p => str(p.name))))
     val parameters = DynamicValue.Record(Chunk(
       "type"       -> str("object"),
       "properties" -> properties,

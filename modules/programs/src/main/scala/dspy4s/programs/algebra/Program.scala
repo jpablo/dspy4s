@@ -23,17 +23,17 @@ import scala.compiletime.ops.int.+
 
 /** A packaged, existentially typed addressable program: the hom-set of the parameterized category.
   *
-  * The package hides a concrete module representation while retaining its fixed-arity [[OptimizableTraversal]] evidence,
-  * so the binary type `Program[I, O]` supports parameter projection and reparameterization without knowing the
-  * representation. Construction through [[Program.of]] is the only gate, and it requires evidence at BOTH slots:
-  * [[OptimizableTraversal]] for the morphism (no addressability, no program) and [[RecordCodec]] for the domain
-  * OBJECT (no codec, no object).
+  * The package hides a concrete module representation while retaining its fixed-arity [[OptimizableTraversal]]
+  * evidence, so the binary type `Program[I, O]` supports parameter projection and reparameterization without knowing
+  * the representation. Construction through [[Program.of]] is the only gate, and it requires evidence at BOTH slots:
+  * [[OptimizableTraversal]] for the morphism (no addressability, no program) and [[RecordCodec]] for the domain OBJECT
+  * (no codec, no object).
   *
   * Decoding is a property of the object, not the morphism: nothing decode-related is packaged, and identity plus
-  * record-boundary evaluation resolve the sealed canonical `RecordCodec[I]` for that object. The old
-  * morphism-specific `ProgramInput` capability and its coherence law are GONE; an incoherent per-morphism decoder is
-  * no longer representable. Runtime-string signatures participate through
-  * [[dspy4s.programs.DynamicSignature]], whose parse mints fresh codec-equipped types.
+  * record-boundary evaluation resolve the sealed canonical `RecordCodec[I]` for that object. The old morphism-specific
+  * `ProgramInput` capability and its coherence law are GONE; an incoherent per-morphism decoder is no longer
+  * representable. Runtime-string signatures participate through [[dspy4s.programs.DynamicSignature]], whose parse mints
+  * fresh codec-equipped types.
   *
   * The category laws use the complete prediction, parameters, and lifecycle as their observation. Sequential raw
   * evidence has an associative accumulator with the empty envelope as identity, so structural identity preserves the
@@ -59,13 +59,14 @@ object Program:
       f: F
   )(using ev: OptimizableTraversal[F]): Program[I, O] { type Rep = F; type ParameterArity = ev.Arity } =
     new Program[I, O]:
-      type Rep = F
+      type Rep            = F
       type ParameterArity = ev.Arity
-      val program: F = f
+      val program: F                                                               = f
       val optimizableParameters: OptimizableTraversal.WithArity[F, ParameterArity] = ev
 
-  /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate:
-    * every object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional. */
+  /** Package a program at a codec-equipped object. The `RecordCodec[I]` requirement is the categorical gate: every
+    * object reachable through `of` / `id` has a canonical decoder, which makes the unit laws unconditional.
+    */
   def of[I, O, F <: Module[I, O]](f: F)(using
       ev: OptimizableTraversal[F],
       @annotation.unused codec: RecordCodec[I]
@@ -129,8 +130,8 @@ object Program:
   /** The parameterized category over packaged programs.
     *
     * Identity exists at codec-equipped objects; composition and fan-out retain the fixed parameter arities of their
-    * children. Decoder equality between `id` and any program is definitional on the sealed
-    * canonical object codec, so the unit laws hold with no morphism-specific coherence condition.
+    * children. Decoder equality between `id` and any program is definitional on the sealed canonical object codec, so
+    * the unit laws hold with no morphism-specific coherence condition.
     */
   given parameterizedCategoryProgram: ParameterizedCategory[RecordCodec, Program] with
     def id[A](using @annotation.unused codec: RecordCodec[A]): WithArity[A, A, 0] =

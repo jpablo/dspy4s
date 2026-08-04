@@ -56,7 +56,10 @@ class CandidateSuite extends FunSuite:
       config = DynamicValues.record("temperature" := 0.3)
     )
     val applied = Candidate.applyTo(p, Candidate.seed(p))
-    assertEquals(summon[OptimizableTraversal[DynamicPredict]].read(applied), summon[OptimizableTraversal[DynamicPredict]].read(p))
+    assertEquals(
+      summon[OptimizableTraversal[DynamicPredict]].read(applied),
+      summon[OptimizableTraversal[DynamicPredict]].read(p)
+    )
   }
 
   test("seed and applyTo distinguish absent from explicitly empty instructions") {

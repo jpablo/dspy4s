@@ -22,12 +22,12 @@ import zio.blocks.schema.DynamicValue
 class FailureTraceSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   /** Returns text with no field markers, so a two-output ChatAdapter signature fails to parse. */
   private final class BadLm extends LanguageModel:
-    override val id: String   = "bad"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "bad"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = "Paris is the answer"))))
 
@@ -41,7 +41,7 @@ class FailureTraceSuite extends FunSuite:
       RuntimeContext(lm = Some(new BadLm), adapter = Some(ChatAdapter()), captureFailureTraces = true)
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(layout = layout)(call)
+      val result           = DynamicPredict(layout = layout)(call)
       assert(result.isLeft, s"expected a parse failure, got: $result")
 
       val trace = RuntimeEnvironment.current.trace
@@ -60,7 +60,7 @@ class FailureTraceSuite extends FunSuite:
       RuntimeContext(lm = Some(new BadLm), adapter = Some(ChatAdapter()))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = DynamicPredict(layout = layout)(call)
+      val result           = DynamicPredict(layout = layout)(call)
       assert(result.isLeft)
       assertEquals(RuntimeEnvironment.current.trace.size, 0)
     }

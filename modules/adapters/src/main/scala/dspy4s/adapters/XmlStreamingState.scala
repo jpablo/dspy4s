@@ -27,19 +27,19 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
 
   private enum Phase derives CanEqual:
     case PreDoc, BetweenTags, TagStart, ReadingOpenTag, SkippingAttrs,
-         ReadingCloseTag, InContent, InContentSeenLt, InEntity, PostDoc
+      ReadingCloseTag, InContent, InContentSeenLt, InEntity, PostDoc
 
   import Phase.*
 
-  private var phase: Phase = PreDoc
-  private var currentField: Option[String] = None
-  private val tagBuilder = new StringBuilder
-  private val contentBuffer = new StringBuilder
-  private val entityBuilder = new StringBuilder
-  private var pendingTagMatch: Boolean = false
+  private var phase: Phase                                              = PreDoc
+  private var currentField: Option[String]                              = None
+  private val tagBuilder                                                = new StringBuilder
+  private val contentBuffer                                             = new StringBuilder
+  private val entityBuilder                                             = new StringBuilder
+  private var pendingTagMatch: Boolean                                  = false
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
-    var i = 0
+    var i   = 0
     while i < delta.length do
       processChar(delta.charAt(i), out)
       i += 1
@@ -116,7 +116,7 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
               phase = InContent
             else phase = BetweenTags
           case ' ' | '\t' | '\r' | '\n' => () // tolerate whitespace before '>'
-          case _ => tagBuilder.append(c)
+          case _                        => tagBuilder.append(c)
       case InContent =>
         c match
           case '<' => phase = InContentSeenLt
@@ -148,16 +148,16 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
           phase = InContent
       case PostDoc => ()
 
-  private def isNameStart(c: Char): Boolean = c.isLetter || c == '_'
-  private def isNameChar(c: Char): Boolean = c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
+  private def isNameStart(c: Char): Boolean  = c.isLetter || c == '_'
+  private def isNameChar(c: Char): Boolean   = c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
   private def isEntityChar(c: Char): Boolean = c.isLetterOrDigit || c == '#'
 
   private def decodeEntity(name: String): String = name match
-    case "amp"  => "&"
-    case "lt"   => "<"
-    case "gt"   => ">"
-    case "quot" => "\""
-    case "apos" => "'"
+    case "amp"                                         => "&"
+    case "lt"                                          => "<"
+    case "gt"                                          => ">"
+    case "quot"                                        => "\""
+    case "apos"                                        => "'"
     case s if s.startsWith("#x") || s.startsWith("#X") =>
       try Character.toString(Integer.parseInt(s.drop(2), 16))
       catch case NonFatal(_) => s"&$name;"
@@ -167,10 +167,9 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
     case _ => s"&$name;"
 
 object XmlStreamingState:
-  /** True iff `text`'s tail could be the start of an XML closing tag that
-    * would terminate the currently-streaming field. Ported from Python
-    * `StreamListener._could_form_end_identifier` for `XMLAdapter`.
-    * Returns true when the buffer ends with `<` or `</`, or already
-    * contains `</` anywhere. */
+  /** True iff `text`'s tail could be the start of an XML closing tag that would terminate the currently-streaming
+    * field. Ported from Python `StreamListener._could_form_end_identifier` for `XMLAdapter`. Returns true when the
+    * buffer ends with `<` or `</`, or already contains `</` anywhere.
+    */
   def couldFormEndIdentifier(text: String): Boolean =
     text.endsWith("<") || text.endsWith("</") || text.contains("</")

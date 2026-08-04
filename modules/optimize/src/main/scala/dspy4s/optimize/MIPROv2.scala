@@ -52,20 +52,19 @@ final case class MIPROv2Config(
   * '''Three-phase composition (reuses, does not reinvent).'''
   *   1. '''Demo-set candidates''' (Step 1, "bootstrap few-shot examples"). Runs [[BootstrapFewShot]] `numCandidates`
   *      times with distinct seeds (`seed + k`), collecting each compiled program's per-predictor demos via
-  *      `OptimizableTraversal.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is also
-  *      included. The result is a `Vector` of demo-assignments, each a per-predictor `Vector[Vector[Example]]` of
+  *      `OptimizableTraversal.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is
+  *      also included. The result is a `Vector` of demo-assignments, each a per-predictor `Vector[Vector[Example]]` of
   *      length == predictor count. 2. '''Instruction candidates''' (Step 2, GroundedProposer). Calls
   *      [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates = <first bootstrapped assignment,
   *      or empty>)` → `Vector[Vector[String]]` (per predictor, `numCandidates` instructions). Each predictor's CURRENT
   *      instruction is prepended as an extra candidate. 3. '''Search''' (Step 3, "find optimal prompt parameters"). For
   *      `numTrials` trials with a seeded RNG, randomly picks one demo-assignment index (applied whole-program) and, per
-  *      predictor, one instruction-candidate index. The trial program is built with a single [[OptimizableTraversal.replace]]
-  *      applying each chosen instruction (`parameters.copy(instructions = Some(instr))`) AND chosen demos
-  *      (`.copy(demos = ...)`). Each trial is scored on the valset (falling back to the trainset) via
-  *      [[dspy4s.evaluate.Evaluate]] +
-  *      [[ProgramRunner]] + the metric. A baseline candidate (the unmodified student) is always scored too. The
-  *      best-scoring candidate is returned as `bestProgram`; all scored candidates (trials + baseline) are returned
-  *      sorted descending.
+  *      predictor, one instruction-candidate index. The trial program is built with a single
+  *      [[OptimizableTraversal.replace]] applying each chosen instruction (`parameters.copy(instructions =
+  *      Some(instr))`) AND chosen demos (`.copy(demos = ...)`). Each trial is scored on the valset (falling back to the
+  *      trainset) via [[dspy4s.evaluate.Evaluate]] + [[ProgramRunner]] + the metric. A baseline candidate (the
+  *      unmodified student) is always scored too. The best-scoring candidate is returned as `bestProgram`; all scored
+  *      candidates (trials + baseline) are returned sorted descending.
   *
   * '''Deltas from Python.'''
   *   - '''Random search instead of Optuna TPE.''' Python's Step 3 drives an Optuna `TPESampler` study that builds a
@@ -93,8 +92,8 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
 
   override val name: String = "mipro_v2"
 
-  private val ps: OptimizableTraversal[P]   = summon[OptimizableTraversal[P]]
-  private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
+  private val ps: OptimizableTraversal[P] = summon[OptimizableTraversal[P]]
+  private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
       student: P,
@@ -158,7 +157,7 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
   )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
     val proposer = new GroundedProposer[P](config.proposerConfig)
     // Ground the proposer on the first bootstrapped demo assignment if present (index 0 is zero-shot), else empty.
-    val seedDemos: Vector[Vector[Example]] = demoCandidates.lift(1).getOrElse(Vector.empty)
+    val seedDemos: Vector[Vector[Example]]  = demoCandidates.lift(1).getOrElse(Vector.empty)
     val currentInstructions: Vector[String] =
       ps.read(student).map(_.instructions.getOrElse(""))
 
@@ -194,10 +193,10 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     // `student` is immutable, so its optimizable leaves are the same every trial — read them once.
     val leaves = ps.read(student)
     (0 until config.numTrials).foreach { trial =>
-      val demoIdx       = rng.nextInt(demoCandidates.size)
+      val demoIdx        = rng.nextInt(demoCandidates.size)
       val demoAssignment = demoCandidates(demoIdx)
-      val instrIndices  = (0 until leafCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
-      val chosenInstrs  = instrIndices.zipWithIndex.map { case (i, p) => instructionCandidates(p)(i) }
+      val instrIndices   = (0 until leafCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
+      val chosenInstrs   = instrIndices.zipWithIndex.map { case (i, p) => instructionCandidates(p)(i) }
 
       val applied = applyTrial(leaves, student, chosenInstrs, demoAssignment)
       val score   = scoreProgram(applied, evalset)
@@ -222,8 +221,9 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       )
     )
 
-  /** Build a trial program by applying, via a single [[OptimizableTraversal.replace]], each predictor's chosen instruction and
-    * chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[OptimizableTraversal.read]] order.
+  /** Build a trial program by applying, via a single [[OptimizableTraversal.replace]], each predictor's chosen
+    * instruction and chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[OptimizableTraversal.read]]
+    * order.
     */
   private def applyTrial(
       leaves: Vector[OptimizableParameters],

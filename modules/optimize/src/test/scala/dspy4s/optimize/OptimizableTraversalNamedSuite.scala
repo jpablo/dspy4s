@@ -51,30 +51,30 @@ class OptimizableTraversalNamedSuite extends FunSuite:
   }
 
   test("identified and named reads reject a naming traversal with divergent views") {
-    val canonical = predict("canonical").optimizableView
+    val canonical  = predict("canonical").optimizableView
     val misleading = predict("misleading").optimizableView
-    val ps = new OptimizableTraversal.Of[Unit, 1]:
+    val ps         = new OptimizableTraversal.Of[Unit, 1]:
       def arity(@annotation.unused program: Unit): Int = 1
-      def inspect(program: Unit) = Vector(canonical)
+      def inspect(program: Unit)                       = Vector(canonical)
       def replace(program: Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
       override def inspectNamed(program: Unit) = Vector("leaf" -> misleading)
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
-    val namedError       = intercept[IllegalArgumentException](ps.readNamed(()))
+    val namedError      = intercept[IllegalArgumentException](ps.readNamed(()))
     assert(identifiedError.getMessage.contains("must preserve the views and order"))
     assert(namedError.getMessage.contains("must preserve the views and order"))
   }
 
   test("identified and named reads reject a naming traversal with different arity") {
     val canonical = predict("canonical").optimizableView
-    val ps = new OptimizableTraversal.Of[Unit, 1]:
+    val ps        = new OptimizableTraversal.Of[Unit, 1]:
       def arity(@annotation.unused program: Unit): Int = 1
-      def inspect(program: Unit) = Vector(canonical)
+      def inspect(program: Unit)                       = Vector(canonical)
       def replace(program: Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
-      override def inspectNamed(program: Unit) = Vector.empty
+      override def inspectNamed(program: Unit)                                                        = Vector.empty
 
     val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
-    val namedError       = intercept[IllegalArgumentException](ps.readNamed(()))
+    val namedError      = intercept[IllegalArgumentException](ps.readNamed(()))
     assert(identifiedError.getMessage.contains("inspectNamed returned 0 entries but inspect returned 1"))
     assert(namedError.getMessage.contains("inspectNamed returned 0 entries but inspect returned 1"))
   }
@@ -83,7 +83,7 @@ class OptimizableTraversalNamedSuite extends FunSuite:
     val pipeline = NamedPipeline(predict("a"), predict("b"))
     val ps       = summon[OptimizableTraversal[NamedPipeline]]
     val before   = ps.readIdentified(pipeline).map(_.id)
-    val updated =
+    val updated  =
       ps.replace(pipeline, ps.read(pipeline).map(_.copy(instructions = Some("x"))))
 
     assertEquals(ps.readIdentified(updated).map(_.id), before)

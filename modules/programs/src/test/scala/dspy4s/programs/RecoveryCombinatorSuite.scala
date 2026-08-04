@@ -31,7 +31,7 @@ class RecoveryCombinatorSuite extends FunSuite:
       predict: DynamicPredict,
       runs: ArrayBuffer[String]
   ) extends Module[Int, String]:
-    override val moduleName: String = name
+    override val moduleName: String                                = name
     override protected val lifecycle: ModuleLifecycle[Int, String] =
       ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
@@ -44,8 +44,8 @@ class RecoveryCombinatorSuite extends FunSuite:
 
   private object Attempt:
     given attemptOptimizable: OptimizableLeaf[Attempt] with
-      def get(program: Attempt): OptimizableParameters = program.predict.optimizableParameters
-      def metadata(program: Attempt): OptimizableMetadata = program.predict.optimizableView.metadata
+      def get(program: Attempt): OptimizableParameters                   = program.predict.optimizableParameters
+      def metadata(program: Attempt): OptimizableMetadata                = program.predict.optimizableView.metadata
       def set(program: Attempt, updated: OptimizableParameters): Attempt =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -134,9 +134,9 @@ class RecoveryCombinatorSuite extends FunSuite:
   }
 
   test("recovery retains both branches in stable optimizer order") {
-    val runs     = ArrayBuffer.empty[String]
-    val primary  = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
-    val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
+    val runs      = ArrayBuffer.empty[String]
+    val primary   = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
+    val fallback  = Attempt("fallback", Right("fallback"), predictor("f"), runs)
     val recovered = primary.recoverWith(RecoveryPolicy.Always)(fallback)
     val P         = summon[OptimizableTraversal[RecoverWith[Int, String, Attempt, Attempt]]]
 

@@ -13,8 +13,8 @@ object EvaluationResultPersistence:
   def saveAsJson(result: EvaluationResult, path: String): Either[String, Unit] =
     try
       val rows = result.results.map { eval =>
-        val entry        = scala.collection.mutable.LinkedHashMap[String, ujson.Value]()
-        val exampleKeys  = DynamicValues.recordKeys(eval.example.values).toSet
+        val entry       = scala.collection.mutable.LinkedHashMap[String, ujson.Value]()
+        val exampleKeys = DynamicValues.recordKeys(eval.example.values).toSet
         DynamicValues.recordEntries(eval.example.values).foreach { (k, v) =>
           entry += (s"example_$k" -> toJson(DynamicValues.toAny(v)))
         }
@@ -25,7 +25,7 @@ object EvaluationResultPersistence:
         entry += (result.metricName -> ujson.Num(eval.score))
         ujson.Obj.from(entry)
       }
-      val array = ujson.Arr.from(rows)
+      val array  = ujson.Arr.from(rows)
       val writer = new PrintWriter(Files.newBufferedWriter(Paths.get(path), StandardCharsets.UTF_8))
       try writer.write(ujson.write(array, indent = 2))
       finally writer.close()
@@ -70,14 +70,14 @@ object EvaluationResultPersistence:
       case error: Throwable => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
 
   private def toJson(value: Any): ujson.Value = value match
-    case s: String   => ujson.Str(s)
-    case b: Boolean  => ujson.Bool(b)
-    case n: Int      => ujson.Num(n.toDouble)
-    case n: Long     => ujson.Num(n.toDouble)
-    case n: Double   => ujson.Num(n)
-    case n: Float    => ujson.Num(n.toDouble)
+    case s: String    => ujson.Str(s)
+    case b: Boolean   => ujson.Bool(b)
+    case n: Int       => ujson.Num(n.toDouble)
+    case n: Long      => ujson.Num(n.toDouble)
+    case n: Double    => ujson.Num(n)
+    case n: Float     => ujson.Num(n.toDouble)
     case _: None.type => ujson.Null
-    case Some(inner) => toJson(inner)
+    case Some(inner)  => toJson(inner)
     case m: Map[?, ?] =>
       ujson.Obj.from(m.iterator.collect { case (k: String, v) => k -> toJson(v) })
     case seq: Iterable[?] =>
@@ -87,14 +87,14 @@ object EvaluationResultPersistence:
     case other => ujson.Str(String.valueOf(other))
 
   private def toCsvString(value: Any): String = value match
-    case s: String  => s
-    case b: Boolean => b.toString
-    case n: Number  => n.toString
-    case _: None.type => ""
-    case Some(inner) => toCsvString(inner)
+    case s: String        => s
+    case b: Boolean       => b.toString
+    case n: Number        => n.toString
+    case _: None.type     => ""
+    case Some(inner)      => toCsvString(inner)
     case seq: Iterable[?] => seq.map(toCsvString).mkString("; ")
-    case arr: Array[?] => arr.map(toCsvString).mkString("; ")
-    case other => String.valueOf(other)
+    case arr: Array[?]    => arr.map(toCsvString).mkString("; ")
+    case other            => String.valueOf(other)
 
   private def csvEscape(field: String): String =
     if field.contains(",") || field.contains("\"") || field.contains("\n") then

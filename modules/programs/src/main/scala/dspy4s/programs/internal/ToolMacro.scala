@@ -8,9 +8,10 @@ import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.quoted.*
 
-/** Runtime support for [[dspy4s.programs.contracts.ToolFunction.fromMethod]]: decode one named argument from the
-  * tool's call record, coercing LM-shaped values (string primitives → the field's type) the same way the typed
-  * predict path does. */
+/** Runtime support for [[dspy4s.programs.contracts.ToolFunction.fromMethod]]: decode one named argument from the tool's
+  * call record, coercing LM-shaped values (string primitives → the field's type) the same way the typed predict path
+  * does.
+  */
 object ToolArgs:
   def decode[A](record: DynamicValue.Record, name: String)(using Schema[A]): Either[DspyError, A] =
     DynamicValues.recordGet(record, name) match
@@ -21,9 +22,10 @@ object ToolArgs:
 
 object ToolMacro:
 
-  /** Implementation of `ToolFunction.fromMethod(method)`: read the method's name + `@description` + typed
-    * parameters, and emit a `ToolFunction` that decodes each argument from the call record, applies the method,
-    * and lifts the result via its `Schema`. */
+  /** Implementation of `ToolFunction.fromMethod(method)`: read the method's name + `@description` + typed parameters,
+    * and emit a `ToolFunction` that decodes each argument from the call record, applies the method, and lifts the
+    * result via its `Schema`.
+    */
   def fromMethodImpl[F: Type](method: Expr[F])(using Quotes): Expr[ToolFunction] =
     import quotes.reflect.*
     given CanEqual[Symbol, Symbol] = CanEqual.derived
@@ -36,25 +38,25 @@ object ToolMacro:
 
     def calledMethod(term: Term): Option[Symbol] =
       unwrap(term) match
-        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun") => Some(fn.symbol)
-        case Apply(fn, _)     => calledMethod(fn)
-        case TypeApply(fn, _) => calledMethod(fn)
-        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun")  => Some(id.symbol)
+        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun")  => Some(fn.symbol)
+        case Apply(fn, _)                                                                  => calledMethod(fn)
+        case TypeApply(fn, _)                                                              => calledMethod(fn)
+        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun")     => Some(id.symbol)
         case sel: Select if sel.symbol.isDefDef && !sel.symbol.name.startsWith("$anonfun") => Some(sel.symbol)
-        case _ => None
+        case _                                                                             => None
 
     // Resolve the referenced method symbol (the call site eta-expands the method into a closure).
     val methodSym: Symbol = unwrap(method.asTerm) match
-      case id: Ident if id.symbol.isDefDef    => id.symbol
-      case sel: Select if sel.symbol.isDefDef => sel.symbol
+      case id: Ident if id.symbol.isDefDef                        => id.symbol
+      case sel: Select if sel.symbol.isDefDef                     => sel.symbol
       case Block(stats, Closure(meth, _)) if meth.symbol.isDefDef =>
         stats.collectFirst { case dd: DefDef if dd.symbol == meth.symbol => dd }
           .flatMap(_.rhs.flatMap(calledMethod)).getOrElse(meth.symbol)
       case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
-      case other =>
+      case other                                    =>
         report.errorAndAbort(
           "ToolFunction.fromMethod expects a method reference, e.g. `ToolFunction.fromMethod(getWeather)`; got: " +
-          other.show
+            other.show
         )
 
     val toolName = methodSym.name
@@ -68,14 +70,14 @@ object ToolMacro:
       case dd: DefDef => dd
       case _          => report.errorAndAbort(s"ToolFunction.fromMethod could not inspect method '$toolName'")
 
-    val paramClauses = defdef.paramss.collect { case tpc: TermParamClause => tpc }
+    val paramClauses                     = defdef.paramss.collect { case tpc: TermParamClause => tpc }
     val params: List[(String, TypeRepr)] = paramClauses match
       case Nil       => Nil
       case List(tpc) => tpc.params.map(p => p.name -> p.tpt.tpe)
-      case _ =>
+      case _         =>
         report.errorAndAbort(
           s"ToolFunction.fromMethod supports a single parameter list (no `using` clauses); '$toolName' has " +
-          s"${paramClauses.size}. Tools needing the RuntimeContext use the ToolFunction(...) / .of(...) factories."
+            s"${paramClauses.size}. Tools needing the RuntimeContext use the ToolFunction(...) / .of(...) factories."
         )
 
     val returnType: TypeRepr = defdef.returnTpt.tpe
@@ -98,7 +100,9 @@ object ToolMacro:
           returnType.asType match
             case '[r] =>
               val schemaR = Expr.summon[Schema[r]]
-                .getOrElse(report.errorAndAbort(s"No zio.blocks.schema.Schema for the tool return type '${returnType.show}'"))
+                .getOrElse(
+                  report.errorAndAbort(s"No zio.blocks.schema.Schema for the tool return type '${returnType.show}'")
+                )
               '{ Right(ToolFunction.result[r](${ applied.asExprOf[r] })(using $schemaR)) }
         case (name, tpe) :: rest =>
           tpe.asType match
@@ -112,8 +116,8 @@ object ToolMacro:
 
     '{
       new ToolFunction:
-        override val name: String                       = ${ Expr(toolName) }
-        override val description: String                = ${ Expr(toolDesc) }
+        override val name: String                             = ${ Expr(toolName) }
+        override val description: String                      = ${ Expr(toolDesc) }
         override val argSchema: Vector[(String, DspyTypeRef)] = $argSchemaExpr
         override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
           ${ buildBody('args, params, Nil) }

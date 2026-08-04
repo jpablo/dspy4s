@@ -16,7 +16,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
 
   test("Done extracts exactly once from the completed trajectory") {
     val extractions = AtomicInteger(0)
-    val result = TrajectoryAgent.runAndExtract[String, String](
+    val result      = TrajectoryAgent.runAndExtract[String, String](
       maxIterations = 5,
       render = _.mkString(" -> ")
     )(
@@ -35,7 +35,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
 
   test("exhaustion extracts exactly once from the final accumulated trajectory") {
     val extractions = AtomicInteger(0)
-    val result = TrajectoryAgent.runAndExtract[Int, String](
+    val result      = TrajectoryAgent.runAndExtract[Int, String](
       maxIterations = 3,
       render = _.mkString(",")
     )(
@@ -53,7 +53,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
   test("a failed trajectory step short-circuits without running extraction") {
     val extractions = AtomicInteger(0)
     val failure     = RuntimeError("trajectory-law", "step failed")
-    val result = TrajectoryAgent.runAndExtract[String, String](
+    val result      = TrajectoryAgent.runAndExtract[String, String](
       maxIterations = 3,
       render = _.mkString(",")
     )(
@@ -75,7 +75,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
     )
     val completions = Completions.fromRows(completionRows).toOption.get
     val usage       = LmUsage(totalTokens = 9, promptTokens = 5, completionTokens = 4)
-    val extracted = Prediction(
+    val extracted   = Prediction(
       output = "typed-answer",
       raw = RawPrediction(
         values = DynamicValues.record("answer" := "first", "metadata" := "preserved"),
@@ -107,7 +107,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
 
   test("extractor-local truncation does not change the complete attached trajectory") {
     val attempts = ArrayBuffer.empty[String]
-    val result = TrajectoryAgent.runAndExtractPrediction[String, String](
+    val result   = TrajectoryAgent.runAndExtractPrediction[String, String](
       maxIterations = 3,
       render = _.mkString(" -> "),
       trajectoryKey = "trajectory",

@@ -1,15 +1,14 @@
-/**
- * Generating llms.txt for Code Documentation with DSPy
- *
- * Source:   docs/docs/tutorials/llms_txt_generation/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/llms_txt_generation/index.md
- * Status:   translated (signatures + the composed pipeline, snippets 1/2/4). The GitHub HTTP fetching
- *           (snippet 3: `requests` + base64) is out of scope — it's plain I/O, not a dspy feature.
- *
- * Python's `class RepositoryAnalyzer(dspy.Module)` composing four `ChainOfThought`s becomes a plain
- * class holding four typed `ChainOfThought` fields whose `forward` threads their typed outputs through
- * an `Either` for-comprehension. `list[str]` fields map to `List[String]`.
- */
+/** Generating llms.txt for Code Documentation with DSPy
+  *
+  * Source: docs/docs/tutorials/llms_txt_generation/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/llms_txt_generation/index.md Status: translated
+  * (signatures + the composed pipeline, snippets 1/2/4). The GitHub HTTP fetching (snippet 3: `requests` + base64) is
+  * out of scope — it's plain I/O, not a dspy feature.
+  *
+  * Python's `class RepositoryAnalyzer(dspy.Module)` composing four `ChainOfThought`s becomes a plain class holding four
+  * typed `ChainOfThought` fields whose `forward` threads their typed outputs through an `Either` for-comprehension.
+  * `list[str]` fields map to `List[String]`.
+  */
 package dspy4s.examples.tutorials.llms_txt_generation
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
@@ -20,28 +19,28 @@ import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 // ── Snippet 1 (lines 23–57) — the three analysis signatures (top-level for Mirror) ──
 // --8<-- [start:signatures]
 trait AnalyzeRepository extends Spec:
-  def repo_url:       InputField[String]
-  def file_tree:      InputField[String]
+  def repo_url: InputField[String]
+  def file_tree: InputField[String]
   def readme_content: InputField[String]
-  def project_purpose:       OutputField[String]
-  def key_concepts:          OutputField[List[String]]
+  def project_purpose: OutputField[String]
+  def key_concepts: OutputField[List[String]]
   def architecture_overview: OutputField[String]
 
 trait AnalyzeCodeStructure extends Spec:
-  def file_tree:     InputField[String]
+  def file_tree: InputField[String]
   def package_files: InputField[String]
   def important_directories: OutputField[List[String]]
-  def entry_points:          OutputField[List[String]]
-  def development_info:      OutputField[String]
+  def entry_points: OutputField[List[String]]
+  def development_info: OutputField[String]
 
 trait GenerateLLMsTxt extends Spec:
-  def project_purpose:       InputField[String]
-  def key_concepts:          InputField[List[String]]
+  def project_purpose: InputField[String]
+  def key_concepts: InputField[List[String]]
   def architecture_overview: InputField[String]
   def important_directories: InputField[List[String]]
-  def entry_points:          InputField[List[String]]
-  def development_info:      InputField[String]
-  def usage_examples:        InputField[String]
+  def entry_points: InputField[List[String]]
+  def development_info: InputField[String]
+  def usage_examples: InputField[String]
   def llms_txt_content: OutputField[String]
 // --8<-- [end:signatures]
 
@@ -69,20 +68,20 @@ object LlmsTxtGeneration:
         packageFiles: String
     )(using RuntimeContext): Either[DspyError, String] =
       for
-        repo <- analyzeRepo((repo_url = repoUrl, file_tree = fileTree, readme_content = readmeContent))
+        repo      <- analyzeRepo((repo_url = repoUrl, file_tree = fileTree, readme_content = readmeContent))
         structure <- analyzeStructure((file_tree = fileTree, package_files = packageFiles))
-        examples <- generateExamples(
-                      (repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: ${repo.output.key_concepts}")
-                    )
+        examples  <- generateExamples(
+          (repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: ${repo.output.key_concepts}")
+        )
         llms <- generateLlmsTxt((
-                  project_purpose       = repo.output.project_purpose,
-                  key_concepts          = repo.output.key_concepts,
-                  architecture_overview = repo.output.architecture_overview,
-                  important_directories = structure.output.important_directories,
-                  entry_points          = structure.output.entry_points,
-                  development_info      = structure.output.development_info,
-                  usage_examples        = examples.output.usage_examples
-                ))
+          project_purpose = repo.output.project_purpose,
+          key_concepts = repo.output.key_concepts,
+          architecture_overview = repo.output.architecture_overview,
+          important_directories = structure.output.important_directories,
+          entry_points = structure.output.entry_points,
+          development_info = structure.output.development_info,
+          usage_examples = examples.output.usage_examples
+        ))
       yield llms.output.llms_txt_content
   // --8<-- [end:analyzer]
 
@@ -103,10 +102,10 @@ object LlmsTxtGeneration:
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.llms_txt_generation.llmsTxtMain"
 @main def llmsTxtMain(): Unit = Demo.withLm {
   val result = LlmsTxtGeneration.generateLlmsTxt(
-    repoUrl       = "https://github.com/example/project",
-    fileTree      = "src/main.py\nsrc/util.py\nREADME.md\npyproject.toml",
+    repoUrl = "https://github.com/example/project",
+    fileTree = "src/main.py\nsrc/util.py\nREADME.md\npyproject.toml",
     readmeContent = "# Project\nA small example project.",
-    packageFiles  = "=== pyproject.toml ===\n[project]\nname = \"project\""
+    packageFiles = "=== pyproject.toml ===\n[project]\nname = \"project\""
   )
   println("llms.txt: " + result)
 }

@@ -26,10 +26,11 @@ class EvaluateSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
 
-  private def ex(values: (String, DynamicValue)*): Example = Example(values*)
+  private def ex(values: (String, DynamicValue)*): Example         = Example(values*)
   private def pred(values: (String, DynamicValue)*): RawPrediction = RawPrediction(rec(values*))
 
-  private def scriptedPredict(mappings: Map[String, RawPrediction]): Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
+  private def scriptedPredict(mappings: Map[String, RawPrediction])
+      : Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
     (ex: Example) =>
       val key = ex.get("question").map(DynamicValues.renderText).getOrElse("")
       mappings.get(key) match
@@ -42,7 +43,7 @@ class EvaluateSuite extends FunSuite:
       ex("question" := "q2", "answer" := "Rome"),
       ex("question" := "q3", "answer" := "Madrid")
     )
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch())
+    val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = evaluator()(scriptedPredict(Map(
@@ -58,9 +59,9 @@ class EvaluateSuite extends FunSuite:
   }
 
   test("Evaluate threads callbackMetadata into the run scope so callbacks/programs can read it") {
-    val seen    = new java.util.concurrent.atomic.AtomicReference[DynamicValue.Record](DynamicValue.Record.empty)
-    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
-    val meta    = rec("run_id" := "abc123")
+    val seen      = new java.util.concurrent.atomic.AtomicReference[DynamicValue.Record](DynamicValue.Record.empty)
+    val dataset   = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val meta      = rec("run_id" := "abc123")
     val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), callbackMetadata = meta)
     given RuntimeContext = RuntimeEnvironment.current
 
@@ -74,9 +75,9 @@ class EvaluateSuite extends FunSuite:
   }
 
   test("Evaluate with empty devset returns score 0") {
-    val evaluator = Evaluate(devset = Vector.empty, metric = new ExactMatch())
+    val evaluator        = Evaluate(devset = Vector.empty, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current
-    val result = evaluator()((_: Example) => Right(RawPrediction.empty))
+    val result           = evaluator()((_: Example) => Right(RawPrediction.empty))
     assert(result.isRight)
     assertEquals(result.toOption.get.score, 0.0)
   }
@@ -85,8 +86,8 @@ class EvaluateSuite extends FunSuite:
     val failingPredict: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
       _ => Left(dspy4s.core.contracts.RuntimeError("test", "program failed"))
 
-    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), failureScore = 0.0)
+    val dataset          = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch(), failureScore = 0.0)
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = evaluator()(failingPredict)
@@ -103,7 +104,7 @@ class EvaluateSuite extends FunSuite:
       Thread.sleep(5)
       Right(RawPrediction(rec("answer" := s"a${q.stripPrefix("q")}")))
 
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), numThreads = Some(ThreadCount(4)))
+    val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch(), numThreads = Some(ThreadCount(4)))
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = evaluator()(program)
@@ -119,20 +120,20 @@ class EvaluateSuite extends FunSuite:
   }
 
   test("Evaluate applies displayProgress without side-effect failure") {
-    val dataset = Vector(ex("answer" := "x"))
+    val dataset                                                                    = Vector(ex("answer" := "x"))
     val program: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
       _ => Right(pred("answer" := "x"))
 
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), displayProgress = true)
+    val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch(), displayProgress = true)
     given RuntimeContext = RuntimeEnvironment.current
-    val result = evaluator()(program)
+    val result           = evaluator()(program)
     assert(result.isRight)
   }
 
   test("Evaluate propagates a configured persistence failure") {
     val directory = Files.createTempDirectory("dspy4s-evaluate-sink-")
     try
-      val dataset = Vector(ex("answer" := "x"))
+      val dataset   = Vector(ex("answer" := "x"))
       val evaluator = Evaluate(
         devset = dataset,
         metric = new ExactMatch(),
@@ -153,7 +154,7 @@ class EvaluateSuite extends FunSuite:
     val failingPredict: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
       _ => Left(dspy4s.core.contracts.RuntimeError("test", "boom: program exploded"))
 
-    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val dataset   = Vector(ex("question" := "q1", "answer" := "Paris"))
     val evaluator = new Evaluate(
       EvaluateConfig(
         devset = dataset,
@@ -166,7 +167,7 @@ class EvaluateSuite extends FunSuite:
 
     val result = evaluator()(failingPredict)
     assert(result.isRight)
-    val eval = result.toOption.get
+    val eval    = result.toOption.get
     val failing = eval.results.head
     assertEquals(failing.score, 0.0)
     assert(failing.error.isDefined, "expected error to be captured on failing example")
@@ -180,8 +181,8 @@ class EvaluateSuite extends FunSuite:
     val failingPredict: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
       _ => Left(dspy4s.core.contracts.RuntimeError("test", "boom"))
 
-    val dataset = Vector(ex("question" := "q1", "answer" := "Paris"))
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch())
+    val dataset          = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = evaluator()(failingPredict)
@@ -195,7 +196,7 @@ class EvaluateSuite extends FunSuite:
       ExampleEvaluation(ex("question" := "q2", "answer" := "Rome"), pred("answer" := "Naples"), 0.0)
     )
     val evalResult = EvaluationResult(score = 50.0, results = results, metricName = "exact_match")
-    val table = evalResult.renderTable()
+    val table      = evalResult.renderTable()
 
     assert(table.contains("question"), s"expected 'question' column header, got:\n$table")
     assert(table.contains("answer"), s"expected 'answer' column header, got:\n$table")
@@ -210,7 +211,7 @@ class EvaluateSuite extends FunSuite:
       ExampleEvaluation(ex("question" := s"q$i"), pred("answer" := s"a$i"), 1.0)
     }.toVector
     val evalResult = EvaluationResult(score = 100.0, results = results, metricName = "exact_match")
-    val table = evalResult.renderTable(Some(2))
+    val table      = evalResult.renderTable(Some(2))
 
     assert(table.contains("q1"), s"expected 'q1' present, got:\n$table")
     assert(table.contains("q2"), s"expected 'q2' present, got:\n$table")
@@ -229,9 +230,9 @@ class EvaluateSuite extends FunSuite:
       ex("answer" := "hello world"),
       ex("answer" := "bye")
     )
-    val evaluator = Evaluate(devset = dataset, metric = metric)
+    val evaluator        = Evaluate(devset = dataset, metric = metric)
     given RuntimeContext = RuntimeEnvironment.current
-    val result = evaluator()((ex: Example) => Right(RawPrediction(ex.values)))
+    val result           = evaluator()((ex: Example) => Right(RawPrediction(ex.values)))
     assert(result.isRight)
     val eval = result.toOption.get
     assertEquals(eval.metricName, "lengthy")

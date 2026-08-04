@@ -14,8 +14,9 @@ class FeedbackMetricSuite extends FunSuite:
   private def rec(entries: (String, zio.blocks.schema.DynamicValue)*): zio.blocks.schema.DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-  /** A toy exact-match feedback metric: 1.0 when the prediction's `answer` matches the gold, else 0.0, with
-    * feedback that names the expected answer (and, at predictor level, the component). */
+  /** A toy exact-match feedback metric: 1.0 when the prediction's `answer` matches the gold, else 0.0, with feedback
+    * that names the expected answer (and, at predictor level, the component).
+    */
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "toy_exact"
     override def feedback(
@@ -28,15 +29,15 @@ class FeedbackMetricSuite extends FunSuite:
       val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")
       val got  = prediction.get("answer").map(DynamicValues.renderText).getOrElse("")
       val s    = if got == gold then 1.0 else 0.0
-      val fb = component match
+      val fb   = component match
         case None       => s"Program: expected '$gold', got '$got'."
         case Some(name) => s"Component '$name': expected '$gold', got '$got'."
       Right(ScoreWithFeedback(s, fb))
 
   test("program-level feedback scores and explains, and Metric.score delegates to it") {
     given RuntimeContext = RuntimeContext()
-    val ex   = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
-    val pred = RawPrediction(rec("answer" := "Paris"))
+    val ex               = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
+    val pred             = RawPrediction(rec("answer" := "Paris"))
 
     val fb = metric.feedback(ex, pred, Vector.empty, component = None, componentTrace = Vector.empty).toOption.get
     assertEquals(fb.score, 1.0)
@@ -48,8 +49,8 @@ class FeedbackMetricSuite extends FunSuite:
 
   test("optimizable-level feedback targets the named component and reflects a wrong answer") {
     given RuntimeContext = RuntimeContext()
-    val ex   = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
-    val pred = RawPrediction(rec("answer" := "Lyon"))
+    val ex               = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
+    val pred             = RawPrediction(rec("answer" := "Lyon"))
 
     val fb = metric.feedback(ex, pred, Vector.empty, component = Some("qa"), componentTrace = Vector.empty).toOption.get
     assertEquals(fb.score, 0.0)

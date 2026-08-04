@@ -26,8 +26,8 @@ import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** Two-predictor pipeline: `hinter` produces a hint, `answerer` answers using it. Top-level so `OptimizableTraversal.derived`
-  * sees its Mirror field labels ("hinter", "answerer").
+/** Two-predictor pipeline: `hinter` produces a hint, `answerer` answers using it. Top-level so
+  * `OptimizableTraversal.derived` sees its Mirror field labels ("hinter", "answerer").
   */
 final case class Pipeline(hinter: DynamicPredict, answerer: DynamicPredict)
 
@@ -53,8 +53,8 @@ class GepaMultiPredictorSuite extends FunSuite:
     * "good_hint". So BOTH predictors must be improved for a correct final answer.
     */
   private final class PipelineLm extends LanguageModel:
-    override val id: String   = "pipeline"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "pipeline"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt = request.messages.flatMap(_.text).mkString("\n")
       if prompt.contains("## answer ##") then
@@ -66,11 +66,11 @@ class GepaMultiPredictorSuite extends FunSuite:
 
   /** Reflection LM: per component (detected from its current instruction), proposes the matching magic token. */
   private final class ReflectionLm extends LanguageModel:
-    override val id: String   = "reflect"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "reflect"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt = request.messages.flatMap(_.text).mkString("\n")
-      val instr =
+      val instr  =
         if prompt.contains("Stage one") || prompt.contains("TOKEN1") then "Use TOKEN1 to produce a good_hint."
         else "Use TOKEN2 with the good_hint to answer."
       Right(LmResponse(outputs = Vector(LmOutput(text = s"```\n$instr\n```"))))
@@ -128,7 +128,13 @@ class GepaMultiPredictorSuite extends FunSuite:
 
       assertEquals(result.bestScore, 1.0)
       // Both components were evolved to carry their required token (per-component reflection + association worked).
-      assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("TOKEN1")), result.bestCandidate(OptimizableId(0)))
-      assert(result.bestCandidate(OptimizableId(1)).exists(_.contains("TOKEN2")), result.bestCandidate(OptimizableId(1)))
+      assert(
+        result.bestCandidate(OptimizableId(0)).exists(_.contains("TOKEN1")),
+        result.bestCandidate(OptimizableId(0))
+      )
+      assert(
+        result.bestCandidate(OptimizableId(1)).exists(_.contains("TOKEN2")),
+        result.bestCandidate(OptimizableId(1))
+      )
     }
   }

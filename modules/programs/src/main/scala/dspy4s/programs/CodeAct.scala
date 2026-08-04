@@ -27,13 +27,13 @@ import scala.util.matching.Regex
   *   1. Ask the LM to produce a `generated_code` Python snippet plus a `finished: bool` flag, given the original task
   *      inputs and the accumulated `trajectory` so far. 2. Strip the fenced ```python code block from the LM's output.
   *      3. Run that code via the configured [[CodeInterpreter]]; capture stdout (or stderr on failure). 4. Append the
-  *      snippet + observation to `trajectory`. Exit early if the LM set `finished=true`.
+  *         snippet + observation to `trajectory`. Exit early if the LM set `finished=true`.
   *
   * After the loop, a reasoning-augmented [[DynamicPredict]] extractor reads the full trajectory and produces the
-  * user-visible outputs declared in `baseSignature`. `CodeAct[I, O]` is a `Module[I,
-  * Prediction[WithReasoning[O]]]`: it encodes the typed input, runs the loop + extractor internally over the data-bag
-  * layer, and decodes the reply into the base outputs `O` with `reasoning: String` prepended (see
-  * [[OutputAugmentation]]). The rendered `trajectory` is kept on `.raw`.
+  * user-visible outputs declared in `baseSignature`. `CodeAct[I, O]` is a `Module[I, Prediction[WithReasoning[O]]]`: it
+  * encodes the typed input, runs the loop + extractor internally over the data-bag layer, and decodes the reply into
+  * the base outputs `O` with `reasoning: String` prepended (see [[OutputAugmentation]]). The rendered `trajectory` is
+  * kept on `.raw`.
   *
   * '''Tools-inside-code.''' Python `CodeAct` lets the user pass functions the LM's generated Python can call. Pass them
   * as [[tools]]: they are listed in the codeact instructions (so the LM knows they exist), and on a sandboxed
@@ -44,9 +44,8 @@ import scala.util.matching.Regex
   * functions; the dspy4s bridge is RPC, so Scala-implemented tools work too.)
   *
   * '''Per-call iteration override.''' Python accepts `max_iters` as a call kwarg; the dspy4s idiom is the immutable
-  * copy — `program.copy(maxIterations = IterationLimit(3))(...)` — rather than a magic key in the per-call
-  * config bag (which is reserved for provider options). Runtime values cross the boundary through
-  * `IterationLimit.either(n)`.
+  * copy — `program.copy(maxIterations = IterationLimit(3))(...)` — rather than a magic key in the per-call config bag
+  * (which is reserved for provider options). Runtime values cross the boundary through `IterationLimit.either(n)`.
   *
   * '''Persistent REPL state.''' The default [[dspy4s.core.runtime.SubprocessPythonInterpreter]] is stateless across
   * snippets; the trajectory carries earlier code/output as PROMPT context, so the LM regenerates what it needs. On the
@@ -67,8 +66,8 @@ final case class CodeAct[I, O](
     override val maxIterations: IterationLimit = IterationLimit(5),
     codeActProgramName: String = "codeact",
     extractorProgramName: String = "codeact_extract",
-    /** Optional override for the per-iteration code-generator predict — a TYPED `Predict` over the base input plus
-      * the rendered trajectory, producing a lenient [[CodeAct.CodeStep]]. When `None` (the default), it is built from
+    /** Optional override for the per-iteration code-generator predict — a TYPED `Predict` over the base input plus the
+      * rendered trajectory, producing a lenient [[CodeAct.CodeStep]]. When `None` (the default), it is built from
       * [[codeActSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable sub-predict
       * addressable + immutably replaceable (see the `OptimizableTraversal[CodeAct]` instance).
       */
@@ -83,12 +82,12 @@ final case class CodeAct[I, O](
 ) extends InterpretedTrajectoryAgent[I, CodeAct.WithReasoning[O], CodeAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
-  type Out = CodeAct.WithReasoning[O]
+  type Out                  = CodeAct.WithReasoning[O]
   override type ModelStep   = CodeAct.CodeStep
   override type Action      = String
   override type Observation = String
 
-  override val moduleName: String = "code_act"
+  override val moduleName: String         = "code_act"
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   /** Interpreter for CodeAct's action language. Python exceptions and runtime-interpreter failures become recoverable
@@ -125,14 +124,14 @@ final case class CodeAct[I, O](
 
   /** The per-iteration code-generator predict, built once from [[codeActSignature]] (mirrors Python's `self.code =
     * Predict(...)` in `__init__`) — a TYPED `Predict[(I, String), CodeStep]`: the base input plus the rendered
-    * trajectory in, a leniently-decoded [[CodeAct.CodeStep]] out (see [[CodeAct.codeStepShape]]). Addressable +
-    * tunable via [[codeActPredictOverride]]; `forward` uses this member rather than rebuilding a local each call.
+    * trajectory in, a leniently-decoded [[CodeAct.CodeStep]] out (see [[CodeAct.codeStepShape]]). Addressable + tunable
+    * via [[codeActPredictOverride]]; `forward` uses this member rather than rebuilding a local each call.
     */
   val codeActPredict: Predict[(I, String), CodeAct.CodeStep] =
     codeActPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name       = baseSignature.name,
-        layout     = codeActSignature,
+        name = baseSignature.name,
+        layout = codeActSignature,
         inputShape =
           InputAugmentation.appendedStringInput(baseSignature.inputShape, CodeAct.loopTrajectoryField, "CodeAct"),
         outputShape = CodeAct.codeStepShape
@@ -147,7 +146,7 @@ final case class CodeAct[I, O](
   override val extractorPredict: Predict[(I, String), CodeAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name   = baseSignature.name,
+        name = baseSignature.name,
         layout = ChainOfThought.augmentLayout(extractorSignature),
         inputShape = InputAugmentation
           .appendedStringInput(baseSignature.inputShape, CodeAct.extractTrajectoryField, "CodeAct extractor"),
@@ -167,10 +166,10 @@ final case class CodeAct[I, O](
     * description, argument schema).
     */
   private def buildInstructions: String =
-    val inputs = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
-    val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
+    val inputs      = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
+    val outputs     = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
     val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
-    val library =
+    val library     =
       if tools.isEmpty then "You have access to the Python Standard Library."
       else "You have access to the Python Standard Library and the following functions:"
     val toolLines = tools.zipWithIndex.map { case (tool, idx) => s"(${idx + 1}) ${CodeAct.renderTool(tool)}" }
@@ -259,34 +258,34 @@ object CodeAct:
 
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
-    name        = "trajectory",
-    typeRef     = TypeRef.string,
+    name = "trajectory",
+    typeRef = TypeRef.string,
     description = Some("History of generated code and observations so far.")
   )
   private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
-    name        = "trajectory",
-    typeRef     = TypeRef.string,
+    name = "trajectory",
+    typeRef = TypeRef.string,
     description = Some("History of generated code and observations.")
   )
   private[programs] val generatedCodeField: FieldSpec = FieldSpec(
-    name        = "generated_code",
-    typeRef     = TypeRef.string,
+    name = "generated_code",
+    typeRef = TypeRef.string,
     description = Some("Python code that, when executed, produces output relevant to answering the question.")
   )
   private[programs] val finishedField: FieldSpec = FieldSpec(
-    name        = "finished",
-    typeRef     = TypeRef.bool,
+    name = "finished",
+    typeRef = TypeRef.bool,
     description = Some("Set to true once enough information has been collected to produce the final outputs.")
   )
 
   /** The typed output of one codeact loop step. */
   final case class CodeStep(generatedCode: String, finished: Boolean)
 
-  /** Hand-written LENIENT output shape mirroring the prior dynamic reads EXACTLY: a missing `generated_code`
-    * renders as "" (the parse-failure path records the observation and continues), and `finished` accepts a
-    * Boolean primitive or the string "true" (case-insensitive), anything else — including absence — reading as
-    * `false`. Decode never fails; `jsonSchemaString` stays `None` for parity with the prior direct
-    * `DynamicPredict` construction. */
+  /** Hand-written LENIENT output shape mirroring the prior dynamic reads EXACTLY: a missing `generated_code` renders as
+    * "" (the parse-failure path records the observation and continues), and `finished` accepts a Boolean primitive or
+    * the string "true" (case-insensitive), anything else — including absence — reading as `false`. Decode never fails;
+    * `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
+    */
   private[programs] val codeStepShape: Shape[CodeStep] = new Shape[CodeStep]:
     val fieldSpecs: Vector[FieldSpec] = Vector(generatedCodeField, finishedField)
 
@@ -303,7 +302,7 @@ object CodeAct:
         case _                                                       => false
       Right(CodeStep(
         generatedCode = DynamicValues.recordGet(raw, "generated_code").map(DynamicValues.renderText).getOrElse(""),
-        finished      = finished
+        finished = finished
       ))
 
   /** Bridge [[dspy4s.programs.contracts.ToolFunction]]s into [[dspy4s.core.contracts.SandboxTool]]s so the LM's

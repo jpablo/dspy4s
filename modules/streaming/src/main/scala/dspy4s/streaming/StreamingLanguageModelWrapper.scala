@@ -24,31 +24,24 @@ import dspy4s.streaming.contracts.TokenEvent
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
-/** Wraps a [[StreamingLanguageModel]] so the runtime can siphon streamed text
-  * into a [[StreamingQueue]] while still returning a fully assembled
-  * [[LmResponse]] to non-streaming callers.
+/** Wraps a [[StreamingLanguageModel]] so the runtime can siphon streamed text into a [[StreamingQueue]] while still
+  * returning a fully assembled [[LmResponse]] to non-streaming callers.
   *
-  * Per-call signature routing: on each `call()` / `stream()` the wrapper reads
-  * the innermost [[ActivePredictContext]] entry. That entry carries the active
-  * predictor's name (used as `TokenEvent.predictName`) and signature (used to
-  * build a fresh [[AdapterStreamingState]] from the configured adapter). This
-  * lets a single Streamify wrap a program that internally invokes multiple
-  * prediction leaves with different signatures, whether typed `Predict`s or
-  * `DynamicPredict`s — each LM call routes to per-field chunks under the correct
-  * signature.
+  * Per-call signature routing: on each `call()` / `stream()` the wrapper reads the innermost [[ActivePredictContext]]
+  * entry. That entry carries the active predictor's name (used as `TokenEvent.predictName`) and signature (used to
+  * build a fresh [[AdapterStreamingState]] from the configured adapter). This lets a single Streamify wrap a program
+  * that internally invokes multiple prediction leaves with different signatures, whether typed `Predict`s or
+  * `DynamicPredict`s — each LM call routes to per-field chunks under the correct signature.
   *
-  * When there is no active predict context (e.g. the LM is called outside any
-  * `PredictEngine.execute`, or no adapter is configured), the wrapper falls back to
-  * raw-token emission with an empty `fieldName`.
+  * When there is no active predict context (e.g. the LM is called outside any `PredictEngine.execute`, or no adapter is
+  * configured), the wrapper falls back to raw-token emission with an empty `fieldName`.
   *
-  * Listener filtering: when `listeners` is non-empty, only field chunks whose
-  * `(predictName, fieldName)` match at least one listener are emitted.
+  * Listener filtering: when `listeners` is non-empty, only field chunks whose `(predictName, fieldName)` match at least
+  * one listener are emitted.
   *
-  * `allowReuse = false` semantics: a non-reuse listener fires for the chunks
-  * of a single field cycle (up to and including the chunk that carries
-  * `isLastChunk = true`) and then goes silent for the remainder of the
-  * `streamify` invocation. The mutable set [[firedListeners]] holds the
-  * indices that have closed at least one field cycle.
+  * `allowReuse = false` semantics: a non-reuse listener fires for the chunks of a single field cycle (up to and
+  * including the chunk that carries `isLastChunk = true`) and then goes silent for the remainder of the `streamify`
+  * invocation. The mutable set [[firedListeners]] holds the indices that have closed at least one field cycle.
   */
 final class StreamingLanguageModelWrapper private (
     delegate: StreamingLanguageModel,
@@ -59,15 +52,15 @@ final class StreamingLanguageModelWrapper private (
 
   private val firedListeners: mutable.Set[Int] = mutable.Set.empty
 
-  override val id: String = delegate.id
+  override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    val ctx = activeContext()
-    val text = new StringBuilder
+    val ctx                        = activeContext()
+    val text                       = new StringBuilder
     var lastUsage: Option[LmUsage] = None
-    val toolDeltas = mutable.ArrayBuffer.empty[LmToolCallDelta]
-    val chunks = delegate.stream(request)
+    val toolDeltas                 = mutable.ArrayBuffer.empty[LmToolCallDelta]
+    val chunks                     = delegate.stream(request)
     try
       // Providers reify transport/HTTP failures into a terminal chunk with `finishReason = "error"` and the
       // message under `raw` (see OpenAiLanguageModel.stream). Surface that as a Left instead of folding it
@@ -83,7 +76,7 @@ final class StreamingLanguageModelWrapper private (
       }
       streamError match
         case Some(message) => Left(RuntimeError("streaming_lm", message))
-        case None =>
+        case None          =>
           flush(ctx)
           val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
           Right(
@@ -109,16 +102,17 @@ final class StreamingLanguageModelWrapper private (
       chunk
     }
 
-  /** Bundles per-LM-call state. Resolved once at the start of each `call()`
-    * / `stream()` so the same predict context governs every chunk in that
-    * invocation, even if nested context pushes happen meanwhile. */
+  /** Bundles per-LM-call state. Resolved once at the start of each `call()` / `stream()` so the same predict context
+    * governs every chunk in that invocation, even if nested context pushes happen meanwhile.
+    */
   private final case class CallContext(
       predictName: String,
       state: Option[AdapterStreamingState]
   )
 
-  /** Extract the provider's error message from a reified error chunk's `raw` payload
-    * (`Map("error" -> message)` by convention). */
+  /** Extract the provider's error message from a reified error chunk's `raw` payload (`Map("error" -> message)` by
+    * convention).
+    */
   private def errorMessage(raw: Option[Any]): String =
     raw match
       case Some(m: Map[?, ?]) =>

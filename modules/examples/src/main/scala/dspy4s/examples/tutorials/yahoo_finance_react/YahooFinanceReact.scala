@@ -1,18 +1,16 @@
-/**
- * Financial Analysis with DSPy ReAct and Yahoo Finance News
- *
- * Source:   docs/docs/tutorials/yahoo_finance_react/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/yahoo_finance_react/index.md
- * Status:   translated (the DSPy core: the typed tools + the ReAct agent, snippets 2/3/4). The live
- *           market data is out of scope — there is no `yfinance` / LangChain bridge in dspy4s, so the
- *           tools return illustrative static quotes instead of fetching, and the LangChain
- *           `YahooFinanceNewsTool` → `Tool.from_langchain` conversion (snippet 1) is omitted.
- *
- * Python passes plain `def`s with docstrings as ReAct tools; the dspy4s analogue is
- * `ToolFunction.fromMethod` over an `@description`-annotated typed method (the macro derives the name,
- * description, and argument schema). A `dict`/`json.dumps` return becomes a `Schema`-deriving case class
- * (or `List` of them), lifted to the tool result automatically.
- */
+/** Financial Analysis with DSPy ReAct and Yahoo Finance News
+  *
+  * Source: docs/docs/tutorials/yahoo_finance_react/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/yahoo_finance_react/index.md Status: translated
+  * (the DSPy core: the typed tools + the ReAct agent, snippets 2/3/4). The live market data is out of scope — there is
+  * no `yfinance` / LangChain bridge in dspy4s, so the tools return illustrative static quotes instead of fetching, and
+  * the LangChain `YahooFinanceNewsTool` → `Tool.from_langchain` conversion (snippet 1) is omitted.
+  *
+  * Python passes plain `def`s with docstrings as ReAct tools; the dspy4s analogue is `ToolFunction.fromMethod` over an
+  * `@description`-annotated typed method (the macro derives the name, description, and argument schema). A
+  * `dict`/`json.dumps` return becomes a `Schema`-deriving case class (or `List` of them), lifted to the tool result
+  * automatically.
+  */
 package dspy4s.examples.tutorials.yahoo_finance_react
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}

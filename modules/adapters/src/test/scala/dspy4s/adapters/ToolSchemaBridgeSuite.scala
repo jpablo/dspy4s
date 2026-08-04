@@ -30,7 +30,12 @@ class ToolSchemaBridgeSuite extends FunSuite:
         name = "search",
         description = Some("Search documents"),
         parameters = Vector(
-          ToolParameterSpec(name = "query", typeRef = TypeRef.string, description = Some("Search query"), required = true),
+          ToolParameterSpec(
+            name = "query",
+            typeRef = TypeRef.string,
+            description = Some("Search query"),
+            required = true
+          ),
           ToolParameterSpec(name = "top_k", typeRef = TypeRef.int, description = Some("Result count"), required = false)
         )
       )
@@ -39,10 +44,10 @@ class ToolSchemaBridgeSuite extends FunSuite:
     val rendered = ToolSchemaBridge.toOpenAiTools(tools)
 
     assertEquals(rendered.size, 1)
-    val function = rendered.head("function").asInstanceOf[Map[String, Any]]
+    val function   = rendered.head("function").asInstanceOf[Map[String, Any]]
     val parameters = function("parameters").asInstanceOf[Map[String, Any]]
     val properties = parameters("properties").asInstanceOf[Map[String, Map[String, String]]]
-    val required = parameters("required").asInstanceOf[Vector[String]]
+    val required   = parameters("required").asInstanceOf[Vector[String]]
 
     assertEquals(function("name"), "search")
     assertEquals(properties("query")("type"), "string")
@@ -56,7 +61,12 @@ class ToolSchemaBridgeSuite extends FunSuite:
         name = "search",
         description = Some("Search documents"),
         parameters = Vector(
-          ToolParameterSpec(name = "query", typeRef = TypeRef.string, description = Some("Search query"), required = true),
+          ToolParameterSpec(
+            name = "query",
+            typeRef = TypeRef.string,
+            description = Some("Search query"),
+            required = true
+          ),
           ToolParameterSpec(name = "top_k", typeRef = TypeRef.int, description = Some("Result count"), required = false)
         )
       )

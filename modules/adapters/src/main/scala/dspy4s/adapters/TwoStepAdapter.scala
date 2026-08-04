@@ -17,16 +17,17 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 
-/** Two-stage adapter (port of Python dspy's `TwoStepAdapter`): the MAIN LM (resolved from the ambient
-  * `RuntimeContext`, e.g. a reasoning model that struggles with structured output) is prompted in plain natural
-  * language; then a second, usually smaller, `extractionModel` converts that free-form completion into the
-  * signature's structured output fields via a `ChatAdapter` over an on-the-fly `text -> <output fields>` signature.
+/** Two-stage adapter (port of Python dspy's `TwoStepAdapter`): the MAIN LM (resolved from the ambient `RuntimeContext`,
+  * e.g. a reasoning model that struggles with structured output) is prompted in plain natural language; then a second,
+  * usually smaller, `extractionModel` converts that free-form completion into the signature's structured output fields
+  * via a `ChatAdapter` over an on-the-fly `text -> <output fields>` signature.
   *
   * It fits the single-call `Adapter` shape cleanly: [[format]] builds the natural prompt (the engine's one main-LM
   * call), and [[parse]] — which receives the `RuntimeContext` — performs the extraction call itself.
   *
   * Delta from Python (carried over): the extractor signature is built fresh with no demos, so the extraction step
-  * cannot be optimized/learned (upstream notes the same limitation). */
+  * cannot be optimized/learned (upstream notes the same limitation).
+  */
 final case class TwoStepAdapter(
     extractionModel: LanguageModel,
     name: String = "two_step"
@@ -45,11 +46,11 @@ final case class TwoStepAdapter(
     val chat = ChatAdapter()
     for
       extractorLayout <- buildExtractorLayout(layout)
-      textField = extractorLayout.inputFields.head.name
+      textField  = extractorLayout.inputFields.head.name
       invocation = AdapterInvocation(
-        layout  = extractorLayout,
-        demos   = Vector.empty,
-        inputs  = Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
+        layout = extractorLayout,
+        demos = Vector.empty,
+        inputs = Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
         request = LmRequest(model = extractionModel.id)
       )
       prompt   <- chat.format(invocation)
@@ -58,25 +59,27 @@ final case class TwoStepAdapter(
       parsed   <- chat.parse(extractorLayout, lmOutput)
     yield parsed
 
-  /** The on-the-fly extractor signature: `text -> <the original output fields>`. When the original signature
-    * already has an output field named `text`, the synthetic input is renamed (`_text`, `__text`, ...) —
-    * SignatureLayout.create rejects duplicate names, which would otherwise fail every parse deterministically. */
+  /** The on-the-fly extractor signature: `text -> <the original output fields>`. When the original signature already
+    * has an output field named `text`, the synthetic input is renamed (`_text`, `__text`, ...) — SignatureLayout.create
+    * rejects duplicate names, which would otherwise fail every parse deterministically.
+    */
   private def buildExtractorLayout(layout: SignatureLayout): Either[DspyError, SignatureLayout] =
-    val reserved = layout.outputFields.map(_.name).toSet
+    val reserved  = layout.outputFields.map(_.name).toSet
     val inputName = Iterator.iterate("text")("_" + _).dropWhile(reserved.contains).next()
     val textInput = FieldSpec(
-      name        = inputName,
+      name = inputName,
       description = Some("The text from which to extract the structured output fields")
     )
     SignatureLayout.create(
-      name         = s"${layout.name}Extractor",
-      inputFields  = Vector(textInput),
+      name = s"${layout.name}Extractor",
+      inputFields = Vector(textInput),
       outputFields = layout.outputFields,
       instructions = Some("Extract the structured output fields from the provided text.")
     )
 
   /** Natural-language task description for the main LM: the signature instructions plus the fields the second stage
-    * will extract from the reply (so the model knows what to cover, without imposing a structured format). */
+    * will extract from the reply (so the model knows what to cover, without imposing a structured format).
+    */
   private def taskDescription(layout: SignatureLayout): String =
     val inputs  = layout.inputFields.map(_.name).mkString(", ")
     val outputs = layout.outputFields

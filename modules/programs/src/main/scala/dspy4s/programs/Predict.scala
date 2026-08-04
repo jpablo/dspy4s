@@ -19,8 +19,8 @@ import zio.blocks.schema.DynamicValue
   *      through `signature.outputShape` into a typed `Prediction[O]`; decode failures surface as `Left(DspyError)` from
   *      `apply`, never via lazy field access.
   *
-  * `Predict[I, O]` is a `Module[I, O]` — the typed analog of `dspy.Predict`. It is a *sibling*
-  * of the untyped [[DynamicPredict]] rather than a wrapper around it: both are thin `Module`s over the shared
+  * `Predict[I, O]` is a `Module[I, O]` — the typed analog of `dspy.Predict`. It is a *sibling* of the untyped
+  * [[DynamicPredict]] rather than a wrapper around it: both are thin `Module`s over the shared
   * [[dspy4s.programs.runtime.PredictEngine PredictEngine]]. So a typed call emits exactly one module event (named by
   * this `Predict`), and the whole encode → LM call → decode runs inside `Module.apply`'s lifecycle wrapping — adapter
   * selection, caching, retries, callbacks, and trace/history are all bracketed around the typed boundary. The untyped
@@ -52,14 +52,14 @@ final case class Predict[I, O](
 
   // The same engine `DynamicPredict` builds; `Predict` adds only the typed encode/decode around it.
   private val engine = PredictEngine(
-    layout           = signature.layout,
-    demos            = demos,
-    moduleName       = moduleName,
-    runtime          = runtime,
+    layout = signature.layout,
+    demos = demos,
+    moduleName = moduleName,
+    runtime = runtime,
     outputJsonSchema = signature.outputShape.jsonSchemaString,
-    config           = config,
-    lm               = lm,
-    tools            = tools
+    config = config,
+    lm = lm,
+    tools = tools
   )
 
   /** Pin a bound LM to this predictor (immutable `set_lm`): returns a copy that resolves to `model` instead of the
@@ -104,7 +104,7 @@ final case class Predict[I, O](
     if missing.nonEmpty then
       Left(NotFoundError(
         resource = "program_input",
-        message  = s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
+        message = s"Missing required inputs for '${signature.name}': ${missing.toVector.sorted.mkString(", ")}"
       ))
     else
       engine

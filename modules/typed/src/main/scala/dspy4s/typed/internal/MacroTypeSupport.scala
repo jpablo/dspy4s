@@ -5,7 +5,9 @@ import scala.quoted.*
 /** Quote-dependent tuple construction and inspection shared by the typed signature macros. */
 private[typed] object MacroTypeSupport:
 
-  private def sameSymbol(using quotes: Quotes)(
+  private def sameSymbol(using
+      quotes: Quotes
+  )(
       left: quotes.reflect.Symbol,
       right: quotes.reflect.Symbol
   ): Boolean =
@@ -18,7 +20,9 @@ private[typed] object MacroTypeSupport:
       TypeRepr.of[*:].appliedTo(List(head, tail))
     }
 
-  def namedTupleType(using quotes: Quotes)(
+  def namedTupleType(using
+      quotes: Quotes
+  )(
       items: List[(String, quotes.reflect.TypeRepr)]
   ): quotes.reflect.TypeRepr =
     import quotes.reflect.*
@@ -34,10 +38,12 @@ private[typed] object MacroTypeSupport:
       case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") =>
         args
       case other if other =:= TypeRepr.of[EmptyTuple] => Nil
-      case other =>
+      case other                                      =>
         report.errorAndAbort(s"Expected tuple type, got: ${other.show}")
 
-  def namedTupleParts(using quotes: Quotes)(
+  def namedTupleParts(using
+      quotes: Quotes
+  )(
       tpe: quotes.reflect.TypeRepr
   ): Option[List[(String, quotes.reflect.TypeRepr)]] =
     import quotes.reflect.*
@@ -46,13 +52,15 @@ private[typed] object MacroTypeSupport:
           if sameSymbol(tc.typeSymbol, TypeRepr.of[NamedTuple.NamedTuple].typeSymbol) =>
         val nameParts = tupleParts(names).map {
           case ConstantType(StringConstant(name)) => name
-          case other =>
+          case other                              =>
             report.errorAndAbort(s"Expected named-tuple label, got: ${other.show}")
         }
         Some(nameParts.zip(tupleParts(values)))
       case _ => None
 
-  def unnamedTupleParts(using quotes: Quotes)(
+  def unnamedTupleParts(using
+      quotes: Quotes
+  )(
       tpe: quotes.reflect.TypeRepr
   ): Option[List[(String, quotes.reflect.TypeRepr)]] =
     import quotes.reflect.*

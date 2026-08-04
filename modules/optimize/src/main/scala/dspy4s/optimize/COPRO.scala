@@ -57,9 +57,9 @@ final case class COPROConfig(
   *      current instruction and its signature's field names. Distinct candidates are sampled by varying the call's
   *      `rolloutId` (and temperature in `config`), mirroring upstream's `n = breadth`. The predictor's own current
   *      instruction is added as the `breadth`-th candidate (matches upstream). 2. Evaluate the WHOLE program with each
-  *      candidate instruction applied to THIS predictor (via [[OptimizableTraversal.replace]]) on the valset (falling back to the
-  *      trainset) using [[dspy4s.evaluate.Evaluate]] + the metric. 3. Keep the best-scoring instruction for this
-  *      predictor, then run `depth - 1` further rounds that refine using the accumulated `(instruction, score)`
+  *      candidate instruction applied to THIS predictor (via [[OptimizableTraversal.replace]]) on the valset (falling
+  *      back to the trainset) using [[dspy4s.evaluate.Evaluate]] + the metric. 3. Keep the best-scoring instruction for
+  *      this predictor, then run `depth - 1` further rounds that refine using the accumulated `(instruction, score)`
   *      attempts (the `GenerateInstructionGivenAttempts` analogue). 4. Lock in the predictor's best instruction before
   *      moving to the next predictor (greedy coordinate ascent).
   *
@@ -83,8 +83,8 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
 
   override val name: String = "copro"
 
-  private val ps: OptimizableTraversal[P]  = summon[OptimizableTraversal[P]]
-  private val runner: ProgramRunner[P] = summon[ProgramRunner[P]]
+  private val ps: OptimizableTraversal[P] = summon[OptimizableTraversal[P]]
+  private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
       student: P,
@@ -99,7 +99,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
       Right(OptimizerSupport.noOptimizableLeavesReport(student))
     else
       // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
-      var current      = student
+      var current       = student
       val allCandidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
 
       (0 until leafCount).foreach { idx =>
@@ -117,8 +117,8 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
           bestProgram = current,
           candidates = sorted,
           metadata = Map(
-            "num_candidates" -> sorted.size,
-            "best_score"     -> finalScore,
+            "num_candidates"     -> sorted.size,
+            "best_score"         -> finalScore,
             "optimizable_leaves" -> leafCount
           )
         )
@@ -130,13 +130,13 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
   private def optimizeLeaf(program: P, idx: Int, evalset: Vector[Example])(using
       RuntimeContext
   ): (P, Vector[CandidateProgram[P]]) =
-    val leaf              = ps.inspect(program)(idx)
-    val baseInstruction   = leaf.layout.instructions.getOrElse("")
-    val fieldNames        = leaf.layout.fields.map(_.name)
+    val leaf            = ps.inspect(program)(idx)
+    val baseInstruction = leaf.layout.instructions.getOrElse("")
+    val fieldNames      = leaf.layout.fields.map(_.name)
 
     // (instruction -> best score) seen for this leaf, plus the whole-program candidates emitted.
-    val evaluated         = mutable.LinkedHashMap.empty[String, Double]
-    val candidates        = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+    val evaluated  = mutable.LinkedHashMap.empty[String, Double]
+    val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
 
     def scoreCandidate(instruction: String): P =
       val applied = OptimizerSupport.applyInstruction(program, idx, instruction)
@@ -218,7 +218,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
         attempts.zipWithIndex
           .map { case ((instr, score), i) => s"Instruction #${i + 1}: $instr\nResulting Score #${i + 1}: $score" }
           .mkString("\n")
-      val fieldsHint = fieldNames.mkString(", ")
+      val fieldsHint                                                   = fieldNames.mkString(", ")
       val baseInputs: Vector[(String, zio.blocks.schema.DynamicValue)] =
         Vector("basic_instruction" := s"$baseInstruction (fields: $fieldsHint)") ++
           (if withAttempts then Vector("attempted_instructions" := attemptsText) else Vector.empty)
@@ -231,11 +231,11 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
       // leaves (identical baseInstruction/fields) from drawing the SAME window.
       val roundSalt = round * config.breadth
       val base      = OptimizerSupport.seedBase(config.seed) + leafIdx * 10000 + roundSalt
-      val results = (0 until count).iterator.flatMap { i =>
+      val results   = (0 until count).iterator.flatMap { i =>
         val rolloutId = base + i
-        val call = ProgramCall(
+        val call      = ProgramCall(
           input = DynamicValues.recordFromEntries(baseInputs),
-          config    = DynamicValues.recordFromEntries(Vector("temperature" := config.initTemperature)),
+          config = DynamicValues.recordFromEntries(Vector("temperature" := config.initTemperature)),
           rolloutId = Some(rolloutId)
         )
         gen(call) match

@@ -1,14 +1,13 @@
-/**
- * Modules
- *
- * Source:   docs/docs/learn/programming/modules.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/modules.md
- * Status:   translated (portable snippets; multi-completion `n=5` access noted as unsupported)
- *
- * Translation rule (see Signatures.scala): string-DSL Python signatures become typed
- * `Signature.fromString("…")` (parsed to a NamedTuple at compile time); each snippet is a
- * self-contained example object exposing a `call(...)` that wires the program.
- */
+/** Modules
+  *
+  * Source: docs/docs/learn/programming/modules.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/modules.md Status: translated (portable
+  * snippets; multi-completion `n=5` access noted as unsupported)
+  *
+  * Translation rule (see Signatures.scala): string-DSL Python signatures become typed `Signature.fromString("…")`
+  * (parsed to a NamedTuple at compile time); each snippet is a self-contained example object exposing a `call(...)`
+  * that wires the program.
+  */
 package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}

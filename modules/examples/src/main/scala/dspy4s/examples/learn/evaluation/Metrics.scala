@@ -1,18 +1,16 @@
-/**
- * Metrics
- *
- * Source:   docs/docs/learn/evaluation/metrics.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/metrics.md
- * Status:   translated (function metrics + Evaluate, snippets 1/3/4/5; LLM-as-judge, snippet 6). Context-aware
- *           metrics (2) and trace-over-retrieval-hops (7) remain noted (dspy4s has no retriever). The
- *           LLM-as-judge metric (6) is now runnable — `Metric.score` carries `(using RuntimeContext)`
- *           (PORT_GAPS G-6), so a metric can run a judge over an LM; the ported `SemanticF1` /
- *           `CompleteAndGrounded` (`dspy4s.evaluate.metrics`) are concrete examples, exercised by
- *           `metricsJudgeMain` below.
- *
- * dspy4s metrics implement `Metric` (`score(example, prediction, trace) => Either[DspyError, Double]`).
- * `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain function.
- */
+/** Metrics
+  *
+  * Source: docs/docs/learn/evaluation/metrics.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/metrics.md Status: translated (function
+  * metrics + Evaluate, snippets 1/3/4/5; LLM-as-judge, snippet 6). Context-aware metrics (2) and
+  * trace-over-retrieval-hops (7) remain noted (dspy4s has no retriever). The LLM-as-judge metric (6) is now runnable —
+  * `Metric.score` carries `(using RuntimeContext)` (PORT_GAPS G-6), so a metric can run a judge over an LM; the ported
+  * `SemanticF1` / `CompleteAndGrounded` (`dspy4s.evaluate.metrics`) are concrete examples, exercised by
+  * `metricsJudgeMain` below.
+  *
+  * dspy4s metrics implement `Metric` (`score(example, prediction, trace) => Either[DspyError, Double]`).
+  * `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain function.
+  */
 package dspy4s.examples.learn.evaluation
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, ThreadCount, :=}
@@ -30,9 +28,9 @@ import dspy4s.typed.{InputField, OutputField, Spec}
 // |     assessment_question = dspy.InputField()
 // |     assessment_answer: bool = dspy.OutputField()
 trait Assess extends Spec:
-  def assessed_text:       InputField[String]
+  def assessed_text: InputField[String]
   def assessment_question: InputField[String]
-  def assessment_answer:   OutputField[Boolean]
+  def assessment_answer: OutputField[Boolean]
 
 object Metrics:
 
@@ -58,10 +56,13 @@ object Metrics:
   // half + the eval-vs-bootstrap branch (Python's `trace is None`) carry over to the 3-arg form
   // (`trace.isEmpty` during evaluation/optimization; non-empty during bootstrapping):
   val validateAnswerOnly: FunctionMetric =
-    new FunctionMetric("validate_answer_only", { (example, pred, _) =>
-      val answerMatch = exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
-      Right(if answerMatch then 1.0 else 0.0)
-    })
+    new FunctionMetric(
+      "validate_answer_only",
+      { (example, pred, _) =>
+        val answerMatch = exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
+        Right(if answerMatch then 1.0 else 0.0)
+      }
+    )
 
   // ── Snippet 3 (lines 62–68) — a manual evaluation loop ──
   // | scores = []
@@ -83,11 +84,11 @@ object Metrics:
   // --8<-- [start:metric-evaluate]
   def evaluator(devset: Vector[Example], metric: Metric): Evaluate =
     new Evaluate(EvaluateConfig(
-      devset          = devset,
-      metric          = metric,
-      numThreads      = Some(ThreadCount(1)),
+      devset = devset,
+      metric = metric,
+      numThreads = Some(ThreadCount(1)),
       displayProgress = true,
-      displayTable    = Right(5)
+      displayTable = Right(5)
     ))
   // --8<-- [end:metric-evaluate]
   // Launch: `evaluator(devset, metric)()(program)(using RuntimeContext)` — the `using` is the
@@ -113,8 +114,8 @@ object Metrics:
 
 // Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.learn.evaluation.metricsMain"
 @main def metricsMain(): Unit =
-  given RuntimeContext = RuntimeContext()
-  val ex      = Metrics.example("What is the capital of France?", "Paris")
+  given RuntimeContext                    = RuntimeContext()
+  val ex                                  = Metrics.example("What is the capital of France?", "Paris")
   def pred(answer: String): RawPrediction =
     RawPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))
   println("validate_answer('paris'): " + Metrics.validateAnswer.score(ex, pred("paris")))
@@ -126,8 +127,10 @@ object Metrics:
   // SemanticF1 defaults: question on the example, ground truth + system response in the `response` field.
   val gold = Example("question" := "What is the capital of France?", "response" := "Paris is the capital of France.")
     .withInputs(Set("question"))
-  val pred = RawPrediction(values = DynamicValues.recordFromEntries(Seq(
-    "response" -> DynamicValues.fromAny("The capital of France is Paris.")
-  )))
+  val pred = RawPrediction(values =
+    DynamicValues.recordFromEntries(Seq(
+      "response" -> DynamicValues.fromAny("The capital of France is Paris.")
+    ))
+  )
   println("SemanticF1 score: " + Metrics.semanticF1.score(gold, pred))
 }

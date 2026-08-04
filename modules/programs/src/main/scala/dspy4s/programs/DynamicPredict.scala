@@ -18,8 +18,8 @@ import zio.blocks.schema.DynamicValue
   * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (input/output cohorts and wire types known only at
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
   * `Prediction[DynamicValue.Record]`. Its semantic output is the parsed value record; its `raw` field retains the
-  * [[dspy4s.core.data.RawPrediction RawPrediction]] with completions and LM usage. The actual execution lives
-  * in [[dspy4s.programs.runtime.PredictEngine PredictEngine]]; [[DynamicModule]] lifts that engine result through
+  * [[dspy4s.core.data.RawPrediction RawPrediction]] with completions and LM usage. The actual execution lives in
+  * [[dspy4s.programs.runtime.PredictEngine PredictEngine]]; [[DynamicModule]] lifts that engine result through
   * `Prediction.dynamic`, and the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and
   * history. Mirrors DSPy's `dspy.Predict` at the dynamic boundary.
   *
@@ -32,9 +32,9 @@ import zio.blocks.schema.DynamicValue
   *     [[ProgramOfThought]], [[MultiChainComparison]], and the internal passes in [[ReAct]];
   *   - optimizer helper generations whose proposed signature exists only as a [[SignatureLayout]].
   *
-  * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it
-  * mints fresh input/output types with their decoder, so the program composes and optimizes through the same
-  * machinery as statically typed programs. `DynamicPredict` is the untyped substrate those helpers run on.
+  * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it mints
+  * fresh input/output types with their decoder, so the program composes and optimizes through the same machinery as
+  * statically typed programs. `DynamicPredict` is the untyped substrate those helpers run on.
   *
   * @param layout
   *   the signature whose input/output fields drive encoding, prompting, and parsing

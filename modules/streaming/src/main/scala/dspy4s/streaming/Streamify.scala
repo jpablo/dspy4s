@@ -17,17 +17,14 @@ import scala.util.control.NonFatal
 
 object Streamify:
 
-  /** Wrap a program in a streaming envelope: each invocation of the returned
-    * function runs the program on a daemon producer thread and yields a
-    * [[ClosableIterator]] of [[StreamEvent]]s.
+  /** Wrap a program in a streaming envelope: each invocation of the returned function runs the program on a daemon
+    * producer thread and yields a [[ClosableIterator]] of [[StreamEvent]]s.
     *
-    * Per-LM-call signature routing happens inside the wrapped
-    * [[StreamingLanguageModel]]: it consults [[dspy4s.core.runtime.ActivePredictContext]]
-    * at the start of each `call()` to pick the active predictor's signature
-    * and name, then builds a fresh adapter state machine for that signature.
-    * As a result, programs that internally invoke multiple `DynamicPredict`s with
-    * different signatures stream per-field tokens correctly under each
-    * predictor's own framing.
+    * Per-LM-call signature routing happens inside the wrapped [[StreamingLanguageModel]]: it consults
+    * [[dspy4s.core.runtime.ActivePredictContext]] at the start of each `call()` to pick the active predictor's
+    * signature and name, then builds a fresh adapter state machine for that signature. As a result, programs that
+    * internally invoke multiple `DynamicPredict`s with different signatures stream per-field tokens correctly under
+    * each predictor's own framing.
     */
   def streamify[P](
       program: P,
@@ -36,7 +33,10 @@ object Streamify:
       includeFinalPrediction: Boolean = true,
       queueCapacity: Int = 64,
       warningSink: String => Unit = msg => System.err.println(s"[dspy4s.streamify] $msg")
-  )(using outerContext: RuntimeContext, streamable: Streamable[P]): DynamicValue.Record => ClosableIterator[StreamEvent] =
+  )(using
+      outerContext: RuntimeContext,
+      streamable: Streamable[P]
+  ): DynamicValue.Record => ClosableIterator[StreamEvent] =
     // Validate listener field names against the program structure as far as
     // we can statically see it. This is dspy4s's equivalent of Python's
     // `find_predictor_for_stream_listeners`: warn (don't fail) if a listener
@@ -46,14 +46,14 @@ object Streamify:
     validateListeners(streamable.knownSignatures(program), streamListeners, warningSink)
 
     inputs =>
-      val queue = StreamingQueue[StreamEvent](queueCapacity)
+      val queue    = StreamingQueue[StreamEvent](queueCapacity)
       val captured = ContextPropagation.captureAll
 
       val provider = statusMessageProvider.getOrElse(StatusMessageProvider.default)
       val callback = new StatusStreamingCallback(provider, queue)
 
       val currentLm = outerContext.lm
-      val adapter = outerContext.adapter.collect { case a: Adapter => a }
+      val adapter   = outerContext.adapter.collect { case a: Adapter => a }
 
       val wrappedLm = currentLm.collect { case slm: StreamingLanguageModel =>
         StreamingLanguageModelWrapper(
@@ -104,11 +104,11 @@ object Streamify:
 
       queue.asIterator
 
-  /** Walk the program tree, collect every DynamicPredict-derived signature we can
-    * statically see, and warn for each listener whose `signatureFieldName`
-    * does not appear in any of them. Composite programs that aren't one of
-    * the well-known shapes contribute nothing — for those, validation is
-    * skipped (matches Python's behavior of "look as far as you can"). */
+  /** Walk the program tree, collect every DynamicPredict-derived signature we can statically see, and warn for each
+    * listener whose `signatureFieldName` does not appear in any of them. Composite programs that aren't one of the
+    * well-known shapes contribute nothing — for those, validation is skipped (matches Python's behavior of "look as far
+    * as you can").
+    */
   private def validateListeners(
       knownSignatures: Vector[(String, SignatureLayout)],
       listeners: Vector[StreamListener],
@@ -116,7 +116,7 @@ object Streamify:
   ): Unit =
     if listeners.isEmpty then return
     if knownSignatures.isEmpty then return // opaque program; skip
-    val knownFields: Set[String] = knownSignatures.flatMap(_._2.outputFields.map(_.name)).toSet
+    val knownFields: Set[String]       = knownSignatures.flatMap(_._2.outputFields.map(_.name)).toSet
     val knownPredictNames: Set[String] = knownSignatures.map(_._1).toSet
     listeners.foreach { listener =>
       if !knownFields.contains(listener.signatureFieldName) then

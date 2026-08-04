@@ -9,27 +9,22 @@ import scala.util.control.NonFatal
 
 /** Streaming state machine for [[JSONAdapter]] output.
   *
-  * Parses a streamed top-level JSON object character by character and emits
-  * per-field value fragments as they arrive. Behaviour:
+  * Parses a streamed top-level JSON object character by character and emits per-field value fragments as they arrive.
+  * Behaviour:
   *
-  *   - Any preamble before the first `{` is skipped, so fenced ```json blocks
-  *     are tolerated.
-  *   - String values are emitted with their escape sequences decoded
-  *     (`\n`, `\t`, `\"`, `\\`, `\/`, `\uXXXX`, …). The surrounding quotes
-  *     are stripped.
-  *   - Non-string scalars (numbers, booleans, `null`) emit their literal
-  *     textual form, trimmed of surrounding whitespace at value boundaries.
-  *   - Nested object / array values emit the raw sub-document, tracking
-  *     brace / bracket nesting and string state so internal `{` or `,`
-  *     characters do not terminate the value early.
-  *   - Keys not present in the signature's output fields are parsed but
-  *     produce no [[FieldChunk]]s.
-  *   - `finish()` flushes any in-progress field with `isLast = true` —
-  *     useful when the model stops mid-value or omits the closing brace.
+  *   - Any preamble before the first `{` is skipped, so fenced ```json blocks are tolerated.
+  *   - String values are emitted with their escape sequences decoded (`\n`, `\t`, `\"`, `\\`, `\/`, `\uXXXX`, …). The
+  *     surrounding quotes are stripped.
+  *   - Non-string scalars (numbers, booleans, `null`) emit their literal textual form, trimmed of surrounding
+  *     whitespace at value boundaries.
+  *   - Nested object / array values emit the raw sub-document, tracking brace / bracket nesting and string state so
+  *     internal `{` or `,` characters do not terminate the value early.
+  *   - Keys not present in the signature's output fields are parsed but produce no [[FieldChunk]]s.
+  *   - `finish()` flushes any in-progress field with `isLast = true` — useful when the model stops mid-value or omits
+  *     the closing brace.
   *
-  * Designed for incremental input: every receive boundary is safe — partial
-  * `\uXXXX` escapes, half-buffered keys, and mid-value pauses all resume
-  * cleanly on the next call.
+  * Designed for incremental input: every receive boundary is safe — partial `\uXXXX` escapes, half-buffered keys, and
+  * mid-value pauses all resume cleanly on the next call.
   */
 final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
@@ -39,25 +34,25 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
 
   import Phase.*
 
-  private var phase: Phase = PreObj
-  private val keyBuilder = new StringBuilder
-  private var currentKey: String = ""
-  private val contentBuffer = new StringBuilder
+  private var phase: Phase             = PreObj
+  private val keyBuilder               = new StringBuilder
+  private var currentKey: String       = ""
+  private val contentBuffer            = new StringBuilder
   private var currentIsString: Boolean = false
 
   // String-value sub-state.
   private var stringEscape: Boolean = false
   private var unicodeRemaining: Int = 0
-  private val unicodeBuf = new StringBuilder
+  private val unicodeBuf            = new StringBuilder
 
   // Other-value sub-state.
-  private var otherDepth: Int = 0
-  private var otherInString: Boolean = false
+  private var otherDepth: Int            = 0
+  private var otherInString: Boolean     = false
   private var otherStringEscape: Boolean = false
 
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
-    var i = 0
+    var i   = 0
     while i < delta.length do
       processChar(delta.charAt(i), out)
       i += 1
@@ -108,12 +103,13 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
         if stringEscape then
           keyBuilder.append(unescapeChar(c))
           stringEscape = false
-        else c match
-          case '\\' => stringEscape = true
-          case '"'  =>
-            currentKey = keyBuilder.toString
-            phase = AfterKey
-          case _    => keyBuilder.append(c)
+        else
+          c match
+            case '\\' => stringEscape = true
+            case '"'  =>
+              currentKey = keyBuilder.toString
+              phase = AfterKey
+            case _ => keyBuilder.append(c)
       case AfterKey =>
         c match
           case ' ' | '\t' | '\r' | '\n' => ()
@@ -122,7 +118,7 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
       case BeforeValue =>
         c match
           case ' ' | '\t' | '\r' | '\n' => ()
-          case '"' =>
+          case '"'                      =>
             contentBuffer.clear()
             stringEscape = false
             unicodeRemaining = 0
@@ -145,9 +141,9 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
             otherStringEscape = false
             currentIsString = false
             phase = InOtherValue
-      case InStringValue  => handleStringValueChar(c, out)
-      case InOtherValue   => handleOtherValueChar(c, out)
-      case AfterValue =>
+      case InStringValue => handleStringValueChar(c, out)
+      case InOtherValue  => handleOtherValueChar(c, out)
+      case AfterValue    =>
         c match
           case ' ' | '\t' | '\r' | '\n' => ()
           case ','                      => phase = ObjStart
@@ -175,13 +171,14 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
         unicodeRemaining = 4
       else if isCurrentTracked then
         contentBuffer.append(unescapeChar(c))
-    else c match
-      case '\\' => stringEscape = true
-      case '"'  =>
-        emitFinal(out)
-        phase = AfterValue
-      case _ =>
-        if isCurrentTracked then contentBuffer.append(c)
+    else
+      c match
+        case '\\' => stringEscape = true
+        case '"'  =>
+          emitFinal(out)
+          phase = AfterValue
+        case _ =>
+          if isCurrentTracked then contentBuffer.append(c)
 
   private def handleOtherValueChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     if otherStringEscape then
@@ -197,47 +194,46 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
           if isCurrentTracked then contentBuffer.append(c)
         case _ =>
           if isCurrentTracked then contentBuffer.append(c)
-    else c match
-      case '"' =>
-        otherInString = true
-        if isCurrentTracked then contentBuffer.append(c)
-      case '{' | '[' =>
-        otherDepth += 1
-        if isCurrentTracked then contentBuffer.append(c)
-      case ']' if otherDepth > 0 =>
-        otherDepth -= 1
-        if isCurrentTracked then contentBuffer.append(c)
-      case '}' if otherDepth > 0 =>
-        otherDepth -= 1
-        if isCurrentTracked then contentBuffer.append(c)
-      case '}' =>
-        // depth is 0 → this closes the outer object and ends this value.
-        emitFinal(out)
-        phase = PostObj
-      case ',' if otherDepth == 0 =>
-        emitFinal(out)
-        phase = ObjStart
-      case _ =>
-        if isCurrentTracked then contentBuffer.append(c)
+    else
+      c match
+        case '"' =>
+          otherInString = true
+          if isCurrentTracked then contentBuffer.append(c)
+        case '{' | '[' =>
+          otherDepth += 1
+          if isCurrentTracked then contentBuffer.append(c)
+        case ']' if otherDepth > 0 =>
+          otherDepth -= 1
+          if isCurrentTracked then contentBuffer.append(c)
+        case '}' if otherDepth > 0 =>
+          otherDepth -= 1
+          if isCurrentTracked then contentBuffer.append(c)
+        case '}' =>
+          // depth is 0 → this closes the outer object and ends this value.
+          emitFinal(out)
+          phase = PostObj
+        case ',' if otherDepth == 0 =>
+          emitFinal(out)
+          phase = ObjStart
+        case _ =>
+          if isCurrentTracked then contentBuffer.append(c)
 
   private def unescapeChar(c: Char): Char = c match
-    case 'n'  => '\n'
-    case 't'  => '\t'
-    case 'r'  => '\r'
-    case 'b'  => '\b'
-    case 'f'  => '\f'
-    case '"'  => '"'
-    case '\\' => '\\'
-    case '/'  => '/'
+    case 'n'   => '\n'
+    case 't'   => '\t'
+    case 'r'   => '\r'
+    case 'b'   => '\b'
+    case 'f'   => '\f'
+    case '"'   => '"'
+    case '\\'  => '\\'
+    case '/'   => '/'
     case other => other
 
 object JsonStreamingState:
-  /** True iff `text`'s tail could be the start of a JSON value boundary
-    * (closing quote, comma, or right brace) that would terminate the
-    * currently-streaming field. Ported from Python
-    * `StreamListener._could_form_end_identifier` for `JSONAdapter`.
-    * Returns true when the buffer ends with `"`, `",`, `" `, or `"}`, or
-    * already contains `}` anywhere. */
+  /** True iff `text`'s tail could be the start of a JSON value boundary (closing quote, comma, or right brace) that
+    * would terminate the currently-streaming field. Ported from Python `StreamListener._could_form_end_identifier` for
+    * `JSONAdapter`. Returns true when the buffer ends with `"`, `",`, `" `, or `"}`, or already contains `}` anywhere.
+    */
   def couldFormEndIdentifier(text: String): Boolean =
     val endPrefixes = Seq("\"", "\",", "\" ", "\"}")
     endPrefixes.exists(text.endsWith) || text.contains("}")

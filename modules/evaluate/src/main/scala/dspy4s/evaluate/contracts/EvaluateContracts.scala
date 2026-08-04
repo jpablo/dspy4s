@@ -13,17 +13,19 @@ object Evaluator:
 trait Metric:
   def name: String
 
-  /** Score a single prediction against its example. `trace` is the program's per-call trace (empty during
-    * evaluation; non-empty during bootstrapping, mirroring Python's `trace is None` branch). The ambient
-    * [[RuntimeContext]] lets LM-judged metrics (e.g. `SemanticF1`) invoke a language model during scoring;
-    * builtin string-comparison metrics ignore it. */
+  /** Score a single prediction against its example. `trace` is the program's per-call trace (empty during evaluation;
+    * non-empty during bootstrapping, mirroring Python's `trace is None` branch). The ambient [[RuntimeContext]] lets
+    * LM-judged metrics (e.g. `SemanticF1`) invoke a language model during scoring; builtin string-comparison metrics
+    * ignore it.
+    */
   def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
       RuntimeContext
   ): Either[DspyError, Double]
 
-/** A single per-example evaluation outcome. `error` carries the captured failure message when the program
-  * (or metric) failed on this example and traceback capture was enabled; it is `None` on success or when
-  * traceback capture is disabled. */
+/** A single per-example evaluation outcome. `error` carries the captured failure message when the program (or metric)
+  * failed on this example and traceback capture was enabled; it is `None` on success or when traceback capture is
+  * disabled.
+  */
 final case class ExampleEvaluation(
     example: Example,
     prediction: RawPrediction,
@@ -39,9 +41,10 @@ final case class EvaluationResult(
 ):
   def aggregateScore: Double = score
 
-  /** Renders the evaluation results as a dependency-free, fixed-width plain-text table. Columns are the union
-    * of example field names, the prediction's `answer`/fields, plus `score` (and `error` when any row has one).
-    * `limit`, when set, caps the number of rows rendered (mirrors dspy's `display_table` row limit). */
+  /** Renders the evaluation results as a dependency-free, fixed-width plain-text table. Columns are the union of
+    * example field names, the prediction's `answer`/fields, plus `score` (and `error` when any row has one). `limit`,
+    * when set, caps the number of rows rendered (mirrors dspy's `display_table` row limit).
+    */
   def renderTable(limit: Option[Int] = None): String =
     val rows = limit.fold(results)(n => results.take(math.max(0, n)))
 
@@ -60,11 +63,11 @@ final case class EvaluationResult(
 
     def cell(r: ExampleEvaluation, header: String): String =
       header match
-        case "score"             => f"${r.score}%.4f"
-        case "error"             => r.error.getOrElse("")
+        case "score"                    => f"${r.score}%.4f"
+        case "error"                    => r.error.getOrElse("")
         case h if h.startsWith("pred:") =>
           r.prediction.get(h.stripPrefix("pred:")).map(DynamicValues.renderText).getOrElse("")
-        case h                   =>
+        case h =>
           r.example.get(h).map(DynamicValues.renderText).getOrElse("")
 
     val dataRows: Vector[Vector[String]] = rows.map(r => headers.map(h => cell(r, h)))

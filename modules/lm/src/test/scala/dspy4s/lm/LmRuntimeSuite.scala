@@ -43,9 +43,9 @@ import scala.jdk.CollectionConverters.*
 class LmRuntimeSuite extends FunSuite:
   private final class StubLanguageModel(initial: Vector[Either[DspyError, LmResponse]]) extends LanguageModel:
     private var scripted = initial
-    val calls = ArrayBuffer.empty[LmRequest]
+    val calls            = ArrayBuffer.empty[LmRequest]
 
-    override val id: String = "stub"
+    override val id: String   = "stub"
     override val mode: LmMode = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
@@ -64,7 +64,8 @@ class LmRuntimeSuite extends FunSuite:
 
   private val baseResponse = LmResponse(
     outputs = Vector(LmOutput(text = "hello")),
-    usage = Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, extras = Map(TokenCategory.Cached -> 3L)))
+    usage =
+      Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, extras = Map(TokenCategory.Cached -> 3L)))
   )
 
   override def beforeEach(context: BeforeEach): Unit =
@@ -76,13 +77,13 @@ class LmRuntimeSuite extends FunSuite:
     LmCacheRegistry.resetDefault()
 
   test("LanguageModel.acall suspends the call on the supplied execution context") {
-    val pending = ArrayBuffer.empty[Runnable]
+    val pending            = ArrayBuffer.empty[Runnable]
     given ExecutionContext = new ExecutionContext:
-      override def execute(runnable: Runnable): Unit = pending += runnable
+      override def execute(runnable: Runnable): Unit     = pending += runnable
       override def reportFailure(cause: Throwable): Unit = throw cause
     given RuntimeContext = RuntimeEnvironment.current
 
-    val lm = new StubLanguageModel(Vector(Right(baseResponse)))
+    val lm     = new StubLanguageModel(Vector(Right(baseResponse)))
     val future = lm.acall(baseRequest)
 
     assertEquals(lm.calls.toVector, Vector.empty)
@@ -124,13 +125,13 @@ class LmRuntimeSuite extends FunSuite:
 
   test("managed language model caches by typed rolloutId and keeps it out of provider options") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse), Right(baseResponse)))
-    val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
-    val request = baseRequest.copy(rolloutId = Some(1))
+    val managed  = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
+    val request  = baseRequest.copy(rolloutId = Some(1))
 
     given RuntimeContext = RuntimeEnvironment.current
-    val first = managed.call(request)
-    val second = managed.call(request)
-    val third = managed.call(request.copy(rolloutId = Some(2)))
+    val first            = managed.call(request)
+    val second           = managed.call(request)
+    val third            = managed.call(request.copy(rolloutId = Some(2)))
 
     assert(first.isRight)
     assert(second.isRight)
@@ -156,7 +157,7 @@ class LmRuntimeSuite extends FunSuite:
     val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = RetryPolicies.maxRetries(RetryCount(2)))
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = managed.call(baseRequest)
+    val result           = managed.call(baseRequest)
 
     assert(result.isRight)
     assertEquals(delegate.calls.size, 3)
@@ -170,7 +171,7 @@ class LmRuntimeSuite extends FunSuite:
         Right(baseResponse)
       )
     )
-    val delays = ArrayBuffer.empty[Long]
+    val delays      = ArrayBuffer.empty[Long]
     val retryPolicy = RetryPolicies.exponentialBackoff(
       maxRetries = RetryCount(2),
       baseDelayMillis = RetryDelayMillis(5L),
@@ -184,7 +185,7 @@ class LmRuntimeSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = managed.call(baseRequest)
+    val result           = managed.call(baseRequest)
 
     assert(result.isRight)
     assertEquals(delegate.calls.size, 3)
@@ -192,7 +193,7 @@ class LmRuntimeSuite extends FunSuite:
   }
 
   test("exponential backoff saturates instead of overflowing large delays") {
-    val base = Long.MaxValue / 2L + 1L
+    val base   = Long.MaxValue / 2L + 1L
     val policy = RetryPolicies.exponentialBackoff(
       maxRetries = RetryCount(30),
       baseDelayMillis = RetryDelayMillis.applyUnsafe(base),
@@ -220,7 +221,7 @@ class LmRuntimeSuite extends FunSuite:
     val managed = ManagedLanguageModel(delegate = delegate, retryPolicy = retryPolicy)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = managed.call(baseRequest)
+    val result           = managed.call(baseRequest)
 
     assert(result.isLeft)
     assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
@@ -229,8 +230,8 @@ class LmRuntimeSuite extends FunSuite:
 
   test("usage tracking records only non-cached usage entries") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse)))
-    val managed = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
-    val tracker = new UsageTracker
+    val managed  = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
+    val tracker  = new UsageTracker
 
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
@@ -250,8 +251,8 @@ class LmRuntimeSuite extends FunSuite:
 
   test("usage tracking respects track_usage setting") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse)))
-    val managed = ManagedLanguageModel(delegate = delegate)
-    val tracker = new UsageTracker
+    val managed  = ManagedLanguageModel(delegate = delegate)
+    val tracker  = new UsageTracker
 
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
@@ -281,13 +282,15 @@ class LmRuntimeSuite extends FunSuite:
   test("disk cache round-trips typed tool-call args faithfully (not stringified)") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache-tools")
     try
-      val toolResponse = LmResponse(outputs = Vector(LmOutput(
-        text = "",
-        toolCalls = Vector(ToolCall(
-          name = "search",
-          args = DynamicValues.recordFromEntries(Seq("query" := "belgium", "top_k" := 3))
+      val toolResponse = LmResponse(outputs =
+        Vector(LmOutput(
+          text = "",
+          toolCalls = Vector(ToolCall(
+            name = "search",
+            args = DynamicValues.recordFromEntries(Seq("query" := "belgium", "top_k" := 3))
+          ))
         ))
-      )))
+      )
       val first = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       first.put(baseRequest, toolResponse)
 
@@ -307,13 +310,13 @@ class LmRuntimeSuite extends FunSuite:
   test("composite cache warms memory cache on disk hit") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-composite-cache")
     try
-      val disk = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
+      val disk   = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       val memory = new InMemoryLmCache(maxEntries = CacheCapacity(8))
       disk.put(baseRequest, baseResponse)
 
       val composite = CompositeLmCache(memory = Some(memory), disk = Some(disk))
-      val first = composite.get(baseRequest)
-      val second = composite.get(baseRequest)
+      val first     = composite.get(baseRequest)
+      val second    = composite.get(baseRequest)
 
       assert(first.isDefined)
       assert(second.isDefined)

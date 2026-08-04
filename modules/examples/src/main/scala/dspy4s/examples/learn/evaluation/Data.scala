@@ -1,15 +1,13 @@
-/**
- * Data
- *
- * Source:   docs/docs/learn/evaluation/data.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/data.md
- * Status:   translated (Example construction + inputs/labels, snippets 1–4). The `DataLoader`
- *           snippets (5–8: from_csv / from_json / from_parquet / from_huggingface) are not portable —
- *           dspy4s has no `datasets` module yet; build `Vector[Example]` directly instead.
- *
- * `dspy.Example(question=..., answer=...)` maps to `Example("question" := ..., "answer" := ...)`; the
- * `with_inputs` / `inputs()` / `labels()` API carries over as `withInputs` / `inputs` / `labels`.
- */
+/** Data
+  *
+  * Source: docs/docs/learn/evaluation/data.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/data.md Status: translated (Example
+  * construction + inputs/labels, snippets 1–4). The `DataLoader` snippets (5–8: from_csv / from_json / from_parquet /
+  * from_huggingface) are not portable — dspy4s has no `datasets` module yet; build `Vector[Example]` directly instead.
+  *
+  * `dspy.Example(question=..., answer=...)` maps to `Example("question" := ..., "answer" := ...)`; the `with_inputs` /
+  * `inputs()` / `labels()` API carries over as `withInputs` / `inputs` / `labels`.
+  */
 package dspy4s.examples.learn.evaluation
 
 import dspy4s.core.contracts.{:=, DynamicValues}
@@ -48,8 +46,8 @@ object Data:
   // --8<-- [start:inputs-labels]
   val articleSummary: Example =
     Example("article" := "This is an article.", "summary" := "This is a summary.").withInputs(Set("article"))
-  def inputKeyOnly = articleSummary.inputs   // -> { article: "..." }
-  def nonInputOnly = articleSummary.labels   // -> { summary: "..." }
+  def inputKeyOnly = articleSummary.inputs // -> { article: "..." }
+  def nonInputOnly = articleSummary.labels // -> { summary: "..." }
   // --8<-- [end:inputs-labels]
 
   // ── Snippets 5–8 (lines 83–138) — DataLoader / HuggingFace / splits ──

@@ -17,9 +17,10 @@ object OptimizableOrdinal extends RefinedSubtype[Int, Positive0]
   * entries. Consequently IDs are unique within one program and remain unchanged by `replace`, category identity nodes,
   * and reassociation of ordered composition.
   *
-  * A [[OptimizableId]] is deliberately not a display path. Human-readable paths come from [[OptimizableTraversal.inspectNamed]] and
-  * may reflect the current case-class/combinator syntax. Nor does an ID survive an arbitrary schema edit that inserts,
-  * removes, or reorders leaves; such a change defines a different traversal.
+  * A [[OptimizableId]] is deliberately not a display path. Human-readable paths come from
+  * [[OptimizableTraversal.inspectNamed]] and may reflect the current case-class/combinator syntax. Nor does an ID
+  * survive an arbitrary schema edit that inserts, removes, or reorders leaves; such a change defines a different
+  * traversal.
   */
 final class OptimizableId private (val ordinal: OptimizableOrdinal) extends Ordered[OptimizableId] derives CanEqual:
 
@@ -27,10 +28,10 @@ final class OptimizableId private (val ordinal: OptimizableOrdinal) extends Orde
   def render: String = s"optimizable-$ordinal"
 
   override def compare(that: OptimizableId): Int = ordinal.compare(that.ordinal)
-  override def toString: String                = render
-  override def equals(other: Any): Boolean = other match
+  override def toString: String                  = render
+  override def equals(other: Any): Boolean       = other match
     case that: OptimizableId => ordinal == that.ordinal
-    case _                 => false
+    case _                   => false
   override def hashCode(): Int = ordinal.hashCode()
 
 object OptimizableId:
@@ -56,10 +57,11 @@ object OptimizableId:
           )
         case None => Left(s"Invalid optimizable id '$value': ordinal must be a non-negative integer")
 
-/** One focus of a [[OptimizableTraversal]] traversal: stable machine identity, structural display name, and a non-executable
-  * snapshot of its read-only metadata plus optimizable parameters. */
+/** One focus of a [[OptimizableTraversal]] traversal: stable machine identity, structural display name, and a
+  * non-executable snapshot of its read-only metadata plus optimizable parameters.
+  */
 final case class IdentifiedOptimizable(id: OptimizableId, displayName: String, view: OptimizableView) derives CanEqual:
   def parameters: OptimizableParameters = view.parameters
-  def metadata: OptimizableMetadata       = view.metadata
-  def layout: SignatureLayout             = view.layout
-  def moduleName: String                  = view.moduleName
+  def metadata: OptimizableMetadata     = view.metadata
+  def layout: SignatureLayout           = view.layout
+  def moduleName: String                = view.moduleName

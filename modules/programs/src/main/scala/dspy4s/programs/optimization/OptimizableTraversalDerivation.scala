@@ -6,10 +6,10 @@ import scala.util.NotGiven
 /** Structural Mirror derivation over a case class. */
 trait LowPriorityOptimizableTraversal:
 
-  /** Mirror derivation over a case class: each field's fixed-arity traversal is concatenated (left -> right field order)
-    * for `read`, its arity contributes to the type-level sum, and `replace` slices updates by field arity before rebuilding
-    * via `m.fromProduct`. Every field must provide evidence; intentionally parameter-free field types opt in explicitly
-    * through [[OptimizableTraversal.empty]].
+  /** Mirror derivation over a case class: each field's fixed-arity traversal is concatenated (left -> right field
+    * order) for `read`, its arity contributes to the type-level sum, and `replace` slices updates by field arity before
+    * rebuilding via `m.fromProduct`. Every field must provide evidence; intentionally parameter-free field types opt in
+    * explicitly through [[OptimizableTraversal.empty]].
     *
     * The `NotGiven[OptimizableLeaf[P]]` guard keeps the structural derivation from competing with
     * [[OptimizableTraversal.fromOptimizableLeaf]]: a type that is itself a leaf (e.g.

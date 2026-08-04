@@ -1,11 +1,10 @@
-/**
- * Model Context Protocol (MCP)
- *
- * Source:   docs/docs/learn/programming/mcp.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/mcp.md
- * Status:   blocked (3 python snippets) — dspy4s has no MCP (Model Context Protocol) client/tool bridge.
- *           Tools are plain `ToolFunction`s (see learn/programming/Tools.scala).
- */
+/** Model Context Protocol (MCP)
+  *
+  * Source: docs/docs/learn/programming/mcp.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/mcp.md Status: blocked (3 python snippets)
+  * — dspy4s has no MCP (Model Context Protocol) client/tool bridge. Tools are plain `ToolFunction`s (see
+  * learn/programming/Tools.scala).
+  */
 package dspy4s.examples.learn.programming
 
 object Mcp {

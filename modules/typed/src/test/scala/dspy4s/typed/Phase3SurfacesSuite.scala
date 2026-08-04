@@ -18,8 +18,9 @@ case class P3ToneOutput(tone: P3Tone) derives Schema
 
 /** Phase 3 surfaces per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *
-  * The case-class API is already in Phase 2 (`Signature.derived`); these
-  * tests round out coverage and add the new SignatureBuilder surface. */
+  * The case-class API is already in Phase 2 (`Signature.derived`); these tests round out coverage and add the new
+  * SignatureBuilder surface.
+  */
 class Phase3SurfacesSuite extends FunSuite:
 
   // ── Builder API ─────────────────────────────────────────────────────────
@@ -69,9 +70,9 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("builder is immutable — chained calls don't mutate earlier references") {
-    val base = Signature.builder("Base").input[String]("a")
+    val base  = Signature.builder("Base").input[String]("a")
     val withB = base.output[Int]("b")
-    val withC = base.output[String]("c")  // forked from `base`, not `withB`
+    val withC = base.output[String]("c") // forked from `base`, not `withB`
 
     assertEquals(withB.build.outputFields.map(_.name), Vector("b"))
     assertEquals(withC.build.outputFields.map(_.name), Vector("c"))
@@ -96,26 +97,28 @@ class Phase3SurfacesSuite extends FunSuite:
   }
 
   test("case-class encode produces a Map keyed by case-class field names") {
-    val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
-    val input = P3CommentInput("hello there", "en")
+    val sig     = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val input   = P3CommentInput("hello there", "en")
     val encoded = sig.inputShape.encode(input)
     assertEquals(encoded, rec("comment" := "hello there", "lang" := "en"))
   }
 
   test("decoded Prediction exposes case-class fields directly") {
     val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
-    val raw = RawPrediction(values = rec(
-      "toxic"      := false,
-      "confidence" := 0.91
-    ))
+    val raw = RawPrediction(values =
+      rec(
+        "toxic"      := false,
+        "confidence" := 0.91
+      )
+    )
     val result = Prediction.from(raw, sig.outputShape)
     result match
       case Right(tp) =>
         // Direct case-class field access — typed, no Either at the field level.
         val toxic: Boolean = tp.output.toxic
-        val conf:  Double  = tp.output.confidence
+        val conf: Double   = tp.output.confidence
         assertEquals(toxic, false)
-        assertEquals(conf,  0.91)
+        assertEquals(conf, 0.91)
       case Left(err) => fail(s"expected success but got: $err")
   }
 
@@ -127,24 +130,24 @@ class Phase3SurfacesSuite extends FunSuite:
     // template. Adapters depend on these for prompt rendering.
     val sig = Signature
       .builder("Bag")
-      .input[String]("userName")  // camelCase exercises prefix inference
+      .input[String]("userName") // camelCase exercises prefix inference
       .output[Int]("scoreValue")
       .build
 
     val byName = sig.fields.map(f => f.name -> f).toMap
-    assertEquals(byName("userName").prefix,      Some("User Name:"))
+    assertEquals(byName("userName").prefix, Some("User Name:"))
     assertEquals(byName("userName").description, Some("${userName}"))
-    assertEquals(byName("scoreValue").prefix,    Some("Score Value:"))
+    assertEquals(byName("scoreValue").prefix, Some("Score Value:"))
     assertEquals(byName("scoreValue").description, Some("${scoreValue}"))
   }
 
   test("case-class derived fields are normalized identically to the builder path") {
-    val sig = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
+    val sig    = Signature.derived[P3CommentInput, P3ClassifyOutput]("Classify")
     val byName = sig.layout.fields.map(f => f.name -> f).toMap
     // P3CommentInput.comment / lang and P3ClassifyOutput.toxic / confidence
     // are all lowercase, so the inferred prefix is just the capitalized form.
-    assertEquals(byName("comment").prefix,    Some("Comment:"))
-    assertEquals(byName("toxic").prefix,      Some("Toxic:"))
+    assertEquals(byName("comment").prefix, Some("Comment:"))
+    assertEquals(byName("toxic").prefix, Some("Toxic:"))
     assertEquals(byName("confidence").prefix, Some("Confidence:"))
   }
 
@@ -191,7 +194,7 @@ class Phase3SurfacesSuite extends FunSuite:
     val parsed = SignatureLayout.parse("question -> answer")
     parsed match
       case Right(layout) =>
-        assertEquals(layout.inputFields.map(_.name),  Vector("question"))
+        assertEquals(layout.inputFields.map(_.name), Vector("question"))
         assertEquals(layout.outputFields.map(_.name), Vector("answer"))
         assertEquals(layout.instructions, None)
       case Left(err) => fail(s"expected parse success, got: $err")
@@ -210,7 +213,7 @@ class Phase3SurfacesSuite extends FunSuite:
 
   test("Signature.fromStringDynamic produces a Record-backed wrapper (MapShape)") {
     val sig = Signature.fromStringDynamic("question -> answer").toOption.get
-    assertEquals(sig.layout.inputFields.map(_.name),  Vector("question"))
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("question"))
     assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
 
     // Map-shape encode is identity for the input record.
@@ -229,7 +232,7 @@ class Phase3SurfacesSuite extends FunSuite:
   test("Signature.fromString (typed literal) is named-tuple-typed with scalar field types") {
     // The literal is parsed at compile time into NamedTuple I/O: (question: String) -> (answer: Boolean).
     val sig = Signature.fromString("question -> answer: bool")
-    assertEquals(sig.layout.inputFields.map(_.name),  Vector("question"))
+    assertEquals(sig.layout.inputFields.map(_.name), Vector("question"))
     assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
 
     // Output decodes to a typed named tuple -> `.answer` is a Boolean (typed dot-access).

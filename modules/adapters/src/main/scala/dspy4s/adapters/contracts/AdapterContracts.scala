@@ -14,35 +14,38 @@ import dspy4s.lm.contracts.Message
 
 /** Optional pre-rendered JSON Schema describing the signature's output fields.
   *
-  * Populated by the typed `Predict[I, O]` path (which has a static `Schema[O]` available and can render it
-  * via zio-blocks' `Schema.toJsonSchema`); left `None` by `DynamicPredict` (where there's no static schema to
-  * render from). Adapters that understand structured-output hints (currently [[JSONAdapter]]) inline this
-  * string into their prompt instruction; adapters that don't ignore it. */
+  * Populated by the typed `Predict[I, O]` path (which has a static `Schema[O]` available and can render it via
+  * zio-blocks' `Schema.toJsonSchema`); left `None` by `DynamicPredict` (where there's no static schema to render from).
+  * Adapters that understand structured-output hints (currently [[JSONAdapter]]) inline this string into their prompt
+  * instruction; adapters that don't ignore it.
+  */
 final case class AdapterInvocation(
     layout: SignatureLayout,
     demos: Vector[Example],
     inputs: Example,
     request: LmRequest,
     outputJsonSchema: Option[String] = None,
-    /** Tool definitions (pure [[ToolSpec]] data — name / description / parameter schema, no invoke closures) the
-      * caller makes available to the model. An adapter with native function-calling enabled renders these into the
-      * provider `tools` request option; adapters without it ignore them. Empty by default. The executable tool
-      * bodies stay on the program (e.g. ReAct's `ToolFunction`s); only the schema travels to the adapter. */
+    /** Tool definitions (pure [[ToolSpec]] data — name / description / parameter schema, no invoke closures) the caller
+      * makes available to the model. An adapter with native function-calling enabled renders these into the provider
+      * `tools` request option; adapters without it ignore them. Empty by default. The executable tool bodies stay on
+      * the program (e.g. ReAct's `ToolFunction`s); only the schema travels to the adapter.
+      */
     tools: Vector[ToolSpec] = Vector.empty
 )
 
 /** The rendered prompt an adapter produces from an [[AdapterInvocation]].
   *
-  * `requestOptions` (G-7) is the seam by which an adapter contributes provider request fields — the option bag
-  * that gets merged into the outgoing [[dspy4s.lm.contracts.LmRequest.options]]. v1 carries native structured
-  * outputs (OpenAI's `response_format: {type:"json_schema", json_schema:{...}}`, emitted by [[JSONAdapter]] when
-  * the resolved LM declares `supportsResponseSchema`). The engine merges this map UNDER the existing per-call /
-  * module options, so explicit user/module config wins on key collision.
+  * `requestOptions` (G-7) is the seam by which an adapter contributes provider request fields — the option bag that
+  * gets merged into the outgoing [[dspy4s.lm.contracts.LmRequest.options]]. v1 carries native structured outputs
+  * (OpenAI's `response_format: {type:"json_schema", json_schema:{...}}`, emitted by [[JSONAdapter]] when the resolved
+  * LM declares `supportsResponseSchema`). The engine merges this map UNDER the existing per-call / module options, so
+  * explicit user/module config wins on key collision.
   *
-  * Native FUNCTION CALLING (G-7b) reuses this same seam: ChatAdapter/JSONAdapter inject `tools` into
-  * `requestOptions` (via [[NativeFunctionCalling.toolOptions]]) when native calling is enabled and the LM
-  * `supportsFunctionCalling`, and fill a `tool_calls` output field from the response. ReAct is NOT involved — it
-  * keeps the text protocol, matching upstream dspy. */
+  * Native FUNCTION CALLING (G-7b) reuses this same seam: ChatAdapter/JSONAdapter inject `tools` into `requestOptions`
+  * (via [[NativeFunctionCalling.toolOptions]]) when native calling is enabled and the LM `supportsFunctionCalling`, and
+  * fill a `tool_calls` output field from the response. ReAct is NOT involved — it keeps the text protocol, matching
+  * upstream dspy.
+  */
 final case class FormattedPrompt(
     messages: Vector[Message],
     metadata: Map[String, Any] = Map.empty,
@@ -50,15 +53,16 @@ final case class FormattedPrompt(
 )
 
 object FormattedPrompt:
-  /** Merge adapter-contributed `requestOptions` UNDER `requestOptions` already present on the request, so the
-    * latter (per-call / module config) wins on key collision. Mirrors the engine's `mergeConfig` style: start
-    * from the adapter options and upsert each request option by name (later wins, preserving insertion order).
+  /** Merge adapter-contributed `requestOptions` UNDER `requestOptions` already present on the request, so the latter
+    * (per-call / module config) wins on key collision. Mirrors the engine's `mergeConfig` style: start from the adapter
+    * options and upsert each request option by name (later wins, preserving insertion order).
     *
     * Scope (v1): exactly ONE adapter contributes options today -- `JSONAdapter`'s `response_format`. The merge is
     * therefore a flat last-key-wins upsert; there is no cross-adapter composition to reconcile. When native
-    * function-calling lands (G-7b) and a second contributor injects e.g. a `tools` array, this seam will need
-    * explicit per-key semantics (arrays concatenate, scalars overwrite) -- deferred until then rather than built
-    * speculatively against a single contributor. */
+    * function-calling lands (G-7b) and a second contributor injects e.g. a `tools` array, this seam will need explicit
+    * per-key semantics (arrays concatenate, scalars overwrite) -- deferred until then rather than built speculatively
+    * against a single contributor.
+    */
   def mergeOptions(
       adapterOptions: zio.blocks.schema.DynamicValue.Record,
       requestOptions: zio.blocks.schema.DynamicValue.Record
@@ -66,32 +70,30 @@ object FormattedPrompt:
     DynamicValues.mergeRecords(adapterOptions, requestOptions)
 
 /** Adapter parse result. `values` is the structured record of output field values produced from the LM completion;
-  * `metadata` is a free-form bag of debug / adapter-specific annotations (e.g. `{"adapter" -> "json", "fallback"
-  * -> "text"}`) and stays a plain Map. */
+  * `metadata` is a free-form bag of debug / adapter-specific annotations (e.g. `{"adapter" -> "json", "fallback" ->
+  * "text"}`) and stays a plain Map.
+  */
 final case class ParsedOutput(
     values: zio.blocks.schema.DynamicValue.Record,
     rawText: Option[String] = None,
     metadata: Map[String, Any] = Map.empty
 )
 
-/** A chunk of output text routed to a specific signature field by an
-  * [[AdapterStreamingState]]. `isLast = true` marks the final emission for the
-  * field (either because the adapter detected the next field's boundary or
-  * because the stream is finishing).
+/** A chunk of output text routed to a specific signature field by an [[AdapterStreamingState]]. `isLast = true` marks
+  * the final emission for the field (either because the adapter detected the next field's boundary or because the
+  * stream is finishing).
   */
 final case class FieldChunk(fieldName: String, text: String, isLast: Boolean = false)
 
-/** Per-call state machine that consumes streamed LM text fragments and emits
-  * per-field chunks based on the adapter's framing.
+/** Per-call state machine that consumes streamed LM text fragments and emits per-field chunks based on the adapter's
+  * framing.
   *
-  *   - `receive(textDelta)` appends a fresh token fragment and returns the
-  *     chunks that have become safe to emit (i.e. not held back to disambiguate
-  *     a partial field marker).
-  *   - `finish()` flushes any remaining buffered content and must mark the
-  *     final emitted chunk with `isLast = true`.
+  *   - `receive(textDelta)` appends a fresh token fragment and returns the chunks that have become safe to emit (i.e.
+  *     not held back to disambiguate a partial field marker).
+  *   - `finish()` flushes any remaining buffered content and must mark the final emitted chunk with `isLast = true`.
   *
-  * Implementations are single-use per LM call; a fresh instance is created per
-  * [[dspy4s.streaming.Streamify]] producer thread.
+  * Implementations are single-use per LM call; a fresh instance is created per [[dspy4s.streaming.Streamify]] producer
+  * thread.
   */
 trait AdapterStreamingState:
   def receive(textDelta: String): Vector[FieldChunk]
@@ -104,19 +106,20 @@ trait Adapter extends AdapterRef:
 
   def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
 
-  /** Streaming-aware adapters override this to return a per-call state
-    * machine. The default returns [[None]] and the streaming pipeline falls
-    * back to emitting raw tokens with an empty field name.
+  /** Streaming-aware adapters override this to return a per-call state machine. The default returns [[None]] and the
+    * streaming pipeline falls back to emitting raw tokens with an empty field name.
     */
   def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] = None
 
-  def execute(languageModel: LanguageModel, invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, Vector[ParsedOutput]] =
+  def execute(languageModel: LanguageModel, invocation: AdapterInvocation)(using
+      RuntimeContext
+  ): Either[DspyError, Vector[ParsedOutput]] =
     for
       prompt <- format(invocation)
       // Merge adapter-contributed requestOptions UNDER the request's existing options (per-call/module wins).
       mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
       response <- languageModel.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
-      parsed <- parseOutputs(invocation.layout, response.outputs)
+      parsed   <- parseOutputs(invocation.layout, response.outputs)
     yield parsed
 
   private def parseOutputs(layout: SignatureLayout, outputs: Vector[LmOutput])(using
@@ -124,7 +127,7 @@ trait Adapter extends AdapterRef:
   ): Either[DspyError, Vector[ParsedOutput]] =
     outputs.foldLeft(Right(Vector.empty): Either[DspyError, Vector[ParsedOutput]]) { (acc, output) =>
       for
-        soFar <- acc
+        soFar  <- acc
         parsed <- parse(layout, output)
       yield soFar :+ parsed
     }
@@ -133,7 +136,8 @@ trait AdapterFallbackPolicy:
   def fallbackFor(error: DspyError, attemptedAdapter: String): Option[String]
 
 object AdapterErrors:
-  /** A parse failure for a missing output field. `raw` is the raw model response that couldn't be parsed — carry
-    * it so failure-trace capture (GEPA reflection, G-12 P-a/P-b) can show what the model actually produced. */
+  /** A parse failure for a missing output field. `raw` is the raw model response that couldn't be parsed — carry it so
+    * failure-trace capture (GEPA reflection, G-12 P-a/P-b) can show what the model actually produced.
+    */
   def missingField(fieldName: String, raw: Option[String] = None): DspyError =
     ParseError(component = "adapter", message = s"Missing required output field: $fieldName", raw = raw)

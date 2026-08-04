@@ -18,8 +18,9 @@ class RetrieversSuite extends FunSuite:
     assert(NeighborCount.either(0).isLeft)
   }
 
-  /** Deterministic test embedder: looks up a fixed vector per text (fails loudly on an unmapped text, so the tests
-    * also pin the exact serialization the retrievers produce). */
+  /** Deterministic test embedder: looks up a fixed vector per text (fails loudly on an unmapped text, so the tests also
+    * pin the exact serialization the retrievers produce).
+    */
   private def mappedEmbedder(mapping: Map[String, Vector[Float]]): Embedder =
     Embedder.fromFunction("mapped") { texts =>
       texts.map(t => mapping.getOrElse(t, throw new IllegalArgumentException(s"unmapped text: '$t'")))
@@ -53,10 +54,10 @@ class RetrieversSuite extends FunSuite:
   test("KNN retrieves the k nearest trainset examples by dot product, best first") {
     // Two clusters: q1/q2 near the x-axis, q3/q4 near the y-axis.
     val embedder = mappedEmbedder(Map(
-      "question: q1" -> Vector(1.0f, 0.0f),
-      "question: q2" -> Vector(0.9f, 0.1f),
-      "question: q3" -> Vector(0.0f, 1.0f),
-      "question: q4" -> Vector(0.1f, 0.9f),
+      "question: q1"     -> Vector(1.0f, 0.0f),
+      "question: q2"     -> Vector(0.9f, 0.1f),
+      "question: q3"     -> Vector(0.0f, 1.0f),
+      "question: q4"     -> Vector(0.1f, 0.9f),
       "question: near-x" -> Vector(1.0f, 0.05f)
     ))
     val examples = trainset(ex("q1", "a1"), ex("q2", "a2"), ex("q3", "a3"), ex("q4", "a4"))
@@ -99,7 +100,7 @@ class RetrieversSuite extends FunSuite:
         .create(corpus("alpha", "beta", "gamma"), embedder, k = NeighborCount(2))
         .toOption
         .get
-    val result    = retriever.search("query").toOption.get
+    val result = retriever.search("query").toOption.get
     assertEquals(result.passages, Vector("alpha", "gamma"))
     assertEquals(result.indices, Vector(0, 2))
     assert(result.scores(0) >= result.scores(1), result.scores.toString)

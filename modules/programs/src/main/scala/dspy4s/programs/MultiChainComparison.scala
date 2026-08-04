@@ -36,8 +36,8 @@ final case class MultiChainInput[I](
   *      new attempt inputs. 5. Run the augmented predict, then decode the reply into `Prediction[WithRationale[O]]` —
   *      the base output with a typed `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
   *
-  * `MultiChainComparison[I, O]` is a `Module[MultiChainInput[I], WithRationale[O]]`. Callers normally use
-  * the [[compare]] convenience, which builds the semantic input and its uniform [[ProgramCall]] envelope.
+  * `MultiChainComparison[I, O]` is a `Module[MultiChainInput[I], WithRationale[O]]`. Callers normally use the
+  * [[compare]] convenience, which builds the semantic input and its uniform [[ProgramCall]] envelope.
   *
   * @param baseSignature
   *   the original task signature
@@ -55,8 +55,8 @@ final case class MultiChainComparison[I, O](
     attemptDescription: String = "${reasoning attempt}",
     answerFieldOverride: Option[String] = None,
     /** Optional optimizable parameters for the comparison predictor. The executable predictor itself is built
-      * internally over this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it
-      * with a shape that accepts arbitrary vectors. Optimizer replacement writes only this lawful parameter surface.
+      * internally over this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it with
+      * a shape that accepts arbitrary vectors. Optimizer replacement writes only this lawful parameter surface.
       */
     comparePredictParametersOverride: Option[OptimizableParameters] = None
 )(using
@@ -76,20 +76,20 @@ final case class MultiChainComparison[I, O](
 
   /** The `m` attempt-input fields (runtime arity: one per expected candidate, with per-instance descriptions and
     * `Student Attempt #i:` prefixes). Shared by the layout and the typed input shape, which is what keeps the
-    * value-level field expansion and the prompt in lockstep. */
-  private val attemptFields: Vector[FieldSpec] =
-    (1 to m).toVector.map { idx =>
-      FieldSpec(
-        name        = s"reasoning_attempt_$idx",
-        description = Some(attemptDescription),
-        prefix      = Some(s"Student Attempt #$idx:")
-      )
-    }
+    * value-level field expansion and the prompt in lockstep.
+    */
+  private val attemptFields: Vector[FieldSpec] = (1 to m).toVector.map { idx =>
+    FieldSpec(
+      name = s"reasoning_attempt_$idx",
+      description = Some(attemptDescription),
+      prefix = Some(s"Student Attempt #$idx:")
+    )
+  }
 
   private val rationaleField: FieldSpec = FieldSpec(
-    name        = MultiChainComparison.rationaleName,
+    name = MultiChainComparison.rationaleName,
     description = Some(rationaleDescription),
-    prefix      = Some(rationalePrefix)
+    prefix = Some(rationalePrefix)
   )
 
   /** The augmented layout: `baseSignature` plus `m` attempt-input fields appended, plus a `rationale` output field
@@ -110,7 +110,7 @@ final case class MultiChainComparison[I, O](
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
     val base = Predict(
       signature = Signature(
-        name   = baseSignature.name,
+        name = baseSignature.name,
         layout = augmentedSignatureLayout,
         inputShape = attemptInputs.shape,
         outputShape = OutputAugmentation.prependedStringShape(
@@ -138,9 +138,11 @@ final case class MultiChainComparison[I, O](
     val input = call.input
     attemptInputs
       .validate(input.attempts.map(formatAttempt))
-      .left.map(_ => ValidationError(
-        s"Number of attempts (${input.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
-      ))
+      .left.map(_ =>
+        ValidationError(
+          s"Number of attempts (${input.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
+        )
+      )
       .flatMap { attempts =>
         comparePredict(
           call

@@ -1,10 +1,9 @@
-/**
- * Managing Conversation History
- *
- * Source:   docs/docs/tutorials/conversation_history/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/conversation_history/index.md
- * Status:   blocked — needs `dspy.History` input type, `inspect_history`, and mutable `predict.demos` (none ported)
- */
+/** Managing Conversation History
+  *
+  * Source: docs/docs/tutorials/conversation_history/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/conversation_history/index.md Status: blocked —
+  * needs `dspy.History` input type, `inspect_history`, and mutable `predict.demos` (none ported)
+  */
 package dspy4s.examples.tutorials.conversation_history
 
 object ConversationHistory {

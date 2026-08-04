@@ -32,11 +32,11 @@ case class ZsOptionProbe(amount: Option[Double], note: String)
 object ZsOptionProbe:
   given Schema[ZsOptionProbe] = Schema.derived
 
-/** The spine is now `DynamicValue.Record` end-to-end -- there is no
-  * `Map[String, Any]` intermediate -- so the historical tests that exercised
-  * the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers were
-  * deleted). What remains exercises `fieldSpecsFromReflect`, `normalize`, and
-  * the native `encode` / `decode` round-trip through `DynamicValue.Record`. */
+/** The spine is now `DynamicValue.Record` end-to-end -- there is no `Map[String, Any]` intermediate -- so the
+  * historical tests that exercised the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers were
+  * deleted). What remains exercises `fieldSpecsFromReflect`, `normalize`, and the native `encode` / `decode` round-trip
+  * through `DynamicValue.Record`.
+  */
 class ZioSchemaCodecSuite extends FunSuite:
 
   test("fieldSpecsFromReflect produces role-free FieldSpecs with the right names and typeRefs") {
@@ -98,7 +98,7 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("Variant-typed fields surface as TypeRef.string at the wire boundary") {
     import ZsClassifyOutput.given
-    val specs = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect)
+    val specs     = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect)
     val sentiment = specs.find(_.name == "sentiment").get
     assertEquals(sentiment.typeRef, TypeRef.string)
   }
@@ -141,8 +141,10 @@ class ZioSchemaCodecSuite extends FunSuite:
     val encoded = shape.encode(value)
     // Native: the record holds a Variant for the enum (not a flat string).
     val sentiment = DynamicValues.recordGet(encoded, "sentiment")
-    assert(sentiment.exists(_.isInstanceOf[DynamicValue.Variant]),
-      s"expected Variant for sentiment, got: $sentiment")
+    assert(
+      sentiment.exists(_.isInstanceOf[DynamicValue.Variant]),
+      s"expected Variant for sentiment, got: $sentiment"
+    )
 
     val decoded = shape.decode(encoded)
     assertEquals(decoded, Right(value))
@@ -150,8 +152,8 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("encode/decode round-trip for a case-class input") {
     import ZsCommentInput.given
-    val shape = ZioSchemaCodec.derivedFromZioSchema[ZsCommentInput]
-    val value = ZsCommentInput(comment = "Best movie ever!", lang = "en")
+    val shape   = ZioSchemaCodec.derivedFromZioSchema[ZsCommentInput]
+    val value   = ZsCommentInput(comment = "Best movie ever!", lang = "en")
     val encoded = shape.encode(value)
     val decoded = shape.decode(encoded)
     assertEquals(decoded, Right(value))

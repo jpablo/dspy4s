@@ -31,17 +31,17 @@ class ModuleConfigSuite extends FunSuite:
 
   /** Records every `LmRequest` it receives so the test can inspect `options`. */
   private final class CapturingLm(val sink: scala.collection.mutable.ArrayBuffer[LmRequest]) extends LanguageModel:
-    override val id: String   = "capturing-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "capturing-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       sink += request
       Right(LmResponse(
         outputs = Vector(LmOutput(text = "Paris", metadata = DynamicValues.record("score" := 0.5))),
-        usage   = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
+        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
       ))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit  = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   private def withCapture(test: (RuntimeContext ?=> Unit)): Vector[LmRequest] =
     val sink = scala.collection.mutable.ArrayBuffer.empty[LmRequest]
@@ -56,7 +56,7 @@ class ModuleConfigSuite extends FunSuite:
   test("DynamicPredict: module config supplies LM options when per-call config is empty") {
     val layout = SignatureDsl.parse("question -> answer, score").toOption.get
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.7))
-    val reqs = withCapture {
+    val reqs   = withCapture {
       val _ = module(ProgramCall(input = rec("question" := "x")))
     }
     assertEquals(reqs.size, 1)
@@ -67,7 +67,7 @@ class ModuleConfigSuite extends FunSuite:
   test("DynamicPredict: per-call config overrides module config per-key (call wins, module default preserved)") {
     val layout = SignatureDsl.parse("question -> answer, score").toOption.get
     val module = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9))
-    val reqs = withCapture {
+    val reqs   = withCapture {
       val _ = module(ProgramCall(
         input = rec("question" := "x"),
         config = DynamicValues.record("temperature" := 0.2)
@@ -76,14 +76,14 @@ class ModuleConfigSuite extends FunSuite:
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
     assertEquals(opts.get("temperature"), Some(0.2: Any)) // call wins
-    assertEquals(opts.get("top_p"),       Some(0.9: Any)) // module default preserved
+    assertEquals(opts.get("top_p"), Some(0.9: Any))       // module default preserved
   }
 
   test("DynamicPredict: empty module config == per-call config (parity)") {
-    val layout = SignatureDsl.parse("question -> answer, score").toOption.get
-    val module = DynamicPredict(layout)
+    val layout     = SignatureDsl.parse("question -> answer, score").toOption.get
+    val module     = DynamicPredict(layout)
     val callConfig = DynamicValues.record("temperature" := 0.42, "max_tokens" := 64)
-    val reqs = withCapture {
+    val reqs       = withCapture {
       val _ = module(ProgramCall(input = rec("question" := "x"), config = callConfig))
     }
     assertEquals(reqs.size, 1)
@@ -93,9 +93,9 @@ class ModuleConfigSuite extends FunSuite:
   // ── typed Predict[I, O] ─────────────────────────────────────────────────────
 
   test("Predict[I,O]: module config supplies LM options when per-call config is empty") {
-    val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
+    val sig    = Signature.derived[MCQAInput, MCQAOutput]("QA")
     val module = Predict(sig, config = DynamicValues.record("temperature" := 0.7))
-    val reqs = withCapture {
+    val reqs   = withCapture {
       val _ = module(MCQAInput("x"))
     }
     assertEquals(reqs.size, 1)
@@ -104,22 +104,22 @@ class ModuleConfigSuite extends FunSuite:
   }
 
   test("Predict[I,O]: per-call config overrides module config per-key (call wins, module default preserved)") {
-    val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
+    val sig    = Signature.derived[MCQAInput, MCQAOutput]("QA")
     val module = Predict(sig, config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9))
-    val reqs = withCapture {
+    val reqs   = withCapture {
       val _ = module(MCQAInput("x"), config = DynamicValues.record("temperature" := 0.2))
     }
     assertEquals(reqs.size, 1)
     val opts = DynamicValues.recordToMap(reqs.head.options)
     assertEquals(opts.get("temperature"), Some(0.2: Any)) // call wins
-    assertEquals(opts.get("top_p"),       Some(0.9: Any)) // module default preserved
+    assertEquals(opts.get("top_p"), Some(0.9: Any))       // module default preserved
   }
 
   test("Predict[I,O]: empty module config == per-call config (parity)") {
-    val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
-    val module = Predict(sig)
+    val sig        = Signature.derived[MCQAInput, MCQAOutput]("QA")
+    val module     = Predict(sig)
     val callConfig = DynamicValues.record("temperature" := 0.42, "max_tokens" := 64)
-    val reqs = withCapture {
+    val reqs       = withCapture {
       val _ = module(MCQAInput("x"), config = callConfig)
     }
     assertEquals(reqs.size, 1)
@@ -129,7 +129,7 @@ class ModuleConfigSuite extends FunSuite:
   // ── typed ChainOfThought[I, O] ──────────────────────────────────────────────
 
   test("ChainOfThought: state config supplies defaults and per-call config wins on collision") {
-    val sig = Signature.derived[MCQAInput, MCQAOutput]("QA")
+    val sig    = Signature.derived[MCQAInput, MCQAOutput]("QA")
     val module = ChainOfThought(
       sig,
       config = DynamicValues.record("temperature" := 0.7, "top_p" := 0.9)

@@ -1,12 +1,11 @@
-/**
- * Tutorial: Use MCP tools in DSPy
- *
- * Source:   docs/docs/tutorials/mcp/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/mcp/index.md
- * Status:   blocked (10 python snippets) — dspy4s has no MCP (Model Context Protocol) client/tool bridge,
- *           so there is no analogue of `dspy.Tool.from_mcp_tool` / an MCP `ClientSession`. Use plain
- *           `ToolFunction`s with ReAct (see learn/programming/Tools.scala).
- */
+/** Tutorial: Use MCP tools in DSPy
+  *
+  * Source: docs/docs/tutorials/mcp/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/mcp/index.md Status: blocked (10 python snippets)
+  * — dspy4s has no MCP (Model Context Protocol) client/tool bridge, so there is no analogue of
+  * `dspy.Tool.from_mcp_tool` / an MCP `ClientSession`. Use plain `ToolFunction`s with ReAct (see
+  * learn/programming/Tools.scala).
+  */
 package dspy4s.examples.tutorials.mcp
 
 object Mcp {

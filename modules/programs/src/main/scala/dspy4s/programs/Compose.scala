@@ -15,27 +15,27 @@ import scala.compiletime.ops.int.+
 /** The program-composition combinators `id` / `>>>` / `fanout` / `split` — value-level category composition plus
   * ordered shared- and independent-input pairing (`docs/refactor/algebra-2-program-composition.md`).
   *
-  * Carrier (the grill's fork-1/5 decision): a program is `Module[I, O]`. `>>>` threads the
-  * plain typed value `O` (not the `Prediction[O]` envelope): it runs the first program, feeds its `prediction.output`
-  * into a fresh `ProgramCall` that inherits the outer call's controls (`config` / `traceEnabled` / `rolloutId`), and
-  * runs the second. Each sub-program's own `apply` records its trace/history entry, while the composite result
-  * accumulates both `Prediction.raw` envelopes with [[RawPrediction.followedBy]].
+  * Carrier (the grill's fork-1/5 decision): a program is `Module[I, O]`. `>>>` threads the plain typed value `O` (not
+  * the `Prediction[O]` envelope): it runs the first program, feeds its `prediction.output` into a fresh `ProgramCall`
+  * that inherits the outer call's controls (`config` / `traceEnabled` / `rolloutId`), and runs the second. Each
+  * sub-program's own `apply` records its trace/history entry, while the composite result accumulates both
+  * `Prediction.raw` envelopes with [[RawPrediction.followedBy]].
   *
   * Structural lifecycle. These nodes extend [[dspy4s.programs.contracts.TransparentModule]], so only their leaf
   * children emit callbacks, trace, and history. Association and identity syntax therefore cannot change the runtime
   * observations visible to a later leaf.
   *
   * Optimizer-addressability (fork 4): the combinators are concretely typed in their child programs (`A` / `B`), and
-  * their hand-written [[OptimizableTraversal]] instances distribute `read` / `replace` structurally (`read(a) ++ read(b)`), so
-  * teleprompters can introspect and tune the predicts inside a pipeline.
+  * their hand-written [[OptimizableTraversal]] instances distribute `read` / `replace` structurally (`read(a) ++
+  * read(b)`), so teleprompters can introspect and tune the predicts inside a pipeline.
   */
 
 /** `id[I]` — the Category unit: a pure passthrough that returns its input as the output, with an empty raw envelope.
-  * Sequential composition accumulates envelopes through [[RawPrediction.followedBy]], for which the empty envelope
-  * is an identity, so both `id >>> p` and `p >>> id` preserve the complete prediction.
+  * Sequential composition accumulates envelopes through [[RawPrediction.followedBy]], for which the empty envelope is
+  * an identity, so both `id >>> p` and `p >>> id` preserve the complete prediction.
   */
 final case class Identity[I]() extends TransparentModule[I, I]:
-  override val moduleName: String = "id"
+  override val moduleName: String                                                                              = "id"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[I]] =
     Right(Prediction(call.input, RawPrediction.empty))
 
@@ -58,13 +58,17 @@ final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
         .map(predO => predO.copy(raw = predX.raw.followedBy(predO.raw)))
     }
 
-/** Shared `OptimizableTraversal` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural `inspect(first)
+/** Shared `OptimizableTraversal` distribution for the two-child combinators ([[AndThen]], [[Both]]): structural
+  * `inspect(first)
   * ++ inspect(second)`, `replace` slicing by `first`'s read-arity, and `first.` / `second.` name prefixing (fork 4).
   * One implementation keeps optimizer addressing in sync between `>>>` and `parallel` — a change to the slicing or path
   * naming applied to one combinator cannot silently miss the other.
   */
 private[programs] object PairOptimizableTraversal:
-  def inspect[A, B](pa: OptimizableTraversal[A], pb: OptimizableTraversal[B])(first: A, second: B): Vector[OptimizableView] =
+  def inspect[A, B](
+      pa: OptimizableTraversal[A],
+      pb: OptimizableTraversal[B]
+  )(first: A, second: B): Vector[OptimizableView] =
     pa.inspect(first) ++ pb.inspect(second)
 
   def replace[A, B, P](pa: OptimizableTraversal[A], pb: OptimizableTraversal[B])(
@@ -77,7 +81,10 @@ private[programs] object PairOptimizableTraversal:
     val (firstUpdates, secondUpdates) = updates.splitAt(pa.read(first).size)
     rebuild(pa.replace(first, firstUpdates), pb.replace(second, secondUpdates))
 
-  def inspectNamed[A, B](pa: OptimizableTraversal[A], pb: OptimizableTraversal[B])(first: A, second: B): Vector[(String, OptimizableView)] =
+  def inspectNamed[A, B](
+      pa: OptimizableTraversal[A],
+      pb: OptimizableTraversal[B]
+  )(first: A, second: B): Vector[(String, OptimizableView)] =
     pa.inspectNamed(first).map { case (sub, view) =>
       (if sub == "self" then "first" else s"first.$sub") -> view
     } ++

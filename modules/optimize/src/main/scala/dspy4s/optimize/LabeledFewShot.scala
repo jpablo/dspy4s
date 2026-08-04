@@ -45,16 +45,16 @@ final class LabeledFewShot[P: OptimizableTraversal](
             program = compiled,
             score = 0.0,
             metadata = Map(
-              "optimizer" -> name,
-              "num_demos" -> demos.size,
+              "optimizer"     -> name,
+              "num_demos"     -> demos.size,
               "trainset_size" -> trainset.size
             )
           )
         ),
         metadata = Map(
-          "k" -> config.k,
+          "k"      -> config.k,
           "sample" -> config.sample,
-          "seed" -> config.seed
+          "seed"   -> config.seed
         )
       )
     )

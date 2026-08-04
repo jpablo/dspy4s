@@ -1,44 +1,44 @@
-/**
- * ReAct vs RLM for Compositional Tool Calling
- *
- * Source:   DSPyWeekly issue 23 — https://github.com/RamXX/react2rlm (MIT). Ported and adapted for dspy4s.
- * Upstream task: a drug-safety checker that must perform every pairwise drug-drug interaction check
- *           (C(7,2) = 21 pairs) and every drug-condition contraindication check (7 × 2 = 14) over a
- *           medication list. The point of the demo: `ReAct` selects tools heuristically and tends to check
- *           only a handful of the required pairs, while `RLM` writes Python that ENUMERATES the combinations
- *           deterministically and so achieves full coverage — the "neuro-symbolic" advantage of having the
- *           model emit symbolic code rather than reason through every call in natural language.
- *
- * What this showcases (two dspy4s flagships, same task, same tools):
- *   - `ReAct`  — the text-protocol think→pick-tool→observe loop (re-reads a growing trajectory each turn).
- *   - `RLM`    — inputs become variables in a sandboxed Python REPL; the model writes code that calls the
- *                SAME tools in a loop and `SUBMIT`s the result. Tools are exposed to the sandbox verbatim.
- *
- * Both agents share one base signature and one set of [[ToolFunction]]s. The task instruction is deliberately
- * NEUTRAL about strategy (it asks for a thorough report, not "check every pair"), so each approach picks its own
- * method. We measure two things per run: COVERAGE (a [[CallRecorder]] over every tool call) and EFFORT (LM
- * round-trips + wall time). The durable, model-independent result is the EFFORT gap: even when a capable model
- * lets ReAct reach full coverage too, RLM gets there in a handful of LM calls (one code-gen step writes a loop
- * that does all the checks) versus ReAct's one-LM-call-per-tool-call, trajectory-re-reading turns.
- *
- * Observed in a sample run: ReAct covered 5/21 pairs + 5/14 contraindications in 12 LM round-trips (90s), while
- * RLM covered 21/21 + 14/14 in 3 round-trips (33s) — ReAct even reported "no issue identified" for drugs it
- * never checked. Numbers vary by model/run; the gap's direction is the point.
- *
- * Deltas from the original:
- *   - The interaction / contraindication / drug-class tables are small ILLUSTRATIVE fixtures (the original
- *     uses simulated databases too). This is not medical advice.
- *   - The original runs on Groq (`groq/openai/gpt-oss-120b`); dspy4s's OpenAI-compatible route is used here
- *     via [[Demo]] (`OPENAI_API_KEY` + optional `DSPY_MODEL`). Any OpenAI-compatible endpoint works.
- *   - `RLM` requires **Deno** on the PATH for its Pyodide sandbox. Without it, this demo runs the ReAct side
- *     only and prints how to enable the RLM side.
- *   - We don't assert exact coverage numbers (a live model varies run to run); we print what each achieved.
- *
- * Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.react_vs_rlm.reactVsRlmMain"
- */
+/** ReAct vs RLM for Compositional Tool Calling
+  *
+  * Source: DSPyWeekly issue 23 — https://github.com/RamXX/react2rlm (MIT). Ported and adapted for dspy4s. Upstream
+  * task: a drug-safety checker that must perform every pairwise drug-drug interaction check (C(7,2) = 21 pairs) and
+  * every drug-condition contraindication check (7 × 2 = 14) over a medication list. The point of the demo: `ReAct`
+  * selects tools heuristically and tends to check only a handful of the required pairs, while `RLM` writes Python that
+  * ENUMERATES the combinations deterministically and so achieves full coverage — the "neuro-symbolic" advantage of
+  * having the model emit symbolic code rather than reason through every call in natural language.
+  *
+  * What this showcases (two dspy4s flagships, same task, same tools):
+  *   - `ReAct` — the text-protocol think→pick-tool→observe loop (re-reads a growing trajectory each turn).
+  *   - `RLM` — inputs become variables in a sandboxed Python REPL; the model writes code that calls the SAME tools in a
+  *     loop and `SUBMIT`s the result. Tools are exposed to the sandbox verbatim.
+  *
+  * Both agents share one base signature and one set of [[ToolFunction]]s. The task instruction is deliberately NEUTRAL
+  * about strategy (it asks for a thorough report, not "check every pair"), so each approach picks its own method. We
+  * measure two things per run: COVERAGE (a [[CallRecorder]] over every tool call) and EFFORT (LM round-trips + wall
+  * time). The durable, model-independent result is the EFFORT gap: even when a capable model lets ReAct reach full
+  * coverage too, RLM gets there in a handful of LM calls (one code-gen step writes a loop that does all the checks)
+  * versus ReAct's one-LM-call-per-tool-call, trajectory-re-reading turns.
+  *
+  * Observed in a sample run: ReAct covered 5/21 pairs + 5/14 contraindications in 12 LM round-trips (90s), while RLM
+  * covered 21/21 + 14/14 in 3 round-trips (33s) — ReAct even reported "no issue identified" for drugs it never checked.
+  * Numbers vary by model/run; the gap's direction is the point.
+  *
+  * Deltas from the original:
+  *   - The interaction / contraindication / drug-class tables are small ILLUSTRATIVE fixtures (the original uses
+  *     simulated databases too). This is not medical advice.
+  *   - The original runs on Groq (`groq/openai/gpt-oss-120b`); dspy4s's OpenAI-compatible route is used here via
+  *     [[Demo]] (`OPENAI_API_KEY` + optional `DSPY_MODEL`). Any OpenAI-compatible endpoint works.
+  *   - `RLM` requires **Deno** on the PATH for its Pyodide sandbox. Without it, this demo runs the ReAct side only and
+  *     prints how to enable the RLM side.
+  *   - We don't assert exact coverage numbers (a live model varies run to run); we print what each achieved.
+  *
+  * Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.react_vs_rlm.reactVsRlmMain"
+  */
 package dspy4s.examples.tutorials.react_vs_rlm
 
-import dspy4s.core.contracts.{CallbackEvent, CallbackHandler, DspyError, DynamicValues, LmStartEvent, RuntimeContext, TypeRef}
+import dspy4s.core.contracts.{
+  CallbackEvent, CallbackHandler, DspyError, DynamicValues, LmStartEvent, RuntimeContext, TypeRef
+}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.programs.{IterationLimit, ReAct, RLM}
@@ -74,13 +74,15 @@ object DrugSafetyData:
     for d <- drugs; c <- conditions yield s"${norm(d)}|${norm(c)}"
 
   private val rawInteractions: List[((String, String), String)] = List(
-    ("warfarin", "aspirin")        -> "MAJOR: additive anticoagulant + antiplatelet effect — substantially increased bleeding risk.",
-    ("warfarin", "ibuprofen")      -> "MAJOR: NSAID with an anticoagulant — increased GI bleeding risk; may raise INR.",
-    ("warfarin", "omeprazole")     -> "MODERATE: omeprazole can inhibit warfarin metabolism — monitor INR.",
-    ("warfarin", "atorvastatin")   -> "MODERATE: possible potentiation of anticoagulant effect — monitor INR.",
-    ("aspirin", "ibuprofen")       -> "MODERATE: ibuprofen can blunt aspirin's antiplatelet effect; additive GI risk.",
-    ("aspirin", "lisinopril")      -> "MODERATE: NSAIDs/aspirin may reduce the antihypertensive effect and renal perfusion.",
-    ("ibuprofen", "lisinopril")    -> "MODERATE: NSAID + ACE inhibitor — reduced renal function (part of the 'triple whammy').",
+    ("warfarin", "aspirin") ->
+      "MAJOR: additive anticoagulant + antiplatelet effect — substantially increased bleeding risk.",
+    ("warfarin", "ibuprofen")    -> "MAJOR: NSAID with an anticoagulant — increased GI bleeding risk; may raise INR.",
+    ("warfarin", "omeprazole")   -> "MODERATE: omeprazole can inhibit warfarin metabolism — monitor INR.",
+    ("warfarin", "atorvastatin") -> "MODERATE: possible potentiation of anticoagulant effect — monitor INR.",
+    ("aspirin", "ibuprofen")     -> "MODERATE: ibuprofen can blunt aspirin's antiplatelet effect; additive GI risk.",
+    ("aspirin", "lisinopril") -> "MODERATE: NSAIDs/aspirin may reduce the antihypertensive effect and renal perfusion.",
+    ("ibuprofen", "lisinopril") ->
+      "MODERATE: NSAID + ACE inhibitor — reduced renal function (part of the 'triple whammy').",
     ("lisinopril", "metformin")    -> "MINOR: ACE inhibitors may modestly enhance the glucose-lowering effect.",
     ("atorvastatin", "omeprazole") -> "MINOR: minimal clinically significant interaction expected."
   )
@@ -90,11 +92,12 @@ object DrugSafetyData:
     rawInteractions.map { case ((a, b), v) => pairKey(a, b) -> v }.toMap
 
   private val rawContraindications: List[((String, String), String)] = List(
-    ("ibuprofen", "peptic ulcer disease")    -> "CONTRAINDICATED: NSAIDs can cause/worsen peptic ulcers and GI bleeding.",
-    ("aspirin", "peptic ulcer disease")      -> "CAUTION: increased GI bleeding risk; avoid or co-prescribe gastroprotection.",
-    ("warfarin", "peptic ulcer disease")     -> "CAUTION: heightened bleeding risk with an active ulcer.",
-    ("ibuprofen", "chronic kidney disease")  -> "CONTRAINDICATED: NSAIDs are nephrotoxic and can worsen renal function.",
-    ("metformin", "chronic kidney disease")  -> "CONTRAINDICATED below an eGFR threshold: lactic-acidosis risk.",
+    ("ibuprofen", "peptic ulcer disease") -> "CONTRAINDICATED: NSAIDs can cause/worsen peptic ulcers and GI bleeding.",
+    ("aspirin", "peptic ulcer disease")   ->
+      "CAUTION: increased GI bleeding risk; avoid or co-prescribe gastroprotection.",
+    ("warfarin", "peptic ulcer disease")    -> "CAUTION: heightened bleeding risk with an active ulcer.",
+    ("ibuprofen", "chronic kidney disease") -> "CONTRAINDICATED: NSAIDs are nephrotoxic and can worsen renal function.",
+    ("metformin", "chronic kidney disease") -> "CONTRAINDICATED below an eGFR threshold: lactic-acidosis risk.",
     ("lisinopril", "chronic kidney disease") -> "CAUTION: monitor renal function and potassium (hyperkalemia risk).",
     ("aspirin", "chronic kidney disease")    -> "CAUTION: may reduce renal perfusion; use with monitoring."
   )
@@ -126,11 +129,18 @@ final class CallRecorder:
 
   /** (covered, total) over the 21 required pairwise interaction checks. */
   def interactionCoverage: (Int, Int) =
-    synchronized { (DrugSafetyData.allInteractionPairs.count(interactions.contains), DrugSafetyData.allInteractionPairs.size) }
+    synchronized {
+      (DrugSafetyData.allInteractionPairs.count(interactions.contains), DrugSafetyData.allInteractionPairs.size)
+    }
 
   /** (covered, total) over the 14 required drug-condition contraindication checks. */
   def contraindicationCoverage: (Int, Int) =
-    synchronized { (DrugSafetyData.allContraindicationPairs.count(contraindications.contains), DrugSafetyData.allContraindicationPairs.size) }
+    synchronized {
+      (
+        DrugSafetyData.allContraindicationPairs.count(contraindications.contains),
+        DrugSafetyData.allContraindicationPairs.size
+      )
+    }
 
 // ── The three shared tools (typed argSchema so BOTH the ReAct prompt and the RLM Python sandbox agree) ─────
 object DrugSafetyTools:
@@ -138,15 +148,16 @@ object DrugSafetyTools:
   private def arg(args: DynamicValue.Record, name: String): String =
     DynamicValues.recordGet(args, name).map(DynamicValues.renderText).getOrElse("")
 
-  /** Hand-built so we control the recording side effect AND populate `argSchema` (which drives the Python
-    * parameter names in RLM's sandbox and the tool docs in ReAct's prompt — see `CodeAct.sandboxTools`). */
+  /** Hand-built so we control the recording side effect AND populate `argSchema` (which drives the Python parameter
+    * names in RLM's sandbox and the tool docs in ReAct's prompt — see `CodeAct.sandboxTools`).
+    */
   private def tool(toolName: String, desc: String, params: (String, TypeRef)*)(
       body: DynamicValue.Record => String
   ): ToolFunction =
     new ToolFunction:
-      override val name: String                              = toolName
-      override val description: String                       = desc
-      override val argSchema: Vector[(String, TypeRef)]      = params.toVector
+      override val name: String                         = toolName
+      override val description: String                  = desc
+      override val argSchema: Vector[(String, TypeRef)] = params.toVector
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
         Right(DynamicValues.fromAny(body(args)))
 
@@ -189,9 +200,10 @@ object DrugSafetyTools:
 
 object ReactVsRlm:
 
-  /** Deliberately NEUTRAL about strategy: asks for a thorough report, NOT "check every unique pair". That lets
-    * each approach choose how to be thorough — the whole point of the comparison. (An over-directive "enumerate
-    * every pair" instruction hands ReAct the answer and erases the difference.) */
+  /** Deliberately NEUTRAL about strategy: asks for a thorough report, NOT "check every unique pair". That lets each
+    * approach choose how to be thorough — the whole point of the comparison. (An over-directive "enumerate every pair"
+    * instruction hands ReAct the answer and erases the difference.)
+    */
   private val taskInstructions =
     """You are a clinical drug-safety checker. Given a medication list and the patient's conditions, produce a
       |thorough risk_report: identify the clinically significant drug-drug interactions and any drug-condition
@@ -203,9 +215,10 @@ object ReactVsRlm:
   val signature = Signature.fromString("medications, conditions -> risk_report", taskInstructions)
   // --8<-- [end:shared-signature]
 
-  /** A generous ceiling, not a target: ReAct *could* check all 21 pairs + 14 contraindications within this budget,
-    * so any under-coverage reflects its own heuristic tool selection — not an artificial cap. Each turn re-reads
-    * the growing trajectory (O(N²) tokens), which is exactly the cost the EFFORT metric below surfaces. */
+  /** A generous ceiling, not a target: ReAct *could* check all 21 pairs + 14 contraindications within this budget, so
+    * any under-coverage reflects its own heuristic tool selection — not an artificial cap. Each turn re-reads the
+    * growing trajectory (O(N²) tokens), which is exactly the cost the EFFORT metric below surfaces.
+    */
   val ReActMaxIterations: IterationLimit = IterationLimit(40)
 
   final case class RunResult(
@@ -223,16 +236,17 @@ object ReactVsRlm:
 
   private def metricLine(label: String, value: String): String = f"$label%-34s $value"
 
-  /** Run `body` with a fresh LM-call counter installed on the context's callbacks, returning the body's result
-    * plus the effort it took: LM round-trips (counted via [[LmStartEvent]]) and wall time. */
+  /** Run `body` with a fresh LM-call counter installed on the context's callbacks, returning the body's result plus the
+    * effort it took: LM round-trips (counted via [[LmStartEvent]]) and wall time.
+    */
   private def measured[A](body: RuntimeContext ?=> A)(using base: RuntimeContext): (A, Int, Long) =
-    val counter = new AtomicInteger(0)
+    val counter          = new AtomicInteger(0)
     val countingCallback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
         case _: LmStartEvent => val _ = counter.incrementAndGet()
         case _               => ()
     val started = System.nanoTime()
-    val result =
+    val result  =
       RuntimeEnvironment.withSettings(base.withCallbacks(base.callbacks :+ countingCallback)) {
         body(using RuntimeEnvironment.current)
       }

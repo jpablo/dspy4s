@@ -14,13 +14,18 @@ import ProgramLeafOptimizableTraversalSuite.Pipe2
 /** P4: leaf [[OptimizableLeaf]] instances for the typed single-predictor programs [[Predict]] and [[ChainOfThought]].
   *
   * A `Predict`/`ChainOfThought` field inside a composite must resolve to the 1-element leaf (via
-  * [[OptimizableTraversal.fromOptimizableLeaf]]) rather than being structurally torn apart by [[OptimizableTraversal.derived]]. */
+  * [[OptimizableTraversal.fromOptimizableLeaf]]) rather than being structurally torn apart by
+  * [[OptimizableTraversal.derived]].
+  */
 class ProgramLeafOptimizableTraversalSuite extends FunSuite:
 
-  /** Resolves the right [[OptimizableLeaf]]/[[OptimizableTraversal]] from the program's *static* type, so the `[I, O]` of the
-    * given are inferred at the call site rather than pinned to `Nothing`. */
-  private def predictorOf[P](@annotation.unused program: P)(using leaf: OptimizableLeaf[P]): OptimizableLeaf[P]    = leaf
-  private def predictorsOf[P](@annotation.unused program: P)(using ps: OptimizableTraversal[P]): OptimizableTraversal[P]   = ps
+  /** Resolves the right [[OptimizableLeaf]]/[[OptimizableTraversal]] from the program's *static* type, so the `[I, O]`
+    * of the given are inferred at the call site rather than pinned to `Nothing`.
+    */
+  private def predictorOf[P](@annotation.unused program: P)(using leaf: OptimizableLeaf[P]): OptimizableLeaf[P] = leaf
+  private def predictorsOf[P](@annotation.unused program: P)(using
+      ps: OptimizableTraversal[P]
+  ): OptimizableTraversal[P] = ps
 
   // A concrete typed signature: (question: String) -> (answer: String).
   private val qaSignature = Signature.fromString("question -> answer")
@@ -77,8 +82,8 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
   // ── ChainOfThought ───────────────────────────────────────────────────────
 
   test("OptimizableLeaf[ChainOfThought] exposes augmented read-only metadata plus writable state") {
-    val cot  = ChainOfThought(qaSignature, demos = demo, name = Some("think"))
-    val leaf = predictorOf(cot)
+    val cot   = ChainOfThought(qaSignature, demos = demo, name = Some("think"))
+    val leaf  = predictorOf(cot)
     val state = leaf.get(cot)
     val view  = leaf.inspect(cot)
     // the exposed layout is the augmented one containing the leading `reasoning` output field
@@ -136,7 +141,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = ChainOfThought(qaSignature, name = Some("think"))
     )
-    val ps   = summon[OptimizableTraversal[Pipe2]]
+    val ps    = summon[OptimizableTraversal[Pipe2]]
     val views = ps.inspect(pipe)
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "ask")

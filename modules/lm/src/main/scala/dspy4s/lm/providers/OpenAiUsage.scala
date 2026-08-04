@@ -8,10 +8,11 @@ import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
 /** Typed wire model of an OpenAI token-usage block, shared by the streaming chunk parser and the (non-streaming)
-  * response parser. Decoded by a derived `JsonCodec`, so absent fields and `null`s become `None` and unknown keys
-  * are ignored — no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the
+  * response parser. Decoded by a derived `JsonCodec`, so absent fields and `null`s become `None` and unknown keys are
+  * ignored — no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the
   * Responses (`input_tokens`/`output_tokens`) naming conventions are modeled; the nested `*_tokens_details` blocks
-  * carry the provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`. */
+  * carry the provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
+  */
 private[lm] final case class OpenAiUsage(
     promptTokens: Option[Long] = None,
     completionTokens: Option[Long] = None,
@@ -23,11 +24,12 @@ private[lm] final case class OpenAiUsage(
 ) derives Schema:
 
   /** `totalTokens` falls back to prompt + completion when absent. `extras` is the union of the prompt- and
-    * completion-side detail breakdowns (a category appearing on both sides, e.g. `audio_tokens`, is summed). */
+    * completion-side detail breakdowns (a category appearing on both sides, e.g. `audio_tokens`, is summed).
+    */
   def toLmUsage: LmUsage =
-    val prompt = promptTokens.orElse(inputTokens).getOrElse(0L)
+    val prompt     = promptTokens.orElse(inputTokens).getOrElse(0L)
     val completion = completionTokens.orElse(outputTokens).getOrElse(0L)
-    val extras = mergeCounts(
+    val extras     = mergeCounts(
       promptTokensDetails.map(_.toCategoryCounts).getOrElse(Map.empty),
       completionTokensDetails.map(_.toCategoryCounts).getOrElse(Map.empty)
     )
@@ -65,7 +67,8 @@ private[lm] final case class OpenAiTokenDetails(
 private[lm] object OpenAiUsage:
   private val codec = Schema[OpenAiUsage].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
-  /** Decode a usage record (a subtree of an already-parsed response/chunk) into the typed model. Lenient: a usage
-    * block that fails to decode yields an empty `OpenAiUsage` rather than failing the whole response. */
+  /** Decode a usage record (a subtree of an already-parsed response/chunk) into the typed model. Lenient: a usage block
+    * that fails to decode yields an empty `OpenAiUsage` rather than failing the whole response.
+    */
   def fromDynamic(usage: DynamicValue): OpenAiUsage =
     codec.decode(usage.toJson).getOrElse(OpenAiUsage())

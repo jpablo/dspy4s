@@ -15,11 +15,11 @@ import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 
 /** What [[Streamify]] needs of a program in order to stream it, captured as a typeclass so that both dynamic
-  * `Module[DynamicValue.Record, DynamicValue.Record]` values and statically typed `Module[I, O]` values can be
-  * streamed through the same entry point. `Streamify` requires exactly two things of a program:
+  * `Module[DynamicValue.Record, DynamicValue.Record]` values and statically typed `Module[I, O]` values can be streamed
+  * through the same entry point. `Streamify` requires exactly two things of a program:
   *
-  *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction`
-  *      for the final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
+  *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction` for the
+  *      final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
   *      `StreamingLanguageModel` consulting `ActivePredictContext`, which each `PredictEngine` execution scopes for
   *      both typed and dynamic prediction modules — independent of how the outer program is invoked. 2.
   *      [[knownSignatures]] — best-effort `(predictName, signature)` pairs used *only* for stream-listener validation

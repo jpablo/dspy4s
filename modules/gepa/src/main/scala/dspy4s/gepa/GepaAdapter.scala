@@ -105,7 +105,7 @@ final class GepaAdapter[P](
     componentsById.get(component).flatMap { case (identified, index) =>
       traj.trace.lift(index).map(identified -> _)
     }.map { case (identified, entry) =>
-      val inputs = DynamicValues.renderText(entry.inputs)
+      val inputs           = DynamicValues.renderText(entry.inputs)
       val generatedOutputs = entry.failure match
         case Some(_) =>
           DynamicValues.recordGet(entry.outputs, "raw_response").map(DynamicValues.renderText).getOrElse("(no output)")
@@ -125,7 +125,7 @@ final class GepaAdapter[P](
 
   /** Run one example in an isolated, failure-capturing context and assemble its [[Trajectory]]. */
   private def runOne(prog: P, example: Example)(using RuntimeContext): Trajectory =
-    val base = summon[RuntimeContext]
+    val base     = summon[RuntimeContext]
     val isolated = base
       .withConfig(base.config.copy(captureFailureTraces = true))
       .withDelta(base.delta.copy(trace = Vector.empty))

@@ -1,27 +1,27 @@
 /** Signatures
- *
+  *
   * Source: docs/docs/learn/programming/signatures.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md Status: translated (8/8
   * python snippets)
- *
- * Translation rule:
+  *
+  * Translation rule:
   *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`, `dspy.ChainOfThought("a -> b")`, or
   *     `dspy.Signature("a -> b")`) become Scala **function signatures** via `Signature.fromType[(in: I) => (out: O)]`.
   *   - Python **class-based** signatures (`class X(dspy.Signature): ...`) become Scala **spec traits** with
   *     `InputField[T]` / `OutputField[T]` members and `Signature.of[T <: Spec]`.
- *
+  *
   * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named tuples, so call sites get typed dot-access:
- *
- *   Predict(sig)((field = "...")).map(_.output.field)
- *
+  *
+  * Predict(sig)((field = "...")).map(_.output.field)
+  *
   * `ChainOfThought` augments the output named tuple with `reasoning: String` and delegates through typed `Predict`.
   * Snippets 3, 4, and 6 use it directly.
- *
+  *
   * Structure note: each snippet is a self-contained block — heading comment + python original + supporting types (when
   * any) + example object. Supporting types (enums, case classes, spec traits) must stay at the package level for
   * zio-blocks-schema / Mirror derivation and for the trait-spec macro to see them, so the per-snippet block places them
   * immediately above the example object that uses them.
- */
+  */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.ChatAdapter
@@ -135,7 +135,7 @@ enum Emotion derives Schema:
   case sadness, joy, love, anger, fear, surprise
 
 trait EmotionSpec extends Spec:
-  def sentence:  InputField[String]
+  def sentence: InputField[String]
   def sentiment: OutputField[Emotion]
 
 object EmotionExample:
@@ -161,10 +161,10 @@ object EmotionExample:
 // trait-spec surface; only signature-level instructions are.
 
 trait CheckCitationFaithfulnessSpec extends Spec:
-  def context:      InputField[String]
-  def text:         InputField[String]
+  def context: InputField[String]
+  def text: InputField[String]
   def faithfulness: OutputField[Boolean]
-  def evidence:     OutputField[Map[String, List[String]]]
+  def evidence: OutputField[Map[String, List[String]]]
 
 object FaithfulnessExample:
   val signature =
@@ -194,7 +194,7 @@ case class Image(url: String) derives Schema
 
 trait DogPictureSpec extends Spec:
   def image_1: InputField[Image]
-  def answer:  OutputField[String]
+  def answer: OutputField[String]
 
 object DogPictureExample:
   val signature =

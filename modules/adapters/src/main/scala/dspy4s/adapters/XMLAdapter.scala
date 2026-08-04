@@ -53,7 +53,7 @@ final case class XMLAdapter(
     // used to return the ENTIRE raw XML document as the field's "value".
     extractXml(output.text).flatMap(parseXml) match
       case Right(document) => parseFields(layout, document, output)
-      case Left(_) =>
+      case Left(_)         =>
         if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
           AdapterTextSupport.singleOutputTextFallback(name, layout, output)
         else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
@@ -80,20 +80,23 @@ final case class XMLAdapter(
     else
       XMLAdapter.FencedXml.findFirstMatchIn(text).map(_.group(1)) match
         case Some(xml) => Right(xml)
-        case None =>
+        case None      =>
           val first = text.indexOf('<')
-          val last = text.lastIndexOf('>')
+          val last  = text.lastIndexOf('>')
           if first >= 0 && last > first then Right(text.substring(first, last + 1))
           else Left(ParseError("adapter", "Could not find XML document in model output"))
 
   private def parseXml(raw: String): Either[DspyError, Elem] =
     Try(XML.loadString(raw)).toEither.left.map(error => ParseError("adapter", error.getMessage))
 
-  /** A present-but-empty tag is a PRESENT field with an empty value (`Some("")`), not a missing field —
-    * treating it as missing used to route single-output signatures into the text fallback, which returned the
-    * whole raw XML document as the field's value. */
-  private def extractFieldText(xml: Elem, fieldName: String): Option[String] =
-    (xml \\ fieldName).headOption.map(_.text.trim)
+  /** A present-but-empty tag is a PRESENT field with an empty value (`Some("")`), not a missing field — treating it as
+    * missing used to route single-output signatures into the text fallback, which returned the whole raw XML document
+    * as the field's value.
+    */
+  private def extractFieldText(
+      xml: Elem,
+      fieldName: String
+  ): Option[String] = (xml \\ fieldName).headOption.map(_.text.trim)
 
   private def escapeXml(value: String): String =
     value

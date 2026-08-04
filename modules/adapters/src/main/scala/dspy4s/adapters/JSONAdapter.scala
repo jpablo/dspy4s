@@ -32,7 +32,8 @@ final case class JSONAdapter(
     name: String = "json",
     allowTextFallbackForSingleOutput: Boolean = true,
     /** See [[ChatAdapter.useNativeFunctionCalling]] — same adapter-level native function-calling gate, shared via
-      * [[NativeFunctionCalling]]. Off by default. */
+      * [[NativeFunctionCalling]]. Off by default.
+      */
     useNativeFunctionCalling: Boolean = false,
     parallelToolCalls: Option[Boolean] = None,
     /** See [[ChatAdapter.toolChoice]]. */
@@ -45,7 +46,7 @@ final case class JSONAdapter(
     // follow-up that needs schema-AST manipulation; the prose block is the v1.)
     // A `tool_calls`-typed output is filled from structured tool_calls, never requested as a JSON key.
     val textOutputFields = invocation.layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
-    val fieldList = textOutputFields.map(_.name).mkString(", ")
+    val fieldList        = textOutputFields.map(_.name).mkString(", ")
     // When the typed Predict path supplies a JSON Schema (rendered from the output `Schema[O]` via
     // `Shape.jsonSchemaString`), inline it so the LM has the precise output contract -- field names, types,
     // enum constraints, and required fields. Falls back to the natural-language instruction when no schema is
@@ -82,23 +83,30 @@ final case class JSONAdapter(
         // `response_format` option; both ride the same requestOptions seam.
         requestOptions = FormattedPrompt.mergeOptions(
           responseFormatOptions(invocation),
-          NativeFunctionCalling.toolOptions(invocation.layout, invocation.tools, useNativeFunctionCalling, parallelToolCalls, toolChoice)
+          NativeFunctionCalling.toolOptions(
+            invocation.layout,
+            invocation.tools,
+            useNativeFunctionCalling,
+            parallelToolCalls,
+            toolChoice
+          )
         )
       )
     )
 
-  /** G-7 v1 (native structured outputs): when the ambient LM declares `supportsResponseSchema` and a JSON Schema
-    * is available, emit OpenAI's `response_format: {type:"json_schema", json_schema:{name, schema, strict}}` into
-    * `FormattedPrompt.requestOptions`, so the provider ENFORCES the output schema (not only the prose hint, which
-    * stays in the system message as a belt-and-suspenders fallback). The engine merges this under the per-call /
-    * module options.
+  /** G-7 v1 (native structured outputs): when the ambient LM declares `supportsResponseSchema` and a JSON Schema is
+    * available, emit OpenAI's `response_format: {type:"json_schema", json_schema:{name, schema, strict}}` into
+    * `FormattedPrompt.requestOptions`, so the provider ENFORCES the output schema (not only the prose hint, which stays
+    * in the system message as a belt-and-suspenders fallback). The engine merges this under the per-call / module
+    * options.
     *
-    * `strict: false` — dspy4s-rendered schemas may not satisfy OpenAI strict-mode requirements (e.g. every
-    * property must be `required`, `additionalProperties: false`). If the schema string fails to parse this returns
-    * an empty record (prose-only); `format` never fails over this.
+    * `strict: false` — dspy4s-rendered schemas may not satisfy OpenAI strict-mode requirements (e.g. every property
+    * must be `required`, `additionalProperties: false`). If the schema string fails to parse this returns an empty
+    * record (prose-only); `format` never fails over this.
     *
     * Native FUNCTION CALLING reuses this same `requestOptions` seam and is now implemented (G-7b): see
-    * [[NativeFunctionCalling.toolOptions]], merged with this `response_format` in `format`. */
+    * [[NativeFunctionCalling.toolOptions]], merged with this `response_format` in `format`.
+    */
   private def responseFormatOptions(invocation: AdapterInvocation)(using ctx: RuntimeContext): DynamicValue.Record =
     val capable = ctx.lm match
       case Some(lm: LanguageModel) => lm.supportsResponseSchema
@@ -125,9 +133,10 @@ final case class JSONAdapter(
         case None => DynamicValue.Record.empty
 
   /** G-9: structurally embed each constrained output field's constraints into the emitted JSON Schema, adding the
-    * JSON-Schema keyword (`exclusiveMinimum`, `maxLength`, ...) to the matching property record. No-op when no
-    * output field is constrained or the schema has no `properties` object. (The schema is emitted `strict:false`,
-    * so the provider treats these as advisory hints — they add structured signal, matching ChatAdapter's prose.) */
+    * JSON-Schema keyword (`exclusiveMinimum`, `maxLength`, ...) to the matching property record. No-op when no output
+    * field is constrained or the schema has no `properties` object. (The schema is emitted `strict:false`, so the
+    * provider treats these as advisory hints — they add structured signal, matching ChatAdapter's prose.)
+    */
   private def embedConstraints(
       schema: DynamicValue.Record,
       outputFields: Vector[dspy4s.core.contracts.FieldSpec]
@@ -137,7 +146,7 @@ final case class JSONAdapter(
     else
       DynamicValues.recordGet(schema, "properties") match
         case Some(props: DynamicValue.Record) =>
-          val byName = constrained.map(f => f.name -> f.constraints).toMap
+          val byName       = constrained.map(f => f.name -> f.constraints).toMap
           val updatedProps = props.fields.map {
             case (propName, prop: DynamicValue.Record) if byName.contains(propName) =>
               propName -> byName(propName).foldLeft(prop)((acc, c) => acc.updated(c.schemaKeyword, c.schemaValue))
@@ -146,8 +155,9 @@ final case class JSONAdapter(
           schema.updated("properties", DynamicValue.Record(Chunk.from(updatedProps)))
         case _ => schema
 
-  /** OpenAI requires the `json_schema.name` to match `^[a-zA-Z0-9_-]+$`. Replace any other character with `_`;
-    * fall back to a constant when the result would be empty. */
+  /** OpenAI requires the `json_schema.name` to match `^[a-zA-Z0-9_-]+$`. Replace any other character with `_`; fall
+    * back to a constant when the result would be empty.
+    */
   private def sanitizeSchemaName(name: String): String =
     val cleaned = name.replaceAll("[^a-zA-Z0-9_-]", "_")
     if cleaned.isEmpty then "response_schema" else cleaned
@@ -164,17 +174,18 @@ final case class JSONAdapter(
       // errors (a parsed object with a missing/miscoerced field would return the raw text as the "value").
       extractJson(output.text).flatMap(parseJsonObject) match
         case Right(root) => parseFields(layout, root, output)
-        case Left(_) =>
+        case Left(_)     =>
           if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
             AdapterTextSupport.singleOutputTextFallback(name, layout, output)
           else Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
 
   /** Native tool turn: the model returned `tool_calls` (typically with an empty or non-JSON body). Fill the
-    * `tool_calls` field from the structured calls; parse any JSON body that IS present for the remaining text
-    * fields, and default the rest to Null (mirrors dspy's lenient native parse — `setdefault(field, None)`). */
+    * `tool_calls` field from the structured calls; parse any JSON body that IS present for the remaining text fields,
+    * and default the rest to Null (mirrors dspy's lenient native parse — `setdefault(field, None)`).
+    */
   private def parseNativeToolTurn(layout: SignatureLayout, output: LmOutput): ParsedOutput =
     val jsonRoot: Option[Value] = extractJson(output.text).flatMap(parseJsonObject).toOption
-    val entries = layout.outputFields.map { field =>
+    val entries                 = layout.outputFields.map { field =>
       if NativeFunctionCalling.isToolCallsField(field) then
         field.name -> NativeFunctionCalling.encodeToolCalls(output.toolCalls)
       else
@@ -199,18 +210,18 @@ final case class JSONAdapter(
     else
       JSONAdapter.FencedJson.findFirstMatchIn(text).map(_.group(1)) match
         case Some(json) => Right(json)
-        case None =>
+        case None       =>
           extractFirstJsonObject(text).toRight(ParseError("adapter", "Could not find JSON object in model output"))
 
   private def extractFirstJsonObject(text: String): Option[String] =
     val start = text.indexOf('{')
     if start < 0 then None
     else
-      var depth = 0
-      var end = -1
-      var i = start
+      var depth    = 0
+      var end      = -1
+      var i        = start
       var inString = false
-      var escaped = false
+      var escaped  = false
       while i < text.length && end < 0 do
         val c = text.charAt(i)
         if inString then

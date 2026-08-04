@@ -19,24 +19,24 @@ class OptimizableTraversalSuite extends FunSuite:
   final case class Pipe(a: DynamicPredict, b: DynamicPredict, n: Int)
   object Pipe:
     given OptimizableTraversal.WithArity[Int, 0] = OptimizableTraversal.empty
-    given OptimizableTraversal[Pipe]                 = OptimizableTraversal.derived
+    given OptimizableTraversal[Pipe]             = OptimizableTraversal.derived
 
   test("OptimizableLeaf lifts to a 1-element OptimizableTraversal via fromOptimizableLeaf") {
     val p  = DynamicPredict(layout = sigA)
     val ps = summon[OptimizableTraversal[DynamicPredict]]
     assertEquals(ps.read(p).size, 1)
     assertEquals(ps.read(p).head, p.optimizableParameters)
-    val updated = p.optimizableParameters.copy(instructions = Some("updated"))
+    val updated  = p.optimizableParameters.copy(instructions = Some("updated"))
     val replaced = ps.replace(p, Vector(updated))
     assertEquals(replaced.optimizableParameters, updated)
     assertEquals(replaced.layout.fields, sigA.fields)
   }
 
   test("derived read concatenates fields left-to-right, honoring explicitly parameter-free fields") {
-    val a    = DynamicPredict(layout = sigA, name = Some("a"))
-    val b    = DynamicPredict(layout = sigB, name = Some("b"))
-    val pipe = Pipe(a, b, 7)
-    val ps   = summon[OptimizableTraversal[Pipe]]
+    val a     = DynamicPredict(layout = sigA, name = Some("a"))
+    val b     = DynamicPredict(layout = sigB, name = Some("b"))
+    val pipe  = Pipe(a, b, 7)
+    val ps    = summon[OptimizableTraversal[Pipe]]
     val views = ps.inspect(pipe)
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "a")

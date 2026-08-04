@@ -36,8 +36,8 @@ class DynamicSignatureSuite extends FunSuite:
       Right(ParsedOutput(values = DynamicValues.record(layout.outputFields.head.name := output.text)))
 
   private final class FixedLm(id0: String, reply: String) extends LanguageModel:
-    override val id: String   = id0
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = id0
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = reply))))
 

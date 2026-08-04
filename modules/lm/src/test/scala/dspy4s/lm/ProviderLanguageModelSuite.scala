@@ -82,17 +82,17 @@ class ProviderLanguageModelSuite extends FunSuite:
 
   test("provider language model parses chat responses including tool calls and usage") {
     var seenRequest: DynamicValue = DynamicValue.Record.empty
-    val rawResponse = DynamicValues.fromAny(Map(
-      "model" -> "openai/test",
+    val rawResponse               = DynamicValues.fromAny(Map(
+      "model"   -> "openai/test",
       "choices" -> Vector(
         Map(
           "message" -> Map(
-            "role" -> "assistant",
-            "content" -> "The answer is Brussels.",
+            "role"       -> "assistant",
+            "content"    -> "The answer is Brussels.",
             "tool_calls" -> Vector(
               Map(
                 "function" -> Map(
-                  "name" -> "search",
+                  "name"      -> "search",
                   "arguments" -> Map("query" -> "capital of belgium")
                 )
               )
@@ -101,9 +101,9 @@ class ProviderLanguageModelSuite extends FunSuite:
         )
       ),
       "usage" -> Map(
-        "prompt_tokens" -> 5,
+        "prompt_tokens"     -> 5,
         "completion_tokens" -> 7,
-        "total_tokens" -> 12
+        "total_tokens"      -> 12
       )
     ))
 
@@ -116,7 +116,7 @@ class ProviderLanguageModelSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = lm.call(
+    val result           = lm.call(
       LmRequest(
         model = "openai/test",
         mode = LmMode.Chat,
@@ -137,11 +137,11 @@ class ProviderLanguageModelSuite extends FunSuite:
     // tool_calls array. The output and its toolCalls must be emitted even though there is no text content —
     // dropping it would make native function-calling impossible (the tool call would be lost).
     val rawResponse = DynamicValues.fromAny(Map(
-      "model" -> "openai/test",
+      "model"   -> "openai/test",
       "choices" -> Vector(
         Map(
           "message" -> Map(
-            "role" -> "assistant",
+            "role"       -> "assistant",
             "tool_calls" -> Vector(
               Map("function" -> Map("name" -> "search", "arguments" -> Map("query" -> "capital of belgium")))
             )
@@ -157,7 +157,7 @@ class ProviderLanguageModelSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = lm.call(
+    val result           = lm.call(
       LmRequest(
         model = "openai/test",
         mode = LmMode.Chat,
@@ -173,10 +173,10 @@ class ProviderLanguageModelSuite extends FunSuite:
 
   test("provider language model parses responses API output blocks") {
     val rawResponse = DynamicValues.fromAny(Map(
-      "model" -> "openai/responses-test",
+      "model"  -> "openai/responses-test",
       "output" -> Vector(
         Map(
-          "type" -> "message",
+          "type"    -> "message",
           "content" -> Vector(Map("type" -> "output_text", "text" -> "First line"), Map("text" -> "Second line"))
         )
       ),
@@ -190,7 +190,7 @@ class ProviderLanguageModelSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = lm.call(
+    val result           = lm.call(
       LmRequest(
         model = "openai/responses-test",
         mode = LmMode.Responses,
@@ -213,7 +213,7 @@ class ProviderLanguageModelSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = lm.call(
+    val result           = lm.call(
       LmRequest(
         model = "openai/empty",
         mode = LmMode.Chat,

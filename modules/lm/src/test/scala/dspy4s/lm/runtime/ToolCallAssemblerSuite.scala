@@ -60,6 +60,6 @@ class ToolCallAssemblerSuite extends FunSuite:
 
   test("empty arguments yield empty args map") {
     val deltas = Vector(LmToolCallDelta(index = 0, name = Some("ping")))
-    val calls = ToolCallAssembler.assemble(deltas)
+    val calls  = ToolCallAssembler.assemble(deltas)
     assertEquals(argsMap(calls.head), Map.empty[String, Any])
   }

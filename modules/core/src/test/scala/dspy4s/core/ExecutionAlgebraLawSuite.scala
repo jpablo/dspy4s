@@ -110,7 +110,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
   test("RuntimeContext partitions round-trip through the flat compatibility surface") {
     val metadata = DynamicValues.record("run" := "abc")
     val delta    = RuntimeDelta(Vector(trace("step")), Vector(history("lm")))
-    val context = RuntimeContext(
+    val context  = RuntimeContext(
       numThreads = Some(ThreadCount(4)),
       callbackMetadata = metadata,
       captureFailureTraces = true,

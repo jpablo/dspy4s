@@ -20,7 +20,7 @@ private[typed] object MacroSignatureSupport:
       val name        = ${ nameExpr }
       val inputShape  = ${ inputShapeExpr }
       val outputShape = ${ outputShapeExpr }
-      val layout = SignatureLayout
+      val layout      = SignatureLayout
         .create(
           name = name,
           inputFields = inputShape.fieldSpecs,

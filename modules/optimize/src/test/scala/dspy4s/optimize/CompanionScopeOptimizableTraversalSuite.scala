@@ -9,28 +9,31 @@ import munit.FunSuite
 
 import CompanionScopeOptimizableTraversalSuite.Agent
 
-/** Regression for the HIGH-severity scope bug: the leaf `OptimizableLeaf[Predict]` / `OptimizableLeaf[ChainOfThought]` instances
-  * (and the hand-written `OptimizableTraversal` instances for the composite typed programs) USED to live in a non-companion
-  * `object ProgramPredictors`, so they were only in implicit scope after an explicit `import ProgramPredictors.given`.
+/** Regression for the HIGH-severity scope bug: the leaf `OptimizableLeaf[Predict]` / `OptimizableLeaf[ChainOfThought]`
+  * instances (and the hand-written `OptimizableTraversal` instances for the composite typed programs) USED to live in a
+  * non-companion `object ProgramPredictors`, so they were only in implicit scope after an explicit
+  * `import ProgramPredictors.given`.
   *
   * This suite DELIBERATELY does NOT import them: it only exercises companion-scope resolution. On the old code a user
-  * composite `case class Agent(...)` with `given OptimizableTraversal[Agent] = OptimizableTraversal.derived` and no such import would
-  * resolve each typed-program field to ZERO predictors. With the instances moved to the typeclass companions it is 2;
-  * the strict derivation boundary now also makes a future omission fail compilation instead of silently falling back to
-  * `OptimizableTraversal.empty`.
+  * composite `case class Agent(...)` with `given OptimizableTraversal[Agent] = OptimizableTraversal.derived` and no
+  * such import would resolve each typed-program field to ZERO predictors. With the instances moved to the typeclass
+  * companions it is 2; the strict derivation boundary now also makes a future omission fail compilation instead of
+  * silently falling back to `OptimizableTraversal.empty`.
   */
 class CompanionScopeOptimizableTraversalSuite extends FunSuite:
 
   private val qaSignature = Signature.fromString("question -> answer")
 
-  private def predictorsOf[P](@annotation.unused program: P)(using ps: OptimizableTraversal[P]): OptimizableTraversal[P] = ps
+  private def predictorsOf[P](@annotation.unused program: P)(using
+      ps: OptimizableTraversal[P]
+  ): OptimizableTraversal[P] = ps
 
   test("composite of typed programs resolves field predictors WITHOUT any import (was 0, now 2)") {
     val agent = Agent(
       planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
-    val ps   = summon[OptimizableTraversal[Agent]]
+    val ps    = summon[OptimizableTraversal[Agent]]
     val views = ps.inspect(agent)
     // Each typed-program leaf is found in companion scope; strict derivation would reject a missing instance.
     assertEquals(views.size, 2)

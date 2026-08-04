@@ -49,8 +49,8 @@ class PersistenceSuite extends FunSuite:
       val result = EvaluationResultPersistence.saveAsJson(sampleResult, path)
       assertEquals(result, Right(()))
       val content = Source.fromFile(path).mkString
-      val parsed = ujson.read(content)
-      val arr = parsed.arr
+      val parsed  = ujson.read(content)
+      val arr     = parsed.arr
       assertEquals(arr.size, 3)
       assertEquals(arr(0)("example_question").str, "cap of France?")
       assertEquals(arr(0)("example_answer").str, "Paris")
@@ -78,7 +78,7 @@ class PersistenceSuite extends FunSuite:
   }
 
   test("saveAsCsv prefixes pred fields on collision with example fields") {
-    val path = tmpPath(".csv")
+    val path      = tmpPath(".csv")
     val collision = EvaluationResult(
       score = 50.0,
       results = Vector(
@@ -100,7 +100,7 @@ class PersistenceSuite extends FunSuite:
   }
 
   test("saveAsJson supports non-string field values") {
-    val path = tmpPath(".json")
+    val path        = tmpPath(".json")
     val withNumbers = sampleResult.copy(
       results = Vector(
         ExampleEvaluation(
@@ -114,7 +114,7 @@ class PersistenceSuite extends FunSuite:
       val result = EvaluationResultPersistence.saveAsJson(withNumbers, path)
       assertEquals(result, Right(()))
       val content = Source.fromFile(path).mkString
-      val parsed = ujson.read(content)
+      val parsed  = ujson.read(content)
       assertEquals(parsed.arr(0)("example_score").num, 0.8)
       assertEquals(parsed.arr(0)("confidence").num, 0.95)
     finally { val _ = Files.deleteIfExists(Paths.get(path)) }

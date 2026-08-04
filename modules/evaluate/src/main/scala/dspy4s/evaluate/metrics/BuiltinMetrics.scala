@@ -11,16 +11,20 @@ import dspy4s.evaluate.contracts.Metric
 import zio.blocks.schema.DynamicValue
 
 object MetricHelpers:
-  def extractString(example: Example, prediction: RawPrediction, fieldName: String): Either[DspyError, (String, Vector[String])] =
+  def extractString(
+      example: Example,
+      prediction: RawPrediction,
+      fieldName: String
+  ): Either[DspyError, (String, Vector[String])] =
     val exampleValue: Either[DspyError, Vector[String]] = example.get(fieldName) match
-      case None => Left(NotFoundError(fieldName, s"Example is missing field '$fieldName'"))
+      case None     => Left(NotFoundError(fieldName, s"Example is missing field '$fieldName'"))
       case Some(dv) =>
         DynamicValues.toAny(dv) match
           case text: String => Right(Vector(text))
           // A record-valued field is a `Map` (hence `Iterable`); render it to text rather than collecting its
           // tuple elements as strings (which yields none and would falsely report "no string values").
           case _: scala.collection.Map[?, ?] => Right(Vector(DynamicValues.renderText(dv)))
-          case seq: Iterable[?] =>
+          case seq: Iterable[?]              =>
             val strings = seq.collect { case s: String => s }.toVector
             if strings.isEmpty then Left(NotFoundError(fieldName, s"Example.$fieldName has no string values"))
             else Right(strings)
@@ -28,23 +32,24 @@ object MetricHelpers:
 
     val predictionValue = prediction.get(fieldName).map(DynamicValues.toAny) match
       case Some(text: String) => Right(text)
-      case Some(other) => Right(other.toString)
-      case None => Left(NotFoundError(fieldName, s"Prediction is missing field '$fieldName'"))
+      case Some(other)        => Right(other.toString)
+      case None               => Left(NotFoundError(fieldName, s"Prediction is missing field '$fieldName'"))
 
     for
       examples <- exampleValue
-      pred <- predictionValue
+      pred     <- predictionValue
     yield (pred, examples)
 
-  /** Render a single field value to text for an LM-judged metric: a string verbatim, an iterable joined by
-    * newlines (e.g. a retrieved-context passage list), any other scalar via `toString`. A missing field is a
-    * `NotFoundError`. Used by the auto-evaluation metrics to build the judge sub-program's inputs. */
+  /** Render a single field value to text for an LM-judged metric: a string verbatim, an iterable joined by newlines
+    * (e.g. a retrieved-context passage list), any other scalar via `toString`. A missing field is a `NotFoundError`.
+    * Used by the auto-evaluation metrics to build the judge sub-program's inputs.
+    */
   def scoringText(value: Option[DynamicValue], fieldName: String, owner: String): Either[DspyError, String] =
     value.map(DynamicValues.toAny) match
       case Some(text: String)     => Right(text)
       case Some(seq: Iterable[?]) => Right(seq.map(_.toString).mkString("\n"))
       case Some(other)            => Right(other.toString)
-      case None => Left(NotFoundError(fieldName, s"$owner is missing field '$fieldName'"))
+      case None                   => Left(NotFoundError(fieldName, s"$owner is missing field '$fieldName'"))
 
 class ExactMatch(answerField: String = "answer") extends Metric:
   val name: String = "exact_match"
@@ -82,7 +87,7 @@ class F1Score(answerField: String = "answer") extends Metric:
     }
 
   private def f1Score(pred: String, truth: String): Double =
-    val predTokens = pred.split("\\s+").filter(_.nonEmpty)
+    val predTokens  = pred.split("\\s+").filter(_.nonEmpty)
     val truthTokens = truth.split("\\s+").filter(_.nonEmpty)
     if predTokens.isEmpty || truthTokens.isEmpty then 0.0
     else
@@ -90,7 +95,7 @@ class F1Score(answerField: String = "answer") extends Metric:
       if common == 0.0 then 0.0
       else
         val precision = common / predTokens.size
-        val recall = common / truthTokens.size
+        val recall    = common / truthTokens.size
         2.0 * precision * recall / (precision + recall)
 
 class AnswerMatch(frac: Double = 1.0, answerField: String = "answer") extends Metric:
@@ -135,11 +140,12 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
       ctx <- contexts
       ans <- answers
     yield
-      val passages = ctx.map(NormalizeText.dpr)
+      val passages    = ctx.map(NormalizeText.dpr)
       val answersNorm = ans.map(NormalizeText.dpr)
       if passages.exists(p => answersNorm.exists(a => p.contains(a))) then 1.0 else 0.0
 
-class FunctionMetric(val name: String, fn: (Example, RawPrediction, Vector[TraceEntry]) => Either[DspyError, Double]) extends Metric:
+class FunctionMetric(val name: String, fn: (Example, RawPrediction, Vector[TraceEntry]) => Either[DspyError, Double])
+    extends Metric:
   // The wrapped `fn` stays PURE (no RuntimeContext) — function metrics are plain `(example, prediction, trace)`
   // callables; the ambient context is accepted to satisfy the trait and ignored here.
   override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using

@@ -44,7 +44,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
       teacher: Option[P] = None,
       valset: Option[Vector[Example]] = None
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps = summon[OptimizableTraversal[P]]
+    val ps                               = summon[OptimizableTraversal[P]]
     val effectiveValset: Vector[Example] =
       valset.getOrElse(trainset)
 
@@ -80,8 +80,8 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
 
     // seeds 0..numCandidates-1: bootstrap with shuffled subset
     (0 until config.numCandidates).foreach { seed =>
-      val subsetRng = new scala.util.Random((config.seed + seed).toLong)
-      val shuffled = Vector.from(subsetRng.shuffle(trainset))
+      val subsetRng  = new scala.util.Random((config.seed + seed).toLong)
+      val shuffled   = Vector.from(subsetRng.shuffle(trainset))
       val minSamples = 1
       val maxSamples = math.max(minSamples, config.maxBootstrappedDemos)
       val targetSize =
@@ -105,9 +105,9 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
         case Left(_)       => ()
     }
 
-    var bestScore: Option[Double] = None
+    var bestScore: Option[Double]                  = None
     var bestCandidate: Option[CandidateProgram[P]] = None
-    val allCandidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+    val allCandidates                              = mutable.ArrayBuffer.empty[CandidateProgram[P]]
 
     val sortedCandidates = candidates.sortBy(c =>
       val (seed, _) = c
@@ -166,7 +166,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
               candidates = allCandidates.toVector.sortBy(-_.score),
               metadata = Map(
                 "num_candidates" -> allCandidates.size,
-                "best_score" -> best.score
+                "best_score"     -> best.score
               )
             )
           )

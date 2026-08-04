@@ -1,19 +1,18 @@
-/**
- * Tutorial: Debugging and Observability in DSPy
- *
- * Source:   docs/docs/tutorials/observability/index.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/observability/index.md
- * Status:   translated (the ReAct agent + the custom-callback observability hook, snippets 1/2/6). The
- *           `inspect_history` snippet (3) is demonstrated in learn/programming/Adapters (dspy4s exposes
- *           `RuntimeEnvironment.inspectHistory`); here the richer `CallbackHandler` stream is the focus.
- *           Blocked bits: MLflow autolog (snippets 4/5 — no MLflow integration), and the retrieval backends
- *           (ColBERTv2 / Tavily) which have no dspy4s equivalent, so the `retrieve` tool returns a static stub.
- *
- * Python's `from dspy.utils.callback import BaseCallback` + `on_module_end(call_id, outputs, exception)`
- * maps onto dspy4s's `CallbackHandler.onEvent`, which receives a sealed `CallbackEvent` stream;
- * `on_module_end` is the `ModuleEndEvent` case. Install handlers with `RuntimeEnvironment.withCallbacks`
- * (the analogue of `dspy.configure(callbacks=[...])`).
- */
+/** Tutorial: Debugging and Observability in DSPy
+  *
+  * Source: docs/docs/tutorials/observability/index.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/observability/index.md Status: translated (the
+  * ReAct agent + the custom-callback observability hook, snippets 1/2/6). The `inspect_history` snippet (3) is
+  * demonstrated in learn/programming/Adapters (dspy4s exposes `RuntimeEnvironment.inspectHistory`); here the richer
+  * `CallbackHandler` stream is the focus. Blocked bits: MLflow autolog (snippets 4/5 — no MLflow integration), and the
+  * retrieval backends (ColBERTv2 / Tavily) which have no dspy4s equivalent, so the `retrieve` tool returns a static
+  * stub.
+  *
+  * Python's `from dspy.utils.callback import BaseCallback` + `on_module_end(call_id, outputs, exception)` maps onto
+  * dspy4s's `CallbackHandler.onEvent`, which receives a sealed `CallbackEvent` stream; `on_module_end` is the
+  * `ModuleEndEvent` case. Install handlers with `RuntimeEnvironment.withCallbacks` (the analogue of
+  * `dspy.configure(callbacks=[...])`).
+  */
 package dspy4s.examples.tutorials.observability
 
 import dspy4s.core.contracts.{DspyError, ModuleEndEvent, RuntimeContext}
@@ -36,7 +35,7 @@ object Observability:
 
   def agent = ReAct(
     baseSignature = Signature.fromString("question -> answer"),
-    tools         = Vector(ToolFunction.fromMethod(retrieve)),
+    tools = Vector(ToolFunction.fromMethod(retrieve)),
     maxIterations = IterationLimit(3)
   )
 
@@ -59,7 +58,8 @@ object Observability:
   // --8<-- [end:callback]
 
   /** Run the agent with the logging callback installed — the analogue of
-    * `dspy.configure(callbacks=[AgentLoggingCallback()])` followed by `agent(question=...)`. */
+    * `dspy.configure(callbacks=[AgentLoggingCallback()])` followed by `agent(question=...)`.
+    */
   // --8<-- [start:callback-run]
   def runWithLogging(question: String)(using ctx: RuntimeContext): Either[DspyError, String] =
     RuntimeEnvironment.withCallbacks(ctx.callbacks :+ new AgentLoggingCallback) {

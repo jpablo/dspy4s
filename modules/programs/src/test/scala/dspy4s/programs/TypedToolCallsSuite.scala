@@ -25,24 +25,29 @@ final case class Plan(toolCalls: Vector[ToolCall]) derives Schema
 class TypedToolCallsSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach):  Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
 
   /** A capable LM that returns a single native tool call (no text content). */
   private final class ToolLm extends LanguageModel:
-    override val id: String                      = "tool-lm"
-    override val mode: LmMode                     = LmMode.Chat
-    override def supportsFunctionCalling: Boolean = true
+    override val id: String                                                                    = "tool-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def supportsFunctionCalling: Boolean                                              = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      Right(LmResponse(outputs = Vector(LmOutput(
-        text      = "",
-        toolCalls = Vector(ToolCall("search", DynamicValues.record("query" := "belgium")))
-      ))))
+      Right(LmResponse(outputs =
+        Vector(LmOutput(
+          text = "",
+          toolCalls = Vector(ToolCall("search", DynamicValues.record("query" := "belgium")))
+        ))
+      ))
 
   test("typed Predict decodes native tool_calls into a Vector[ToolCall] output field") {
     val signature = Signature.derived[Ask, Plan]("QA").markToolCalls("toolCalls")
-    val tools = Vector(
-      ToolSpec("search", Some("Search the web"),
-        Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true)))
+    val tools     = Vector(
+      ToolSpec(
+        "search",
+        Some("Search the web"),
+        Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+      )
     )
     val predict = Predict(signature = signature, tools = tools)
 
@@ -50,7 +55,7 @@ class TypedToolCallsSuite extends FunSuite:
       RuntimeContext(lm = Some(new ToolLm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = predict(Ask("capital of belgium?"))
+      val result           = predict(Ask("capital of belgium?"))
 
       assert(result.isRight, s"expected success, got: $result")
       val plan = result.toOption.get.output

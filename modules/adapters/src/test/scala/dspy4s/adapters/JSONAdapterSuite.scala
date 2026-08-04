@@ -21,7 +21,6 @@ class JSONAdapterSuite extends FunSuite:
   private def lookup(rec: DynamicValue.Record, key: String): Option[Any] =
     DynamicValues.recordGet(rec, key).map(DynamicValues.toAny)
 
-
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()
 
@@ -29,7 +28,7 @@ class JSONAdapterSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("format injects json output contract into system message") {
-    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    val signature  = SignatureDsl.parse("question -> answer, score: float").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector(
@@ -43,7 +42,7 @@ class JSONAdapterSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val formatted = JSONAdapter().format(invocation)
+    val formatted        = JSONAdapter().format(invocation)
 
     assert(formatted.isRight)
     val messages = formatted.toOption.get.messages
@@ -55,51 +54,59 @@ class JSONAdapterSuite extends FunSuite:
   }
 
   test("format inlines outputJsonSchema in the system message when supplied") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature    = SignatureDsl.parse("question -> answer").toOption.get
     val schemaString =
       """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
     val invocation = AdapterInvocation(
-      layout           = signature,
-      demos            = Vector.empty,
-      inputs           = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request          = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      layout = signature,
+      demos = Vector.empty,
+      inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
+      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
       outputJsonSchema = Some(schemaString)
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val formatted = JSONAdapter().format(invocation)
+    val formatted        = JSONAdapter().format(invocation)
 
     assert(formatted.isRight)
     val systemText = formatted.toOption.get.messages.head.text.get
-    assert(systemText.contains("conforms to the following JSON Schema"),
-      s"expected schema-aware instruction, got:\n$systemText")
-    assert(systemText.contains(schemaString),
-      s"expected schema inlined in system message, got:\n$systemText")
+    assert(
+      systemText.contains("conforms to the following JSON Schema"),
+      s"expected schema-aware instruction, got:\n$systemText"
+    )
+    assert(
+      systemText.contains(schemaString),
+      s"expected schema inlined in system message, got:\n$systemText"
+    )
   }
 
   test("format falls back to the keys-list instruction when outputJsonSchema is None") {
-    val signature = SignatureDsl.parse("question -> answer, score").toOption.get
+    val signature  = SignatureDsl.parse("question -> answer, score").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
-      demos  = Vector.empty,
+      demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
       // outputJsonSchema defaults to None
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val systemText = JSONAdapter().format(invocation).toOption.get.messages.head.text.get
-    assert(systemText.contains("exactly these keys: answer, score"),
-      s"expected key-list instruction, got:\n$systemText")
-    assert(!systemText.contains("JSON Schema"),
-      s"unexpected schema mention in fallback instruction:\n$systemText")
+    val systemText       = JSONAdapter().format(invocation).toOption.get.messages.head.text.get
+    assert(
+      systemText.contains("exactly these keys: answer, score"),
+      s"expected key-list instruction, got:\n$systemText"
+    )
+    assert(
+      !systemText.contains("JSON Schema"),
+      s"unexpected schema mention in fallback instruction:\n$systemText"
+    )
   }
 
   test("parse reads plain json payload and coerces scalar types") {
     val signature = SignatureDsl.parse("question -> answer, score: float, ok: bool").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = JSONAdapter().parse(
+    val parsed           = JSONAdapter().parse(
       signature,
       LmOutput(text = """{"answer":"Brussels","score":0.91,"ok":true}""")
     )
@@ -113,7 +120,7 @@ class JSONAdapterSuite extends FunSuite:
 
   test("parse coerces a whole-number int but rejects a fractional value (no silent truncation)") {
     // Two outputs so the JSON-object path (not the single-output raw-text fallback) drives coercion.
-    val signature = SignatureDsl.parse("question -> answer, count: int").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer, count: int").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
 
     val ok = JSONAdapter().parse(signature, LmOutput(text = """{"answer":"x","count":42}"""))
@@ -126,13 +133,13 @@ class JSONAdapterSuite extends FunSuite:
 
   test("parse supports fenced json payloads") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val text =
+    val text      =
       """```json
         |{"answer":"Brussels"}
         |```""".stripMargin
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = JSONAdapter().parse(signature, LmOutput(text = text))
+    val parsed           = JSONAdapter().parse(signature, LmOutput(text = text))
 
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
@@ -157,7 +164,7 @@ class JSONAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = JSONAdapter().parse(signature, LmOutput(text = "{not-json}"))
+    val parsed           = JSONAdapter().parse(signature, LmOutput(text = "{not-json}"))
 
     assert(parsed.isLeft)
     assert(parsed.left.toOption.get.isInstanceOf[ParseError])
@@ -167,7 +174,7 @@ class JSONAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = JSONAdapter().parse(signature, LmOutput(text = "Brussels"))
+    val parsed           = JSONAdapter().parse(signature, LmOutput(text = "Brussels"))
 
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
@@ -180,7 +187,7 @@ class JSONAdapterSuite extends FunSuite:
   // (no JSON object), and the single-output text fallback explicitly refuses
   // empty text -> ParseError. Multi-output skips the fallback entirely -> ParseError.
   test("C1: parse of an empty response for a single-output signature is a ParseError") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
     for blank <- Vector("", "   ", "\n\n") do
       val parsed = JSONAdapter().parse(signature, LmOutput(text = blank))
@@ -192,7 +199,7 @@ class JSONAdapterSuite extends FunSuite:
   }
 
   test("C1: parse of an empty response for a multi-output signature is a ParseError") {
-    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    val signature        = SignatureDsl.parse("question -> answer, score: float").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
     for blank <- Vector("", "   ", "\n\n") do
       val parsed = JSONAdapter().parse(signature, LmOutput(text = blank))
@@ -207,7 +214,7 @@ class JSONAdapterSuite extends FunSuite:
   // dspy 3.2.1 json_adapter.py uses json.dumps(..., ensure_ascii=False); dspy4s
   // formats demo assistant messages via ujson.write, which writes UTF-8 literally.
   test("A1: format emits non-ASCII demo values literally in the assistant JSON (no \\uXXXX)") {
-    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val signature  = SignatureDsl.parse("question -> answer").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
       demos = Vector(
@@ -220,7 +227,7 @@ class JSONAdapterSuite extends FunSuite:
       request = LmRequest(model = "openai/test", mode = LmMode.Chat)
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val all = JSONAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")
+    val all              = JSONAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")
 
     assert(all.contains("café naïve 日本語"), s"expected literal non-ASCII in assistant JSON: $all")
     assert(!all.contains("\\u"), s"non-ASCII was \\u-escaped in assistant JSON: $all")
@@ -230,9 +237,9 @@ class JSONAdapterSuite extends FunSuite:
   // is itself a nested JSON object containing non-ASCII must round-trip literally
   // through value.render() (JSONAdapter coerce for TypeRef.json -> JsonDynamic).
   test("A1: parse round-trips non-ASCII inside a nested json output field literally") {
-    val signature = SignatureDsl.parse("question -> payload: json").toOption.get
+    val signature        = SignatureDsl.parse("question -> payload: json").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
-    val parsed = JSONAdapter().parse(
+    val parsed           = JSONAdapter().parse(
       signature,
       LmOutput(text = """{"payload":{"drink":"café","note":"naïve 日本語"}}""")
     )

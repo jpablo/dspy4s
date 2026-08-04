@@ -1,12 +1,11 @@
-/**
- * Tools
- *
- * Source:   docs/docs/learn/programming/tools.md
- * Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/tools.md
- * Status:   translated (ReAct + tools, snippets 1/2/9; native-function-calling toggle, snippet 6). The
- *           manual-tool-call path (snippets 3/5) and async tools (7/8) aren't part of dspy4s's surface —
- *           dspy4s's ReAct selects tools via output fields and `ToolFunction` is synchronous.
- */
+/** Tools
+  *
+  * Source: docs/docs/learn/programming/tools.md Upstream:
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/tools.md Status: translated (ReAct +
+  * tools, snippets 1/2/9; native-function-calling toggle, snippet 6). The manual-tool-call path (snippets 3/5) and
+  * async tools (7/8) aren't part of dspy4s's surface — dspy4s's ReAct selects tools via output fields and
+  * `ToolFunction` is synchronous.
+  */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
@@ -52,7 +51,7 @@ object Tools:
     // --8<-- [start:react-agent]
     val reactAgent = ReAct(
       baseSignature = Signature.fromString("question -> answer"),
-      tools         = Vector(getWeather, searchWeb),
+      tools = Vector(getWeather, searchWeb),
       maxIterations = IterationLimit(5)
     )
 
@@ -68,11 +67,12 @@ object Tools:
   // A clear `name` + `description` and defensive arg handling carry over directly to `ToolFunction`:
   object GoodToolExample:
     val goodTool: ToolFunction =
-      ToolFunction.of("good_tool", "Get weather information for a specific city (units: celsius | fahrenheit).") { args =>
-        val city  = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("").trim
-        val units = DynamicValues.recordGet(args, "units").map(DynamicValues.renderText).getOrElse("celsius")
-        if city.isEmpty then "Error: City name cannot be empty"
-        else s"Weather in $city: 25°${units.take(1).toUpperCase}, sunny"
+      ToolFunction.of("good_tool", "Get weather information for a specific city (units: celsius | fahrenheit).") {
+        args =>
+          val city  = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("").trim
+          val units = DynamicValues.recordGet(args, "units").map(DynamicValues.renderText).getOrElse("celsius")
+          if city.isEmpty then "Error: City name cannot be empty"
+          else s"Weather in $city: 25°${units.take(1).toUpperCase}, sunny"
       }
 
   // ── Snippets 3 / 5 — manual `dspy.Tool` input field + `ToolCalls` output + `call.execute()` ──

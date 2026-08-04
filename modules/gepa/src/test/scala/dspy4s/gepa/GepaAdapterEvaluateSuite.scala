@@ -30,8 +30,8 @@ class GepaAdapterEvaluateSuite extends FunSuite:
 
   /** Answers "Paris" for the France question (ChatAdapter marker format), "Lyon" otherwise. */
   private final class ScriptedLm extends LanguageModel:
-    override val id: String   = "scripted"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt = request.messages.flatMap(_.text).mkString("\n")
       val answer = if prompt.contains("France") then "Paris" else "Lyon"
@@ -104,7 +104,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     // but the prompt the LM sees must carry the candidate instruction).
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = adapter.evaluate(
+      val result           = adapter.evaluate(
         batch.take(1),
         Map(OptimizableId(0) -> Some("Answer with the city name only.")),
         captureTraces = true
