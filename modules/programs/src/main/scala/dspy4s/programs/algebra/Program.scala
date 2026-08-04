@@ -58,9 +58,7 @@ object Program:
     packageWith(f)
 
   /** Naturals grade program composition: identity contributes zero leaves and composition adds leaf counts. */
-  given gradedProgramCategory: NatGradedCategory[RecordCodec, Program, SomeProgram] with
-    def forget[A, B, N <: Int](f: Program[A, B, N]): SomeProgram[A, B] = f
-
+  given gradedProgramCategory: NatGradedCategory[RecordCodec, Program] with
     def id[A](using @annotation.unused codec: RecordCodec[A]): Program[A, A, 0] =
       Program.packageWith(Compose.id[A])
 
@@ -89,8 +87,8 @@ object Program:
       )
 
   /** The complete parameter vector is a lawful lens whose size is the program's grade. */
-  given programParameterization: Parameterization[RecordCodec, Program, SomeProgram] with
-    val category: NatGradedCategory[RecordCodec, Program, SomeProgram] = gradedProgramCategory
+  given programParameterization: Parameterization[RecordCodec, Program] with
+    val category: NatGradedCategory[RecordCodec, Program] = gradedProgramCategory
 
     def read[A, B, N <: Int](f: Program[A, B, N]): SizedVector[OptimizableParameters, N] =
       f.optimizableParameters.readSized(f.program)

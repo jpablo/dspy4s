@@ -45,11 +45,11 @@ final case class NestedBox(value: NestedValue) derives Schema
 final case class ArrayBox(values: Array[Int]) derives Schema
 
 /** Executes the `@Law` statements of the graded program structures ([[NatGradedCategory]] / [[Parameterization]] over
-  * [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it:
-  * structural `==` for parameter vectors and delooping morphisms, observational equality (complete prediction / params
-  * / coherent decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no
-  * `OptimizableTraversal`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
-  * shares its input; copying is not natural for effectful morphisms).
+  * [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural
+  * `==` for parameter vectors and delooping morphisms, observational equality (complete prediction / params / coherent
+  * decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no `OptimizableTraversal`, no
+  * `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying
+  * is not natural for effectful morphisms).
   */
 class ProgramAlgebraLawSuite extends FunSuite:
 
@@ -90,8 +90,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[NatGradedCategory[RecordCodec, Program, SomeProgram]]
-  private val P = summon[Parameterization[RecordCodec, Program, SomeProgram]]
+  private val C = summon[NatGradedCategory[RecordCodec, Program]]
+  private val P = summon[Parameterization[RecordCodec, Program]]
   private val F = summon[OrderedFanout[Program]]
 
   // ── Bundle-tagged dynamic objects: fresh types minted per parse (DynamicSignature) ─────────────────────────
@@ -164,11 +164,11 @@ class ProgramAlgebraLawSuite extends FunSuite:
     * decoding is a property of the object, so it no longer varies between the two sides by construction).
     */
   private def assertObsEq[I, O](
-      eq: IsEq[SomeProgram[I, O]],
+      eq: IsEq[AnyGrade[Program, I, O]],
       input: I
   ): Unit =
-    assertEquals(eq.lhs.params, eq.rhs.params)
-    assertEquals(observe(eq.lhs, input), observe(eq.rhs, input))
+    assertEquals(eq.lhs.morphism.params, eq.rhs.morphism.params)
+    assertEquals(observe(eq.lhs.morphism, input), observe(eq.rhs.morphism, input))
 
   /** Execute an IsEq whose carrier supports plain structural equality (parameter vectors). */
   private def assertIsEq[A](eq: IsEq[A]): Unit =
@@ -176,15 +176,15 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   // ── Graded-category laws over Program, executed from the trait's @Law statements ────────────────────────────
   test("graded Category laws hold observationally and grades compose as natural numbers") {
-    val f = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val f                                  = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
     val identity: Program[Boxed, Boxed, 0] = C.id[Boxed]
     assertObsEq(C.identityLeft(f), Boxed(7))
     assertObsEq(C.identityRight(f), Boxed(7))
     assertEquals(identity.params, Vector.empty)
 
-    val a = pack(step[Int, String]("a", "i -> s")(i => s"<$i>"))
-    val g = pack(step[String, String]("g", "s -> t")(s => s + s))
-    val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
+    val a                              = pack(step[Int, String]("a", "i -> s")(i => s"<$i>"))
+    val g                              = pack(step[String, String]("g", "s -> t")(s => s + s))
+    val h                              = pack(step[String, Int]("h", "t -> n")(s => s.length))
     val composed: Program[Int, Int, 3] = (a >>> g) >>> h
     assertObsEq(C.associativity(a, g, h), 3)
     assertEquals(composed(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
@@ -220,9 +220,9 @@ class ProgramAlgebraLawSuite extends FunSuite:
   }
 
   test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
-    val inferred = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val inferred                            = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
     val program: Program[Boxed, Wrapped, 1] = inferred
-    val lens                                          = summon[Lens[
+    val lens                                = summon[Lens[
       Program[Boxed, Wrapped, 1],
       SizedVector[OptimizableParameters, 1]
     ]]
@@ -247,8 +247,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   // ── fanout: behavior, its params law, and the copy NON-law ───────────────────────────────────────────────
   test("fanout runs both legs on the same input and satisfies paramsFanout") {
-    val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
-    val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
+    val f                                      = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
+    val g                                      = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
     val paired: Program[Int, (String, Int), 2] = F.fanout(f, g)
     assertEquals(paired(ProgramCall(4)).map(_.output), Right(("v4", 5)))
     assertIsEq(P.paramsFanout(f, g))

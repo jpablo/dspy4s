@@ -12,8 +12,8 @@ import scala.compiletime.ops.int.+
   * The grade is the number of writable optimizer leaves. The lens laws govern replacement; the laws below state that
   * parameter reading is compositional. Ordered fan-out remains a separate optional structure.
   */
-trait Parameterization[P[_], Hom[_, _, _ <: Int], Erased[_, _]]:
-  def category: NatGradedCategory[P, Hom, Erased]
+trait Parameterization[P[_], Hom[_, _, _ <: Int]]:
+  def category: NatGradedCategory[P, Hom]
 
   /** Read every writable parameter in stable address order. */
   def read[A, B, N <: Int](f: Hom[A, B, N]): SizedVector[OptimizableParameters, N]

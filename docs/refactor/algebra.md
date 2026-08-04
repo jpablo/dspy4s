@@ -271,7 +271,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
     homogeneous `OptimizableParameters` values make `Vector` the exact, not approximate, parameter object, while layout/module
     metadata remains read-only). Prototyped as
-    `NatGradedCategory[RecordCodec, Program, SomeProgram]` over `Program[I, O, N]` morphisms, with parameter access and
+    `NatGradedCategory[RecordCodec, Program]` over `Program[I, O, N]` morphisms, with canonical lossless grade erasure
+    through `AnyGrade`; parameter access and
     ordered fan-out separated into `Parameterization` and `OrderedFanout`; `Program` packages addressability while its
     domain object supplies a sealed canonical codec. Exact programs provide uniform `OptimizableTraversal[Program[I, O, N]]`
     plus `ProgramRunner[Program[I, O, N]]`; `SomeProgram[I, O]` is the explicit runnable grade-erasure boundary. Two

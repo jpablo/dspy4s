@@ -88,7 +88,7 @@ grade(f >>> g) = grade(f) + grade(g)
 The abstraction expressing this is:
 
 ```scala
-NatGradedCategory[RecordCodec, Program, SomeProgram]
+NatGradedCategory[RecordCodec, Program]
 ```
 
 Its important operations have these types:
@@ -115,8 +115,10 @@ flowchart LR
 ```
 
 The ordinary category laws still apply: identity changes nothing and composition is associative. The law statements
-compare programs after forgetting only the grade. This is necessary because Scala does not normalize symbolic types
-such as `(N + M) + K` and `N + (M + K)` to the same spelling, even though natural-number addition is associative.
+compare programs after forgetting only the grade. `AnyGrade` is a sealed existential package containing the unchanged
+morphism and its hidden grade; `forgetGrade` is final, so an instance cannot discard behavioral information to make a
+law pass. This package is necessary because Scala does not normalize symbolic types such as `(N + M) + K` and
+`N + (M + K)` to the same spelling, even though natural-number addition is associative.
 
 ## Parameters form a lawful lens
 
