@@ -57,16 +57,16 @@ typeclass values—often called *evidence* in Scala documentation:
 
 ```mermaid
 flowchart LR
-    moduleValue["F <: Module[I, O]<br/>concrete executable value"]
+    moduleValue["F extends Module[I, O]<br/>concrete executable value"]
     traversalEvidence["OptimizableTraversal.WithArity[F, N]<br/>complete parameter traversal"]
     objectCodec["RecordCodec[I]<br/>canonical object decoder"]
-    constructor["Program.of"]
+    programOf["Program.of"]
     packagedValue["Program.WithArity[I, O, N]<br/>Rep = F"]
 
-    moduleValue --> constructor
-    traversalEvidence -->|"stored in the package"| constructor
-    objectCodec -->|"construction gate only"| constructor
-    constructor --> packagedValue
+    moduleValue --> programOf
+    traversalEvidence -->|"stored in the package"| programOf
+    objectCodec -->|"construction gate only"| programOf
+    programOf --> packagedValue
 ```
 
 The two requirements reject different invalid packages:
