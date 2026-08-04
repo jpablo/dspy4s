@@ -159,7 +159,8 @@ object InspectFunctor
       Program.erasedCategory,
       viewsDeloop
     ):
-  def map[A, B](f: SomeProgram[A, B]): ViewsHom[A, B] =
+  def mapObject[A](using RecordCodec[A]): AnyObject[A] = summon
+  def map[A, B](f: SomeProgram[A, B]): ViewsHom[A, B]  =
     f.optimizableParameters.inspect(f.program)
 
 /** Parameter projection from arity-erased programs into the delooped ordered parameter monoid. */
@@ -168,5 +169,6 @@ object ReadFunctor
       Program.erasedCategory,
       paramsDeloop
     ):
+  def mapObject[A](using RecordCodec[A]): AnyObject[A] = summon
   def map[A, B](f: SomeProgram[A, B]): ParamsHom[A, B] =
     ForgetMetadataFunctor.map(InspectFunctor.map(f))

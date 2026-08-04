@@ -6,7 +6,7 @@ import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.LmUsage
-import dspy4s.core.algebra.{Monad, Monoid}
+import dspy4s.core.algebra.{Monoid, ScalaMonad}
 import dspy4s.core.contracts.RuntimeConfig
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
@@ -95,23 +95,38 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     assertEquals(initial.flatMap(value => Executed(value + 1, next)), Executed(2, first.combine(next)))
   }
 
-  property("Executed obeys the writer flatMap identity and associativity laws") {
+  property("Executed obeys the categorical writer-monad laws and their derived bind form") {
     Prop.forAll(Gen.choose(-1000, 1000), genDelta) { (value, delta) =>
-      val M                        = Monad[Executed]
+      val M                        = ScalaMonad[Executed]
       val executed                 = Executed(value, delta)
       def f(n: Int): Executed[Int] = Executed(n + 1, RuntimeDelta(Vector(trace("f"))))
       def g(n: Int): Executed[Int] = Executed(n * 2, RuntimeDelta(Vector(trace("g"))))
-      val leftIdentity             = M.identityLeft(value, f)
-      val rightIdentity            = M.identityRight(executed)
-      val associativity            = M.associativity(executed, f, g)
-      val functorIdentity          = M.identities[Int]
-      val functorComposition       = M.composition((n: Int) => n + 1, (n: Int) => n * 2)
+      val leftIdentity             = M.bindIdentityLeft(value, f)
+      val rightIdentity            = M.bindIdentityRight(executed)
+      val bindAssociativity        = M.bindAssociativity(executed, f, g)
+      val functorIdentity          = M.endofunctor.identities[Int]
+      val functorComposition       = M.endofunctor.composition((n: Int) => n + 1, (n: Int) => n * 2)
+      val unitNaturality           = M.unit.naturality((n: Int) => n + 1)
+      val multiplicationNaturality = M.multiplication.naturality((n: Int) => n + 1)
+      val unitAtF                  = M.unitAtF
+      val fMapUnit                 = M.fMapUnit
+      val categoricalAssociativity = M.associativity
+      val nested                   = Executed(
+        Executed(Executed(value, delta), RuntimeDelta(Vector(trace("middle")))),
+        RuntimeDelta(Vector(trace("outer")))
+      )
 
       leftIdentity.lhs == leftIdentity.rhs &&
       rightIdentity.lhs == rightIdentity.rhs &&
-      associativity.lhs == associativity.rhs &&
+      bindAssociativity.lhs == bindAssociativity.rhs &&
       functorIdentity.lhs(executed) == functorIdentity.rhs(executed) &&
-      functorComposition.lhs(executed) == functorComposition.rhs(executed)
+      functorComposition.lhs(executed) == functorComposition.rhs(executed) &&
+      unitNaturality.lhs(value) == unitNaturality.rhs(value) &&
+      multiplicationNaturality.lhs(nested.value) == multiplicationNaturality.rhs(nested.value) &&
+      unitAtF.lhs.component[Int](executed) == unitAtF.rhs.component[Int](executed) &&
+      fMapUnit.lhs.component[Int](executed) == fMapUnit.rhs.component[Int](executed) &&
+      categoricalAssociativity.lhs.component[Int](nested) ==
+        categoricalAssociativity.rhs.component[Int](nested)
     }
   }
 

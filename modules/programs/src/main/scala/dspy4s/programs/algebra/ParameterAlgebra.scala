@@ -38,5 +38,6 @@ object ForgetMetadataFunctor
       viewsDeloop,
       paramsDeloop
     ):
+  def mapObject[A](using AnyObject[A]): AnyObject[A]    = summon
   def map[A, B](views: ViewsHom[A, B]): ParamsHom[A, B] =
     views.map(_.parameters)

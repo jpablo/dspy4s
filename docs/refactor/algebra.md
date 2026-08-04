@@ -187,11 +187,11 @@ input `(I, J)` has no canonical single-record decoder (two independent inputs, o
 `split` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
 category naturally supports fan-out, and the raw split is the structural op beneath it.
 
-**Not adopted (deliberately).** The higher-kinded generalization from `typista.org`'s categories article —
-`CategoryTC1[P[F[_]], Hom[F[_], G[_]]]` (objects = endofunctors) and the internal-monoid tower that recovers
-`Monad` as a monoid in `End(X)` — does not apply: dspy4s's objects are types, not functors, and its monads
-(`Either`, later `CIO`) are ambient and used, never re-derived. The useful generalization here is instead an
-ordered Arrow/premonoidal vocabulary for executable effects. A separate commutative denotational carrier would
+**Endofunctor structure is used where it belongs.** `Monad[F, P, Hom]` now models a monad as a monoid in `End(X)`:
+an endofunctor plus natural unit `Id => F` and multiplication `F ∘ F => F`. `ScalaMonad` specializes the structure to
+total Scala functions and derives `pure`, `flatten`, and `flatMap`; `Executed` and `Prediction` are its writer
+instances. This does not make executable `Module` morphisms commutative or cartesian. Their ordered
+Arrow/premonoidal behavior and the copy counterexample remain separate; a commutative denotational carrier would still
 be required before monoidal or Markov coherence becomes meaningful.
 
 **Ugly laws in the current code = the work to do.**
@@ -325,8 +325,11 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     and executed by behavioral law suites, rather than forced into dishonest `IsEq` statements.
   - **Previously implicit functors and actions are explicit:** `Functor` now includes its object mapping, allowing the
     same law-bearing trait to describe both category interpretations and ordinary Scala type constructors.
-    `ProgramCall` and fixed-length `SizedVector` are endofunctors; `Executed` and `Prediction` are writer monads;
-    module input/output adaptation is `ModuleProfunctor`; total and fallible local-function lifting are `LiftFunctor`
+    `ProgramCall` and fixed-length `SizedVector` are endofunctors; `Executed` and `Prediction` are categorical writer
+    monads through the Scala specialization. `NaturalTransformation` states naturality and supplies vertical
+    composition plus left/right whiskering, so `Monad` can state its unit and associativity laws directly as equations
+    between transformations.
+    Module input/output adaptation is `ModuleProfunctor`; total and fallible local-function lifting are `LiftFunctor`
     and `LiftEitherFunctor`; and `Mode` acts on modules through `MonoidAction`. Optimizer inspection factors as
     `InspectFunctor` followed by `ForgetMetadataFunctor`, with `ReadFunctor` retaining the composite parameter view.
     The associated suites execute the laws rather than relying on the names alone.

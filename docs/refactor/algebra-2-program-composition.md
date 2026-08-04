@@ -312,9 +312,12 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
 - **Previously implicit module structures are explicit.** `Module` has its ordinary category instance;
   `ModuleProfunctor` states the laws shared by `contramapInput`, `mapOutput`, and `dimap`; `LiftFunctor` embeds total
   functions; and `LiftEitherFunctor` embeds the `Either[DspyError, *]` Kleisli category. `Mode` acts on modules through
-  a `MonoidAction`, while the writer carriers `Executed` and `Prediction` expose `Monad` instances. The common
-  `Functor` trait now carries an object mapping, so it also describes `ProgramCall` and every fixed-length
-  `SizedVector[*, N]`. Focused suites execute each law under the appropriate extensional or runtime observation.
+  a `MonoidAction`, while the writer carriers `Executed` and `Prediction` expose `ScalaMonad` instances of the general
+  categorical `Monad[F, P, Hom]`. Natural transformations, vertical composition, and whiskering state the monad laws
+  at their categorical level; `pure`, `flatten`, and `flatMap` are derived Scala operations. The common `Functor` trait
+  now carries both an object mapping and evidence that valid source objects map to valid target objects, so it also
+  describes `ProgramCall` and every fixed-length `SizedVector[*, N]`. Focused suites execute each law under the
+  appropriate extensional or runtime observation.
 - **`fanout`, named honestly.** Added to the `Program` layer as the ordered pairing: both legs share the
   input, so it is copy-then-ordered-tensor fused. The copy NON-law is pinned as an executable
   counterexample: `h >>> fanout(f, g)` runs `h` once while `fanout(h >>> f, h >>> g)` runs it twice,

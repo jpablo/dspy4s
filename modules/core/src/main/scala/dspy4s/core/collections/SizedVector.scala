@@ -1,6 +1,6 @@
 package dspy4s.core.collections
 
-import dspy4s.core.algebra.{Endofunctor, functionCategory}
+import dspy4s.core.algebra.{AnyObject, Endofunctor, functionCategory}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.FixedLength
 
@@ -19,7 +19,8 @@ type SizedVector[A, N <: Int] = Vector[A] :| FixedLength[N]
 object SizedVector:
 
   given functor[N <: Int]: Endofunctor[[A] =>> SizedVector[A, N]] with
-    def map[A, B](f: A => B): SizedVector[A, N] => SizedVector[B, N] = _.mapSized(f)
+    def mapObject[A](using AnyObject[A]): AnyObject[SizedVector[A, N]] = summon
+    def map[A, B](f: A => B): SizedVector[A, N] => SizedVector[B, N]   = _.mapSized(f)
 
   /** Describes a failed attempt to establish a statically tracked vector length. */
   final case class SizeMismatch(expected: Int, actual: Int) derives CanEqual:

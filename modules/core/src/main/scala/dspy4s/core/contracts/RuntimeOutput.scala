@@ -1,7 +1,7 @@
 package dspy4s.core.contracts
 
 import dspy4s.core.algebra.Monoid
-import dspy4s.core.algebra.{Monad, functionCategory}
+import dspy4s.core.algebra.ScalaMonad
 
 import zio.blocks.schema.DynamicValue
 
@@ -49,7 +49,8 @@ object RuntimeDelta:
 
 /** A value paired with the observable runtime output produced while computing it. This is the writer carrier for
   * isolated execution: `map` preserves the delta and `flatMap` combines deltas in execution order. Its companion's
-  * [[dspy4s.core.algebra.Monad]] instance states and exposes those composition laws explicitly.
+  * [[dspy4s.core.algebra.ScalaMonad]] instance supplies the categorical endofunctor, unit, and multiplication while
+  * deriving the usual Scala operations.
   */
 final case class Executed[+A](value: A, delta: RuntimeDelta) derives CanEqual:
   def map[B](f: A => B): Executed[B] = Executed(f(value), delta)
@@ -61,7 +62,9 @@ final case class Executed[+A](value: A, delta: RuntimeDelta) derives CanEqual:
 object Executed:
   def pure[A](value: A): Executed[A] = Executed(value, RuntimeDelta.empty)
 
-  given monad: Monad[Executed] with
-    def pure[A](value: A): Executed[A] = Executed.pure(value)
-
-    def flatMap[A, B](value: Executed[A])(f: A => Executed[B]): Executed[B] = value.flatMap(f)
+  given monad: ScalaMonad[Executed] =
+    ScalaMonad.fromComponents(
+      [A, B] => (f: A => B) => (value: Executed[A]) => value.map(f),
+      [A] => (value: A) => Executed.pure(value),
+      [A] => (value: Executed[Executed[A]]) => value.flatMap(identity)
+    )

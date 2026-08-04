@@ -28,7 +28,8 @@ object LiftFunctor
       functionCategory,
       moduleCategory
     ):
-  def map[A, B](f: A => B): Module[A, B] = Compose.lift(f)
+  def mapObject[A](using AnyObject[A]): AnyObject[A] = summon
+  def map[A, B](f: A => B): Module[A, B]             = Compose.lift(f)
 
 /** Embeds fallible Scala functions as parameter-free, lifecycle-transparent modules. */
 object LiftEitherFunctor
@@ -36,6 +37,7 @@ object LiftEitherFunctor
       errorKleisliCategory,
       moduleCategory
     ):
+  def mapObject[A](using AnyObject[A]): AnyObject[A] = summon
   def map[A, B](f: ErrorKleisli[A, B]): Module[A, B] = Compose.liftEither(f)
 
 /** Typed modules are contravariant in their input boundary and covariant in their semantic output boundary. */
