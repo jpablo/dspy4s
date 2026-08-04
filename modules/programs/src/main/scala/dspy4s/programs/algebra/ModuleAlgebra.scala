@@ -23,17 +23,19 @@ given moduleCategory: Category[AnyObject, Module] with
     infix def >>>[C](g: Module[B, C]): Module[A, C] = Compose.andThen(f, g)
 
 /** Embeds total Scala functions as parameter-free, lifecycle-transparent modules. */
-object LiftFunctor extends Functor[AnyObject, Function1, AnyObject, Module, Id]:
-  protected given source: Category[AnyObject, Function1] = functionCategory
-  protected given target: Category[AnyObject, Module]    = moduleCategory
-
+object LiftFunctor
+    extends Functor[Id, AnyObject, Function1, AnyObject, Module](using
+      functionCategory,
+      moduleCategory
+    ):
   def map[A, B](f: A => B): Module[A, B] = Compose.lift(f)
 
 /** Embeds fallible Scala functions as parameter-free, lifecycle-transparent modules. */
-object LiftEitherFunctor extends Functor[AnyObject, ErrorKleisli, AnyObject, Module, Id]:
-  protected given source: Category[AnyObject, ErrorKleisli] = errorKleisliCategory
-  protected given target: Category[AnyObject, Module]       = moduleCategory
-
+object LiftEitherFunctor
+    extends Functor[Id, AnyObject, ErrorKleisli, AnyObject, Module](using
+      errorKleisliCategory,
+      moduleCategory
+    ):
   def map[A, B](f: ErrorKleisli[A, B]): Module[A, B] = Compose.liftEither(f)
 
 /** Typed modules are contravariant in their input boundary and covariant in their semantic output boundary. */

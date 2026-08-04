@@ -4,9 +4,7 @@ package dspy4s.core.algebra
   *
   * `map` is derived from [[pure]] and [[flatMap]], so every instance is also an [[Endofunctor]].
   */
-trait Monad[F[_]] extends Endofunctor[F]:
-  protected given source: Category[AnyObject, Function1] = functionCategory
-  protected given target: Category[AnyObject, Function1] = functionCategory
+trait Monad[F[_]] extends Functor[F, AnyObject, Function1, AnyObject, Function1]:
 
   def pure[A](value: A): F[A]
 

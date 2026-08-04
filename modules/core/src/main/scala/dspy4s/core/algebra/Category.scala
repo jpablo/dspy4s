@@ -49,14 +49,21 @@ def delooping[M](using M: Monoid[M]): Category[AnyObject, Delooped[M]] =
     extension [A, B](f: M) infix def >>>[C](g: M): M = f.combine(g)
 
 /** A functor between two `Hom`-indexed categories with object mapping `F`. */
-trait Functor[PS[_], Source[_, _], PT[_], Target[_, _], F[_]]:
-  protected given source: Category[PS, Source]
-  protected given target: Category[PT, Target]
+trait Functor[
+    F[_],
+    SourceConstraint[_],
+    Source[_, _],
+    TargetConstraint[_],
+    Target[_, _]
+](using
+    source: Category[SourceConstraint, Source],
+    target: Category[TargetConstraint, Target]
+):
 
   def map[A, B](f: Source[A, B]): Target[F[A], F[B]]
 
   @Law("functor preserves identities")
-  def identities[A](using PS[A], PT[F[A]]): IsEq[Target[F[A], F[A]]] =
+  def identities[A](using SourceConstraint[A], TargetConstraint[F[A]]): IsEq[Target[F[A], F[A]]] =
     map(source.id[A]) <-> target.id[F[A]]
 
   @Law("functor preserves composition")
@@ -64,9 +71,9 @@ trait Functor[PS[_], Source[_, _], PT[_], Target[_, _], F[_]]:
     map(f >>> g) <-> (map(f) >>> map(g))
 
 object Functor:
-  def apply[PS[_], Source[_, _], PT[_], Target[_, _], F[_]](using
-      functor: Functor[PS, Source, PT, Target, F]
-  ): Functor[PS, Source, PT, Target, F] = functor
+  def apply[F[_], SourceConstraint[_], Source[_, _], TargetConstraint[_], Target[_, _]](using
+      functor: Functor[F, SourceConstraint, Source, TargetConstraint, Target]
+  ): Functor[F, SourceConstraint, Source, TargetConstraint, Target] = functor
 
 /** An endofunctor on Scala types and total functions. */
-type Endofunctor[F[_]] = Functor[AnyObject, Function1, AnyObject, Function1, F]
+type Endofunctor[F[_]] = Functor[F, AnyObject, Function1, AnyObject, Function1]

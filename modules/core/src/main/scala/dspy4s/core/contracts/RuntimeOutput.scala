@@ -1,7 +1,7 @@
 package dspy4s.core.contracts
 
 import dspy4s.core.algebra.Monoid
-import dspy4s.core.algebra.Monad
+import dspy4s.core.algebra.{Monad, functionCategory}
 
 import zio.blocks.schema.DynamicValue
 

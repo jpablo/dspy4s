@@ -1,6 +1,6 @@
 package dspy4s.core.collections
 
-import dspy4s.core.algebra.{AnyObject, Category, Endofunctor, functionCategory}
+import dspy4s.core.algebra.{Endofunctor, functionCategory}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.FixedLength
 
@@ -19,9 +19,6 @@ type SizedVector[A, N <: Int] = Vector[A] :| FixedLength[N]
 object SizedVector:
 
   given functor[N <: Int]: Endofunctor[[A] =>> SizedVector[A, N]] with
-    protected given source: Category[AnyObject, Function1] = functionCategory
-    protected given target: Category[AnyObject, Function1] = functionCategory
-
     def map[A, B](f: A => B): SizedVector[A, N] => SizedVector[B, N] = _.mapSized(f)
 
   /** Describes a failed attempt to establish a statically tracked vector length. */

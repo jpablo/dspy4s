@@ -2,7 +2,7 @@ package dspy4s.typed
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
-import dspy4s.core.algebra.Monad
+import dspy4s.core.algebra.{Monad, functionCategory}
 import zio.blocks.schema.DynamicValue
 
 /** A prediction whose raw field values have been decoded into a semantic output value `O`. Constructed only after every

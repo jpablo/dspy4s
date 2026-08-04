@@ -1,6 +1,6 @@
 package dspy4s.programs.contracts
 
-import dspy4s.core.algebra.{AnyObject, Category, Endofunctor, functionCategory}
+import dspy4s.core.algebra.{Endofunctor, functionCategory}
 import zio.blocks.schema.DynamicValue
 
 /** The uniform invocation envelope for every program boundary.
@@ -45,7 +45,4 @@ final case class ProgramCall[I](
 
 object ProgramCall:
   given functor: Endofunctor[ProgramCall] with
-    protected given source: Category[AnyObject, Function1] = functionCategory
-    protected given target: Category[AnyObject, Function1] = functionCategory
-
     def map[A, B](f: A => B): ProgramCall[A] => ProgramCall[B] = _.mapInput(f)

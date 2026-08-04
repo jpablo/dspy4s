@@ -34,9 +34,9 @@ given paramsDeloop: Category[AnyObject, ParamsHom] = delooping[Vector[Optimizabl
 
 /** Forgets optimizer metadata while retaining the ordered writable parameters. */
 object ForgetMetadataFunctor
-    extends Functor[AnyObject, ViewsHom, AnyObject, ParamsHom, Id]:
-  protected given source: Category[AnyObject, ViewsHom]  = viewsDeloop
-  protected given target: Category[AnyObject, ParamsHom] = paramsDeloop
-
+    extends Functor[Id, AnyObject, ViewsHom, AnyObject, ParamsHom](using
+      viewsDeloop,
+      paramsDeloop
+    ):
   def map[A, B](views: ViewsHom[A, B]): ParamsHom[A, B] =
     views.map(_.parameters)

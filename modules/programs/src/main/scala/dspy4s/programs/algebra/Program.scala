@@ -155,18 +155,18 @@ object Program:
 
 /** Optimizer-view projection from arity-erased programs into the delooped ordered view monoid. */
 object InspectFunctor
-    extends Functor[RecordCodec, SomeProgram, AnyObject, ViewsHom, Id]:
-  protected given source: Category[RecordCodec, SomeProgram] = Program.erasedCategory
-  protected given target: Category[AnyObject, ViewsHom]      = viewsDeloop
-
+    extends Functor[Id, RecordCodec, SomeProgram, AnyObject, ViewsHom](using
+      Program.erasedCategory,
+      viewsDeloop
+    ):
   def map[A, B](f: SomeProgram[A, B]): ViewsHom[A, B] =
     f.optimizableParameters.inspect(f.program)
 
 /** Parameter projection from arity-erased programs into the delooped ordered parameter monoid. */
 object ReadFunctor
-    extends Functor[RecordCodec, SomeProgram, AnyObject, ParamsHom, Id]:
-  protected given source: Category[RecordCodec, SomeProgram] = Program.erasedCategory
-  protected given target: Category[AnyObject, ParamsHom]     = paramsDeloop
-
+    extends Functor[Id, RecordCodec, SomeProgram, AnyObject, ParamsHom](using
+      Program.erasedCategory,
+      paramsDeloop
+    ):
   def map[A, B](f: SomeProgram[A, B]): ParamsHom[A, B] =
     ForgetMetadataFunctor.map(InspectFunctor.map(f))
