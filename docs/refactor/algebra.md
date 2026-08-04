@@ -272,7 +272,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     homogeneous `OptimizableParameters` values make `Vector` the exact, not approximate, parameter object, while layout/module
     metadata remains read-only). Prototyped as
     `NatGradedCategory[RecordCodec, Program]` over `Program[I, O, N]` morphisms, with canonical lossless grade erasure
-    through `AnyGrade`; parameter access and
+    modeled as a `GradedFunctor` into the ordinary `AnyGrade` category; parameter access and
     ordered fan-out separated into `Parameterization` and `OrderedFanout`; `Program` packages addressability while its
     domain object supplies a sealed canonical codec. Exact programs provide uniform `OptimizableTraversal[Program[I, O, N]]`
     plus `ProgramRunner[Program[I, O, N]]`; `SomeProgram[I, O]` is the explicit runnable grade-erasure boundary. Two
@@ -298,7 +298,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     (associativity / identity), previously untested (only the mode-action homomorphism law was). Newly named
     structures from the parameterization pass: the delooping of the parameter monoid as an explicit `Category` instance;
     `ReadFunctor` (`OptimizableTraversal.read` as a functor value; its functor laws — preserves id + composition — are
-    carried on the `CategoryFunctor` trait and are exactly the parameter projection laws); and
+    carried on the `Functor` trait and are exactly the parameter projection laws); and
     `fanout` as ordered shared-input pairing, with `parallel` retained as a compatibility name and the copy NON-law
     (sharing vs re-running an effectful `h` differ, in
     behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the

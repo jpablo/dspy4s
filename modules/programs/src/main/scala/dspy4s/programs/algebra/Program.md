@@ -116,9 +116,17 @@ flowchart LR
 
 The ordinary category laws still apply: identity changes nothing and composition is associative. The law statements
 compare programs after forgetting only the grade. `AnyGrade` is a sealed existential package containing the unchanged
-morphism and its hidden grade; `forgetGrade` is final, so an instance cannot discard behavioral information to make a
-law pass. This package is necessary because Scala does not normalize symbolic types such as `(N + M) + K` and
-`N + (M + K)` to the same spelling, even though natural-number addition is associative.
+morphism and its hidden grade. `underlyingCategory` composes these packages as an ordinary `Category`, while
+`forgetGrade` is the canonical `GradedFunctor` into that category:
+
+```text
+Program[A, B, N] ── forgetGrade.map ──> AnyGrade[Program, A, B]
+```
+
+Its functor laws state that hiding the grade preserves identity and composition. Because both constructions are final,
+an instance cannot discard behavioral information to make a law pass. This package is necessary because Scala does not
+normalize symbolic types such as `(N + M) + K` and `N + (M + K)` to the same spelling, even though natural-number
+addition is associative.
 
 ## Parameters form a lawful lens
 

@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{AnyObject, Category, CategoryFunctor, Lens}
+import dspy4s.core.algebra.{AnyObject, Category, Functor, Lens}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -155,7 +155,7 @@ object Program:
 
 /** Parameter projection from arity-erased programs into the delooped ordered parameter monoid. */
 object ReadFunctor
-    extends CategoryFunctor[RecordCodec, SomeProgram, AnyObject, ParamsHom](using
+    extends Functor[RecordCodec, SomeProgram, AnyObject, ParamsHom](using
       Program.erasedCategory,
       paramsDeloop
     ):

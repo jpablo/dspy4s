@@ -199,8 +199,9 @@ reparameterization; signature structure and module identity remain in the morphi
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
-`dspy4s.programs.algebra.NatGradedCategory` (grade-zero `id` and grade-additive `>>>`), with `Parameterization` and
-`OrderedFanout` as separate structures, over `dspy4s.programs.algebra.Program[I, O, N]` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
+`dspy4s.programs.algebra.NatGradedCategory` (grade-zero `id` and grade-additive `>>>`), whose canonical
+`GradedFunctor` hides the grade into its ordinary `AnyGrade` category, with `Parameterization` and `OrderedFanout` as
+separate structures, over `dspy4s.programs.algebra.Program[I, O, N]` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
 `OptimizableTraversal[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
 the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ProgramAlgebraLawSuite`.
 The Mirror-based `OptimizableTraversal.derived` gate is strict: every product field must provide `OptimizableTraversal` evidence.
@@ -302,9 +303,9 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   by compile gates. The deliberate split from the
   formalization library: there the equations are the deliverable, here they are executable specifications.
 - **`params` as a functor value.** `Parameterization` is separate from graded composition. The delooping of the
-  parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from `SomeProgram`
+  parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `Functor` from `SomeProgram`
   category to the parameter-monoid delooping) names what `OptimizableTraversal.read` is categorically; its functor laws
-  (preserves id + composition), carried on the `CategoryFunctor` trait against the two `Category` instances, are exactly
+  (preserves id + composition), carried on the `Functor` trait against the two `Category` instances, are exactly
   the parameter projection laws. The
   parameter monoid is now an explicit `given Monoid[Vector[OptimizableParameters]]` and the delooping is generic
   (`delooping[M](using Monoid[M]) : Category[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so

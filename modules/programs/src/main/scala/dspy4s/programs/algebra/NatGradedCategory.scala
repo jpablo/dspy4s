@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{IsEq, Law, <->}
+import dspy4s.core.algebra.{Category, IsEq, Law, <->}
 
 import scala.compiletime.ops.int.+
 
@@ -27,9 +27,6 @@ object AnyGrade:
   */
 trait NatGradedCategory[P[_], Hom[_, _, _ <: Int]]:
 
-  /** Hide only the grade. This final widening cannot discard or reinterpret the morphism. */
-  final def forgetGrade[A, B, N <: Int](f: Hom[A, B, N]): AnyGrade[Hom, A, B] = AnyGrade(f)
-
   /** The identity morphism has no graded resources. */
   def id[A: P]: Hom[A, A, 0]
 
@@ -40,13 +37,27 @@ trait NatGradedCategory[P[_], Hom[_, _, _ <: Int]]:
     /** Diagrammatic composition: run `f`, then thread its output into `g`. */
     infix final def >>>[C, M <: Int](g: Hom[B, C, M]): Hom[A, C, N + M] = compose(f, g)
 
+  /** The ordinary category obtained by existentially hiding morphism grades. */
+  final lazy val underlyingCategory: Category[P, [A, B] =>> AnyGrade[Hom, A, B]] =
+    new Category[P, [A, B] =>> AnyGrade[Hom, A, B]]:
+      def id[A: P]: AnyGrade[Hom, A, A] = AnyGrade(NatGradedCategory.this.id[A])
+
+      extension [A, B](f: AnyGrade[Hom, A, B])
+        infix def >>>[C](g: AnyGrade[Hom, B, C]): AnyGrade[Hom, A, C] =
+          AnyGrade(NatGradedCategory.this.compose(f.morphism, g.morphism))
+
+  /** The canonical functor that hides only the grade while retaining the unchanged morphism. */
+  final lazy val forgetGrade: GradedFunctor[P, Hom, P, [A, B] =>> AnyGrade[Hom, A, B]] =
+    new GradedFunctor[P, Hom, P, [A, B] =>> AnyGrade[Hom, A, B]](using this, underlyingCategory):
+      def map[A, B, N <: Int](f: Hom[A, B, N]): AnyGrade[Hom, A, B] = AnyGrade(f)
+
   @Law("left unit after forgetting the grade")
   def identityLeft[A: P, B, N <: Int](f: Hom[A, B, N]): IsEq[AnyGrade[Hom, A, B]] =
-    forgetGrade(compose(id[A], f)) <-> forgetGrade(f)
+    forgetGrade.map(id[A] >>> f) <-> forgetGrade.map(f)
 
   @Law("right unit after forgetting the grade")
   def identityRight[A, B: P, N <: Int](f: Hom[A, B, N]): IsEq[AnyGrade[Hom, A, B]] =
-    forgetGrade(compose(f, id[B])) <-> forgetGrade(f)
+    forgetGrade.map(f >>> id[B]) <-> forgetGrade.map(f)
 
   @Law("associativity after forgetting the grade")
   def associativity[A, B, C, D, N <: Int, M <: Int, K <: Int](
@@ -54,4 +65,25 @@ trait NatGradedCategory[P[_], Hom[_, _, _ <: Int]]:
       g: Hom[B, C, M],
       h: Hom[C, D, K]
   ): IsEq[AnyGrade[Hom, A, D]] =
-    forgetGrade(compose(compose(f, g), h)) <-> forgetGrade(compose(f, compose(g, h)))
+    forgetGrade.map((f >>> g) >>> h) <-> forgetGrade.map(f >>> (g >>> h))
+
+/** An identity-on-objects functor from a naturally graded category to an ordinary category.
+  *
+  * Mapping hides or interprets the source grade while preserving the domain, codomain, identities, and composition.
+  */
+trait GradedFunctor[PS[_], Source[_, _, _ <: Int], PT[_], Target[_, _]](using
+    source: NatGradedCategory[PS, Source],
+    target: Category[PT, Target]
+):
+  def map[A, B, N <: Int](f: Source[A, B, N]): Target[A, B]
+
+  @Law("graded functor preserves identities")
+  def identities[A: {PS, PT}]: IsEq[Target[A, A]] =
+    map(source.id[A]) <-> target.id[A]
+
+  @Law("graded functor preserves composition")
+  def composition[A, B, C, N <: Int, M <: Int](
+      f: Source[A, B, N],
+      g: Source[B, C, M]
+  ): IsEq[Target[A, C]] =
+    map(f >>> g) <-> (map(f) >>> map(g))

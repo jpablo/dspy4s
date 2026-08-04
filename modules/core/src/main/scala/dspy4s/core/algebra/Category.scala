@@ -42,7 +42,7 @@ def delooping[M](using M: Monoid[M]): Category[AnyObject, Delooped[M]] =
   *
   * The target may collapse objects, as the delooping does, so an explicit object map would be inert here.
   */
-trait CategoryFunctor[PS[_], Source[_, _], PT[_], Target[_, _]](using
+trait Functor[PS[_], Source[_, _], PT[_], Target[_, _]](using
     source: Category[PS, Source],
     target: Category[PT, Target]
 ):

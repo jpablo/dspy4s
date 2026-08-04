@@ -44,12 +44,12 @@ final case class NestedValue(n: Int) derives Schema
 final case class NestedBox(value: NestedValue) derives Schema
 final case class ArrayBox(values: Array[Int]) derives Schema
 
-/** Executes the `@Law` statements of the graded program structures ([[NatGradedCategory]] / [[Parameterization]] over
-  * [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it: structural
-  * `==` for parameter vectors and delooping morphisms, observational equality (complete prediction / params / coherent
-  * decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no `OptimizableTraversal`, no
-  * `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout` shares its input; copying
-  * is not natural for effectful morphisms).
+/** Executes the `@Law` statements of the graded program structures ([[NatGradedCategory]], [[GradedFunctor]], and
+  * [[Parameterization]] over [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation
+  * honest for it: structural `==` for parameter vectors and delooping morphisms, observational equality (complete
+  * prediction / params / coherent decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no
+  * `OptimizableTraversal`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
+  * shares its input; copying is not natural for effectful morphisms).
   */
 class ProgramAlgebraLawSuite extends FunSuite:
 
@@ -91,6 +91,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
   private val C = summon[NatGradedCategory[RecordCodec, Program]]
+  private val U = C.forgetGrade
   private val P = summon[Parameterization[RecordCodec, Program]]
   private val F = summon[OrderedFanout[Program]]
 
@@ -188,6 +189,15 @@ class ProgramAlgebraLawSuite extends FunSuite:
     val composed: Program[Int, Int, 3] = (a >>> g) >>> h
     assertObsEq(C.associativity(a, g, h), 3)
     assertEquals(composed(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
+  }
+
+  test("forgetGrade is a lawful functor into the underlying ordinary category") {
+    val f = pack(step[Int, String]("f", "i -> s")(i => s"<$i>"))
+    val g = pack(step[String, Int]("g", "s -> n")(_.length))
+
+    assert(U.map(f).morphism eq f)
+    assertObsEq(U.identities[Boxed], Boxed(7))
+    assertObsEq(U.composition(f, g), 3)
   }
 
   test("identity preserves the complete prediction envelope through ProgramRunner") {
