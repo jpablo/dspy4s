@@ -140,13 +140,13 @@ closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one 
 
 ### The executable program carrier is ordered, not Markov
 
-`ModuleHom[I, O]` contains fail-fast errors, callbacks, tools, LM calls, trace, and usage. Its independent-input
+`Module[I, O]` contains fail-fast errors, callbacks, tools, LM calls, trace, and usage. Its independent-input
 operation runs the left program before the right program, so execution order is observable. Consequently the
 carrier does **not** form a symmetric monoidal, CD, or Markov category.
 
 The reusable executable interface is
 [`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/algebra/OrderedExecution.scala), with the
-`given orderedProgram` instance over `ModuleHom`. It deliberately exposes operations without asserting tensor
+`given orderedProgram` instance over `Module`. It deliberately exposes operations without asserting tensor
 interchange, symmetry of effects, or discard naturality:
 
 ```
@@ -164,7 +164,7 @@ in `OrderedTensorOpsSuite`. The reusable hierarchy now distinguishes `MonoidalCa
 `SymmetricMonoidalCategory`, `CopyDiscardCategory`, `MarkovCategory`, and `CartesianCategory`, with the relevant
 coherence and naturality laws stated on each trait. `CopyDiscardCategorySuite` executes the complete hierarchy on
 Scala functions. A future commutative denotational carrier such as stochastic kernels can implement the appropriate
-level, but there is no `CDCategory[ModuleHom]` instance.
+level, but there is no `CDCategory[Module]` instance.
 
 Sequential association is made stable by lifecycle-transparent structural nodes: `Identity`, `AndThen`,
 `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, and `Moded` add no callbacks, trace, or history of their own. Leaf
@@ -341,11 +341,11 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     the laws rather than relying on the names alone.
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
     audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and
-    `fanout = copy >>> split`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not
+    `fanout = copy >>> split`, but unrestricted `Module` now implements `OrderedTensorOps`, not
     `CDCategory`. `OrderedTensorOpsSuite` pins the fail-fast interchange counterexample (`g1` versus `f2`),
     while `ComposeLawSuite` pins lifecycle-transparent association. The complete symmetric-monoidal,
     copy/discard, Markov, and cartesian law hierarchy is executable on suitable carriers in
-    `CopyDiscardCategorySuite`; it is intentionally not instantiated for effectful `ModuleHom`.
+    `CopyDiscardCategorySuite`; it is intentionally not instantiated for effectful `Module`.
   - **Typed inner predicts** (the class-A conversion, then the class-B bridge): every composite now runs typed
     inner `Predict`s — Refine's critic, ReAct, CodeAct, RLM, ProgramOfThought (statically-shaped layouts kept
     verbatim, `InputAugmentation.appendedStringInput` for appended input fields, lenient hand-written or derived

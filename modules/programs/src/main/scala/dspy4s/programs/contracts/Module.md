@@ -140,7 +140,7 @@ This is an inheritance diagram, not a catalog of every type that mentions `Modul
 
 - `Program[I, O, N]` packages a representation through `type Rep <: Module[I, O]`; it does not extend `Module`. `N`
   records the exact number of writable optimizer leaves.
-- `ModuleHom[I, O]` is an alias for `Module[I, O]`, not a new type.
+- The ordered execution algebra uses `Module[I, O]` directly as its morphism type.
 - `Parallel`, `Compose`, and `DynamicSignature` are factories or APIs that construct modules, not subclasses.
 - A program containing `Predict` fields has a composition relationship to those predicts, not an inheritance edge.
 

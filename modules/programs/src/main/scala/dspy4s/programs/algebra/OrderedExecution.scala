@@ -6,9 +6,6 @@ import dspy4s.programs.andThen
 import dspy4s.programs.***
 import dspy4s.programs.contracts.Module
 
-/** Plain executable program morphisms without optimizer-addressability or decoder evidence. */
-type ModuleHom[I, O] = Module[I, O]
-
 /** A category equipped with independent-input pairing, with no functoriality or coherence laws assumed. */
 trait TensorOps[Hom[_, _]] extends Category[AnyObject, Hom]:
   /** Run `f` on the first input, then `g` on the second, and pair their outputs. */
@@ -31,16 +28,16 @@ trait OrderedTensorOps[Hom[_, _]] extends TensorOps[Hom]:
   * evidence uses its associative accumulator with an empty identity. Independent-input execution stays ordered and
   * therefore deliberately has no interchange law.
   */
-given orderedProgram: OrderedTensorOps[ModuleHom] with
-  def id[A: AnyObject]: ModuleHom[A, A] = Compose.id[A]
+given orderedProgram: OrderedTensorOps[Module] with
+  def id[A: AnyObject]: Module[A, A] = Compose.id[A]
 
-  extension [A, B](f: ModuleHom[A, B])
-    infix def >>>[C](g: ModuleHom[B, C]): ModuleHom[A, C] =
+  extension [A, B](f: Module[A, B])
+    infix def >>>[C](g: Module[B, C]): Module[A, C] =
       f.andThen(g)
 
-  def tensor[A, B, C, D](f: ModuleHom[A, C], g: ModuleHom[B, D]): ModuleHom[(A, B), (C, D)] =
+  def tensor[A, B, C, D](f: Module[A, C], g: Module[B, D]): Module[(A, B), (C, D)] =
     f *** g
 
-  def swap[A, B]: ModuleHom[(A, B), (B, A)] = Compose.swap[A, B]
-  def copy[A]: ModuleHom[A, (A, A)]         = Compose.copy[A]
-  def discard[A]: ModuleHom[A, Unit]        = Compose.discard[A]
+  def swap[A, B]: Module[(A, B), (B, A)] = Compose.swap[A, B]
+  def copy[A]: Module[A, (A, A)]         = Compose.copy[A]
+  def discard[A]: Module[A, Unit]        = Compose.discard[A]

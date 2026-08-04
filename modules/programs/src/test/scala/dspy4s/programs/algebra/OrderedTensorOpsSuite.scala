@@ -14,7 +14,7 @@ import munit.FunSuite
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Executable semantics for [[OrderedTensorOps]] over unrestricted programs. In particular, this suite pins the
-  * fail-fast counterexample that prevents [[ModuleHom]] from having the stronger [[CDCategory]] instance.
+  * fail-fast counterexample that prevents [[Module]] from having the stronger [[CDCategory]] instance.
   */
 class OrderedTensorOpsSuite extends FunSuite:
 
@@ -23,10 +23,10 @@ class OrderedTensorOpsSuite extends FunSuite:
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[OrderedTensorOps[ModuleHom]]
+  private val C = summon[OrderedTensorOps[Module]]
 
   test("unrestricted modules do not have a CDCategory instance") {
-    val errors = compileErrors("summon[CDCategory[ModuleHom]]")
+    val errors = compileErrors("summon[CDCategory[Module]]")
     assert(errors.nonEmpty)
   }
 

@@ -482,7 +482,7 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
 - **Commutative denotational carrier**: the law hierarchy now distinguishes monoidal, symmetric monoidal,
-  copy/discard, Markov, and cartesian carriers and is executed for Scala functions. Unrestricted `ModuleHom`
+  copy/discard, Markov, and cartesian carriers and is executed for Scala functions. Unrestricted `Module`
   implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or other
   commutative carrier could implement the appropriate level. A pair-input decoder would still be needed to lift
   ordered tensor into the packaged `Program` algebra.
