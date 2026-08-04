@@ -302,14 +302,19 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   The former unlawful-decoder counterexample is UNREPRESENTABLE: `RecordCodec` is sealed and its removal is pinned
   by compile gates. The deliberate split from the
   formalization library: there the equations are the deliverable, here they are executable specifications.
-- **`params` as a functor value.** `Parameterization` is separate from graded composition. The delooping of the
-  parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `Functor` from `SomeProgram`
-  category to the parameter-monoid delooping) names what `OptimizableTraversal.read` is categorically; its functor laws
-  (preserves id + composition), carried on the `Functor` trait against the two `Category` instances, are exactly
-  the parameter projection laws. The
-  parameter monoid is now an explicit `given Monoid[Vector[OptimizableParameters]]` and the delooping is generic
+- **Optimizer projections as functor values.** `Parameterization` is separate from graded composition.
+  `InspectFunctor` maps `SomeProgram` into the delooping of the ordered `OptimizableView` monoid;
+  `ForgetMetadataFunctor` maps those views to their ordered writable parameters; and `ReadFunctor` names the composite
+  projection. Their identity and composition laws are exactly the optimizer traversal laws. The view and parameter
+  monoids are explicit instances, and delooping is generic
   (`delooping[M](using Monoid[M]) : Category[AnyObject, Delooped[M]]`, "a monoid is a one-object category"), so
-  `paramsDeloop` is literally that monoid delooped (commit `d3be8e1`).
+  both target categories are literally their monoids delooped.
+- **Previously implicit module structures are explicit.** `Module` has its ordinary category instance;
+  `ModuleProfunctor` states the laws shared by `contramapInput`, `mapOutput`, and `dimap`; `LiftFunctor` embeds total
+  functions; and `LiftEitherFunctor` embeds the `Either[DspyError, *]` Kleisli category. `Mode` acts on modules through
+  a `MonoidAction`, while the writer carriers `Executed` and `Prediction` expose `Monad` instances. The common
+  `Functor` trait now carries an object mapping, so it also describes `ProgramCall` and every fixed-length
+  `SizedVector[*, N]`. Focused suites execute each law under the appropriate extensional or runtime observation.
 - **`fanout`, named honestly.** Added to the `Program` layer as the ordered pairing: both legs share the
   input, so it is copy-then-ordered-tensor fused. The copy NON-law is pinned as an executable
   counterexample: `h >>> fanout(f, g)` runs `h` once while `fanout(h >>> f, h >>> g)` runs it twice,

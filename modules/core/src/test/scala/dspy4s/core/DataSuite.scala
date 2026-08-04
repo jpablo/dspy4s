@@ -1,5 +1,6 @@
 package dspy4s.core
 
+import dspy4s.core.algebra.Monoid
 import dspy4s.core.data.Completions
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
@@ -129,9 +130,10 @@ class DataSuite extends FunSuite:
     )
     val c = RawPrediction(values = DynamicValues.record("stage" := "c"))
 
-    assertEquals(RawPrediction.empty.followedBy(a), a)
-    assertEquals(a.followedBy(RawPrediction.empty), a)
-    assertEquals(a.followedBy(b).followedBy(c), a.followedBy(b.followedBy(c)))
+    val M = Monoid[RawPrediction]
+    assertEquals(M.identityLeft(a).lhs, M.identityLeft(a).rhs)
+    assertEquals(M.identityRight(a).lhs, M.identityRight(a).rhs)
+    assertEquals(M.associativity(a, b, c).lhs, M.associativity(a, b, c).rhs)
     assertEquals(a.followedBy(b).lmUsage, Some(LmUsage(totalTokens = 3, promptTokens = 1, completionTokens = 2)))
     assertEquals(a.followedBy(b).asString("stage"), Right("b"))
   }

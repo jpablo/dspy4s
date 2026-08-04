@@ -5,7 +5,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.algebra.{IsEq, Monoid}
+import dspy4s.core.algebra.{IsEq, Monoid, MonoidAction}
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -89,6 +89,27 @@ class ModeLawSuite extends FunSuite:
     assertEquals(rA.seen.head.config, rB.seen.head.config)
     assertEquals(temp(rA.seen.head), Some("0.9"))
     assertEquals(temp(rB.seen.head), Some("0.9"))
+  }
+
+  test("the Module action executes its stated identity and compatibility laws") {
+    val action = MonoidAction[Mode, Module[Int, Int]]
+    val m1     = Mode.temperature(0.5)
+    val m2     = Mode.temperature(0.9)
+
+    def assertActionLaw(law: IsEq[Module[Int, Int]], recorder: Recorder): Unit =
+      val left         = law.lhs(ProgramCall(1))
+      val leftControls = recorder.seen.toVector
+      recorder.seen.clear()
+      val right         = law.rhs(ProgramCall(1))
+      val rightControls = recorder.seen.toVector
+      assertEquals(left, right)
+      assertEquals(leftControls, rightControls)
+
+    val identityRecorder = Recorder(predict("a -> b"))
+    assertActionLaw(action.identity(identityRecorder), identityRecorder)
+
+    val compositionRecorder = Recorder(predict("a -> b"))
+    assertActionLaw(action.compatibility(m1, m2, compositionRecorder), compositionRecorder)
   }
 
   test("mode(Mode.id)(p) = p on the controls and the output (left/right unit)") {

@@ -6,7 +6,7 @@ import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.LmUsage
-import dspy4s.core.algebra.Monoid
+import dspy4s.core.algebra.{Monad, Monoid}
 import dspy4s.core.contracts.RuntimeConfig
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
@@ -97,13 +97,21 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
 
   property("Executed obeys the writer flatMap identity and associativity laws") {
     Prop.forAll(Gen.choose(-1000, 1000), genDelta) { (value, delta) =>
+      val M                        = Monad[Executed]
       val executed                 = Executed(value, delta)
       def f(n: Int): Executed[Int] = Executed(n + 1, RuntimeDelta(Vector(trace("f"))))
       def g(n: Int): Executed[Int] = Executed(n * 2, RuntimeDelta(Vector(trace("g"))))
+      val leftIdentity             = M.identityLeft(value, f)
+      val rightIdentity            = M.identityRight(executed)
+      val associativity            = M.associativity(executed, f, g)
+      val functorIdentity          = M.identities[Int]
+      val functorComposition       = M.composition((n: Int) => n + 1, (n: Int) => n * 2)
 
-      Executed.pure(value).flatMap(f) == f(value) &&
-      executed.flatMap(Executed.pure) == executed &&
-      executed.flatMap(f).flatMap(g) == executed.flatMap(n => f(n).flatMap(g))
+      leftIdentity.lhs == leftIdentity.rhs &&
+      rightIdentity.lhs == rightIdentity.rhs &&
+      associativity.lhs == associativity.rhs &&
+      functorIdentity.lhs(executed) == functorIdentity.rhs(executed) &&
+      functorComposition.lhs(executed) == functorComposition.rhs(executed)
     }
   }
 

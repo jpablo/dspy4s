@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{AnyObject, Category, Functor, Lens}
+import dspy4s.core.algebra.{AnyObject, Category, Functor, Id, Lens}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -153,11 +153,20 @@ object Program:
       infix def >>>[C](g: SomeProgram[B, C]): SomeProgram[A, C] =
         gradedProgramCategory.compose(f, g)
 
+/** Optimizer-view projection from arity-erased programs into the delooped ordered view monoid. */
+object InspectFunctor
+    extends Functor[RecordCodec, SomeProgram, AnyObject, ViewsHom, Id]:
+  protected given source: Category[RecordCodec, SomeProgram] = Program.erasedCategory
+  protected given target: Category[AnyObject, ViewsHom]      = viewsDeloop
+
+  def map[A, B](f: SomeProgram[A, B]): ViewsHom[A, B] =
+    f.optimizableParameters.inspect(f.program)
+
 /** Parameter projection from arity-erased programs into the delooped ordered parameter monoid. */
 object ReadFunctor
-    extends Functor[RecordCodec, SomeProgram, AnyObject, ParamsHom](using
-      Program.erasedCategory,
-      paramsDeloop
-    ):
+    extends Functor[RecordCodec, SomeProgram, AnyObject, ParamsHom, Id]:
+  protected given source: Category[RecordCodec, SomeProgram] = Program.erasedCategory
+  protected given target: Category[AnyObject, ParamsHom]     = paramsDeloop
+
   def map[A, B](f: SomeProgram[A, B]): ParamsHom[A, B] =
-    f.optimizableParameters.read(f.program)
+    ForgetMetadataFunctor.map(InspectFunctor.map(f))

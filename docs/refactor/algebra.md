@@ -323,6 +323,13 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     from the more general `Shape[A]`: `MapShape` is a deliberate counterexample because its unrestricted record carrier
     can omit required fields. Effectful trajectory guarantees are instead documented on their final template traits
     and executed by behavioral law suites, rather than forced into dishonest `IsEq` statements.
+  - **Previously implicit functors and actions are explicit:** `Functor` now includes its object mapping, allowing the
+    same law-bearing trait to describe both category interpretations and ordinary Scala type constructors.
+    `ProgramCall` and fixed-length `SizedVector` are endofunctors; `Executed` and `Prediction` are writer monads;
+    module input/output adaptation is `ModuleProfunctor`; total and fallible local-function lifting are `LiftFunctor`
+    and `LiftEitherFunctor`; and `Mode` acts on modules through `MonoidAction`. Optimizer inspection factors as
+    `InspectFunctor` followed by `ForgetMetadataFunctor`, with `ReadFunctor` retaining the composite parameter view.
+    The associated suites execute the laws rather than relying on the names alone.
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
     audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and
     `fanout = copy >>> split`, but unrestricted `ModuleHom` now implements `OrderedTensorOps`, not

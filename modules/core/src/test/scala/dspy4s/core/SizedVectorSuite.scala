@@ -1,7 +1,9 @@
 package dspy4s.core
 
+import dspy4s.core.algebra.Endofunctor
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
+import dspy4s.core.collections.SizedVector.given
 import munit.FunSuite
 
 final class SizedVectorSuite extends FunSuite:
@@ -25,6 +27,16 @@ final class SizedVectorSuite extends FunSuite:
     val result: SizedVector[Int, 3] = mapped.concatSized(right)
 
     assertEquals(result.unsized, Vector(11, 2, 3))
+  }
+
+  test("mapSized is a lawful functor at every fixed length") {
+    val F       = summon[Endofunctor[[A] =>> SizedVector[A, 2]]]
+    val values  = SizedVector.fromVector[Int, 2](Vector(1, 2)).toOption.get
+    val id      = F.identities[Int]
+    val compose = F.composition((n: Int) => n.toString, (s: String) => s.length)
+
+    assertEquals(id.lhs(values), id.rhs(values))
+    assertEquals(compose.lhs(values), compose.rhs(values))
   }
 
   test("empty carries length zero") {

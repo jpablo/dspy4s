@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.algebra.Monoid
+import dspy4s.core.algebra.{Monoid, MonoidAction}
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
@@ -72,6 +72,10 @@ object Mode:
   given monoid: Monoid[Mode] with
     def empty: Mode                                      = Mode.id
     extension (a: Mode) infix def combine(b: Mode): Mode = a ++ b
+
+  /** The control-transform monoid acting lawfully on modules without adding an observed lifecycle node. */
+  given moduleAction[I, O]: MonoidAction[Mode, Module[I, O]] with
+    def act(mode: Mode, program: Module[I, O]): Module[I, O] = Compose.mode(mode)(program)
 
 /** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Lifecycle-transparent — it records no callback,
   * trace, or history event of its own, so a chain of modes collapses to the wrapped program's single lifecycle scope

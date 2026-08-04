@@ -2,6 +2,7 @@ package dspy4s.typed
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
+import dspy4s.core.algebra.Monad
 import zio.blocks.schema.DynamicValue
 
 /** A prediction whose raw field values have been decoded into a semantic output value `O`. Constructed only after every
@@ -14,13 +15,29 @@ import zio.blocks.schema.DynamicValue
   * Phase 2 carries the typed output as the decoded value itself: case-class signatures expose ordinary case-class
   * fields, and trait-spec signatures expose named-tuple fields. In both cases `p.output.sentiment` is typed dot-access
   * with no lazy parsing.
+  *
+  * The companion exposes the canonical writer [[dspy4s.core.algebra.Monad]]: [[Prediction.map]] changes only the
+  * semantic output, while [[Prediction.flatMap]] accumulates `RawPrediction` evidence in execution order.
   */
 final case class Prediction[O](
     output: O,
     raw: RawPrediction
-)
+):
+  def map[B](f: O => B): Prediction[B] =
+    Prediction(f(output), raw)
+
+  def flatMap[B](f: O => Prediction[B]): Prediction[B] =
+    val next = f(output)
+    Prediction(next.output, raw.followedBy(next.raw))
 
 object Prediction:
+
+  def pure[O](output: O): Prediction[O] = Prediction(output, RawPrediction.empty)
+
+  given monad: Monad[Prediction] with
+    def pure[A](value: A): Prediction[A] = Prediction.pure(value)
+
+    def flatMap[A, B](value: Prediction[A])(f: A => Prediction[B]): Prediction[B] = value.flatMap(f)
 
   /** Lift the erased prediction boundary into the uniform module result. The dynamic semantic output is exactly the raw
     * prediction's value record; completions, usage, and adapter metadata remain available through [[Prediction.raw]].

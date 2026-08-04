@@ -2,6 +2,7 @@ package dspy4s.core.data
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, NotFoundError, ValidationError}
 import dspy4s.core.contracts.updated
+import dspy4s.core.algebra.Monoid
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** Adapter-parsed, schema-uninterpreted prediction data.
@@ -90,6 +91,11 @@ final case class RawPrediction(
 
 object RawPrediction:
   def empty: RawPrediction = RawPrediction(values = DynamicValue.Record.empty)
+
+  given monoid: Monoid[RawPrediction] with
+    def empty: RawPrediction = RawPrediction.empty
+    extension (current: RawPrediction)
+      infix def combine(next: RawPrediction): RawPrediction = current.followedBy(next)
 
   /** Lift the primary completion (index 0) of a multi-candidate [[Completions]] into a `RawPrediction`, retaining the
     * full completions on the result's [[RawPrediction.completions]] so callers can still reach the other candidates.

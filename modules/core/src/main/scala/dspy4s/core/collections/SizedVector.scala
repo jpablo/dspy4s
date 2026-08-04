@@ -1,5 +1,6 @@
 package dspy4s.core.collections
 
+import dspy4s.core.algebra.{AnyObject, Category, Endofunctor, functionCategory}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.FixedLength
 
@@ -10,11 +11,18 @@ import scala.compiletime.ops.int.+
   * Runtime vectors cross the boundary through [[SizedVector.fromVector]], which checks their length once. Operations
   * exposed here preserve the length invariant in their result types. Ordinary `Vector` operations remain available
   * because Iron refinements are subtypes of their underlying values, but operations whose result length is known should
-  * use this API so that information is not erased.
+  * use this API so that information is not erased. At every fixed `N`, mapping is exposed as a lawful
+  * [[dspy4s.core.algebra.Endofunctor]] and therefore cannot change the tracked length.
   */
 type SizedVector[A, N <: Int] = Vector[A] :| FixedLength[N]
 
 object SizedVector:
+
+  given functor[N <: Int]: Endofunctor[[A] =>> SizedVector[A, N]] with
+    protected given source: Category[AnyObject, Function1] = functionCategory
+    protected given target: Category[AnyObject, Function1] = functionCategory
+
+    def map[A, B](f: A => B): SizedVector[A, N] => SizedVector[B, N] = _.mapSized(f)
 
   /** Describes a failed attempt to establish a statically tracked vector length. */
   final case class SizeMismatch(expected: Int, actual: Int) derives CanEqual:

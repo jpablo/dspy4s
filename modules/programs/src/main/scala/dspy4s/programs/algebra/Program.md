@@ -219,21 +219,26 @@ identity = Vector.empty
 combine  = ++
 ```
 
-`ParamsHom` turns that monoid into a one-object category. `ReadFunctor` maps an arity-erased program into it:
+Optimizer inspection first returns complete `OptimizableView` values, which contain both metadata and writable
+parameters. Each stage is now an explicit functor:
 
 ```text
 SomeProgram[I, O]
-      │ ReadFunctor
+      │ InspectFunctor
       ▼
-Vector[OptimizableParameters]
+Vector[OptimizableView]
+      │ ForgetMetadataFunctor
+      ▼
+Vector[OptimizableParameters]  <── ReadFunctor (the composite projection)
       │ length
       ▼
 Natural-number grade N
 ```
 
-Calling this projection a functor says that it preserves identity and composition. It cannot reorder, invent, or discard
-parameters when programs are combined. The visible grade is therefore not unrelated metadata: it is the length of the
-ordered parameter vector produced by this semantics.
+`ViewsHom` and `ParamsHom` turn their ordered vectors into one-object categories. Calling these projections functors
+says that each preserves identity and composition. Inspection cannot reorder, invent, or discard leaves when programs
+are combined, and forgetting metadata cannot change the order of their parameters. The visible grade is therefore not
+unrelated metadata: it is the length of the ordered parameter vector produced by this semantics.
 
 ## Execution paths
 
@@ -314,7 +319,8 @@ have grade zero, so a pipeline across two runtime signatures retains only the gr
 2. Zero identity grade and additive composition/fan-out grades.
 3. The sized parameter lens laws.
 4. Parameter identity, composition, and fan-out laws.
-5. The parameter monoid, its delooping, and both `ReadFunctor` laws.
+5. The view and parameter monoids, their deloopings, and the laws of `InspectFunctor`, `ForgetMetadataFunctor`, and
+   `ReadFunctor`.
 6. Canonical object-side decoding and construction gates.
 7. The effectful copying non-law.
 
@@ -337,5 +343,6 @@ sbt --error \
 2. Read `NatGradedCategory` to see why identity has grade zero and composition adds grades.
 3. Read `Parameterization` and `Lens` to see how parameters are read and replaced lawfully.
 4. Read `OrderedFanout` to see which useful effectful operation is intentionally not a category law.
-5. Read `ParameterAlgebra` and `ReadFunctor` to see parameter extraction as a separate interpretation.
+5. Read `ParameterAlgebra`, `InspectFunctor`, and `ReadFunctor` to see optimizer inspection as a separate
+   interpretation.
 6. Read `ProgramAlgebraLawSuite` for executable examples and counterexamples.

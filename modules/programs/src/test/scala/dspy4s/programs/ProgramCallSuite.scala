@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.algebra.Endofunctor
 import dspy4s.core.contracts.{:=, DynamicValues}
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
@@ -22,6 +23,15 @@ class ProgramCallSuite extends FunSuite:
     val g: String => Boolean = _.nonEmpty
 
     assertEquals(controls.mapInput(f).mapInput(g), controls.mapInput(g compose f))
+  }
+
+  test("ProgramCall exposes those laws through its Functor instance") {
+    val F              = summon[Endofunctor[ProgramCall]]
+    val identityLaw    = F.identities[Int]
+    val compositionLaw = F.composition((n: Int) => n.toString, (s: String) => s.nonEmpty)
+
+    assertEquals(identityLaw.lhs(controls), identityLaw.rhs(controls))
+    assertEquals(compositionLaw.lhs(controls), compositionLaw.rhs(controls))
   }
 
   test("mapInput changes only the input carrier") {

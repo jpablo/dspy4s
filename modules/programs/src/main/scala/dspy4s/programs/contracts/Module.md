@@ -218,6 +218,34 @@ existence of module start/end callbacks. A successful observed call appends one 
 failure normally appends neither; when `captureFailureTraces` is enabled, it appends a failure trace and preserves a
 parser's raw response when available.
 
+## The reusable algebra behind module combinators
+
+The operations on modules are not merely a collection of unrelated helpers. Their shared structures and laws are named
+in [`ModuleAlgebra.scala`](../algebra/ModuleAlgebra.scala):
+
+| Structure | What it says in ordinary terms | Operations |
+|---|---|---|
+| `Category[AnyObject, Module]` | Modules compose sequentially and have a do-nothing module | `>>>`, `Compose.id` |
+| `ModuleProfunctor` | A module can adapt its input before running and its output after running | `contramapInput`, `mapOutput`, `dimap` |
+| `LiftFunctor` | A total Scala function can be embedded without changing identity or composition | `Compose.lift` |
+| `LiftEitherFunctor` | The same holds for local functions that return `Either[DspyError, O]` | `Compose.liftEither` |
+
+For example, the profunctor composition law says that adapting a boundary twice has the same meaning as composing the
+two input functions and the two output functions first:
+
+```text
+Module[A, B]
+  -- dimap(before1, after1) --> Module[C, D]
+  -- dimap(before2, after2) --> Module[E, G]
+
+= dimap(before2 andThen before1, after1 andThen after2)
+```
+
+These equations use module execution as their observation: output, errors, raw prediction evidence, controls, and
+lifecycle behavior must agree. The function-side laws assume ordinary total functions. The runtime still translates an
+accidentally thrown exception into `DspyError`, but exception throwing is not part of the mathematical function
+category.
+
 ## `ModuleLifecycle` is an observation policy
 
 [`ModuleLifecycle`](ModuleLifecycle.scala) is a value-level strategy:

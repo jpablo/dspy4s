@@ -26,6 +26,16 @@ trait Category[P[_], Hom[_, _]]:
 /** The trivial object constraint for categories whose morphisms ignore their object indices. */
 type AnyObject[A] = DummyImplicit
 
+/** The identity object mapping. */
+type Id[A] = A
+
+/** Scala types and total functions as a category. */
+given functionCategory: Category[AnyObject, Function1] with
+  def id[A: AnyObject]: A => A = identity
+
+  extension [A, B](f: A => B)
+    infix def >>>[C](g: B => C): A => C = f.andThen(g)
+
 /** The delooping B(M) of a monoid M: a one-object category whose morphisms are elements of M. */
 type Delooped[M] = [A, B] =>> M
 
@@ -38,20 +48,25 @@ def delooping[M](using M: Monoid[M]): Category[AnyObject, Delooped[M]] =
     def id[A: AnyObject]: M                          = M.empty
     extension [A, B](f: M) infix def >>>[C](g: M): M = f.combine(g)
 
-/** An identity-on-objects functor between two `Hom`-indexed categories.
-  *
-  * The target may collapse objects, as the delooping does, so an explicit object map would be inert here.
-  */
-trait Functor[PS[_], Source[_, _], PT[_], Target[_, _]](using
-    source: Category[PS, Source],
-    target: Category[PT, Target]
-):
-  def map[A, B](f: Source[A, B]): Target[A, B]
+/** A functor between two `Hom`-indexed categories with object mapping `F`. */
+trait Functor[PS[_], Source[_, _], PT[_], Target[_, _], F[_]]:
+  protected given source: Category[PS, Source]
+  protected given target: Category[PT, Target]
+
+  def map[A, B](f: Source[A, B]): Target[F[A], F[B]]
 
   @Law("functor preserves identities")
-  def identities[A: {PS, PT}]: IsEq[Target[A, A]] =
-    map(source.id[A]) <-> target.id[A]
+  def identities[A](using PS[A], PT[F[A]]): IsEq[Target[F[A], F[A]]] =
+    map(source.id[A]) <-> target.id[F[A]]
 
   @Law("functor preserves composition")
-  def composition[A, B, C](f: Source[A, B], g: Source[B, C]): IsEq[Target[A, C]] =
+  def composition[A, B, C](f: Source[A, B], g: Source[B, C]): IsEq[Target[F[A], F[C]]] =
     map(f >>> g) <-> (map(f) >>> map(g))
+
+object Functor:
+  def apply[PS[_], Source[_, _], PT[_], Target[_, _], F[_]](using
+      functor: Functor[PS, Source, PT, Target, F]
+  ): Functor[PS, Source, PT, Target, F] = functor
+
+/** An endofunctor on Scala types and total functions. */
+type Endofunctor[F[_]] = Functor[AnyObject, Function1, AnyObject, Function1, F]

@@ -316,11 +316,18 @@ class ProgramAlgebraLawSuite extends FunSuite:
   }
 
   // ── ReadFunctor: params as a functor value; its laws executed ────────────────────────────────────────────
-  test("ReadFunctor preserves identities and composition (params is a functor into the delooping)") {
-    val a = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
-    val b = pack(step[String, Int]("b", "s -> n")(s => s.length))
+  test("InspectFunctor and ReadFunctor preserve identities and composition") {
+    val a      = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
+    val b      = pack(step[String, Int]("b", "s -> n")(s => s.length))
+    val aViews = InspectFunctor.map(a)
+    val bViews = InspectFunctor.map(b)
+    assertIsEq(InspectFunctor.identities[Boxed])
+    assertIsEq(InspectFunctor.composition(a, b))
+    assertIsEq(ForgetMetadataFunctor.identities[Boxed])
+    assertIsEq(ForgetMetadataFunctor.composition(aViews, bViews))
     assertIsEq(ReadFunctor.identities[Boxed])
     assertIsEq(ReadFunctor.composition(a, b))
+    assertEquals(ReadFunctor.map(a), ForgetMetadataFunctor.map(aViews))
   }
 
   // ── Object-side decoding: the coherence condition is gone because nothing per-program remains ───────────

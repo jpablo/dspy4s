@@ -16,6 +16,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.programs.algebra.{LiftEitherFunctor, LiftFunctor, ModuleProfunctor}
 import dspy4s.typed.Prediction
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -67,6 +68,22 @@ class TransformCombinatorSuite extends FunSuite:
     assertEquals(params(fallible), Vector.empty)
   }
 
+  test("lift and liftEither preserve categorical identity and composition") {
+    val totalIdentity      = LiftFunctor.identities[Int]
+    val totalComposition   = LiftFunctor.composition((n: Int) => n + 1, (n: Int) => s"v$n")
+    val partialIdentity    = LiftEitherFunctor.identities[Int]
+    val partialComposition = LiftEitherFunctor.composition(
+      (n: Int) => if n >= 0 then Right(n + 1) else Left(ValidationError("negative")),
+      (n: Int) => Right(s"v$n")
+    )
+
+    assertEquals(totalIdentity.lhs(ProgramCall(2)), totalIdentity.rhs(ProgramCall(2)))
+    assertEquals(totalComposition.lhs(ProgramCall(2)), totalComposition.rhs(ProgramCall(2)))
+    assertEquals(partialIdentity.lhs(ProgramCall(2)), partialIdentity.rhs(ProgramCall(2)))
+    assertEquals(partialComposition.lhs(ProgramCall(2)), partialComposition.rhs(ProgramCall(2)))
+    assertEquals(partialComposition.lhs(ProgramCall(-1)), partialComposition.rhs(ProgramCall(-1)))
+  }
+
   test("mapOutput obeys identity/composition on output and preserves raw prediction evidence") {
     val base           = step[Int, String]("base", "i -> s")(i => s"v$i")
     val mappedIdentity = base.mapOutput(identity[String])
@@ -113,6 +130,24 @@ class TransformCombinatorSuite extends FunSuite:
 
     assertEquals(direct(ProgramCall("42")), derived(ProgramCall("42")))
     assertEquals(params(direct), Vector(base.predict.optimizableParameters))
+  }
+
+  test("ModuleProfunctor obeys identity and composition under module execution") {
+    val base           = step[Int, String]("base", "i -> s")(i => s"v$i")
+    val identityLaw    = ModuleProfunctor.identity(base)
+    val compositionLaw = ModuleProfunctor.composition(
+      base,
+      (text: String) => text.toInt,
+      (text: String) => text.length,
+      (values: Vector[Int]) => values.sum.toString,
+      (length: Int) => length * 2
+    )
+
+    assertEquals(identityLaw.lhs(ProgramCall(4)), identityLaw.rhs(ProgramCall(4)))
+    assertEquals(
+      compositionLaw.lhs(ProgramCall(Vector(1, 2))),
+      compositionLaw.rhs(ProgramCall(Vector(1, 2)))
+    )
   }
 
   test("transform wrappers are lifecycle-transparent") {

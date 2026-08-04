@@ -69,7 +69,7 @@ final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[B]] =
     program(call).flatMap { prediction =>
-      TransformResult.guard("program_map_output")(Right(Prediction(map(prediction.output), prediction.raw)))
+      TransformResult.guard("program_map_output")(Right(prediction.map(map)))
     }
 
 object MapOutput:
@@ -111,7 +111,7 @@ final case class Dimap[J, I, O, B, P <: Module[I, O]](
       input      <- TransformResult.guard("program_dimap_input")(Right(contramap(call.input)))
       prediction <- program(call.mapInput(_ => input))
       output     <- TransformResult.guard("program_dimap_output")(Right(map(prediction.output)))
-    yield Prediction(output, prediction.raw)
+    yield prediction.map(_ => output)
 
 object Dimap:
   given dimapOptimizableTraversal[J, I, O, B, P <: Module[I, O], N <: Int](using
