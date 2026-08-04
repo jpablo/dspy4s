@@ -14,6 +14,73 @@ Those words are not merely comments over sequential code. Each phase has its own
 enumerate branching successor sets, while a transition with only one legal successor returns that state directly. Every
 state carries the values required by its outgoing transition.
 
+## Class hierarchy
+
+The hollow-triangle arrows below mean “extends” and point toward the supertype. `ReAct` and `CodeAct` are the two
+production programs that specialize the shared state machine.
+
+```mermaid
+classDiagram
+    direction TB
+
+    class Module {
+        <<trait>>
+        +String moduleName
+        #Prediction forward(ProgramCall call)
+    }
+
+    class TrajectoryAgent {
+        <<trait>>
+        +IterationLimit maxIterations
+        #Module extractorPredict
+        #Step trajectoryStep(ProgramCall call)
+        #String renderTrajectory(Vector trajectory)
+    }
+
+    class InterpretedTrajectoryAgent {
+        <<trait>>
+        type ModelStep
+        type Action
+        type Observation
+        #ActionInterpreter actionInterpreter
+        #StepGeneration generateStep(ProgramCall call, Vector trajectory)
+        #ActionPreparation prepareAction(ModelStep step)
+        #Entry recordRejection(Int iteration, ModelStep step, Observation observation)
+        #Entry recordOutcome(Int iteration, ModelStep step, Action action, ActionOutcome outcome)
+        #ActionDecision decide(ModelStep step, Action action, ActionOutcome outcome)
+    }
+
+    namespace Programs {
+        class ReAct {
+            <<final>>
+            ReactStep ModelStep
+            ToolCallRequest Action
+            String Observation
+        }
+
+        class CodeAct {
+            <<final>>
+            CodeStep ModelStep
+            String Action
+            String Observation
+        }
+    }
+
+    Module <|-- TrajectoryAgent
+    TrajectoryAgent <|-- InterpretedTrajectoryAgent
+    InterpretedTrajectoryAgent <|-- ReAct
+    InterpretedTrajectoryAgent <|-- CodeAct
+```
+
+In full, the specializations are:
+
+- `ReAct[I, O] extends InterpretedTrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]`.
+- `CodeAct[I, O] extends InterpretedTrajectoryAgent[I, CodeAct.WithReasoning[O], CodeAct.TrajectoryEntry]`.
+
+`TrajectoryAgent` supplies the final `Module.forward` implementation. `InterpretedTrajectoryAgent` supplies its final
+`trajectoryStep` implementation, leaving the concrete programs to define their action language through `ModelStep`,
+`Action`, and `Observation` and to implement the typed phase hooks.
+
 ## Where it fits
 
 There are three nested abstractions:
