@@ -220,6 +220,10 @@ class ProgramAlgebraLawSuite extends FunSuite:
     val ab = a >>> b
     assertIsEq(P.paramsId[Boxed])
     assertIsEq(P.paramsCompose(a, b))
+    assertIsEq(P.readFunctor.identities[Boxed])
+    assertIsEq(P.readFunctor.composition(a, b))
+    val staticallySizedRead: SizedParamsHom[Int, Int, 2] = P.readFunctor.map(ab)
+    assertEquals(staticallySizedRead, ab.sizedParams)
     val fresh = Vector(
       predict("i -> s").optimizableParameters.copy(instructions = Some("first update")),
       predict("s -> n").optimizableParameters.copy(instructions = Some("second update"))

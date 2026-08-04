@@ -87,3 +87,39 @@ trait GradedFunctor[PS[_], Source[_, _, _ <: Int], PT[_], Target[_, _]](using
       g: Source[B, C, M]
   ): IsEq[Target[A, C]] =
     map(f >>> g) <-> (map(f) >>> map(g))
+
+/** A functor between naturally graded categories that preserves each morphism's grade exactly.
+  *
+  * Unlike [[GradedFunctor]], whose target is ordinary and therefore hides or interprets the grade, this structure maps
+  * `Source[A, B, N]` to `Target[F[A], F[B], N]`. The target can consequently retain static information such as a
+  * parameter vector's exact length.
+  */
+trait GradePreservingFunctor[
+    F[_],
+    SourceConstraint[_],
+    Source[_, _, _ <: Int],
+    TargetConstraint[_],
+    Target[_, _, _ <: Int]
+](using
+    source: NatGradedCategory[SourceConstraint, Source],
+    target: NatGradedCategory[TargetConstraint, Target]
+):
+  final val sourceCategory: NatGradedCategory[SourceConstraint, Source] = source
+  final val targetCategory: NatGradedCategory[TargetConstraint, Target] = target
+
+  /** Evidence that valid source objects remain valid after object mapping. */
+  def mapObject[A](using SourceConstraint[A]): TargetConstraint[F[A]]
+
+  def map[A, B, N <: Int](f: Source[A, B, N]): Target[F[A], F[B], N]
+
+  @Law("grade-preserving functor preserves identities")
+  def identities[A: SourceConstraint]: IsEq[Target[F[A], F[A], 0]] =
+    given TargetConstraint[F[A]] = mapObject[A]
+    map(source.id[A]) <-> target.id[F[A]]
+
+  @Law("grade-preserving functor preserves composition")
+  def composition[A, B, C, N <: Int, M <: Int](
+      f: Source[A, B, N],
+      g: Source[B, C, M]
+  ): IsEq[Target[F[A], F[C], N + M]] =
+    map(source.compose(f, g)) <-> target.compose(map(f), map(g))

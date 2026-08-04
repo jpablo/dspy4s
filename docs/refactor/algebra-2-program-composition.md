@@ -200,8 +200,9 @@ reparameterization; signature structure and module identity remain in the morphi
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
 `dspy4s.programs.algebra.NatGradedCategory` (grade-zero `id` and grade-additive `>>>`), whose canonical
-`GradedFunctor` hides the grade into its ordinary `AnyGrade` category, with `Parameterization` and `OrderedFanout` as
-separate structures, over `dspy4s.programs.algebra.Program[I, O, N]` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
+`GradedFunctor` hides the grade into its ordinary `AnyGrade` category. `Parameterization.readFunctor` instead uses a
+`GradePreservingFunctor` into sized parameter vectors, retaining `N` exactly; `OrderedFanout` remains a separate
+structure. These structures operate over `dspy4s.programs.algebra.Program[I, O, N]` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
 `OptimizableTraversal[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
 the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ProgramAlgebraLawSuite`.
 The Mirror-based `OptimizableTraversal.derived` gate is strict: every product field must provide `OptimizableTraversal` evidence.
@@ -303,6 +304,8 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   by compile gates. The deliberate split from the
   formalization library: there the equations are the deliverable, here they are executable specifications.
 - **Optimizer projections as functor values.** `Parameterization` is separate from graded composition.
+  Its `readFunctor` maps `Program[A, B, N]` to `SizedVector[OptimizableParameters, N]` in a naturally graded target,
+  making the parameter count part of the preserved type rather than an erased runtime fact.
   `InspectFunctor` maps `SomeProgram` into the delooping of the ordered `OptimizableView` monoid;
   `ForgetMetadataFunctor` maps those views to their ordered writable parameters; and `ReadFunctor` names the composite
   projection. Their identity and composition laws are exactly the optimizer traversal laws. The view and parameter
@@ -311,8 +314,10 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   both target categories are literally their monoids delooped.
 - **Previously implicit module structures are explicit.** `Module` has its ordinary category instance;
   `ModuleProfunctor` states the laws shared by `contramapInput`, `mapOutput`, and `dimap`; `LiftFunctor` embeds total
-  functions; and `LiftEitherFunctor` embeds the `Either[DspyError, *]` Kleisli category. `Mode` acts on modules through
-  a `MonoidAction`, while the writer carriers `Executed` and `Prediction` expose `ScalaMonad` instances of the general
+  functions; and `LiftEitherFunctor` embeds the specialization to `Either[DspyError, *]` of the generic Kleisli
+  category constructed from any `ScalaMonad`. `Mode` acts on modules through a `MonoidAction`; because this is a left
+  action under diagrammatic composition, its functor source is explicitly the opposite monoid delooping. The writer
+  carriers `Executed` and `Prediction` expose `ScalaMonad` instances of the general
   categorical `Monad[F, P, Hom]`. Natural transformations, vertical composition, and whiskering state the monad laws
   at their categorical level; `pure`, `flatten`, and `flatMap` are derived Scala operations. The common `Functor` trait
   now carries both an object mapping and evidence that valid source objects map to valid target objects, so it also
@@ -476,9 +481,10 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
   dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
-- **Commutative denotational carrier**: the abstract `CDCategory[Hom]` law target remains, but unrestricted
-  `ModuleHom` implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or
-  other commutative carrier could implement CD/Markov laws. A pair-input decoder would still be needed to lift
+- **Commutative denotational carrier**: the law hierarchy now distinguishes monoidal, symmetric monoidal,
+  copy/discard, Markov, and cartesian carriers and is executed for Scala functions. Unrestricted `ModuleHom`
+  implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or other
+  commutative carrier could implement the appropriate level. A pair-input decoder would still be needed to lift
   ordered tensor into the packaged `Program` algebra.
 - **Full parameterized-program adoption**: promote the packaged `Program` (see the formalization above; the entry-point
   loop is closed, decoding is object-side with codec-equipped objects gating `of` / `id` / the runner, the

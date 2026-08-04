@@ -80,6 +80,14 @@ object ScalaMonad:
 
   def apply[F[_]](using monad: ScalaMonad[F]): ScalaMonad[F] = monad
 
+  /** The error monad: the first `Left` short-circuits, while `Right` values compose normally. */
+  given either[E]: ScalaMonad[[A] =>> Either[E, A]] =
+    fromComponents(
+      [A, B] => (f: A => B) => (value: Either[E, A]) => value.map(f),
+      [A] => (value: A) => Right(value),
+      [A] => (value: Either[E, Either[E, A]]) => value.flatten
+    )
+
   /** Build a Scala monad from its functor action, unit components, and multiplication components. */
   def fromComponents[F[_]](
       mapComponent: [A, B] => (A => B) => F[A] => F[B],

@@ -155,6 +155,11 @@ params(id[A])  = empty
 params(f >>> g) = params(f) ++ params(g)
 ```
 
+These are not unrelated equations attached to the lens. `Parameterization.readFunctor` interprets each
+`Program[A, B, N]` as a `SizedVector[OptimizableParameters, N]` in another naturally graded category. It preserves the
+grade exactly, so the interpretation cannot forget that an `N`-parameter program has an `N`-element parameter vector.
+The two equations above are its identity and composition functor laws.
+
 `params` and `reparam(Vector)` remain convenient runtime-boundary operations. Prefer `sizedParams` and `reparamSized`
 inside typed code because their lengths are checked statically.
 
@@ -220,7 +225,7 @@ combine  = ++
 ```
 
 Optimizer inspection first returns complete `OptimizableView` values, which contain both metadata and writable
-parameters. Each stage is now an explicit functor:
+parameters. The arity-erased inspection API and the exact-grade parameterization are both explicit functors:
 
 ```text
 SomeProgram[I, O]
@@ -230,9 +235,8 @@ Vector[OptimizableView]
       │ ForgetMetadataFunctor
       ▼
 Vector[OptimizableParameters]  <── ReadFunctor (the composite projection)
-      │ length
-      ▼
-Natural-number grade N
+
+Program[I, O, N] ── Parameterization.readFunctor ──> SizedVector[OptimizableParameters, N]
 ```
 
 `ViewsHom` and `ParamsHom` turn their ordered vectors into one-object categories. Calling these projections functors
@@ -319,8 +323,8 @@ have grade zero, so a pipeline across two runtime signatures retains only the gr
 2. Zero identity grade and additive composition/fan-out grades.
 3. The sized parameter lens laws.
 4. Parameter identity, composition, and fan-out laws.
-5. The view and parameter monoids, their deloopings, and the laws of `InspectFunctor`, `ForgetMetadataFunctor`, and
-   `ReadFunctor`.
+5. Exact-grade `Parameterization.readFunctor`, plus the view and parameter monoids, their deloopings, and the laws of
+   the arity-erased `InspectFunctor`, `ForgetMetadataFunctor`, and `ReadFunctor`.
 6. Canonical object-side decoding and construction gates.
 7. The effectful copying non-law.
 

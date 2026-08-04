@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{IsEq, Law, Lens, <->}
+import dspy4s.core.algebra.{AnyObject, Id, IsEq, Law, Lens, <->}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.programs.optimization.OptimizableParameters
@@ -30,6 +30,12 @@ trait Parameterization[P[_], Hom[_, _, _ <: Int]]:
       parameters: Vector[OptimizableParameters]
   ): Hom[A, B, N]
 
+  /** Parameter reading as a functor that retains the source morphism's grade as the vector length. */
+  final lazy val readFunctor: GradePreservingFunctor[Id, P, Hom, AnyObject, SizedParamsHom] =
+    new GradePreservingFunctor[Id, P, Hom, AnyObject, SizedParamsHom](using category, sizedParamsCategory):
+      def mapObject[A](using P[A]): AnyObject[A]                        = summon
+      def map[A, B, N <: Int](f: Hom[A, B, N]): SizedParamsHom[A, B, N] = read(f)
+
   final def parameterLens[A, B, N <: Int]: Lens[Hom[A, B, N], SizedVector[OptimizableParameters, N]] =
     new Lens[Hom[A, B, N], SizedVector[OptimizableParameters, N]]:
       def get(f: Hom[A, B, N]): SizedVector[OptimizableParameters, N] = read(f)
@@ -50,14 +56,14 @@ trait Parameterization[P[_], Hom[_, _, _ <: Int]]:
 
   @Law("the identity is parameter-free")
   def paramsId[A: P]: IsEq[SizedVector[OptimizableParameters, 0]] =
-    read(category.id[A]) <-> SizedVector.empty
+    readFunctor.identities[A]
 
   @Law("composition concatenates parameters")
   def paramsCompose[A, B, C, N <: Int, M <: Int](
       f: Hom[A, B, N],
       g: Hom[B, C, M]
   ): IsEq[SizedVector[OptimizableParameters, N + M]] =
-    read(category.compose(f, g)) <-> read(f).concatSized(read(g))
+    readFunctor.composition(f, g)
 
   @Law("ordered fan-out concatenates parameters")
   def paramsFanout[I, A, B, N <: Int, M <: Int](

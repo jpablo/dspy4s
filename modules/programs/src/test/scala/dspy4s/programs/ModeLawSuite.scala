@@ -112,6 +112,28 @@ class ModeLawSuite extends FunSuite:
     assertActionLaw(action.compatibility(m1, m2, compositionRecorder), compositionRecorder)
   }
 
+  test("the Module action is a lawful functor from the opposite Mode delooping") {
+    val action = MonoidAction[Mode, Module[Int, Int]]
+    val F      = action.functor
+    val m1     = Mode.temperature(0.5)
+    val m2     = Mode.temperature(0.9)
+
+    def assertFunctorLaw(
+        law: IsEq[Module[Int, Int] => Module[Int, Int]],
+        recorder: Recorder
+    ): Unit =
+      val left         = law.lhs(recorder)(ProgramCall(1))
+      val leftControls = recorder.seen.toVector
+      recorder.seen.clear()
+      val right         = law.rhs(recorder)(ProgramCall(1))
+      val rightControls = recorder.seen.toVector
+      assertEquals(left, right)
+      assertEquals(leftControls, rightControls)
+
+    assertFunctorLaw(F.identities[Unit], Recorder(predict("a -> b")))
+    assertFunctorLaw(F.composition[Unit, Unit, Unit](m1, m2), Recorder(predict("a -> b")))
+  }
+
   test("mode(Mode.id)(p) = p on the controls and the output (left/right unit)") {
     val r      = Recorder(predict("a -> b"))
     val result = Compose.mode(Mode.id)(r)(ProgramCall(42))

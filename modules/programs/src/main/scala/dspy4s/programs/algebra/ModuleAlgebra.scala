@@ -1,19 +1,24 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{AnyObject, Category, Functor, Id, ScalaProfunctor, functionCategory}
+import dspy4s.core.algebra.{
+  AnyObject,
+  Category,
+  Functor,
+  Id,
+  Kleisli,
+  ScalaProfunctor,
+  functionCategory,
+  kleisliCategory
+}
 import dspy4s.core.contracts.DspyError
 import dspy4s.programs.{Compose, Dimap}
 import dspy4s.programs.contracts.Module
 
 /** Fallible Scala functions as the Kleisli category of `Either[DspyError, *]`. */
-type ErrorKleisli[A, B] = A => Either[DspyError, B]
+type ErrorKleisli[A, B] = Kleisli[[X] =>> Either[DspyError, X], A, B]
 
-given errorKleisliCategory: Category[AnyObject, ErrorKleisli] with
-  def id[A: AnyObject]: ErrorKleisli[A, A] = Right(_)
-
-  extension [A, B](f: ErrorKleisli[A, B])
-    infix def >>>[C](g: ErrorKleisli[B, C]): ErrorKleisli[A, C] =
-      input => f(input).flatMap(g)
+given errorKleisliCategory: Category[AnyObject, ErrorKleisli] =
+  kleisliCategory[[X] =>> Either[DspyError, X]]
 
 /** Typed modules form a category under transparent sequential composition. */
 given moduleCategory: Category[AnyObject, Module] with
