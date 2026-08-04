@@ -27,9 +27,13 @@ every program boundary needs.
 
 ## Class hierarchy
 
-The hollow-triangle arrows mean “extends” and point toward the supertype. This diagram contains every **named**
-`src/main` descendant in the repository. Test fixtures are excluded. The streaming tutorial also creates one anonymous
-`new DynamicModule`; because that expression declares no reusable class name, it is noted here but is not a class node.
+The hollow-triangle arrows mean “extends” and point toward the supertype. This diagram names every **named** `src/main`
+descendant in the repository. To keep the large transparent branch legible, its descendants are grouped by
+responsibility in an attached note instead of fourteen individual class nodes and arrows. Test fixtures are excluded.
+The streaming tutorial also creates one anonymous `new DynamicModule`; because that expression declares no reusable
+class name, it is noted here but is not a class node.
+Colors match the four semantic branches in the table below: blue is direct executable, green is transparent structural,
+amber is dynamic-record, and violet is trajectory-based. The `Module` root remains neutral gray.
 
 ```mermaid
 classDiagram
@@ -60,21 +64,6 @@ classDiagram
     class BestOfN
     class Refine
 
-    class Identity
-    class AndThen
-    class Both
-    class Tensor
-    class Copy
-    class Discard
-    class Swap
-    class Lift
-    class LiftEither
-    class MapOutput
-    class ContramapInput
-    class Dimap
-    class Moded
-    class RecoverWith
-
     class DynamicPredict
     class KNNFewShotProgram
     class EnsembledProgram {
@@ -90,6 +79,8 @@ classDiagram
     class ReAct
     class CodeAct
 
+    note for TransparentModule "Composition<br/>Identity · AndThen · Both · Tensor<br/>Copy · Discard · Swap<br/><br/>Transformations<br/>Lift · LiftEither · MapOutput<br/>ContramapInput · Dimap<br/><br/>Control<br/>Moded · RecoverWith"
+
     Module <|-- TransparentModule
     Module <|-- DynamicModule
     Module <|-- TrajectoryAgent
@@ -102,21 +93,6 @@ classDiagram
     Module <|-- BestOfN
     Module <|-- Refine
 
-    TransparentModule <|-- Identity
-    TransparentModule <|-- AndThen
-    TransparentModule <|-- Both
-    TransparentModule <|-- Tensor
-    TransparentModule <|-- Copy
-    TransparentModule <|-- Discard
-    TransparentModule <|-- Swap
-    TransparentModule <|-- Lift
-    TransparentModule <|-- LiftEither
-    TransparentModule <|-- MapOutput
-    TransparentModule <|-- ContramapInput
-    TransparentModule <|-- Dimap
-    TransparentModule <|-- Moded
-    TransparentModule <|-- RecoverWith
-
     DynamicModule <|-- DynamicPredict
     DynamicModule <|-- KNNFewShotProgram
     DynamicModule <|-- EnsembledProgram
@@ -126,6 +102,29 @@ classDiagram
     TrajectoryAgent <|-- InterpretedTrajectoryAgent
     InterpretedTrajectoryAgent <|-- ReAct
     InterpretedTrajectoryAgent <|-- CodeAct
+
+    style Module fill:#F3F4F6,stroke:#4B5563,color:#111827,stroke-width:2px
+
+    style Predict fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style ChainOfThought fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style ProgramOfThought fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style RLM fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style MultiChainComparison fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style BestOfN fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style Refine fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+
+    style TransparentModule fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px
+    style DynamicModule fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+    style DynamicPredict fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+    style KNNFewShotProgram fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+    style EnsembledProgram fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+    style SimplifyModule fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+    style ScoringModule fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
+
+    style TrajectoryAgent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+    style InterpretedTrajectoryAgent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+    style ReAct fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
+    style CodeAct fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
 ```
 
 The descendants fall into four semantic branches:
@@ -193,7 +192,7 @@ shared lifecycle.
 flowchart TD
     input["apply(input, config, traceEnabled)"]
     envelope["construct ProgramCall[I]"]
-    call["apply(call)"]
+    applyCall["apply(call)"]
     lifecycle{"lifecycle"}
     transparent["forward(call)"]
     start["enter CallbackDispatcher.withModule"]
@@ -204,8 +203,8 @@ flowchart TD
     unchanged["no trace/history append"]
     output["Either[DspyError, Prediction[O]]"]
 
-    input --> envelope --> call
-    call --> lifecycle
+    input --> envelope --> applyCall
+    applyCall --> lifecycle
     lifecycle -->|"Transparent"| transparent --> output
     lifecycle -->|"Observed"| start --> observed --> result
     result -->|"Right and traceEnabled"| success --> output
