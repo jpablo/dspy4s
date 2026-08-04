@@ -138,7 +138,8 @@ The descendants fall into four semantic branches:
 
 This is an inheritance diagram, not a catalog of every type that mentions `Module`. In particular:
 
-- `Program[I, O]` packages a representation through `type Rep <: Module[I, O]`; it does not extend `Module`.
+- `Program[I, O, N]` packages a representation through `type Rep <: Module[I, O]`; it does not extend `Module`. `N`
+  records the exact number of writable optimizer leaves.
 - `ModuleHom[I, O]` is an alias for `Module[I, O]`, not a new type.
 - `Parallel`, `Compose`, and `DynamicSignature` are factories or APIs that construct modules, not subclasses.
 - A program containing `Predict` fields has a composition relationship to those predicts, not an inheritance edge.

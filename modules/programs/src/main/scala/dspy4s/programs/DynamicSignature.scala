@@ -73,14 +73,14 @@ sealed trait DynamicSignature:
   ): Predict[In, Out] =
     Predict(signature, demos = demos, name = name, config = config)
 
-  /** Package this bundle's predict as a parameterized-category object in one step: the object codec comes from the
-    * bundle itself, so no `import s.given` is needed at the call site.
+  /** Package this bundle's predict as a graded-category morphism in one step: the object codec comes from the bundle
+    * itself, so no `import s.given` is needed at the call site.
     */
   final def packaged(
       demos: Vector[Example] = Vector.empty,
       name: Option[String] = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
-  ): Program.WithArity[In, Out, 1] =
+  ): Program[In, Out, 1] =
     Program.of(predict(demos, name, config))(using summon[OptimizableTraversal[Predict[In, Out]]], inputCodec)
 
 object DynamicSignature:
@@ -110,7 +110,7 @@ object DynamicSignature:
         demos: Vector[Example] = Vector.empty,
         name: Option[String] = None,
         config: DynamicValue.Record = DynamicValue.Record.empty
-    ): Program.WithArity[I, O, 1] = underlying.packaged(demos, name, config)
+    ): Program[I, O, 1] = underlying.packaged(demos, name, config)
 
   /** Parse a DSPy-style DSL string at runtime, minting a fresh pair of input/output types for it. The declared
     * `DynamicSignature` return type is what seals the type members: the concrete representation (`In` and `Out` are
@@ -136,7 +136,7 @@ object DynamicSignature:
     * records whose declared fields are absent. Parameter-free ([[LiftEither]]), so it contributes nothing to `params`
     * and pipelines optimize exactly as before.
     */
-  def bridge(from: DynamicSignature, to: DynamicSignature): Either[DspyError, Program.WithArity[from.Out, to.In, 0]] =
+  def bridge(from: DynamicSignature, to: DynamicSignature): Either[DspyError, Program[from.Out, to.In, 0]] =
     val provided = from.signature.layout.outputFields.map(_.name).toSet
     val missing  = to.signature.layout.inputFields.map(_.name).filterNot(provided.contains)
     if missing.nonEmpty then

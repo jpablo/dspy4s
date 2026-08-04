@@ -44,14 +44,14 @@ final case class NestedValue(n: Int) derives Schema
 final case class NestedBox(value: NestedValue) derives Schema
 final case class ArrayBox(values: Array[Int]) derives Schema
 
-/** Executes the `@Law` statements of the parameterized program structures ([[Category]] / [[ParameterizedCategory]]
-  * over [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it:
+/** Executes the `@Law` statements of the graded program structures ([[NatGradedCategory]] / [[Parameterization]] over
+  * [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation honest for it:
   * structural `==` for parameter vectors and delooping morphisms, observational equality (complete prediction / params
   * / coherent decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no
   * `OptimizableTraversal`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
   * shares its input; copying is not natural for effectful morphisms).
   */
-class ParameterizedCategoryLawSuite extends FunSuite:
+class ProgramAlgebraLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
@@ -90,7 +90,9 @@ class ParameterizedCategoryLawSuite extends FunSuite:
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[ParameterizedCategory[RecordCodec, Program]]
+  private val C = summon[NatGradedCategory[RecordCodec, Program, SomeProgram]]
+  private val P = summon[Parameterization[RecordCodec, Program, SomeProgram]]
+  private val F = summon[OrderedFanout[Program]]
 
   // ── Bundle-tagged dynamic objects: fresh types minted per parse (DynamicSignature) ─────────────────────────
   // Suite-level so the freshness compile gate can reference them from compileErrors snippets.
@@ -119,7 +121,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     RecordCodec.fromDecoder(_ => Left(ValidationError("test stub: no input codec")))
 
   /** Package a Step at its (codec-equipped) domain object. */
-  private def pack[I, O](m: Step[I, O])(using RecordCodec[I]): Program[I, O] = Program.of(m)
+  private def pack[I, O](m: Step[I, O])(using RecordCodec[I]): Program[I, O, 1] = Program.of(m)
 
   // Fixture for the Record-input compile gate below (suite-level so compileErrors snippets can reference
   // it; referenced only inside the snippet, which the unused checker cannot see).
@@ -140,7 +142,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
   )
 
   /** Observe the executable semantics retained by Category equality. Structural nodes must not perturb lifecycle. */
-  private def observe[I, O](program: Program[I, O], input: I): ProgramObservation[O] =
+  private def observe[I, O](program: SomeProgram[I, O], input: I): ProgramObservation[O] =
     RuntimeEnvironment.resetForTests()
     val starts   = Vector.newBuilder[String]
     val callback = new CallbackHandler:
@@ -162,7 +164,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     * decoding is a property of the object, so it no longer varies between the two sides by construction).
     */
   private def assertObsEq[I, O](
-      eq: IsEq[Program[I, O]],
+      eq: IsEq[SomeProgram[I, O]],
       input: I
   ): Unit =
     assertEquals(eq.lhs.params, eq.rhs.params)
@@ -172,17 +174,20 @@ class ParameterizedCategoryLawSuite extends FunSuite:
   private def assertIsEq[A](eq: IsEq[A]): Unit =
     assertEquals(eq.lhs, eq.rhs)
 
-  // ── Category laws over Program, executed from the trait's @Law statements ───────────────────────────────────
-  test("Category laws (identity left/right, associativity) hold observationally on Program") {
+  // ── Graded-category laws over Program, executed from the trait's @Law statements ────────────────────────────
+  test("graded Category laws hold observationally and grades compose as natural numbers") {
     val f = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
+    val identity: Program[Boxed, Boxed, 0] = C.id[Boxed]
     assertObsEq(C.identityLeft(f), Boxed(7))
     assertObsEq(C.identityRight(f), Boxed(7))
+    assertEquals(identity.params, Vector.empty)
 
     val a = pack(step[Int, String]("a", "i -> s")(i => s"<$i>"))
     val g = pack(step[String, String]("g", "s -> t")(s => s + s))
     val h = pack(step[String, Int]("h", "t -> n")(s => s.length))
+    val composed: Program[Int, Int, 3] = (a >>> g) >>> h
     assertObsEq(C.associativity(a, g, h), 3)
-    assertEquals(((a >>> g) >>> h)(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
+    assertEquals(composed(ProgramCall(3)).map(_.output), Right(6)) // "<3>" -> "<3><3>" -> length 6
   }
 
   test("identity preserves the complete prediction envelope through ProgramRunner") {
@@ -193,24 +198,22 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     assertEquals(viaId, direct)
 
     val record = DynamicValues.record("n" := 7)
-    val runner = summon[ProgramRunner[Program[Boxed, Wrapped]]]
+    val runner = summon[ProgramRunner[SomeProgram[Boxed, Wrapped]]]
     assertEquals(runner.run(f >>> C.id[Wrapped], record), runner.run(f, record))
     assertEquals(runner.run(C.id[Boxed] >>> f, record), runner.run(f, record))
   }
 
   // ── parameterization laws, executed from the @Law statements ─────────────────────────────────────────────────────────
-  test("parameterization laws: paramsId, paramsCompose, reparam round-trip and write-back") {
+  test("parameterization laws: identity and composition preserve the ordered parameter vector") {
     val a  = pack(step[Int, String]("a", "i -> s")(i => s"v$i"))
     val b  = pack(step[String, Int]("b", "s -> n")(s => s.length))
     val ab = a >>> b
-    assertIsEq(C.paramsId[Boxed])
-    assertIsEq(C.paramsCompose(a, b))
-    assertIsEq(C.reparamRoundTrip(ab))
+    assertIsEq(P.paramsId[Boxed])
+    assertIsEq(P.paramsCompose(a, b))
     val fresh = Vector(
       predict("i -> s").optimizableParameters.copy(instructions = Some("first update")),
       predict("s -> n").optimizableParameters.copy(instructions = Some("second update"))
     )
-    assertIsEq(C.reparamWriteBack(ab, fresh))
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
     assertEquals(ab.reparam(ab.params)(ProgramCall(5)).map(_.output), ab(ProgramCall(5)).map(_.output))
     assertEquals(ab.reparam(fresh)(ProgramCall(5)).map(_.output), Right(2))
@@ -218,15 +221,15 @@ class ParameterizedCategoryLawSuite extends FunSuite:
 
   test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
     val inferred = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val program: Program.WithArity[Boxed, Wrapped, 1] = inferred
+    val program: Program[Boxed, Wrapped, 1] = inferred
     val lens                                          = summon[Lens[
-      Program.WithArity[Boxed, Wrapped, 1],
+      Program[Boxed, Wrapped, 1],
       SizedVector[OptimizableParameters, 1]
     ]]
     val current: SizedVector[OptimizableParameters, 1] = lens.get(program)
     val updated = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
     val second  = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
-    val composed: Program.WithArity[Boxed, Boxed, 2]              = program >>> second
+    val composed: Program[Boxed, Boxed, 2]                        = program >>> second
     val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams
     val arityAgreement = composed.optimizableParameters.arityAgreement(composed.program)
 
@@ -246,10 +249,10 @@ class ParameterizedCategoryLawSuite extends FunSuite:
   test("fanout runs both legs on the same input and satisfies paramsFanout") {
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
-    assertEquals(C.fanout(f, g)(ProgramCall(4)).map(_.output), Right(("v4", 5)))
-    assertIsEq(C.paramsFanout(f, g))
-    assertEquals(C.parallel(f, g)(ProgramCall(4)), C.fanout(f, g)(ProgramCall(4)))
-    assertIsEq(C.paramsParallel(f, g))
+    val paired: Program[Int, (String, Int), 2] = F.fanout(f, g)
+    assertEquals(paired(ProgramCall(4)).map(_.output), Right(("v4", 5)))
+    assertIsEq(P.paramsFanout(f, g))
+    assertEquals(F.parallel(f, g)(ProgramCall(4)), F.fanout(f, g)(ProgramCall(4)))
   }
 
   test("copy is NOT natural: h >>> fanout(f, g) shares h; fanout(h >>> f, h >>> g) re-runs it") {
@@ -260,8 +263,8 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     val f = pack(step[Int, String]("f", "i -> s")(i => s"v$i"))
     val g = pack(step[Int, Int]("g", "i -> n")(i => i + 1))
 
-    val shared = h >>> C.fanout(f, g)
-    val copied = C.fanout(h >>> f, h >>> g)
+    val shared = h >>> F.fanout(f, g)
+    val copied = F.fanout(h >>> f, h >>> g)
 
     runs.set(0)
     val sharedOut = shared(ProgramCall(3)).map(_.output)
@@ -318,7 +321,7 @@ class ParameterizedCategoryLawSuite extends FunSuite:
     val boxedRecord = DynamicValues.record("n" := 5)
     assertEquals(summon[RecordCodec[Boxed]].decode(boxedRecord), Right(Boxed(5)))
     val p   = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val ran = summon[ProgramRunner[Program[Boxed, Wrapped]]].run(p, boxedRecord)
+    val ran = summon[ProgramRunner[SomeProgram[Boxed, Wrapped]]].run(p, boxedRecord)
     assert(ran.isRight, s"object-side record run failed: ${ran.left.toOption}")
   }
 

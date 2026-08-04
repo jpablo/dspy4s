@@ -179,10 +179,10 @@ The load-bearing facts, all executable:
   `h >>> copy = copy >>> split(h, h)`, i.e. iff `h` is deterministic under the chosen observation. Both sides
   are pinned: the positive case for a pure `h` in
   `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
-  `ParameterizedCategoryLawSuite`. This remains useful without claiming a Markov structure for execution.
+  `ProgramAlgebraLawSuite`. This remains useful without claiming a Markov structure for execution.
 
-**Why `split` lives at the Module level, not on `ParameterizedCategory`.** `fanout` lifts into the packaged `Program` /
-`ParameterizedCategory` category because both legs share one input, so the pair reuses that input's decoder. The split's
+**Why `split` lives at the Module level, not on `OrderedFanout[Program]`.** `fanout` lifts into the packaged `Program`
+algebra because both legs share one input, so the pair reuses that input's decoder. The split's
 input `(I, J)` has no canonical single-record decoder (two independent inputs, one flat `Example` record), so
 `split` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
 category naturally supports fan-out, and the raw split is the structural op beneath it.
@@ -266,16 +266,16 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
     `augment` closing position, execution-wrapping modes. Usage accumulation on `>>>` is now part of the lawful
     `RawPrediction.followedBy` envelope operation.
-  - **Parameterized-program prototype** (Para-inspired; commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
+  - **Graded-program algebra** (originally the Para-inspired prototype; commits `9d4b5cd`, `8d7e009`, `d1d38d0`, `876442a`), functionally complete: the
     optimizer-addressability layer identified as the Para construction (morphism = parameters x shape;
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
     homogeneous `OptimizableParameters` values make `Vector` the exact, not approximate, parameter object, while layout/module
     metadata remains read-only). Prototyped as
-    `dspy4s.programs.algebra.ParameterizedCategory[P[_], Hom]` (the CategoryTC constraint-parameterized shape) over packaged
-    `Program` morphisms, with objects constrained by `RecordCodec` exactly where evidence is synthesized (`id`);
-    `Program` packages addressability while its domain object supplies a sealed canonical codec, giving uniform
-    `OptimizableTraversal[Program]` + `ProgramRunner[Program]`, so `new COPRO[Program[I, O]]` works directly, including on upcast
-    values, composed pipelines, and id-headed pipelines. Two compile-time gates: no `OptimizableTraversal`, no `Program`;
+    `NatGradedCategory[RecordCodec, Program, SomeProgram]` over `Program[I, O, N]` morphisms, with parameter access and
+    ordered fan-out separated into `Parameterization` and `OrderedFanout`; `Program` packages addressability while its
+    domain object supplies a sealed canonical codec. Exact programs provide uniform `OptimizableTraversal[Program[I, O, N]]`
+    plus `ProgramRunner[Program[I, O, N]]`; `SomeProgram[I, O]` is the explicit runnable grade-erasure boundary. Two
+    compile-time gates: no `OptimizableTraversal`, no `Program`;
     no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
     Decoding is OBJECT-side (stage 4, after the lawfulness-review arc that first replaced `unsafeOf` with a
     `ProgramInput` coherence law and then deleted `ProgramInput` outright): `Program.of` and the record-boundary
@@ -288,7 +288,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `algebra-2-program-composition.md`).
     `OptimizableTraversal.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `OptimizableTraversal.empty`, so an omitted learnable subtree can no longer disappear silently.
-    Pinned by `ParameterizedCategoryLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
+    Pinned by `ProgramAlgebraLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
     deferred to the CIO phase; see the "Parameterized program algebra" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
     now stated ON the structures as `@Law` methods returning `IsEq` (`core.algebra.Laws`) and executed by the
@@ -303,7 +303,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the
     uniform law-statement style across the codebase; every use must name an observational equality preserved by
     its public combinators.
-  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `ParameterizedCategory` pattern (an
+  - **Abstract-structure traits** (commits `d7ab930`, `d3be8e1`): following the `Category` / `NatGradedCategory` pattern (an
     abstract trait carrying the laws + `given` instances), monoids get an explicit `core.algebra.Monoid[M]`
     trait (`empty` / `combine`, laws on the trait). Instances: `given Monoid[Mode]` (the endomorphism monoid on
     `Controls`, replacing `Mode`'s loose companion `@Law` methods) and `given Monoid[Vector[OptimizableParameters]]`

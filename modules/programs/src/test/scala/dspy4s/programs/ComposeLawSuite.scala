@@ -257,7 +257,7 @@ class ComposeLawSuite extends FunSuite:
   // ── Determinism classifier: copy commutes with a deterministic morphism ─────────────────────────────────
   // h >>> copy  =  copy >>> tensor(h, h)   holds because our Step is deterministic (a pure function). For an
   // effect-observing h the two sides run h once vs twice and diverge — the copy NON-naturality is already pinned
-  // in ParameterizedCategoryLawSuite. This is a useful classifier, not a law of unrestricted executable programs.
+  // in ProgramAlgebraLawSuite. This is a useful classifier, not a law of unrestricted executable programs.
   test("copy is natural for a deterministic morphism: h >>> copy = copy >>> tensor(h, h)") {
     val h   = step[Int, String]("h", "i -> s")(i => s"v$i")
     val lhs = (h >>> Compose.copy[String])(ProgramCall(5)).map(_.output)

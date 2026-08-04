@@ -54,11 +54,11 @@ modules extensible despite that choice.
 
 ## Goals
 
-- Give all structural combinations one stable binary type, `Program[I, O]`, instead of exposing increasingly large
+- Give all structural combinations one stable graded type, `Program[I, O, N]`, instead of exposing increasingly large
   nested implementation types such as `AndThen[I, X, O, A, B]`.
 - Define execution semantics in one interpreter, including `ProgramCall` control propagation and `Prediction.raw`
   behavior.
-- Derive one lawful `OptimizableTraversal.WithArity[Program.WithArity[I, O, N], N]` implementation from the tree
+- Derive one lawful `OptimizableTraversal.WithArity[Program[I, O, N], N]` implementation from the tree
   instead of one instance per structural node.
 - Preserve arbitrary user and framework `Module`s as executable, optimizer-addressable leaves.
 - Keep learnable children structurally visible. In particular, do not introduce a closure-based
@@ -276,7 +276,7 @@ The public typeclass becomes a single adapter:
 
 ```scala
 given [I, O, N <: Int]
-    : OptimizableTraversal.WithArity[Program.WithArity[I, O, N], N] =
+    : OptimizableTraversal.WithArity[Program[I, O, N], N] =
   ProgramPredictorInterpreter.instance
 ```
 

@@ -11,7 +11,7 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.Predict
-import dspy4s.programs.algebra.Program
+import dspy4s.programs.algebra.{Program, SomeProgram}
 import dspy4s.typed.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -19,7 +19,7 @@ import zio.blocks.schema.DynamicValue
 /** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a TYPED
   * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction
   * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the distinction
-  * between record-running and optimization: an upcast `Program[I, O]` remains runnable but has erased the arity
+  * between record-running and optimization: an upcast `SomeProgram[I, O]` remains runnable but has erased the arity
   * required by optimizers, while a shape-preserving composed pipeline remains both runnable and optimizable.
   */
 class ParaCompileSuite extends FunSuite:
@@ -146,16 +146,16 @@ class ParaCompileSuite extends FunSuite:
 
   // ── 3. Erasing parameter arity preserves running but deliberately loses optimization ───────────────────
 
-  test("an upcast Program[I, O] remains runnable but is no longer optimizable") {
-    val erased: Program[QAInput, QAOutput] = Program.of(Predict[QAInput, QAOutput](taskSignature))
+  test("an upcast SomeProgram[I, O] remains runnable but is no longer optimizable") {
+    val erased: SomeProgram[QAInput, QAOutput] = Program.of(Predict[QAInput, QAOutput](taskSignature))
     assertEquals(erased.params.size, 1)
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran              = summon[ProgramRunner[Program[QAInput, QAOutput]]].run(erased, rec("question" := "q1"))
+      val ran              = summon[ProgramRunner[SomeProgram[QAInput, QAOutput]]].run(erased, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the erased program failed: ${ran.left.toOption}")
     }
     val errors = compileErrors(
-      "summon[dspy4s.programs.optimization.OptimizableTraversal[Program[QAInput, QAOutput]]]"
+      "summon[dspy4s.programs.optimization.OptimizableTraversal[SomeProgram[QAInput, QAOutput]]]"
     )
     assert(errors.nonEmpty, "expected erased Program traversal lookup to fail")
   }
@@ -166,7 +166,7 @@ class ParaCompileSuite extends FunSuite:
     // Second stage maps QAOutput back to QAInput (fields `answer -> question`, unique within one layout).
     val first  = Program.of(Predict[QAInput, QAOutput](taskSignature))
     val second = Program.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
-    val pipeline: Program.WithArity[QAInput, QAInput, 2] = first >>> second
+    val pipeline: Program[QAInput, QAInput, 2] = first >>> second
     // The metric compares the pipeline's final output field ("question"); this test proves the PLUMBING
     // (record-run + optimization over a composite), not instruction discovery, so zero scores are fine.
     val pipelineConfig = COPROConfig(
@@ -180,7 +180,7 @@ class ParaCompileSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       // Uniform record-based evaluation on a composite: decode via the threaded first-leg decoder, run both
       // stages. Bare user composites need a hand-written ProgramRunner for exactly this (ProgramRunner's scaladoc).
-      val ran = summon[ProgramRunner[Program.WithArity[QAInput, QAInput, 2]]].run(pipeline, rec("question" := "q1"))
+      val ran = summon[ProgramRunner[Program[QAInput, QAInput, 2]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the composed pipeline failed: ${ran.left.toOption}")
       // And the whole pipeline is optimizable: COPRO sees both predicts through the packaged evidence.
       val result = pipeline.copro(pipelineConfig, trainset)
@@ -213,12 +213,12 @@ class ParaCompileSuite extends FunSuite:
   // ── 5. Codec-equipped objects: an id-headed pipeline evaluates and optimizes ─────────────────────────────
 
   test("an explicitly packaged zero-arity identity remains optimizable at the head of a pipeline") {
-    val identity                                          = Program.of(dspy4s.programs.Compose.id[QAInput])
-    val pipeline: Program.WithArity[QAInput, QAOutput, 1] =
+    val identity                                = Program.of(dspy4s.programs.Compose.id[QAInput])
+    val pipeline: Program[QAInput, QAOutput, 1] =
       identity >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val ran              = summon[ProgramRunner[Program.WithArity[QAInput, QAOutput, 1]]]
+      val ran              = summon[ProgramRunner[Program[QAInput, QAOutput, 1]]]
         .run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
       val report = pipeline.copro(config(), trainset).toOption.get

@@ -14,7 +14,7 @@ import zio.blocks.schema.DynamicValue
   *
   * For BARE typed modules the program's own signature is the canonical decode boundary (no identity morphism is in
   * sight, so no coherence question arises); the framework leaves and composites carry signature-backed instances below.
-  * Inside the parameterized category, decoding is instead a property of the OBJECT ([[RecordCodec]]), resolved
+  * Inside the graded program category, decoding is instead a property of the OBJECT ([[RecordCodec]]), resolved
   * canonically at the record boundary rather than stored in each morphism.
   */
 trait ProgramRunner[P]:

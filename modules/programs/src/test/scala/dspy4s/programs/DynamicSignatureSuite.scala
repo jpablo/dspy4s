@@ -14,7 +14,7 @@ import zio.blocks.schema.DynamicValue
 /** The DynamicSignature bundle end-to-end: the path-dependent `predict` constructor, the optimizer surface
   * (`OptimizableTraversal` + `ProgramRunner`) over a packaged bundle program, and the cross-fiber `bridge` (eager
   * compatibility failure; a bridged pipeline composing and running). The unit-law and freshness pins live in
-  * `ParameterizedCategoryLawSuite`; this suite is the usability story.
+  * `ProgramAlgebraLawSuite`; this suite is the usability story.
   */
 class DynamicSignatureSuite extends FunSuite:
 
@@ -62,9 +62,9 @@ class DynamicSignatureSuite extends FunSuite:
 
   test("the optimizer surface holds over a packaged bundle program (OptimizableTraversal read/replace + record run)") {
     import qa.given
-    val packaged: Program.WithArity[qa.In, qa.Out, 1] =
+    val packaged: Program[qa.In, qa.Out, 1] =
       Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
-    val P = summon[OptimizableTraversal[Program.WithArity[qa.In, qa.Out, 1]]]
+    val P = summon[OptimizableTraversal[Program[qa.In, qa.Out, 1]]]
 
     val states = P.read(packaged)
     assertEquals(states.size, 1)
@@ -72,7 +72,7 @@ class DynamicSignatureSuite extends FunSuite:
     assertEquals(P.read(tuned).head.instructions, Some("Be terse."))
 
     // The record-boundary run decodes through the bundle's codec, then executes the typed predict.
-    val runner = summon[ProgramRunner[Program.WithArity[qa.In, qa.Out, 1]]]
+    val runner = summon[ProgramRunner[Program[qa.In, qa.Out, 1]]]
     val out    = underAdapter(runner.run(packaged, ProgramCall(input = DynamicValues.record("question" := "x"))))
     assertEquals(out.toOption.map(p => field(p.values, "answer")), Some(Some("7")))
     // A record missing the declared input fails at decode, before any LM call.
@@ -93,7 +93,7 @@ class DynamicSignatureSuite extends FunSuite:
     val b        = DynamicSignature.bridge(qa, judge).toOption.get
     val p1       = Program.of(qa.predict().withLm(new FixedLm("one", "yes")))
     val p2       = Program.of(judge.predict().withLm(new FixedLm("two", "valid")))
-    val pipeline = p1 >>> b >>> p2 // Program[qa.In, judge.Out]: expressible ONLY through the bridge
+    val pipeline = p1 >>> b >>> p2 // Program[qa.In, judge.Out, 2]: expressible ONLY through the bridge
 
     // The bridge is parameter-free: the pipeline.s parameters are exactly the two predicts'.
     assertEquals(pipeline.params.size, 2)

@@ -12,11 +12,11 @@ import dspy4s.programs.algebra.Program
 /** A packaged [[Program]] as the optimizer entry point.
   *
   * `COPRO[P]` needs `OptimizableTraversal[P]` and `ProgramRunner[P]`. The packaged entry point therefore retains
-  * `Program.WithArity[I, O, N]`: the runner depends only on the codec-equipped input object, while optimizer traversal
-  * additionally requires the parameter shape that a plain `Program[I, O]` has erased.
+  * `Program[I, O, N]`: the runner depends only on the codec-equipped input object, while optimizer traversal uses the
+  * parameter grade retained by `N`.
   */
 object ParaCompile:
-  extension [I, O, N <: Int](program: Program.WithArity[I, O, N])
+  extension [I, O, N <: Int](program: Program[I, O, N])
     /** Run COPRO over a packaged program while preserving its static parameter arity. The required `ProgramRunner`
       * exists whenever `RecordCodec[I]` does (object-side decoding).
       */
@@ -26,6 +26,6 @@ object ParaCompile:
         valset: Option[Vector[Example]] = None
     )(using
         RuntimeContext,
-        ProgramRunner[Program.WithArity[I, O, N]]
-    ): Either[DspyError, OptimizationReport[Program.WithArity[I, O, N]]] =
-      new COPRO[Program.WithArity[I, O, N]](config).compile(program, trainset, valset = valset)
+        ProgramRunner[Program[I, O, N]]
+    ): Either[DspyError, OptimizationReport[Program[I, O, N]]] =
+      new COPRO[Program[I, O, N]](config).compile(program, trainset, valset = valset)

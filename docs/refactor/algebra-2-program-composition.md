@@ -199,10 +199,10 @@ reparameterization; signature structure and module identity remain in the morphi
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
-`dspy4s.programs.algebra.ParameterizedCategory` (id / `>>>` / ordered `fanout` / `params` / `reparam` with the parameterization laws) over
-`dspy4s.programs.algebra.Program` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
+`dspy4s.programs.algebra.NatGradedCategory` (grade-zero `id` and grade-additive `>>>`), with `Parameterization` and
+`OrderedFanout` as separate structures, over `dspy4s.programs.algebra.Program[I, O, N]` (the packaged Sigma-type morphism bundling a concrete `Rep` with its
 `OptimizableTraversal[Rep]` evidence). Packaging is the only constructor, so a program without evidence cannot enter
-the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ParameterizedCategoryLawSuite`.
+the category (compile error at `Program.of`, proven by a `compileErrors` test); pinned by `ProgramAlgebraLawSuite`.
 The Mirror-based `OptimizableTraversal.derived` gate is strict: every product field must provide `OptimizableTraversal` evidence.
 Intentionally parameter-free field types opt in with `OptimizableTraversal.empty`; missing evidence is a compile error,
 so a learnable subtree cannot silently disappear from optimizer addressability.
@@ -238,7 +238,7 @@ per stable path, the path-dependent freshness the compiler enforces) and carries
 the same parse behind the abstraction. Identity and any program over the bundle then decode identically as a
 consequence of abstraction: the unit laws hold on bundle objects with NO coherence caveat, and re-parsing the
 same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
-`ParameterizedCategoryLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
+`ProgramAlgebraLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
 parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
 `MultiChainComparison` owns a path-branded opaque attempt block validated against `m`. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
@@ -250,7 +250,7 @@ Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)`
 constructor (the runtime-string counterpart of `Predict(Signature.derived(...))`, outputs read from the raw
 envelope as always), and the optimizer surface (`OptimizableTraversal` read/replace + the record-boundary
 `ProgramRunner`) holds over a packaged bundle program. Cross-fiber pipelines are expressed through
-`DynamicSignature.bridge(from, to): Either[_, Program[from.Out, to.In]]`, the reindexing morphism: it factors
+`DynamicSignature.bridge(from, to): Either[_, Program[from.Out, to.In, 0]]`, the reindexing morphism: it factors
 through the wire (encode, then the target's validating entry, a parameter-free `LiftEither`), fails EAGERLY
 when the target's input names are not covered by the source's output names (that name-set condition is the
 base compatibility arrow the bridge lifts), and contributes nothing to `params`. One correction to the earlier
@@ -266,18 +266,18 @@ constraints. The declared stance: `DynamicSignature` is the user path for runtim
 `DynamicPredict` is the untyped substrate for framework-internal generations (its scaladoc now points users to
 the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
 decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
-unrepresentable. Record-running is uniform over the binary package through `ProgramRunner[Program[I, O]]`, while
-optimization deliberately retains `Program.WithArity[I, O, N]`. An upcast to `Program[I, O]` therefore remains
-runnable but erases the parameter shape required by `OptimizableTraversal`; shape-preserving composed pipelines
+unrepresentable. Record-running is uniform over exact `Program[I, O, N]` values and the existential
+`SomeProgram[I, O]`, while optimization deliberately retains the grade `N`. An upcast to `SomeProgram[I, O]`
+therefore remains runnable but erases the parameter shape required by `OptimizableTraversal`; shape-preserving composed pipelines
 still optimize end-to-end, and `.copro` preserves their arity in its report type. Pinned by
-`ParameterizedCategoryLawSuite` (object-side decoding + the unrepresentability gates) and `ParaCompileSuite`
+`ProgramAlgebraLawSuite` (object-side decoding + the unrepresentability gates) and `ParaCompileSuite`
 (erasure boundary + composed-pipeline + bundle optimization).
 
 **Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:
 `id[A]` carried a failing decoder (nothing decodes an arbitrary `A` from a record), so the left unit
 degraded on the evaluation observation. The fix is the `CategoryTC[P[_], Hom]` object-constraint slot from
-jpablo/math-with-scala, applied where it belongs: `ParameterizedCategory` is now `ParameterizedCategory[P[_], Hom[_,_]]`, instantiated
-for `Program` at `P = RecordCodec` ("the object decodes from a record", built on the SAME
+jpablo/math-with-scala, applied where it belongs: `NatGradedCategory` is instantiated for `Program` at
+`P = RecordCodec` ("the object decodes from a record", built on the SAME
 role-free canonical `Shape` decode path `Signature.derived` uses, so codec- and signature-derived
 decoders cohere definitionally). Unlike a blanket Ok-style constrained category, the constraint appears
 ONLY where object evidence is required: `id[A: RecordCodec]` is available at codec-equipped objects while
@@ -294,15 +294,15 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
 
 - **Laws as statements.** `core.algebra.Laws` adds `IsEq[A]` (an equation as a value, built with `<->`)
   and the `@Law` annotation. The parameterized structures now state their laws as `@Law` methods ON the traits, and
-  `ParameterizedCategoryLawSuite` executes the statements instead of hand-building both sides, each under the honest
+  `ProgramAlgebraLawSuite` executes the statements instead of hand-building both sides, each under the honest
   observation (structural `==` for parameter vectors; complete prediction + params + lifecycle for `Program`
   morphisms, decoding having moved to the objects in stage 4). Sequential raw evidence has an associative
   accumulator with the empty envelope as identity, so `p >>> id` is indistinguishable even through `ProgramRunner`.
   The former unlawful-decoder counterexample is UNREPRESENTABLE: `RecordCodec` is sealed and its removal is pinned
   by compile gates. The deliberate split from the
   formalization library: there the equations are the deliverable, here they are executable specifications.
-- **`params` as a functor value.** `ParameterizedCategory` splits into a base `Category[P[_], Hom]` so the delooping of the
-  parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from the `Program`
+- **`params` as a functor value.** `Parameterization` is separate from graded composition. The delooping of the
+  parameter monoid is itself a lawful `Category` instance, and `ReadFunctor` (a `CategoryFunctor` from `SomeProgram`
   category to the parameter-monoid delooping) names what `OptimizableTraversal.read` is categorically; its functor laws
   (preserves id + composition), carried on the `CategoryFunctor` trait against the two `Category` instances, are exactly
   the parameter projection laws. The
@@ -470,7 +470,7 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
 - **Commutative denotational carrier**: the abstract `CDCategory[Hom]` law target remains, but unrestricted
   `ModuleHom` implements only `OrderedTensorOps`; fail-fast interchange is false. A future stochastic-kernel or
   other commutative carrier could implement CD/Markov laws. A pair-input decoder would still be needed to lift
-  ordered tensor into `ParameterizedCategory`/`Program`.
+  ordered tensor into the packaged `Program` algebra.
 - **Full parameterized-program adoption**: promote the packaged `Program` (see the formalization above; the entry-point
   loop is closed, decoding is object-side with codec-equipped objects gating `of` / `id` / the runner, the
   signature-backed `ProgramRunner` instances cover the framework leaves and composites for bare-module
