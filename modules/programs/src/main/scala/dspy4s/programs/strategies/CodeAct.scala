@@ -21,9 +21,10 @@ import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
   *
   * The flow per iteration:
   *   1. Ask the LM to produce a `generated_code` Python snippet plus a `finished: bool` flag, given the original task
-  *      inputs and the accumulated `trajectory` so far. 2. Strip the fenced ```python code block from the LM's output.
-  *      3. Run that code via the configured [[CodeInterpreter]]; capture stdout (or stderr on failure). 4. Append the
-  *         snippet + observation to `trajectory`. Exit early if the LM set `finished=true`.
+  *      inputs and the accumulated `trajectory` so far.
+  *   2. Strip the fenced Python code block from the LM's output.
+  *   3. Run that code via the configured [[CodeInterpreter]]; capture stdout (or stderr on failure).
+  *   4. Append the snippet and observation to `trajectory`. Exit early if the LM set `finished=true`.
   *
   * After the loop, a reasoning-augmented [[DynamicPredict]] extractor reads the full trajectory and produces the
   * user-visible outputs declared in `baseSignature`. `CodeAct[I, O]` is a `Module[I, Prediction[WithReasoning[O]]]`: it
