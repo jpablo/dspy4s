@@ -1,4 +1,4 @@
-package dspy4s.programs
+package dspy4s.programs.compose
 
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError

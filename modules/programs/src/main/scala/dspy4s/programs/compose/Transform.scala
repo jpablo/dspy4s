@@ -1,4 +1,4 @@
-package dspy4s.programs
+package dspy4s.programs.compose
 
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
@@ -18,7 +18,7 @@ import scala.util.control.NonFatal
   * own, and introduce no optimizer-addressable predictors. Non-fatal exceptions from user functions are normalized into
   * the program's `Either` error channel; use [[LiftEither]] when failure is part of the function's declared API.
   */
-private[programs] object TransformResult:
+private[compose] object TransformResult:
   def guard[A](component: String)(result: => Either[DspyError, A]): Either[DspyError, A] =
     try result
     catch
@@ -29,7 +29,7 @@ private[programs] object TransformResult:
         ))
 
 /** Shared optimizer traversal for a transparent unary wrapper. */
-private[programs] object UnaryOptimizableTraversal:
+private[compose] object UnaryOptimizableTraversal:
   def passthrough[W, P, N <: Int](get: W => P)(replaceInner: (W, P) => W)(using
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[W, N] =

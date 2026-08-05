@@ -1,6 +1,7 @@
 package dspy4s.programs.strategies
 
-import dspy4s.programs.{AttemptCount, FailureCount, Mode, mode}
+import dspy4s.programs.{AttemptCount, FailureCount}
+import dspy4s.programs.compose.{Mode, mode}
 import dspy4s.programs.optimization.*
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter

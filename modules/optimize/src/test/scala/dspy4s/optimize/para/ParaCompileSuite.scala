@@ -213,7 +213,7 @@ class ParaCompileSuite extends FunSuite:
   // ── 5. Codec-equipped objects: an id-headed pipeline evaluates and optimizes ─────────────────────────────
 
   test("an explicitly packaged zero-arity identity remains optimizable at the head of a pipeline") {
-    val identity                                = Program.of(dspy4s.programs.Compose.id[QAInput])
+    val identity                                = Program.of(dspy4s.programs.compose.Compose.id[QAInput])
     val pipeline: Program[QAInput, QAOutput, 1] =
       identity >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {

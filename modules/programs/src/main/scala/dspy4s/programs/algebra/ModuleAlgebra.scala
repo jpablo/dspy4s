@@ -11,7 +11,7 @@ import dspy4s.core.algebra.{
   kleisliCategory
 }
 import dspy4s.core.contracts.DspyError
-import dspy4s.programs.{Compose, Dimap}
+import dspy4s.programs.compose.{Compose, Dimap}
 import dspy4s.programs.contracts.Module
 
 /** Fallible Scala functions as the Kleisli category of `Either[DspyError, *]`. */

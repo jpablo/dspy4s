@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
 import dspy4s.programs.algebra.Program
+import dspy4s.programs.compose.LiftEither
 import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue

@@ -1,9 +1,9 @@
 package dspy4s.programs.algebra
 
 import dspy4s.core.algebra.{AnyObject, Category}
-import dspy4s.programs.Compose
-import dspy4s.programs.andThen
-import dspy4s.programs.***
+import dspy4s.programs.compose.Compose
+import dspy4s.programs.compose.andThen
+import dspy4s.programs.compose.***
 import dspy4s.programs.contracts.Module
 
 /** A category equipped with independent-input pairing, with no functoriality or coherence laws assumed. */

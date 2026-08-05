@@ -128,7 +128,7 @@ object ProgramNode:
       extends ProgramNode[I, B]
   final case class ContramapInput[J, I, O](inner: ProgramNode[I, O], f: J => I)
       extends ProgramNode[J, O]
-  final case class Mode[I, O](inner: ProgramNode[I, O], mode: dspy4s.programs.Mode)
+  final case class Mode[I, O](inner: ProgramNode[I, O], mode: dspy4s.programs.compose.Mode)
       extends ProgramNode[I, O]
   final case class Recover[I, O](
       primary: ProgramNode[I, O],

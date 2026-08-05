@@ -1,4 +1,4 @@
-package dspy4s.programs
+package dspy4s.programs.compose
 
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.optimization.OptimizableTraversal
@@ -8,7 +8,7 @@ import dspy4s.programs.optimization.OptimizableView
   * structural `inspect(first) ++ inspect(second)`, replacement sliced by `first`'s arity, and `first.` / `second.` name
   * prefixing.
   */
-private[programs] object PairOptimizableTraversal:
+private[compose] object PairOptimizableTraversal:
   def inspect[A, B](
       pa: OptimizableTraversal[A],
       pb: OptimizableTraversal[B]
