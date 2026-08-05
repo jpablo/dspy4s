@@ -26,7 +26,7 @@ import munit.FunSuite
 class GepaAdapterEvaluateSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Answers "Paris" for the France question (ChatAdapter marker format), "Lyon" otherwise. */
   private final class ScriptedLm extends LanguageModel:
@@ -40,10 +40,10 @@ class GepaAdapterEvaluateSuite extends FunSuite:
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")

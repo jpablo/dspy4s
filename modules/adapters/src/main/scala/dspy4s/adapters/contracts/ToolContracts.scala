@@ -6,22 +6,22 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final case class ToolParameterSpec(
-    name: String,
-    typeRef: TypeRef = TypeRef.string,
+    name       : String,
+    typeRef    : TypeRef        = TypeRef.string,
     description: Option[String] = None,
-    required: Boolean = true
+    required   : Boolean        = true
 )
 
 final case class ToolSpec(
-    name: String,
-    description: Option[String] = None,
-    parameters: Vector[ToolParameterSpec] = Vector.empty
+    name       : String,
+    description: Option[String]            = None,
+    parameters : Vector[ToolParameterSpec] = Vector.empty
 )
 
 final case class ToolCallData(
     name: String,
     args: DynamicValue.Record,
-    id: Option[String] = None
+    id  : Option[String] = None
 )
 
 object ToolSchemaBridge:

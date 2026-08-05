@@ -17,8 +17,7 @@ object ToolArgs:
     DynamicValues.recordGet(record, name) match
       case Some(dv) =>
         SchemaInterop.decodeValue[A](dv).left.map(err => ValidationError(s"tool argument '$name': ${err.message}"))
-      case None =>
-        Left(NotFoundError("tool_argument", s"missing required tool argument '$name'"))
+      case None => Left(NotFoundError("tool_argument", s"missing required tool argument '$name'"))
 
 object ToolMacro:
 
@@ -30,11 +29,12 @@ object ToolMacro:
     import quotes.reflect.*
     given CanEqual[Symbol, Symbol] = CanEqual.derived
 
-    def unwrap(t: Term): Term = t match
-      case Inlined(_, _, inner) => unwrap(inner)
-      case Typed(inner, _)      => unwrap(inner)
-      case Block(Nil, inner)    => unwrap(inner)
-      case other                => other
+    def unwrap(t: Term): Term =
+      t match
+        case Inlined(_, _, inner) => unwrap(inner)
+        case Typed(inner, _)      => unwrap(inner)
+        case Block(Nil, inner)    => unwrap(inner)
+        case other                => other
 
     def calledMethod(term: Term): Option[Symbol] =
       unwrap(term) match
@@ -53,18 +53,16 @@ object ToolMacro:
         stats.collectFirst { case dd: DefDef if dd.symbol == meth.symbol => dd }
           .flatMap(_.rhs.flatMap(calledMethod)).getOrElse(meth.symbol)
       case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
-      case other                                    =>
-        report.errorAndAbort(
+      case other                                    => report.errorAndAbort(
           "ToolFunction.fromMethod expects a method reference, e.g. `ToolFunction.fromMethod(getWeather)`; got: " +
             other.show
         )
 
     val toolName = methodSym.name
 
-    val toolDesc: String =
-      methodSym.getAnnotation(TypeRepr.of[description].typeSymbol) match
-        case Some(Apply(_, List(Literal(StringConstant(s))))) => s
-        case _                                                => ""
+    val toolDesc: String = methodSym.getAnnotation(TypeRepr.of[description].typeSymbol) match
+      case Some(Apply(_, List(Literal(StringConstant(s))))) => s
+      case _                                                => ""
 
     val defdef: DefDef = methodSym.tree match
       case dd: DefDef => dd
@@ -74,8 +72,7 @@ object ToolMacro:
     val params: List[(String, TypeRepr)] = paramClauses match
       case Nil       => Nil
       case List(tpc) => tpc.params.map(p => p.name -> p.tpt.tpe)
-      case _         =>
-        report.errorAndAbort(
+      case _         => report.errorAndAbort(
           s"ToolFunction.fromMethod supports a single parameter list (no `using` clauses); '$toolName' has " +
             s"${paramClauses.size}. Tools needing the RuntimeContext use the ToolFunction(...) / .of(...) factories."
         )
@@ -104,8 +101,7 @@ object ToolMacro:
                   report.errorAndAbort(s"No zio.blocks.schema.Schema for the tool return type '${returnType.show}'")
                 )
               '{ Right(ToolFunction.result[r](${ applied.asExprOf[r] })(using $schemaR)) }
-        case (name, tpe) :: rest =>
-          tpe.asType match
+        case (name, tpe) :: rest => tpe.asType match
             case '[t] =>
               val schemaT = Expr.summon[Schema[t]].get
               '{
@@ -116,9 +112,9 @@ object ToolMacro:
 
     '{
       new ToolFunction:
-        override val name: String                             = ${ Expr(toolName) }
-        override val description: String                      = ${ Expr(toolDesc) }
-        override val argSchema: Vector[(String, DspyTypeRef)] = $argSchemaExpr
+        override val name: String                                                                             = ${ Expr(toolName) }
+        override val description: String                                                                      = ${ Expr(toolDesc) }
+        override val argSchema: Vector[(String, DspyTypeRef)]                                                 = $argSchemaExpr
         override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
           ${ buildBody('args, params, Nil) }
     }

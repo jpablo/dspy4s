@@ -33,17 +33,17 @@ class CopyDiscardCategorySuite extends FunSuite:
     def braiding[A, B]: Isomorphism[AnyObject, Function1, (A, B), (B, A)] =
       iso[(A, B), (B, A)]({ case (a, b) => (b, a) }, { case (b, a) => (a, b) })
 
-    def copy[A]: A => (A, A) = value => (value, value)
+    def copy[A]: A => (A, A)  = value => (value, value)
     def discard[A]: A => Unit = _ => ()
 
   private def assertFunctionLaw[A, B](law: IsEq[A => B], samples: Vector[A]): Unit =
     samples.foreach(value => assertEquals(law.lhs(value), law.rhs(value)))
 
   test("Scala functions satisfy all structural isomorphism laws") {
-    val associator = Functions.associator[Int, String, Boolean]
-    val leftUnitor = Functions.leftUnitor[Int]
+    val associator  = Functions.associator[Int, String, Boolean]
+    val leftUnitor  = Functions.leftUnitor[Int]
     val rightUnitor = Functions.rightUnitor[Int]
-    val braiding = Functions.braiding[Int, String]
+    val braiding    = Functions.braiding[Int, String]
 
     assertFunctionLaw(associator.forwardBackward, Vector(((1, "a"), true)))
     assertFunctionLaw(associator.backwardForward, Vector((1, ("a", true))))

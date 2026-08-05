@@ -13,16 +13,17 @@ class OpenAiEmbedderSuite extends FunSuite:
 
   /** Replays scripted responses and records each request body (to assert payload shape and batching). */
   private final class ScriptedTransport(responses: Vector[Either[DspyError, HttpResponse]]) extends HttpTransport:
-    private var idx = 0
-    val sent        = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
+    private var idx                                                                                                 = 0
+    val sent                                                                                                        = scala.collection.mutable.ArrayBuffer.empty[(String, String)]
     override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
       sent += ((url, body))
       if idx >= responses.size then Left(RuntimeError("test", "No more responses scripted"))
-      else { val r = responses(idx); idx += 1; r }
+      else
+        val r = responses(idx); idx += 1; r
     override def streamSse(
-        url: String,
+        url    : String,
         headers: Map[String, String],
-        body: String
+        body   : String
     ): Either[DspyError, HttpStreamResponse] =
       Left(RuntimeError("test", "streaming not used by embeddings"))
 

@@ -20,11 +20,11 @@ private def lookupString(rec: DynamicValue.Record, key: String): String =
   DynamicValues.recordGet(rec, key).map(DynamicValues.renderText).getOrElse("")
 
 final case class ScriptedPredictProgram(
-    answers: Map[String, String],
-    layout: SignatureLayout,
-    demos: Vector[Example] = Vector.empty,
+    answers  : Map[String, String],
+    layout   : SignatureLayout,
+    demos    : Vector[Example]          = Vector.empty,
     failsWith: Option[RuntimeException] = None,
-    config: DynamicValue.Record = DynamicValue.Record.empty
+    config   : DynamicValue.Record      = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
@@ -37,10 +37,10 @@ final case class ScriptedPredictProgram(
         Right(RawPrediction(rec("answer" := answers.getOrElse(q, "unknown"))))
 
 final case class DemoAwarePredictProgram(
-    layout: SignatureLayout,
-    demos: Vector[Example] = Vector.empty,
+    layout : SignatureLayout,
+    demos  : Vector[Example]     = Vector.empty,
     answers: Map[String, String] = Map.empty,
-    config: DynamicValue.Record = DynamicValue.Record.empty
+    config : DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using

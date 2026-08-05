@@ -20,28 +20,27 @@ class PersistenceSuite extends FunSuite:
   private def tmpPath(suffix: String) =
     Files.createTempFile("dspy4s-evaluate-", suffix).toString
 
-  private val sampleResult: EvaluationResult =
-    EvaluationResult(
-      score = 66.67,
-      results = Vector(
-        ExampleEvaluation(
-          Example(rec("question" := "cap of France?", "answer" := "Paris")),
-          RawPrediction(rec("answer" := "Paris")),
-          score = 1.0
-        ),
-        ExampleEvaluation(
-          Example(rec("question" := "cap of Italy?", "answer" := "Rome")),
-          RawPrediction(rec("answer" := "Naples")),
-          score = 0.0
-        ),
-        ExampleEvaluation(
-          Example(rec("question" := "cap of Spain?", "answer" := "Madrid")),
-          RawPrediction(rec("answer" := "Madrid")),
-          score = 1.0
-        )
+  private val sampleResult: EvaluationResult = EvaluationResult(
+    score = 66.67,
+    results = Vector(
+      ExampleEvaluation(
+        Example(rec("question" := "cap of France?", "answer" := "Paris")),
+        RawPrediction(rec("answer" := "Paris")),
+        score = 1.0
       ),
-      metricName = "exact_match"
-    )
+      ExampleEvaluation(
+        Example(rec("question" := "cap of Italy?", "answer" := "Rome")),
+        RawPrediction(rec("answer" := "Naples")),
+        score = 0.0
+      ),
+      ExampleEvaluation(
+        Example(rec("question" := "cap of Spain?", "answer" := "Madrid")),
+        RawPrediction(rec("answer" := "Madrid")),
+        score = 1.0
+      )
+    ),
+    metricName = "exact_match"
+  )
 
   test("saveAsJson writes array of flat result objects") {
     val path = tmpPath(".json")
@@ -58,7 +57,8 @@ class PersistenceSuite extends FunSuite:
       assertEquals(arr(0)("exact_match").num, 1.0)
       assertEquals(arr(1)("exact_match").num, 0.0)
       assertEquals(arr(2)("exact_match").num, 1.0)
-    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
+    finally
+      val _ = Files.deleteIfExists(Paths.get(path))
   }
 
   test("saveAsCsv writes header and one row per evaluation") {
@@ -74,7 +74,8 @@ class PersistenceSuite extends FunSuite:
       assert(header.contains("exact_match"))
       // prediction and example share 'answer', so CSV uses 'pred_answer'
       assert(header.contains("pred_answer"))
-    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
+    finally
+      val _ = Files.deleteIfExists(Paths.get(path))
   }
 
   test("saveAsCsv prefixes pred fields on collision with example fields") {
@@ -96,7 +97,8 @@ class PersistenceSuite extends FunSuite:
       val header = Source.fromFile(path).getLines().next()
       assert(header.contains("example_answer"))
       assert(header.contains("pred_answer"))
-    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
+    finally
+      val _ = Files.deleteIfExists(Paths.get(path))
   }
 
   test("saveAsJson supports non-string field values") {
@@ -117,5 +119,6 @@ class PersistenceSuite extends FunSuite:
       val parsed  = ujson.read(content)
       assertEquals(parsed.arr(0)("example_score").num, 0.8)
       assertEquals(parsed.arr(0)("confidence").num, 0.95)
-    finally { val _ = Files.deleteIfExists(Paths.get(path)) }
+    finally
+      val _ = Files.deleteIfExists(Paths.get(path))
   }

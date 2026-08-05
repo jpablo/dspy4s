@@ -43,7 +43,7 @@ import scala.collection.mutable.ArrayBuffer
 class StreamingPortedSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private final class ScriptedLm(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
     override val id: String                                                                    = "scripted"

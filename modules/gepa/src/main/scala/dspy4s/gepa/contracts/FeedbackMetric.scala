@@ -38,10 +38,10 @@ trait FeedbackMetric extends Metric:
 
   /** Score + feedback for one example at the granularity selected by `component` (see the trait doc). */
   def feedback(
-      example: Example,
-      prediction: RawPrediction,
-      trace: Vector[TraceEntry],
-      component: Option[String],
+      example       : Example,
+      prediction    : RawPrediction,
+      trace         : Vector[TraceEntry],
+      component     : Option[String],
       componentTrace: Vector[TraceEntry]
   )(using RuntimeContext): Either[DspyError, ScoreWithFeedback]
 
@@ -49,9 +49,9 @@ trait FeedbackMetric extends Metric:
     * `Metric`. `final` so implementations define only [[name]] and [[feedback]].
     */
   final override def score(
-      example: Example,
+      example   : Example,
       prediction: RawPrediction,
-      trace: Vector[TraceEntry]
+      trace     : Vector[TraceEntry]
   )(using RuntimeContext): Either[DspyError, Double] =
     feedback(example, prediction, trace, component = None, componentTrace = Vector.empty).map(_.score)
 

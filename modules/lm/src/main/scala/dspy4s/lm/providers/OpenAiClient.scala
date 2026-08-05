@@ -11,10 +11,10 @@ import dspy4s.lm.contracts.LmChunk
 import zio.blocks.schema.DynamicValue
 
 final case class OpenAiClient(
-    apiKey: String,
-    baseUrl: String = OpenAiClient.defaultBaseUrl,
-    transport: HttpTransport = HttpTransport.jdk(),
-    chatEndpoint: String = "/chat/completions"
+    apiKey      : String,
+    baseUrl     : String        = OpenAiClient.defaultBaseUrl,
+    transport   : HttpTransport = HttpTransport.jdk(),
+    chatEndpoint: String        = "/chat/completions"
 ):
   private val defaultHeaders: Map[String, String] = Map(
     "Authorization" -> s"Bearer $apiKey"
@@ -51,8 +51,8 @@ final case class OpenAiClient(
       if response.status < 200 || response.status >= 300 then
         val buffered = new StringBuilder
         val draining = response.dataLines
-        try
-          while draining.hasNext do { val _ = buffered.append(draining.next()).append('\n') }
+        try while draining.hasNext do
+            val _ = buffered.append(draining.next()).append('\n')
         finally draining.close()
         Left(statusError(response.status, buffered.toString, modelOf(payload)))
       else
@@ -133,12 +133,10 @@ object OpenAiClient:
     contextWindowMarkers.exists(lowered.contains)
 
   def fromEnv(
-      base: String = defaultBaseUrl,
+      base     : String        = defaultBaseUrl,
       transport: HttpTransport = HttpTransport.jdk(),
-      envVar: String = "OPENAI_API_KEY"
+      envVar   : String        = "OPENAI_API_KEY"
   ): Either[DspyError, OpenAiClient] =
     sys.env.get(envVar) match
-      case Some(value) if value.nonEmpty =>
-        Right(OpenAiClient(apiKey = value, baseUrl = base, transport = transport))
-      case _ =>
-        Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
+      case Some(value) if value.nonEmpty => Right(OpenAiClient(apiKey = value, baseUrl = base, transport = transport))
+      case _                             => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))

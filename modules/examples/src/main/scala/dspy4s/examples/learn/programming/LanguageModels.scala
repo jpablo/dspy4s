@@ -112,9 +112,9 @@ object LanguageModels:
       base   <- ask(question) // current/global LM
       other  <- OpenAiLanguageModel.fromEnv(overrideModel)
       scoped <- RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) {
-        given RuntimeContext = RuntimeEnvironment.current
-        ask(question)
-      }
+                  given RuntimeContext = RuntimeEnvironment.current
+                  ask(question)
+                }
     yield (base, scoped)
   // --8<-- [end:scoped-override]
 
@@ -172,11 +172,12 @@ object LanguageModels:
   // dspy4s programs aren't serialized.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.languageModelsMain"
-@main def languageModelsMain(): Unit = Demo.withLm {
-  val q = "How many floors are in the castle David Gregory inherited?"
-  println("Direct call:   " + LanguageModels.callDirect("Say this is a test!"))
-  println("Via module:    " + LanguageModels.ask(q))
-  println("With config:   " + LanguageModels.askWithConfig(q, temperature = 1.0, rolloutId = 5))
-  println("Usage:         " + LanguageModels.callWithUsage("Say this is a test!").map(_._2))
-  println("Error-handled: " + LanguageModels.askHandlingErrors(q))
-}
+@main def languageModelsMain(): Unit =
+  Demo.withLm {
+    val q = "How many floors are in the castle David Gregory inherited?"
+    println("Direct call:   " + LanguageModels.callDirect("Say this is a test!"))
+    println("Via module:    " + LanguageModels.ask(q))
+    println("With config:   " + LanguageModels.askWithConfig(q, temperature = 1.0, rolloutId = 5))
+    println("Usage:         " + LanguageModels.callWithUsage("Say this is a test!").map(_._2))
+    println("Error-handled: " + LanguageModels.askHandlingErrors(q))
+  }

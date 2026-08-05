@@ -20,9 +20,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   * so passing keys that aren't in `values` silently drops them rather than declaring phantom inputs.
   */
 final case class Example(
-    values: DynamicValue.Record,
+    values   : DynamicValue.Record,
     inputKeys: Set[String] = Set.empty,
-    augmented: Boolean = false
+    augmented: Boolean     = false
 ):
   /** Field-value accessor by name. */
   def get(key: String): Option[DynamicValue] = DynamicValues.recordGet(values, key)
@@ -92,7 +92,7 @@ object Example:
             acc.flatMap { keys =>
               raw match
                 case DynamicValue.Primitive(PrimitiveValue.String(s)) => Right(keys + s)
-                case _ => Left(ValidationError("Example state 'inputKeys' must be a sequence of strings"))
+                case _                                                => Left(ValidationError("Example state 'inputKeys' must be a sequence of strings"))
             }
           }
         case Some(_) => Left(ValidationError("Example state 'inputKeys' must be a sequence"))
@@ -101,7 +101,7 @@ object Example:
       DynamicValues.recordGet(state, "augmented") match
         case None | Some(_: DynamicValue.Null.type)                  => Right(false)
         case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(b))) => Right(b)
-        case Some(_) => Left(ValidationError("Example state 'augmented' must be a boolean"))
+        case Some(_)                                                 => Left(ValidationError("Example state 'augmented' must be a boolean"))
 
     for
       values    <- readValues

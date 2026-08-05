@@ -16,8 +16,8 @@ import munit.FunSuite
 class OpenAiLanguageModelSuite extends FunSuite:
 
   private final class ScriptedTransport(
-      nonStreamingResponses: Vector[Either[DspyError, HttpResponse]] = Vector.empty,
-      streamingResponses: Vector[Either[DspyError, HttpStreamResponse]] = Vector.empty
+      nonStreamingResponses: Vector[Either[DspyError, HttpResponse]]       = Vector.empty,
+      streamingResponses   : Vector[Either[DspyError, HttpStreamResponse]] = Vector.empty
   ) extends HttpTransport:
     private var nonStreamingIdx = 0
     private var streamingIdx    = 0
@@ -31,9 +31,9 @@ class OpenAiLanguageModelSuite extends FunSuite:
         r
 
     override def streamSse(
-        url: String,
+        url    : String,
         headers: Map[String, String],
-        body: String
+        body   : String
     ): Either[DspyError, HttpStreamResponse] =
       if streamingIdx >= streamingResponses.size then
         Left(RuntimeError("test", "No more streaming responses scripted"))
@@ -126,7 +126,7 @@ class OpenAiLanguageModelSuite extends FunSuite:
     val lm     = OpenAiLanguageModel(model = "gpt-4o-mini", client = client)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result = lm.call(LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("x")))))
+    val result           = lm.call(LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("x")))))
     assert(result.isLeft)
     assertEquals(result.left.toOption.get.asInstanceOf[RuntimeError].component, "openai_auth")
   }

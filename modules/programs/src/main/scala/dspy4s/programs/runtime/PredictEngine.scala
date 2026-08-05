@@ -34,10 +34,10 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * encodes/decodes around `execute`). Neither wraps the other, so a call emits exactly one module event.
   */
 private[dspy4s] final case class PredictEngine(
-    layout: SignatureLayout,
-    demos: Vector[Example],
+    layout    : SignatureLayout,
+    demos     : Vector[Example],
     moduleName: String,
-    runtime: ProgramRuntime,
+    runtime   : ProgramRuntime,
     /** Optional pre-rendered JSON Schema for the output. Populated by the typed [[dspy4s.programs.strategies.Predict]]
       * path (which has a `Schema[O]` to render via `Shape.jsonSchemaString`); left `None` by
       * [[dspy4s.programs.strategies.DynamicPredict]]. Passed straight through to [[AdapterInvocation]]; adapters that
@@ -65,24 +65,25 @@ private[dspy4s] final case class PredictEngine(
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
       for
-        model   <- lm.fold(runtime.resolveModel)(Right(_))
-        adapter <- runtime.resolveAdapter
+        model     <- lm.fold(runtime.resolveModel)(Right(_))
+        adapter   <- runtime.resolveAdapter
         invocation = buildInvocation(call, model)
-        prompt <- CallbackDispatcher.withAdapter(
-          adapterName = adapter.name,
-          inputs = DynamicValues.record("phase" := "format", "signature" := layout.name)
-        ) {
-          adapter.format(invocation)
-        }
+        prompt    <- CallbackDispatcher.withAdapter(
+                    adapterName = adapter.name,
+                    inputs = DynamicValues.record("phase" := "format", "signature" := layout.name)
+                  ) {
+                    adapter.format(invocation)
+                  }
         response <- CallbackDispatcher.withLm(
-          modelId = model.id,
-          request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
-        ) {
-          // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing
-          // request options, so explicit per-call/module config wins on key collision.
-          val mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
-          model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
-        }
+                      modelId = model.id,
+                      request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
+                    ) {
+                      // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing
+                      // request options, so explicit per-call/module config wins on key collision.
+                      val mergedOptions =
+                        FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
+                      model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
+                    }
         parsed     <- parseOutputs(adapter, response.outputs)
         prediction <-
           buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))
@@ -149,24 +150,24 @@ private[dspy4s] final case class PredictEngine(
       for
         soFar  <- acc
         parsed <- CallbackDispatcher.withAdapter(
-          adapterName = adapter.name,
-          inputs = DynamicValues.record("phase" := "parse", "index" := index)
-        ) {
-          adapter.parse(layout, output)
-        }
+                    adapterName = adapter.name,
+                    inputs = DynamicValues.record("phase" := "parse", "index" := index)
+                  ) {
+                    adapter.parse(layout, output)
+                  }
       yield soFar :+ parsed
     }
 
   private def buildPrediction(
       parsedOutputs: Vector[ParsedOutput],
-      response: LmResponse,
-      toolCalls: Vector[ToolCall]
+      response     : LmResponse,
+      toolCalls    : Vector[ToolCall]
   ): Either[DspyError, RawPrediction] =
     for
       completions <- Completions.fromRows(parsedOutputs.map(_.values))
       first       <- RawPrediction.fromCompletions(completions)
-      withUsage  = first.copy(lmUsage = response.usage)
-      prediction = withUsage.withValue(PredictEngine.ToolCallsKey, toToolCallPayload(toolCalls))
+      withUsage    = first.copy(lmUsage = response.usage)
+      prediction   = withUsage.withValue(PredictEngine.ToolCallsKey, toToolCallPayload(toolCalls))
     yield prediction
 
   private def toToolCallPayload(toolCalls: Vector[ToolCall]): DynamicValue =

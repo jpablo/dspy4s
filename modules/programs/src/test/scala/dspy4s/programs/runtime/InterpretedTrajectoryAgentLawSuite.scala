@@ -18,8 +18,7 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
 
   private val unusedExtractor: Module[(String, String), String] = new Module[(String, String), String]:
     override val moduleName: String                                             = "law_extractor"
-    override protected val lifecycle: ModuleLifecycle[(String, String), String] =
-      ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[(String, String), String] = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[(String, String)])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =
@@ -27,17 +26,18 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
 
   private def interpreter(
       executeAction: String => Either[DspyError, ActionOutcome[String]]
-  ): ActionInterpreter[String, String] = new ActionInterpreter[String, String]:
-    override def execute(action: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
-      executeAction(action)
+  ): ActionInterpreter[String, String] =
+    new ActionInterpreter[String, String]:
+      override def execute(action: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
+        executeAction(action)
 
   private final class TestAgent(
-      generation: Vector[String] => Either[DspyError, StepGeneration[String, String]],
-      preparation: String => ActionPreparation[String, String],
-      interpreterValue: ActionInterpreter[String, String],
+      generation       : Vector[String] => Either[DspyError, StepGeneration[String, String]],
+      preparation      : String => ActionPreparation[String, String],
+      interpreterValue : ActionInterpreter[String, String],
       rejectionRecorder: (Int, String, String) => String,
-      outcomeRecorder: (Int, String, String, ActionOutcome[String]) => String,
-      decision: (String, String, ActionOutcome[String]) => ActionDecision
+      outcomeRecorder  : (Int, String, String, ActionOutcome[String]) => String,
+      decision         : (String, String, ActionOutcome[String]) => ActionDecision
   ) extends InterpretedTrajectoryAgent[String, String, String]:
     type ModelStep   = String
     type Action      = String
@@ -53,7 +53,7 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
     override protected def renderTrajectory(trajectory: Vector[String]): String = trajectory.mkString(" -> ")
 
     override protected def generateStep(
-        call: ProgramCall[String],
+        call      : ProgramCall[String],
         trajectory: Vector[String]
     )(using RuntimeContext): Either[DspyError, StepGeneration[String, String]] =
       generation(trajectory)
@@ -61,22 +61,22 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
     override protected def prepareAction(step: String): ActionPreparation[String, String] = preparation(step)
 
     override protected def decide(
-        step: String,
-        action: String,
+        step   : String,
+        action : String,
         outcome: ActionOutcome[String]
     ): ActionDecision = decision(step, action, outcome)
 
     override protected def recordRejection(
-        iteration: Int,
-        step: String,
+        iteration  : Int,
+        step       : String,
         observation: String
     ): String = rejectionRecorder(iteration, step, observation)
 
     override protected def recordOutcome(
         iteration: Int,
-        step: String,
-        action: String,
-        outcome: ActionOutcome[String]
+        step     : String,
+        action   : String,
+        outcome  : ActionOutcome[String]
     ): String = outcomeRecorder(iteration, step, action, outcome)
 
     def advance(trajectory: Vector[String], iteration: Int)(using

@@ -43,22 +43,21 @@ object NativeFunctionCalling:
     * `tool_calls` output field AND the LM supports function calling (mirrors dspy's gate).
     */
   def toolOptions(
-      layout: SignatureLayout,
-      tools: Vector[ToolSpec],
-      useNative: Boolean,
+      layout           : SignatureLayout,
+      tools            : Vector[ToolSpec],
+      useNative        : Boolean,
       parallelToolCalls: Option[Boolean],
-      toolChoice: Option[ToolChoice] = None
+      toolChoice       : Option[ToolChoice] = None
   )(using RuntimeContext): DynamicValue.Record =
-    val active =
-      useNative && tools.nonEmpty && layout.outputFields.exists(isToolCallsField) && lmSupportsFunctionCalling
+    val active = useNative && tools.nonEmpty && layout.outputFields.exists(isToolCallsField) &&
+      lmSupportsFunctionCalling
     if !active then DynamicValue.Record.empty
     else
-      val entries =
-        Vector("tools" -> ToolSchemaBridge.toOpenAiToolsDynamic(tools)) ++
-          parallelToolCalls.map(b =>
-            "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))
-          ).toVector ++
-          toolChoice.map(tc => "tool_choice" -> encodeToolChoice(tc)).toVector
+      val entries = Vector("tools" -> ToolSchemaBridge.toOpenAiToolsDynamic(tools)) ++
+        parallelToolCalls.map(b =>
+          "parallel_tool_calls" -> DynamicValue.Primitive(PrimitiveValue.Boolean(b))
+        ).toVector ++
+        toolChoice.map(tc => "tool_choice" -> encodeToolChoice(tc)).toVector
       DynamicValues.recordFromEntries(entries)
 
   /** Encode a [[ToolChoice]] as the provider `tool_choice` value: a string for the modes, an object for a forced
@@ -69,8 +68,7 @@ object NativeFunctionCalling:
       case ToolChoice.Auto        => str("auto")
       case ToolChoice.Required    => str("required")
       case ToolChoice.Off         => str("none")
-      case ToolChoice.Function(n) =>
-        DynamicValue.Record(Chunk(
+      case ToolChoice.Function(n) => DynamicValue.Record(Chunk(
           "type"     -> str("function"),
           "function" -> DynamicValue.Record(Chunk("name" -> str(n)))
         ))

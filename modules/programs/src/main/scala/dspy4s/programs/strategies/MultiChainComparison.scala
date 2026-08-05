@@ -25,7 +25,7 @@ import zio.blocks.schema.DynamicValue
   */
 final case class MultiChainInput[I](
     baseInput: I,
-    attempts: Vector[RawPrediction]
+    attempts : Vector[RawPrediction]
 )
 
 /** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected reasoning +
@@ -48,13 +48,13 @@ final case class MultiChainInput[I](
   *   temperature for the comparison call (Python's default 0.7)
   */
 final case class MultiChainComparison[I, O](
-    baseSignature: Signature[I, O],
-    m: AttemptCount = AttemptCount(3),
-    temperature: Double = 0.7,
-    rationalePrefix: String = "Accurate Reasoning: Thank you everyone. Let's now holistically",
-    rationaleDescription: String = "${corrected reasoning}",
-    attemptDescription: String = "${reasoning attempt}",
-    answerFieldOverride: Option[String] = None,
+    baseSignature       : Signature[I, O],
+    m                   : AttemptCount   = AttemptCount(3),
+    temperature         : Double         = 0.7,
+    rationalePrefix     : String         = "Accurate Reasoning: Thank you everyone. Let's now holistically",
+    rationaleDescription: String         = "${corrected reasoning}",
+    attemptDescription  : String         = "${reasoning attempt}",
+    answerFieldOverride : Option[String] = None,
     /** Optional optimizable parameters for the comparison predictor. The executable predictor itself is built
       * internally over this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it with
       * a shape that accepts arbitrary vectors. Optimizer replacement writes only this lawful parameter surface.
@@ -125,13 +125,12 @@ final case class MultiChainComparison[I, O](
     )
     comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
-  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] =
-    ModuleLifecycle.observed(
-      // Preserve the existing observation surface: attempts affect execution but are not copied into trace inputs.
-      call => baseSignature.inputShape.encode(call.input.baseInput),
-      _.traceEnabled,
-      _.raw.values
-    )
+  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] = ModuleLifecycle.observed(
+    // Preserve the existing observation surface: attempts affect execution but are not copied into trace inputs.
+    call => baseSignature.inputShape.encode(call.input.baseInput),
+    _.traceEnabled,
+    _.raw.values
+  )
 
   override protected def forward(
       call: ProgramCall[MultiChainInput[I]]
@@ -157,10 +156,10 @@ final case class MultiChainComparison[I, O](
     * `compare_answers(completions, question=...)`.
     */
   def compare(
-      input: I,
-      attempts: Vector[RawPrediction],
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
+      input       : I,
+      attempts    : Vector[RawPrediction],
+      config      : DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean             = true
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     apply(ProgramCall(MultiChainInput(input, attempts), config, traceEnabled))
 

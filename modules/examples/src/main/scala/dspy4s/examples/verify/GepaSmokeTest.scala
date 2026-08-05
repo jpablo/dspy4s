@@ -71,10 +71,10 @@ object GepaSmokeTest:
   val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "label_match"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val text    = example.get("text").map(DynamicValues.renderText).getOrElse("")
@@ -95,9 +95,10 @@ object GepaSmokeTest:
   final class ProgressLmCallback extends CallbackHandler:
     private val calls                                                      = new AtomicInteger(0)
     def count: Int                                                         = calls.get()
-    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-      case _: LmEndEvent => val _ = calls.incrementAndGet(); System.out.print("."); System.out.flush()
-      case _             => ()
+    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+      event match
+        case _: LmEndEvent => val _ = calls.incrementAndGet(); System.out.print("."); System.out.flush()
+        case _             => ()
 
 @main def gepaSmokeMain(): Unit =
   import GepaSmokeTest.*

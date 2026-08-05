@@ -18,9 +18,9 @@ import zio.blocks.schema.Schema
   * `Signature.derived[I, O]` instead.
   */
 final class SignatureBuilder private[typed] (
-    private val sigName: String,
-    private val inputs: Vector[FieldSpec],
-    private val outputs: Vector[FieldSpec],
+    private val sigName         : String,
+    private val inputs          : Vector[FieldSpec],
+    private val outputs         : Vector[FieldSpec],
     private val instructionsText: Option[String]
 ):
 
@@ -67,9 +67,9 @@ final class SignatureBuilder private[typed] (
     )
 
   private def copy(
-      inputs: Vector[FieldSpec] = this.inputs,
-      outputs: Vector[FieldSpec] = this.outputs,
-      instructionsText: Option[String] = this.instructionsText
+      inputs          : Vector[FieldSpec] = this.inputs,
+      outputs         : Vector[FieldSpec] = this.outputs,
+      instructionsText: Option[String]    = this.instructionsText
   ): SignatureBuilder =
     new SignatureBuilder(sigName, inputs, outputs, instructionsText)
 

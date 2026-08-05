@@ -48,15 +48,16 @@ object ProgramPersistence:
       "optimizableParameters" -> DynamicValue.Record(Chunk.from(parameters))
     )))
 
-  private def decodeParameters(raw: DynamicValue, at: String): Either[DspyError, OptimizableParameters] = raw match
-    case rec: DynamicValue.Record => OptimizableParameters.fromState(rec)
-    case _                        => Left(ValidationError(s"Program state optimizable '$at' must be a record"))
+  private def decodeParameters(raw: DynamicValue, at: String): Either[DspyError, OptimizableParameters] =
+    raw match
+      case rec: DynamicValue.Record => OptimizableParameters.fromState(rec)
+      case _                        => Left(ValidationError(s"Program state optimizable '$at' must be a record"))
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
       traversal: OptimizableTraversal[P]
   ): Either[DspyError, P] =
     val expectedIds = traversal.readIdentified(program).map(_.id)
-    val parsed = record.fields.toVector.foldLeft[Either[DspyError, Vector[(OptimizableId, OptimizableParameters)]]](
+    val parsed      = record.fields.toVector.foldLeft[Either[DspyError, Vector[(OptimizableId, OptimizableParameters)]]](
       Right(Vector.empty)
     ) { case (acc, (rawId, rawParameters)) =>
       for
@@ -92,8 +93,8 @@ object ProgramPersistence:
   ): Either[DspyError, P] =
     DynamicValues.recordGet(state, "optimizableParameters") match
       case Some(record: DynamicValue.Record) => loadById(program, record)
-      case Some(_) => Left(ValidationError("Program state 'optimizableParameters' must be an id-keyed record"))
-      case None    => Left(ValidationError("Program state is missing 'optimizableParameters'"))
+      case Some(_)                           => Left(ValidationError("Program state 'optimizableParameters' must be an id-keyed record"))
+      case None                              => Left(ValidationError("Program state is missing 'optimizableParameters'"))
 
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
     * [[loadJson]].
@@ -105,8 +106,8 @@ object ProgramPersistence:
   def loadJson[P](program: P, json: String)(using OptimizableTraversal[P]): Either[DspyError, P] =
     dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
       case Right(rec: DynamicValue.Record) => loadState(program, rec)
-      case Right(other) => Left(ValidationError(s"Expected a JSON object for program state, got: $other"))
-      case Left(err)    => Left(ValidationError(s"Invalid program-state JSON: ${err.toString}"))
+      case Right(other)                    => Left(ValidationError(s"Expected a JSON object for program state, got: $other"))
+      case Left(err)                       => Left(ValidationError(s"Invalid program-state JSON: ${err.toString}"))
 
   /** Write a program's state JSON to `path`. IO failures are wrapped into a [[RuntimeError]]. */
   def save[P](program: P, path: String)(using OptimizableTraversal[P]): Either[DspyError, Unit] =

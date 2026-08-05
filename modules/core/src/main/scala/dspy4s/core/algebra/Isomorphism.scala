@@ -15,7 +15,7 @@ trait Isomorphism[P[_], Hom[_, _], A: P, B: P](using category: Category[P, Hom])
 
 object Isomorphism:
   def apply[P[_], Hom[_, _], A: P, B: P](
-      forwardMorphism: Hom[A, B],
+      forwardMorphism : Hom[A, B],
       backwardMorphism: Hom[B, A]
   )(using Category[P, Hom]): Isomorphism[P, Hom, A, B] =
     new Isomorphism[P, Hom, A, B]:

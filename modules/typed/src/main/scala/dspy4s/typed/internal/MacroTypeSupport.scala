@@ -8,7 +8,7 @@ private[typed] object MacroTypeSupport:
   private def sameSymbol(using
       quotes: Quotes
   )(
-      left: quotes.reflect.Symbol,
+      left : quotes.reflect.Symbol,
       right: quotes.reflect.Symbol
   ): Boolean =
     given CanEqual[quotes.reflect.Symbol, quotes.reflect.Symbol] = CanEqual.derived
@@ -35,11 +35,9 @@ private[typed] object MacroTypeSupport:
     tpe.dealias match
       case AppliedType(tc, List(head, tail)) if sameSymbol(tc.typeSymbol, TypeRepr.of[*:].typeSymbol) =>
         head :: tupleParts(tail)
-      case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") =>
-        args
-      case other if other =:= TypeRepr.of[EmptyTuple] => Nil
-      case other                                      =>
-        report.errorAndAbort(s"Expected tuple type, got: ${other.show}")
+      case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") => args
+      case other if other =:= TypeRepr.of[EmptyTuple]                                => Nil
+      case other                                                                     => report.errorAndAbort(s"Expected tuple type, got: ${other.show}")
 
   def namedTupleParts(using
       quotes: Quotes
@@ -52,8 +50,7 @@ private[typed] object MacroTypeSupport:
           if sameSymbol(tc.typeSymbol, TypeRepr.of[NamedTuple.NamedTuple].typeSymbol) =>
         val nameParts = tupleParts(names).map {
           case ConstantType(StringConstant(name)) => name
-          case other                              =>
-            report.errorAndAbort(s"Expected named-tuple label, got: ${other.show}")
+          case other                              => report.errorAndAbort(s"Expected named-tuple label, got: ${other.show}")
         }
         Some(nameParts.zip(tupleParts(values)))
       case _ => None
@@ -71,9 +68,8 @@ private[typed] object MacroTypeSupport:
       t.dealias match
         case AppliedType(tc, List(head, tail)) if sameSymbol(tc.typeSymbol, TypeRepr.of[*:].typeSymbol) =>
           elements(tail).map(head :: _)
-        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty =>
-          Some(args)
-        case other if other =:= TypeRepr.of[EmptyTuple] => Some(Nil)
-        case _                                          => None
+        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Tuple") && args.nonEmpty => Some(args)
+        case other if other =:= TypeRepr.of[EmptyTuple]                                                 => Some(Nil)
+        case _                                                                                          => None
 
     elements(tpe).map(_.zipWithIndex.map { case (element, index) => s"_${index + 1}" -> element })

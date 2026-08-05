@@ -57,9 +57,9 @@ object DecodeFixtures:
     * live LM. Returns the decoded typed output.
     */
   def decodeCompletion[I, O](
-      signature: Signature[I, O],
-      adapter: Adapter,
-      input: I,
+      signature : Signature[I, O],
+      adapter   : Adapter,
+      input     : I,
       completion: String
   ): Either[DspyError, O] =
     runWith(adapter, completion) {

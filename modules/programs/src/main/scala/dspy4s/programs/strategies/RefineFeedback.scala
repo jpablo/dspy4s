@@ -16,59 +16,58 @@ private[programs] object RefineFeedback:
     * `module_names` for which advice is sought) and the `discussion` / `advice` outputs. Per parity, `advice` is a JSON
     * object keyed by module name (`{module_name: advice}`).
     */
-  val layout: SignatureLayout =
-    SignatureLayout.create(
-      name = "OfferFeedback",
-      inputFields = Vector(
-        FieldSpec(
-          "program_inputs",
-          description = Some("The inputs to the program that we are analyzing")
-        ),
-        FieldSpec(
-          "program_trajectory",
-          description = Some("The trajectory of the program's execution, showing each module's I/O")
-        ),
-        FieldSpec(
-          "program_outputs",
-          description = Some("The outputs of the program that we are analyzing")
-        ),
-        FieldSpec(
-          "reward_value",
-          description = Some("The reward value assigned to the program's outputs")
-        ),
-        FieldSpec(
-          "target_threshold",
-          description = Some("The target threshold for the reward function")
-        ),
-        FieldSpec(
-          "module_names",
-          description = Some("The names of the modules in the program, for which we seek advice")
-        )
+  val layout: SignatureLayout = SignatureLayout.create(
+    name = "OfferFeedback",
+    inputFields = Vector(
+      FieldSpec(
+        "program_inputs",
+        description = Some("The inputs to the program that we are analyzing")
       ),
-      outputFields = Vector(
-        FieldSpec(
-          "discussion",
-          description = Some("Discussing blame of where each module went wrong, if it did")
-        ),
-        FieldSpec(
-          "advice",
-          description = Some(
-            "A JSON object mapping each module name (from module_names) to concrete, actionable advice for that " +
-              "module: the specific scenarios in which it made mistakes and what it should do differently on the " +
-              "same or similar inputs in the future. Each module will NOT see its own history, so its advice must be " +
-              "entirely self-contained. Use \"N/A\" for a module that is not to blame. Example: " +
-              "{\"module_a\": \"...\", \"module_b\": \"N/A\"}."
-          )
-        )
+      FieldSpec(
+        "program_trajectory",
+        description = Some("The trajectory of the program's execution, showing each module's I/O")
       ),
-      instructions = Some(
-        "Assign blame for the final reward being below the threshold to each named module. Then prescribe " +
-          "concrete, actionable advice for how each module should act on its future input if it were to receive " +
-          "the same or similar inputs on a retry. A module will not see its own history, so it must rely entirely " +
-          "on concrete and actionable advice from you to avoid the same mistake. Return the advice as a JSON " +
-          "object keyed by module name; if a module is not to blame, its advice should be \"N/A\"."
+      FieldSpec(
+        "program_outputs",
+        description = Some("The outputs of the program that we are analyzing")
+      ),
+      FieldSpec(
+        "reward_value",
+        description = Some("The reward value assigned to the program's outputs")
+      ),
+      FieldSpec(
+        "target_threshold",
+        description = Some("The target threshold for the reward function")
+      ),
+      FieldSpec(
+        "module_names",
+        description = Some("The names of the modules in the program, for which we seek advice")
       )
-    ).getOrElse(throw new IllegalStateException("OfferFeedback layout failed to construct"))
+    ),
+    outputFields = Vector(
+      FieldSpec(
+        "discussion",
+        description = Some("Discussing blame of where each module went wrong, if it did")
+      ),
+      FieldSpec(
+        "advice",
+        description = Some(
+          "A JSON object mapping each module name (from module_names) to concrete, actionable advice for that " +
+            "module: the specific scenarios in which it made mistakes and what it should do differently on the " +
+            "same or similar inputs in the future. Each module will NOT see its own history, so its advice must be " +
+            "entirely self-contained. Use \"N/A\" for a module that is not to blame. Example: " +
+            "{\"module_a\": \"...\", \"module_b\": \"N/A\"}."
+        )
+      )
+    ),
+    instructions = Some(
+      "Assign blame for the final reward being below the threshold to each named module. Then prescribe " +
+        "concrete, actionable advice for how each module should act on its future input if it were to receive " +
+        "the same or similar inputs on a retry. A module will not see its own history, so it must rely entirely " +
+        "on concrete and actionable advice from you to avoid the same mistake. Return the advice as a JSON " +
+        "object keyed by module name; if a module is not to blame, its advice should be \"N/A\"."
+    )
+  ).getOrElse(throw new IllegalStateException("OfferFeedback layout failed to construct"))
 
   /** Hand-written lenient output shape: advice is required, while discussion defaults to an empty string. */
   private val outputShape: Shape[Refine.OfferFeedbackAdvice] = new Shape[Refine.OfferFeedbackAdvice]:
@@ -86,13 +85,12 @@ private[programs] object RefineFeedback:
       }
 
   /** The typed critic signature, preserving the hand-built descriptions and lenient output decoding. */
-  val signature: Signature[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] =
-    Signature(
-      name = "OfferFeedback",
-      layout = layout,
-      inputShape = Shape.derived[Refine.OfferFeedbackInputs],
-      outputShape = outputShape
-    )
+  val signature: Signature[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] = Signature(
+    name = "OfferFeedback",
+    layout = layout,
+    inputShape = Shape.derived[Refine.OfferFeedbackInputs],
+    outputShape = outputShape
+  )
 
   /** Render one runtime trace block per component: `component: <inputs> -> <outputs>`. */
   def renderTrajectory(trace: Vector[TraceEntry]): String =
@@ -106,12 +104,12 @@ private[programs] object RefineFeedback:
 
   /** Run the critic under the ambient runtime context and decode its per-module advice. */
   def generateAdvice[I, O](
-      critic: Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice],
-      input: I,
-      prediction: Prediction[O],
-      trace: Vector[TraceEntry],
-      reward: Double,
-      threshold: Double,
+      critic     : Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice],
+      input      : I,
+      prediction : Prediction[O],
+      trace      : Vector[TraceEntry],
+      reward     : Double,
+      threshold  : Double,
       moduleNames: Vector[String]
   )(using RuntimeContext): Either[DspyError, Map[String, String]] =
     val programInputs = trace.headOption

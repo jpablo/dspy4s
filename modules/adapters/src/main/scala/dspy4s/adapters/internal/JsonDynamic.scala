@@ -26,12 +26,10 @@ private[adapters] object JsonDynamic:
         else DynamicValue.Primitive(PrimitiveValue.Double(v))
       case ujson.Bool(v)      => DynamicValue.Primitive(PrimitiveValue.Boolean(v))
       case _: ujson.Null.type => DynamicValue.Null
-      case obj: ujson.Obj     =>
-        DynamicValue.Record(Chunk.from(
+      case obj: ujson.Obj     => DynamicValue.Record(Chunk.from(
           obj.value.iterator.map { case (k, v) => k -> fromUjson(v) }.toSeq
         ))
-      case arr: ujson.Arr =>
-        DynamicValue.Sequence(Chunk.from(arr.value.toVector.map(fromUjson)))
+      case arr: ujson.Arr => DynamicValue.Sequence(Chunk.from(arr.value.toVector.map(fromUjson)))
 
   /** Recursively convert a `DynamicValue` into a `ujson.Value` — the inverse of [[fromUjson]]. Non-JSON shapes
     * (variants, exotic primitives) fall back to their rendered-text string. Field order is preserved, so a serialized
@@ -46,12 +44,11 @@ private[adapters] object JsonDynamic:
       case DynamicValue.Primitive(PrimitiveValue.Float(v))   => ujson.Num(v.toDouble)
       case DynamicValue.Primitive(PrimitiveValue.Boolean(v)) => ujson.Bool(v)
       case _: DynamicValue.Null.type                         => ujson.Null
-      case rec: DynamicValue.Record                          =>
-        ujson.Obj.from(rec.fields.iterator.map { case (k, v) => k -> toUjson(v) })
-      case seq: DynamicValue.Sequence =>
-        ujson.Arr.from(seq.elements.iterator.map(toUjson))
-      case m: DynamicValue.Map =>
-        ujson.Obj.from(m.entries.iterator.map { case (k, v) => DynamicValues.renderText(k) -> toUjson(v) })
+      case rec: DynamicValue.Record                          => ujson.Obj.from(rec.fields.iterator.map { case (k, v) => k -> toUjson(v) })
+      case seq: DynamicValue.Sequence                        => ujson.Arr.from(seq.elements.iterator.map(toUjson))
+      case m: DynamicValue.Map                               => ujson.Obj.from(m.entries.iterator.map { case (k, v) =>
+          DynamicValues.renderText(k) -> toUjson(v)
+        })
       case other => ujson.Str(DynamicValues.renderText(other))
 
   /** Parse raw text as JSON and convert it to a `DynamicValue`. Parse failures map to a `ParseError`. */

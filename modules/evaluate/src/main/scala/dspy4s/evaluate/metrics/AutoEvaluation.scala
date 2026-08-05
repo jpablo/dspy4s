@@ -65,18 +65,18 @@ object AutoEvaluation:
     * completions. Parse failures (missing / non-numeric field) surface as `Left`.
     */
   private[metrics] def runJudge(
-      predictor: DynamicPredict,
-      inputs: DynamicValue.Record,
+      predictor : DynamicPredict,
+      inputs    : DynamicValue.Record,
       readFields: Seq[String]
   )(using RuntimeContext): Either[DspyError, Vector[Double]] =
     for
       prediction <- predictor(ProgramCall(input = inputs, traceEnabled = false))
       values     <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
-        for
-          soFar <- acc
-          value <- prediction.raw.asDouble(field)
-        yield soFar :+ value
-      }
+                  for
+                    soFar <- acc
+                    value <- prediction.raw.asDouble(field)
+                  yield soFar :+ value
+                }
     yield values
 
 object SemanticF1:
@@ -96,11 +96,11 @@ object SemanticF1:
   * `f1_score(precision, recall)`. Port of `dspy.evaluate.SemanticF1`.
   */
 final case class SemanticF1(
-    decompositional: Boolean = false,
-    threshold: Double = 0.66,
-    questionField: String = "question",
-    groundTruthField: String = "response",
-    responseField: String = "response"
+    decompositional : Boolean = false,
+    threshold       : Double  = 0.66,
+    questionField   : String  = "question",
+    groundTruthField: String  = "response",
+    responseField   : String  = "response"
 ) extends Metric:
   val name: String = "semantic_f1"
 
@@ -140,11 +140,11 @@ final case class SemanticF1(
       question       <- MetricHelpers.scoringText(example.get(questionField), questionField, "Example")
       groundTruth    <- MetricHelpers.scoringText(example.get(groundTruthField), groundTruthField, "Example")
       systemResponse <- MetricHelpers.scoringText(prediction.get(responseField), responseField, "Prediction")
-      inputs = DynamicValues.recordFromEntries(Seq(
-        "question"        -> DynamicValues.fromAny(question),
-        "ground_truth"    -> DynamicValues.fromAny(groundTruth),
-        "system_response" -> DynamicValues.fromAny(systemResponse)
-      ))
+      inputs          = DynamicValues.recordFromEntries(Seq(
+                 "question"        -> DynamicValues.fromAny(question),
+                 "ground_truth"    -> DynamicValues.fromAny(groundTruth),
+                 "system_response" -> DynamicValues.fromAny(systemResponse)
+               ))
       scores <- AutoEvaluation.runJudge(judgePredictor, inputs, Seq("recall", "precision"))
     yield AutoEvaluation.f1Score(precision = scores(1), recall = scores(0))
 
@@ -168,52 +168,50 @@ object CompleteAndGrounded:
   * under evaluation; absent it, scoring returns `Left`.
   */
 final case class CompleteAndGrounded(
-    threshold: Double = 0.66,
-    questionField: String = "question",
+    threshold       : Double = 0.66,
+    questionField   : String = "question",
     groundTruthField: String = "response",
-    responseField: String = "response",
-    contextField: String = "context"
+    responseField   : String = "response",
+    contextField    : String = "context"
 ) extends Metric:
   val name: String = "complete_and_grounded"
 
-  private val completenessLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "AnswerCompleteness",
-      inputFields = Vector(
-        AutoEvaluation.input("question"),
-        AutoEvaluation.input("ground_truth"),
-        AutoEvaluation.input("system_response")
-      ),
-      outputFields = Vector(
-        AutoEvaluation.textOutput("ground_truth_key_ideas", "enumeration of key ideas in the ground truth"),
-        AutoEvaluation.textOutput("system_response_key_ideas", "enumeration of key ideas in the system response"),
-        AutoEvaluation.textOutput("discussion", "discussion of the overlap between ground truth and system response"),
-        AutoEvaluation.output("completeness", "fraction (out of 1.0) of ground truth covered by the system response")
-      ),
-      instructions = Some(CompleteAndGrounded.completenessInstructions)
-    )
+  private val completenessLayout: SignatureLayout = SignatureLayout.of(
+    name = "AnswerCompleteness",
+    inputFields = Vector(
+      AutoEvaluation.input("question"),
+      AutoEvaluation.input("ground_truth"),
+      AutoEvaluation.input("system_response")
+    ),
+    outputFields = Vector(
+      AutoEvaluation.textOutput("ground_truth_key_ideas", "enumeration of key ideas in the ground truth"),
+      AutoEvaluation.textOutput("system_response_key_ideas", "enumeration of key ideas in the system response"),
+      AutoEvaluation.textOutput("discussion", "discussion of the overlap between ground truth and system response"),
+      AutoEvaluation.output("completeness", "fraction (out of 1.0) of ground truth covered by the system response")
+    ),
+    instructions = Some(CompleteAndGrounded.completenessInstructions)
+  )
 
-  private val groundednessLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "AnswerGroundedness",
-      inputFields = Vector(
-        AutoEvaluation.input("question"),
-        AutoEvaluation.input("retrieved_context"),
-        AutoEvaluation.input("system_response")
+  private val groundednessLayout: SignatureLayout = SignatureLayout.of(
+    name = "AnswerGroundedness",
+    inputFields = Vector(
+      AutoEvaluation.input("question"),
+      AutoEvaluation.input("retrieved_context"),
+      AutoEvaluation.input("system_response")
+    ),
+    outputFields = Vector(
+      AutoEvaluation.textOutput(
+        "system_response_claims",
+        "enumeration of non-trivial or check-worthy claims in the system response"
       ),
-      outputFields = Vector(
-        AutoEvaluation.textOutput(
-          "system_response_claims",
-          "enumeration of non-trivial or check-worthy claims in the system response"
-        ),
-        AutoEvaluation.textOutput("discussion", "discussion of how supported the claims are by the retrieved context"),
-        AutoEvaluation.output(
-          "groundedness",
-          "fraction (out of 1.0) of system response supported by the retrieved context"
-        )
-      ),
-      instructions = Some(CompleteAndGrounded.groundednessInstructions)
-    )
+      AutoEvaluation.textOutput("discussion", "discussion of how supported the claims are by the retrieved context"),
+      AutoEvaluation.output(
+        "groundedness",
+        "fraction (out of 1.0) of system response supported by the retrieved context"
+      )
+    ),
+    instructions = Some(CompleteAndGrounded.groundednessInstructions)
+  )
 
   // Built once per metric instance — the judge layouts never change between score() calls. These stay two
   // separate LM calls (unlike SemanticF1) because they judge against different layouts and inputs.
@@ -224,20 +222,20 @@ final case class CompleteAndGrounded(
       RuntimeContext
   ): Either[DspyError, Double] =
     for
-      question       <- MetricHelpers.scoringText(example.get(questionField), questionField, "Example")
-      groundTruth    <- MetricHelpers.scoringText(example.get(groundTruthField), groundTruthField, "Example")
-      systemResponse <- MetricHelpers.scoringText(prediction.get(responseField), responseField, "Prediction")
-      context        <- MetricHelpers.scoringText(prediction.get(contextField), contextField, "Prediction")
+      question          <- MetricHelpers.scoringText(example.get(questionField), questionField, "Example")
+      groundTruth       <- MetricHelpers.scoringText(example.get(groundTruthField), groundTruthField, "Example")
+      systemResponse    <- MetricHelpers.scoringText(prediction.get(responseField), responseField, "Prediction")
+      context           <- MetricHelpers.scoringText(prediction.get(contextField), contextField, "Prediction")
       completenessInputs = DynamicValues.recordFromEntries(Seq(
-        "question"        -> DynamicValues.fromAny(question),
-        "ground_truth"    -> DynamicValues.fromAny(groundTruth),
-        "system_response" -> DynamicValues.fromAny(systemResponse)
-      ))
+                             "question"        -> DynamicValues.fromAny(question),
+                             "ground_truth"    -> DynamicValues.fromAny(groundTruth),
+                             "system_response" -> DynamicValues.fromAny(systemResponse)
+                           ))
       groundednessInputs = DynamicValues.recordFromEntries(Seq(
-        "question"          -> DynamicValues.fromAny(question),
-        "retrieved_context" -> DynamicValues.fromAny(context),
-        "system_response"   -> DynamicValues.fromAny(systemResponse)
-      ))
+                             "question"          -> DynamicValues.fromAny(question),
+                             "retrieved_context" -> DynamicValues.fromAny(context),
+                             "system_response"   -> DynamicValues.fromAny(systemResponse)
+                           ))
       completeness <- AutoEvaluation.runJudge(completenessPredictor, completenessInputs, Seq("completeness"))
       groundedness <- AutoEvaluation.runJudge(groundednessPredictor, groundednessInputs, Seq("groundedness"))
     yield AutoEvaluation.f1Score(groundedness.head, completeness.head)

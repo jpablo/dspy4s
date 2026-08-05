@@ -24,9 +24,8 @@ private[adapters] object JSONAdapterParser:
       Right(parseNativeToolTurn(adapterName, layout, output))
     else
       extractJson(output.text).flatMap(parseJsonObject) match
-        case Right(root) =>
-          parseFields(adapterName, layout, root, output)
-        case Left(_) =>
+        case Right(root) => parseFields(adapterName, layout, root, output)
+        case Left(_)     =>
           if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
             AdapterTextSupport.singleOutputTextFallback(adapterName, layout, output)
           else
@@ -34,7 +33,7 @@ private[adapters] object JSONAdapterParser:
 
   private def parseNativeToolTurn(adapterName: String, layout: SignatureLayout, output: LmOutput): ParsedOutput =
     val jsonRoot: Option[Value] = extractJson(output.text).flatMap(parseJsonObject).toOption
-    val entries = layout
+    val entries                 = layout
       .outputFields
       .map { field =>
         if NativeFunctionCalling.isToolCallsField(field) then
@@ -53,15 +52,14 @@ private[adapters] object JSONAdapterParser:
       layout     : SignatureLayout,
       root       : Value,
       output     : LmOutput
-  ): Either[DspyError, ParsedOutput] = AdapterTextSupport
-    .decodeOutputFields(layout) { field =>
-      root.obj.get(field.name) match
-        case Some(raw) =>
-          coerce(field.typeRef, raw)
-        case None =>
-          Left(AdapterErrors.missingField(field.name, Some(output.text)))
-    }
-    .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
+  ): Either[DspyError, ParsedOutput] =
+    AdapterTextSupport
+      .decodeOutputFields(layout) { field =>
+        root.obj.get(field.name) match
+          case Some(raw) => coerce(field.typeRef, raw)
+          case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
+      }
+      .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim
@@ -69,9 +67,8 @@ private[adapters] object JSONAdapterParser:
       Right(trimmed)
     else
       FencedJson.findFirstMatchIn(text).map(_.group(1)) match
-        case Some(json) =>
-          Right(json)
-        case None =>
+        case Some(json) => Right(json)
+        case None       =>
           extractFirstJsonObject(text).toRight(ParseError("adapter", "Could not find JSON object in model output"))
 
   private def extractFirstJsonObject(text: String): Option[String] =
@@ -79,11 +76,11 @@ private[adapters] object JSONAdapterParser:
     if start < 0 then
       None
     else
-      var depth = 0
-      var end = -1
-      var i = start
+      var depth    = 0
+      var end      = -1
+      var i        = start
       var inString = false
-      var escaped = false
+      var escaped  = false
       while i < text.length && end < 0 do
         val char = text.charAt(i)
         if inString then
@@ -95,59 +92,50 @@ private[adapters] object JSONAdapterParser:
             inString = false
         else
           char match
-            case '"' =>
-              inString = true
-            case '{' =>
-              depth += 1
+            case '"' => inString = true
+            case '{' => depth += 1
             case '}' =>
               depth -= 1
               if depth == 0 then
                 end = i
-            case _ =>
-              ()
+            case _ => ()
         i += 1
       if end >= start then
         Some(text.substring(start, end + 1))
       else
         None
 
-  private def parseJsonObject(raw: String): Either[DspyError, Value] = Try(ujson.read(raw))
-    .toEither
-    .left
-    .map(error => ParseError("adapter", error.getMessage))
-    .flatMap { value =>
-      if value.objOpt.isDefined then
-        Right(value)
-      else
-        Left(ParseError("adapter", "Parsed JSON output is not an object"))
-    }
+  private def parseJsonObject(raw: String): Either[DspyError, Value] =
+    Try(ujson.read(raw))
+      .toEither
+      .left
+      .map(error => ParseError("adapter", error.getMessage))
+      .flatMap { value =>
+        if value.objOpt.isDefined then
+          Right(value)
+        else
+          Left(ParseError("adapter", "Parsed JSON output is not an object"))
+      }
 
   private def coerce(typeRef: TypeRef, value: Value): Either[DspyError, DynamicValue] =
     typeRef match
-      case TypeRef.int =>
-        value
+      case TypeRef.int => value
           .numOpt
           .filter(number => number.isWhole && number >= Int.MinValue.toDouble && number <= Int.MaxValue.toDouble)
           .map(number => DynamicValue.Primitive(PrimitiveValue.Int(number.toInt)))
           .toRight(ValidationError(s"Expected integer value, found: $value"))
-      case TypeRef.double =>
-        value
+      case TypeRef.double => value
           .numOpt
           .toRight(ValidationError(s"Expected numeric value, found: $value"))
           .map(number => DynamicValue.Primitive(PrimitiveValue.Double(number)))
-      case TypeRef.bool =>
-        value
+      case TypeRef.bool => value
           .boolOpt
           .toRight(ValidationError(s"Expected boolean value, found: $value"))
           .map(boolean => DynamicValue.Primitive(PrimitiveValue.Boolean(boolean)))
-      case TypeRef.json | TypeRef.list =>
-        Right(JsonDynamic.fromUjson(value))
-      case _ =>
-        Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
+      case TypeRef.json | TypeRef.list => Right(JsonDynamic.fromUjson(value))
+      case _                           => Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
 
   private def renderJson(value: Value): String =
     value match
-      case ujson.Str(text) =>
-        text
-      case other =>
-        other.render()
+      case ujson.Str(text) => text
+      case other           => other.render()

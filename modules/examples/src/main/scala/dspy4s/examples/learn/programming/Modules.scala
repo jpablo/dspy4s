@@ -67,7 +67,9 @@ object Modules:
   // carries a single decoded output. The raw completions remain on `prediction.raw.completions`.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.modulesMain"
-@main def modulesMain(): Unit = Demo.withLm {
-  println("Sentiment: " + Modules.SentimentExample.call("it's a charming and often affecting journey."))
-  println("QA:        " + Modules.QaReasoningExample.call("What's something great about the ColBERT retrieval model?"))
-}
+@main def modulesMain(): Unit =
+  Demo.withLm {
+    println("Sentiment: " + Modules.SentimentExample.call("it's a charming and often affecting journey."))
+    println("QA:        " +
+      Modules.QaReasoningExample.call("What's something great about the ColBERT retrieval model?"))
+  }

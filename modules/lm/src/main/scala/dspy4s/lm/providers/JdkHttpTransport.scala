@@ -18,9 +18,9 @@ final class JdkHttpTransport(timeoutMillis: Long) extends HttpTransport:
     .build()
 
   override def sendJson(
-      url: String,
+      url    : String,
       headers: Map[String, String],
-      body: String
+      body   : String
   ): Either[DspyError, HttpResponse] =
     runWithErrorMap {
       val request  = buildRequest(url, headers, body)
@@ -33,9 +33,9 @@ final class JdkHttpTransport(timeoutMillis: Long) extends HttpTransport:
     }
 
   override def streamSse(
-      url: String,
+      url    : String,
       headers: Map[String, String],
-      body: String
+      body   : String
   ): Either[DspyError, HttpStreamResponse] =
     runWithErrorMap {
       val request                            = buildRequest(url, headers, body)
@@ -79,7 +79,6 @@ final class JdkHttpTransport(timeoutMillis: Long) extends HttpTransport:
         Left(RuntimeError("openai_http", s"HTTP timeout: ${error.getMessage}"))
       case error: java.net.ConnectException =>
         Left(RuntimeError("openai_http", s"Connection failed: ${error.getMessage}"))
-      case error: java.io.IOException =>
-        Left(RuntimeError("openai_http", s"IO error: ${error.getMessage}"))
-      case error: RuntimeException =>
+      case error: java.io.IOException => Left(RuntimeError("openai_http", s"IO error: ${error.getMessage}"))
+      case error: RuntimeException    =>
         Left(RuntimeError("openai_http", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))

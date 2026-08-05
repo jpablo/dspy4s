@@ -22,34 +22,28 @@ private[adapters] object JSONAdapterPrompt:
       toolChoice              : Option[ToolChoice]
   )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val textOutputFields = invocation.layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
-    val fieldList = textOutputFields.map(_.name).mkString(", ")
-    val jsonInstruction =
-      invocation.outputJsonSchema match
-        case Some(schema) =>
-          s"""Return a valid JSON object that conforms to the following JSON Schema. Do not include markdown fences.
+    val fieldList        = textOutputFields.map(_.name).mkString(", ")
+    val jsonInstruction  = invocation.outputJsonSchema match
+      case Some(schema) =>
+        s"""Return a valid JSON object that conforms to the following JSON Schema. Do not include markdown fences.
            |
            |$schema""".stripMargin
-        case None =>
-          s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
-    val baseSystemText =
-      invocation.layout.instructions match
-        case Some(instructions) =>
-          s"$instructions\n\n$jsonInstruction"
-        case None =>
-          jsonInstruction
+      case None => s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
+    val baseSystemText = invocation.layout.instructions match
+      case Some(instructions) => s"$instructions\n\n$jsonInstruction"
+      case None               => jsonInstruction
     val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
 
-    val messages =
-      AdapterTextSupport.fewShotMessages(invocation, systemText) { demoValues =>
-        val assistantJson = ujson
-          .Obj
-          .from(
-            textOutputFields.flatMap(field =>
-              DynamicValues.recordGet(demoValues, field.name).map(value => field.name -> JsonDynamic.toUjson(value))
-            )
+    val messages = AdapterTextSupport.fewShotMessages(invocation, systemText) { demoValues =>
+      val assistantJson = ujson
+        .Obj
+        .from(
+          textOutputFields.flatMap(field =>
+            DynamicValues.recordGet(demoValues, field.name).map(value => field.name -> JsonDynamic.toUjson(value))
           )
-        ujson.write(assistantJson)
-      }
+        )
+      ujson.write(assistantJson)
+    }
 
     Right(
       FormattedPrompt(
@@ -69,18 +63,14 @@ private[adapters] object JSONAdapterPrompt:
 
   /** Emit an OpenAI-compatible response schema when the resolved model supports it. */
   private def responseFormatOptions(invocation: AdapterInvocation)(using ctx: RuntimeContext): DynamicValue.Record =
-    val capable =
-      ctx.lm match
-        case Some(lm: LanguageModel) =>
-          lm.supportsResponseSchema
-        case _ =>
-          false
+    val capable = ctx.lm match
+      case Some(lm: LanguageModel) => lm.supportsResponseSchema
+      case _                       => false
     if !capable then
       DynamicValue.Record.empty
     else
       invocation.outputJsonSchema match
-        case Some(schemaString) =>
-          JsonDynamic.parse(schemaString) match
+        case Some(schemaString) => JsonDynamic.parse(schemaString) match
             case Right(schema: DynamicValue.Record) =>
               val jsonSchema = DynamicValue.Record(
                 Chunk(
@@ -100,10 +90,8 @@ private[adapters] object JSONAdapterPrompt:
                     )
                 )
               )
-            case _ =>
-              DynamicValue.Record.empty
-        case None =>
-          DynamicValue.Record.empty
+            case _ => DynamicValue.Record.empty
+        case None => DynamicValue.Record.empty
 
   /** Add each output field's constraints to the corresponding JSON Schema property. */
   private def embedConstraints(
@@ -116,7 +104,7 @@ private[adapters] object JSONAdapterPrompt:
     else
       DynamicValues.recordGet(schema, "properties") match
         case Some(properties: DynamicValue.Record) =>
-          val byName = constrained.map(field => field.name -> field.constraints).toMap
+          val byName            = constrained.map(field => field.name -> field.constraints).toMap
           val updatedProperties = properties
             .fields
             .map {
@@ -125,12 +113,10 @@ private[adapters] object JSONAdapterPrompt:
                   byName(propertyName).foldLeft(property)((current, constraint) =>
                     current.updated(constraint.schemaKeyword, constraint.schemaValue)
                   )
-              case other =>
-                other
+              case other => other
             }
           schema.updated("properties", DynamicValue.Record(Chunk.from(updatedProperties)))
-        case _ =>
-          schema
+        case _ => schema
 
   private def sanitizeSchemaName(name: String): String =
     val cleaned = name.replaceAll("[^a-zA-Z0-9_-]", "_")

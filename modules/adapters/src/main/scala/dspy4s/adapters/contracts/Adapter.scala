@@ -22,8 +22,8 @@ trait Adapter extends AdapterRef:
       prompt <- format(invocation)
       // Merge adapter-contributed requestOptions UNDER the request's existing options (per-call/module wins).
       mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
-      response <- languageModel.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
-      parsed   <- parseOutputs(invocation.layout, response.outputs)
+      response     <- languageModel.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
+      parsed       <- parseOutputs(invocation.layout, response.outputs)
     yield parsed
 
   private def parseOutputs(layout: SignatureLayout, outputs: Vector[LmOutput])(using

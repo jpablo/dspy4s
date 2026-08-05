@@ -75,11 +75,12 @@ class CallbackDispatcherSuite extends FunSuite:
     val endAttempts = AtomicInteger(0)
     val observed    = ArrayBuffer.empty[CallbackEvent]
     val throwing    = new CallbackHandler:
-      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-        case _: ModuleEndEvent =>
-          endAttempts.incrementAndGet()
-          throw IllegalStateException("end observer failed")
-        case _ => ()
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case _: ModuleEndEvent =>
+            endAttempts.incrementAndGet()
+            throw IllegalStateException("end observer failed")
+          case _ => ()
     val later = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = observed += event
 
@@ -98,9 +99,10 @@ class CallbackDispatcherSuite extends FunSuite:
     val bodyRuns = AtomicInteger(0)
     val observed = ArrayBuffer.empty[CallbackEvent]
     val throwing = new CallbackHandler:
-      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-        case _: ModuleStartEvent => throw IllegalStateException("start observer failed")
-        case _                   => ()
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case _: ModuleStartEvent => throw IllegalStateException("start observer failed")
+          case _                   => ()
     val later = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = observed += event
 

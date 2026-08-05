@@ -34,9 +34,9 @@ import zio.blocks.schema.DynamicValue
   *   take precedence -- see [[ProviderRequestNormalizer]].
   */
 final case class OpenAiLanguageModel(
-    model: String,
-    mode: LmMode = LmMode.Chat,
-    client: OpenAiClient,
+    model         : String,
+    mode          : LmMode              = LmMode.Chat,
+    client        : OpenAiClient,
     defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends StreamingLanguageModel:
 
@@ -65,8 +65,7 @@ final case class OpenAiLanguageModel(
     val normalized = ProviderRequestNormalizer.normalize(request, defaultOptions)
     client.stream(normalized) match
       case Right(iterator) => iterator
-      case Left(error)     =>
-        Iterator.single(
+      case Left(error)     => Iterator.single(
           LmChunk(
             text = "",
             finishReason = Some("error"),
@@ -86,9 +85,9 @@ object OpenAiLanguageModel:
     * (Azure, Ollama, vLLM, ...) or for injecting a stub `HttpTransport` in tests.
     */
   def apply(
-      model: String,
-      apiKey: String,
-      baseUrl: String,
+      model    : String,
+      apiKey   : String,
+      baseUrl  : String,
       transport: HttpTransport
   ): OpenAiLanguageModel =
     OpenAiLanguageModel(
@@ -105,9 +104,9 @@ object OpenAiLanguageModel:
     * SOMETHING non-empty (e.g. `OPENAI_API_KEY=local`) — or skip the environment entirely with [[local]].
     */
   def fromEnv(
-      model: String,
+      model  : String,
       baseUrl: String = OpenAiClient.defaultBaseUrl,
-      envVar: String = "OPENAI_API_KEY"
+      envVar : String = "OPENAI_API_KEY"
   ): Either[DspyError, OpenAiLanguageModel] =
     OpenAiClient.fromEnv(base = baseUrl, envVar = envVar).map(client =>
       OpenAiLanguageModel(model = model, client = client)

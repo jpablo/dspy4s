@@ -25,8 +25,7 @@ final case class ActivePredict(name: String, layout: SignatureLayout)
   * alone. Concurrent invocations stay isolated because the storage is a [[ThreadLocal]].
   */
 object ActivePredictContext:
-  private val tl: ThreadLocal[List[ActivePredict]] =
-    ThreadLocal.withInitial(() => Nil)
+  private val tl: ThreadLocal[List[ActivePredict]] = ThreadLocal.withInitial(() => Nil)
 
   def current: Option[ActivePredict] = tl.get.headOption
 

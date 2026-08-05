@@ -60,6 +60,7 @@ object SpecExample:
     Predict(emotion)((sentence = sentence)).map(_.output.sentiment)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.specMain"
-@main def specMain(): Unit = Demo.withLm {
-  println("Spec: " + SpecExample.callEmotion("i started feeling a little vulnerable"))
-}
+@main def specMain(): Unit =
+  Demo.withLm {
+    println("Spec: " + SpecExample.callEmotion("i started feeling a little vulnerable"))
+  }

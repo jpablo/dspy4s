@@ -21,7 +21,7 @@ private[typed] object SpecMacro:
     *   - missing `Schema[X]` for any wrapped type
     */
   def ofImpl[T <: Spec: Type](
-      name: Expr[String],
+      name        : Expr[String],
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
@@ -59,47 +59,43 @@ private[typed] object SpecMacro:
     // For each method: (name, isInput, inner type X from InputField[X] / OutputField[X]).
     // Field metadata (typeRef) and the value codec are both derived later from the
     // zio-blocks `Schema` of the input / output named tuple -- no per-field FieldCodec.
-    val fieldData: List[(String, Boolean, TypeRepr)] =
-      methods.map { m =>
-        val name = m.name
+    val fieldData: List[(String, Boolean, TypeRepr)] = methods.map { m =>
+      val name = m.name
 
-        // Reject methods that take parameters -- spec methods must be
-        // parameterless field declarations.
-        if m.paramSymss.exists(_.nonEmpty) then
-          report.errorAndAbort(
-            s"Spec method '$specName.$name' must be parameterless (got parameters: ${m.paramSymss})"
+      // Reject methods that take parameters -- spec methods must be
+      // parameterless field declarations.
+      if m.paramSymss.exists(_.nonEmpty) then
+        report.errorAndAbort(
+          s"Spec method '$specName.$name' must be parameterless (got parameters: ${m.paramSymss})"
+        )
+
+      // Read the declared return type directly from the DefDef. This
+      // sidesteps the NullaryMethodType / ByNameType wrappers that
+      // `tpe.memberType(m)` produces for parameterless `def`s.
+      val returnType = m.tree match
+        case dd: DefDef => dd.returnTpt.tpe
+        case _          => report.errorAndAbort(
+            s"Spec member '$specName.$name' must be a `def` declaration"
           )
 
-        // Read the declared return type directly from the DefDef. This
-        // sidesteps the NullaryMethodType / ByNameType wrappers that
-        // `tpe.memberType(m)` produces for parameterless `def`s.
-        val returnType = m.tree match
-          case dd: DefDef => dd.returnTpt.tpe
-          case _          =>
+      val (isInput, innerType) = returnType match
+        case AppliedType(tc, List(arg)) if tc.typeSymbol == inputFieldSym  => (true, arg)
+        case AppliedType(tc, List(arg)) if tc.typeSymbol == outputFieldSym => (false, arg)
+        case other                                                         => report.errorAndAbort(
+            s"Spec method '$specName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
+          )
+
+      // Validate up front that the field type has a zio-blocks Schema, so a missing one
+      // gives a per-field error here rather than a derivation failure on the whole tuple.
+      innerType.asType match
+        case '[t] => if Expr.summon[Schema[t]].isEmpty then
             report.errorAndAbort(
-              s"Spec member '$specName.$name' must be a `def` declaration"
+              s"No Schema[${innerType.show}] in scope for spec field '$specName.$name'. Spec field " +
+                "types must have a zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
             )
 
-        val (isInput, innerType) = returnType match
-          case AppliedType(tc, List(arg)) if tc.typeSymbol == inputFieldSym  => (true, arg)
-          case AppliedType(tc, List(arg)) if tc.typeSymbol == outputFieldSym => (false, arg)
-          case other                                                         =>
-            report.errorAndAbort(
-              s"Spec method '$specName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
-            )
-
-        // Validate up front that the field type has a zio-blocks Schema, so a missing one
-        // gives a per-field error here rather than a derivation failure on the whole tuple.
-        innerType.asType match
-          case '[t] =>
-            if Expr.summon[Schema[t]].isEmpty then
-              report.errorAndAbort(
-                s"No Schema[${innerType.show}] in scope for spec field '$specName.$name'. Spec field " +
-                  "types must have a zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
-              )
-
-        (name, isInput, innerType)
-      }
+      (name, isInput, innerType)
+    }
 
     // Reject duplicate field names.
     val duplicates = fieldData.groupBy(_._1).collect {
@@ -122,13 +118,11 @@ private[typed] object SpecMacro:
     val outputType = namedTupleType(outputData.map { case (n, _, tpe) => n -> tpe })
 
     (inputType.asType, outputType.asType) match
-      case ('[i], '[o]) =>
-        materialize[i, o](
+      case ('[i], '[o]) => materialize[i, o](
           nameExpr = sigNameExpr,
           instructionsExpr = instructions,
           errorContext = s"spec trait '$specName'",
           inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
           outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
         )
-      case _ =>
-        report.errorAndAbort(s"Internal error materializing spec trait '$specName'")
+      case _ => report.errorAndAbort(s"Internal error materializing spec trait '$specName'")

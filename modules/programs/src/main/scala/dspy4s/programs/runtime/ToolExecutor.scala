@@ -11,11 +11,10 @@ import dspy4s.programs.contracts.ToolFunction
 object ToolExecutor:
   def invoke(
       request: ToolCallRequest,
-      tools: Vector[ToolFunction]
+      tools  : Vector[ToolFunction]
   )(using RuntimeContext): Either[DspyError, ToolCallResult] =
     tools.find(_.name == request.name) match
-      case None =>
-        Left(NotFoundError("tool", s"Tool '${request.name}' does not exist"))
+      case None       => Left(NotFoundError("tool", s"Tool '${request.name}' does not exist"))
       case Some(tool) =>
         val result = CallbackDispatcher.withTool(
           toolName = request.name,

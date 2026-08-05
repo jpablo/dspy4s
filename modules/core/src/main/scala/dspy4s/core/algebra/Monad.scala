@@ -90,8 +90,8 @@ object ScalaMonad:
 
   /** Build a Scala monad from its functor action, unit components, and multiplication components. */
   def fromComponents[F[_]](
-      mapComponent: [A, B] => (A => B) => F[A] => F[B],
-      pureComponent: [A] => A => F[A],
+      mapComponent    : [A, B] => (A => B) => F[A] => F[B],
+      pureComponent   : [A] => A => F[A],
       flattenComponent: [A] => F[F[A]] => F[A]
   ): ScalaMonad[F] =
     given Category[AnyObject, Function1] = functionCategory

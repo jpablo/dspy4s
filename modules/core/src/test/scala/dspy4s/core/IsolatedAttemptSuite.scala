@@ -10,7 +10,7 @@ import zio.blocks.schema.DynamicValue
   */
 class IsolatedAttemptSuite extends munit.FunSuite:
 
-  private def hist(n: Int): HistoryEntry   = HistoryEntry("c", DynamicValues.record("n" := n))
+  private def hist(n : Int): HistoryEntry  = HistoryEntry("c", DynamicValues.record("n" := n))
   private def tr(name: String): TraceEntry = TraceEntry(name, DynamicValue.Record.empty, DynamicValue.Record.empty)
 
   test("isolatedAttempt captures the body's trace/history and does not leak them") {

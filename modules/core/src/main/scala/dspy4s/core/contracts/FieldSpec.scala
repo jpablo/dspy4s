@@ -22,13 +22,13 @@ import scala.util.matching.Regex
   * these strings today.
   */
 final case class FieldSpec(
-    name: String,
-    typeRef: TypeRef = TypeRef.string,
-    description: Option[String] = None,
-    prefix: Option[String] = None,
-    defaultValue: Option[Any] = None,
-    enumValues: Vector[String] = Vector.empty,
-    constraints: Vector[Constraint] = Vector.empty
+    name        : String,
+    typeRef     : TypeRef            = TypeRef.string,
+    description : Option[String]     = None,
+    prefix      : Option[String]     = None,
+    defaultValue: Option[Any]        = None,
+    enumValues  : Vector[String]     = Vector.empty,
+    constraints : Vector[Constraint] = Vector.empty
 ) derives CanEqual
 
 object FieldSpec:

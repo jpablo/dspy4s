@@ -40,11 +40,11 @@ import zio.blocks.schema.DynamicValue
   * mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
   */
 final case class ReAct[I, O](
-    baseSignature: Signature[I, O],
-    tools: Vector[ToolFunction],
+    baseSignature             : Signature[I, O],
+    tools                     : Vector[ToolFunction],
     override val maxIterations: IterationLimit = IterationLimit(5),
-    reactProgramName: String = ReActKeys.reactModule,
-    extractorProgramName: String = ReActKeys.extractModule,
+    reactProgramName          : String         = ReActKeys.reactModule,
+    extractorProgramName      : String         = ReActKeys.extractModule,
     /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the rendered
       * trajectory, producing a lenient [[ReAct.ReactStep]]. When `None` (the default), the predict is built from
       * [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable sub-predict
@@ -81,7 +81,8 @@ final case class ReAct[I, O](
       override def execute(request: ToolCallRequest)(using
           RuntimeContext
       ): Either[DspyError, ActionOutcome[String]] =
-        if request.name.isEmpty then Right(ActionOutcome.Failed("No tool was selected."))
+        if request.name.isEmpty then
+          Right(ActionOutcome.Failed("No tool was selected."))
         else if !toolsByName.contains(request.name) then
           Right(ActionOutcome.Failed(s"Execution error: tool `${request.name}` does not exist."))
         else
@@ -94,15 +95,13 @@ final case class ReAct[I, O](
   /** Per-iteration signature: base inputs + `trajectory` -> `next_thought` / `next_tool_name` / `next_tool_args`. The
     * base output fields are intentionally dropped here — they are produced by the extractor, not the loop.
     */
-  val reactSignature: SignatureLayout =
-    baseLayout
-      .appendInput(ReAct.loopTrajectoryField)
-      .replaceOutputs(Vector(ReAct.nextThoughtField, ReAct.nextToolNameField, ReAct.nextToolArgsField))
-      .withInstructions(Some(buildInstructions))
+  val reactSignature: SignatureLayout = baseLayout
+    .appendInput(ReAct.loopTrajectoryField)
+    .replaceOutputs(Vector(ReAct.nextThoughtField, ReAct.nextToolNameField, ReAct.nextToolArgsField))
+    .withInstructions(Some(buildInstructions))
 
   /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. */
-  val extractorSignature: SignatureLayout =
-    baseLayout.appendInput(ReAct.extractTrajectoryField)
+  val extractorSignature: SignatureLayout = baseLayout.appendInput(ReAct.extractTrajectoryField)
 
   /** The per-iteration react predict, built once from [[reactSignature]] (mirrors Python's `self.react = Predict(...)`
     * in `__init__`) — a TYPED `Predict[(I, String), ReactStep]`: the base input plus the rendered trajectory in, a
@@ -110,17 +109,15 @@ final case class ReAct[I, O](
     * descriptions, tool-listing instructions) is unchanged. Addressable + tunable via [[reactPredictOverride]];
     * `forward` uses this member rather than rebuilding a local each call.
     */
-  val reactPredict: Predict[(I, String), ReAct.ReactStep] =
-    reactPredictOverride.getOrElse(Predict(
-      signature = Signature(
-        name = baseSignature.name,
-        layout = reactSignature,
-        inputShape =
-          InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.loopTrajectoryField, "ReAct"),
-        outputShape = ReAct.reactStepShape
-      ),
-      name = Some(reactProgramName)
-    ))
+  val reactPredict: Predict[(I, String), ReAct.ReactStep] = reactPredictOverride.getOrElse(Predict(
+    signature = Signature(
+      name = baseSignature.name,
+      layout = reactSignature,
+      inputShape = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.loopTrajectoryField, "ReAct"),
+      outputShape = ReAct.reactStepShape
+    ),
+    name = Some(reactProgramName)
+  ))
 
   /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
@@ -152,9 +149,10 @@ final case class ReAct[I, O](
     val outputs     = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
     val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
     val toolList    = allTools.zipWithIndex.map { case (tool, idx) =>
-      val args = if tool.argSchema.nonEmpty then
-        tool.argSchema.map((argName, typeRef) => s"$argName: ${typeRef.repr}").mkString("(", ", ", ")")
-      else ""
+      val args =
+        if tool.argSchema.nonEmpty then
+          tool.argSchema.map((argName, typeRef) => s"$argName: ${typeRef.repr}").mkString("(", ", ", ")")
+        else ""
       val desc = if tool.description.nonEmpty then s": ${tool.description}" else ""
       s"(${idx + 1}) `${tool.name}`$args$desc"
     }.mkString("\n")
@@ -166,8 +164,7 @@ final case class ReAct[I, O](
        |next_tool_name must be one of:
        |$toolList""".stripMargin
 
-  override protected val lifecycle: ModuleLifecycle[I, Out] =
-    ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected val trajectoryKey: String = ReActKeys.trajectory
 
@@ -178,7 +175,7 @@ final case class ReAct[I, O](
     * persistent overflow halts the action loop so final extraction can still run over the remaining view.
     */
   override protected def generateStep(
-      call: ProgramCall[I],
+      call      : ProgramCall[I],
       trajectory: Vector[ReAct.TrajectoryEntry]
   )(using RuntimeContext): Either[DspyError, StepGeneration[ReAct.ReactStep, ReAct.TrajectoryEntry]] =
     reactWithTruncation(call, trajectory, remaining = 3).map {
@@ -195,16 +192,16 @@ final case class ReAct[I, O](
     * The shared transition records that outcome before applying this decision.
     */
   override protected def decide(
-      @annotation.unused step: ReAct.ReactStep,
-      action: ToolCallRequest,
+      @annotation.unused step   : ReAct.ReactStep,
+      action                    : ToolCallRequest,
       @annotation.unused outcome: ActionOutcome[String]
   ): ActionDecision =
     if action.name == ReAct.FinishToolName || action.name.isEmpty then ActionDecision.Stop
     else ActionDecision.Continue
 
   override protected def recordRejection(
-      iteration: Int,
-      step: ReAct.ReactStep,
+      iteration  : Int,
+      step       : ReAct.ReactStep,
       observation: String
   ): ReAct.TrajectoryEntry =
     ReAct.TrajectoryEntry(
@@ -217,9 +214,9 @@ final case class ReAct[I, O](
 
   override protected def recordOutcome(
       iteration: Int,
-      step: ReAct.ReactStep,
-      action: ToolCallRequest,
-      outcome: ActionOutcome[String]
+      step     : ReAct.ReactStep,
+      action   : ToolCallRequest,
+      outcome  : ActionOutcome[String]
   ): ReAct.TrajectoryEntry =
     ReAct.TrajectoryEntry(
       iteration,
@@ -237,8 +234,8 @@ final case class ReAct[I, O](
     * converts into a break rather than a failure.
     */
   private def reactWithTruncation(
-      call: ProgramCall[I],
-      view: Vector[ReAct.TrajectoryEntry],
+      call     : ProgramCall[I],
+      view     : Vector[ReAct.TrajectoryEntry],
       remaining: Int
   )(using RuntimeContext): Either[DspyError, (Option[ReAct.ReactStep], Vector[ReAct.TrajectoryEntry])] =
     val (result, used) = truncateOnOverflow(view, remaining)(ReAct.renderTrajectory) { rendered =>
@@ -264,7 +261,7 @@ object ReAct:
 
   /** The typed output of one react loop step. */
   final case class ReactStep(
-      nextThought: String,
+      nextThought : String,
       nextToolName: String,
       nextToolArgs: DynamicValue.Record
   )
@@ -285,10 +282,10 @@ object ReAct:
 
   /** One step of the agent's trajectory: its thought, the tool it chose with arguments, and the observation. */
   final case class TrajectoryEntry(
-      iteration: Int,
-      thought: String,
-      toolName: String,
-      toolArgs: DynamicValue.Record,
+      iteration  : Int,
+      thought    : String,
+      toolName   : String,
+      toolArgs   : DynamicValue.Record,
       observation: String
   )
 

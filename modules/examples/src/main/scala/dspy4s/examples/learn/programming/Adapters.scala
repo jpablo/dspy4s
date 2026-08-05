@@ -104,8 +104,7 @@ object Adapters:
   // --8<-- [start:inspect-history]
   def askThenInspect(question: String)(using ctx: RuntimeContext): Either[DspyError, (String, String)] =
     ctx.lm match
-      case Some(lm: LanguageModel) =>
-        RuntimeEnvironment.withSettings(ctx.copy(lm = Some(ManagedLanguageModel(lm)))) {
+      case Some(lm: LanguageModel) => RuntimeEnvironment.withSettings(ctx.copy(lm = Some(ManagedLanguageModel(lm)))) {
           given RuntimeContext = RuntimeEnvironment.current
           Predict(Signature.fromString("question -> answer"))((question = question))
             .map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1)))
@@ -114,13 +113,14 @@ object Adapters:
   // --8<-- [end:inspect-history]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.adaptersMain"
-@main def adaptersMain(): Unit = Demo.withLm {
-  println("=== ChatAdapter system message ===")
-  println(Adapters.systemMessage)
-  println("\n=== ask ===")
-  println(Adapters.ask("What is the capital of France?"))
-  println("\n=== ask + inspect_history ===")
-  Adapters.askThenInspect("What is the capital of France?") match
-    case Right((answer, history)) => println(s"answer: $answer\n$history")
-    case Left(err)                => println(s"error: ${err.message}")
-}
+@main def adaptersMain(): Unit =
+  Demo.withLm {
+    println("=== ChatAdapter system message ===")
+    println(Adapters.systemMessage)
+    println("\n=== ask ===")
+    println(Adapters.ask("What is the capital of France?"))
+    println("\n=== ask + inspect_history ===")
+    Adapters.askThenInspect("What is the capital of France?") match
+      case Right((answer, history)) => println(s"answer: $answer\n$history")
+      case Left(err)                => println(s"error: ${err.message}")
+  }

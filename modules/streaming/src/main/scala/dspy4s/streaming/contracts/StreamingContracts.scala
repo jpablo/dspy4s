@@ -10,10 +10,10 @@ sealed trait StreamEvent extends Product with Serializable:
 
 final case class TokenEvent(
     predictName: String,
-    fieldName: String,
-    chunk: String,
+    fieldName  : String,
+    chunk      : String,
     isLastChunk: Boolean = false,
-    timestamp: Instant = Instant.now()
+    timestamp  : Instant = Instant.now()
 ) extends StreamEvent
 
 final case class StatusEvent(message: String, timestamp: Instant = Instant.now()) extends StreamEvent
@@ -34,8 +34,8 @@ final case class ErrorEvent(error: DspyError, timestamp: Instant = Instant.now()
   */
 final case class StreamListener(
     signatureFieldName: String,
-    predictName: Option[String] = None,
-    allowReuse: Boolean = true
+    predictName       : Option[String] = None,
+    allowReuse        : Boolean        = true
 ):
   def matches(predict: String, field: String): Boolean =
     field == signatureFieldName && predictName.forall(_ == predict)

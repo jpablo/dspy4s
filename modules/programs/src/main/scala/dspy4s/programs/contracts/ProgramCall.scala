@@ -17,10 +17,10 @@ import zio.blocks.schema.DynamicValue
   * through their input `Shape`; the engine receives `ProgramCall[DynamicValue.Record]`.
   */
 final case class ProgramCall[I](
-    input: I,
-    config: DynamicValue.Record = DynamicValue.Record.empty,
-    traceEnabled: Boolean = true,
-    rolloutId: Option[Int] = None
+    input       : I,
+    config      : DynamicValue.Record = DynamicValue.Record.empty,
+    traceEnabled: Boolean             = true,
+    rolloutId   : Option[Int]         = None
 ):
   /** Change the input carrier without changing execution controls. */
   def mapInput[J](f: I => J): ProgramCall[J] =

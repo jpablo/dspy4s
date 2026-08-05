@@ -16,8 +16,8 @@ private[compose] object PairOptimizableTraversal:
     pa.inspect(first) ++ pb.inspect(second)
 
   def replace[A, B, P](pa: OptimizableTraversal[A], pb: OptimizableTraversal[B])(
-      first: A,
-      second: B,
+      first  : A,
+      second : B,
       updates: Vector[OptimizableParameters]
   )(
       rebuild: (A, B) => P
@@ -29,9 +29,5 @@ private[compose] object PairOptimizableTraversal:
       pa: OptimizableTraversal[A],
       pb: OptimizableTraversal[B]
   )(first: A, second: B): Vector[(String, OptimizableView)] =
-    pa.inspectNamed(first).map { case (sub, view) =>
-      (if sub == "self" then "first" else s"first.$sub") -> view
-    } ++
-      pb.inspectNamed(second).map { case (sub, view) =>
-        (if sub == "self" then "second" else s"second.$sub") -> view
-      }
+    pa.inspectNamed(first).map { case (sub, view) => (if sub == "self" then "first" else s"first.$sub") -> view } ++
+      pb.inspectNamed(second).map { case (sub, view) => (if sub == "self" then "second" else s"second.$sub") -> view }

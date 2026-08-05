@@ -17,13 +17,13 @@ import zio.blocks.schema.PrimitiveValue
   * payload.
   */
 final case class OpenAiEmbedder(
-    model: String,
-    apiKey: String,
-    baseUrl: String = OpenAiClient.defaultBaseUrl,
-    transport: HttpTransport = HttpTransport.jdk(),
-    batchSize: BatchSize = BatchSize(200),
-    options: DynamicValue.Record = DynamicValue.Record.empty,
-    embeddingsEndpoint: String = "/embeddings"
+    model             : String,
+    apiKey            : String,
+    baseUrl           : String              = OpenAiClient.defaultBaseUrl,
+    transport         : HttpTransport       = HttpTransport.jdk(),
+    batchSize         : BatchSize           = BatchSize(200),
+    options           : DynamicValue.Record = DynamicValue.Record.empty,
+    embeddingsEndpoint: String              = "/embeddings"
 ) extends Embedder:
 
   override def id: String = model
@@ -55,8 +55,7 @@ final case class OpenAiEmbedder(
   /** Extract `data[*].embedding` ordered by `data[*].index` (the authoritative row order). */
   private def parseRows(raw: DynamicValue, expected: Int): Either[DspyError, Vector[Vector[Float]]] =
     val rows = raw match
-      case rec: DynamicValue.Record =>
-        DynamicValues.recordGet(rec, "data") match
+      case rec: DynamicValue.Record => DynamicValues.recordGet(rec, "data") match
           case Some(seq: DynamicValue.Sequence) =>
             val parsed = seq.elements.iterator.flatMap {
               case item: DynamicValue.Record =>
@@ -72,27 +71,28 @@ final case class OpenAiEmbedder(
     if rows.size == expected then Right(rows)
     else Left(ParseError("openai_embeddings", s"Expected $expected embedding rows, got ${rows.size}"))
 
-  private def floatRow(dv: DynamicValue): Option[Vector[Float]] = dv match
-    case seq: DynamicValue.Sequence =>
-      val floats = seq.elements.iterator.flatMap(asFloat).toVector
-      Option.when(floats.size == seq.elements.size)(floats)
-    case _ => None
+  private def floatRow(dv: DynamicValue): Option[Vector[Float]] =
+    dv match
+      case seq: DynamicValue.Sequence =>
+        val floats = seq.elements.iterator.flatMap(asFloat).toVector
+        Option.when(floats.size == seq.elements.size)(floats)
+      case _ => None
 
   // Direct PrimitiveValue matching: the dynamic JSON codec may decode numbers as BigDecimal/BigInt, which
   // `DynamicValues.toAny` does not surface as numbers.
-  private def asFloat(dv: DynamicValue): Option[Float] = dv match
-    case DynamicValue.Primitive(p) =>
-      p match
-        case PrimitiveValue.Double(n)     => Some(n.toFloat)
-        case PrimitiveValue.Float(n)      => Some(n)
-        case PrimitiveValue.Int(n)        => Some(n.toFloat)
-        case PrimitiveValue.Long(n)       => Some(n.toFloat)
-        case PrimitiveValue.BigDecimal(n) => Some(n.toFloat)
-        case PrimitiveValue.BigInt(n)     => Some(n.toFloat)
-        case PrimitiveValue.Short(n)      => Some(n.toFloat)
-        case PrimitiveValue.Byte(n)       => Some(n.toFloat)
-        case _                            => None
-    case _ => None
+  private def asFloat(dv: DynamicValue): Option[Float] =
+    dv match
+      case DynamicValue.Primitive(p) => p match
+          case PrimitiveValue.Double(n)     => Some(n.toFloat)
+          case PrimitiveValue.Float(n)      => Some(n)
+          case PrimitiveValue.Int(n)        => Some(n.toFloat)
+          case PrimitiveValue.Long(n)       => Some(n.toFloat)
+          case PrimitiveValue.BigDecimal(n) => Some(n.toFloat)
+          case PrimitiveValue.BigInt(n)     => Some(n.toFloat)
+          case PrimitiveValue.Short(n)      => Some(n.toFloat)
+          case PrimitiveValue.Byte(n)       => Some(n.toFloat)
+          case _                            => None
+      case _ => None
 
   private def asInt(dv: DynamicValue): Option[Int] = asFloat(dv).map(_.toInt)
 
@@ -101,13 +101,13 @@ object OpenAiEmbedder:
     * OpenAI-compatible server's `/embeddings` endpoint.
     */
   def fromEnv(
-      model: String,
+      model  : String,
       baseUrl: String = OpenAiClient.defaultBaseUrl,
-      envVar: String = "OPENAI_API_KEY"
+      envVar : String = "OPENAI_API_KEY"
   ): Either[DspyError, OpenAiEmbedder] =
     sys.env.get(envVar) match
       case Some(value) if value.nonEmpty => Right(OpenAiEmbedder(model = model, apiKey = value, baseUrl = baseUrl))
-      case _ => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
+      case _                             => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
 
   /** Embedder against a LOCAL OpenAI-compatible server that does not check credentials (e.g. Ollama's
     * `http://localhost:11434/v1`), mirroring [[OpenAiLanguageModel.local]].

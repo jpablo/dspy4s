@@ -88,10 +88,8 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
 
   private def processChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     phase match
-      case PreObj =>
-        if c == '{' then phase = ObjStart
-      case ObjStart =>
-        c match
+      case PreObj   => if c == '{' then phase = ObjStart
+      case ObjStart => c match
           case ' ' | '\t' | '\r' | '\n' => ()
           case '}'                      => phase = PostObj
           case '"'                      =>
@@ -110,13 +108,11 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
               currentKey = keyBuilder.toString
               phase = AfterKey
             case _ => keyBuilder.append(c)
-      case AfterKey =>
-        c match
+      case AfterKey => c match
           case ' ' | '\t' | '\r' | '\n' => ()
           case ':'                      => phase = BeforeValue
           case _                        => ()
-      case BeforeValue =>
-        c match
+      case BeforeValue => c match
           case ' ' | '\t' | '\r' | '\n' => ()
           case '"'                      =>
             contentBuffer.clear()
@@ -143,8 +139,7 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
             phase = InOtherValue
       case InStringValue => handleStringValueChar(c, out)
       case InOtherValue  => handleOtherValueChar(c, out)
-      case AfterValue    =>
-        c match
+      case AfterValue    => c match
           case ' ' | '\t' | '\r' | '\n' => ()
           case ','                      => phase = ObjStart
           case '}'                      => phase = PostObj
@@ -177,8 +172,7 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
         case '"'  =>
           emitFinal(out)
           phase = AfterValue
-        case _ =>
-          if isCurrentTracked then contentBuffer.append(c)
+        case _ => if isCurrentTracked then contentBuffer.append(c)
 
   private def handleOtherValueChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     if otherStringEscape then
@@ -192,8 +186,7 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
         case '"' =>
           otherInString = false
           if isCurrentTracked then contentBuffer.append(c)
-        case _ =>
-          if isCurrentTracked then contentBuffer.append(c)
+        case _ => if isCurrentTracked then contentBuffer.append(c)
     else
       c match
         case '"' =>
@@ -215,19 +208,19 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
         case ',' if otherDepth == 0 =>
           emitFinal(out)
           phase = ObjStart
-        case _ =>
-          if isCurrentTracked then contentBuffer.append(c)
+        case _ => if isCurrentTracked then contentBuffer.append(c)
 
-  private def unescapeChar(c: Char): Char = c match
-    case 'n'   => '\n'
-    case 't'   => '\t'
-    case 'r'   => '\r'
-    case 'b'   => '\b'
-    case 'f'   => '\f'
-    case '"'   => '"'
-    case '\\'  => '\\'
-    case '/'   => '/'
-    case other => other
+  private def unescapeChar(c: Char): Char =
+    c match
+      case 'n'   => '\n'
+      case 't'   => '\t'
+      case 'r'   => '\r'
+      case 'b'   => '\b'
+      case 'f'   => '\f'
+      case '"'   => '"'
+      case '\\'  => '\\'
+      case '/'   => '/'
+      case other => other
 
 object JsonStreamingState:
   /** True iff `text`'s tail could be the start of a JSON value boundary (closing quote, comma, or right brace) that

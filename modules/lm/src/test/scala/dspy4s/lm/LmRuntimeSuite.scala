@@ -60,9 +60,10 @@ class LmRuntimeSuite extends FunSuite:
 
   test("LanguageModel.acall suspends the call on the supplied execution context") {
     val pending            = ArrayBuffer.empty[Runnable]
-    given ExecutionContext = new ExecutionContext:
-      override def execute(runnable: Runnable): Unit     = pending += runnable
-      override def reportFailure(cause: Throwable): Unit = throw cause
+    given ExecutionContext =
+      new ExecutionContext:
+        override def execute(runnable   : Runnable): Unit  = pending += runnable
+        override def reportFailure(cause: Throwable): Unit = throw cause
     given RuntimeContext = RuntimeEnvironment.current
 
     val lm     = new StubLanguageModel(Vector(Right(baseResponse)))

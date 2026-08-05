@@ -21,7 +21,7 @@ import scala.collection.mutable.ArrayBuffer
 class KNNFewShotSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val gold = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3", "q4" -> "a4")
 

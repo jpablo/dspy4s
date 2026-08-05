@@ -10,9 +10,9 @@ import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 
 final case class LabeledFewShotConfig(
-    k: DemoCount = DemoCount(16),
-    sample: Boolean = true,
-    seed: Long = 0L
+    k     : DemoCount = DemoCount(16),
+    sample: Boolean   = true,
+    seed  : Long      = 0L
 )
 
 final class LabeledFewShot[P: OptimizableTraversal](
@@ -22,10 +22,10 @@ final class LabeledFewShot[P: OptimizableTraversal](
   override val name: String = "labeled_few_shot"
 
   override def compile(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P] = None,
-      valset: Option[Vector[Example]] = None
+      teacher : Option[P]               = None,
+      valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val ps = summon[OptimizableTraversal[P]]
 

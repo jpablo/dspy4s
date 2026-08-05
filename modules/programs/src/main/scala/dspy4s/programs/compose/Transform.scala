@@ -22,8 +22,7 @@ private[compose] object TransformResult:
   def guard[A](component: String)(result: => Either[DspyError, A]): Either[DspyError, A] =
     try result
     catch
-      case NonFatal(error) =>
-        Left(RuntimeError(
+      case NonFatal(error) => Left(RuntimeError(
           component,
           Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
         ))
@@ -34,7 +33,7 @@ private[compose] object UnaryOptimizableTraversal:
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[W, N] =
     new OptimizableTraversal.Of[W, N]:
-      def arity(program: W): Int                                         = inner.arity(get(program))
+      def arity(program  : W): Int                                       = inner.arity(get(program))
       def inspect(program: W): Vector[OptimizableView]                   = inner.inspect(get(program))
       def replace(program: W, updates: Vector[OptimizableParameters]): W =
         replaceInner(program, inner.replace(get(program), updates))
@@ -100,9 +99,9 @@ object ContramapInput:
 
 /** Adapt both sides of a program in one transparent node, preserving the inner prediction envelope. */
 final case class Dimap[J, I, O, B, P <: Module[I, O]](
-    program: P,
+    program  : P,
     contramap: J => I,
-    map: O => B
+    map      : O => B
 ) extends TransparentModule[J, B]:
   override val moduleName: String = "dimap"
 

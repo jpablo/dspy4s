@@ -29,9 +29,10 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     DynamicValues.recordFromEntries(entries)
 
   /** Navigate into a nested `DynamicValue.Record` by field name. */
-  private def field(dv: DynamicValue, name: String): Option[DynamicValue] = dv match
-    case r: DynamicValue.Record => DynamicValues.recordGet(r, name)
-    case _                      => None
+  private def field(dv: DynamicValue, name: String): Option[DynamicValue] =
+    dv match
+      case r: DynamicValue.Record => DynamicValues.recordGet(r, name)
+      case _                      => None
 
   private def stringField(dv: DynamicValue, name: String): Option[String] =
     field(dv, name).collect { case DynamicValue.Primitive(PrimitiveValue.String(s)) => s }
@@ -44,10 +45,9 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
       Right(LmResponse(outputs = Vector.empty))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  private val schemaString =
-    """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
+  private val schemaString = """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
 
   private def invocationWithSchema(schema: Option[String]): AdapterInvocation =
     val signature = SignatureDsl.parse("question -> answer").toOption.get

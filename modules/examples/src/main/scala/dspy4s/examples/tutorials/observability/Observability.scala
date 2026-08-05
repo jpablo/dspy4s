@@ -34,11 +34,12 @@ object Observability:
   def retrieve(query: String): List[String] =
     List(s"(stubbed retrieval result for: $query)")
 
-  def agent = ReAct(
-    baseSignature = Signature.fromString("question -> answer"),
-    tools = Vector(ToolFunction.fromMethod(retrieve)),
-    maxIterations = IterationLimit(3)
-  )
+  def agent =
+    ReAct(
+      baseSignature = Signature.fromString("question -> answer"),
+      tools = Vector(ToolFunction.fromMethod(retrieve)),
+      maxIterations = IterationLimit(3)
+    )
 
   // ── Snippet 6 (lines 211–231) — a custom logging callback ──
   // | class AgentLoggingCallback(BaseCallback):
@@ -78,6 +79,7 @@ object Observability:
   // Not portable: dspy4s has no MLflow integration. The callback stream is the observability seam.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.observability.observabilityMain"
-@main def observabilityMain(): Unit = Demo.withLm {
-  println("Answer: " + Observability.runWithLogging("Which baseball team does Shohei Ohtani play for?"))
-}
+@main def observabilityMain(): Unit =
+  Demo.withLm {
+    println("Answer: " + Observability.runWithLogging("Which baseball team does Shohei Ohtani play for?"))
+  }

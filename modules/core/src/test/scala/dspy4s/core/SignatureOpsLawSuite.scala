@@ -31,9 +31,8 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
   // already present -> the idempotent / dedup branch is hit) and sometimes fresh ("r" / "n").
   private val genOutField: Gen[FieldSpec]          = Gen.oneOf("x", "y", "r").map(FieldSpec(_))
   private val genInField: Gen[FieldSpec]           = Gen.oneOf("a", "b", "n").map(FieldSpec(_))
-  private val genOutFields: Gen[Vector[FieldSpec]] =
-    Gen.someOf(outputPool).map(_.toVector.distinct.map(FieldSpec(_)))
-  private val genInstr: Gen[String] = Gen.oneOf("inst-1", "inst-2", "inst-3")
+  private val genOutFields: Gen[Vector[FieldSpec]] = Gen.someOf(outputPool).map(_.toVector.distinct.map(FieldSpec(_)))
+  private val genInstr: Gen[String]                = Gen.oneOf("inst-1", "inst-2", "inst-3")
 
   // ── The two honest observations the @Law statements are checked under ────────────────────────────────────
 
@@ -55,7 +54,7 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
 
   /** Execute a stated `Monoid[OutputTransform]` law under output-observational equality of the transform. */
   private def outEq(eq: IsEq[OutputTransform], s: SignatureLayout): Boolean = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
-  private def inEq(eq: IsEq[InputTransform], s: SignatureLayout): Boolean   = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
+  private def inEq(eq : IsEq[InputTransform], s : SignatureLayout): Boolean = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))
 
   /** Execute a stated layout equation under observational equality. */
   private def holdsLayout(eq: IsEq[SignatureLayout]): Boolean = obsEq(eq.lhs, eq.rhs)

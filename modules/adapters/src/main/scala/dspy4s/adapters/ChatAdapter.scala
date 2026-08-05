@@ -44,9 +44,10 @@ final case class ChatAdapter(
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     ChatAdapterPrompt.format(invocation, useNativeFunctionCalling, parallelToolCalls, toolChoice)
 
-  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] = Some(
-    new ChatStreamingState(layout.outputFields)
-  )
+  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+    Some(
+      new ChatStreamingState(layout.outputFields)
+    )
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     ChatAdapterParser.parse(name, layout, output)
@@ -60,7 +61,7 @@ object ChatAdapter:
 
   /** Reserved field name that closes the structured output. */
   val CompletedFieldName: String = "completed"
-  val CompletedMarker: String = s"[[ ## $CompletedFieldName ## ]]"
+  val CompletedMarker: String    = s"[[ ## $CompletedFieldName ## ]]"
 
   /** Canonical type name to surface in the system prompt's field description block. Maps dspy4s's internal
     * `TypeRef.repr` to the names users will recognise (and that match Python DSPy).
@@ -72,29 +73,19 @@ object ChatAdapter:
     */
   def reminderHint(t: TypeRef): Option[String] =
     t match
-      case TypeRef.string =>
-        None
-      case TypeRef.list =>
-        Some("must be a valid JSON array")
-      case _ =>
-        Some(s"must be formatted as a valid ${displayTypeName(t)}")
+      case TypeRef.string => None
+      case TypeRef.list   => Some("must be a valid JSON array")
+      case _              => Some(s"must be formatted as a valid ${displayTypeName(t)}")
 
   /** Hint phrasing for the structure-example `# note: ...` comments. More specific than the reminder hint: enumerates
     * booleans and gives a brief "single X value" form for scalars.
     */
   def structureHint(t: TypeRef): Option[String] =
     t match
-      case TypeRef.string =>
-        None
-      case TypeRef.int =>
-        Some("must be a single int value")
-      case TypeRef.double =>
-        Some("must be a single float value")
-      case TypeRef.bool =>
-        Some("must be true or false")
-      case TypeRef.json =>
-        Some("must be a valid JSON object")
-      case TypeRef.list =>
-        Some("must be a valid JSON array")
-      case other =>
-        Some(s"must be a valid ${displayTypeName(other)}")
+      case TypeRef.string => None
+      case TypeRef.int    => Some("must be a single int value")
+      case TypeRef.double => Some("must be a single float value")
+      case TypeRef.bool   => Some("must be true or false")
+      case TypeRef.json   => Some("must be a valid JSON object")
+      case TypeRef.list   => Some("must be a valid JSON array")
+      case other          => Some(s"must be a valid ${displayTypeName(other)}")

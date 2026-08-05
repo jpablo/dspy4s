@@ -15,7 +15,7 @@ object Compose:
 
   /** Sequentially compose two programs, threading the first program's output value into the second. */
   def andThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
-      first: A,
+      first : A,
       second: B
   ): AndThen[I, X, O, A, B] = AndThen(first, second)
 
@@ -51,9 +51,9 @@ object Compose:
 
   /** Try `primary`, then a fixed fallback only when `policy` selects the primary error. */
   def recover[I, O, P <: Module[I, O], F <: Module[I, O]](
-      primary: P,
+      primary : P,
       fallback: F,
-      policy: RecoveryPolicy
+      policy  : RecoveryPolicy
   ): RecoverWith[I, O, P, F] = RecoverWith(primary, fallback, policy)
 
   /** Duplicate the input into `(I, I)`. The first half of a fan-out. */

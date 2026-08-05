@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicInteger
 private[programs] object RLMSandboxTools:
   def build(
       maxLlmCalls: LlmCallLimit,
-      subLm: Option[LanguageModel],
-      ctx: RuntimeContext
+      subLm      : Option[LanguageModel],
+      ctx        : RuntimeContext
   ): Vector[SandboxTool] =
     val counter = new AtomicInteger(0)
 
@@ -40,8 +40,7 @@ private[programs] object RLMSandboxTools:
       val lm = subLm.orElse(ctx.lm.collect { case m: LanguageModel => m })
       lm match
         case None        => Left(RuntimeError("rlm", "No LM configured. Configure an ambient LM or pass subLm to RLM."))
-        case Some(model) =>
-          model
+        case Some(model) => model
             .call(LmRequest(
               model = model.id,
               messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))

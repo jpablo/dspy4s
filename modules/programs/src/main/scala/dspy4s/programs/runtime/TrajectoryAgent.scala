@@ -89,8 +89,8 @@ object TrajectoryAgent:
     *   the final extraction over the rendered trajectory (typically an inner predict call)
     */
   def runAndExtract[S, E](
-      maxIterations: Int,
-      render: Vector[S] => String,
+      maxIterations  : Int,
+      render         : Vector[S] => String,
       extractAttempts: Int = 3
   )(
       step: (Vector[S], Int) => Either[DspyError, Step[S]]
@@ -99,8 +99,8 @@ object TrajectoryAgent:
   ): Either[DspyError, (E, String)] =
     for
       trajectory <- AgentLoop.run[Vector[S], Vector[S]](Vector.empty, 0, maxIterations)(onExhausted = Right(_))(step)
-      rendered = render(trajectory)
-      extracted <- truncateOnOverflow(trajectory, extractAttempts)(render)(extract)._1
+      rendered    = render(trajectory)
+      extracted  <- truncateOnOverflow(trajectory, extractAttempts)(render)(extract)._1
     yield (extracted, rendered)
 
   /** Prediction-specialized [[runAndExtract]]: preserve the extractor's complete typed/raw result and add the full,
@@ -111,9 +111,9 @@ object TrajectoryAgent:
     * rather than rebuilding the raw envelope also preserves completions, LM usage, and any future raw metadata.
     */
   def runAndExtractPrediction[S, O](
-      maxIterations: Int,
-      render: Vector[S] => String,
-      trajectoryKey: String,
+      maxIterations  : Int,
+      render         : Vector[S] => String,
+      trajectoryKey  : String,
       extractAttempts: Int = 3
   )(
       step: (Vector[S], Int) => Either[DspyError, Step[S]]
@@ -121,8 +121,7 @@ object TrajectoryAgent:
       extract: String => Either[DspyError, Prediction[O]]
   ): Either[DspyError, Prediction[O]] =
     runAndExtract[S, Prediction[O]](maxIterations, render, extractAttempts)(step)(extract).map {
-      case (extracted, rendered) =>
-        extracted.copy(raw =
+      case (extracted, rendered) => extracted.copy(raw =
           extracted.raw.withValue(
             trajectoryKey,
             DynamicValue.Primitive(PrimitiveValue.String(rendered))

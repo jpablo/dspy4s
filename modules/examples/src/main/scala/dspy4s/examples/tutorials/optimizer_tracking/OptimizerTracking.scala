@@ -37,9 +37,10 @@ object OptimizerTracking:
   final class CompileTrackingCallback extends CallbackHandler:
     private val lmCalls                                                    = new AtomicInteger(0)
     def calls: Int                                                         = lmCalls.get()
-    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-      case _: LmEndEvent => val _ = lmCalls.incrementAndGet()
-      case _             => ()
+    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+      event match
+        case _: LmEndEvent => val _ = lmCalls.incrementAndGet()
+        case _             => ()
   // --8<-- [end:tracking-callback]
 
   val metric: Metric = new ExactMatch(answerField = "answer")
@@ -94,10 +95,11 @@ object OptimizerTracking:
   // --8<-- [end:reload]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.optimizer_tracking.optimizerTrackingMain"
-@main def optimizerTrackingMain(): Unit = Demo.withLm {
-  OptimizerTracking.optimizeWithTracking(OptimizerTracking.student()) match
-    case Right((optimized, calls)) =>
-      println(s"optimized program: ${optimized.moduleName}")
-      println(s"tracked $calls LM calls during optimization")
-    case Left(err) => println(s"optimization failed: ${err.message}")
-}
+@main def optimizerTrackingMain(): Unit =
+  Demo.withLm {
+    OptimizerTracking.optimizeWithTracking(OptimizerTracking.student()) match
+      case Right((optimized, calls)) =>
+        println(s"optimized program: ${optimized.moduleName}")
+        println(s"tracked $calls LM calls during optimization")
+      case Left(err) => println(s"optimization failed: ${err.message}")
+  }

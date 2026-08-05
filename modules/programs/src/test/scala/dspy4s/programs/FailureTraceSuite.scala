@@ -22,7 +22,7 @@ import zio.blocks.schema.DynamicValue
 class FailureTraceSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Returns text with no field markers, so a two-output ChatAdapter signature fails to parse. */
   private final class BadLm extends LanguageModel:
@@ -32,7 +32,7 @@ class FailureTraceSuite extends FunSuite:
       Right(LmResponse(outputs = Vector(LmOutput(text = "Paris is the answer"))))
 
   // Two outputs → no single-output text fallback, so a marker-less response is a genuine parse failure.
-  private val layout: SignatureLayout = SignatureLayout.parse("question -> answer, confidence").toOption.get
+  private val layout: SignatureLayout                = SignatureLayout.parse("question -> answer, confidence").toOption.get
   private val call: ProgramCall[DynamicValue.Record] =
     ProgramCall(input = DynamicValues.record("question" := "capital of France?"))
 

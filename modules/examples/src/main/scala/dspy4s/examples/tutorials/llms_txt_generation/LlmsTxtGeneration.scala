@@ -62,26 +62,26 @@ object LlmsTxtGeneration:
     private val generateLlmsTxt  = ChainOfThought(Signature.of[GenerateLLMsTxt])
 
     def forward(
-        repoUrl: String,
-        fileTree: String,
+        repoUrl      : String,
+        fileTree     : String,
         readmeContent: String,
-        packageFiles: String
+        packageFiles : String
     )(using RuntimeContext): Either[DspyError, String] =
       for
         repo      <- analyzeRepo((repo_url = repoUrl, file_tree = fileTree, readme_content = readmeContent))
         structure <- analyzeStructure((file_tree = fileTree, package_files = packageFiles))
         examples  <- generateExamples(
-          (repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: ${repo.output.key_concepts}")
-        )
+                      (repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: ${repo.output.key_concepts}")
+                    )
         llms <- generateLlmsTxt((
-          project_purpose = repo.output.project_purpose,
-          key_concepts = repo.output.key_concepts,
-          architecture_overview = repo.output.architecture_overview,
-          important_directories = structure.output.important_directories,
-          entry_points = structure.output.entry_points,
-          development_info = structure.output.development_info,
-          usage_examples = examples.output.usage_examples
-        ))
+                  project_purpose = repo.output.project_purpose,
+                  key_concepts = repo.output.key_concepts,
+                  architecture_overview = repo.output.architecture_overview,
+                  important_directories = structure.output.important_directories,
+                  entry_points = structure.output.entry_points,
+                  development_info = structure.output.development_info,
+                  usage_examples = examples.output.usage_examples
+                ))
       yield llms.output.llms_txt_content
   // --8<-- [end:analyzer]
 
@@ -92,20 +92,21 @@ object LlmsTxtGeneration:
   // ── Snippet 4 (lines 175–210) — run the generator ──
   // | analyzer = RepositoryAnalyzer(); result = analyzer(repo_url=..., file_tree=..., ...)
   def generateLlmsTxt(
-      repoUrl: String,
-      fileTree: String,
+      repoUrl      : String,
+      fileTree     : String,
       readmeContent: String,
-      packageFiles: String
+      packageFiles : String
   )(using RuntimeContext): Either[DspyError, String] =
     new RepositoryAnalyzer().forward(repoUrl, fileTree, readmeContent, packageFiles)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.llms_txt_generation.llmsTxtMain"
-@main def llmsTxtMain(): Unit = Demo.withLm {
-  val result = LlmsTxtGeneration.generateLlmsTxt(
-    repoUrl = "https://github.com/example/project",
-    fileTree = "src/main.py\nsrc/util.py\nREADME.md\npyproject.toml",
-    readmeContent = "# Project\nA small example project.",
-    packageFiles = "=== pyproject.toml ===\n[project]\nname = \"project\""
-  )
-  println("llms.txt: " + result)
-}
+@main def llmsTxtMain(): Unit =
+  Demo.withLm {
+    val result = LlmsTxtGeneration.generateLlmsTxt(
+      repoUrl = "https://github.com/example/project",
+      fileTree = "src/main.py\nsrc/util.py\nREADME.md\npyproject.toml",
+      readmeContent = "# Project\nA small example project.",
+      packageFiles = "=== pyproject.toml ===\n[project]\nname = \"project\""
+    )
+    println("llms.txt: " + result)
+  }

@@ -19,7 +19,6 @@ object Demo:
     val model = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
     OpenAiLanguageModel.fromEnv(model) match
       case Left(err) => sys.error(s"Could not initialize LM (is OPENAI_API_KEY set?): $err")
-      case Right(lm) =>
-        RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      case Right(lm) => RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
           body(using RuntimeEnvironment.current)
         }

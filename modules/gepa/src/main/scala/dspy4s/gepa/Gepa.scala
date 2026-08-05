@@ -21,9 +21,9 @@ import dspy4s.programs.ProgramRunner
   *   budget + search settings ([[GepaConfig]])
   */
 final class Gepa[P](
-    metric: FeedbackMetric,
+    metric      : FeedbackMetric,
     reflectionLm: LanguageModel,
-    config: GepaConfig
+    config      : GepaConfig
 )(using OptimizableTraversal[P], ProgramRunner[P]):
 
   val name: String = "gepa"

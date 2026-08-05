@@ -33,14 +33,14 @@ import scala.collection.mutable.ArrayBuffer
 class ReActSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Test adapter. For a react step (its outputs include `next_tool_name`) it parses the convention
     * `thought || tool_name || key=value` into the three react fields (`key=value` -> `{key: value}` args, blank ->
     * `{}`). For the extractor step it assigns the full text to every output field.
     */
   private object ScriptedAdapter extends Adapter:
-    override val name: String = "scripted-react-adapter"
+    override val name: String                                                                                    = "scripted-react-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -65,9 +65,9 @@ class ReActSuite extends FunSuite:
         Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := text)*)))
 
   private final class SearchTool extends ToolFunction:
-    val calls: AtomicInteger         = AtomicInteger(0)
-    override val name: String        = "search"
-    override val description: String = "Look up a fact about the world."
+    val calls: AtomicInteger                                                                              = AtomicInteger(0)
+    override val name: String                                                                             = "search"
+    override val description: String                                                                      = "Look up a fact about the world."
     override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
       calls.incrementAndGet()
       Right(ToolFunction.result("Brussels"))
@@ -189,8 +189,8 @@ class ReActSuite extends FunSuite:
 
   /** ScriptedAdapter variant that records the rendered trajectory of every EXTRACTOR call. */
   private final class ExtractProbeAdapter extends Adapter:
-    val extractorTrajectories: ArrayBuffer[String] = ArrayBuffer.empty
-    override val name: String                      = "extract-probe"
+    val extractorTrajectories: ArrayBuffer[String]                                                               = ArrayBuffer.empty
+    override val name: String                                                                                    = "extract-probe"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       if !invocation.layout.outputFields.exists(_.name == "next_tool_name") then
         dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")

@@ -10,9 +10,7 @@ private[programs] object SandboxToolBridge:
     tools.map { tool =>
       SandboxTool(
         name = tool.name,
-        parameters = tool.argSchema.map { case (name, typeRef) =>
-          SandboxTool.Param(name, typeRef.pythonTypeName)
-        },
+        parameters = tool.argSchema.map { case (name, typeRef) => SandboxTool.Param(name, typeRef.pythonTypeName) },
         invoke = kwargs => tool.invoke(kwargs)(using ctx)
       )
     }

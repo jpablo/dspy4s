@@ -50,7 +50,7 @@ class ChainOfThoughtSuite extends FunSuite:
     * constructor so different tests can exercise different output shapes.
     */
   private class ScriptedAdapter(
-      reasoning: String,
+      reasoning : String,
       baseValues: Map[String, Any]
   ) extends Adapter:
     override val name: String = "scripted"
@@ -107,13 +107,14 @@ class ChainOfThoughtSuite extends FunSuite:
         usage = Some(LmUsage(totalTokens = 10, promptTokens = 4, completionTokens = 6))
       ))
 
-  private def settings(adapter: Adapter): RuntimeContext = RuntimeContext(
-    lm = Some(FixedLm),
-    adapter = Some(adapter)
-  )
+  private def settings(adapter: Adapter): RuntimeContext =
+    RuntimeContext(
+      lm = Some(FixedLm),
+      adapter = Some(adapter)
+    )
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   // ── Happy path ──────────────────────────────────────────────────────────
 

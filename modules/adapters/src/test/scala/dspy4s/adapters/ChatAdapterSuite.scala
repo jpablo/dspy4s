@@ -226,8 +226,7 @@ class ChatAdapterSuite extends FunSuite:
     val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
 
     given RuntimeContext = RuntimeEnvironment.current
-    val completion       =
-      """[[ ## answer ## ]]
+    val completion       = """[[ ## answer ## ]]
         |Brussels
         |
         |[[ ## score ## ]]
@@ -246,8 +245,7 @@ class ChatAdapterSuite extends FunSuite:
     val signature        = SignatureDsl.parse("question -> reasoning, answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
 
-    val completion =
-      """[[ ## reasoning ## ]]
+    val completion = """[[ ## reasoning ## ]]
         |First I consider X.
         |Then I weigh Y.
         |Finally I conclude Z.
@@ -293,8 +291,7 @@ class ChatAdapterSuite extends FunSuite:
   test("parse skips unknown markers without polluting tracked fields") {
     val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
-    val completion       =
-      """[[ ## thinking ## ]]
+    val completion       = """[[ ## thinking ## ]]
         |hallucinated section
         |
         |[[ ## answer ## ]]

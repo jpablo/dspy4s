@@ -49,18 +49,17 @@ object Optimize:
   val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "answer_match"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val q        = example.get("question").map(DynamicValues.renderText).getOrElse("")
       val gold     = example.get("answer").map(DynamicValues.renderText).getOrElse("")
       val goldPlan = example.get("goldplan").map(DynamicValues.renderText).getOrElse("")
       plannerOutputShape.decode(prediction.values) match
-        case Left(err) =>
-          Right(ScoreWithFeedback(
+        case Left(err) => Right(ScoreWithFeedback(
             0.0,
             s"""Your plan for "$q" was not a valid QueryPlan (${err.message}). """ +
               "Output every field with a valid enum value (agg, column, groupBy, filters, timeRange, sort, limit, answerKind)."
@@ -98,10 +97,10 @@ object Optimize:
       scores.sum / scores.size
 
   final case class OptimizationReport(
-      baselineAccuracy: Double,
-      optimizedAccuracy: Double,
+      baselineAccuracy    : Double,
+      optimizedAccuracy   : Double,
       optimizedInstruction: String,
-      numCandidates: Int
+      numCandidates       : Int
   )
 
   /** Measure the baseline planner, evolve a better instruction with GEPA, measure again, all on the held-out val split,

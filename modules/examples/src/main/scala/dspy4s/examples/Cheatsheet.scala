@@ -180,10 +180,10 @@ object Cheatsheet:
 
   // | BootstrapFewShotWithRandomSearch(metric=..., max_bootstrapped_demos=2, num_candidate_programs=8).compile(student, trainset, valset=devset)
   def bootstrapRandomSearch(
-      metric: Metric,
-      student: DynamicPredict,
+      metric  : Metric,
+      student : DynamicPredict,
       trainset: Vector[Example],
-      devset: Vector[Example]
+      devset  : Vector[Example]
   )(
       using RuntimeContext
   ): Either[DspyError, DynamicPredict] =
@@ -196,7 +196,7 @@ object Cheatsheet:
   // ── Snippets 16/17 — save / load ──
   // Ported (PORT_GAPS G-4): persist each leaf's `OptimizableParameters` (instructions + demos + module config) as JSON.
   // `load` applies it to a fresh program with the same optimizable traversal/order; metadata/resources stay fresh.
-  def save(program: DynamicPredict, path: String): Either[DspyError, Unit] = ProgramPersistence.save(program, path)
+  def save(program: DynamicPredict, path: String): Either[DspyError, Unit]         = ProgramPersistence.save(program, path)
   def load(fresh: DynamicPredict, path: String): Either[DspyError, DynamicPredict] =
     ProgramPersistence.load(fresh, path)
 

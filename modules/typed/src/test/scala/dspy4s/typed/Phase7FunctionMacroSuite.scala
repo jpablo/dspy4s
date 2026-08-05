@@ -18,16 +18,14 @@ def p7ScalarEmotion(sentence: String): P7Emotion =
   P7Emotion.joy
 
 @nowarn("msg=unused")
-def p7NamedEmotion(sentence: String): (sentiment: P7Emotion) =
-  (sentiment = P7Emotion.joy)
+def p7NamedEmotion(sentence: String): (sentiment: P7Emotion) = (sentiment = P7Emotion.joy)
 
 @nowarn("msg=unused")
 def p7ScoredEmotion(sentence: String, hint: String): (sentiment: P7Emotion, confidence: Double) =
   (sentiment = P7Emotion.love, confidence = 0.9)
 
 @nowarn("msg=unused")
-def p7TupleEmotion(sentence: String): (P7Emotion, Double) =
-  (P7Emotion.joy, 0.9)
+def p7TupleEmotion(sentence: String): (P7Emotion, Double) = (P7Emotion.joy, 0.9)
 
 @nowarn("msg=unused")
 def p7CaseClassEmotion(sentence: String): P7Score =
@@ -126,13 +124,12 @@ class Phase7FunctionMacroSuite extends FunSuite:
   }
 
   test("type-only function signature keeps named inputs and named tuple outputs") {
-    val sig =
-      Signature.fromType[
-        (sentence: String, hint: String) => (sentiment: P7Emotion, confidence: Double)
-      ](
-        name = "ScoredEmotion",
-        instructions = "Classify emotion with confidence."
-      )
+    val sig = Signature.fromType[
+      (sentence: String, hint: String) => (sentiment: P7Emotion, confidence: Double)
+    ](
+      name = "ScoredEmotion",
+      instructions = "Classify emotion with confidence."
+    )
 
     assertEquals(sig.layout.name, "ScoredEmotion")
     assertEquals(sig.instructions, Some("Classify emotion with confidence."))

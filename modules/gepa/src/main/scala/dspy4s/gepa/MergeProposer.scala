@@ -26,12 +26,12 @@ final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accep
   * [[onMergeAccepted]]. `performed*` track already-attempted triplets so the same merge is not retried.
   */
 final class MergeProposer[P](
-    valset: Vector[Example],
+    valset             : Vector[Example],
     maxMergeInvocations: MergeInvocationLimit,
-    rng: Random,
-    cache: GepaEvalCache[P],
-    maxAttempts: MergeInvocationLimit = MergeInvocationLimit(10),
-    subsampleSize: MergeSubsampleSize = MergeSubsampleSize(5)
+    rng                : Random,
+    cache              : GepaEvalCache[P],
+    maxAttempts        : MergeInvocationLimit = MergeInvocationLimit(10),
+    subsampleSize      : MergeSubsampleSize   = MergeSubsampleSize(5)
 ):
   import MergeProposer.*
 
@@ -64,16 +64,15 @@ final class MergeProposer[P](
     if dominators.size < 2 || state.candidates.size < 3 then return None
 
     findTriplet(state, dominators).flatMap { case (id1, id2, ancestor) =>
-      val (merged, desc) =
-        crossover(
-          state.candidates(ancestor),
-          id1,
-          state.candidates(id1),
-          id2,
-          state.candidates(id2),
-          state.aggregateScore,
-          rng
-        )
+      val (merged, desc) = crossover(
+        state.candidates(ancestor),
+        id1,
+        state.candidates(id1),
+        id2,
+        state.candidates(id2),
+        state.aggregateScore,
+        rng
+      )
       if performedDescs.contains((id1, id2, desc)) then None // this exact merge was already produced
       else
         performedTriplets += ((id1, id2, ancestor))
@@ -136,13 +135,13 @@ object MergeProposer:
     * (the "description" used to dedup identical merges).
     */
   private[gepa] def crossover(
-      ancestor: Candidate,
-      id1: Int,
-      cand1: Candidate,
-      id2: Int,
-      cand2: Candidate,
+      ancestor      : Candidate,
+      id1           : Int,
+      cand1         : Candidate,
+      id2           : Int,
+      cand2         : Candidate,
       aggregateScore: Int => Double,
-      rng: Random
+      rng           : Random
   ): (Candidate, Vector[Int]) =
     val components = ancestor.keys.toVector.sorted
     val chosen     = components.map { component =>

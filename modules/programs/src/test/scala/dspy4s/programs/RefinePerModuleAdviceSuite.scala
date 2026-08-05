@@ -34,7 +34,7 @@ import scala.collection.mutable
 class RefinePerModuleAdviceSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private case class Q(q: String)
   private case class Cand(answer: String)
@@ -51,15 +51,14 @@ class RefinePerModuleAdviceSuite extends FunSuite:
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
       extends Module[Q, Cand]:
     override val moduleName: String                            = "hint_then_answer"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] =
-      ModuleLifecycle.typed(call => rec("q" := call.input.q))
+    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       for
         hintPred <- hinter(ProgramCall(input = rec("q" := call.input.q)))
-        hint = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
-        ansPred <- answerer(ProgramCall(input = rec("q" := call.input.q, "hint" := hint)))
-        answer  <- ansPred.raw.asString("answer")
+        hint      = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
+        ansPred  <- answerer(ProgramCall(input = rec("q" := call.input.q, "hint" := hint)))
+        answer   <- ansPred.raw.asString("answer")
       yield Prediction(output = Cand(answer), raw = ansPred.raw)
 
   /** Generic adapter that tags each prompt with its requested OUTPUT fields (so the LM and the test can route), and

@@ -61,7 +61,7 @@ class StreamingLiveSuite extends FunSuite:
     OpenAiLanguageModel(model = model, client = client)
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def collectStream(events: dspy4s.core.contracts.ClosableIterator[StreamEvent]): Vector[StreamEvent] =
     val buf = ArrayBuffer.empty[StreamEvent]
@@ -84,11 +84,11 @@ class StreamingLiveSuite extends FunSuite:
         for
           answer    <- predict1(input)
           judgement <- predict2(input.copy(
-            input = input.input.updated(
-              "answer",
-              answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
-            )
-          ))
+                         input = input.input.updated(
+                           "answer",
+                           answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+                         )
+                       ))
         yield judgement.raw
 
   /** Direct dspy4s port of Python DSPy's `tests/streaming/test_streaming.py::test_stream_listener_chat_adapter`.

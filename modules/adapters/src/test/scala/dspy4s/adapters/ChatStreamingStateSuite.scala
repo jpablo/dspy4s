@@ -27,8 +27,7 @@ class ChatStreamingStateSuite extends FunSuite:
 
   test("multi-output: each marker switches the active field") {
     val state = new ChatStreamingState(Vector(output("reasoning"), output("answer")))
-    val raw   =
-      """[[ ## reasoning ## ]]
+    val raw   = """[[ ## reasoning ## ]]
         |think step by step
         |[[ ## answer ## ]]
         |42
@@ -41,8 +40,7 @@ class ChatStreamingStateSuite extends FunSuite:
 
   test("multi-line field values arrive intact") {
     val state = new ChatStreamingState(Vector(output("reasoning"), output("answer")))
-    val raw   =
-      """[[ ## reasoning ## ]]
+    val raw   = """[[ ## reasoning ## ]]
         |line one
         |line two
         |line three
@@ -72,8 +70,7 @@ class ChatStreamingStateSuite extends FunSuite:
     // The key win over the old `prefix:` framing: stray text on its own line
     // that happens to look like a label is preserved as content.
     val state = new ChatStreamingState(Vector(output("reasoning"), output("answer")))
-    val raw   =
-      """[[ ## reasoning ## ]]
+    val raw   = """[[ ## reasoning ## ]]
         |Note: this is interesting.
         |Another line.
         |[[ ## answer ## ]]
@@ -93,8 +90,8 @@ class ChatStreamingStateSuite extends FunSuite:
   }
 
   test("text before the first marker is discarded (no fallback fields)") {
-    val state = new ChatStreamingState(Vector(output("reasoning"), output("answer")))
-    val out   = drive(state, "Some preamble\n[[ ## reasoning ## ]]\nreal\n[[ ## answer ## ]]\n1\n[[ ## completed ## ]]")
+    val state   = new ChatStreamingState(Vector(output("reasoning"), output("answer")))
+    val out     = drive(state, "Some preamble\n[[ ## reasoning ## ]]\nreal\n[[ ## answer ## ]]\n1\n[[ ## completed ## ]]")
     val grouped = collect(out)
     assertEquals(grouped.values.mkString.contains("preamble"), false)
     assertEquals(grouped.get("reasoning"), Some("real"))

@@ -12,14 +12,15 @@ package dspy4s.core.contracts
 final case class TypeRef(repr: String) derives CanEqual:
 
   /** Python/DSPy-facing name for well-known wire types. `None` means there is no safe direct Python equivalent. */
-  def pythonTypeName: Option[String] = repr match
-    case "string" => Some("str")
-    case "int"    => Some("int")
-    case "double" => Some("float")
-    case "bool"   => Some("bool")
-    case "list"   => Some("list")
-    case "json"   => Some("dict")
-    case _        => None
+  def pythonTypeName: Option[String] =
+    repr match
+      case "string" => Some("str")
+      case "int"    => Some("int")
+      case "double" => Some("float")
+      case "bool"   => Some("bool")
+      case "list"   => Some("list")
+      case "json"   => Some("dict")
+      case _        => None
 
 object TypeRef:
   val string: TypeRef = TypeRef("string")

@@ -20,7 +20,7 @@ case class BlmOutput(answer: String) derives Schema
 class BoundLmSuite extends FunSuite:
 
   private object EchoAdapter extends Adapter:
-    override val name: String = "echo"
+    override val name: String                                                                                    = "echo"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -38,7 +38,7 @@ class BoundLmSuite extends FunSuite:
   private val boundLm   = new FixedLm("bound", "BOUND")
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def underAmbient[A](body: RuntimeContext ?=> A): A =
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(ambientLm), adapter = Some(EchoAdapter))) {

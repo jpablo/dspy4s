@@ -39,12 +39,12 @@ import scala.collection.mutable
   *   upstream-style preamble.
   */
 final case class COPROConfig(
-    metric: Metric,
-    breadth: CoproBreadth = CoproBreadth(10),
-    depth: RoundCount = RoundCount(3),
-    initTemperature: Double = 1.4,
-    seed: Long = 0L,
-    instructionMarker: String =
+    metric           : Metric,
+    breadth          : CoproBreadth = CoproBreadth(10),
+    depth            : RoundCount   = RoundCount(3),
+    initTemperature  : Double       = 1.4,
+    seed             : Long         = 0L,
+    instructionMarker: String       =
       "You are an instruction optimizer for large language models. Propose an improved instruction."
 )
 
@@ -87,10 +87,10 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P] = None,
-      valset: Option[Vector[Example]] = None
+      teacher : Option[P]               = None,
+      valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
     val leafCount                = ps.read(student).size
@@ -187,10 +187,9 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
     * task prompts.
     */
   private def instructionGenLayout(withAttempts: Boolean): SignatureLayout =
-    val inputs =
-      Vector(FieldSpec(name = "basic_instruction")) ++
-        (if withAttempts then Vector(FieldSpec(name = "attempted_instructions"))
-         else Vector.empty)
+    val inputs = Vector(FieldSpec(name = "basic_instruction")) ++
+      (if withAttempts then Vector(FieldSpec(name = "attempted_instructions"))
+       else Vector.empty)
     SignatureLayout.of(
       name = "GenerateInstruction",
       inputFields = inputs,
@@ -203,21 +202,20 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
     * `attempts` (ascending by score) seed the refinement variant when non-empty.
     */
   private def generateInstructions(
-      leafIdx: Int,
+      leafIdx        : Int,
       baseInstruction: String,
-      fieldNames: Vector[String],
-      count: Int,
-      attempts: Vector[(String, Double)],
-      round: Int
+      fieldNames     : Vector[String],
+      count          : Int,
+      attempts       : Vector[(String, Double)],
+      round          : Int
   )(using RuntimeContext): Vector[String] =
     if count <= 0 then Vector.empty
     else
       val withAttempts = attempts.nonEmpty
       val gen          = DynamicPredict(layout = instructionGenLayout(withAttempts), name = Some("copro_instruct"))
-      val attemptsText =
-        attempts.zipWithIndex
-          .map { case ((instr, score), i) => s"Instruction #${i + 1}: $instr\nResulting Score #${i + 1}: $score" }
-          .mkString("\n")
+      val attemptsText = attempts.zipWithIndex
+        .map { case ((instr, score), i) => s"Instruction #${i + 1}: $instr\nResulting Score #${i + 1}: $score" }
+        .mkString("\n")
       val fieldsHint                                                   = fieldNames.mkString(", ")
       val baseInputs: Vector[(String, zio.blocks.schema.DynamicValue)] =
         Vector("basic_instruction" := s"$baseInstruction (fields: $fieldsHint)") ++
@@ -239,8 +237,7 @@ final class COPRO[P: {OptimizableTraversal, ProgramRunner}](config: COPROConfig)
           rolloutId = Some(rolloutId)
         )
         gen(call) match
-          case Right(pred) =>
-            DynamicValues.recordGet(pred.output, "proposed_instruction")
+          case Right(pred) => DynamicValues.recordGet(pred.output, "proposed_instruction")
               .map(DynamicValues.renderText)
               .map(_.trim)
               .filter(_.nonEmpty)

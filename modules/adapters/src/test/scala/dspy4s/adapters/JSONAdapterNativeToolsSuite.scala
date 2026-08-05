@@ -30,15 +30,14 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Left(RuntimeError("stub", "unused"))
 
-  private val layout: SignatureLayout =
-    SignatureLayout.create(
-      name = "Search",
-      inputFields = Vector(FieldSpec("question")),
-      outputFields = Vector(
-        FieldSpec("answer"),
-        FieldSpec("tool_calls", typeRef = TypeRef.toolCalls)
-      )
-    ).toOption.get
+  private val layout: SignatureLayout = SignatureLayout.create(
+    name = "Search",
+    inputFields = Vector(FieldSpec("question")),
+    outputFields = Vector(
+      FieldSpec("answer"),
+      FieldSpec("tool_calls", typeRef = TypeRef.toolCalls)
+    )
+  ).toOption.get
 
   private val tools: Vector[ToolSpec] = Vector(
     ToolSpec(

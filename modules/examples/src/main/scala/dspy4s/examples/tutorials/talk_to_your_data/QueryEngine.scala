@@ -30,24 +30,21 @@ object QueryEngine:
         List(List(metricLabel(plan), formatNumber(v, plan.agg)))
       )
     else
-      val grouped: Vector[(List[String], Double)] =
-        filtered
-          .groupBy(o => plan.groupBy.map(stringField(o, _)))
-          .toVector
-          .map((key, rows) => key -> aggregate(rows, plan.agg, plan.column))
+      val grouped: Vector[(List[String], Double)] = filtered
+        .groupBy(o => plan.groupBy.map(stringField(o, _)))
+        .toVector
+        .map((key, rows) => key -> aggregate(rows, plan.agg, plan.column))
       val descending = plan.sort.forall(_.descending) // default: largest first
       val ascending  = grouped.sortBy(_._2)
       val ordered    = if descending then ascending.reverse else ascending
       val limited    = plan.limit.filter(_ > 0).fold(ordered)(ordered.take)
       val columns    = plan.groupBy :+ metricLabel(plan)
       val rows       = limited.map((key, v) => key :+ formatNumber(v, plan.agg)).toList
-      val answer     =
-        limited.headOption match
-          case Some((key, v)) =>
-            plan.answerKind match
-              case AnswerKind.Category => key.mkString(" / ")
-              case AnswerKind.Number   => formatNumber(v, plan.agg)
-          case None => "(no rows)"
+      val answer     = limited.headOption match
+        case Some((key, v)) => plan.answerKind match
+            case AnswerKind.Category => key.mkString(" / ")
+            case AnswerKind.Number   => formatNumber(v, plan.agg)
+        case None => "(no rows)"
       val value = limited.headOption.map(_._2)
       EvalResult(answer, value, columns, rows)
 
@@ -72,21 +69,23 @@ object QueryEngine:
 
   // ── fields & filters ────────────────────────────────────────────────────────────────────────────────────
 
-  private def stringField(o: Order, column: String): String = column.trim.toLowerCase match
-    case "region"   => o.region
-    case "category" => o.category
-    case "product"  => o.product
-    case "date"     => o.date
-    case "quantity" => o.quantity.toString
-    case _          => formatNumber(numericField(o, column), Agg.Sum)
+  private def stringField(o: Order, column: String): String =
+    column.trim.toLowerCase match
+      case "region"   => o.region
+      case "category" => o.category
+      case "product"  => o.product
+      case "date"     => o.date
+      case "quantity" => o.quantity.toString
+      case _          => formatNumber(numericField(o, column), Agg.Sum)
 
-  private def numericField(o: Order, column: String): Double = column.trim.toLowerCase match
-    case "total"     => o.total
-    case "quantity"  => o.quantity.toDouble
-    case "unitprice" => o.unitPrice
-    case "discount"  => o.discount
-    case "orderid"   => o.orderId.toDouble
-    case _           => o.total
+  private def numericField(o: Order, column: String): Double =
+    column.trim.toLowerCase match
+      case "total"     => o.total
+      case "quantity"  => o.quantity.toDouble
+      case "unitprice" => o.unitPrice
+      case "discount"  => o.discount
+      case "orderid"   => o.orderId.toDouble
+      case _           => o.total
 
   private def passes(o: Order, f: Filter): Boolean =
     val numericColumn = Set("total", "quantity", "unitprice", "discount", "orderid").contains(f.column.trim.toLowerCase)
@@ -110,11 +109,12 @@ object QueryEngine:
           case FilterOp.Ne => l != r
           case _           => l == r // ordering ops are meaningless on labels; treat as equality
 
-  private def inRange(o: Order, range: Option[TimeRange]): Boolean = range match
-    case None     => true
-    case Some(tr) =>
-      val v = stringField(o, tr.column)
-      tr.start.forall(v >= _) && tr.end.forall(v <= _)
+  private def inRange(o: Order, range: Option[TimeRange]): Boolean =
+    range match
+      case None     => true
+      case Some(tr) =>
+        val v = stringField(o, tr.column)
+        tr.start.forall(v >= _) && tr.end.forall(v <= _)
 
   // ── formatting ──────────────────────────────────────────────────────────────────────────────────────────
 

@@ -96,6 +96,7 @@ object Tools:
   // Not portable: `ToolFunction.invoke` is synchronous; there is no async tool path.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.toolsMain"
-@main def toolsMain(): Unit = Demo.withLm {
-  println("ReAct: " + Tools.WeatherAgentExample.call("What's the weather like in Tokyo?"))
-}
+@main def toolsMain(): Unit =
+  Demo.withLm {
+    println("ReAct: " + Tools.WeatherAgentExample.call("What's the weather like in Tokyo?"))
+  }

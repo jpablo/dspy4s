@@ -29,7 +29,7 @@ class MergeProposerSuite extends FunSuite:
   private val second = OptimizableId(1)
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Two predictors must BOTH carry their token for "Paris": hinter emits good_hint only with TOKEN1; answerer emits
     * Paris only with TOKEN2 AND a good_hint. So a merge of a hinter-fixed and an answerer-fixed descendant is what
@@ -50,10 +50,10 @@ class MergeProposerSuite extends FunSuite:
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")

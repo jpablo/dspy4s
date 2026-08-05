@@ -15,8 +15,7 @@ import zio.blocks.schema.DynamicValue
 
 final class OptimizableParametersSuite extends FunSuite:
 
-  private val layout =
-    SignatureDsl.parse("question -> answer").toOption.get.withInstructions(Some("Be terse."))
+  private val layout = SignatureDsl.parse("question -> answer").toOption.get.withInstructions(Some("Be terse."))
 
   private val demos = Vector(
     Example("question" := "q1", "answer" := "a1").withInputs(Set("question")),

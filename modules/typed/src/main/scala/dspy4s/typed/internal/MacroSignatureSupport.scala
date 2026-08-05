@@ -9,11 +9,11 @@ import scala.quoted.*
 private[typed] object MacroSignatureSupport:
 
   def materialize[I: Type, O: Type](
-      nameExpr: Expr[String],
+      nameExpr        : Expr[String],
       instructionsExpr: Expr[String],
-      errorContext: String,
-      inputShapeExpr: Expr[Shape[I]],
-      outputShapeExpr: Expr[Shape[O]]
+      errorContext    : String,
+      inputShapeExpr  : Expr[Shape[I]],
+      outputShapeExpr : Expr[Shape[O]]
   )(using Quotes): Expr[Signature[I, O]] =
     val errorContextExpr = Expr(errorContext)
     '{

@@ -27,7 +27,7 @@ import scala.collection.mutable.ArrayBuffer
 class ProgramOfThoughtSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private final class RecordingInterpreter(responses: Vector[Either[DspyError, CodeResult]]) extends CodeInterpreter:
     private val idx                                                   = new AtomicInteger(0)
@@ -45,7 +45,7 @@ class ProgramOfThoughtSuite extends FunSuite:
     *   - any other signature → every output field gets the raw text as its value
     */
   private object ScriptedAdapter extends Adapter:
-    override val name: String = "scripted-pot-adapter"
+    override val name: String                                                                                    = "scripted-pot-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -53,9 +53,8 @@ class ProgramOfThoughtSuite extends FunSuite:
     ): Either[DspyError, ParsedOutput] =
       val names = layout.outputFields.map(_.name)
       if names.contains("generated_code") then
-        val entries: Seq[(String, DynamicValue)] =
-          Seq("generated_code" := output.text) ++
-            (if names.contains("reasoning") then Seq("reasoning" := "scripted reasoning") else Seq.empty)
+        val entries: Seq[(String, DynamicValue)] = Seq("generated_code" := output.text) ++
+          (if names.contains("reasoning") then Seq("reasoning" := "scripted reasoning") else Seq.empty)
         Right(ParsedOutput(values = rec(entries*)))
       else
         // Answer signature — every output field gets the LM's text.
@@ -250,7 +249,7 @@ class ProgramOfThoughtSuite extends FunSuite:
     // reached the answer signature (the finalOutput, not the printed noise).
     val codeOutputs = ArrayBuffer.empty[String]
     object RecordingAnswerAdapter extends Adapter:
-      override val name: String = "recording-answer"
+      override val name: String                                                                                    = "recording-answer"
       override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
         if invocation.layout.outputFields.exists(_.name == "answer") then
           dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "code_output")

@@ -10,19 +10,19 @@ import zio.blocks.schema.DynamicValue
   * intentionally record different input payloads.
   */
 trait CallObservation[-Call, Output]:
-  def inputs(call: Call): DynamicValue.Record
-  def traceEnabled(call: Call): Boolean
+  def inputs(call       : Call): DynamicValue.Record
+  def traceEnabled(call : Call): Boolean
   def outputs(prediction: Prediction[Output]): DynamicValue.Record
 
 object CallObservation:
   def apply[Call, Output](
-      inputProjection: Call => DynamicValue.Record,
+      inputProjection       : Call => DynamicValue.Record,
       traceEnabledProjection: Call => Boolean,
-      outputProjection: Prediction[Output] => DynamicValue.Record
+      outputProjection      : Prediction[Output] => DynamicValue.Record
   ): CallObservation[Call, Output] =
     new CallObservation[Call, Output]:
-      def inputs(call: Call): DynamicValue.Record                      = inputProjection(call)
-      def traceEnabled(call: Call): Boolean                            = traceEnabledProjection(call)
+      def inputs(call       : Call): DynamicValue.Record               = inputProjection(call)
+      def traceEnabled(call : Call): Boolean                           = traceEnabledProjection(call)
       def outputs(prediction: Prediction[Output]): DynamicValue.Record = outputProjection(prediction)
 
 /** Whether a module boundary is observable and, when it is, how its uniform [[ProgramCall]] and result project into
@@ -39,9 +39,9 @@ object ModuleLifecycle:
   def transparent[I, O]: ModuleLifecycle[I, O] = Transparent()
 
   def observed[I, O](
-      inputs: ProgramCall[I] => DynamicValue.Record,
+      inputs      : ProgramCall[I] => DynamicValue.Record,
       traceEnabled: ProgramCall[I] => Boolean,
-      outputs: Prediction[O] => DynamicValue.Record
+      outputs     : Prediction[O] => DynamicValue.Record
   ): ModuleLifecycle[I, O] =
     Observed(CallObservation(inputs, traceEnabled, outputs))
 

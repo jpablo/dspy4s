@@ -62,7 +62,7 @@ class AggregationSuite extends FunSuite:
     val normalize: DynamicValue => Option[String] = {
       case _: DynamicValue.Null.type                        => None
       case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s.trim.toLowerCase).filter(_.nonEmpty)
-      case other => Some(DynamicValues.renderText(other).trim.toLowerCase).filter(_.nonEmpty)
+      case other                                            => Some(DynamicValues.renderText(other).trim.toLowerCase).filter(_.nonEmpty)
     }
     val result = Aggregation.majority(rows, normalize = normalize).toOption.get
     // First completion with the majority key (normalised "2") wins on tie order.

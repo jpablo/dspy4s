@@ -37,13 +37,13 @@ import scala.util.Random
   *   configuration for the [[GroundedProposer]] phase (instruction proposal)
   */
 final case class MIPROv2Config(
-    metric: Metric,
-    numCandidates: CandidateCount = CandidateCount(5),
-    numTrials: TrialCount = TrialCount(10),
-    maxBootstrappedDemos: DemoCount = DemoCount(4),
-    maxLabeledDemos: DemoCount = DemoCount(4),
-    seed: Long = 0L,
-    proposerConfig: GroundedProposerConfig = GroundedProposerConfig()
+    metric              : Metric,
+    numCandidates       : CandidateCount         = CandidateCount(5),
+    numTrials           : TrialCount             = TrialCount(10),
+    maxBootstrappedDemos: DemoCount              = DemoCount(4),
+    maxLabeledDemos     : DemoCount              = DemoCount(4),
+    seed                : Long                   = 0L,
+    proposerConfig      : GroundedProposerConfig = GroundedProposerConfig()
 )
 
 /** MIPROv2 — Multiprompt Instruction PRoposal Optimizer (v2). A v1 port of DSPy's `dspy.teleprompt.MIPROv2`
@@ -96,10 +96,10 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P] = None,
-      valset: Option[Vector[Example]] = None
+      teacher : Option[P]               = None,
+      valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
     val leafCount                = ps.read(student).size
@@ -122,9 +122,9 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     * as the per-predictor demo vectors, PLUS a zero-shot assignment (empty demos for every predictor).
     */
   private def bootstrapDemoCandidates(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P]
+      teacher : Option[P]
   )(using RuntimeContext): Vector[Vector[Vector[Example]]] =
     val leafCount = ps.read(student).size
     val zeroShot  = Vector.fill(leafCount)(Vector.empty[Example])
@@ -151,15 +151,14 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     * instruction as an extra candidate (so the baseline instruction is always reachable).
     */
   private def proposeInstructionCandidates(
-      student: P,
-      trainset: Vector[Example],
+      student       : P,
+      trainset      : Vector[Example],
       demoCandidates: Vector[Vector[Vector[Example]]]
   )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
     val proposer = new GroundedProposer[P](config.proposerConfig)
     // Ground the proposer on the first bootstrapped demo assignment if present (index 0 is zero-shot), else empty.
     val seedDemos: Vector[Vector[Example]]  = demoCandidates.lift(1).getOrElse(Vector.empty)
-    val currentInstructions: Vector[String] =
-      ps.read(student).map(_.instructions.getOrElse(""))
+    val currentInstructions: Vector[String] = ps.read(student).map(_.instructions.getOrElse(""))
 
     proposer.proposeInstructions(student, trainset, seedDemos).map { proposed =>
       proposed.zipWithIndex.map { case (perLeaf, idx) =>
@@ -177,11 +176,11 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     * descending.
     */
   private def searchTrials(
-      student: P,
-      evalset: Vector[Example],
-      demoCandidates: Vector[Vector[Vector[Example]]],
+      student              : P,
+      evalset              : Vector[Example],
+      demoCandidates       : Vector[Vector[Vector[Example]]],
       instructionCandidates: Vector[Vector[String]],
-      leafCount: Int
+      leafCount            : Int
   )(using RuntimeContext): OptimizationReport[P] =
     val rng        = new Random(config.seed)
     val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
@@ -226,9 +225,9 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
     * order.
     */
   private def applyTrial(
-      leaves: Vector[OptimizableParameters],
-      student: P,
-      instructions: Vector[String],
+      leaves        : Vector[OptimizableParameters],
+      student       : P,
+      instructions  : Vector[String],
       demoAssignment: Vector[Vector[Example]]
   ): P =
     val updated = leaves.zipWithIndex.map { case (leaf, idx) =>

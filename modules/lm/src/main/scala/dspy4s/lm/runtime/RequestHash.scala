@@ -38,15 +38,13 @@ object RequestHash:
       case DynamicValue.Primitive(p)     => quote(p.toString)
       case DynamicValue.Sequence(elems)  => elems.iterator.map(normalizeDynamic).mkString("[", ",", "]")
       case DynamicValue.Variant(name, v) => s"{${quote(name)}:${normalizeDynamic(v)}}"
-      case DynamicValue.Record(fields)   =>
-        fields.iterator
+      case DynamicValue.Record(fields)   => fields.iterator
           .map { case (k, v) => quote(k) -> normalizeDynamic(v) }
           .toVector
           .sortBy(_._1)
           .map { case (k, v) => s"$k:$v" }
           .mkString("{", ",", "}")
-      case DynamicValue.Map(entries) =>
-        entries.iterator
+      case DynamicValue.Map(entries) => entries.iterator
           .map { case (k, v) => normalizeDynamic(k) -> normalizeDynamic(v) }
           .toVector
           .sortBy(_._1)

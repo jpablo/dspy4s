@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class AttemptSelectionLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def attemptCount(value: Int): AttemptCount =
     AttemptCount.either(value) match
@@ -35,7 +35,9 @@ class AttemptSelectionLawSuite extends FunSuite:
   test("the reducer returns its only successful attempt, regardless of threshold") {
     val calls  = AtomicInteger(0)
     val result = AttemptSelection.bestOf[Double](AttemptCount(1), threshold = 0.9, None, "law")(
-      runAttempt = _ => { calls.incrementAndGet(); Right(0.2) }, // below threshold
+      runAttempt = _ =>
+        calls.incrementAndGet(); Right(0.2)
+      , // below threshold
       reward = d => Right(d)
     )
     assertEquals(result, Right(0.2))
@@ -63,7 +65,9 @@ class AttemptSelectionLawSuite extends FunSuite:
   test("short-circuits at the first attempt that reaches the threshold") {
     val calls  = AtomicInteger(0)
     val result = AttemptSelection.bestOf[Double](AttemptCount(3), threshold = 0.9, None, "law")(
-      runAttempt = idx => { calls.incrementAndGet(); Right(Vector(0.95, 0.1, 0.99)(idx)) },
+      runAttempt = idx =>
+        calls.incrementAndGet(); Right(Vector(0.95, 0.1, 0.99)(idx))
+      ,
       reward = d => Right(d)
     )
     assertEquals(result, Right(0.95))
@@ -87,7 +91,9 @@ class AttemptSelectionLawSuite extends FunSuite:
       failCount = Some(FailureCount(1)),
       "law"
     )(
-      runAttempt = idx => { calls.incrementAndGet(); Left(RuntimeError("law", s"f$idx")) },
+      runAttempt = idx =>
+        calls.incrementAndGet(); Left(RuntimeError("law", s"f$idx"))
+      ,
       reward = d => Right(d)
     )
     assertEquals(result.left.toOption.map(_.message), Some("f1"))

@@ -91,14 +91,12 @@ object OptimizerSmokeTest:
     "Children laughed on the playground"
   )
 
-  private def hasNum(s: String): Example  = example(s, "HAS_NUM")
+  private def hasNum(s : String): Example = example(s, "HAS_NUM")
   private def noNumEx(s: String): Example = example(s, "NO_NUM")
 
   // Train: 7 of each, interleaved (so bootstrap demos are class-balanced). Val: the remaining 5 of each.
-  val trainset: Vector[Example] =
-    withNum.take(7).zip(noNum.take(7)).flatMap((a, b) => Vector(hasNum(a), noNumEx(b)))
-  val valset: Vector[Example] =
-    withNum.drop(7).map(hasNum) ++ noNum.drop(7).map(noNumEx)
+  val trainset: Vector[Example] = withNum.take(7).zip(noNum.take(7)).flatMap((a, b) => Vector(hasNum(a), noNumEx(b)))
+  val valset: Vector[Example]   = withNum.drop(7).map(hasNum) ++ noNum.drop(7).map(noNumEx)
 
   val metric = new ExactMatch(answerField = "label")
 
@@ -114,14 +112,15 @@ object OptimizerSmokeTest:
     private val errors                                                     = new AtomicInteger(0)
     def count: Int                                                         = calls.get()
     def errorCount: Int                                                    = errors.get()
-    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-      case e: LmEndEvent =>
-        val _ = calls.incrementAndGet()
-        e.response match
-          case Left(_) => val _ = errors.incrementAndGet(); System.out.print("x")
-          case _       => System.out.print(".")
-        System.out.flush()
-      case _ => ()
+    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+      event match
+        case e: LmEndEvent =>
+          val _ = calls.incrementAndGet()
+          e.response match
+            case Left(_) => val _ = errors.incrementAndGet(); System.out.print("x")
+            case _       => System.out.print(".")
+          System.out.flush()
+        case _ => ()
 
 @main def optimizerSmokeMain(): Unit =
   import OptimizerSmokeTest.*

@@ -7,9 +7,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** ProgramOfThought's generated-code field contract, predictor names, and lenient step decoder. */
 private[programs] object ProgramOfThoughtProtocol:
-  val generatorModuleName: String = "program_of_thought_generate"
+  val generatorModuleName: String   = "program_of_thought_generate"
   val regeneratorModuleName: String = "program_of_thought_regenerate"
-  val answererModuleName: String = "program_of_thought_answer"
+  val answererModuleName: String    = "program_of_thought_answer"
 
   val generatedCodeField: FieldSpec = FieldSpec.normalize(
     FieldSpec(
@@ -51,22 +51,17 @@ private[programs] object ProgramOfThoughtProtocol:
     )
   )
 
-  val codeOutShape: Shape[ProgramOfThought.CodeOut] =
-    new Shape[ProgramOfThought.CodeOut]:
-      val fieldSpecs: Vector[FieldSpec] = Vector(generatedCodeField)
+  val codeOutShape: Shape[ProgramOfThought.CodeOut] = new Shape[ProgramOfThought.CodeOut]:
+    val fieldSpecs: Vector[FieldSpec] = Vector(generatedCodeField)
 
-      def encode(value: ProgramOfThought.CodeOut): DynamicValue.Record =
-        value.generatedCode match
-          case Some(code) =>
-            DynamicValue.Record(Chunk("generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(code))))
-          case None =>
-            DynamicValue.Record.empty
+    def encode(value: ProgramOfThought.CodeOut): DynamicValue.Record =
+      value.generatedCode match
+        case Some(code) =>
+          DynamicValue.Record(Chunk("generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(code))))
+        case None => DynamicValue.Record.empty
 
-      def decode(raw: DynamicValue.Record): Either[DspyError, ProgramOfThought.CodeOut] =
-        DynamicValues.recordGet(raw, "generated_code") match
-          case None =>
-            Right(ProgramOfThought.CodeOut(None))
-          case Some(DynamicValue.Primitive(PrimitiveValue.String(code))) =>
-            Right(ProgramOfThought.CodeOut(Some(code)))
-          case Some(other) =>
-            Left(ValidationError(s"ProgramOfThought generated_code must be a String, got: $other"))
+    def decode(raw: DynamicValue.Record): Either[DspyError, ProgramOfThought.CodeOut] =
+      DynamicValues.recordGet(raw, "generated_code") match
+        case None                                                      => Right(ProgramOfThought.CodeOut(None))
+        case Some(DynamicValue.Primitive(PrimitiveValue.String(code))) => Right(ProgramOfThought.CodeOut(Some(code)))
+        case Some(other)                                               => Left(ValidationError(s"ProgramOfThought generated_code must be a String, got: $other"))

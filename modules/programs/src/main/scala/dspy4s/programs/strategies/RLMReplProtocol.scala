@@ -12,10 +12,10 @@ private[programs] object RLMReplProtocol:
 
   /** Upstream's `ACTION_INSTRUCTIONS_TEMPLATE`, ported verbatim with the same placeholders. */
   def actionInstructionsTemplate(
-      inputs: String,
-      outputFields: String,
+      inputs          : String,
+      outputFields    : String,
       finalOutputNames: String,
-      maxLlmCalls: LlmCallLimit
+      maxLlmCalls     : LlmCallLimit
   ): String =
     s"""You are tasked with producing the following outputs given the inputs $inputs:
        |$outputFields
@@ -64,7 +64,7 @@ private[programs] object RLMReplProtocol:
     * the upstream-style `[Error] …` message on a problem.
     */
   def parseSubmitted(
-      finalJson: String,
+      finalJson       : String,
       outputFieldNames: Vector[String]
   ): Either[String, DynamicValue.Record] =
     dynamicJsonCodec.decode(finalJson.getBytes(StandardCharsets.UTF_8)) match
@@ -76,8 +76,7 @@ private[programs] object RLMReplProtocol:
           Left(
             s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})"
           )
-      case _ =>
-        Left(
+      case _ => Left(
           s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
         )
 
@@ -110,25 +109,26 @@ private[programs] object RLMReplProtocol:
             if blockEnd < 0 then Right(remainder.trim) else Right(remainder.take(blockEnd).trim)
 
   /** Python-style type name for the variable metadata (upstream `type(value).__name__`). */
-  def pythonTypeName(value: DynamicValue): String = value match
-    case DynamicValue.Primitive(p) =>
-      p match
-        case _: PrimitiveValue.String  => "str"
-        case _: PrimitiveValue.Boolean => "bool"
-        case _: PrimitiveValue.Int | _: PrimitiveValue.Long | _: PrimitiveValue.Short | _: PrimitiveValue.Byte |
-            _: PrimitiveValue.BigInt => "int"
-        case _: PrimitiveValue.Double | _: PrimitiveValue.Float | _: PrimitiveValue.BigDecimal => "float"
-        case _                                                                                 => "str"
-    case _: DynamicValue.Sequence  => "list"
-    case _: DynamicValue.Record    => "dict"
-    case _: DynamicValue.Map       => "dict"
-    case _: DynamicValue.Null.type => "NoneType"
-    case _                         => "str"
+  def pythonTypeName(value: DynamicValue): String =
+    value match
+      case DynamicValue.Primitive(p) => p match
+          case _: PrimitiveValue.String  => "str"
+          case _: PrimitiveValue.Boolean => "bool"
+          case _: PrimitiveValue.Int | _: PrimitiveValue.Long | _: PrimitiveValue.Short | _: PrimitiveValue.Byte |
+              _: PrimitiveValue.BigInt => "int"
+          case _: PrimitiveValue.Double | _: PrimitiveValue.Float | _: PrimitiveValue.BigDecimal => "float"
+          case _                                                                                 => "str"
+      case _: DynamicValue.Sequence  => "list"
+      case _: DynamicValue.Record    => "dict"
+      case _: DynamicValue.Map       => "dict"
+      case _: DynamicValue.Null.type => "NoneType"
+      case _                         => "str"
 
   /** Render a variable's value for length/preview: primitives as text, records/sequences as JSON. */
-  def renderValue(value: DynamicValue): String = value match
-    case DynamicValue.Primitive(_) => DynamicValues.renderText(value)
-    case _                         => new String(dynamicJsonCodec.encode(value), StandardCharsets.UTF_8)
+  def renderValue(value: DynamicValue): String =
+    value match
+      case DynamicValue.Primitive(_) => DynamicValues.renderText(value)
+      case _                         => new String(dynamicJsonCodec.encode(value), StandardCharsets.UTF_8)
 
   /** Digit grouping like Python's `{:,}` (locale-independent). */
   def groupDigits(n: Int): String =

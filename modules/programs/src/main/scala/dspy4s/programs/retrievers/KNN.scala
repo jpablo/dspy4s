@@ -16,9 +16,9 @@ import zio.blocks.schema.DynamicValue
   * Construction embeds eagerly (like upstream's `__init__`), so it is effectful — build via [[KNN.create]].
   */
 final class KNN private (
-    val k: NeighborCount,
+    val k       : NeighborCount,
     val trainset: NonEmptyTrainset,
-    embedder: Embedder,
+    embedder    : Embedder,
     trainVectors: Vector[Vector[Float]]
 ):
   /** The `k` trainset examples nearest to `inputs` (the query's input fields), best first. Ties break by the earlier

@@ -18,9 +18,9 @@ object GepaStatePersistence:
   /** Flat, JSON-friendly projection of [[GepaState]]'s fields (no methods / `require`), so the codec derives cleanly.
     */
   private final case class Snapshot(
-      candidates: Vector[Map[String, Option[String]]],
-      valSubscores: Vector[Vector[Double]],
-      parents: Vector[Vector[Int]],
+      candidates      : Vector[Map[String, Option[String]]],
+      valSubscores    : Vector[Vector[Double]],
+      parents         : Vector[Vector[Int]],
       totalMetricCalls: Int
   ) derives Schema
 
@@ -43,22 +43,22 @@ object GepaStatePersistence:
         for
           parsed    <- acc
           candidate <- raw.foldLeft[Either[String, Candidate]](Right(Map.empty)) { case (candidateAcc, (key, value)) =>
-            for
-              candidate <- candidateAcc
-              id        <- OptimizableId.parse(key)
-            yield candidate.updated(id, value)
-          }
+                         for
+                           candidate <- candidateAcc
+                           id        <- OptimizableId.parse(key)
+                         yield candidate.updated(id, value)
+                       }
         yield parsed :+ candidate
       }
       candidates.flatMap { parsed =>
         for
           pool  <- CandidatePool.either(parsed).left.map(_ => "invalid GEPA state snapshot: candidate pool is empty")
           calls <- MetricCallCount
-            .either(s.totalMetricCalls)
-            .left
-            .map(_ => "invalid GEPA state snapshot: totalMetricCalls must be non-negative")
+                     .either(s.totalMetricCalls)
+                     .left
+                     .map(_ => "invalid GEPA state snapshot: totalMetricCalls must be non-negative")
           state <- scala.util.Try(GepaState(pool, s.valSubscores, s.parents, calls)).toEither.left
-            .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
+                     .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
         yield state
       }
     }

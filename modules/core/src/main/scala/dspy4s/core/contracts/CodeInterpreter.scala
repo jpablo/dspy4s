@@ -10,9 +10,9 @@ package dspy4s.core.contracts
   *     result.
   */
 final case class CodeResult(
-    stdout: String,
-    stderr: String,
-    exitCode: Int,
+    stdout     : String,
+    stderr     : String,
+    exitCode   : Int,
     finalOutput: Option[String] = None
 ):
   def isSuccess: Boolean = exitCode == 0 && finalOutput.isEmpty || finalOutput.isDefined
@@ -53,7 +53,7 @@ trait CodeInterpreter extends AutoCloseable:
 trait ReplCodeInterpreter extends CodeInterpreter:
   /** Like `execute(code)`, but first defines each of `variables` as a variable in the sandbox. */
   def execute(
-      code: String,
+      code     : String,
       variables: Map[String, zio.blocks.schema.DynamicValue]
   ): Either[DspyError, CodeResult]
 
@@ -72,9 +72,9 @@ trait ReplCodeInterpreter extends CodeInterpreter:
   *   `str`; any other value crosses as JSON.
   */
 final case class SandboxTool(
-    name: String,
+    name      : String,
     parameters: Vector[SandboxTool.Param],
-    invoke: zio.blocks.schema.DynamicValue.Record => Either[DspyError, zio.blocks.schema.DynamicValue]
+    invoke    : zio.blocks.schema.DynamicValue.Record => Either[DspyError, zio.blocks.schema.DynamicValue]
 )
 
 object SandboxTool:

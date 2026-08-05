@@ -34,11 +34,11 @@ object RetryPolicies:
     this.maxRetries(maxRetries, error => retryableCodes.contains(error.code))
 
   def exponentialBackoff(
-      maxRetries: RetryCount,
-      baseDelayMillis: RetryDelayMillis = RetryDelayMillis(200L),
-      maxDelayMillis: RetryDelayMillis = RetryDelayMillis(4000L),
-      jitterFactor: JitterFactor = JitterFactor(0.0),
-      retryOn: DspyError => Boolean = _ => true
+      maxRetries     : RetryCount,
+      baseDelayMillis: RetryDelayMillis     = RetryDelayMillis(200L),
+      maxDelayMillis : RetryDelayMillis     = RetryDelayMillis(4000L),
+      jitterFactor   : JitterFactor         = JitterFactor(0.0),
+      retryOn        : DspyError => Boolean = _ => true
   ): RetryPolicy =
     require(maxDelayMillis >= baseDelayMillis, "maxDelayMillis must be >= baseDelayMillis")
 
@@ -110,10 +110,10 @@ object UsageTracking:
     activeTrackers.get().foreach(_.addUsage(model, usage))
 
 final case class ManagedLanguageModel(
-    delegate: LanguageModel,
-    cache: Option[LmCache] = None,
-    retryPolicy: RetryPolicy = RetryPolicies.never,
-    sleep: Long => Unit = ManagedLanguageModel.defaultSleep
+    delegate   : LanguageModel,
+    cache      : Option[LmCache] = None,
+    retryPolicy: RetryPolicy     = RetryPolicies.never,
+    sleep      : Long => Unit    = ManagedLanguageModel.defaultSleep
 ) extends StreamingLanguageModel:
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
@@ -135,10 +135,8 @@ final case class ManagedLanguageModel(
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match
       case streaming: StreamingLanguageModel => streaming.stream(request)
-      case _                                 =>
-        call(request) match
-          case Right(response) =>
-            Iterator.single(LmChunk(
+      case _                                 => call(request) match
+          case Right(response) => Iterator.single(LmChunk(
               text = response.outputs.headOption.map(_.text).getOrElse(""),
               finishReason = Some("stop"),
               usage = response.usage

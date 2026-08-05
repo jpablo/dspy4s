@@ -22,7 +22,7 @@ import zio.blocks.schema.DynamicValue
   */
 final case class Prediction[O](
     output: O,
-    raw: RawPrediction
+    raw   : RawPrediction
 ):
   def map[B](f: O => B): Prediction[B] =
     Prediction(f(output), raw)

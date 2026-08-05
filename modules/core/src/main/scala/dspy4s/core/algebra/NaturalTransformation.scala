@@ -25,8 +25,8 @@ trait NaturalTransformation[
       next: NaturalTransformation[G, H, SourceConstraint, Source, TargetConstraint, Target]
   ): NaturalTransformation[F, H, SourceConstraint, Source, TargetConstraint, Target] =
     given Category[TargetConstraint, Target] = source.targetCategory
-    NaturalTransformation(source, next.target)(
-      [A] => (evidence: SourceConstraint[A]) ?=> self.component[A] >>> next.component[A]
+    NaturalTransformation(source, next.target)([A] =>
+      (evidence: SourceConstraint[A]) ?=> self.component[A] >>> next.component[A]
     )
 
   @Law("naturality")
@@ -66,8 +66,8 @@ object NaturalTransformation:
   ](
       functor: Functor[F, SourceConstraint, Source, TargetConstraint, Target]
   ): NaturalTransformation[F, F, SourceConstraint, Source, TargetConstraint, Target] =
-    NaturalTransformation(functor, functor)(
-      [A] => (evidence: SourceConstraint[A]) ?=>
+    NaturalTransformation(functor, functor)([A] =>
+      (evidence: SourceConstraint[A]) ?=>
         given TargetConstraint[F[A]] = functor.mapObject[A]
         functor.targetCategory.id[F[A]]
     )
@@ -84,7 +84,7 @@ object NaturalTransformation:
       TargetConstraint[_],
       Target[_, _]
   ](
-      outer: Functor[K, MiddleConstraint, Middle, TargetConstraint, Target],
+      outer         : Functor[K, MiddleConstraint, Middle, TargetConstraint, Target],
       transformation: NaturalTransformation[F, G, SourceConstraint, Source, MiddleConstraint, Middle]
   ): NaturalTransformation[
     [A] =>> K[F[A]],
@@ -97,9 +97,7 @@ object NaturalTransformation:
     NaturalTransformation(
       Functor.andThen(transformation.source, outer),
       Functor.andThen(transformation.target, outer)
-    )(
-      [A] => (evidence: SourceConstraint[A]) ?=> outer.map(transformation.component[A])
-    )
+    )([A] => (evidence: SourceConstraint[A]) ?=> outer.map(transformation.component[A]))
 
   /** Whisker a transformation on the right by precomposing both of its functors. */
   def rightWhisker[
@@ -114,7 +112,7 @@ object NaturalTransformation:
       Target[_, _]
   ](
       transformation: NaturalTransformation[F, G, SourceConstraint, Source, TargetConstraint, Target],
-      inner: Functor[H, InputConstraint, Input, SourceConstraint, Source]
+      inner         : Functor[H, InputConstraint, Input, SourceConstraint, Source]
   ): NaturalTransformation[
     [A] =>> F[H[A]],
     [A] =>> G[H[A]],
@@ -126,8 +124,8 @@ object NaturalTransformation:
     NaturalTransformation(
       Functor.andThen(inner, transformation.source),
       Functor.andThen(inner, transformation.target)
-    )(
-      [A] => (evidence: InputConstraint[A]) ?=>
+    )([A] =>
+      (evidence: InputConstraint[A]) ?=>
         given SourceConstraint[H[A]] = inner.mapObject[A]
         transformation.component[H[A]]
     )

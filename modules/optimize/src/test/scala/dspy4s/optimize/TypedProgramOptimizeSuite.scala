@@ -28,7 +28,7 @@ final case class QAOutput(answer: String) derives Schema
   */
 final case class TwoStageQA(
     classify: Predict[QAInput, QAOutput],
-    answer: Predict[QAInput, QAOutput]
+    answer  : Predict[QAInput, QAOutput]
 )
 
 object TwoStageQA:
@@ -51,7 +51,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
   // ── Offline scripted LM + adapter ─────────────────────────────────────────
 
   private object EchoAdapter extends Adapter:
-    override val name: String = "echo"
+    override val name: String                                                                                    = "echo"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val q = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(q)))))
@@ -75,7 +75,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm(answers)), adapter = Some(EchoAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val sig = Signature.derived[QAInput, QAOutput]("QA")
 

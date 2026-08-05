@@ -36,8 +36,8 @@ object Optimizers:
   // | optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
   // --8<-- [start:optimize-bootstrap]
   def optimize[P: {OptimizableTraversal, ProgramRunner}](
-      metric: Metric,
-      program: P,
+      metric  : Metric,
+      program : P,
       trainset: Vector[Example]
   )(using RuntimeContext): Either[DspyError, P] =
     val teleprompter = BootstrapFewShotWithRandomSearch[P](RandomSearchConfig(
@@ -66,15 +66,16 @@ object Optimizers:
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.optimization.optimizersMain"
 // (Runs a small bootstrap+random-search over an LM — makes several LM calls.)
-@main def optimizersMain(): Unit = Demo.withLm {
-  // The runtime-string path: parse once (minting fresh input/output types with their codec), then build a
-  // typed Predict over the bundle. Optimizable through the same capabilities as any typed program.
-  val signature = DynamicSignature.parse("question -> answer")
-    .fold(error => throw new IllegalArgumentException(error.message), identity)
-  val program  = signature.predict()
-  val trainset = Vector(
-    Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question")),
-    Example("question" := "What is 2+2?", "answer" := "4").withInputs(Set("question"))
-  )
-  println("Optimized program: " + Optimizers.optimize(new ExactMatch(), program, trainset).map(_.moduleName))
-}
+@main def optimizersMain(): Unit =
+  Demo.withLm {
+    // The runtime-string path: parse once (minting fresh input/output types with their codec), then build a
+    // typed Predict over the bundle. Optimizable through the same capabilities as any typed program.
+    val signature = DynamicSignature.parse("question -> answer")
+      .fold(error => throw new IllegalArgumentException(error.message), identity)
+    val program  = signature.predict()
+    val trainset = Vector(
+      Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question")),
+      Example("question" := "What is 2+2?", "answer" := "4").withInputs(Set("question"))
+    )
+    println("Optimized program: " + Optimizers.optimize(new ExactMatch(), program, trainset).map(_.moduleName))
+  }

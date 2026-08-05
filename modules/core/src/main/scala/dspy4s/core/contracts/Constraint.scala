@@ -19,34 +19,37 @@ enum Constraint derives CanEqual:
   case MultipleOf(value: Double)
 
   /** The exact upstream prose hint, e.g. `"greater than: 0"`. Whole numbers render without a trailing `.0`. */
-  def render: String = this match
-    case Constraint.Gt(n)         => s"greater than: ${Constraint.num(n)}"
-    case Constraint.Ge(n)         => s"greater than or equal to: ${Constraint.num(n)}"
-    case Constraint.Lt(n)         => s"less than: ${Constraint.num(n)}"
-    case Constraint.Le(n)         => s"less than or equal to: ${Constraint.num(n)}"
-    case Constraint.MinLength(n)  => s"minimum length: $n"
-    case Constraint.MaxLength(n)  => s"maximum length: $n"
-    case Constraint.MultipleOf(n) => s"a multiple of the given number: ${Constraint.num(n)}"
+  def render: String =
+    this match
+      case Constraint.Gt(n)         => s"greater than: ${Constraint.num(n)}"
+      case Constraint.Ge(n)         => s"greater than or equal to: ${Constraint.num(n)}"
+      case Constraint.Lt(n)         => s"less than: ${Constraint.num(n)}"
+      case Constraint.Le(n)         => s"less than or equal to: ${Constraint.num(n)}"
+      case Constraint.MinLength(n)  => s"minimum length: $n"
+      case Constraint.MaxLength(n)  => s"maximum length: $n"
+      case Constraint.MultipleOf(n) => s"a multiple of the given number: ${Constraint.num(n)}"
 
   /** The JSON-Schema keyword this constraint maps to (for structural embedding by schema-emitting adapters). */
-  def schemaKeyword: String = this match
-    case _: Constraint.Gt         => "exclusiveMinimum"
-    case _: Constraint.Ge         => "minimum"
-    case _: Constraint.Lt         => "exclusiveMaximum"
-    case _: Constraint.Le         => "maximum"
-    case _: Constraint.MinLength  => "minLength"
-    case _: Constraint.MaxLength  => "maxLength"
-    case _: Constraint.MultipleOf => "multipleOf"
+  def schemaKeyword: String =
+    this match
+      case _: Constraint.Gt         => "exclusiveMinimum"
+      case _: Constraint.Ge         => "minimum"
+      case _: Constraint.Lt         => "exclusiveMaximum"
+      case _: Constraint.Le         => "maximum"
+      case _: Constraint.MinLength  => "minLength"
+      case _: Constraint.MaxLength  => "maxLength"
+      case _: Constraint.MultipleOf => "multipleOf"
 
   /** The JSON-Schema value (a number) paired with [[schemaKeyword]]. */
-  def schemaValue: DynamicValue = this match
-    case Constraint.MinLength(n)  => DynamicValue.Primitive(PrimitiveValue.Int(n))
-    case Constraint.MaxLength(n)  => DynamicValue.Primitive(PrimitiveValue.Int(n))
-    case Constraint.Gt(n)         => Constraint.numValue(n)
-    case Constraint.Ge(n)         => Constraint.numValue(n)
-    case Constraint.Lt(n)         => Constraint.numValue(n)
-    case Constraint.Le(n)         => Constraint.numValue(n)
-    case Constraint.MultipleOf(n) => Constraint.numValue(n)
+  def schemaValue: DynamicValue =
+    this match
+      case Constraint.MinLength(n)  => DynamicValue.Primitive(PrimitiveValue.Int(n))
+      case Constraint.MaxLength(n)  => DynamicValue.Primitive(PrimitiveValue.Int(n))
+      case Constraint.Gt(n)         => Constraint.numValue(n)
+      case Constraint.Ge(n)         => Constraint.numValue(n)
+      case Constraint.Lt(n)         => Constraint.numValue(n)
+      case Constraint.Le(n)         => Constraint.numValue(n)
+      case Constraint.MultipleOf(n) => Constraint.numValue(n)
 
   /** Persisted form: a `{op, value}` record (used by [[SignatureLayout.dumpState]]). */
   def dumpState: DynamicValue.Record =
@@ -55,23 +58,25 @@ enum Constraint derives CanEqual:
       "value" -> Constraint.numValue(numericValue)
     ))
 
-  private def op: String = this match
-    case _: Constraint.Gt         => "gt"
-    case _: Constraint.Ge         => "ge"
-    case _: Constraint.Lt         => "lt"
-    case _: Constraint.Le         => "le"
-    case _: Constraint.MinLength  => "min_length"
-    case _: Constraint.MaxLength  => "max_length"
-    case _: Constraint.MultipleOf => "multiple_of"
+  private def op: String =
+    this match
+      case _: Constraint.Gt         => "gt"
+      case _: Constraint.Ge         => "ge"
+      case _: Constraint.Lt         => "lt"
+      case _: Constraint.Le         => "le"
+      case _: Constraint.MinLength  => "min_length"
+      case _: Constraint.MaxLength  => "max_length"
+      case _: Constraint.MultipleOf => "multiple_of"
 
-  private def numericValue: Double = this match
-    case Constraint.Gt(n)         => n
-    case Constraint.Ge(n)         => n
-    case Constraint.Lt(n)         => n
-    case Constraint.Le(n)         => n
-    case Constraint.MinLength(n)  => n.toDouble
-    case Constraint.MaxLength(n)  => n.toDouble
-    case Constraint.MultipleOf(n) => n
+  private def numericValue: Double =
+    this match
+      case Constraint.Gt(n)         => n
+      case Constraint.Ge(n)         => n
+      case Constraint.Lt(n)         => n
+      case Constraint.Le(n)         => n
+      case Constraint.MinLength(n)  => n.toDouble
+      case Constraint.MaxLength(n)  => n.toDouble
+      case Constraint.MultipleOf(n) => n
 
 object Constraint:
   /** Render a numeric bound: drop the `.0` for whole numbers, keep the fractional part otherwise. */
@@ -86,34 +91,35 @@ object Constraint:
   /** Rebuild from the persisted `{op, value}` record; `None` for an unrecognized op (forward-compat / corruption). */
   def fromState(rec: DynamicValue.Record): Option[Constraint] =
     for
-      op    <- DynamicValues.recordGet(rec, "op").collect { case DynamicValue.Primitive(PrimitiveValue.String(s)) => s }
-      value <- DynamicValues.recordGet(rec, "value").flatMap(numberOf)
+      op         <- DynamicValues.recordGet(rec, "op").collect { case DynamicValue.Primitive(PrimitiveValue.String(s)) => s }
+      value      <- DynamicValues.recordGet(rec, "value").flatMap(numberOf)
       constraint <- op match
-        case "gt"          => Some(Gt(value))
-        case "ge"          => Some(Ge(value))
-        case "lt"          => Some(Lt(value))
-        case "le"          => Some(Le(value))
-        case "min_length"  => Some(MinLength(value.toInt))
-        case "max_length"  => Some(MaxLength(value.toInt))
-        case "multiple_of" => Some(MultipleOf(value))
-        case _             => None
+                      case "gt"          => Some(Gt(value))
+                      case "ge"          => Some(Ge(value))
+                      case "lt"          => Some(Lt(value))
+                      case "le"          => Some(Le(value))
+                      case "min_length"  => Some(MinLength(value.toInt))
+                      case "max_length"  => Some(MaxLength(value.toInt))
+                      case "multiple_of" => Some(MultipleOf(value))
+                      case _             => None
     yield constraint
 
-  private def numberOf(dv: DynamicValue): Option[Double] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Some(n.toDouble)
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Some(n.toDouble)
-    case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n)
-    case _                                                => None
+  private def numberOf(dv: DynamicValue): Option[Double] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Some(n.toDouble)
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Some(n.toDouble)
+      case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n)
+      case _                                                => None
 
 /** Builders for field [[Constraint]]s. Mirrors Python DSPy's `PYDANTIC_CONSTRAINT_MAP` (`dspy/signatures/field.py`) so
   * dspy4s prompts match upstream byte-for-byte: `gt(0).render == "greater than: 0"`, etc. Numeric helpers accept
   * `Double` (integral or fractional bounds); length helpers take `Int`.
   */
 object FieldConstraints:
-  def gt(n: Double): Constraint         = Constraint.Gt(n)
-  def ge(n: Double): Constraint         = Constraint.Ge(n)
-  def lt(n: Double): Constraint         = Constraint.Lt(n)
-  def le(n: Double): Constraint         = Constraint.Le(n)
-  def minLength(n: Int): Constraint     = Constraint.MinLength(n)
-  def maxLength(n: Int): Constraint     = Constraint.MaxLength(n)
+  def gt(n        : Double): Constraint = Constraint.Gt(n)
+  def ge(n        : Double): Constraint = Constraint.Ge(n)
+  def lt(n        : Double): Constraint = Constraint.Lt(n)
+  def le(n        : Double): Constraint = Constraint.Le(n)
+  def minLength(n : Int): Constraint    = Constraint.MinLength(n)
+  def maxLength(n : Int): Constraint    = Constraint.MaxLength(n)
   def multipleOf(n: Double): Constraint = Constraint.MultipleOf(n)

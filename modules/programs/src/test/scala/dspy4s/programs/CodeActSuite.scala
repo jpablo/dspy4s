@@ -29,7 +29,7 @@ import scala.collection.mutable.ArrayBuffer
 class CodeActSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Records every code snippet the interpreter was asked to run, so tests can assert on what CodeAct passed through.
     * Returns scripted output.
@@ -49,7 +49,7 @@ class CodeActSuite extends FunSuite:
     * JSON-style hint in the text.
     */
   private object ScriptedAdapter extends Adapter:
-    override val name: String = "scripted-codeact-adapter"
+    override val name: String                                                                                    = "scripted-codeact-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -238,13 +238,14 @@ class CodeActSuite extends FunSuite:
 
   // ── Parity fixes: tools-in-prompt, parse semantics, truncation ──────────
 
-  private def weatherTool: dspy4s.programs.contracts.ToolFunction = new dspy4s.programs.contracts.ToolFunction:
-    override val name: String                                               = "get_weather"
-    override val description: String                                        = "Look up the weather\nfor a city"
-    override def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] =
-      Vector("city" -> dspy4s.core.contracts.TypeRef.string)
-    override def invoke(args: zio.blocks.schema.DynamicValue.Record)(using RuntimeContext) =
-      Right(dspy4s.core.contracts.DynamicValues.fromAny("sunny"))
+  private def weatherTool: dspy4s.programs.contracts.ToolFunction =
+    new dspy4s.programs.contracts.ToolFunction:
+      override val name: String                                               = "get_weather"
+      override val description: String                                        = "Look up the weather\nfor a city"
+      override def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] =
+        Vector("city" -> dspy4s.core.contracts.TypeRef.string)
+      override def invoke(args: zio.blocks.schema.DynamicValue.Record)(using RuntimeContext) =
+        Right(dspy4s.core.contracts.DynamicValues.fromAny("sunny"))
 
   test("CodeAct: tools are listed in the codeact instructions (numbered, desc-wrapped, with args)") {
     val signature = Signature.fromString("question -> answer")
@@ -292,7 +293,7 @@ class CodeActSuite extends FunSuite:
     // LM: two codeact iterations, then the extractor — whose FIRST call overflows the context window.
     val extractorCalls = ArrayBuffer.empty[String] // rendered trajectory per extractor call
     object TruncationAdapter extends Adapter:
-      override val name: String = "truncation-probe"
+      override val name: String                                                                                    = "truncation-probe"
       override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
         if !invocation.layout.outputFields.exists(_.name == "generated_code") then
           dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")

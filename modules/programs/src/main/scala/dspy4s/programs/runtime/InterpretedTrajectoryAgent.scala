@@ -45,7 +45,7 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
     * halt before producing an action (for example after a persistent context-window overflow).
     */
   protected def generateStep(
-      call: ProgramCall[I],
+      call      : ProgramCall[I],
       trajectory: Vector[Entry]
   )(using RuntimeContext): Either[DspyError, StepGeneration[ModelStep, Entry]]
 
@@ -60,33 +60,33 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
     * success. Rejected preparations always continue and do not invoke this hook.
     */
   protected def decide(
-      step: ModelStep,
-      action: Action,
+      step   : ModelStep,
+      action : Action,
       outcome: ActionOutcome[Observation]
   ): ActionDecision
 
   /** Record a rejected preparation. This state has an observation but no action or interpreted outcome. */
   protected def recordRejection(
-      iteration: Int,
-      step: ModelStep,
+      iteration  : Int,
+      step       : ModelStep,
       observation: Observation
   ): Entry
 
   /** Record an interpreted action and its observable outcome. */
   protected def recordOutcome(
       iteration: Int,
-      step: ModelStep,
-      action: Action,
-      outcome: ActionOutcome[Observation]
+      step     : ModelStep,
+      action   : Action,
+      outcome  : ActionOutcome[Observation]
   ): Entry
 
   private final def transitionGeneration(
-      call: ProgramCall[I],
+      call   : ProgramCall[I],
       current: State.Generating[Entry]
   )(using RuntimeContext): GenerationTransition[ModelStep, Entry] =
     generateStep(call, current.trajectory) match
-      case Left(error)                        => GenerationTransition.Fail(State.Failed(error))
-      case Right(StepGeneration.Halted(used)) => GenerationTransition.Complete(State.Completed(used))
+      case Left(error)                                 => GenerationTransition.Fail(State.Failed(error))
+      case Right(StepGeneration.Halted(used))          => GenerationTransition.Complete(State.Completed(used))
       case Right(StepGeneration.Generated(step, used)) =>
         GenerationTransition.Prepare(State.Preparing(step, used, current.iteration))
 
@@ -94,12 +94,10 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
       current: State.Preparing[ModelStep, Entry]
   ): PreparationTransition[ModelStep, Action, Observation, Entry] =
     prepareAction(current.step) match
-      case ActionPreparation.Rejected(observation) =>
-        PreparationTransition.RecordRejection(
+      case ActionPreparation.Rejected(observation) => PreparationTransition.RecordRejection(
           State.RecordingRejection(current.step, observation, current.trajectory, current.iteration)
         )
-      case ActionPreparation.Ready(action) =>
-        PreparationTransition.Interpret(
+      case ActionPreparation.Ready(action) => PreparationTransition.Interpret(
           State.Interpreting(current.step, action, current.trajectory, current.iteration)
         )
 
@@ -107,10 +105,8 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
       current: State.Interpreting[ModelStep, Action, Entry]
   )(using RuntimeContext): InterpretationTransition[ModelStep, Action, Observation, Entry] =
     actionInterpreter.execute(current.action) match
-      case Left(error) =>
-        InterpretationTransition.Fail(State.Failed(error))
-      case Right(outcome) =>
-        InterpretationTransition.RecordOutcome(
+      case Left(error)    => InterpretationTransition.Fail(State.Failed(error))
+      case Right(outcome) => InterpretationTransition.RecordOutcome(
           State.RecordingOutcome(
             current.step,
             current.action,
@@ -136,25 +132,20 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
       current: State.Deciding[ModelStep, Action, Observation, Entry]
   ): DecisionTransition[Entry] =
     decide(current.step, current.action, current.outcome) match
-      case ActionDecision.Continue =>
-        DecisionTransition.Continue(State.Continuing(current.trajectory))
-      case ActionDecision.Stop =>
-        DecisionTransition.Complete(State.Completed(current.trajectory))
+      case ActionDecision.Continue => DecisionTransition.Continue(State.Continuing(current.trajectory))
+      case ActionDecision.Stop     => DecisionTransition.Complete(State.Completed(current.trajectory))
 
   private final def runStateMachine(
-      call: ProgramCall[I],
+      call   : ProgramCall[I],
       initial: State.Generating[Entry]
   )(using RuntimeContext): State.Terminal[Entry] =
     transitionGeneration(call, initial) match
       case GenerationTransition.Fail(failed)       => failed
       case GenerationTransition.Complete(complete) => complete
-      case GenerationTransition.Prepare(preparing) =>
-        transitionPreparation(preparing) match
-          case PreparationTransition.RecordRejection(recording) =>
-            transitionRejectionRecording(recording)
-          case PreparationTransition.Interpret(interpreting) =>
-            transitionInterpretation(interpreting) match
-              case InterpretationTransition.Fail(failed) => failed
+      case GenerationTransition.Prepare(preparing) => transitionPreparation(preparing) match
+          case PreparationTransition.RecordRejection(recording) => transitionRejectionRecording(recording)
+          case PreparationTransition.Interpret(interpreting)    => transitionInterpretation(interpreting) match
+              case InterpretationTransition.Fail(failed)             => failed
               case InterpretationTransition.RecordOutcome(recording) =>
                 transitionDecision(transitionOutcomeRecording(recording)) match
                   case DecisionTransition.Continue(continuing) => continuing
@@ -178,37 +169,37 @@ object InterpretedTrajectoryAgent:
     final case class Generating[+Entry](trajectory: Vector[Entry], iteration: Int)
 
     final case class Preparing[+ModelStep, +Entry](
-        step: ModelStep,
+        step      : ModelStep,
         trajectory: Vector[Entry],
-        iteration: Int
+        iteration : Int
     )
 
     final case class Interpreting[+ModelStep, +Action, +Entry](
-        step: ModelStep,
-        action: Action,
+        step      : ModelStep,
+        action    : Action,
         trajectory: Vector[Entry],
-        iteration: Int
+        iteration : Int
     )
 
     final case class RecordingRejection[+ModelStep, +Observation, +Entry](
-        step: ModelStep,
+        step       : ModelStep,
         observation: Observation,
-        trajectory: Vector[Entry],
-        iteration: Int
+        trajectory : Vector[Entry],
+        iteration  : Int
     )
 
     final case class RecordingOutcome[+ModelStep, +Action, +Observation, +Entry](
-        step: ModelStep,
-        action: Action,
-        outcome: ActionOutcome[Observation],
+        step      : ModelStep,
+        action    : Action,
+        outcome   : ActionOutcome[Observation],
         trajectory: Vector[Entry],
-        iteration: Int
+        iteration : Int
     )
 
     final case class Deciding[+ModelStep, +Action, +Observation, +Entry](
-        step: ModelStep,
-        action: Action,
-        outcome: ActionOutcome[Observation],
+        step      : ModelStep,
+        action    : Action,
+        outcome   : ActionOutcome[Observation],
         trajectory: Vector[Entry]
     )
 

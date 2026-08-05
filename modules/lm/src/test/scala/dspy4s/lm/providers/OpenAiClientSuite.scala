@@ -12,8 +12,8 @@ import munit.FunSuite
 class OpenAiClientSuite extends FunSuite:
 
   private final class ScriptedTransport(
-      nonStreamingResponses: Vector[Either[DspyError, HttpResponse]] = Vector.empty,
-      streamingResponses: Vector[Either[DspyError, HttpStreamResponse]] = Vector.empty
+      nonStreamingResponses: Vector[Either[DspyError, HttpResponse]]       = Vector.empty,
+      streamingResponses   : Vector[Either[DspyError, HttpStreamResponse]] = Vector.empty
   ) extends HttpTransport:
     private var nonStreamingIdx = 0
     private var streamingIdx    = 0
@@ -30,9 +30,9 @@ class OpenAiClientSuite extends FunSuite:
         r
 
     override def streamSse(
-        url: String,
+        url    : String,
         headers: Map[String, String],
-        body: String
+        body   : String
     ): Either[DspyError, HttpStreamResponse] =
       sentStreamBodies += ((url, body, headers.get("Authorization").getOrElse("")))
       if streamingIdx >= streamingResponses.size then
@@ -187,7 +187,8 @@ class OpenAiClientSuite extends FunSuite:
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
     val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
-    while iter.hasNext do { val _ = iter.next() }
+    while iter.hasNext do
+      val _ = iter.next()
 
     assert(source.closed, "underlying SSE connection should be closed after the stream reaches [DONE]")
   }

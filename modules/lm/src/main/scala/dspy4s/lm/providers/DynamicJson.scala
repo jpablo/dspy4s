@@ -24,42 +24,46 @@ private[lm] object DynamicJson:
       case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
 
   /** Recursively drop record fields whose value is `Null`. */
-  def stripNull(value: DynamicValue): DynamicValue = value match
-    case rec: DynamicValue.Record =>
-      DynamicValue.Record(Chunk.from(rec.fields.iterator.collect {
-        case (k, v) if !isNull(v) => k -> stripNull(v)
-      }.toSeq))
-    case seq: DynamicValue.Sequence =>
-      DynamicValue.Sequence(Chunk.from(seq.elements.iterator.map(stripNull).toSeq))
-    case other => other
+  def stripNull(value: DynamicValue): DynamicValue =
+    value match
+      case rec: DynamicValue.Record => DynamicValue.Record(Chunk.from(rec.fields.iterator.collect {
+          case (k, v) if !isNull(v) => k -> stripNull(v)
+        }.toSeq))
+      case seq: DynamicValue.Sequence => DynamicValue.Sequence(Chunk.from(seq.elements.iterator.map(stripNull).toSeq))
+      case other                      => other
 
-  private def isNull(v: DynamicValue): Boolean = v match
-    case _: DynamicValue.Null.type => true
-    case _                         => false
+  private def isNull(v: DynamicValue): Boolean =
+    v match
+      case _: DynamicValue.Null.type => true
+      case _                         => false
 
   // ── Navigation (replacing Map's asMap / asVector / asLong / string extraction) ──────────────────
 
   def field(value: DynamicValue, name: String): Option[DynamicValue] =
     asRecord(value).flatMap(rec => DynamicValues.recordGet(rec, name))
 
-  def asRecord(value: DynamicValue): Option[DynamicValue.Record] = value match
-    case rec: DynamicValue.Record => Some(rec)
-    case _                        => None
+  def asRecord(value: DynamicValue): Option[DynamicValue.Record] =
+    value match
+      case rec: DynamicValue.Record => Some(rec)
+      case _                        => None
 
-  def asSequence(value: DynamicValue): Vector[DynamicValue] = value match
-    case seq: DynamicValue.Sequence => seq.elements.iterator.toVector
-    case _                          => Vector.empty
+  def asSequence(value: DynamicValue): Vector[DynamicValue] =
+    value match
+      case seq: DynamicValue.Sequence => seq.elements.iterator.toVector
+      case _                          => Vector.empty
 
-  def asString(value: DynamicValue): Option[String] = value match
-    case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
-    case _                                                => None
+  def asString(value: DynamicValue): Option[String] =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
+      case _                                                => None
 
-  def asLong(value: DynamicValue): Option[Long] = value match
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Some(n)
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Some(n.toLong)
-    case DynamicValue.Primitive(PrimitiveValue.Short(n))  => Some(n.toLong)
-    case DynamicValue.Primitive(PrimitiveValue.Byte(n))   => Some(n.toLong)
-    case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n.toLong)
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Some(n.toLong)
-    case DynamicValue.Primitive(PrimitiveValue.String(s)) => s.toLongOption
-    case _                                                => None
+  def asLong(value: DynamicValue): Option[Long] =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Some(n)
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Some(n.toLong)
+      case DynamicValue.Primitive(PrimitiveValue.Short(n))  => Some(n.toLong)
+      case DynamicValue.Primitive(PrimitiveValue.Byte(n))   => Some(n.toLong)
+      case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n.toLong)
+      case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Some(n.toLong)
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) => s.toLongOption
+      case _                                                => None

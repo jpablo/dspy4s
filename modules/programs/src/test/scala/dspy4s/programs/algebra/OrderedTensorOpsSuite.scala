@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class OrderedTensorOpsSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
@@ -31,24 +31,21 @@ class OrderedTensorOpsSuite extends FunSuite:
   }
 
   private final case class Fn[I, O](f: I => O) extends Module[I, O]:
-    override val moduleName: String                         = "fn"
-    override protected val lifecycle: ModuleLifecycle[I, O] =
-      ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                                                                              = "fn"
+    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction.empty))
 
   private final case class Fail[I, O](label: String) extends Module[I, O]:
-    override val moduleName: String                         = s"fail_$label"
-    override protected val lifecycle: ModuleLifecycle[I, O] =
-      ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                                                                              = s"fail_$label"
+    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Left(ValidationError(label))
 
   private final class Counting extends Module[Int, String]:
     val calls: AtomicInteger                                       = AtomicInteger(0)
     override val moduleName: String                                = "counting"
-    override protected val lifecycle: ModuleLifecycle[Int, String] =
-      ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int, String] = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =

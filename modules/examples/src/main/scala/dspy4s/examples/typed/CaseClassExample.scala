@@ -38,11 +38,10 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
 object CaseClassExample:
 
   // --8<-- [start:derived-sig]
-  val signature: Signature[EmotionInput, EmotionOutput] =
-    Signature.derived[EmotionInput, EmotionOutput](
-      name = "Emotion",
-      instructions = "Classify emotion in the given sentence."
-    )
+  val signature: Signature[EmotionInput, EmotionOutput] = Signature.derived[EmotionInput, EmotionOutput](
+    name = "Emotion",
+    instructions = "Classify emotion in the given sentence."
+  )
   // --8<-- [end:derived-sig]
 
   /** Illustrative call site. With an LM and adapter configured in `RuntimeContext`, `Predict(signature)(...)` returns
@@ -57,12 +56,12 @@ object CaseClassExample:
     * for showing the decode boundary.
     */
   def fromRawValues(rawSentiment: String): Either[DspyError, Prediction[EmotionOutput]] =
-    val raw = RawPrediction(values =
-      dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" := rawSentiment))
-    )
+    val raw =
+      RawPrediction(values = dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" := rawSentiment)))
     Prediction.from(raw, signature.outputShape)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.caseClassMain"
-@main def caseClassMain(): Unit = Demo.withLm {
-  println("CaseClass: " + CaseClassExample.classify("i started feeling a little vulnerable"))
-}
+@main def caseClassMain(): Unit =
+  Demo.withLm {
+    println("CaseClass: " + CaseClassExample.classify("i started feeling a little vulnerable"))
+  }

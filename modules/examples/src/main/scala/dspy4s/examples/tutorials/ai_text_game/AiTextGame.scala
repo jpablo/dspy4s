@@ -69,11 +69,11 @@ case class GameContext(currentLocation: String, storyProgress: Int = 0):
 case class Scene(description: String, actions: List[String], npcs: List[String], items: List[String])
 case class Dialogue(response: String, mood: String, quest: Boolean, info: String)
 case class ActionOutcome(
-    success: Boolean,
+    success    : Boolean,
     description: String,
     statChanges: Map[String, Int],
-    items: List[String],
-    experience: Int
+    items      : List[String],
+    experience : Int
 )
 
 object AiTextGame:
@@ -168,13 +168,14 @@ object AiTextGame:
   // from your own loop, threading the returned `Scene` / `Dialogue` / `ActionOutcome` back into state.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.ai_text_game.aiTextGameMain"
-@main def aiTextGameMain(): Unit = Demo.withLm {
-  val ai      = new AiTextGame.GameAI
-  val player  = Player(name = "Aria", skills = List("perception", "stealth"))
-  val context = GameContext(currentLocation = "the misty village square")
-  ai.generateScene(player, context, recentActions = "Just arrived in town.") match
-    case Left(err)    => println(s"⚠️  ${err.message}")
-    case Right(scene) =>
-      println(s"📜 ${scene.description}")
-      println(s"🎯 Actions: ${scene.actions.mkString(", ")}")
-}
+@main def aiTextGameMain(): Unit =
+  Demo.withLm {
+    val ai      = new AiTextGame.GameAI
+    val player  = Player(name = "Aria", skills = List("perception", "stealth"))
+    val context = GameContext(currentLocation = "the misty village square")
+    ai.generateScene(player, context, recentActions = "Just arrived in town.") match
+      case Left(err)    => println(s"⚠️  ${err.message}")
+      case Right(scene) =>
+        println(s"📜 ${scene.description}")
+        println(s"🎯 Actions: ${scene.actions.mkString(", ")}")
+  }

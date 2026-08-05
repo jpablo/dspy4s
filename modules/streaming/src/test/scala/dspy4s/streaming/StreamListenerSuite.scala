@@ -43,7 +43,7 @@ class StreamListenerSuite extends FunSuite:
       chunks.iterator
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def collectStream(events: ClosableIterator[StreamEvent]): Vector[StreamEvent] =
     val buf = ArrayBuffer.empty[StreamEvent]
@@ -303,8 +303,8 @@ class StreamListenerSuite extends FunSuite:
     )
     val callIdx = new java.util.concurrent.atomic.AtomicInteger(0)
     val lm      = new StreamingLanguageModel:
-      override val id: String   = "scripted-react-stream"
-      override val mode: LmMode = LmMode.Chat
+      override val id: String                                                                    = "scripted-react-stream"
+      override val mode: LmMode                                                                  = LmMode.Chat
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         val idx = callIdx.getAndIncrement() % perCallOutputs.size
         Right(LmResponse(outputs = Vector(LmOutput(text = perCallOutputs(idx)))))
@@ -366,11 +366,11 @@ class StreamListenerSuite extends FunSuite:
         for
           answer    <- predict1(input)
           judgement <- predict2(input.copy(
-            input = input.input.updated(
-              "answer",
-              answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
-            )
-          ))
+                         input = input.input.updated(
+                           "answer",
+                           answer.raw.get("answer").getOrElse(zio.blocks.schema.DynamicValue.Null)
+                         )
+                       ))
         yield judgement.raw
 
     RuntimeEnvironment.withSettings(

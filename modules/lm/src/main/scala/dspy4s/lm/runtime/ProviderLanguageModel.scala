@@ -21,9 +21,9 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final case class ProviderLanguageModel(
-    id: String,
-    mode: LmMode,
-    invoke: DynamicValue => Either[DspyError, DynamicValue],
+    id            : String,
+    mode          : LmMode,
+    invoke        : DynamicValue => Either[DspyError, DynamicValue],
     defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends LanguageModel:
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
@@ -38,7 +38,7 @@ object ProviderRequestNormalizer:
     * request's options), plus model / mode / request_id and the encoded messages or prompt.
     */
   def normalize(
-      request: LmRequest,
+      request       : LmRequest,
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
   ): DynamicValue.Record =
     var rec = DynamicValues.mergeRecords(defaultOptions, request.options)
@@ -138,8 +138,7 @@ object ProviderResponseParser:
 
   private def parseToolCalls(message: DynamicValue.Record): Vector[ToolCall] =
     seqField(message, WireKeys.toolCalls) match
-      case Right(entries) =>
-        entries.flatMap { call =>
+      case Right(entries) => entries.flatMap { call =>
           asRecord(call).flatMap { rec =>
             val functionRec = field(rec, WireKeys.function).flatMap(asRecord).getOrElse(rec)
             field(functionRec, WireKeys.name).flatMap(asString).map { name =>
@@ -152,21 +151,18 @@ object ProviderResponseParser:
   private def parseArgs(raw: Option[DynamicValue]): DynamicValue.Record =
     raw.flatMap(asRecord) match
       case Some(rec) => rec
-      case None      =>
-        raw.flatMap(asString) match
+      case None      => raw.flatMap(asString) match
           // OpenAI sends `function.arguments` as a JSON STRING; decode it into a Record (the ToolCall contract:
           // args are decoded at the parse boundary). Shares ToolCallAssembler.parseArguments with the streaming
           // path so both decode identically; non-JSON strings fall back to `{input: raw}` there.
           case Some(value) if value.trim.nonEmpty => ToolCallAssembler.parseArguments(value)
-          case _                                  =>
-            raw match
+          case _                                  => raw match
               case Some(other) => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
               case None        => DynamicValue.Record.empty
 
   private def extractText(node: DynamicValue): Option[String] =
     field(node, WireKeys.content) match
-      case Some(content) =>
-        asString(content) match
+      case Some(content) => asString(content) match
           case Some(text) => Some(text)
           case None       =>
             val fromParts = DynamicJson.asSequence(content).iterator
@@ -175,8 +171,7 @@ object ProviderResponseParser:
             Option
               .when(fromParts.nonEmpty)(fromParts)
               .orElse(field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty))
-      case None =>
-        field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty)
+      case None => field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty)
 
   /** A response field treated as an array: absent or null -> empty; a sequence -> its elements; anything else -> a
     * parse error (mirrors the old `asVector`).

@@ -28,7 +28,7 @@ class StreamingToolCallSuite extends FunSuite:
       chunks.iterator
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("wrapper accumulates tool-call deltas across chunks into LmResponse") {
     val chunks = Vector(

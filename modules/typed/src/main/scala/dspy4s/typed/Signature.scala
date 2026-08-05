@@ -11,9 +11,9 @@ import zio.blocks.schema.DynamicValue
   * Phase 2 supports `I <: Product` / `O <: Product` (case classes). Phase 3 adds the builder API.
   */
 final case class Signature[I, O](
-    name: String,
-    layout: SignatureLayout,
-    inputShape: Shape[I],
+    name       : String,
+    layout     : SignatureLayout,
+    inputShape : Shape[I],
     outputShape: Shape[O]
 ):
 
@@ -59,7 +59,7 @@ object Signature:
     * a defensive measure -- it should never fire for a well-formed case class.
     */
   inline def derived[I <: Product, O <: Product](
-      name: String,
+      name        : String,
       instructions: String = ""
   )(using
       mi: scala.deriving.Mirror.ProductOf[I],
@@ -109,7 +109,7 @@ object Signature:
     * `Signature.from(method)`, or `Signature.of[T <: Spec]`.
     */
   def fromStringDynamic(
-      dsl: String,
+      dsl         : String,
       instructions: String = ""
   ): Either[DspyError, Signature[DynamicValue.Record, DynamicValue.Record]] =
     SignatureLayout.parse(dsl, instructions).map { layout =>
@@ -146,7 +146,7 @@ object Signature:
     * for DSPy-style anonymous signatures.
     */
   transparent inline def fromType[F](
-      inline name: String = "Signature",
+      inline name        : String = "Signature",
       inline instructions: String = ""
   ) =
     ${ internal.FunctionMacro.fromTypeImpl[F]('name, 'instructions) }
@@ -165,7 +165,7 @@ object Signature:
     * when empty.
     */
   transparent inline def of[T <: Spec](
-      inline name: String = "",
+      inline name        : String = "",
       inline instructions: String = ""
   ) =
     ${ internal.SpecMacro.ofImpl[T]('name, 'instructions) }

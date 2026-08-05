@@ -73,14 +73,13 @@ object BestOfNAndRefine:
       rewardFn = (_, pred) => oneWord(pred.output.answer),
       threshold = 1.0
     )
-    val refineStopOnFirstError =
-      Refine(
-        module = qa,
-        n = AttemptCount(3),
-        rewardFn = (_, pred) => oneWord(pred.output.answer),
-        threshold = 1.0,
-        failCount = Some(FailureCount(1))
-      )
+    val refineStopOnFirstError = Refine(
+      module = qa,
+      n = AttemptCount(3),
+      rewardFn = (_, pred) => oneWord(pred.output.answer),
+      threshold = 1.0,
+      failCount = Some(FailureCount(1))
+    )
 
     def call(question: String)(using RuntimeContext): Either[DspyError, String] =
       refine((question = question)).map(_.output.answer)
@@ -121,22 +120,22 @@ object BestOfNAndRefine:
       val distance = math.abs(words - 75)
       math.max(0.0, 1.0 - distance / 125.0)
 
-    val optimizedSummarizer =
-      BestOfN(
-        module = summarizer,
-        n = AttemptCount(50),
-        rewardFn = (_, pred) => idealLength(pred.output.summary),
-        threshold = 0.9
-      )
+    val optimizedSummarizer = BestOfN(
+      module = summarizer,
+      n = AttemptCount(50),
+      rewardFn = (_, pred) => idealLength(pred.output.summary),
+      threshold = 0.9
+    )
 
     def call(text: String)(using RuntimeContext): Either[DspyError, String] =
       optimizedSummarizer((text = text)).map(_.output.summary)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.output_refinement.bestOfNAndRefineMain"
-@main def bestOfNAndRefineMain(): Unit = Demo.withLm {
-  val q = "What is the capital of Belgium?"
-  println("BestOfN: " + BestOfNAndRefine.OneWordBestOfN.call(q))
-  println("Refine:  " + BestOfNAndRefine.OneWordRefine.call(q))
-  println("Judge:   " + BestOfNAndRefine.FactualityRefine.call("Tell me about Belgium's capital city."))
-  println("Summary: " + BestOfNAndRefine.IdealLengthSummarizer.call("[Long text to summarize...]"))
-}
+@main def bestOfNAndRefineMain(): Unit =
+  Demo.withLm {
+    val q = "What is the capital of Belgium?"
+    println("BestOfN: " + BestOfNAndRefine.OneWordBestOfN.call(q))
+    println("Refine:  " + BestOfNAndRefine.OneWordRefine.call(q))
+    println("Judge:   " + BestOfNAndRefine.FactualityRefine.call("Tell me about Belgium's capital city."))
+    println("Summary: " + BestOfNAndRefine.IdealLengthSummarizer.call("[Long text to summarize...]"))
+  }

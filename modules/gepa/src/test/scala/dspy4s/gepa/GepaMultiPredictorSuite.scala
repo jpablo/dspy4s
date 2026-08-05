@@ -46,7 +46,7 @@ object Pipeline:
 class GepaMultiPredictorSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Instruction-sensitive two-stage task. Stage 1 (output `hint`) emits "good_hint" only when its instruction carries
     * TOKEN1. Stage 2 (output `answer`) emits "Paris" only when its instruction carries TOKEN2 AND it received
@@ -78,10 +78,10 @@ class GepaMultiPredictorSuite extends FunSuite:
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")

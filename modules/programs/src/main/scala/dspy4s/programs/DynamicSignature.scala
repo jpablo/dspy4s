@@ -68,8 +68,8 @@ sealed trait DynamicSignature:
     * the same surface the dynamic layer always exposed.
     */
   final def predict(
-      demos: Vector[Example] = Vector.empty,
-      name: Option[String] = None,
+      demos : Vector[Example]     = Vector.empty,
+      name  : Option[String]      = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
   ): Predict[In, Out] =
     Predict(signature, demos = demos, name = name, config = config)
@@ -78,8 +78,8 @@ sealed trait DynamicSignature:
     * itself, so no `import s.given` is needed at the call site.
     */
   final def packaged(
-      demos: Vector[Example] = Vector.empty,
-      name: Option[String] = None,
+      demos : Vector[Example]     = Vector.empty,
+      name  : Option[String]      = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
   ): Program[In, Out, 1] =
     Program.of(predict(demos, name, config))(using summon[OptimizableTraversal[Predict[In, Out]]], inputCodec)
@@ -102,14 +102,14 @@ object DynamicSignature:
     def input(record: DynamicValue.Record): Either[DspyError, I] = underlying.input(record)
 
     def predict(
-        demos: Vector[Example] = Vector.empty,
-        name: Option[String] = None,
+        demos : Vector[Example]     = Vector.empty,
+        name  : Option[String]      = None,
         config: DynamicValue.Record = DynamicValue.Record.empty
     ): Predict[I, O] = underlying.predict(demos, name, config)
 
     def packaged(
-        demos: Vector[Example] = Vector.empty,
-        name: Option[String] = None,
+        demos : Vector[Example]     = Vector.empty,
+        name  : Option[String]      = None,
         config: DynamicValue.Record = DynamicValue.Record.empty
     ): Program[I, O, 1] = underlying.packaged(demos, name, config)
 

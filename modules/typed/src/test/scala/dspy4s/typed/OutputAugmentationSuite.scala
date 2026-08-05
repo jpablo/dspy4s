@@ -50,21 +50,23 @@ class OutputAugmentationSuite extends FunSuite:
 
   // ── decodePrepended: the value-level decode shared by the composite programs ──────────────────────
 
-  private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
+  private def str(s    : String): DynamicValue                         = DynamicValue.Primitive(PrimitiveValue.String(s))
   private def rec(pairs: (String, DynamicValue)*): DynamicValue.Record = DynamicValue.Record(Chunk.from(pairs))
 
   // A minimal named-tuple Shape that decodes `{ answer }` into `(answer: String)`.
-  private def answerShape: Shape[(answer: String)] = new Shape[(answer: String)]:
-    val fieldSpecs: Vector[FieldSpec]                                         = Vector(FieldSpec("answer"))
-    def encode(value: (answer: String)): DynamicValue.Record                  = rec("answer" -> str(value.answer))
-    def decode(raw: DynamicValue.Record): Either[DspyError, (answer: String)] =
-      DynamicValues.requireString(raw, "answer", "test").map(a => (answer = a))
+  private def answerShape: Shape[(answer: String)] =
+    new Shape[(answer: String)]:
+      val fieldSpecs: Vector[FieldSpec]                                         = Vector(FieldSpec("answer"))
+      def encode(value: (answer: String)): DynamicValue.Record                  = rec("answer" -> str(value.answer))
+      def decode(raw: DynamicValue.Record): Either[DspyError, (answer: String)] =
+        DynamicValues.requireString(raw, "answer", "test").map(a => (answer = a))
 
   // A non-product Shape: its decoded output hits the PrependField fallback (None) inside decodePrepended.
-  private def intShape: Shape[Int] = new Shape[Int]:
-    val fieldSpecs: Vector[FieldSpec]                            = Vector.empty
-    def encode(value: Int): DynamicValue.Record                  = rec()
-    def decode(raw: DynamicValue.Record): Either[DspyError, Int] = Right(0)
+  private def intShape: Shape[Int] =
+    new Shape[Int]:
+      val fieldSpecs: Vector[FieldSpec]                              = Vector.empty
+      def encode(value: Int): DynamicValue.Record                    = rec()
+      def decode(raw  : DynamicValue.Record): Either[DspyError, Int] = Right(0)
 
   test("decodePrepended: reads the field, decodes the base, prepends") {
     val r = OutputAugmentation.decodePrepended(

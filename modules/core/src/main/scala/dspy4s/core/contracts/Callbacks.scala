@@ -57,22 +57,22 @@ sealed trait CallbackEvent extends Product with Serializable:
 
 /** Opens a module-level scope (a `Predict`, `ChainOfThought`, `ReAct`, etc.). Paired with [[ModuleEndEvent]]. */
 final case class ModuleStartEvent(
-    moduleName: String,
-    inputs: DynamicValue.Record,
-    callId: String = UUID.randomUUID().toString,
+    moduleName  : String,
+    inputs      : DynamicValue.Record,
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Closes a module-level scope opened by a [[ModuleStartEvent]] with the same `callId`. `output` is `Left(DspyError)`
   * on failure (including `RuntimeError("callback_dispatch", ...)` if the body threw).
   */
 final case class ModuleEndEvent(
-    moduleName: String,
-    output: Either[DspyError, Any],
-    callId: String = UUID.randomUUID().toString,
+    moduleName  : String,
+    output      : Either[DspyError, Any],
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Opens an LM-call scope around `LanguageModel.call`. The `request` payload is a denormalized snapshot of the request
@@ -80,22 +80,22 @@ final case class ModuleEndEvent(
   * [[LmEndEvent]].
   */
 final case class LmStartEvent(
-    modelId: String,
-    request: DynamicValue.Record,
-    callId: String = UUID.randomUUID().toString,
+    modelId     : String,
+    request     : DynamicValue.Record,
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Closes an LM-call scope opened by an [[LmStartEvent]] with the same `callId`. `response` carries the `LmResponse` on
   * success or a `DspyError` on failure.
   */
 final case class LmEndEvent(
-    modelId: String,
-    response: Either[DspyError, Any],
-    callId: String = UUID.randomUUID().toString,
+    modelId     : String,
+    response    : Either[DspyError, Any],
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Opens an adapter scope around `Adapter.format` or `Adapter.parse`. The dispatcher reuses the same event types for
@@ -103,40 +103,40 @@ final case class LmEndEvent(
   * [[AdapterEndEvent]].
   */
 final case class AdapterStartEvent(
-    adapterName: String,
-    inputs: DynamicValue.Record,
-    callId: String = UUID.randomUUID().toString,
+    adapterName : String,
+    inputs      : DynamicValue.Record,
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Closes an adapter scope opened by an [[AdapterStartEvent]] with the same `callId`. */
 final case class AdapterEndEvent(
-    adapterName: String,
-    output: Either[DspyError, Any],
-    callId: String = UUID.randomUUID().toString,
+    adapterName : String,
+    output      : Either[DspyError, Any],
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Opens a tool-invocation scope. Emitted by `ReAct`, `CodeAct`, and other composite programs when they dispatch a
   * `ToolFunction`. Paired with [[ToolEndEvent]].
   */
 final case class ToolStartEvent(
-    toolName: String,
-    args: DynamicValue.Record,
-    callId: String = UUID.randomUUID().toString,
+    toolName    : String,
+    args        : DynamicValue.Record,
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Closes a tool-invocation scope opened by a [[ToolStartEvent]] with the same `callId`. */
 final case class ToolEndEvent(
-    toolName: String,
-    output: Either[DspyError, DynamicValue],
-    callId: String = UUID.randomUUID().toString,
+    toolName    : String,
+    output      : Either[DspyError, DynamicValue],
+    callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Consumer side of the [[CallbackEvent]] stream. Implementations receive every event from every scope opened in the

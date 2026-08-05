@@ -55,22 +55,21 @@ object Metrics:
   // The `context_match` half needs a retriever (`pred.context`), which dspy4s doesn't have; the answer
   // half + the eval-vs-bootstrap branch (Python's `trace is None`) carry over to the 3-arg form
   // (`trace.isEmpty` during evaluation/optimization; non-empty during bootstrapping):
-  val validateAnswerOnly: FunctionMetric =
-    new FunctionMetric(
-      "validate_answer_only",
-      { (example, pred, _) =>
-        val answerMatch = exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
-        Right(if answerMatch then 1.0 else 0.0)
-      }
-    )
+  val validateAnswerOnly: FunctionMetric = new FunctionMetric(
+    "validate_answer_only",
+    { (example, pred, _) =>
+      val answerMatch = exField(example, "answer").toLowerCase == predField(pred, "answer").toLowerCase
+      Right(if answerMatch then 1.0 else 0.0)
+    }
+  )
 
   // ── Snippet 3 (lines 62–68) — a manual evaluation loop ──
   // | scores = []
   // | for x in devset:
   // |     pred = program(**x.inputs()); score = metric(x, pred); scores.append(score)
   def manualScores(
-      devset: Vector[Example],
-      metric: Metric,
+      devset : Vector[Example],
+      metric : Metric,
       program: Example => Either[DspyError, RawPrediction]
   ): Vector[Either[DspyError, Double]] =
     // Offline example code: these metrics don't call an LM, so a default context suffices. A real
@@ -123,14 +122,15 @@ object Metrics:
 
 // Snippet 6 — the LLM-judged `SemanticF1` metric, run against a live model.
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.evaluation.metricsJudgeMain"
-@main def metricsJudgeMain(): Unit = Demo.withLm {
-  // SemanticF1 defaults: question on the example, ground truth + system response in the `response` field.
-  val gold = Example("question" := "What is the capital of France?", "response" := "Paris is the capital of France.")
-    .withInputs(Set("question"))
-  val pred = RawPrediction(values =
-    DynamicValues.recordFromEntries(Seq(
-      "response" -> DynamicValues.fromAny("The capital of France is Paris.")
-    ))
-  )
-  println("SemanticF1 score: " + Metrics.semanticF1.score(gold, pred))
-}
+@main def metricsJudgeMain(): Unit =
+  Demo.withLm {
+    // SemanticF1 defaults: question on the example, ground truth + system response in the `response` field.
+    val gold = Example("question" := "What is the capital of France?", "response" := "Paris is the capital of France.")
+      .withInputs(Set("question"))
+    val pred = RawPrediction(values =
+      DynamicValues.recordFromEntries(Seq(
+        "response" -> DynamicValues.fromAny("The capital of France is Paris.")
+      ))
+    )
+    println("SemanticF1 score: " + Metrics.semanticF1.score(gold, pred))
+  }

@@ -28,9 +28,9 @@ import zio.blocks.schema.DynamicValue
   */
 final case class Predict[I, O](
     signature: Signature[I, O],
-    demos: Vector[Example] = Vector.empty,
-    name: Option[String] = None,
-    runtime: ProgramRuntime = new SettingsProgramRuntime {},
+    demos    : Vector[Example] = Vector.empty,
+    name     : Option[String]  = None,
+    runtime  : ProgramRuntime  = new SettingsProgramRuntime {},
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `config` (per-call keys win on collision), so it supplies defaults a call may override.
       * Empty by default — then the merged options are exactly the per-call config.
@@ -89,8 +89,7 @@ final case class Predict[I, O](
       tools = tools
     )
 
-  override protected val lifecycle: ModuleLifecycle[I, O] =
-    ModuleLifecycle.typed(signature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typed(signature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputRecord = call.encodedInput(signature.inputShape)

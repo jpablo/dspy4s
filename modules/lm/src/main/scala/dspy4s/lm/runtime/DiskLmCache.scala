@@ -13,21 +13,21 @@ import scala.util.control.NonFatal
 
 private object DiskCacheModel:
   final case class PersistedResponse(
-      outputs: Array[PersistedOutput],
-      usage: PersistedUsage | Null,
+      outputs  : Array[PersistedOutput],
+      usage    : PersistedUsage | Null,
       modelName: String | Null
   ) extends Serializable
 
   final case class PersistedOutput(
-      text: String,
-      toolCalls: Array[PersistedToolCall],
+      text        : String,
+      toolCalls   : Array[PersistedToolCall],
       metadataJson: String
   ) extends Serializable
 
   // Tool-call args and output metadata are `DynamicValue.Record`s; persist them as their natural JSON (via
   // zio-blocks' DynamicValue JSON codec), faithfully -- not the old lossy String-flattening.
   final case class PersistedToolCall(
-      name: String,
+      name    : String,
       argsJson: String
   ) extends Serializable
 
@@ -38,17 +38,16 @@ private object DiskCacheModel:
 
   def decodeRecord(json: String | Null): DynamicValue.Record =
     Option(json) match
-      case Some(j) =>
-        dynamicJsonCodec.decode(j.getBytes(StandardCharsets.UTF_8)) match
+      case Some(j) => dynamicJsonCodec.decode(j.getBytes(StandardCharsets.UTF_8)) match
           case Right(rec: DynamicValue.Record) => rec
           case _                               => DynamicValue.Record.empty
       case None => DynamicValue.Record.empty
 
   final case class PersistedUsage(
-      totalTokens: Long,
-      promptTokens: Long,
+      totalTokens     : Long,
+      promptTokens    : Long,
       completionTokens: Long,
-      details: java.util.Map[String, java.lang.Long]
+      details         : java.util.Map[String, java.lang.Long]
   ) extends Serializable
 
 final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapacity(200000)) extends LmCache:
@@ -89,8 +88,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
         moveIntoPlace(temp, path)
         evictOverflow()
       catch
-        case NonFatal(_) =>
-          ()
+        case NonFatal(_) => ()
     }
 
   def size: Int =
@@ -110,8 +108,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
     try
       val _ = Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     catch
-      case _: AtomicMoveNotSupportedException =>
-        val _ = Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
+      case _: AtomicMoveNotSupportedException => val _ = Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
 
   private def serialize(response: LmResponse): Array[Byte] =
     val persisted = toPersisted(response)
@@ -127,16 +124,14 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
 
   private def deserialize(bytes: Array[Byte]): Option[LmResponse] =
     val input = ObjectInputStream(ByteArrayInputStream(bytes))
-    try
-      input.readObject() match
+    try input.readObject() match
         case persisted: PersistedResponse => Some(fromPersisted(persisted))
         case _                            => None
     finally input.close()
 
   private def entryPaths: Vector[Path] =
     val stream = Files.list(directory)
-    try
-      stream.iterator().asScala
+    try stream.iterator().asScala
         .filter(path => Files.isRegularFile(path) && path.getFileName.toString.endsWith(".bin"))
         .toVector
     finally stream.close()
@@ -197,9 +192,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
 
   private def toJavaLongMap(values: Map[String, Long]): java.util.Map[String, java.lang.Long] =
     val map = java.util.HashMap[String, java.lang.Long]()
-    values.foreach { case (key, value) =>
-      map.put(key, value)
-    }
+    values.foreach { case (key, value) => map.put(key, value) }
     map
 
   private def fromJavaLongMap(values: java.util.Map[String, java.lang.Long] | Null): Map[String, Long] =

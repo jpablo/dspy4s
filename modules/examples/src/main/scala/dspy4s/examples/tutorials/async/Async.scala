@@ -61,9 +61,10 @@ object Async:
   // `allow_tool_async_sync_conversion` knob). Tools run synchronously inside the (optionally async) program.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.async.asyncMain"
-@main def asyncMain(): Unit = Demo.withLm {
-  given ExecutionContext = ExecutionContext.global
-  val q                  = "Why did a chicken cross the kitchen?"
-  println("Async predict: " + Await.result(Async.askAsync(q), 60.seconds))
-  println("Async module:  " + Await.result(new Async.SimplifierModule().aforward(q), 60.seconds))
-}
+@main def asyncMain(): Unit =
+  Demo.withLm {
+    given ExecutionContext = ExecutionContext.global
+    val q                  = "Why did a chicken cross the kitchen?"
+    println("Async predict: " + Await.result(Async.askAsync(q), 60.seconds))
+    println("Async module:  " + Await.result(new Async.SimplifierModule().aforward(q), 60.seconds))
+  }

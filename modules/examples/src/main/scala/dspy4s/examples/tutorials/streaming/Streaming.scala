@@ -70,8 +70,8 @@ object Streaming:
   // --8<-- [start:compose-module]
   final class SimplifyModule extends DynamicModule:
     override val moduleName: String = "simplify_module"
-    private val predict1 = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
-    private val predict2 =
+    private val predict1            = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
+    private val predict2            =
       DynamicPredict(Signature.fromString("answer -> simplified_answer").layout, name = Some("predict2"))
 
     override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
@@ -124,20 +124,20 @@ object Streaming:
   // be named `answer` like its output); both predictors still emit an `answer` field, the point of the snippet.
   final class ScoringModule extends DynamicModule:
     override val moduleName: String = "scoring_module"
-    private val predict1 = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
-    private val predict2 =
+    private val predict1            = DynamicPredict(Signature.fromString("question -> answer").layout, name = Some("predict1"))
+    private val predict2            =
       DynamicPredict(Signature.fromString("question, draft -> answer, score").layout, name = Some("predict2"))
 
     override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
       for
-        step1 <- predict1(call)
+        step1   <- predict1(call)
         question = textField(call.input, "question")
         answer   = textField(step1.output, "answer")
-        step2 <- predict2(ProgramCall(input =
-          DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
-        ))
+        step2   <- predict2(ProgramCall(input =
+                   DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
+                 ))
       yield step2.raw
 
   def streamScoring(question: String)(using RuntimeContext): Option[RawPrediction] =
@@ -177,10 +177,10 @@ object Streaming:
         for
           doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
           out     <- predict(ProgramCall(input =
-            DynamicValues.recordFromEntries(
-              Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
-            )
-          ))
+                   DynamicValues.recordFromEntries(
+                     Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
+                   )
+                 ))
         yield out.raw
 
     val streamPredict = Streamify.streamify(
@@ -191,8 +191,9 @@ object Streaming:
     consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.streaming.streamingMain"
-@main def streamingMain(): Unit = Demo.withLm {
-  println("=== single Predict, streaming `answer` ===")
-  val out = Streaming.streamAnswer("Why did a chicken cross the kitchen?")
-  println("Final output: " + out)
-}
+@main def streamingMain(): Unit =
+  Demo.withLm {
+    println("=== single Predict, streaming `answer` ===")
+    val out = Streaming.streamAnswer("Why did a chicken cross the kitchen?")
+    println("Final output: " + out)
+  }

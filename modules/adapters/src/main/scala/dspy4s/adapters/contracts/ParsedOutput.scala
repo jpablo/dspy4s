@@ -6,7 +6,7 @@ import zio.blocks.schema.DynamicValue
   * `metadata` is a free-form bag of debug or adapter-specific annotations.
   */
 final case class ParsedOutput(
-    values: DynamicValue.Record,
-    rawText: Option[String] = None,
+    values  : DynamicValue.Record,
+    rawText : Option[String]   = None,
     metadata: Map[String, Any] = Map.empty
 )

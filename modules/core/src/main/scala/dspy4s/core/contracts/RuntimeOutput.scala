@@ -18,10 +18,10 @@ import java.time.Instant
   */
 final case class TraceEntry(
     component: String,
-    inputs: DynamicValue.Record,
-    outputs: DynamicValue.Record,
-    failure: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    inputs   : DynamicValue.Record,
+    outputs  : DynamicValue.Record,
+    failure  : Option[String] = None,
+    timestamp: Instant        = Instant.now()
 )
 
 /** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and -- for LM
@@ -34,7 +34,7 @@ final case class HistoryEntry(component: String, payload: DynamicValue.Record, t
   * execution order of trace and history entries, and [[RuntimeDelta.empty]] is its identity.
   */
 final case class RuntimeDelta(
-    trace: Vector[TraceEntry] = Vector.empty,
+    trace  : Vector[TraceEntry]   = Vector.empty,
     history: Vector[HistoryEntry] = Vector.empty
 ) derives CanEqual:
   def combine(that: RuntimeDelta): RuntimeDelta =

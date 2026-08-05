@@ -20,10 +20,10 @@ import dspy4s.lm.contracts.Embedder
   * Construction embeds eagerly — build via [[EmbeddingsRetriever.create]].
   */
 final class EmbeddingsRetriever private (
-    val corpus: NonEmptyCorpus,
-    embedder: Embedder,
-    val k: NeighborCount,
-    normalize: Boolean,
+    val corpus   : NonEmptyCorpus,
+    embedder     : Embedder,
+    val k        : NeighborCount,
+    normalize    : Boolean,
     corpusVectors: Vector[Vector[Float]]
 ):
   /** The top-`k` passages most similar to `query`, best first, with corpus indices and similarity scores. */
@@ -48,10 +48,10 @@ object EmbeddingsRetriever:
 
   /** Embed the corpus and assemble the retriever. */
   def create(
-      corpus: NonEmptyCorpus,
-      embedder: Embedder,
-      k: NeighborCount = NeighborCount(5),
-      normalize: Boolean = true
+      corpus   : NonEmptyCorpus,
+      embedder : Embedder,
+      k        : NeighborCount = NeighborCount(5),
+      normalize: Boolean       = true
   )(using
       RuntimeContext
   ): Either[DspyError, EmbeddingsRetriever] =

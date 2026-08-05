@@ -60,7 +60,7 @@ final case class ProgramOfThought[I, O](
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ProgramOfThought.WithReasoning[O]
 
-  override val moduleName: String = "program_of_thought"
+  override val moduleName: String         = "program_of_thought"
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   import ProgramOfThought.{codeOutputField, errorField, finalGeneratedCodeField, generatedCodeField, previousCodeField}
@@ -183,9 +183,9 @@ final case class ProgramOfThought[I, O](
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     for
-      codeAndOutput <- runCode(call)
+      codeAndOutput     <- runCode(call)
       (code, codeOutput) = codeAndOutput
-      result <- answererPredict(call.mapInput(input => ((input, code), codeOutput)))
+      result            <- answererPredict(call.mapInput(input => ((input, code), codeOutput)))
     yield Prediction(output = result.output, raw = result.raw)
 
   /** The regenerate-until-execution-succeeds loop (the `retryUntil` shape of Algebra 2, on the shared [[AgentLoop]]
@@ -196,10 +196,8 @@ final case class ProgramOfThought[I, O](
   private def runCode(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, (String, String)] =
     AgentLoop.run[Option[ProgramOfThought.Attempt], (String, String)](None, 0, maxIterations)(
       onExhausted = {
-        case Some(attempt) =>
-          Left(RuntimeError("program_of_thought", attempt.exhaustionMessage))
-        case None =>
-          Left(RuntimeError("program_of_thought", s"Max attempts ($maxIterations) reached."))
+        case Some(attempt) => Left(RuntimeError("program_of_thought", attempt.exhaustionMessage))
+        case None          => Left(RuntimeError("program_of_thought", s"Max attempts ($maxIterations) reached."))
       }
     )(potStep(call))
 
@@ -216,12 +214,9 @@ final case class ProgramOfThought[I, O](
     (previous, _) =>
       // Generator on the first attempt, regenerator (carrying the prior failure) thereafter. The two predicts
       // have different typed inputs, so the dispatch happens at the call rather than on a shared predict value.
-      val generated =
-        previous match
-          case None =>
-            generatorPredict(call)
-          case Some(attempt) =>
-            regeneratorPredict(call.mapInput(input => ((input, attempt.code), attempt.error)))
+      val generated = previous match
+        case None          => generatorPredict(call)
+        case Some(attempt) => regeneratorPredict(call.mapInput(input => ((input, attempt.code), attempt.error)))
 
       generated.flatMap { prediction =>
         prediction.output.generatedCode match
@@ -244,8 +239,7 @@ final case class ProgramOfThought[I, O](
             // Shared with CodeAct — upstream's `_parse_code` is one function serving both programs, so both get
             // the same LM-output tolerance (fence stripping, `---` truncation, trailing-assignment echo).
             GeneratedPython.parse(rawCode) match
-              case Left(parseErr) =>
-                Right(
+              case Left(parseErr) => Right(
                   AgentLoop
                     .Step
                     .Continue(
@@ -258,8 +252,7 @@ final case class ProgramOfThought[I, O](
                       )
                     )
                 )
-              case Right(code) =>
-                interpreter.execute(code) match
+              case Right(code) => interpreter.execute(code) match
                   case Right(result) if result.exitCode == 0 =>
                     // A SUBMIT-capable interpreter (DenoPyodideInterpreter) surfaces a structured early-exit in
                     // `finalOutput`; prefer it over printed stdout (Python-parity: upstream PoT reads SUBMIT).
@@ -294,9 +287,9 @@ object ProgramOfThought:
     */
   private[programs] final case class Attempt(code: String, error: String, exhaustionMessage: String)
 
-  private[programs] val generatorModuleName: String = ProgramOfThoughtProtocol.generatorModuleName
+  private[programs] val generatorModuleName: String   = ProgramOfThoughtProtocol.generatorModuleName
   private[programs] val regeneratorModuleName: String = ProgramOfThoughtProtocol.regeneratorModuleName
-  private[programs] val answererModuleName: String = ProgramOfThoughtProtocol.answererModuleName
+  private[programs] val answererModuleName: String    = ProgramOfThoughtProtocol.answererModuleName
 
   /** Use one stateless settings-based runtime for default inner predictors. Keeping it in the companion means a
     * state-only `copy` rebuild retains the same execution resource.
@@ -311,11 +304,11 @@ object ProgramOfThought:
   // the marker from the field NAME (title-case via inferPrefix): generated_code -> "Generated Code:",
   // previous_code -> "Previous Code:", error -> "Error:", final_generated_code -> "Final Generated Code:",
   // code_output -> "Code Output:". The old code reused "Code:" on two distinct fields; derivation disambiguates. ──
-  private[programs] val generatedCodeField: FieldSpec = ProgramOfThoughtProtocol.generatedCodeField
-  private[programs] val previousCodeField: FieldSpec = ProgramOfThoughtProtocol.previousCodeField
-  private[programs] val errorField: FieldSpec = ProgramOfThoughtProtocol.errorField
+  private[programs] val generatedCodeField: FieldSpec      = ProgramOfThoughtProtocol.generatedCodeField
+  private[programs] val previousCodeField: FieldSpec       = ProgramOfThoughtProtocol.previousCodeField
+  private[programs] val errorField: FieldSpec              = ProgramOfThoughtProtocol.errorField
   private[programs] val finalGeneratedCodeField: FieldSpec = ProgramOfThoughtProtocol.finalGeneratedCodeField
-  private[programs] val codeOutputField: FieldSpec = ProgramOfThoughtProtocol.codeOutputField
+  private[programs] val codeOutputField: FieldSpec         = ProgramOfThoughtProtocol.codeOutputField
 
   /** The typed output consumed by the generate / regenerate loop. The augmented layout also asks the LM for
     * `reasoning`, but that field is execution evidence rather than part of this semantic output. Missing code is an

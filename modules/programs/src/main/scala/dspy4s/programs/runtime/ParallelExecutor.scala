@@ -19,15 +19,15 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
 final case class ParallelExecutionResult[+A](
-    results: Vector[Option[A]],
+    results      : Vector[Option[A]],
     failedIndices: Vector[Int],
-    errors: Map[Int, DspyError]
+    errors       : Map[Int, DspyError]
 )
 
 final class ParallelExecutor(
-    numThreads: ThreadCount = ThreadCount(8),
-    maxErrors: ErrorLimit = ErrorLimit(10),
-    timeout: FiniteDuration = 120.seconds
+    numThreads: ThreadCount    = ThreadCount(8),
+    maxErrors : ErrorLimit     = ErrorLimit(10),
+    timeout   : FiniteDuration = 120.seconds
 ):
 
   def execute[A, B](
@@ -68,8 +68,7 @@ final class ParallelExecutor(
                   val value: Either[DspyError, B] =
                     try task(data(index))
                     catch
-                      case NonFatal(error) =>
-                        Left(
+                      case NonFatal(error) => Left(
                           RuntimeError(
                             component = "parallel_executor",
                             message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
@@ -104,11 +103,9 @@ final class ParallelExecutor(
 
           maybeOutcome match
             case None          => ()
-            case Some(outcome) =>
-              outcome match
-                case Right(value) =>
-                  resultBuffer(index) = Some(value)
-                case Left(error) =>
+            case Some(outcome) => outcome match
+                case Right(value) => resultBuffer(index) = Some(value)
+                case Left(error)  =>
                   failedIndices += index
                   errors.update(index, error)
                   if errors.size >= maxErrors then
@@ -133,8 +130,7 @@ final class ParallelExecutor(
           )
         )
     catch
-      case NonFatal(error) =>
-        Left(
+      case NonFatal(error) => Left(
           RuntimeError(
             component = "parallel_executor",
             message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)

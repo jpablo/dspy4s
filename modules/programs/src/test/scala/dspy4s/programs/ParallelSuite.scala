@@ -19,7 +19,7 @@ class ParallelSuite extends FunSuite:
 
   private final case class StubProgram(
       override val moduleName: String = "stub",
-      behavior: Int => Either[DspyError, RawPrediction]
+      behavior               : Int => Either[DspyError, RawPrediction]
   ) extends DynamicModule:
     override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
         RuntimeContext

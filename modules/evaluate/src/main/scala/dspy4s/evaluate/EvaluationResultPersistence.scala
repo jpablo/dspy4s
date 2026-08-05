@@ -69,32 +69,31 @@ object EvaluationResultPersistence:
     catch
       case error: Throwable => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
 
-  private def toJson(value: Any): ujson.Value = value match
-    case s: String    => ujson.Str(s)
-    case b: Boolean   => ujson.Bool(b)
-    case n: Int       => ujson.Num(n.toDouble)
-    case n: Long      => ujson.Num(n.toDouble)
-    case n: Double    => ujson.Num(n)
-    case n: Float     => ujson.Num(n.toDouble)
-    case _: None.type => ujson.Null
-    case Some(inner)  => toJson(inner)
-    case m: Map[?, ?] =>
-      ujson.Obj.from(m.iterator.collect { case (k: String, v) => k -> toJson(v) })
-    case seq: Iterable[?] =>
-      ujson.Arr.from(seq.iterator.map(toJson))
-    case arr: Array[?] =>
-      ujson.Arr.from(arr.iterator.map(toJson))
-    case other => ujson.Str(String.valueOf(other))
+  private def toJson(value: Any): ujson.Value =
+    value match
+      case s: String        => ujson.Str(s)
+      case b: Boolean       => ujson.Bool(b)
+      case n: Int           => ujson.Num(n.toDouble)
+      case n: Long          => ujson.Num(n.toDouble)
+      case n: Double        => ujson.Num(n)
+      case n: Float         => ujson.Num(n.toDouble)
+      case _: None.type     => ujson.Null
+      case Some(inner)      => toJson(inner)
+      case m: Map[?, ?]     => ujson.Obj.from(m.iterator.collect { case (k: String, v) => k -> toJson(v) })
+      case seq: Iterable[?] => ujson.Arr.from(seq.iterator.map(toJson))
+      case arr: Array[?]    => ujson.Arr.from(arr.iterator.map(toJson))
+      case other            => ujson.Str(String.valueOf(other))
 
-  private def toCsvString(value: Any): String = value match
-    case s: String        => s
-    case b: Boolean       => b.toString
-    case n: Number        => n.toString
-    case _: None.type     => ""
-    case Some(inner)      => toCsvString(inner)
-    case seq: Iterable[?] => seq.map(toCsvString).mkString("; ")
-    case arr: Array[?]    => arr.map(toCsvString).mkString("; ")
-    case other            => String.valueOf(other)
+  private def toCsvString(value: Any): String =
+    value match
+      case s: String        => s
+      case b: Boolean       => b.toString
+      case n: Number        => n.toString
+      case _: None.type     => ""
+      case Some(inner)      => toCsvString(inner)
+      case seq: Iterable[?] => seq.map(toCsvString).mkString("; ")
+      case arr: Array[?]    => arr.map(toCsvString).mkString("; ")
+      case other            => String.valueOf(other)
 
   private def csvEscape(field: String): String =
     if field.contains(",") || field.contains("\"") || field.contains("\n") then

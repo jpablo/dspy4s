@@ -12,8 +12,7 @@ import java.util.Objects
   * `DynamicValue` can use the plain `"name" -> value`.
   */
 extension (key: String)
-  infix def :=[A](value: A)(using schema: Schema[A]): (String, DynamicValue) =
-    (key, schema.toDynamicValue(value))
+  infix def :=[A](value: A)(using schema: Schema[A]): (String, DynamicValue) = (key, schema.toDynamicValue(value))
 
 /** `record.updated(name, value)` updates or appends a field by name: if the record already has `name`, replace its
   * value in place (preserving insertion order); otherwise append at the end. Import via
@@ -43,15 +42,14 @@ object DynamicValues:
     if Objects.isNull(value) then DynamicValue.Null
     else
       value match
-        case dv: DynamicValue => dv
-        case s: String        => DynamicValue.Primitive(PrimitiveValue.String(s))
-        case b: Boolean       => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
-        case i: Int           => DynamicValue.Primitive(PrimitiveValue.Int(i))
-        case l: Long          => DynamicValue.Primitive(PrimitiveValue.Long(l))
-        case f: Float         => DynamicValue.Primitive(PrimitiveValue.Float(f))
-        case d: Double        => DynamicValue.Primitive(PrimitiveValue.Double(d))
-        case seq: Seq[?]      =>
-          DynamicValue.Sequence(Chunk.from(seq.map(fromAny)))
+        case dv: DynamicValue        => dv
+        case s: String               => DynamicValue.Primitive(PrimitiveValue.String(s))
+        case b: Boolean              => DynamicValue.Primitive(PrimitiveValue.Boolean(b))
+        case i: Int                  => DynamicValue.Primitive(PrimitiveValue.Int(i))
+        case l: Long                 => DynamicValue.Primitive(PrimitiveValue.Long(l))
+        case f: Float                => DynamicValue.Primitive(PrimitiveValue.Float(f))
+        case d: Double               => DynamicValue.Primitive(PrimitiveValue.Double(d))
+        case seq: Seq[?]             => DynamicValue.Sequence(Chunk.from(seq.map(fromAny)))
         case m: collection.Map[?, ?] =>
           val entries = m.iterator.collect { case (k: String, v) => k -> fromAny(v) }.toSeq
           DynamicValue.Record(Chunk.from(entries))
@@ -83,10 +81,8 @@ object DynamicValues:
   def requireString(rec: DynamicValue.Record, field: String, label: String): Either[DspyError, String] =
     recordGet(rec, field) match
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(s)
-      case Some(other)                                            =>
-        Left(ValidationError(s"$label field '$field' must be a String, got: $other"))
-      case None =>
-        Left(NotFoundError(
+      case Some(other)                                            => Left(ValidationError(s"$label field '$field' must be a String, got: $other"))
+      case None                                                   => Left(NotFoundError(
           resource = "prediction_field",
           message = s"Required field '$field' is missing from the $label prediction"
         ))
@@ -116,27 +112,24 @@ object DynamicValues:
     * to their host type. Used at observability boundaries (TraceEntry payloads, callback event bags) where the consumer
     * expects a free-form Map.
     */
-  def toAny(dv: DynamicValue): Any = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s))    => s
-    case DynamicValue.Primitive(PrimitiveValue.Boolean(b))   => b
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))       => n
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))      => n
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))     => n
-    case DynamicValue.Primitive(PrimitiveValue.Double(n))    => n
-    case DynamicValue.Primitive(PrimitiveValue.Short(n))     => n
-    case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n
-    case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c
-    case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => ()
-    case DynamicValue.Primitive(other)                       => other.toString
-    case variant: DynamicValue.Variant                       =>
-      variant.caseName.getOrElse(toAny(variant.value))
-    case seq: DynamicValue.Sequence =>
-      seq.elements.iterator.map(toAny).toList
-    case rec: DynamicValue.Record =>
-      rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
-    case m: DynamicValue.Map =>
-      m.entries.iterator.map((k, v) => toAny(k) -> toAny(v)).toMap
-    case _: DynamicValue.Null.type => null
+  def toAny(dv: DynamicValue): Any =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.String(s))    => s
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(b))   => b
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))       => n
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))      => n
+      case DynamicValue.Primitive(PrimitiveValue.Float(n))     => n
+      case DynamicValue.Primitive(PrimitiveValue.Double(n))    => n
+      case DynamicValue.Primitive(PrimitiveValue.Short(n))     => n
+      case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n
+      case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c
+      case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => ()
+      case DynamicValue.Primitive(other)                       => other.toString
+      case variant: DynamicValue.Variant                       => variant.caseName.getOrElse(toAny(variant.value))
+      case seq: DynamicValue.Sequence                          => seq.elements.iterator.map(toAny).toList
+      case rec: DynamicValue.Record                            => rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
+      case m: DynamicValue.Map                                 => m.entries.iterator.map((k, v) => toAny(k) -> toAny(v)).toMap
+      case _: DynamicValue.Null.type                           => null
 
   /** Convenience: `toAny` specialized to a `Record`, returning a `Map[String, Any]`. */
   def recordToMap(rec: DynamicValue.Record): Map[String, Any] =
@@ -146,24 +139,23 @@ object DynamicValues:
     * Recursively flattens records / sequences / variants into a JSON-ish textual form. Primitives use their natural
     * `toString`; null renders as `null`.
     */
-  def renderText(dv: DynamicValue): String = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s))    => s
-    case DynamicValue.Primitive(PrimitiveValue.Boolean(b))   => b.toString
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))       => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))      => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))     => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Double(n))    => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Short(n))     => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n.toString
-    case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c.toString
-    case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => "()"
-    case DynamicValue.Primitive(other)                       => other.toString
-    case variant: DynamicValue.Variant                       =>
-      variant.caseName.getOrElse(renderText(variant.value))
-    case seq: DynamicValue.Sequence =>
-      seq.elements.iterator.map(renderText).mkString("[", ", ", "]")
-    case rec: DynamicValue.Record =>
-      rec.fields.iterator.map((k, v) => s"\"$k\": ${renderText(v)}").mkString("{", ", ", "}")
-    case m: DynamicValue.Map =>
-      m.entries.iterator.map((k, v) => s"${renderText(k)}: ${renderText(v)}").mkString("{", ", ", "}")
-    case _: DynamicValue.Null.type => "null"
+  def renderText(dv: DynamicValue): String =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.String(s))    => s
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(b))   => b.toString
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))       => n.toString
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))      => n.toString
+      case DynamicValue.Primitive(PrimitiveValue.Float(n))     => n.toString
+      case DynamicValue.Primitive(PrimitiveValue.Double(n))    => n.toString
+      case DynamicValue.Primitive(PrimitiveValue.Short(n))     => n.toString
+      case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n.toString
+      case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c.toString
+      case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => "()"
+      case DynamicValue.Primitive(other)                       => other.toString
+      case variant: DynamicValue.Variant                       => variant.caseName.getOrElse(renderText(variant.value))
+      case seq: DynamicValue.Sequence                          => seq.elements.iterator.map(renderText).mkString("[", ", ", "]")
+      case rec: DynamicValue.Record                            =>
+        rec.fields.iterator.map((k, v) => s"\"$k\": ${renderText(v)}").mkString("{", ", ", "}")
+      case m: DynamicValue.Map =>
+        m.entries.iterator.map((k, v) => s"${renderText(k)}: ${renderText(v)}").mkString("{", ", ", "}")
+      case _: DynamicValue.Null.type => "null"

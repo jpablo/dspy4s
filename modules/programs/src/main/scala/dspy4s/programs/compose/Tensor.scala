@@ -27,7 +27,7 @@ final case class Tensor[
     FA <: Module[I, A],
     FB <: Module[J, B]
 ](
-    first: FA,
+    first : FA,
     second: FB
 ) extends TransparentModule[(I, J), (A, B)]:
   override val moduleName: String = "tensor"
@@ -59,7 +59,7 @@ object Tensor:
       pa: OptimizableTraversal.WithArity[FA, NA],
       pb: OptimizableTraversal.WithArity[FB, NB]
   ): OptimizableTraversal.Of[Tensor[I, J, A, B, FA, FB], NA + NB] with
-    def arity(program: Tensor[I, J, A, B, FA, FB]): Int = pa.arity(program.first) + pb.arity(program.second)
+    def arity(program: Tensor[I, J, A, B, FA, FB]): Int                       = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[OptimizableView] =
       PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
 

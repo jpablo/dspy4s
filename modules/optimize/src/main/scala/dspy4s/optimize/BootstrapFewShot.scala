@@ -19,13 +19,13 @@ import scala.util.boundary.break
 import scala.util.control.NonFatal
 
 final case class BootstrapFewShotConfig(
-    metric: Option[dspy4s.evaluate.contracts.Metric] = None,
-    metricThreshold: Option[Double] = None,
-    maxBootstrappedDemos: DemoCount = DemoCount(4),
-    maxLabeledDemos: DemoCount = DemoCount(16),
-    maxRounds: RoundCount = RoundCount(1),
-    maxErrors: ErrorLimit = ErrorLimit(10),
-    seed: Long = 0L
+    metric              : Option[dspy4s.evaluate.contracts.Metric] = None,
+    metricThreshold     : Option[Double]                           = None,
+    maxBootstrappedDemos: DemoCount                                = DemoCount(4),
+    maxLabeledDemos     : DemoCount                                = DemoCount(16),
+    maxRounds           : RoundCount                               = RoundCount(1),
+    maxErrors           : ErrorLimit                               = ErrorLimit(10),
+    seed                : Long                                     = 0L
 )
 
 final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
@@ -35,10 +35,10 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
   override val name: String = "bootstrap_few_shot"
 
   override def compile(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P] = None,
-      valset: Option[Vector[Example]] = None
+      teacher : Option[P]               = None,
+      valset  : Option[Vector[Example]] = None
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     if trainset.isEmpty then
       Right(
@@ -53,9 +53,9 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
       compileInternal(student, trainset, teacher)
 
   private def compileInternal(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P]
+      teacher : Option[P]
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val teacherProgram: P = teacher.getOrElse(student)
 
@@ -81,10 +81,8 @@ final class BootstrapFewShot[P: {OptimizableTraversal, ProgramRunner}](
                 case Right(prediction) =>
                   val metricOk = config.metric match
                     case None    => true
-                    case Some(m) =>
-                      m.score(example, prediction) match
-                        case Right(score) =>
-                          config.metricThreshold match
+                    case Some(m) => m.score(example, prediction) match
+                        case Right(score) => config.metricThreshold match
                             case None            => score > 0.0
                             case Some(threshold) => score >= threshold
                         case Left(_) => false

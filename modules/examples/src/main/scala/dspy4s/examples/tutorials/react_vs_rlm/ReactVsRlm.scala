@@ -63,16 +63,13 @@ object DrugSafetyData:
   val drugs: Vector[String] =
     Vector("warfarin", "aspirin", "ibuprofen", "lisinopril", "metformin", "atorvastatin", "omeprazole")
 
-  val conditions: Vector[String] =
-    Vector("peptic ulcer disease", "chronic kidney disease")
+  val conditions: Vector[String] = Vector("peptic ulcer disease", "chronic kidney disease")
 
   /** The 21 unique drug pairs the agent is expected to check (`combinations(drugs, 2)`). */
-  val allInteractionPairs: Vector[String] =
-    (for case Seq(a, b) <- drugs.combinations(2).toVector yield pairKey(a, b))
+  val allInteractionPairs: Vector[String] = (for case Seq(a, b) <- drugs.combinations(2).toVector yield pairKey(a, b))
 
   /** The 14 drug × condition contraindication checks expected. */
-  val allContraindicationPairs: Vector[String] =
-    for d <- drugs; c <- conditions yield s"${norm(d)}|${norm(c)}"
+  val allContraindicationPairs: Vector[String] = for d <- drugs; c <- conditions yield s"${norm(d)}|${norm(c)}"
 
   private val rawInteractions: List[((String, String), String)] = List(
     ("warfarin", "aspirin") ->
@@ -81,30 +78,30 @@ object DrugSafetyData:
     ("warfarin", "omeprazole")   -> "MODERATE: omeprazole can inhibit warfarin metabolism — monitor INR.",
     ("warfarin", "atorvastatin") -> "MODERATE: possible potentiation of anticoagulant effect — monitor INR.",
     ("aspirin", "ibuprofen")     -> "MODERATE: ibuprofen can blunt aspirin's antiplatelet effect; additive GI risk.",
-    ("aspirin", "lisinopril") -> "MODERATE: NSAIDs/aspirin may reduce the antihypertensive effect and renal perfusion.",
-    ("ibuprofen", "lisinopril") ->
+    ("aspirin", "lisinopril")    -> "MODERATE: NSAIDs/aspirin may reduce the antihypertensive effect and renal perfusion.",
+    ("ibuprofen", "lisinopril")  ->
       "MODERATE: NSAID + ACE inhibitor — reduced renal function (part of the 'triple whammy').",
     ("lisinopril", "metformin")    -> "MINOR: ACE inhibitors may modestly enhance the glucose-lowering effect.",
     ("atorvastatin", "omeprazole") -> "MINOR: minimal clinically significant interaction expected."
   )
 
   /** Pairwise interaction lookup; pairs without an entry are reported as not clinically significant. */
-  val interactionDb: Map[String, String] =
-    rawInteractions.map { case ((a, b), v) => pairKey(a, b) -> v }.toMap
+  val interactionDb: Map[String, String] = rawInteractions.map { case ((a, b), v) => pairKey(a, b) -> v }.toMap
 
   private val rawContraindications: List[((String, String), String)] = List(
     ("ibuprofen", "peptic ulcer disease") -> "CONTRAINDICATED: NSAIDs can cause/worsen peptic ulcers and GI bleeding.",
     ("aspirin", "peptic ulcer disease")   ->
       "CAUTION: increased GI bleeding risk; avoid or co-prescribe gastroprotection.",
-    ("warfarin", "peptic ulcer disease")    -> "CAUTION: heightened bleeding risk with an active ulcer.",
-    ("ibuprofen", "chronic kidney disease") -> "CONTRAINDICATED: NSAIDs are nephrotoxic and can worsen renal function.",
-    ("metformin", "chronic kidney disease") -> "CONTRAINDICATED below an eGFR threshold: lactic-acidosis risk.",
+    ("warfarin", "peptic ulcer disease")     -> "CAUTION: heightened bleeding risk with an active ulcer.",
+    ("ibuprofen", "chronic kidney disease")  -> "CONTRAINDICATED: NSAIDs are nephrotoxic and can worsen renal function.",
+    ("metformin", "chronic kidney disease")  -> "CONTRAINDICATED below an eGFR threshold: lactic-acidosis risk.",
     ("lisinopril", "chronic kidney disease") -> "CAUTION: monitor renal function and potassium (hyperkalemia risk).",
     ("aspirin", "chronic kidney disease")    -> "CAUTION: may reduce renal perfusion; use with monitoring."
   )
 
-  val contraindicationDb: Map[String, String] =
-    rawContraindications.map { case ((d, c), v) => s"${norm(d)}|${norm(c)}" -> v }.toMap
+  val contraindicationDb: Map[String, String] = rawContraindications.map { case ((d, c), v) =>
+    s"${norm(d)}|${norm(c)}" -> v
+  }.toMap
 
   val drugClassDb: Map[String, String] = Map(
     "warfarin"     -> "vitamin-K antagonist anticoagulant",
@@ -156,48 +153,49 @@ object DrugSafetyTools:
       body: DynamicValue.Record => String
   ): ToolFunction =
     new ToolFunction:
-      override val name: String                         = toolName
-      override val description: String                  = desc
-      override val argSchema: Vector[(String, TypeRef)] = params.toVector
+      override val name: String                                                                             = toolName
+      override val description: String                                                                      = desc
+      override val argSchema: Vector[(String, TypeRef)]                                                     = params.toVector
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
         Right(DynamicValues.fromAny(body(args)))
 
-  def build(recorder: CallRecorder): Vector[ToolFunction] = Vector(
-    tool(
-      "check_drug_interaction",
-      "Check the interaction between two drugs. Returns the severity and clinical detail.",
-      "drug_a" -> TypeRef.string,
-      "drug_b" -> TypeRef.string
-    ) { args =>
-      val (a, b) = (arg(args, "drug_a"), arg(args, "drug_b"))
-      recorder.recordInteraction(a, b)
-      DrugSafetyData.interactionDb.getOrElse(
-        DrugSafetyData.pairKey(a, b),
-        s"NONE: no clinically significant interaction documented between $a and $b."
-      )
-    },
-    tool(
-      "check_contraindication",
-      "Check whether a drug is contraindicated for a patient condition.",
-      "drug"      -> TypeRef.string,
-      "condition" -> TypeRef.string
-    ) { args =>
-      val (d, c) = (arg(args, "drug"), arg(args, "condition"))
-      recorder.recordContraindication(d, c)
-      DrugSafetyData.contraindicationDb.getOrElse(
-        s"${DrugSafetyData.norm(d)}|${DrugSafetyData.norm(c)}",
-        s"NONE: no specific contraindication documented for $d in $c."
-      )
-    },
-    tool(
-      "get_drug_class",
-      "Return the pharmacological class of a drug.",
-      "drug" -> TypeRef.string
-    ) { args =>
-      val d = arg(args, "drug")
-      DrugSafetyData.drugClassDb.getOrElse(DrugSafetyData.norm(d), s"unknown class for $d")
-    }
-  )
+  def build(recorder: CallRecorder): Vector[ToolFunction] =
+    Vector(
+      tool(
+        "check_drug_interaction",
+        "Check the interaction between two drugs. Returns the severity and clinical detail.",
+        "drug_a" -> TypeRef.string,
+        "drug_b" -> TypeRef.string
+      ) { args =>
+        val (a, b) = (arg(args, "drug_a"), arg(args, "drug_b"))
+        recorder.recordInteraction(a, b)
+        DrugSafetyData.interactionDb.getOrElse(
+          DrugSafetyData.pairKey(a, b),
+          s"NONE: no clinically significant interaction documented between $a and $b."
+        )
+      },
+      tool(
+        "check_contraindication",
+        "Check whether a drug is contraindicated for a patient condition.",
+        "drug"      -> TypeRef.string,
+        "condition" -> TypeRef.string
+      ) { args =>
+        val (d, c) = (arg(args, "drug"), arg(args, "condition"))
+        recorder.recordContraindication(d, c)
+        DrugSafetyData.contraindicationDb.getOrElse(
+          s"${DrugSafetyData.norm(d)}|${DrugSafetyData.norm(c)}",
+          s"NONE: no specific contraindication documented for $d in $c."
+        )
+      },
+      tool(
+        "get_drug_class",
+        "Return the pharmacological class of a drug.",
+        "drug" -> TypeRef.string
+      ) { args =>
+        val d = arg(args, "drug")
+        DrugSafetyData.drugClassDb.getOrElse(DrugSafetyData.norm(d), s"unknown class for $d")
+      }
+    )
 
 object ReactVsRlm:
 
@@ -223,11 +221,11 @@ object ReactVsRlm:
   val ReActMaxIterations: IterationLimit = IterationLimit(40)
 
   final case class RunResult(
-      label: String,
-      report: String,
-      recorder: CallRecorder,
-      lmCalls: Int,
-      elapsedMs: Long,
+      label     : String,
+      report    : String,
+      recorder  : CallRecorder,
+      lmCalls   : Int,
+      elapsedMs : Long,
       trajectory: Option[String]
   )
 
@@ -243,14 +241,14 @@ object ReactVsRlm:
   private def measured[A](body: RuntimeContext ?=> A)(using base: RuntimeContext): (A, Int, Long) =
     val counter          = new AtomicInteger(0)
     val countingCallback = new CallbackHandler:
-      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-        case _: LmStartEvent => val _ = counter.incrementAndGet()
-        case _               => ()
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case _: LmStartEvent => val _ = counter.incrementAndGet()
+          case _               => ()
     val started = System.nanoTime()
-    val result  =
-      RuntimeEnvironment.withSettings(base.withCallbacks(base.callbacks :+ countingCallback)) {
-        body(using RuntimeEnvironment.current)
-      }
+    val result  = RuntimeEnvironment.withSettings(base.withCallbacks(base.callbacks :+ countingCallback)) {
+      body(using RuntimeEnvironment.current)
+    }
     val elapsedMs = (System.nanoTime() - started) / 1_000_000L
     (result, counter.get(), elapsedMs)
 
@@ -324,23 +322,24 @@ object ReactVsRlm:
     try new ProcessBuilder("deno", "--version").start().waitFor() == 0
     catch case NonFatal(_) => false
 
-@main def reactVsRlmMain(): Unit = Demo.withLm {
-  import ReactVsRlm.*
+@main def reactVsRlmMain(): Unit =
+  Demo.withLm {
+    import ReactVsRlm.*
 
-  println(s"Medications: $demoMedications")
-  println(s"Conditions:  $demoConditions")
-  println(s"Goal: a thorough risk report. There are ${DrugSafetyData.allInteractionPairs.size} unique drug pairs " +
-    s"and ${DrugSafetyData.allContraindicationPairs.size} drug-condition combinations to consider.\n")
+    println(s"Medications: $demoMedications")
+    println(s"Conditions:  $demoConditions")
+    println(s"Goal: a thorough risk report. There are ${DrugSafetyData.allInteractionPairs.size} unique drug pairs " +
+      s"and ${DrugSafetyData.allContraindicationPairs.size} drug-condition combinations to consider.\n")
 
-  val react = runReAct(demoMedications, demoConditions)
-  printResult(react)
+    val react = runReAct(demoMedications, demoConditions)
+    printResult(react)
 
-  if denoAvailable then
-    val rlm = runRlm(demoMedications, demoConditions)
-    printResult(rlm)
-    printComparison(react, rlm)
-  else
-    println("=== RLM (direct) — SKIPPED ===")
-    println("RLM needs Deno on the PATH for its Pyodide sandbox. Install from https://deno.com and re-run to")
-    println("see the RLM side write Python that enumerates every pair — typically far fewer LM round-trips.")
-}
+    if denoAvailable then
+      val rlm = runRlm(demoMedications, demoConditions)
+      printResult(rlm)
+      printComparison(react, rlm)
+    else
+      println("=== RLM (direct) — SKIPPED ===")
+      println("RLM needs Deno on the PATH for its Pyodide sandbox. Install from https://deno.com and re-run to")
+      println("see the RLM side write Python that enumerates every pair — typically far fewer LM round-trips.")
+  }

@@ -78,18 +78,18 @@ trait SummarizeEmail extends Spec:
   * merged outputs of the four steps.
   */
 case class EmailAnalysis(
-    email_type: EmailType,
-    urgency: UrgencyLevel,
-    summary: String,
-    key_entities: List[ExtractedEntity],
+    email_type      : EmailType,
+    urgency         : UrgencyLevel,
+    summary         : String,
+    key_entities    : List[ExtractedEntity],
     financial_amount: Option[Double],
-    important_dates: List[String],
-    action_required: Boolean,
-    action_items: List[String],
-    deadline: Option[String],
-    priority_score: Int,
-    reasoning: String,
-    contact_info: List[String]
+    important_dates : List[String],
+    action_required : Boolean,
+    action_items    : List[String],
+    deadline        : Option[String],
+    priority_score  : Int,
+    reasoning       : String,
+    contact_info    : List[String]
 )
 
 object EmailExtraction:
@@ -111,35 +111,35 @@ object EmailExtraction:
 
     def forward(
         emailSubject: String,
-        emailBody: String,
-        sender: String = ""
+        emailBody   : String,
+        sender      : String = ""
     )(using RuntimeContext): Either[DspyError, EmailAnalysis] =
       for
         // Step 1: Classify the email
         classification <- classifier((
-          email_subject = emailSubject,
-          email_body = emailBody,
-          sender = sender
-        ))
+                            email_subject = emailSubject,
+                            email_body = emailBody,
+                            sender = sender
+                          ))
         // Step 2: Extract entities
         fullContent = s"Subject: $emailSubject\n\nFrom: $sender\n\n$emailBody"
-        entities <- entityExtractor((
-          email_content = fullContent,
-          email_type = classification.output.email_type
-        ))
+        entities   <- entityExtractor((
+                      email_content = fullContent,
+                      email_type = classification.output.email_type
+                    ))
         // Step 3: Generate summary
         summary <- summarizer((
-          email_subject = emailSubject,
-          email_body = emailBody,
-          key_entities = entities.output.key_entities
-        ))
+                     email_subject = emailSubject,
+                     email_body = emailBody,
+                     key_entities = entities.output.key_entities
+                   ))
         // Step 4: Determine actions
         actions <- actionGenerator((
-          email_type = classification.output.email_type,
-          urgency = classification.output.urgency,
-          email_summary = summary.output.summary,
-          extracted_entities = entities.output.key_entities
-        ))
+                     email_type = classification.output.email_type,
+                     urgency = classification.output.urgency,
+                     email_summary = summary.output.summary,
+                     extracted_entities = entities.output.key_entities
+                   ))
       // Step 5: Structure the results
       yield EmailAnalysis(
         email_type = classification.output.email_type,
@@ -164,8 +164,7 @@ object EmailExtraction:
   val sampleEmails: Vector[SampleEmail] = Vector(
     SampleEmail(
       subject = "Order Confirmation #12345 - Your MacBook Pro is on the way!",
-      body =
-        """Dear John Smith,
+      body = """Dear John Smith,
           |
           |Thank you for your order! We're excited to confirm that your order #12345 has been processed.
           |
@@ -183,8 +182,7 @@ object EmailExtraction:
     ),
     SampleEmail(
       subject = "URGENT: Server Outage - Immediate Action Required",
-      body =
-        """Hi DevOps Team,
+      body = """Hi DevOps Team,
           |
           |We're experiencing a critical server outage affecting our production environment.
           |
@@ -201,8 +199,7 @@ object EmailExtraction:
     ),
     SampleEmail(
       subject = "Meeting Invitation: Q4 Planning Session",
-      body =
-        """Hello team,
+      body = """Hello team,
           |
           |You're invited to our Q4 planning session.
           |
@@ -230,11 +227,12 @@ object EmailExtraction:
            |   ✅ Action Required: ${if r.action_required then "Yes" else "No"}$deadline""".stripMargin
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extraction.emailExtractionMain"
-@main def emailExtractionMain(): Unit = Demo.withLm {
-  println("🚀 Email Processing Demo")
-  println("=" * 50)
-  EmailExtraction.sampleEmails.zipWithIndex.foreach { (email, i) =>
-    println(s"\n📧 EMAIL ${i + 1}: ${email.subject.take(50)}...")
-    println(EmailExtraction.describe(email))
+@main def emailExtractionMain(): Unit =
+  Demo.withLm {
+    println("🚀 Email Processing Demo")
+    println("=" * 50)
+    EmailExtraction.sampleEmails.zipWithIndex.foreach { (email, i) =>
+      println(s"\n📧 EMAIL ${i + 1}: ${email.subject.take(50)}...")
+      println(EmailExtraction.describe(email))
+    }
   }
-}

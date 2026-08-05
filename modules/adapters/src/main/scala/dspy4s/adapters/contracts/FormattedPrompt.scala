@@ -11,8 +11,8 @@ import zio.blocks.schema.DynamicValue
   * request options, so explicit configuration wins on key collision.
   */
 final case class FormattedPrompt(
-    messages: Vector[Message],
-    metadata: Map[String, Any] = Map.empty,
+    messages      : Vector[Message],
+    metadata      : Map[String, Any]    = Map.empty,
     requestOptions: DynamicValue.Record = DynamicValue.Record.empty
 )
 

@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class GepaEvalCacheSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Counts how many times the model is actually called, so we can prove cache hits skip the LM. */
   private final class CountingLm extends LanguageModel:
@@ -40,10 +40,10 @@ class GepaEvalCacheSuite extends FunSuite:
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "always_one"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       Right(ScoreWithFeedback(1.0, "ok"))

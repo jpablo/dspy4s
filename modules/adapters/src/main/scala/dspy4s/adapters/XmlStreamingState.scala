@@ -62,13 +62,11 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
 
   private def processChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     phase match
-      case PreDoc =>
-        if c == '<' then phase = TagStart
+      case PreDoc      => if c == '<' then phase = TagStart
       case BetweenTags =>
         if c == '<' then phase = TagStart
         // else: skip whitespace / stray chars between tags
-      case TagStart =>
-        c match
+      case TagStart => c match
           case '/' =>
             tagBuilder.clear()
             phase = ReadingCloseTag
@@ -89,16 +87,13 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
             currentField = Some(tag)
             contentBuffer.clear()
           c match
-            case '>' =>
-              phase = if pendingTagMatch then InContent else BetweenTags
-            case _ =>
-              phase = SkippingAttrs
+            case '>' => phase = if pendingTagMatch then InContent else BetweenTags
+            case _   => phase = SkippingAttrs
       case SkippingAttrs =>
         if c == '>' then
           phase = if pendingTagMatch then InContent else BetweenTags
         // else: skip attribute chars, including self-closing '/'
-      case ReadingCloseTag =>
-        c match
+      case ReadingCloseTag => c match
           case '>' =>
             val tag = tagBuilder.toString
             if currentField.contains(tag) then
@@ -117,8 +112,7 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
             else phase = BetweenTags
           case ' ' | '\t' | '\r' | '\n' => () // tolerate whitespace before '>'
           case _                        => tagBuilder.append(c)
-      case InContent =>
-        c match
+      case InContent => c match
           case '<' => phase = InContentSeenLt
           case '&' =>
             entityBuilder.clear()
@@ -148,23 +142,25 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
           phase = InContent
       case PostDoc => ()
 
-  private def isNameStart(c: Char): Boolean  = c.isLetter || c == '_'
-  private def isNameChar(c: Char): Boolean   = c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
+  private def isNameStart(c : Char): Boolean = c.isLetter || c == '_'
+  private def isNameChar(c  : Char): Boolean = c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
   private def isEntityChar(c: Char): Boolean = c.isLetterOrDigit || c == '#'
 
-  private def decodeEntity(name: String): String = name match
-    case "amp"                                         => "&"
-    case "lt"                                          => "<"
-    case "gt"                                          => ">"
-    case "quot"                                        => "\""
-    case "apos"                                        => "'"
-    case s if s.startsWith("#x") || s.startsWith("#X") =>
-      try Character.toString(Integer.parseInt(s.drop(2), 16))
-      catch case NonFatal(_) => s"&$name;"
-    case s if s.startsWith("#") =>
-      try Character.toString(Integer.parseInt(s.drop(1)))
-      catch case NonFatal(_) => s"&$name;"
-    case _ => s"&$name;"
+  private def decodeEntity(name: String): String =
+    name match
+      case "amp"  => "&"
+      case "lt"   => "<"
+      case "gt"   => ">"
+      case "quot" => "\""
+      case "apos" => "'"
+
+      case s if s.startsWith("#x") || s.startsWith("#X") =>
+        try Character.toString(Integer.parseInt(s.drop(2), 16))
+        catch case NonFatal(_) => s"&$name;"
+      case s if s.startsWith("#") =>
+        try Character.toString(Integer.parseInt(s.drop(1)))
+        catch case NonFatal(_) => s"&$name;"
+      case _ => s"&$name;"
 
 object XmlStreamingState:
   /** True iff `text`'s tail could be the start of an XML closing tag that would terminate the currently-streaming

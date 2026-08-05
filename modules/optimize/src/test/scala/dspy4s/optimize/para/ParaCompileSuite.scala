@@ -28,14 +28,13 @@ class ParaCompileSuite extends FunSuite:
 
   private val winningInstruction = "INSTR_C: answer precisely"
 
-  private val proposalPool: Vector[String] =
-    Vector(
-      "INSTR_A: be brief",
-      "INSTR_B: be verbose",
-      winningInstruction,
-      "INSTR_D: be formal",
-      "INSTR_E: be casual"
-    )
+  private val proposalPool: Vector[String] = Vector(
+    "INSTR_A: be brief",
+    "INSTR_B: be verbose",
+    winningInstruction,
+    "INSTR_D: be formal",
+    "INSTR_E: be casual"
+  )
 
   private val instrGenMarker = "OPTIMIZE_THE_INSTRUCTION"
 
@@ -45,14 +44,12 @@ class ParaCompileSuite extends FunSuite:
     DynamicValues.recordFromEntries(entries)
 
   private object InstructionAwareAdapter extends Adapter:
-    override val name: String = "instruction-aware"
+    override val name: String                                                                                    = "instruction-aware"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
-      val q     =
-        DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
-      val bi =
-        DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
-          .getOrElse("")
+      val q     = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
+      val bi    = DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
+        .getOrElse("")
       Right(FormattedPrompt(messages =
         Vector(Message(role = MessageRole.User, text = Some(s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]")))
       ))
@@ -64,8 +61,8 @@ class ParaCompileSuite extends FunSuite:
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
-    override val id: String   = "scripted-para-copro-lm"
-    override val mode: LmMode = LmMode.Chat
+    override val id: String                                                                    = "scripted-para-copro-lm"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
       val out  =
@@ -91,7 +88,7 @@ class ParaCompileSuite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def taskSignature: Signature[QAInput, QAOutput] =
     Signature.derived[QAInput, QAOutput]("QA").withInstructions(Some("INSTR_INITIAL: default"))
@@ -164,8 +161,8 @@ class ParaCompileSuite extends FunSuite:
 
   test("a composed pipeline (a >>> b) is record-runnable and optimizable through the packaged evidence") {
     // Second stage maps QAOutput back to QAInput (fields `answer -> question`, unique within one layout).
-    val first  = Program.of(Predict[QAInput, QAOutput](taskSignature))
-    val second = Program.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
+    val first                                  = Program.of(Predict[QAInput, QAOutput](taskSignature))
+    val second                                 = Program.of(Predict[QAOutput, QAInput](Signature.derived[QAOutput, QAInput]("Back")))
     val pipeline: Program[QAInput, QAInput, 2] = first >>> second
     // The metric compares the pipeline's final output field ("question"); this test proves the PLUMBING
     // (record-run + optimization over a composite), not instruction discovery, so zero scores are fine.
@@ -214,8 +211,7 @@ class ParaCompileSuite extends FunSuite:
 
   test("an explicitly packaged zero-arity identity remains optimizable at the head of a pipeline") {
     val identity                                = Program.of(dspy4s.programs.compose.Compose.id[QAInput])
-    val pipeline: Program[QAInput, QAOutput, 1] =
-      identity >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
+    val pipeline: Program[QAInput, QAOutput, 1] = identity >>> Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       val ran              = summon[ProgramRunner[Program[QAInput, QAOutput, 1]]]

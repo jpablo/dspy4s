@@ -8,12 +8,12 @@ class StreamingQueueSuite extends FunSuite:
 
   test("queue delivers items in offer order") {
     val queue    = StreamingQueue[Int](8)
-    val producer = new Thread(() => {
+    val producer = new Thread(() =>
       val _ = queue.offer(1)
       val _ = queue.offer(2)
       val _ = queue.offer(3)
       queue.close()
-    })
+    )
     producer.start()
 
     val received = queue.asIterator.toList
@@ -26,11 +26,12 @@ class StreamingQueueSuite extends FunSuite:
     val received = new java.util.concurrent.CopyOnWriteArrayList[String]()
     val done     = new AtomicBoolean(false)
 
-    val consumer = new Thread(() => {
+    val consumer = new Thread(() =>
       val iter = queue.asIterator
-      while iter.hasNext do { val _ = received.add(iter.next()) }
+      while iter.hasNext do
+        val _ = received.add(iter.next())
       done.set(true)
-    })
+    )
     consumer.start()
 
     Thread.sleep(100)
@@ -88,11 +89,11 @@ class StreamingQueueSuite extends FunSuite:
     // Regression: blocking put() + a consumer close() that didn't drain left the producer parked forever.
     val queue    = StreamingQueue[Int](2) // tiny buffer so the producer blocks quickly
     val stopped  = new AtomicBoolean(false)
-    val producer = new Thread(() => {
+    val producer = new Thread(() =>
       var i = 0
       while queue.offer(i) do i += 1 // keep producing until offer reports the consumer is gone
       stopped.set(true)
-    })
+    )
     producer.start()
 
     val iter = queue.asIterator

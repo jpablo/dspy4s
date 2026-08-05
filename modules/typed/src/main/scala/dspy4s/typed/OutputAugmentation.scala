@@ -31,8 +31,7 @@ object OutputAugmentation:
     * then prepends `Name: T` unless a `Name` field is already present (idempotent).
     */
   type WithField[O, Name <: String & Singleton, T] = NamedTuple.From[O] match
-    case NamedTuple.NamedTuple[n, v] =>
-      Contains[n, Name] match
+    case NamedTuple.NamedTuple[n, v] => Contains[n, Name] match
         case true  => NamedTuple.NamedTuple[n, v]
         case false => NamedTuple.NamedTuple[Name *: n, T *: v]
 
@@ -105,13 +104,13 @@ object OutputAugmentation:
     * names the producing component in errors.
     */
   def decodeAugmented[O, Name <: String & Singleton, T, Out](
-      raw: DynamicValue.Record,
-      shape: Shape[O],
-      fieldName: Name,
-      label: String,
+      raw          : DynamicValue.Record,
+      shape        : Shape[O],
+      fieldName    : Name,
+      label        : String,
       signatureName: String,
-      readField: (DynamicValue.Record, Name, String) => Either[DspyError, T],
-      hook: Out => Either[DspyError, Out] = (out: Out) => Right(out)
+      readField    : (DynamicValue.Record, Name, String) => Either[DspyError, T],
+      hook         : Out => Either[DspyError, Out] = (out: Out) => Right(out)
   )(using prepend: PrependField.WithOutput[Name, T, O, Out]): Either[DspyError, Out] =
     for
       value     <- readField(raw, fieldName, label)
@@ -125,10 +124,10 @@ object OutputAugmentation:
     * `MultiChainComparison` / `ProgramOfThought`.
     */
   def decodePrepended[O, Name <: String & Singleton, Out](
-      raw: DynamicValue.Record,
-      shape: Shape[O],
-      fieldName: Name,
-      label: String,
+      raw          : DynamicValue.Record,
+      shape        : Shape[O],
+      fieldName    : Name,
+      label        : String,
       signatureName: String
   )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Either[DspyError, Out] =
     decodeAugmented[O, Name, String, Out](
@@ -149,34 +148,34 @@ object OutputAugmentation:
     * adapter's field markers).
     */
   def prependedStringShape[Name <: String & Singleton, O, Out](
-      base: Shape[O],
-      field: dspy4s.core.contracts.FieldSpec,
-      fieldName: Name,
-      label: String,
+      base         : Shape[O],
+      field        : dspy4s.core.contracts.FieldSpec,
+      fieldName    : Name,
+      label        : String,
       signatureName: String
-  )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Shape[Out] = new Shape[Out]:
-    val fieldSpecs: Vector[dspy4s.core.contracts.FieldSpec] =
-      if base.fieldSpecs.exists(_.name == field.name) then base.fieldSpecs
-      else field +: base.fieldSpecs
+  )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Shape[Out] =
+    new Shape[Out]:
+      val fieldSpecs: Vector[dspy4s.core.contracts.FieldSpec] =
+        if base.fieldSpecs.exists(_.name == field.name) then base.fieldSpecs
+        else field +: base.fieldSpecs
 
-    override lazy val jsonSchemaString: Option[String] = base.jsonSchemaString
+      override lazy val jsonSchemaString: Option[String] = base.jsonSchemaString
 
-    def encode(value: Out): DynamicValue.Record =
-      val product: Product = value match
-        case p: Product => p
-        case _          =>
-          throw new IllegalArgumentException(
-            s"$label output must be a named-tuple value (a Product); got a non-Product. " +
-              "This shape is built only from an augmented Signature, which supplies named tuples."
-          )
-      val values  = product.productIterator.toVector
-      val entries = fieldSpecs.zip(values).map { (spec, raw) =>
-        spec.name -> DynamicValues.fromAny(raw)
-      }
-      DynamicValue.Record(zio.blocks.chunk.Chunk.from(entries))
+      def encode(value: Out): DynamicValue.Record =
+        val product: Product = value match
+          case p: Product => p
+          case _          => throw new IllegalArgumentException(
+              s"$label output must be a named-tuple value (a Product); got a non-Product. " +
+                "This shape is built only from an augmented Signature, which supplies named tuples."
+            )
+        val values  = product.productIterator.toVector
+        val entries = fieldSpecs.zip(values).map { (spec, raw) =>
+          spec.name -> DynamicValues.fromAny(raw)
+        }
+        DynamicValue.Record(zio.blocks.chunk.Chunk.from(entries))
 
-    def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
-      decodePrepended[O, Name, Out](raw, base, fieldName, label, signatureName)(using prepend)
+      def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
+        decodePrepended[O, Name, Out](raw, base, fieldName, label, signatureName)(using prepend)
 
   /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no static
     * fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a prepended field, so the

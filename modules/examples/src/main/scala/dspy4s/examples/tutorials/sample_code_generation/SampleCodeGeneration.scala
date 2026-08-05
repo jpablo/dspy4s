@@ -53,20 +53,20 @@ trait RefineCode extends Spec:
 
 /** What the agent learns about a library — the analyzer's outputs plus the library name. */
 case class LibraryInfo(
-    library: String,
+    library     : String,
     coreConcepts: List[String],
-    patterns: List[String],
-    methods: List[String],
+    patterns    : List[String],
+    methods     : List[String],
     installation: String,
-    examples: List[String]
+    examples    : List[String]
 )
 
 /** A generated, explained code example for one use case. */
 case class GeneratedExample(
-    code: String,
-    explanation: String,
+    code         : String,
+    explanation  : String,
     bestPractices: List[String],
-    imports: List[String]
+    imports      : List[String]
 )
 
 object SampleCodeGeneration:
@@ -104,8 +104,7 @@ object SampleCodeGeneration:
         RuntimeContext
     )
         : Either[DspyError, GeneratedExample] =
-      val infoText =
-        s"""Library: ${info.library}
+      val infoText = s"""Library: ${info.library}
            |Core Concepts: ${info.coreConcepts.mkString(", ")}
            |Common Patterns: ${info.patterns.mkString(", ")}
            |Key Methods: ${info.methods.mkString(", ")}
@@ -136,36 +135,40 @@ object SampleCodeGeneration:
 
   // --8<-- [start:learn-and-generate]
   def learnAndGenerate(
-      libraryName: String,
+      libraryName    : String,
       combinedContent: String,
-      useCases: Vector[String] = defaultUseCases
+      useCases       : Vector[String] = defaultUseCases
   )(using RuntimeContext): Either[DspyError, (LibraryInfo, Vector[GeneratedExample])] =
     val agent = new DocumentationLearningAgent
     for
       info     <- agent.learnFromDocs(libraryName, combinedContent)
       examples <- useCases.foldLeft[Either[DspyError, Vector[GeneratedExample]]](Right(Vector.empty)) {
-        (acc, useCase) =>
-          for
-            sofar <- acc
-            ex    <- agent.generateExample(
-              info,
-              useCase,
-              requirements = "Include error handling, comments, and best practices"
-            )
-          yield sofar :+ ex
-      }
+                    (acc, useCase) =>
+                      for
+                        sofar <- acc
+                        ex    <- agent.generateExample(
+                                info,
+                                useCase,
+                                requirements = "Include error handling, comments, and best practices"
+                              )
+                      yield sofar :+ ex
+                  }
     yield (info, examples)
   // --8<-- [end:learn-and-generate]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.sample_code_generation.sampleCodeGenerationMain"
-@main def sampleCodeGenerationMain(): Unit = Demo.withLm {
-  val docs =
-    """FastAPI is a modern, fast web framework for building APIs with Python based on standard type hints.
+@main def sampleCodeGenerationMain(): Unit =
+  Demo.withLm {
+    val docs = """FastAPI is a modern, fast web framework for building APIs with Python based on standard type hints.
       |Install with `pip install fastapi uvicorn`. Define routes with @app.get decorators on an app = FastAPI()
       |instance. Run with `uvicorn main:app --reload`.""".stripMargin
-  SampleCodeGeneration.learnAndGenerate("FastAPI", docs, useCases = Vector("Basic setup and hello world example")) match
-    case Left(err)               => println(s"⚠️  ${err.message}")
-    case Right((info, examples)) =>
-      println(s"🔍 ${info.library} core concepts: ${info.coreConcepts}")
-      examples.foreach(ex => println(s"\n💻 Code:\n${ex.code}\n📦 Imports: ${ex.imports}"))
-}
+    SampleCodeGeneration.learnAndGenerate(
+      "FastAPI",
+      docs,
+      useCases = Vector("Basic setup and hello world example")
+    ) match
+      case Left(err)               => println(s"⚠️  ${err.message}")
+      case Right((info, examples)) =>
+        println(s"🔍 ${info.library} core concepts: ${info.coreConcepts}")
+        examples.foreach(ex => println(s"\n💻 Code:\n${ex.code}\n📦 Imports: ${ex.imports}"))
+  }

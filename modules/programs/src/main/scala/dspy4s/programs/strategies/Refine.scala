@@ -62,9 +62,9 @@ import scala.compiletime.ops.int.+
   *   optimizable leaves ([[optimization]]).
   */
 final case class Refine[P <: Module[I, O], I, O](
-    module: P,
-    n: AttemptCount,
-    rewardFn: (I, Prediction[O]) => Double,
+    module   : P,
+    n        : AttemptCount,
+    rewardFn : (I, Prediction[O]) => Double,
     threshold: Double,
     failCount: Option[FailureCount] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
@@ -86,8 +86,7 @@ final case class Refine[P <: Module[I, O], I, O](
   val criticPredict: Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] =
     criticPredictOverride.getOrElse(Predict(signature = Refine.offerFeedbackSignature, name = Some("offer_feedback")))
 
-  override protected val lifecycle: ModuleLifecycle[I, O] =
-    ModuleLifecycle.typedWithoutInputs
+  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val baseContext  = RuntimeEnvironment.current
@@ -166,7 +165,7 @@ object Refine:
     * advice for this predictor) it delegates unchanged. `parse` is always unchanged.
     */
   private[programs] final case class HintInjectingAdapter(
-      baseAdapter: Adapter,
+      baseAdapter   : Adapter,
       adviceByLayout: Map[SignatureLayout, String]
   ) extends Adapter:
     override def name: String = s"${baseAdapter.name}+hint"
@@ -196,19 +195,18 @@ object Refine:
     * `module_names` for which advice is sought) and the `discussion` / `advice` outputs. Per parity, `advice` is a JSON
     * object keyed by module name (`{module_name: advice}`).
     */
-  private[programs] val offerFeedbackLayout: SignatureLayout =
-    RefineFeedback.layout
+  private[programs] val offerFeedbackLayout: SignatureLayout = RefineFeedback.layout
 
   /** The critic's typed input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout
     * exactly.
     */
   private[programs] final case class OfferFeedbackInputs(
-      program_inputs: String,
+      program_inputs    : String,
       program_trajectory: String,
-      program_outputs: String,
-      reward_value: Double,
-      target_threshold: Double,
-      module_names: String
+      program_outputs   : String,
+      reward_value      : Double,
+      target_threshold  : Double,
+      module_names      : String
   ) derives Schema
 
   /** The critic's typed output. `discussion` is prompt-guidance only ([[generateAdvice]] never reads it), which the
@@ -235,12 +233,12 @@ object Refine:
     * `moduleNames` for a non-JSON output.
     */
   private[programs] def generateAdvice[I, O](
-      critic: Predict[OfferFeedbackInputs, OfferFeedbackAdvice],
-      input: I,
-      prediction: Prediction[O],
-      trace: Vector[TraceEntry],
-      reward: Double,
-      threshold: Double,
+      critic     : Predict[OfferFeedbackInputs, OfferFeedbackAdvice],
+      input      : I,
+      prediction : Prediction[O],
+      trace      : Vector[TraceEntry],
+      reward     : Double,
+      threshold  : Double,
       moduleNames: Vector[String]
   )(using RuntimeContext): Either[DspyError, Map[String, String]] =
     RefineFeedback.generateAdvice(critic, input, prediction, trace, reward, threshold, moduleNames)

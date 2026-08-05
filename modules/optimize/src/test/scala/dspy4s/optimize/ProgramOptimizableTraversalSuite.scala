@@ -31,8 +31,8 @@ class ProgramOptimizableTraversalSuite extends FunSuite:
   private val qaSignature = Signature.fromString("question -> answer")
 
   private val search: ToolFunction = new ToolFunction:
-    override val name: String        = "search"
-    override val description: String = "look something up"
+    override val name: String                                                                             = "search"
+    override val description: String                                                                      = "look something up"
     override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
       Right(ToolFunction.result("ok"))
 

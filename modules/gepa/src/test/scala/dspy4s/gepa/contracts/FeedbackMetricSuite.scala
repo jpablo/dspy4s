@@ -20,10 +20,10 @@ class FeedbackMetricSuite extends FunSuite:
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "toy_exact"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")

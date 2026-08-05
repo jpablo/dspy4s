@@ -35,9 +35,9 @@ import zio.blocks.schema.DynamicValue
   */
 final case class ChainOfThought[I, O](
     baseSignature: Signature[I, O],
-    demos: Vector[Example] = Vector.empty,
-    runtime: ProgramRuntime = new SettingsProgramRuntime {},
-    name: Option[String] = None,
+    demos        : Vector[Example] = Vector.empty,
+    runtime      : ProgramRuntime  = new SettingsProgramRuntime {},
+    name         : Option[String]  = None,
     /** Module-level LM defaults carried in [[OptimizableParameters]], matching [[Predict]] and [[DynamicPredict]].
       * Per-call config still wins on key collisions.
       */
@@ -50,8 +50,7 @@ final case class ChainOfThought[I, O](
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
-  override protected val lifecycle: ModuleLifecycle[I, Out] =
-    ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predict(call)

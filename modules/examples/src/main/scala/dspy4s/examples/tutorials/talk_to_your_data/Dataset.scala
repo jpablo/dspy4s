@@ -70,8 +70,7 @@ object Dataset:
   /** Column description handed to the planner (so it knows what it can ask for) and to RLM (so it knows the CSV
     * layout).
     */
-  val schemaDescription: String =
-    """Table `orders`, one row per order. Columns:
+  val schemaDescription: String = """Table `orders`, one row per order. Columns:
       |- order_id (int)
       |- date (string, ISO yyyy-MM-dd, all in year 2024)
       |- region (string; one of North, South, East, West)
@@ -87,25 +86,25 @@ object Dataset:
     def answer(data: Vector[Order]): String = QueryEngine.run(plan, data).answer
 
   private def num(
-      agg: Agg,
-      column: Option[String] = None,
-      filters: List[Filter] = Nil,
+      agg      : Agg,
+      column   : Option[String]    = None,
+      filters  : List[Filter]      = Nil,
       timeRange: Option[TimeRange] = None
   ): QueryPlan =
     QueryPlan(agg, column, Nil, filters, timeRange, None, None, AnswerKind.Number)
 
   private def topGroup(
-      agg: Agg,
-      by: String,
+      agg       : Agg,
+      by        : String,
       answerKind: AnswerKind,
-      column: Option[String] = None,
-      descending: Boolean = true
+      column    : Option[String] = None,
+      descending: Boolean        = true
   ): QueryPlan =
     QueryPlan(agg, column, List(by), Nil, None, Some(Sort("value", descending)), Some(1), answerKind)
 
   private def f(col: String, op: FilterOp, v: String): Filter = Filter(col, op, v)
-  private def q1 = Some(TimeRange("date", Some("2024-01-01"), Some("2024-03-31")))
-  private def q4 = Some(TimeRange("date", Some("2024-10-01"), Some("2024-12-31")))
+  private def q1                                              = Some(TimeRange("date", Some("2024-01-01"), Some("2024-03-31")))
+  private def q4                                              = Some(TimeRange("date", Some("2024-10-01"), Some("2024-12-31")))
 
   /** ~24 questions spanning aggregates, filters, group-by/top-N, time windows, and both answer kinds. */
   val goldset: Vector[GoldQuestion] = Vector(

@@ -27,17 +27,17 @@ trait Metric:
   * disabled.
   */
 final case class ExampleEvaluation(
-    example: Example,
+    example   : Example,
     prediction: RawPrediction,
-    score: Double,
-    error: Option[String] = None
+    score     : Double,
+    error     : Option[String] = None
 )
 
 final case class EvaluationResult(
-    score: Double,
-    results: Vector[ExampleEvaluation],
+    score     : Double,
+    results   : Vector[ExampleEvaluation],
     metricName: String,
-    metadata: Map[String, Any] = Map.empty
+    metadata  : Map[String, Any] = Map.empty
 ):
   def aggregateScore: Double = score
 
@@ -50,16 +50,15 @@ final case class EvaluationResult(
 
     val exampleCols: Vector[String] =
       results.iterator.flatMap(r => DynamicValues.recordKeys(r.example.values)).toVector.distinct
-    val predCols: Vector[String] =
-      results.iterator
-        .flatMap(r => DynamicValues.recordKeys(r.prediction.values))
-        .map(name => s"pred:$name")
-        .toVector
-        .distinct
+    val predCols: Vector[String] = results.iterator
+      .flatMap(r => DynamicValues.recordKeys(r.prediction.values))
+      .map(name => s"pred:$name")
+      .toVector
+      .distinct
     val hasError = results.exists(_.error.isDefined)
 
-    val headers: Vector[String] =
-      exampleCols ++ predCols ++ Vector("score") ++ (if hasError then Vector("error") else Vector.empty)
+    val headers: Vector[String] = exampleCols ++ predCols ++ Vector("score") ++
+      (if hasError then Vector("error") else Vector.empty)
 
     def cell(r: ExampleEvaluation, header: String): String =
       header match
@@ -67,15 +66,13 @@ final case class EvaluationResult(
         case "error"                    => r.error.getOrElse("")
         case h if h.startsWith("pred:") =>
           r.prediction.get(h.stripPrefix("pred:")).map(DynamicValues.renderText).getOrElse("")
-        case h =>
-          r.example.get(h).map(DynamicValues.renderText).getOrElse("")
+        case h => r.example.get(h).map(DynamicValues.renderText).getOrElse("")
 
     val dataRows: Vector[Vector[String]] = rows.map(r => headers.map(h => cell(r, h)))
 
-    val widths: Vector[Int] =
-      headers.indices.map { c =>
-        (headers(c).length +: dataRows.map(_(c).length)).max
-      }.toVector
+    val widths: Vector[Int] = headers.indices.map { c =>
+      (headers(c).length +: dataRows.map(_(c).length)).max
+    }.toVector
 
     def renderRow(cells: Vector[String]): String =
       cells.zip(widths).map((value, w) => value.padTo(w, ' ')).mkString("| ", " | ", " |")
@@ -89,5 +86,5 @@ trait Evaluator:
   def evaluate(
       predict: Evaluator.PredictFn,
       dataset: Vector[Example],
-      metric: Metric
+      metric : Metric
   )(using RuntimeContext): Either[DspyError, EvaluationResult]

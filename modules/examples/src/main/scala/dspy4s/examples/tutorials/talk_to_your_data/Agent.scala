@@ -33,8 +33,7 @@ object Agent:
   /** Deliberately THIN: types already pin the *shape* of a plan, but not how to map an English question onto the right
     * aggregation/filters/grouping. That mapping is exactly what GEPA learns to spell out (Stage 3).
     */
-  val plannerInstructionsBaseline: String =
-    "Translate the user's question about the dataset into a query plan."
+  val plannerInstructionsBaseline: String = "Translate the user's question about the dataset into a query plan."
 
   /** The planner signature, parameterized by instruction so the agent can run the baseline or the GEPA-optimized
     * planner. Output is the full [[QueryPlan]], a rich typed structure (enums, nested lists) the model must fill.
@@ -63,13 +62,12 @@ object Agent:
   /** The ACT executor: an [[RLM]] producing a typed [[AnalysisResult]] from the SUBMIT payload. No host tools and no
     * `llm_query`; it is pure deterministic computation in the sandbox.
     */
-  val executor: RLM[ActInput, AnalysisResult] =
-    RLM(
-      baseSignature =
-        Signature.derived[ActInput, AnalysisResult](name = "AnalystExecutor", instructions = actInstructions),
-      maxIterations = IterationLimit(8),
-      maxLlmCalls = LlmCallLimit(1)
-    )
+  val executor: RLM[ActInput, AnalysisResult] = RLM(
+    baseSignature =
+      Signature.derived[ActInput, AnalysisResult](name = "AnalystExecutor", instructions = actInstructions),
+    maxIterations = IterationLimit(8),
+    maxLlmCalls = LlmCallLimit(1)
+  )
 
   // ── stages ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -103,9 +101,9 @@ object Agent:
 
   /** Full pipeline for one question: plan once, then act→verify, refining the ACT stage up to `maxAttempts`. */
   def ask(
-      question: String,
+      question           : String,
       plannerInstructions: String = plannerInstructionsBaseline,
-      maxAttempts: Int = 2
+      maxAttempts        : Int    = 2
   )(using RuntimeContext): Either[DspyError, AgentAnswer] =
     plan(question, plannerInstructions).flatMap { qp =>
       @tailrec def loop(feedback: String, attempt: Int): Either[DspyError, AgentAnswer] =

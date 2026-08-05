@@ -52,7 +52,7 @@ object Program:
 
   /** Package a module at a codec-equipped input object while retaining its exact parameter grade. */
   def of[I, O, F <: Module[I, O]](f: F)(using
-      ev: OptimizableTraversal[F],
+      ev                      : OptimizableTraversal[F],
       @annotation.unused codec: RecordCodec[I]
   ): Program[I, O, ev.Arity] { type Rep = F } =
     packageWith(f)
@@ -94,13 +94,13 @@ object Program:
       f.optimizableParameters.readSized(f.program)
 
     def replace[A, B, N <: Int](
-        f: Program[A, B, N],
+        f         : Program[A, B, N],
         parameters: SizedVector[OptimizableParameters, N]
     ): Program[A, B, N] =
       Program.packageWith(f.optimizableParameters.replaceSized(f.program, parameters))(using f.optimizableParameters)
 
     def replaceUnsized[A, B, N <: Int](
-        f: Program[A, B, N],
+        f         : Program[A, B, N],
         parameters: Vector[OptimizableParameters]
     ): Program[A, B, N] =
       Program.packageWith(f.optimizableParameters.replace(f.program, parameters))(using f.optimizableParameters)

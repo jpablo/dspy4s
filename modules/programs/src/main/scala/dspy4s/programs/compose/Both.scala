@@ -18,7 +18,7 @@ import scala.compiletime.ops.int.+
   * value records (`second` wins on a key collision).
   */
 final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
-    first: A,
+    first : A,
     second: B
 ) extends TransparentModule[I, (OA, OB)]:
   override val moduleName: String = "parallel"
@@ -47,7 +47,7 @@ object Both:
       pa: OptimizableTraversal.WithArity[A, NA],
       pb: OptimizableTraversal.WithArity[B, NB]
   ): OptimizableTraversal.Of[Both[I, OA, OB, A, B], NA + NB] with
-    def arity(program: Both[I, OA, OB, A, B]): Int = pa.arity(program.first) + pb.arity(program.second)
+    def arity(program: Both[I, OA, OB, A, B]): Int                       = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: Both[I, OA, OB, A, B]): Vector[OptimizableView] =
       PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
 

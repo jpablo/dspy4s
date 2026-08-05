@@ -16,7 +16,7 @@ given recordSchema: Schema[DynamicValue.Record] =
   Schema[DynamicValue].transform(
     {
       case record: DynamicValue.Record => record
-      case other => throw new IllegalArgumentException(s"Expected a DynamicValue.Record, got: $other")
+      case other                       => throw new IllegalArgumentException(s"Expected a DynamicValue.Record, got: $other")
     },
     (record: DynamicValue.Record) => record
   )

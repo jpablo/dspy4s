@@ -21,9 +21,9 @@ trait OptimizableTraversal[P]:
   /** Runtime reflection of [[Arity]] for compatibility APIs that still accept an unsized `Vector`. */
   def arity(program: P): Int
 
-  def inspect(program: P): Vector[OptimizableView]
+  def inspect(program   : P): Vector[OptimizableView]
   final def read(program: P): Vector[OptimizableParameters] = inspect(program).map(_.parameters)
-  def replace(program: P, updates: Vector[OptimizableParameters]): P
+  def replace(program   : P, updates: Vector[OptimizableParameters]): P
 
   /** Read parameters while retaining the statically known arity. */
   final def readSized(program: P): SizedVector[OptimizableParameters, Arity] =
@@ -100,7 +100,7 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     */
   given fromOptimizableLeaf[P](using leaf: OptimizableLeaf[P]): OptimizableTraversal.Of[P, 1] with
     def arity(@annotation.unused program: P): Int                      = 1
-    def inspect(program: P): Vector[OptimizableView]                   = Vector(leaf.inspect(program))
+    def inspect(program                 : P): Vector[OptimizableView]  = Vector(leaf.inspect(program))
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
       require(updates.size == 1, s"OptimizableLeaf expects exactly 1 update, got ${updates.size}")
       leaf.set(program, updates.head)
@@ -114,25 +114,24 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
     * instance in scope for each deliberately non-learnable field type. This makes an omitted `OptimizableTraversal`
     * instance a compile error instead of silently hiding a potentially learnable subtree.
     */
-  def empty[P]: OptimizableTraversal.WithArity[P, 0] = new OptimizableTraversal.Of[P, 0]:
-    def arity(@annotation.unused program: P): Int                      = 0
-    def inspect(program: P): Vector[OptimizableView]                   = Vector.empty
-    def replace(program: P, updates: Vector[OptimizableParameters]): P =
-      require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
-      program
+  def empty[P]: OptimizableTraversal.WithArity[P, 0] =
+    new OptimizableTraversal.Of[P, 0]:
+      def arity(@annotation.unused program: P): Int                      = 0
+      def inspect(program                 : P): Vector[OptimizableView]  = Vector.empty
+      def replace(program: P, updates: Vector[OptimizableParameters]): P =
+        require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
+        program
 
   /** Named (non-inline) carrier of the derived behaviour. Keeping it a named class — rather than an anonymous class
     * inside `derived` — avoids `-Werror` rejecting an inline-duplicated anonymous class definition at each use site.
     */
   private[dspy4s] final class DerivedOptimizableTraversal[P <: Product, N <: Int](
-      m: Mirror.ProductOf[P],
+      m             : Mirror.ProductOf[P],
       fieldInstances: List[OptimizableTraversal[Any]],
-      labels: List[String]
+      labels        : List[String]
   ) extends OptimizableTraversal.Of[P, N]:
     def arity(program: P): Int =
-      fieldInstances.zipWithIndex.map { case (instance, index) =>
-        instance.arity(program.productElement(index))
-      }.sum
+      fieldInstances.zipWithIndex.map { case (instance, index) => instance.arity(program.productElement(index)) }.sum
 
     def inspect(program: P): Vector[OptimizableView] =
       fieldInstances.zipWithIndex.foldLeft(Vector.empty[OptimizableView]) { case (acc, (inst, i)) =>
@@ -150,9 +149,7 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
       }.toVector
 
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
-      val arities = fieldInstances.zipWithIndex.map { case (inst, i) =>
-        inst.read(program.productElement(i)).size
-      }
+      val arities  = fieldInstances.zipWithIndex.map { case (inst, i) => inst.read(program.productElement(i)).size }
       val expected = arities.sum
       require(expected == updates.size, s"OptimizableTraversal.replace expected $expected updates, got ${updates.size}")
       var cursor      = 0

@@ -30,7 +30,7 @@ class InstructionProposerSuite extends FunSuite:
 
   test("propose prompts with the current instruction + dataset and extracts the fenced rewrite") {
     given RuntimeContext = RuntimeContext()
-    val lm = new ReflectionLm("Sure! Here's a better one:\n```\nAnswer with only the city name.\n```\nHope that helps.")
+    val lm               = new ReflectionLm("Sure! Here's a better one:\n```\nAnswer with only the city name.\n```\nHope that helps.")
 
     val result = InstructionProposer.propose("Answer the question.", records, lm)
     assertEquals(result, Right("Answer with only the city name."))

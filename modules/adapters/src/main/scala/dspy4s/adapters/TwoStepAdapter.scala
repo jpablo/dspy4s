@@ -30,7 +30,7 @@ import dspy4s.lm.contracts.LmRequest
   */
 final case class TwoStepAdapter(
     extractionModel: LanguageModel,
-    name: String = "two_step"
+    name           : String = "two_step"
 ) extends Adapter:
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
@@ -46,13 +46,14 @@ final case class TwoStepAdapter(
     val chat = ChatAdapter()
     for
       extractorLayout <- buildExtractorLayout(layout)
-      textField  = extractorLayout.inputFields.head.name
-      invocation = AdapterInvocation(
-        layout = extractorLayout,
-        demos = Vector.empty,
-        inputs = Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
-        request = LmRequest(model = extractionModel.id)
-      )
+      textField        = extractorLayout.inputFields.head.name
+      invocation       = AdapterInvocation(
+                     layout = extractorLayout,
+                     demos = Vector.empty,
+                     inputs =
+                       Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
+                     request = LmRequest(model = extractionModel.id)
+                   )
       prompt   <- chat.format(invocation)
       response <- extractionModel.call(LmRequest(model = extractionModel.id, messages = prompt.messages))
       lmOutput <- response.outputs.headOption.toRight(ParseError(name, "Extraction model returned no output"))

@@ -30,7 +30,7 @@ import scala.collection.mutable.ArrayBuffer
 class StatusStreamingParitySuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** A program that invokes a tool and then "predicts" a fixed answer. We keep it minimal — no LM is configured because
     * the test only inspects status events.
@@ -72,7 +72,7 @@ class StatusStreamingParitySuite extends FunSuite:
     @volatile var messagesA: Vector[String] = Vector.empty
     @volatile var messagesB: Vector[String] = Vector.empty
 
-    val runA: Runnable = () => {
+    val runA: Runnable = () =>
       RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
         val stream           = Streamify.streamify(
@@ -88,8 +88,7 @@ class StatusStreamingParitySuite extends FunSuite:
             case _              => ()
         messagesA = msgs.toVector
       }
-    }
-    val runB: Runnable = () => {
+    val runB: Runnable = () =>
       RuntimeEnvironment.withSettings(RuntimeContext()) {
         given RuntimeContext = RuntimeEnvironment.current
         val stream           = Streamify.streamify(
@@ -105,7 +104,6 @@ class StatusStreamingParitySuite extends FunSuite:
             case _              => ()
         messagesB = msgs.toVector
       }
-    }
 
     val futureA = pool.submit(runA)
     val futureB = pool.submit(runB)
@@ -143,9 +141,8 @@ class StatusStreamingParitySuite extends FunSuite:
     val statusTimestamps = ArrayBuffer.empty[(String, Long)]
     while stream.hasNext do
       stream.next() match
-        case s: StatusEvent =>
-          statusTimestamps += ((s.message, s.timestamp.toEpochMilli))
-        case _ => ()
+        case s: StatusEvent => statusTimestamps += ((s.message, s.timestamp.toEpochMilli))
+        case _              => ()
 
     // We expect at least a "Calling tool slow..." start and a
     // "Tool calling finished!..." end status.

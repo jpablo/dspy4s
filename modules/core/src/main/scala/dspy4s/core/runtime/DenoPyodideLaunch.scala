@@ -11,9 +11,9 @@ private[runtime] object DenoPyodideLaunch:
   import DenoPyodideProtocol.*
 
   def command(
-      enableReadPaths: Vector[String],
-      enableWritePaths: Vector[String],
-      enableEnvVars: Vector[String],
+      enableReadPaths    : Vector[String],
+      enableWritePaths   : Vector[String],
+      enableEnvVars      : Vector[String],
       enableNetworkAccess: Vector[String]
   ): Vector[String] =
     val runner    = runnerPath.toString
@@ -44,13 +44,12 @@ private[runtime] object DenoPyodideLaunch:
     file
 
   /** Deno's cache directory (`DENO_DIR` or `deno info --json`), allow-read'd so Pyodide can load its files. */
-  private lazy val denoCacheDir: Option[String] =
-    sys.env.get("DENO_DIR").orElse {
-      try
-        val p   = new ProcessBuilder("deno", "info", "--json").start()
-        val out = new String(p.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
-        if p.waitFor() == 0 then
-          decodeJson(out).collect { case r: DynamicValue.Record => r }.flatMap(field(_, "denoDir")).flatMap(asString)
-        else None
-      catch case NonFatal(_) => None
-    }
+  private lazy val denoCacheDir: Option[String] = sys.env.get("DENO_DIR").orElse {
+    try
+      val p   = new ProcessBuilder("deno", "info", "--json").start()
+      val out = new String(p.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
+      if p.waitFor() == 0 then
+        decodeJson(out).collect { case r: DynamicValue.Record => r }.flatMap(field(_, "denoDir")).flatMap(asString)
+      else None
+    catch case NonFatal(_) => None
+  }

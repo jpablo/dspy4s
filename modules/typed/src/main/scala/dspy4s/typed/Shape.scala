@@ -174,11 +174,11 @@ object Shape:
   final class SchemaTupleShape[A](
       schema: Schema[A]
   ) extends RoundTripShape[A]:
-    private val delegate: RoundTripShape[A]                    = ZioSchemaCodec.derivedFromZioSchema[A](using schema)
-    val fieldSpecs: Vector[FieldSpec]                          = delegate.fieldSpecs
-    def encode(value: A): DynamicValue.Record                  = delegate.encode(value)
-    def decode(raw: DynamicValue.Record): Either[DspyError, A] = delegate.decode(raw)
-    override def jsonSchemaString: Option[String]              = delegate.jsonSchemaString
+    private val delegate: RoundTripShape[A]                      = ZioSchemaCodec.derivedFromZioSchema[A](using schema)
+    val fieldSpecs: Vector[FieldSpec]                            = delegate.fieldSpecs
+    def encode(value: A): DynamicValue.Record                    = delegate.encode(value)
+    def decode(raw  : DynamicValue.Record): Either[DspyError, A] = delegate.decode(raw)
+    override def jsonSchemaString: Option[String]                = delegate.jsonSchemaString
 
   /** Derives a `Shape[A]` from any case class / product type with a `zio.blocks.schema.Schema[A]` in scope. zio-blocks
     * owns product encode/decode; dspy4s derives the DSPy-facing field metadata from the same structural Reflect

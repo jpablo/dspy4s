@@ -29,9 +29,10 @@ final class OptimizableId private (val ordinal: OptimizableOrdinal) extends Orde
 
   override def compare(that: OptimizableId): Int = ordinal.compare(that.ordinal)
   override def toString: String                  = render
-  override def equals(other: Any): Boolean       = other match
-    case that: OptimizableId => ordinal == that.ordinal
-    case _                   => false
+  override def equals(other: Any): Boolean       =
+    other match
+      case that: OptimizableId => ordinal == that.ordinal
+      case _                   => false
   override def hashCode(): Int = ordinal.hashCode()
 
 object OptimizableId:
@@ -50,8 +51,7 @@ object OptimizableId:
     if !value.startsWith(Prefix) then Left(s"Invalid optimizable id '$value': expected '$Prefix<ordinal>'")
     else
       value.drop(Prefix.length).toIntOption match
-        case Some(ordinal) =>
-          OptimizableOrdinal.either(ordinal).fold(
+        case Some(ordinal) => OptimizableOrdinal.either(ordinal).fold(
             _ => Left(s"Invalid optimizable id '$value': ordinal must be a non-negative integer"),
             valid => Right(fromOrdinal(valid))
           )

@@ -28,7 +28,7 @@ class InferRulesSuite extends FunSuite:
     * can tell rule-induction (`natural_language_rules`) from task (`answer`).
     */
   private object InstructionAwareAdapter extends Adapter:
-    override val name: String = "instruction-aware"
+    override val name: String                                                                                    = "instruction-aware"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val instr  = invocation.layout.instructions.getOrElse("")
       val out    = invocation.layout.outputFields.map(_.name).mkString(",")
@@ -62,21 +62,21 @@ class InferRulesSuite extends FunSuite:
   private def extractBetween(s: String, start: String, end: String): String =
     val i = s.indexOf(start)
     if i < 0 then ""
-    else { val from = i + start.length; val j = s.indexOf(end, from); if j < 0 then "" else s.substring(from, j) }
+    else
+      val from = i + start.length; val j = s.indexOf(end, from); if j < 0 then "" else s.substring(from, j)
 
   private def settings: RuntimeContext =
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  private val taskLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "QA",
-      inputFields = Vector(FieldSpec("question")),
-      outputFields = Vector(FieldSpec("answer")),
-      instructions = Some("BASELINE: answer the question.")
-    )
+  private val taskLayout: SignatureLayout = SignatureLayout.of(
+    name = "QA",
+    inputFields = Vector(FieldSpec("question")),
+    outputFields = Vector(FieldSpec("answer")),
+    instructions = Some("BASELINE: answer the question.")
+  )
 
   private def ex(q: String): Example =
     Example(DynamicValues.record("question" := q, "answer" := gold(q)), inputKeys = Set("question"))

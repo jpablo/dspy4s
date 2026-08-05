@@ -47,11 +47,9 @@ import zio.blocks.schema.Schema
 
 // --8<-- [start:toxicity]
 object ToxicityExample:
-  val signature =
-    Signature.fromType[(comment: String) => (toxic: Boolean)](
-      instructions =
-        "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
-    )
+  val signature = Signature.fromType[(comment: String) => (toxic: Boolean)](
+    instructions = "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
+  )
 
   val toxicity = Predict(signature)
 
@@ -167,10 +165,9 @@ trait CheckCitationFaithfulnessSpec extends Spec:
   def evidence: OutputField[Map[String, List[String]]]
 
 object FaithfulnessExample:
-  val signature =
-    Signature.of[CheckCitationFaithfulnessSpec](
-      instructions = "Verify that the text is based on the provided context."
-    )
+  val signature = Signature.of[CheckCitationFaithfulnessSpec](
+    instructions = "Verify that the text is based on the provided context."
+  )
 
   val program = ChainOfThought(signature)
 
@@ -197,10 +194,9 @@ trait DogPictureSpec extends Spec:
   def answer: OutputField[String]
 
 object DogPictureExample:
-  val signature =
-    Signature.of[DogPictureSpec](
-      instructions = "Output the dog breed of the dog in the image."
-    )
+  val signature = Signature.of[DogPictureSpec](
+    instructions = "Output the dog breed of the dog in the image."
+  )
 
   val program = Predict(signature)
 
@@ -238,13 +234,11 @@ object MyContainer:
   case class Score(score: Double) derives Schema
 
 object CustomTypesExample:
-  val signature =
-    Signature.fromType[(query: String) => (result: QueryResult)]
+  val signature = Signature.fromType[(query: String) => (result: QueryResult)]
 
-  val nestedSignature =
-    Signature.fromType[
-      (query: MyContainer.Query) => (score: MyContainer.Score)
-    ]
+  val nestedSignature = Signature.fromType[
+    (query: MyContainer.Query) => (score: MyContainer.Score)
+  ]
 // --8<-- [end:custom-types]
 
 // ═══════════════════════════════════════════════════════════════════════════

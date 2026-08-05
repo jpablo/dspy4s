@@ -25,7 +25,7 @@ import scala.collection.mutable.ArrayBuffer
 class ModeLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
@@ -34,17 +34,16 @@ class ModeLawSuite extends FunSuite:
     * learnable leaf (for the addressability law).
     */
   private final case class Recorder(predict: DynamicPredict) extends Module[Int, Int]:
-    val seen: ArrayBuffer[Mode.Controls]                        = ArrayBuffer.empty
-    override val moduleName: String                             = "recorder"
-    override protected val lifecycle: ModuleLifecycle[Int, Int] =
-      ModuleLifecycle.typedWithoutInputs
+    val seen: ArrayBuffer[Mode.Controls]                                                                             = ArrayBuffer.empty
+    override val moduleName: String                                                                                  = "recorder"
+    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       seen += Mode.Controls(call.config, call.traceEnabled, call.rolloutId)
       Right(Prediction(call.input, RawPrediction.empty))
 
   private object Recorder:
     given recorderOptimizable: OptimizableLeaf[Recorder] with
-      def get(program: Recorder): OptimizableParameters                    = program.predict.optimizableParameters
+      def get(program     : Recorder): OptimizableParameters               = program.predict.optimizableParameters
       def metadata(program: Recorder): OptimizableMetadata                 = program.predict.optimizableView.metadata
       def set(program: Recorder, updated: OptimizableParameters): Recorder =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
@@ -119,7 +118,7 @@ class ModeLawSuite extends FunSuite:
     val m2     = Mode.temperature(0.9)
 
     def assertFunctorLaw(
-        law: IsEq[Module[Int, Int] => Module[Int, Int]],
+        law     : IsEq[Module[Int, Int] => Module[Int, Int]],
         recorder: Recorder
     ): Unit =
       val left         = law.lhs(recorder)(ProgramCall(1))

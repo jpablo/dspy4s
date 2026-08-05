@@ -50,10 +50,10 @@ import zio.blocks.schema.DynamicValue
   *   module-level LM option bag (see field comment below)
   */
 final case class DynamicPredict(
-    layout: SignatureLayout,
-    demos: Vector[Example] = Vector.empty,
-    name: Option[String] = None,
-    runtime: ProgramRuntime = new SettingsProgramRuntime {},
+    layout : SignatureLayout,
+    demos  : Vector[Example] = Vector.empty,
+    name   : Option[String]  = None,
+    runtime: ProgramRuntime  = new SettingsProgramRuntime {},
     /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. A typed
       * [[Predict]] derives the same input for its own engine from `signature.outputShape.jsonSchemaString`; users who
       * construct `DynamicPredict` directly usually leave it `None`.

@@ -33,9 +33,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   * [[score]] helper is a thin alias for `asDouble("score")` used by metrics and optimizers.
   */
 final case class RawPrediction(
-    values: DynamicValue.Record,
+    values     : DynamicValue.Record,
     completions: Option[Completions] = None,
-    lmUsage: Option[LmUsage] = None
+    lmUsage    : Option[LmUsage]     = None
 ):
   /** Field-value accessor by name. */
   def get(key: String): Option[DynamicValue] = DynamicValues.recordGet(values, key)
@@ -108,45 +108,42 @@ object RawPrediction:
   def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, RawPrediction] =
     Completions.fromRows(rows).flatMap(fromCompletions)
 
-  private def asString(key: String, dv: DynamicValue): Either[DspyError, String] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s))  => Right(s)
-    case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b.toString)
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))     => Right(n.toString)
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))    => Right(n.toString)
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))   => Right(n.toString)
-    case DynamicValue.Primitive(PrimitiveValue.Double(n))  => Right(n.toString)
-    case variant: DynamicValue.Variant                     =>
-      variant.caseName.toRight(ValidationError(
-        s"Prediction field '$key' is a variant without a case name"
-      ))
-    case other =>
-      Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
+  private def asString(key: String, dv: DynamicValue): Either[DspyError, String] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.String(s))  => Right(s)
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))     => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))    => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Float(n))   => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Double(n))  => Right(n.toString)
+      case variant: DynamicValue.Variant                     => variant.caseName.toRight(ValidationError(
+          s"Prediction field '$key' is a variant without a case name"
+        ))
+      case other => Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
 
-  private def asInt(key: String, dv: DynamicValue): Either[DspyError, Int] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))                                            => Right(n)
-    case DynamicValue.Primitive(PrimitiveValue.Long(n)) if n >= Int.MinValue && n <= Int.MaxValue =>
-      Right(n.toInt)
-    case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
-      s.trim.toIntOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Int: $s"))
-    case other =>
-      Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
+  private def asInt(key: String, dv: DynamicValue): Either[DspyError, Int] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))                                            => Right(n)
+      case DynamicValue.Primitive(PrimitiveValue.Long(n)) if n >= Int.MinValue && n <= Int.MaxValue => Right(n.toInt)
+      case DynamicValue.Primitive(PrimitiveValue.String(s))                                         =>
+        s.trim.toIntOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Int: $s"))
+      case other => Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
 
-  private def asDouble(key: String, dv: DynamicValue): Either[DspyError, Double] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Right(n.toDouble)
-    case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Right(n.toDouble)
-    case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Right(n.toDouble)
-    case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Right(n)
-    case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
-      s.trim.toDoubleOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Double: $s"))
-    case other =>
-      Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
+  private def asDouble(key: String, dv: DynamicValue): Either[DspyError, Double] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Right(n.toDouble)
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Right(n.toDouble)
+      case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Right(n.toDouble)
+      case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Right(n)
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
+        s.trim.toDoubleOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Double: $s"))
+      case other => Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
 
-  private def asBoolean(key: String, dv: DynamicValue): Either[DspyError, Boolean] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b)
-    case DynamicValue.Primitive(PrimitiveValue.String(s))  =>
-      s.trim.toLowerCase match
-        case "true"  => Right(true)
-        case "false" => Right(false)
-        case _       => Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
-    case other =>
-      Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))
+  private def asBoolean(key: String, dv: DynamicValue): Either[DspyError, Boolean] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b)
+      case DynamicValue.Primitive(PrimitiveValue.String(s))  => s.trim.toLowerCase match
+          case "true"  => Right(true)
+          case "false" => Right(false)
+          case _       => Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
+      case other => Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))

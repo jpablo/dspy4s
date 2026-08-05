@@ -51,13 +51,14 @@ object ContextPropagation:
     */
   final class Captured private[ContextPropagation] (
       val context: RuntimeContext,
-      snapshots: Vector[Snapshot]
+      snapshots  : Vector[Snapshot]
   ):
     /** Run `thunk` with the captured context and every carrier snapshot installed, restoring on exit. */
     def run[A](thunk: => A): A =
-      def installAll(remaining: List[Snapshot]): A = remaining match
-        case Nil          => thunk
-        case head :: tail => head.restore(installAll(tail))
+      def installAll(remaining: List[Snapshot]): A =
+        remaining match
+          case Nil          => thunk
+          case head :: tail => head.restore(installAll(tail))
       RuntimeEnvironment.withContext(context)(installAll(snapshots.toList))
 
   private def captureSnapshots(): Vector[Snapshot] =

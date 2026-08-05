@@ -108,10 +108,10 @@ class GroundedProposerSuite extends FunSuite:
   )
 
   private def config(
-      numInstructions: CandidateCount,
+      numInstructions  : CandidateCount,
       useDatasetSummary: Boolean = true,
-      useTips: Boolean = true,
-      seed: Long = 0L
+      useTips          : Boolean = true,
+      seed             : Long    = 0L
   ): GroundedProposerConfig =
     GroundedProposerConfig(
       numInstructions = numInstructions,

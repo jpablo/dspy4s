@@ -50,7 +50,7 @@ class StreamifySuite extends FunSuite:
       chunks.iterator
 
   private object PassthroughAdapter extends Adapter:
-    override val name: String = "passthrough"
+    override val name: String                                                                                    = "passthrough"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
     override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using

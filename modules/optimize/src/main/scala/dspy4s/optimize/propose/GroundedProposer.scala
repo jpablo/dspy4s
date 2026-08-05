@@ -41,13 +41,13 @@ import dspy4s.programs.contracts.ProgramCall
   *   distinguishable from a task prompt (lets offline scripted LMs branch)
   */
 final case class GroundedProposerConfig(
-    numInstructions: CandidateCount = CandidateCount(5),
-    useDatasetSummary: Boolean = true,
-    useTips: Boolean = true,
+    numInstructions  : CandidateCount    = CandidateCount(5),
+    useDatasetSummary: Boolean           = true,
+    useTips          : Boolean           = true,
     datasetSampleSize: DatasetSampleSize = DatasetSampleSize(10),
-    initTemperature: Double = 1.0,
-    seed: Long = 0L,
-    summaryMarker: String =
+    initTemperature  : Double            = 1.0,
+    seed             : Long              = 0L,
+    summaryMarker    : String            =
       "You are a dataset analyst. Summarize the observations that hold across the dataset samples.",
     instructionMarker: String =
       "You are an instruction proposer for large language models. Propose a new instruction grounded in the context."
@@ -109,17 +109,17 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     *   [[DspyError]] encountered
     */
   def proposeInstructions(
-      program: P,
-      trainset: Vector[Example],
+      program       : P,
+      trainset      : Vector[Example],
       demoCandidates: Vector[Vector[Example]] = Vector.empty
   )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
     val leaves = ps.inspect(program)
     for
       summary <- datasetSummary(trainset)
       perLeaf <- traverse(leaves.zipWithIndex.toVector) { case (leaf, idx) =>
-        val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
-        proposeForLeaf(leaf, idx, summary, demoSet)
-      }
+                   val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
+                   proposeForLeaf(leaf, idx, summary, demoSet)
+                 }
     yield perLeaf
 
   // ── Dataset summary (the create_dataset_summary analogue) ──────────────────
@@ -153,8 +153,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
       // The dataset summary is best-effort grounding: a failed summary LM call degrades to "no grounding"
       // (Right(None)) rather than aborting the whole proposeInstructions / MIPROv2 compile.
       gen(call) match
-        case Right(pred) =>
-          Right(
+        case Right(pred) => Right(
             DynamicValues.recordGet(pred.output, "observations")
               .map(DynamicValues.renderText)
               .map(_.trim)
@@ -169,14 +168,13 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     * is set as the signature instructions so generation prompts are distinguishable from task prompts.
     */
   private def instructionGenLayout(withSummary: Boolean, withDemos: Boolean, withTip: Boolean): SignatureLayout =
-    val inputs =
-      (if withSummary then Vector(FieldSpec(name = "dataset_description")) else Vector.empty) ++
-        Vector(
-          FieldSpec(name = "program_description"),
-          FieldSpec(name = "basic_instruction")
-        ) ++
-        (if withDemos then Vector(FieldSpec(name = "task_demos")) else Vector.empty) ++
-        (if withTip then Vector(FieldSpec(name = "tip")) else Vector.empty)
+    val inputs = (if withSummary then Vector(FieldSpec(name = "dataset_description")) else Vector.empty) ++
+      Vector(
+        FieldSpec(name = "program_description"),
+        FieldSpec(name = "basic_instruction")
+      ) ++
+      (if withDemos then Vector(FieldSpec(name = "task_demos")) else Vector.empty) ++
+      (if withTip then Vector(FieldSpec(name = "tip")) else Vector.empty)
     SignatureLayout.of(
       name = "GenerateModuleInstruction",
       inputFields = inputs,
@@ -188,8 +186,8 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     * the leaf's signature-derived description, the optional demo set, and a rotating tip.
     */
   private def proposeForLeaf(
-      leaf: OptimizableView,
-      idx: Int,
+      leaf   : OptimizableView,
+      idx    : Int,
       summary: Option[String],
       demoSet: Vector[Example]
   )(using RuntimeContext): Either[DspyError, Vector[String]] =

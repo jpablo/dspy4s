@@ -26,12 +26,11 @@ class TwoStepAdapterSuite extends FunSuite:
       lastPrompt = Some(request.messages.flatMap(_.text).mkString("\n"))
       Right(LmResponse(outputs = Vector(LmOutput(text = response))))
 
-  private val layout: SignatureLayout =
-    SignatureLayout.create(
-      name = "QA",
-      inputFields = Vector(FieldSpec("question")),
-      outputFields = Vector(FieldSpec("answer"))
-    ).toOption.get
+  private val layout: SignatureLayout = SignatureLayout.create(
+    name = "QA",
+    inputFields = Vector(FieldSpec("question")),
+    outputFields = Vector(FieldSpec("answer"))
+  ).toOption.get
 
   test("TwoStepAdapter formats a plain natural-language prompt for the main LM (no structured markers)") {
     val adapter          = TwoStepAdapter(new ScriptedLm(""))

@@ -37,16 +37,15 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
   /** A typed program stub with one learnable leaf (same pattern as ComposeLawSuite's Step). */
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
-    override val moduleName: String                         = "leaf"
-    override protected val lifecycle: ModuleLifecycle[I, O] =
-      ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                                                                              = "leaf"
+    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction.empty))
 
   private object Leaf:
     given leafOptimizable[I, O]: OptimizableLeaf[Leaf[I, O]] with
-      def get(program: Leaf[I, O]): OptimizableParameters    = program.predict.optimizableParameters
-      def metadata(program: Leaf[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
+      def get(program     : Leaf[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
+      def metadata(program: Leaf[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
       def set(program: Leaf[I, O], updated: OptimizableParameters): Leaf[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 

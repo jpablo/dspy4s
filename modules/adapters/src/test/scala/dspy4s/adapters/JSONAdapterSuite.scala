@@ -55,9 +55,8 @@ class JSONAdapterSuite extends FunSuite:
 
   test("format inlines outputJsonSchema in the system message when supplied") {
     val signature    = SignatureDsl.parse("question -> answer").toOption.get
-    val schemaString =
-      """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
-    val invocation = AdapterInvocation(
+    val schemaString = """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
+    val invocation   = AdapterInvocation(
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
@@ -133,8 +132,7 @@ class JSONAdapterSuite extends FunSuite:
 
   test("parse supports fenced json payloads") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val text      =
-      """```json
+    val text      = """```json
         |{"answer":"Brussels"}
         |```""".stripMargin
 

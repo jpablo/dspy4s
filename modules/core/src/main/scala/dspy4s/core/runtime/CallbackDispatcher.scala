@@ -39,7 +39,7 @@ object CallbackDispatcher:
   /** Wrap a module execution in a `ModuleStartEvent` / `ModuleEndEvent` pair. */
   def withModule[A](
       moduleName: String,
-      inputs: DynamicValue.Record
+      inputs    : DynamicValue.Record
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope(prefix = "module") { (callId, parentCallId) =>
       emit(
@@ -88,7 +88,7 @@ object CallbackDispatcher:
   /** Wrap an adapter pass (format or parse) in an `AdapterStartEvent` / `AdapterEndEvent` pair. */
   def withAdapter[A](
       adapterName: String,
-      inputs: DynamicValue.Record
+      inputs     : DynamicValue.Record
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     withCallScope(prefix = "adapter") { (callId, parentCallId) =>
       emit(
@@ -116,7 +116,7 @@ object CallbackDispatcher:
     */
   def withTool(
       toolName: String,
-      args: DynamicValue.Record
+      args    : DynamicValue.Record
   )(thunk: => Either[DspyError, DynamicValue]): Either[DspyError, DynamicValue] =
     withCallScope(prefix = "tool") { (callId, parentCallId) =>
       emit(

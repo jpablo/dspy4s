@@ -22,15 +22,14 @@ import scala.xml.Elem
 import scala.xml.XML
 
 final case class XMLAdapter(
-    name: String = "xml",
+    name                            : String  = "xml",
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     // G-9: this adapter renders no prose field-description block (only `<field>` tags), so field constraints are
     // surfaced as a consolidated block appended to the system instruction (shared with JSONAdapter).
-    val fieldTags = invocation.layout.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
-    val xmlInstruction =
-      s"Return XML only using this shape:\n<outputs>\n$fieldTags\n</outputs>"
+    val fieldTags      = invocation.layout.outputFields.map(field => s"<${field.name}>...</${field.name}>").mkString("\n")
+    val xmlInstruction = s"Return XML only using this shape:\n<outputs>\n$fieldTags\n</outputs>"
     val baseSystemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$xmlInstruction"
       case None               => xmlInstruction
@@ -61,7 +60,7 @@ final case class XMLAdapter(
   private def parseFields(layout: SignatureLayout, document: Elem, output: LmOutput): Either[DspyError, ParsedOutput] =
     AdapterTextSupport.decodeOutputFields(layout) { field =>
       for
-        raw <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
+        raw     <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
         coerced <- AdapterTextSupport.coerceText(field.typeRef, raw)
       yield coerced
     }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
@@ -94,7 +93,7 @@ final case class XMLAdapter(
     * as the field's value.
     */
   private def extractFieldText(
-      xml: Elem,
+      xml      : Elem,
       fieldName: String
   ): Option[String] = (xml \\ fieldName).headOption.map(_.text.trim)
 

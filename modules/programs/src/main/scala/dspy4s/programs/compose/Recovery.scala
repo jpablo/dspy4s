@@ -22,15 +22,16 @@ enum RecoveryPolicy derives CanEqual:
   case ErrorCodes(codes: Set[String])
   case When(predicate: DspyError => Boolean)
 
-  def allows(error: DspyError): Boolean = this match
-    case Never             => false
-    case Always            => true
-    case ErrorCodes(codes) => codes.contains(error.code)
-    case When(predicate)   => predicate(error)
+  def allows(error: DspyError): Boolean =
+    this match
+      case Never             => false
+      case Always            => true
+      case ErrorCodes(codes) => codes.contains(error.code)
+      case When(predicate)   => predicate(error)
 
 object RecoveryPolicy:
-  def onCodes(first: String, rest: String*): RecoveryPolicy = ErrorCodes((first +: rest).toSet)
-  def when(predicate: DspyError => Boolean): RecoveryPolicy = When(predicate)
+  def onCodes(first : String, rest: String*): RecoveryPolicy = ErrorCodes((first +: rest).toSet)
+  def when(predicate: DspyError => Boolean): RecoveryPolicy  = When(predicate)
 
 /** Try `primary`; on an allowed failure, run `fallback` on the same input and call controls.
   *

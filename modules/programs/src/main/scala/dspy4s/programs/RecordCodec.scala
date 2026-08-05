@@ -26,8 +26,9 @@ object RecordCodec:
 
   private[programs] def fromDecoder[A](
       decoder: DynamicValue.Record => Either[DspyError, A]
-  ): RecordCodec[A] = new RecordCodec[A]:
-    def decode(record: DynamicValue.Record): Either[DspyError, A] = decoder(record)
+  ): RecordCodec[A] =
+    new RecordCodec[A]:
+      def decode(record: DynamicValue.Record): Either[DspyError, A] = decoder(record)
 
   /** Decode products through the same closed structural input shape used by typed signatures. Ambient schemas cannot
     * change this instance's behavior; custom schema semantics need a freshly branded object type.

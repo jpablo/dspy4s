@@ -6,18 +6,18 @@ import dspy4s.core.contracts.RuntimeContext
   * for an index and `function.arguments` fragments on subsequent deltas; consumers accumulate by `index`.
   */
 final case class LmToolCallDelta(
-    index: Int,
-    id: Option[String] = None,
-    name: Option[String] = None,
+    index            : Int,
+    id               : Option[String] = None,
+    name             : Option[String] = None,
     argumentsFragment: Option[String] = None
 )
 
 final case class LmChunk(
-    text: String = "",
-    finishReason: Option[String] = None,
-    usage: Option[LmUsage] = None,
-    toolCalls: Vector[LmToolCallDelta] = Vector.empty,
-    raw: Option[Any] = None
+    text        : String                  = "",
+    finishReason: Option[String]          = None,
+    usage       : Option[LmUsage]         = None,
+    toolCalls   : Vector[LmToolCallDelta] = Vector.empty,
+    raw         : Option[Any]             = None
 ):
   def isFinal: Boolean = finishReason.isDefined
 

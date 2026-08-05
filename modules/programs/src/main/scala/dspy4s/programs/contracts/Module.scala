@@ -99,9 +99,9 @@ trait Module[I, O]:
     * `rolloutId` that are not represented here.
     */
   final def apply(
-      input: I,
-      config: DynamicValue.Record = DynamicValue.Record.empty,
-      traceEnabled: Boolean = true
+      input       : I,
+      config      : DynamicValue.Record = DynamicValue.Record.empty,
+      traceEnabled: Boolean             = true
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     apply(call = ProgramCall(input, config, traceEnabled))
 
@@ -136,8 +136,7 @@ private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   * sibling module over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */
 trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
-    ModuleLifecycle.dynamic
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] = ModuleLifecycle.dynamic
 
   protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

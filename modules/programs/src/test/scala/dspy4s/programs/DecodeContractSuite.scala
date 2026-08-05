@@ -14,15 +14,14 @@ import munit.FunSuite
 class DecodeContractSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val signature = Signature.derived[TagInput, TagOutput](name = "TagContract")
 
   test("decodeCompletion runs the real ChatAdapter + typed decode over a canned completion") {
     // A CORRECT ChatAdapter completion: marker-framed, JSON array of objects for the record list, and a
     // currency-formatted number for the optional field (proves the end-to-end lenient numeric path).
-    val completion =
-      """[[ ## tags ## ]]
+    val completion = """[[ ## tags ## ]]
         |["urgent", "billing"]
         |
         |[[ ## items ## ]]
@@ -58,8 +57,7 @@ class DecodeContractSuite extends FunSuite:
   test("ChainOfThought decodes its augmented (reasoning + structured) output over a canned completion") {
     // A correct ChatAdapter completion for a CoT: the prepended `reasoning` block, then the base fields —
     // JSON array of objects for the record list and a currency-formatted optional number.
-    val completion =
-      """[[ ## reasoning ## ]]
+    val completion = """[[ ## reasoning ## ]]
         |The email names two tags and one purchased item.
         |
         |[[ ## tags ## ]]

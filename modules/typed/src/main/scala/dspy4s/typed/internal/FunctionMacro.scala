@@ -17,11 +17,12 @@ private[typed] object FunctionMacro:
     import quotes.reflect.*
     given CanEqual[Symbol, Symbol] = CanEqual.derived
 
-    def unwrap(term: Term): Term = term match
-      case Inlined(_, _, inner) => unwrap(inner)
-      case Typed(inner, _)      => unwrap(inner)
-      case Block(Nil, inner)    => unwrap(inner)
-      case other                => other
+    def unwrap(term: Term): Term =
+      term match
+        case Inlined(_, _, inner) => unwrap(inner)
+        case Typed(inner, _)      => unwrap(inner)
+        case Block(Nil, inner)    => unwrap(inner)
+        case other                => other
 
     def referencedMethod(term: Term): Symbol =
       unwrap(term) match
@@ -32,8 +33,7 @@ private[typed] object FunctionMacro:
             case dd: DefDef if dd.symbol == meth.symbol => dd
           }.flatMap(_.rhs.flatMap(calledMethod)).getOrElse(meth.symbol)
         case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
-        case other                                    =>
-          report.errorAndAbort(
+        case other                                    => report.errorAndAbort(
             "Signature.from expects a method reference, e.g. " +
               "`Signature.from(emotionsSig)`; got: " + other.show
           )
@@ -41,22 +41,18 @@ private[typed] object FunctionMacro:
     def methodDef(sym: Symbol): DefDef =
       sym.tree match
         case dd: DefDef => dd
-        case _          =>
-          report.errorAndAbort(
+        case _          => report.errorAndAbort(
             s"Signature.from could not inspect method '${sym.name}'"
           )
 
     def calledMethod(term: Term): Option[Symbol] =
       unwrap(term) match
-        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun") =>
-          Some(fn.symbol)
-        case Apply(fn, _)                                                              => calledMethod(fn)
-        case TypeApply(fn, _)                                                          => calledMethod(fn)
-        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun") =>
-          Some(id.symbol)
-        case sel: Select if sel.symbol.isDefDef && !sel.symbol.name.startsWith("$anonfun") =>
-          Some(sel.symbol)
-        case _ => None
+        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun")  => Some(fn.symbol)
+        case Apply(fn, _)                                                                  => calledMethod(fn)
+        case TypeApply(fn, _)                                                              => calledMethod(fn)
+        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun")     => Some(id.symbol)
+        case sel: Select if sel.symbol.isDefDef && !sel.symbol.name.startsWith("$anonfun") => Some(sel.symbol)
+        case _                                                                             => None
 
     def dealiasedMethod(sym: Symbol): Symbol =
       if sym.name.startsWith("$anonfun") then
@@ -66,8 +62,7 @@ private[typed] object FunctionMacro:
     def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
       items.foreach { (fieldName, tpe) =>
         tpe.asType match
-          case '[t] =>
-            if Expr.summon[Schema[t]].isEmpty then
+          case '[t] => if Expr.summon[Schema[t]].isEmpty then
               report.errorAndAbort(
                 s"No Schema[${tpe.show}] in scope for field '$owner.$fieldName'. Field types must have a " +
                   "zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
@@ -75,8 +70,8 @@ private[typed] object FunctionMacro:
       }
 
     def signatureExpr[I: Type, O: Type](
-        sigName: String,
-        inputShapeExpr: Expr[Shape[I]],
+        sigName        : String,
+        inputShapeExpr : Expr[Shape[I]],
         outputShapeExpr: Expr[Shape[O]]
     ): Expr[TypedSig[I, O]] =
       materialize[I, O](
@@ -131,14 +126,12 @@ private[typed] object FunctionMacro:
       validateSchemas(sigName, outputItems)
       val outputType = namedTupleType(outputItems)
       (inputType.asType, outputType.asType) match
-        case ('[i], '[o]) =>
-          signatureExpr[i, o](
+        case ('[i], '[o]) => signatureExpr[i, o](
             sigName = sigName,
             inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
             outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
           )
-        case _ =>
-          report.errorAndAbort(s"Internal error materializing scalar output for method '$sigName'")
+        case _ => report.errorAndAbort(s"Internal error materializing scalar output for method '$sigName'")
 
     namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
       case Some(outputItems) =>
@@ -146,36 +139,29 @@ private[typed] object FunctionMacro:
           report.errorAndAbort(s"Signature.from requires method '$sigName' to declare at least one output field")
         validateSchemas(sigName, outputItems)
         (inputType.asType, returnType.asType) match
-          case ('[i], '[o]) =>
-            signatureExpr[i, o](
+          case ('[i], '[o]) => signatureExpr[i, o](
               sigName = sigName,
               inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
               outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
             )
-          case _ =>
-            report.errorAndAbort(s"Internal error materializing tuple output for method '$sigName'")
+          case _ => report.errorAndAbort(s"Internal error materializing tuple output for method '$sigName'")
       case None =>
         if returnType.typeSymbol.flags.is(Flags.Case) || returnType <:< TypeRepr.of[Product] then
           returnType.asType match
-            case '[o] =>
-              Expr.summon[Mirror.ProductOf[o]] match
-                case Some(_) =>
-                  inputType.asType match
-                    case '[i] =>
-                      signatureExpr[i, o](
+            case '[o] => Expr.summon[Mirror.ProductOf[o]] match
+                case Some(_) => inputType.asType match
+                    case '[i] => signatureExpr[i, o](
                         sigName = sigName,
-                        inputShapeExpr =
-                          '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
+                        inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
                         outputShapeExpr = '{ Shape.canonicalDerived[o] }
                       )
-                case None =>
-                  scalarOutputExpr(returnType)
+                case None => scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
 
   /** Implementation of `Signature.fromType[F]`. Inspects a function type rather than a method term.
     */
   def fromTypeImpl[F: Type](
-      name: Expr[String],
+      name        : Expr[String],
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
@@ -183,8 +169,7 @@ private[typed] object FunctionMacro:
     def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
       items.foreach { (fieldName, tpe) =>
         tpe.asType match
-          case '[t] =>
-            if Expr.summon[Schema[t]].isEmpty then
+          case '[t] => if Expr.summon[Schema[t]].isEmpty then
               report.errorAndAbort(
                 s"No Schema[${tpe.show}] in scope for field '$owner.$fieldName'. Field types must have a " +
                   "zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
@@ -195,10 +180,8 @@ private[typed] object FunctionMacro:
       tpe.dealias match
         case Refinement(parent, "apply", MethodType(paramNames, paramTypes, returnType)) =>
           val parentParts = parent.dealias match
-            case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Function") =>
-              args
-            case other =>
-              report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
+            case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Function") => args
+            case other                                                                        => report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
           val parentInputs = parentParts.dropRight(1)
           val inputs       =
             if paramTypes.size == parentInputs.size then paramTypes
@@ -210,8 +193,7 @@ private[typed] object FunctionMacro:
           val inputTypes = args.dropRight(1)
           val returnType = args.last
           inputTypes.map(None -> _) -> returnType
-        case other =>
-          report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
+        case other => report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
 
     def inputName(index: Int, total: Int, explicit: Option[String]): String =
       explicit.getOrElse(if total == 1 then "input" else s"input${index + 1}")
@@ -258,12 +240,10 @@ private[typed] object FunctionMacro:
       validateSchemas(sigName, outputItems)
       val outputType = namedTupleType(outputItems)
       (inputType.asType, outputType.asType) match
-        case ('[i], '[o]) =>
-          signatureExpr[i, o](
+        case ('[i], '[o]) => signatureExpr[i, o](
             outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
           )
-        case _ =>
-          report.errorAndAbort("Internal error materializing scalar output for function type")
+        case _ => report.errorAndAbort("Internal error materializing scalar output for function type")
 
     namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
       case Some(outputItems) =>
@@ -271,25 +251,19 @@ private[typed] object FunctionMacro:
           report.errorAndAbort("Signature.fromType requires at least one output field")
         validateSchemas(sigName, outputItems)
         (inputType.asType, returnType.asType) match
-          case ('[i], '[o]) =>
-            signatureExpr[i, o](
+          case ('[i], '[o]) => signatureExpr[i, o](
               outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
             )
-          case _ =>
-            report.errorAndAbort("Internal error materializing named-tuple output for function type")
+          case _ => report.errorAndAbort("Internal error materializing named-tuple output for function type")
       case None =>
         if returnType.typeSymbol.flags.is(Flags.Case) || returnType <:< TypeRepr.of[Product] then
           returnType.asType match
-            case '[o] =>
-              Expr.summon[Mirror.ProductOf[o]] match
-                case Some(_) =>
-                  inputType.asType match
-                    case '[i] =>
-                      signatureExpr[i, o](
+            case '[o] => Expr.summon[Mirror.ProductOf[o]] match
+                case Some(_) => inputType.asType match
+                    case '[i] => signatureExpr[i, o](
                         outputShapeExpr = '{ Shape.canonicalDerived[o] }
                       )
-                case None =>
-                  scalarOutputExpr(returnType)
+                case None => scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
 
   /** Implementation of the typed `Signature.fromString("a -> b")`. The DSL string must be a compile-time literal; it is
@@ -317,8 +291,7 @@ private[typed] object FunctionMacro:
         case "int"    => TypeRepr.of[Int]
         case "double" => TypeRepr.of[Double]
         case "bool"   => TypeRepr.of[Boolean]
-        case other    =>
-          report.errorAndAbort(
+        case other    => report.errorAndAbort(
             s"Signature.fromString: field '${field.name}' has type '$other', which the typed string DSL does " +
               "not support (supported: str, int, float, bool). For richer field types use Signature.of[Spec], a " +
               "case class, or Signature.fromStringDynamic."
@@ -332,13 +305,11 @@ private[typed] object FunctionMacro:
       report.errorAndAbort(s"""Signature.fromString "$literal" declares no output fields""")
 
     (namedTupleType(inputItems).asType, namedTupleType(outputItems).asType) match
-      case ('[i], '[o]) =>
-        materialize[i, o](
+      case ('[i], '[o]) => materialize[i, o](
           nameExpr = Expr(layout.name),
           instructionsExpr = instructions,
           errorContext = s"function signature '${layout.name}'",
           inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
           outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
         )
-      case _ =>
-        report.errorAndAbort(s"""Internal error materializing Signature.fromString "$literal"""")
+      case _ => report.errorAndAbort(s"""Internal error materializing Signature.fromString "$literal"""")

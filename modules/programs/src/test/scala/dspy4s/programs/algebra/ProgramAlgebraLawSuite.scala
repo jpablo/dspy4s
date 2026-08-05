@@ -54,7 +54,7 @@ final case class ArrayBox(values: Array[Int]) derives Schema
 class ProgramAlgebraLawSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
@@ -65,16 +65,15 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
     override val moduleName: String = s"step_$tag"
 
-    override protected val lifecycle: ModuleLifecycle[I, O] =
-      ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
 
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
-      def get(program: Step[I, O]): OptimizableParameters    = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
+      def get(program     : Step[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
+      def metadata(program: Step[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -82,9 +81,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
     * prove the construction gate below.
     */
   private final class Opaque extends Module[Int, Int]:
-    override val moduleName: String                             = "opaque"
-    override protected val lifecycle: ModuleLifecycle[Int, Int] =
-      ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                                                                                  = "opaque"
+    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, RawPrediction.empty))
 
@@ -97,16 +95,13 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   // ── Bundle-tagged dynamic objects: fresh types minted per parse (DynamicSignature) ─────────────────────────
   // Suite-level so the freshness compile gate can reference them from compileErrors snippets.
-  private val qaBundle: DynamicSignature =
-    DynamicSignature.parse("question -> answer").toOption.get
+  private val qaBundle: DynamicSignature = DynamicSignature.parse("question -> answer").toOption.get
   // Referenced only inside the freshness compile gate's compileErrors snippet, which the unused checker
   // cannot see.
   @annotation.unused
-  private val qaBundleAgain: DynamicSignature =
-    DynamicSignature.parse("question -> answer").toOption.get
+  private val qaBundleAgain: DynamicSignature = DynamicSignature.parse("question -> answer").toOption.get
 
-  private val shiftedBoxSchema =
-    Schema.derived[Boxed].transform(box => Boxed(box.n + 1), box => Boxed(box.n - 1))
+  private val shiftedBoxSchema = Schema.derived[Boxed].transform(box => Boxed(box.n + 1), box => Boxed(box.n - 1))
   private val shiftedBoxObject = RecordObject.fromSchema(shiftedBoxSchema)
   @annotation.unused
   private val shiftedBoxObjectAgain = RecordObject.fromSchema(shiftedBoxSchema)
@@ -136,9 +131,9 @@ class ProgramAlgebraLawSuite extends FunSuite:
   )
 
   private final case class ProgramObservation[O](
-      output: Either[DspyError, Prediction[O]],
-      starts: Vector[String],
-      trace: Vector[String],
+      output : Either[DspyError, Prediction[O]],
+      starts : Vector[String],
+      trace  : Vector[String],
       history: Vector[String]
   )
 
@@ -147,9 +142,10 @@ class ProgramAlgebraLawSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
     val starts   = Vector.newBuilder[String]
     val callback = new CallbackHandler:
-      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-        case start: ModuleStartEvent => starts += start.moduleName
-        case _                       => ()
+      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case start: ModuleStartEvent => starts += start.moduleName
+          case _                       => ()
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       given RuntimeContext = RuntimeEnvironment.current
       val output           = program(ProgramCall(input))
@@ -165,7 +161,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     * decoding is a property of the object, so it no longer varies between the two sides by construction).
     */
   private def assertObsEq[I, O](
-      eq: IsEq[AnyGrade[Program, I, O]],
+      eq   : IsEq[AnyGrade[Program, I, O]],
       input: I
   ): Unit =
     assertEquals(eq.lhs.morphism.params, eq.rhs.morphism.params)
@@ -240,12 +236,12 @@ class ProgramAlgebraLawSuite extends FunSuite:
       Program[Boxed, Wrapped, 1],
       SizedVector[OptimizableParameters, 1]
     ]]
-    val current: SizedVector[OptimizableParameters, 1] = lens.get(program)
-    val updated = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
-    val second  = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
+    val current: SizedVector[OptimizableParameters, 1]            = lens.get(program)
+    val updated                                                   = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
+    val second                                                    = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
     val composed: Program[Boxed, Boxed, 2]                        = program >>> second
     val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams
-    val arityAgreement = composed.optimizableParameters.arityAgreement(composed.program)
+    val arityAgreement                                            = composed.optimizableParameters.arityAgreement(composed.program)
 
     val getPut = lens.getPut(program)
     assertEquals(getPut.lhs.params, getPut.rhs.params)

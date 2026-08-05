@@ -36,9 +36,9 @@ object InputAugmentation:
     * vector and its former truncating `zip` is unnecessary.
     */
   final class AppendedStringInputs[I] private[InputAugmentation] (
-      base: Shape[I],
+      base  : Shape[I],
       fields: Vector[FieldSpec],
-      label: String
+      label : String
   ):
     opaque type Values = Vector[String]
 
@@ -74,8 +74,8 @@ object InputAugmentation:
 
   /** Build a path-branded, validated runtime-arity input block. */
   def appendedStringInputs[I](
-      base: Shape[I],
+      base  : Shape[I],
       fields: Vector[FieldSpec],
-      label: String
+      label : String
   ): AppendedStringInputs[I] =
     new AppendedStringInputs(base, fields, label)

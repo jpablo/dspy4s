@@ -77,7 +77,7 @@ class TypedPredictSuite extends FunSuite:
   )
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   // ── Happy path ──────────────────────────────────────────────────────────
 
@@ -87,8 +87,7 @@ class TypedPredictSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result           = Predict(sig)(P4QAInput("Capital of France?"))
       result match
-        case Right(tp) =>
-          assertEquals(tp.output, P4QAOutput("Paris", 0.95))
+        case Right(tp) => assertEquals(tp.output, P4QAOutput("Paris", 0.95))
         case Left(err) => fail(s"expected success, got: $err")
     }
   }

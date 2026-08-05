@@ -13,7 +13,7 @@ import dspy4s.typed.Prediction
   * programs; this is a useful classifier rather than a law of the unrestricted execution carrier.
   */
 final case class Copy[I]() extends TransparentModule[I, (I, I)]:
-  override val moduleName: String = "copy"
+  override val moduleName: String                                                                                   = "copy"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[(I, I)]] =
     Right(Prediction((call.input, call.input), RawPrediction.empty))
 
@@ -26,7 +26,7 @@ object Copy:
   * unrestricted executable programs.
   */
 final case class Discard[I]() extends TransparentModule[I, Unit]:
-  override val moduleName: String = "discard"
+  override val moduleName: String                                                                                 = "discard"
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Unit]] =
     Right(Prediction((), RawPrediction.empty))
 

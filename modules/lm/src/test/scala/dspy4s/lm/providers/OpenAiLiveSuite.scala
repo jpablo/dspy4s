@@ -144,7 +144,7 @@ class OpenAiLiveSuite extends FunSuite:
     assert(result.isLeft, "expected auth failure")
     val error = result.swap.toOption.get match
       case e: dspy4s.core.contracts.RuntimeError => e
-      case other => fail(s"expected RuntimeError, got ${other.getClass.getSimpleName}: ${other.message}")
+      case other                                 => fail(s"expected RuntimeError, got ${other.getClass.getSimpleName}: ${other.message}")
     assert(
       error.component == "openai_auth" || error.component == "openai_http",
       s"unexpected error component: ${error.component} / ${error.message}"

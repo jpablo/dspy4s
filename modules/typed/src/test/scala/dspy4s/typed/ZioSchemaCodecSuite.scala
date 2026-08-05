@@ -77,7 +77,8 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("normalize coerces currency- and comma-formatted numbers into Int/Double") {
     case class Money(amount: Double, count: Int)
-    object Money { given Schema[Money] = Schema.derived }
+    object Money:
+      given Schema[Money] = Schema.derived
     import Money.given
     val shape = ZioSchemaCodec.derivedFromZioSchema[Money]
     assertEquals(
@@ -125,7 +126,8 @@ class ZioSchemaCodecSuite extends FunSuite:
 
   test("normalize coerces 'true' / '42' / '0.9' string primitives into the declared type") {
     case class Probe(flag: Boolean, count: Int, score: Double)
-    object Probe { given Schema[Probe] = Schema.derived }
+    object Probe:
+      given Schema[Probe] = Schema.derived
     import Probe.given
     val shape = ZioSchemaCodec.derivedFromZioSchema[Probe]
     val raw   = DynamicValues.recordFromEntries(Seq("flag" := "true", "count" := "42", "score" := "0.9"))

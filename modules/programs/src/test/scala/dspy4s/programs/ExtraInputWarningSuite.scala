@@ -40,7 +40,7 @@ class ExtraInputWarningSuite extends FunSuite:
   private val defaultSettings: RuntimeContext = RuntimeContext(lm = Some(FixedLm), adapter = Some(EchoQuestionAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def captureErr(thunk: => Unit): String =
     val buffer = new ByteArrayOutputStream()

@@ -95,11 +95,10 @@ class RetrieversSuite extends FunSuite:
       "gamma" -> Vector(0.7f, 0.7f),
       "query" -> Vector(1.0f, 0.1f)
     ))
-    val retriever =
-      EmbeddingsRetriever
-        .create(corpus("alpha", "beta", "gamma"), embedder, k = NeighborCount(2))
-        .toOption
-        .get
+    val retriever = EmbeddingsRetriever
+      .create(corpus("alpha", "beta", "gamma"), embedder, k = NeighborCount(2))
+      .toOption
+      .get
     val result = retriever.search("query").toOption.get
     assertEquals(result.passages, Vector("alpha", "gamma"))
     assertEquals(result.indices, Vector(0, 2))
@@ -113,15 +112,13 @@ class RetrieversSuite extends FunSuite:
       "unit"  -> Vector(0.0f, 1.0f),
       "query" -> Vector(0.0f, 1.0f)
     ))
-    val cosine =
-      EmbeddingsRetriever.create(corpus("big", "unit"), embedder, k = NeighborCount(1)).toOption.get
+    val cosine = EmbeddingsRetriever.create(corpus("big", "unit"), embedder, k = NeighborCount(1)).toOption.get
     assertEquals(cosine.search("query").toOption.get.passages, Vector("unit")) // perfect cosine match wins
 
-    val rawDot =
-      EmbeddingsRetriever
-        .create(corpus("big", "unit"), embedder, k = NeighborCount(1), normalize = false)
-        .toOption
-        .get
+    val rawDot = EmbeddingsRetriever
+      .create(corpus("big", "unit"), embedder, k = NeighborCount(1), normalize = false)
+      .toOption
+      .get
     assertEquals(rawDot.search("query").toOption.get.passages, Vector("big")) // 10.0 > 1.0 unnormalized
   }
 
@@ -129,7 +126,6 @@ class RetrieversSuite extends FunSuite:
     val embedder = Embedder.fromFunction("empty-query") { texts =>
       if texts.sizeIs == 1 then Vector.empty else texts.map(_ => Vector(1.0f, 0.0f))
     }
-    val retriever =
-      EmbeddingsRetriever.create(corpus("alpha", "beta"), embedder, k = NeighborCount(1)).toOption.get
+    val retriever = EmbeddingsRetriever.create(corpus("alpha", "beta"), embedder, k = NeighborCount(1)).toOption.get
     assert(retriever.search("query").isLeft, "empty embedder rows must surface as Left, not throw")
   }

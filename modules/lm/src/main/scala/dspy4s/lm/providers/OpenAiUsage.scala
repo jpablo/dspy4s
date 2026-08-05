@@ -14,12 +14,12 @@ import zio.blocks.schema.json.JsonCodecDeriver
   * carry the provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
   */
 private[lm] final case class OpenAiUsage(
-    promptTokens: Option[Long] = None,
-    completionTokens: Option[Long] = None,
-    totalTokens: Option[Long] = None,
-    inputTokens: Option[Long] = None,
-    outputTokens: Option[Long] = None,
-    promptTokensDetails: Option[OpenAiTokenDetails] = None,
+    promptTokens           : Option[Long]               = None,
+    completionTokens       : Option[Long]               = None,
+    totalTokens            : Option[Long]               = None,
+    inputTokens            : Option[Long]               = None,
+    outputTokens           : Option[Long]               = None,
+    promptTokensDetails    : Option[OpenAiTokenDetails] = None,
     completionTokensDetails: Option[OpenAiTokenDetails] = None
 ) derives Schema:
 
@@ -48,9 +48,9 @@ private[lm] final case class OpenAiUsage(
 
 /** One of OpenAI's `prompt_tokens_details` / `completion_tokens_details` sub-objects. */
 private[lm] final case class OpenAiTokenDetails(
-    cachedTokens: Option[Long] = None,
-    audioTokens: Option[Long] = None,
-    reasoningTokens: Option[Long] = None,
+    cachedTokens            : Option[Long] = None,
+    audioTokens             : Option[Long] = None,
+    reasoningTokens         : Option[Long] = None,
     acceptedPredictionTokens: Option[Long] = None,
     rejectedPredictionTokens: Option[Long] = None
 ) derives Schema:

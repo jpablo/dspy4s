@@ -57,7 +57,7 @@ class ProgramOfThoughtRunnerSuite extends FunSuite:
     def close(): Unit = ()
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("ProgramRunner decodes ProgramOfThought input, executes it, and returns the final raw prediction") {
     val interpreter = new RecordingInterpreter
@@ -74,7 +74,7 @@ class ProgramOfThoughtRunnerSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result = summon[ProgramRunner[ProgramOfThought[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]]]
+      val result           = summon[ProgramRunner[ProgramOfThought[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]]]
         .run(program, inputs)
 
       assert(result.isRight, result.left.toOption.map(_.message).getOrElse("ProgramRunner failed"))

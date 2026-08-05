@@ -26,20 +26,19 @@ import scala.collection.mutable.ArrayBuffer
 class TransformCombinatorSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private final case class Step[I, O](tag: String, run: I => Either[DspyError, O], predict: DynamicPredict)
       extends Module[I, O]:
-    override val moduleName: String                         = s"step_$tag"
-    override protected val lifecycle: ModuleLifecycle[I, O] =
-      ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                                                                              = s"step_$tag"
+    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       run(call.input).map(output => Prediction(output, RawPrediction(DynamicValues.record("tag" := tag))))
 
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
-      def get(program: Step[I, O]): OptimizableParameters    = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): OptimizableMetadata = program.predict.optimizableView.metadata
+      def get(program     : Step[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
+      def metadata(program: Step[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -101,7 +100,9 @@ class TransformCombinatorSuite extends FunSuite:
     val observed = ArrayBuffer.empty[ProgramCall[Int]]
     val base     = Step[Int, String](
       "base",
-      i => { observed += ProgramCall(i); Right(s"v$i") },
+      i =>
+        observed += ProgramCall(i); Right(s"v$i")
+      ,
       predictor("i -> s")
     )
     val sequential = base.contramapInput[String](_.length).contramapInput[Vector[Int]](_.mkString)
@@ -115,9 +116,8 @@ class TransformCombinatorSuite extends FunSuite:
     val controlAware = new Module[Int, (Int, DynamicValue.Record, Boolean, Option[Int])]:
       val moduleName: String = "control_aware"
       protected val lifecycle
-          : ModuleLifecycle[Int, (Int, DynamicValue.Record, Boolean, Option[Int])] =
-        ModuleLifecycle.typedWithoutInputs
-      protected def forward(call: ProgramCall[Int])(using RuntimeContext) =
+          : ModuleLifecycle[Int, (Int, DynamicValue.Record, Boolean, Option[Int])] = ModuleLifecycle.typedWithoutInputs
+      protected def forward(call: ProgramCall[Int])(using RuntimeContext)          =
         Right(Prediction((call.input, call.config, call.traceEnabled, call.rolloutId), RawPrediction.empty))
     val adapted = controlAware.contramapInput[Vector[Int]](_.sum)
     assertEquals(adapted(controls).map(_.output), Right((1, controls.config, false, Some(7))))
@@ -153,9 +153,10 @@ class TransformCombinatorSuite extends FunSuite:
   test("transform wrappers are lifecycle-transparent") {
     val starts   = ArrayBuffer.empty[String]
     val callback = new CallbackHandler:
-      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-        case start: ModuleStartEvent => starts += start.moduleName
-        case _                       => ()
+      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case start: ModuleStartEvent => starts += start.moduleName
+          case _                       => ()
     val base = step[Int, String]("base", "i -> s")(_.toString)
 
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
@@ -187,7 +188,9 @@ class TransformCombinatorSuite extends FunSuite:
     val order = ArrayBuffer.empty[String]
     val first = Step[Int, String](
       "first",
-      _ => { order += "first"; Left(ValidationError("first failed")) },
+      _ =>
+        order += "first"; Left(ValidationError("first failed"))
+      ,
       predictor("i -> s")
     )
     val second = step[Boolean, Int]("second", "p -> n") { p =>

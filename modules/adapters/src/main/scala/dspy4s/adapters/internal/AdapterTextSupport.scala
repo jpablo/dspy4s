@@ -60,9 +60,9 @@ private[adapters] object AdapterTextSupport:
   /** Build the common adapter parse result while preserving the model's exact raw text. */
   def parsedOutput(
       adapterName: String,
-      output: LmOutput,
-      entries: Vector[(String, DynamicValue)],
-      metadata: Map[String, Any] = Map.empty
+      output     : LmOutput,
+      entries    : Vector[(String, DynamicValue)],
+      metadata   : Map[String, Any] = Map.empty
   ): ParsedOutput =
     ParsedOutput(
       values = DynamicValue.Record(Chunk.from(entries)),
@@ -89,23 +89,18 @@ private[adapters] object AdapterTextSupport:
     */
   def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     typeRef match
-      case TypeRef.int =>
-        raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
+      case TypeRef.int => raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
           .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
-      case TypeRef.double =>
-        raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
+      case TypeRef.double => raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
           .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
-      case TypeRef.bool =>
-        raw.trim.toLowerCase match
+      case TypeRef.bool => raw.trim.toLowerCase match
           case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
           case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
           case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
-      case TypeRef.json | TypeRef.list =>
-        JsonDynamic.parse(raw).left.map(_ =>
+      case TypeRef.json | TypeRef.list => JsonDynamic.parse(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
-      case _ =>
-        Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+      case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
 
   /** Single-output plain-text fallback shared by the JSON and XML adapters: when structured parsing failed at the
     * DOCUMENT level and the signature has exactly one output field, treat the whole (trimmed, non-empty) reply as that
@@ -113,8 +108,8 @@ private[adapters] object AdapterTextSupport:
     */
   def singleOutputTextFallback(
       adapterName: String,
-      layout: SignatureLayout,
-      output: LmOutput
+      layout     : SignatureLayout,
+      output     : LmOutput
   ): Either[DspyError, ParsedOutput] =
     val field   = layout.outputFields.head
     val trimmed = output.text.trim

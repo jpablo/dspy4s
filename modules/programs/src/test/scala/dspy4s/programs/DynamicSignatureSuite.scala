@@ -19,7 +19,7 @@ import zio.blocks.schema.DynamicValue
 class DynamicSignatureSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val qa           = DynamicSignature.parse("question -> answer").toOption.get
   private val judge        = DynamicSignature.parse("answer -> verdict").toOption.get
@@ -27,7 +27,7 @@ class DynamicSignatureSuite extends FunSuite:
 
   /** Writes the LM's reply into the layout's FIRST output field, whichever signature is running. */
   private object FirstFieldAdapter extends Adapter:
-    override val name: String = "first-field"
+    override val name: String                                                                                    = "first-field"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -62,9 +62,8 @@ class DynamicSignatureSuite extends FunSuite:
 
   test("the optimizer surface holds over a packaged bundle program (OptimizableTraversal read/replace + record run)") {
     import qa.given
-    val packaged: Program[qa.In, qa.Out, 1] =
-      Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
-    val P = summon[OptimizableTraversal[Program[qa.In, qa.Out, 1]]]
+    val packaged: Program[qa.In, qa.Out, 1] = Program.of(qa.predict().withLm(new FixedLm("stub", "7")))
+    val P                                   = summon[OptimizableTraversal[Program[qa.In, qa.Out, 1]]]
 
     val states = P.read(packaged)
     assertEquals(states.size, 1)

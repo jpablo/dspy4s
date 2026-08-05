@@ -26,7 +26,7 @@ class RLMLiveSuite extends FunSuite:
     scala.concurrent.duration.Duration(180, "s")
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private lazy val denoAvailable: Boolean =
     try new ProcessBuilder("deno", "--version").start().waitFor() == 0
@@ -35,7 +35,7 @@ class RLMLiveSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
 
   private object ActionAdapter extends Adapter:
-    override val name: String = "rlm-live-adapter"
+    override val name: String                                                                                    = "rlm-live-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using

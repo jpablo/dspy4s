@@ -13,7 +13,7 @@ private[adapters] object ChatAdapterPrompt:
       parallelToolCalls       : Option[Boolean],
       toolChoice              : Option[ToolChoice]
   )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout = invocation.layout
+    val layout       = invocation.layout
     val renderLayout = layout.withOutputFields(layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField))
 
     val systemMessage = Message(
@@ -24,9 +24,9 @@ private[adapters] object ChatAdapterPrompt:
     val demoMessages = invocation
       .demos
       .flatMap { demo =>
-        val userText = renderInputs(renderLayout.inputFields, demo.values)
-        val assistantText =
-          renderOutputs(renderLayout.outputFields, demo.values) + "\n\n" + ChatAdapter.CompletedMarker + "\n"
+        val userText      = renderInputs(renderLayout.inputFields, demo.values)
+        val assistantText = renderOutputs(renderLayout.outputFields, demo.values) + "\n\n" +
+          ChatAdapter.CompletedMarker + "\n"
         Vector(
           Message(role = MessageRole.User, text = Some(userText)),
           Message(role = MessageRole.Assistant, text = Some(assistantText))
@@ -54,16 +54,13 @@ private[adapters] object ChatAdapterPrompt:
     )
 
   private def buildSystemPrompt(layout: SignatureLayout, outputJsonSchema: Option[String]): String =
-    val inputBlock = fieldDescriptionBlock(layout.inputFields, role = "input")
+    val inputBlock  = fieldDescriptionBlock(layout.inputFields, role = "input")
     val outputBlock = fieldDescriptionBlock(layout.outputFields, role = "output")
-    val schemaBlock =
-      outputJsonSchema match
-        case Some(schema) =>
-          s"\n\nYour output fields must conform to this JSON schema:\n$schema"
-        case None =>
-          ""
+    val schemaBlock = outputJsonSchema match
+      case Some(schema) => s"\n\nYour output fields must conform to this JSON schema:\n$schema"
+      case None         => ""
     val structureExample = exampleStructure(layout)
-    val instructions = layout.instructions.getOrElse(defaultInstructions(layout))
+    val instructions     = layout.instructions.getOrElse(defaultInstructions(layout))
     s"""$inputBlock
        |
        |$outputBlock$schemaBlock
@@ -80,16 +77,13 @@ private[adapters] object ChatAdapterPrompt:
       s"Your $role fields are: (none)."
     else
       val header = s"Your $role fields are:"
-      val lines = fields
+      val lines  = fields
         .zipWithIndex
         .map { case (field, idx) =>
           val typeName = ChatAdapter.displayTypeName(field.typeRef)
-          val descPart =
-            field.description match
-              case Some(desc) if desc != s"$${${field.name}}" && desc.nonEmpty =>
-                s": $desc"
-              case _ =>
-                ""
+          val descPart = field.description match
+            case Some(desc) if desc != s"$${${field.name}}" && desc.nonEmpty => s": $desc"
+            case _                                                           => ""
           val constraintsPart =
             if field.constraints.nonEmpty then
               s" Constraints: ${field.constraints.map(_.render).mkString(", ")}"
@@ -105,7 +99,7 @@ private[adapters] object ChatAdapterPrompt:
       (header +: lines).mkString("\n")
 
   private def defaultInstructions(layout: SignatureLayout): String =
-    val inputs = layout.inputFields.map(_.name).mkString(", ")
+    val inputs  = layout.inputFields.map(_.name).mkString(", ")
     val outputs = layout.outputFields.map(_.name).mkString(", ")
     s"Given the fields $inputs, produce the fields $outputs."
 
@@ -119,12 +113,11 @@ private[adapters] object ChatAdapterPrompt:
     val outputBlock = layout
       .outputFields
       .map { field =>
-        val note =
-          ChatAdapter
-            .structureHint(field.typeRef)
-            .fold("") { hint =>
-              s"        # note: the value you produce $hint"
-            }
+        val note = ChatAdapter
+          .structureHint(field.typeRef)
+          .fold("") { hint =>
+            s"        # note: the value you produce $hint"
+          }
         s"[[ ## ${field.name} ## ]]\n{${field.name}}$note"
       }
       .mkString("\n\n")
@@ -141,22 +134,25 @@ private[adapters] object ChatAdapterPrompt:
     s"Respond with the corresponding output fields, starting with the field $outputs, and then ending with the marker for `${ChatAdapter
         .CompletedMarker}`."
 
-  private def renderInputs(fields: Vector[FieldSpec], values: DynamicValue.Record): String = renderFieldBlock(
-    fields,
-    values
-  )
+  private def renderInputs(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
+    renderFieldBlock(
+      fields,
+      values
+    )
 
-  private def renderOutputs(fields: Vector[FieldSpec], values: DynamicValue.Record): String = renderFieldBlock(
-    fields,
-    values
-  )
+  private def renderOutputs(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
+    renderFieldBlock(
+      fields,
+      values
+    )
 
-  private def renderFieldBlock(fields: Vector[FieldSpec], values: DynamicValue.Record): String = fields
-    .flatMap { field =>
-      val resolved = DynamicValues
-        .recordGet(values, field.name)
-        .map(DynamicValues.renderText)
-        .orElse(field.defaultValue.map(_.toString))
-      resolved.map(rendered => s"[[ ## ${field.name} ## ]]\n$rendered")
-    }
-    .mkString("\n\n")
+  private def renderFieldBlock(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
+    fields
+      .flatMap { field =>
+        val resolved = DynamicValues
+          .recordGet(values, field.name)
+          .map(DynamicValues.renderText)
+          .orElse(field.defaultValue.map(_.toString))
+        resolved.map(rendered => s"[[ ## ${field.name} ## ]]\n$rendered")
+      }
+      .mkString("\n\n")

@@ -25,8 +25,8 @@ import dspy4s.programs.ProgramRunner
   *   the score for an example the program failed on (parse/runtime error); default `0.0`
   */
 final class GepaAdapter[P](
-    val program: P,
-    val metric: FeedbackMetric,
+    val program     : P,
+    val metric      : FeedbackMetric,
     val failureScore: Double = 0.0
 )(using ps: OptimizableTraversal[P], runner: ProgramRunner[P]):
 
@@ -68,8 +68,7 @@ final class GepaAdapter[P](
         task = (example: Example) => runOne(prog, example)(using RuntimeEnvironment.current),
         data = batch
       ) match
-      case Right(outcome) =>
-        batch.indices.toVector.map { i =>
+      case Right(outcome) => batch.indices.toVector.map { i =>
           outcome.results(i).getOrElse(Trajectory(batch(i), RawPrediction.empty, Vector.empty, failureScore))
         }
       case Left(_) =>
@@ -93,8 +92,8 @@ final class GepaAdapter[P](
     */
   def makeReflectiveDataset(
       @scala.annotation.unused candidate: Candidate, // kept for engine-contract parity
-      evalBatch: EvaluationBatch,
-      components: Vector[OptimizableId]
+      evalBatch                         : EvaluationBatch,
+      components                        : Vector[OptimizableId]
   )(using RuntimeContext): Map[OptimizableId, Vector[ReflectiveRecord]] =
     val trajectories = evalBatch.trajectories.getOrElse(Vector.empty)
     components.iterator.map(component => component -> trajectories.flatMap(traj => recordFor(component, traj))).toMap

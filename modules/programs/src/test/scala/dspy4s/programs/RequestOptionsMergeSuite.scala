@@ -22,7 +22,7 @@ class RequestOptionsMergeSuite extends FunSuite:
 
   /** Adapter that contributes a fixed `requestOptions` and a value that collides with a per-call option. */
   private final class OptsAdapter(opts: DynamicValue.Record) extends Adapter:
-    override val name: String = "opts"
+    override val name: String                                                                                    = "opts"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(
         messages = Vector(Message(role = MessageRole.User, text = Some("hi"))),
@@ -42,7 +42,7 @@ class RequestOptionsMergeSuite extends FunSuite:
       Right(LmResponse(outputs = Vector(LmOutput(text = "Paris"))))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def capture(adapter: Adapter)(body: RuntimeContext ?=> Unit): Vector[LmRequest] =
     val sink = scala.collection.mutable.ArrayBuffer.empty[LmRequest]

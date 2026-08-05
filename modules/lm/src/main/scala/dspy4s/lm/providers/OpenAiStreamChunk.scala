@@ -18,7 +18,7 @@ import zio.blocks.schema.json.JsonCodecDeriver
   */
 private[providers] final case class OpenAiStreamChunk(
     choices: Vector[OpenAiStreamChoice] = Vector.empty,
-    usage: Option[OpenAiUsage] = None
+    usage  : Option[OpenAiUsage]        = None
 ) derives Schema:
 
   /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk); usage
@@ -34,12 +34,12 @@ private[providers] final case class OpenAiStreamChunk(
     )
 
 private[providers] final case class OpenAiStreamChoice(
-    delta: Option[OpenAiStreamDelta] = None,
-    finishReason: Option[String] = None
+    delta       : Option[OpenAiStreamDelta] = None,
+    finishReason: Option[String]            = None
 ) derives Schema
 
 private[providers] final case class OpenAiStreamDelta(
-    content: Option[String] = None,
+    content  : Option[String]               = None,
     toolCalls: Vector[OpenAiStreamToolCall] = Vector.empty
 ) derives Schema:
 
@@ -55,13 +55,13 @@ private[providers] final case class OpenAiStreamDelta(
     }
 
 private[providers] final case class OpenAiStreamToolCall(
-    index: Option[Int] = None,
-    id: Option[String] = None,
+    index   : Option[Int]                  = None,
+    id      : Option[String]               = None,
     function: Option[OpenAiStreamFunction] = None
 ) derives Schema
 
 private[providers] final case class OpenAiStreamFunction(
-    name: Option[String] = None,
+    name     : Option[String] = None,
     arguments: Option[String] = None
 ) derives Schema
 

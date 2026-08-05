@@ -15,22 +15,20 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final class StatusStreamingCallback(
     val provider: StatusMessageProvider,
-    queue: StreamingQueue[StreamEvent]
+    queue       : StreamingQueue[StreamEvent]
 ) extends CallbackHandler:
 
   override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
     val message: Option[String] = event match
-      case e: ModuleStartEvent => provider.moduleStart(e.moduleName, e.inputs)
-      case e: ModuleEndEvent   => provider.moduleEnd(e.moduleName, e.output.fold(identity, identity))
-      case e: LmStartEvent     => provider.lmStart(e.modelId, e.request)
-      case e: LmEndEvent       => provider.lmEnd(e.modelId, e.response.fold(identity, identity))
-      case e: ToolStartEvent if e.toolName != "finish" =>
-        provider.toolStart(e.toolName, e.args)
+      case e: ModuleStartEvent                         => provider.moduleStart(e.moduleName, e.inputs)
+      case e: ModuleEndEvent                           => provider.moduleEnd(e.moduleName, e.output.fold(identity, identity))
+      case e: LmStartEvent                             => provider.lmStart(e.modelId, e.request)
+      case e: LmEndEvent                               => provider.lmEnd(e.modelId, e.response.fold(identity, identity))
+      case e: ToolStartEvent if e.toolName != "finish" => provider.toolStart(e.toolName, e.args)
       case e: ToolEndEvent if !e.output.exists {
             case DynamicValue.Primitive(PrimitiveValue.String("Completed.")) => true
             case _                                                           => false
-          } =>
-        provider.toolEnd(e.toolName, e.output)
+          } => provider.toolEnd(e.toolName, e.output)
       case _ => None
 
     message.foreach(message => queue.offer(StatusEvent(message = message)))

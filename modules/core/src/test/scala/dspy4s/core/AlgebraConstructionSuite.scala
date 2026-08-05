@@ -6,13 +6,13 @@ import munit.FunSuite
 /** Executable checks for generic algebra constructors rather than any domain-specific carrier. */
 class AlgebraConstructionSuite extends FunSuite:
 
-  private type ErrorOr[A] = Either[String, A]
+  private type ErrorOr[A]         = Either[String, A]
   private type ErrorKleisli[A, B] = Kleisli[ErrorOr, A, B]
 
   private val K = kleisliCategory[ErrorOr]
 
   private def assertKleisliLaw[A, B](
-      law: IsEq[ErrorKleisli[A, B]],
+      law    : IsEq[ErrorKleisli[A, B]],
       samples: Vector[A]
   ): Unit =
     samples.foreach(value => assertEquals(law.lhs(value), law.rhs(value)))

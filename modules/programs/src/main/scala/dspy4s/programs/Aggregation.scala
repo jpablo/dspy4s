@@ -38,8 +38,8 @@ object Aggregation:
     *     count falls back to raw values so we still pick a winner.
     */
   def majority(
-      rows: Vector[DynamicValue.Record],
-      field: Option[String] = None,
+      rows     : Vector[DynamicValue.Record],
+      field    : Option[String]                 = None,
       normalize: DynamicValue => Option[String] = defaultNormalize
   ): Either[DspyError, RawPrediction] =
     if rows.isEmpty then Left(ValidationError("Cannot compute majority over an empty set of completions"))
@@ -86,8 +86,8 @@ object Aggregation:
     */
   def majorityOf(
       prediction: RawPrediction,
-      field: Option[String] = None,
-      normalize: DynamicValue => Option[String] = defaultNormalize
+      field     : Option[String]                 = None,
+      normalize : DynamicValue => Option[String] = defaultNormalize
   ): Either[DspyError, RawPrediction] =
     prediction.completions match
       case Some(completions) => majorityOf(completions, field, normalize)
@@ -96,8 +96,8 @@ object Aggregation:
   /** Run majority over a [[Completions]] directly. Convenience overload. */
   def majorityOf(
       completions: Completions,
-      field: Option[String],
-      normalize: DynamicValue => Option[String]
+      field      : Option[String],
+      normalize  : DynamicValue => Option[String]
   ): Either[DspyError, RawPrediction] =
     if completions.size == 0 then
       Left(ValidationError("Cannot compute majority over an empty Completions"))

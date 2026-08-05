@@ -48,14 +48,14 @@ object AttemptSelection:
     *   best-of-`n` without carried feedback.
     */
   private[programs] def bestOf[A](
-      n: AttemptCount,
+      n        : AttemptCount,
       threshold: Double,
       failCount: Option[FailureCount],
-      label: String
+      label    : String
   )(
       runAttempt: Int => (RuntimeContext ?=> Either[DspyError, A]),
-      reward: A => Either[DspyError, Double],
-      feedback: Option[(A, Vector[TraceEntry], Double) => Either[DspyError, Option[AdapterRef]]] = None
+      reward    : A => Either[DspyError, Double],
+      feedback  : Option[(A, Vector[TraceEntry], Double) => Either[DspyError, Option[AdapterRef]]] = None
   ): Either[DspyError, A] =
     val baseContext                  = RuntimeEnvironment.current
     var remainingFailures            = failCount.getOrElse(n)
@@ -72,8 +72,7 @@ object AttemptSelection:
       val executed = RuntimeEnvironment.isolatedAttempt(baseContext, carriedAdapter)(runAttempt(idx))
 
       executed.value match
-        case Right(value) =>
-          reward(value) match
+        case Right(value) => reward(value) match
             case Left(error) =>
               // A reward failure charges the failure budget like a module failure — upstream DSPy catches
               // reward_fn exceptions and continues; aborting would discard budgeted attempts and best-so-far.
@@ -96,8 +95,7 @@ object AttemptSelection:
                 // failure charges the failure budget and keeps `best`, retaining the prior carried adapter.
                 feedback match
                   case None           => ()
-                  case Some(generate) =>
-                    generate(value, executed.delta.trace, score) match
+                  case Some(generate) => generate(value, executed.delta.trace, score) match
                       case Right(nextAdapter) => carriedAdapter = nextAdapter
                       case Left(error)        =>
                         lastError = Some(error)
@@ -115,15 +113,13 @@ object AttemptSelection:
       case Some(value) =>
         RuntimeEnvironment.propagateAttempt(bestDelta)
         Right(value)
-      case None =>
-        Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))
+      case None => Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))
 
   /** Evaluate a user reward function, lifting any thrown exception into the `Either` channel. */
   private[programs] def guardedReward(label: String)(score: => Double): Either[DspyError, Double] =
     try Right(score)
     catch
-      case NonFatal(error) =>
-        Left(RuntimeError(
+      case NonFatal(error) => Left(RuntimeError(
           label,
           s"Reward function failed: ${Option(error.getMessage).getOrElse(error.getClass.getSimpleName)}"
         ))

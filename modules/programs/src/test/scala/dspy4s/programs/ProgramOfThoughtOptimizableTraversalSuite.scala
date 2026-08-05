@@ -46,8 +46,8 @@ class ProgramOfThoughtOptimizableTraversalSuite extends FunSuite:
   }
 
   test("OptimizableTraversal replacement obeys Get-Put, read-after-write, and the metadata frame") {
-    val pot = program
-    val P   = summon[OptimizableTraversal[ProgramOfThought[ProgramOfThoughtStateInput, ProgramOfThoughtStateOutput]]]
+    val pot      = program
+    val P        = summon[OptimizableTraversal[ProgramOfThought[ProgramOfThoughtStateInput, ProgramOfThoughtStateOutput]]]
     val original = P.read(pot)
     val metadata = P.inspect(pot).map(_.metadata)
 

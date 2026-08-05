@@ -25,7 +25,7 @@ import zio.blocks.schema.DynamicValue
 class NativeFunctionCallingSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Records the options of the request it received and returns a tool-only response. */
   private final class RecordingLm extends LanguageModel:
@@ -42,15 +42,14 @@ class NativeFunctionCallingSuite extends FunSuite:
         ))
       ))
 
-  private val layout: SignatureLayout =
-    SignatureLayout.create(
-      name = "Search",
-      inputFields = Vector(FieldSpec("question")),
-      outputFields = Vector(
-        FieldSpec("answer"),
-        FieldSpec("tool_calls", typeRef = TypeRef.toolCalls)
-      )
-    ).toOption.get
+  private val layout: SignatureLayout = SignatureLayout.create(
+    name = "Search",
+    inputFields = Vector(FieldSpec("question")),
+    outputFields = Vector(
+      FieldSpec("answer"),
+      FieldSpec("tool_calls", typeRef = TypeRef.toolCalls)
+    )
+  ).toOption.get
 
   private val tools: Vector[ToolSpec] = Vector(
     ToolSpec(

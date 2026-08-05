@@ -50,13 +50,14 @@ object ProgramRunner extends LowPriorityProgramRunner:
 
   private def signatureBacked[I, O, P <: Module[I, O]](
       inputShapeOf: P => Shape[I]
-  ): ProgramRunner[P] = new ProgramRunner[P]:
-    def run(program: P, call: ProgramCall[DynamicValue.Record])(using
-        RuntimeContext
-    ): Either[DspyError, RawPrediction] =
-      inputShapeOf(program).decode(call.input).flatMap { decoded =>
-        program(call.mapInput(_ => decoded)).map(_.raw)
-      }
+  ): ProgramRunner[P] =
+    new ProgramRunner[P]:
+      def run(program: P, call: ProgramCall[DynamicValue.Record])(using
+          RuntimeContext
+      ): Either[DspyError, RawPrediction] =
+        inputShapeOf(program).decode(call.input).flatMap { decoded =>
+          program(call.mapInput(_ => decoded)).map(_.raw)
+        }
 
   // ── The framework leaves and composites, decoded through their own (base) signature ──────────────────────
   given fromPredict[I, O]: ProgramRunner[Predict[I, O]] =

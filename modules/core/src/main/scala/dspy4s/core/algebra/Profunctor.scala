@@ -16,11 +16,11 @@ trait Profunctor[P[_], Hom[_, _], F[_, _]](using category: Category[P, Hom]):
 
   @Law("profunctor composition")
   def composition[A, B, C, D, E, G](
-      value: F[A, B],
-      beforeFirst: Hom[C, A],
-      afterFirst: Hom[B, D],
+      value       : F[A, B],
+      beforeFirst : Hom[C, A],
+      afterFirst  : Hom[B, D],
       beforeSecond: Hom[E, C],
-      afterSecond: Hom[D, G]
+      afterSecond : Hom[D, G]
   ): IsEq[F[E, G]] =
     dimap(dimap(value, beforeFirst, afterFirst), beforeSecond, afterSecond) <->
       dimap(value, beforeSecond >>> beforeFirst, afterFirst >>> afterSecond)

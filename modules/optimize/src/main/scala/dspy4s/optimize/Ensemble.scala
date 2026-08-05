@@ -37,8 +37,8 @@ import zio.blocks.schema.DynamicValue
   */
 final case class Ensemble(
     reduceFn: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction] = Ensemble.majorityVote,
-    size: Option[EnsembleSize] = None,
-    seed: Long = 0L
+    size    : Option[EnsembleSize]                                            = None,
+    seed    : Long                                                            = 0L
 ):
 
   val name: String = "ensemble"
@@ -50,15 +50,14 @@ final case class Ensemble(
 object Ensemble:
 
   /** Default reducer: majority vote over the members' output rows (Python's `dspy.majority`). */
-  val majorityVote: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction] =
-    rows => Aggregation.majority(rows)
+  val majorityVote: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction] = rows => Aggregation.majority(rows)
 
   /** The compiled ensemble: a [[DynamicModule]] that runs the (optionally sampled) members and reduces. */
   private final case class EnsembledProgram(
       programs: Vector[DynamicModule],
       reduceFn: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction],
-      size: Option[EnsembleSize],
-      seed: Long
+      size    : Option[EnsembleSize],
+      seed    : Long
   ) extends DynamicModule:
     override val moduleName: String = "ensemble"
 

@@ -28,16 +28,15 @@ import dspy4s.typed.Prediction
   *   instance; an abstract `Module[...]` field would erase that evidence.
   */
 final case class BestOfN[P <: Module[I, O], I, O](
-    module: P,
-    n: AttemptCount,
-    rewardFn: (I, Prediction[O]) => Double,
+    module   : P,
+    n        : AttemptCount,
+    rewardFn : (I, Prediction[O]) => Double,
     threshold: Double,
     failCount: Option[FailureCount] = None
 ) extends Module[I, O]:
   override val moduleName: String = "best_of_n"
 
-  override protected val lifecycle: ModuleLifecycle[I, O] =
-    ModuleLifecycle.typedWithoutInputs
+  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val rolloutStart = call.rolloutId.getOrElse(0)

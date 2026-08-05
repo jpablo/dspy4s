@@ -12,14 +12,13 @@ import zio.blocks.schema.DynamicValue
 
 object MetricHelpers:
   def extractString(
-      example: Example,
+      example   : Example,
       prediction: RawPrediction,
-      fieldName: String
+      fieldName : String
   ): Either[DspyError, (String, Vector[String])] =
     val exampleValue: Either[DspyError, Vector[String]] = example.get(fieldName) match
       case None     => Left(NotFoundError(fieldName, s"Example is missing field '$fieldName'"))
-      case Some(dv) =>
-        DynamicValues.toAny(dv) match
+      case Some(dv) => DynamicValues.toAny(dv) match
           case text: String => Right(Vector(text))
           // A record-valued field is a `Map` (hence `Iterable`); render it to text rather than collecting its
           // tuple elements as strings (which yields none and would falsely report "no string values").
@@ -117,24 +116,16 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
       RuntimeContext
   ): Either[DspyError, Double] =
     val contexts = prediction.get(contextField).map(DynamicValues.toAny) match
-      case Some(texts: Iterable[?]) =>
-        Right(texts.collect { case s: String => s }.toVector)
-      case Some(text: String) =>
-        Right(Vector(text))
-      case Some(other) =>
-        Right(Vector(other.toString))
-      case None =>
-        Left(NotFoundError(contextField, s"Prediction is missing field '$contextField'"))
+      case Some(texts: Iterable[?]) => Right(texts.collect { case s: String => s }.toVector)
+      case Some(text: String)       => Right(Vector(text))
+      case Some(other)              => Right(Vector(other.toString))
+      case None                     => Left(NotFoundError(contextField, s"Prediction is missing field '$contextField'"))
 
     val answers = example.get(answerField).map(DynamicValues.toAny) match
-      case Some(texts: Iterable[?]) =>
-        Right(texts.collect { case s: String => s }.toVector)
-      case Some(text: String) =>
-        Right(Vector(text))
-      case Some(other) =>
-        Right(Vector(other.toString))
-      case None =>
-        Left(NotFoundError(answerField, s"Example is missing field '$answerField'"))
+      case Some(texts: Iterable[?]) => Right(texts.collect { case s: String => s }.toVector)
+      case Some(text: String)       => Right(Vector(text))
+      case Some(other)              => Right(Vector(other.toString))
+      case None                     => Left(NotFoundError(answerField, s"Example is missing field '$answerField'"))
 
     for
       ctx <- contexts

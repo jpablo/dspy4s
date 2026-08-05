@@ -26,7 +26,7 @@ class EvaluateSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
 
-  private def ex(values: (String, DynamicValue)*): Example         = Example(values*)
+  private def ex(values  : (String, DynamicValue)*): Example       = Example(values*)
   private def pred(values: (String, DynamicValue)*): RawPrediction = RawPrediction(rec(values*))
 
   private def scriptedPredict(mappings: Map[String, RawPrediction])
@@ -59,10 +59,10 @@ class EvaluateSuite extends FunSuite:
   }
 
   test("Evaluate threads callbackMetadata into the run scope so callbacks/programs can read it") {
-    val seen      = new java.util.concurrent.atomic.AtomicReference[DynamicValue.Record](DynamicValue.Record.empty)
-    val dataset   = Vector(ex("question" := "q1", "answer" := "Paris"))
-    val meta      = rec("run_id" := "abc123")
-    val evaluator = Evaluate(devset = dataset, metric = new ExactMatch(), callbackMetadata = meta)
+    val seen             = new java.util.concurrent.atomic.AtomicReference[DynamicValue.Record](DynamicValue.Record.empty)
+    val dataset          = Vector(ex("question" := "q1", "answer" := "Paris"))
+    val meta             = rec("run_id" := "abc123")
+    val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch(), callbackMetadata = meta)
     given RuntimeContext = RuntimeEnvironment.current
 
     val result = evaluator() { (_: Example) =>
@@ -98,7 +98,7 @@ class EvaluateSuite extends FunSuite:
   }
 
   test("Evaluate parallel execution preserves devset order") {
-    val dataset = (1 to 20).map(i => ex("question" := s"q$i", "answer" := s"a$i")).toVector
+    val dataset                                                                    = (1 to 20).map(i => ex("question" := s"q$i", "answer" := s"a$i")).toVector
     val program: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] = ex =>
       val q = ex.get("question").map(DynamicValues.renderText).getOrElse("")
       Thread.sleep(5)
@@ -121,8 +121,7 @@ class EvaluateSuite extends FunSuite:
 
   test("Evaluate applies displayProgress without side-effect failure") {
     val dataset                                                                    = Vector(ex("answer" := "x"))
-    val program: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] =
-      _ => Right(pred("answer" := "x"))
+    val program: Example => Either[dspy4s.core.contracts.DspyError, RawPrediction] = _ => Right(pred("answer" := "x"))
 
     val evaluator        = Evaluate(devset = dataset, metric = new ExactMatch(), displayProgress = true)
     given RuntimeContext = RuntimeEnvironment.current

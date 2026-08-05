@@ -20,8 +20,8 @@ object InstructionProposer:
     */
   def propose(
       currentInstruction: String,
-      records: Vector[ReflectiveRecord],
-      reflectionLm: LanguageModel
+      records           : Vector[ReflectiveRecord],
+      reflectionLm      : LanguageModel
   )(using RuntimeContext): Either[DspyError, String] =
     val request = LmRequest(
       model = reflectionLm.id,

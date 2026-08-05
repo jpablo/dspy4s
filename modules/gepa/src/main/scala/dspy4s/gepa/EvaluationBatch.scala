@@ -8,10 +8,10 @@ import dspy4s.core.contracts.TraceEntry
   * (including failure entries via G-12 P-a) plus the score it earned. The reflective-dataset builder reads these.
   */
 final case class Trajectory(
-    example: Example,
+    example   : Example,
     prediction: RawPrediction,
-    trace: Vector[TraceEntry],
-    score: Double
+    trace     : Vector[TraceEntry],
+    score     : Double
 )
 
 /** Result of evaluating a candidate over a batch (the analogue of gepa's `EvaluationBatch`). `trajectories` is `Some`
@@ -19,7 +19,7 @@ final case class Trajectory(
   * (when present) `trajectories` are all aligned with the input batch order.
   */
 final case class EvaluationBatch(
-    outputs: Vector[RawPrediction],
-    scores: Vector[Double],
+    outputs     : Vector[RawPrediction],
+    scores      : Vector[Double],
     trajectories: Option[Vector[Trajectory]]
 )

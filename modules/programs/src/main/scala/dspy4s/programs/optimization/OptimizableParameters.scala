@@ -21,17 +21,16 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *   module-level language-model option defaults
   */
 final case class OptimizableParameters(
-    instructions: Option[String] = None,
-    demos: Vector[Example] = Vector.empty,
-    config: DynamicValue.Record = DynamicValue.Record.empty
+    instructions: Option[String]      = None,
+    demos       : Vector[Example]     = Vector.empty,
+    config      : DynamicValue.Record = DynamicValue.Record.empty
 ) derives CanEqual:
 
   /** Encode these parameters as a data-only record suitable for program persistence. */
   def dumpState: DynamicValue.Record =
-    val encodedInstructions: DynamicValue =
-      instructions.fold(DynamicValue.Null: DynamicValue)(value =>
-        DynamicValue.Primitive(PrimitiveValue.String(value))
-      )
+    val encodedInstructions: DynamicValue = instructions.fold(DynamicValue.Null: DynamicValue)(value =>
+      DynamicValue.Primitive(PrimitiveValue.String(value))
+    )
     val encodedDemos: Seq[DynamicValue] = demos.map(demo => demo.dumpState: DynamicValue)
     DynamicValue.Record(Chunk.from(Seq(
       "instructions" -> encodedInstructions,
@@ -52,8 +51,8 @@ object OptimizableParameters:
       DynamicValues.recordGet(state, "instructions") match
         case Some(_: DynamicValue.Null.type)                            => Right(None)
         case Some(DynamicValue.Primitive(PrimitiveValue.String(value))) => Right(Some(value))
-        case None    => Left(ValidationError("OptimizableParameters is missing 'instructions'"))
-        case Some(_) => Left(ValidationError("OptimizableParameters 'instructions' must be a string or null"))
+        case None                                                       => Left(ValidationError("OptimizableParameters is missing 'instructions'"))
+        case Some(_)                                                    => Left(ValidationError("OptimizableParameters 'instructions' must be a string or null"))
 
     def readDemos: Either[DspyError, Vector[Example]] =
       DynamicValues.recordGet(state, "demos") match
@@ -63,8 +62,8 @@ object OptimizableParameters:
               for
                 demos <- acc
                 demo  <- raw match
-                  case record: DynamicValue.Record => Example.fromState(record)
-                  case _ => Left(ValidationError("OptimizableParameters 'demos' must contain records"))
+                          case record: DynamicValue.Record => Example.fromState(record)
+                          case _                           => Left(ValidationError("OptimizableParameters 'demos' must contain records"))
               yield demos :+ demo
           }
         case None    => Left(ValidationError("OptimizableParameters is missing 'demos'"))
@@ -74,7 +73,7 @@ object OptimizableParameters:
       DynamicValues.recordGet(state, "config") match
         case Some(record: DynamicValue.Record) => Right(record)
         case None                              => Left(ValidationError("OptimizableParameters is missing 'config'"))
-        case Some(_) => Left(ValidationError("OptimizableParameters 'config' must be a record"))
+        case Some(_)                           => Left(ValidationError("OptimizableParameters 'config' must be a record"))
 
     for
       instructions <- readInstructions

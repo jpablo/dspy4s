@@ -39,8 +39,8 @@ object Cache:
   // | dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)   # → NoopLmCache (or no cache)
   // | dspy.configure_cache(enable_disk_cache=True,  enable_memory_cache=True)    # → InMemory / Disk caches
   // --8<-- [start:cache-variants]
-  def uncached(lm: LanguageModel): LanguageModel     = ManagedLanguageModel(lm, cache = Some(NoopLmCache))
-  def memoryCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()))
+  def uncached(lm    : LanguageModel): LanguageModel          = ManagedLanguageModel(lm, cache = Some(NoopLmCache))
+  def memoryCached(lm: LanguageModel): LanguageModel          = ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()))
   def diskCached(lm: LanguageModel, dir: Path): LanguageModel =
     ManagedLanguageModel(lm, cache = Some(new DiskLmCache(dir)))
   // --8<-- [end:cache-variants]
@@ -78,18 +78,20 @@ object Cache:
     private def key(request: LmRequest): String =
       RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
     override def get(request: LmRequest): Option[LmResponse]         = store.get(key(request))
-    override def put(request: LmRequest, response: LmResponse): Unit = { store.update(key(request), response); () }
+    override def put(request: LmRequest, response: LmResponse): Unit =
+      store.update(key(request), response); ()
 
   def customCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new MessagesOnlyCache))
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.cache.cacheMain"
-@main def cacheMain(): Unit = Demo.withLm {
-  // Demo installs a base LM in the context; rewrap it with a memory cache and ask twice.
-  // Demo installs a base LM in the context; rewrap it with each cache and ask.
-  RuntimeEnvironment.current.lm match
-    case Some(base: LanguageModel) =>
-      println("Memory-cached: " + Cache.ask(Cache.memoryCached(base), "Who is the GOAT of basketball?"))
-      println("Custom-cached: " + Cache.ask(Cache.customCached(base), "Who is the GOAT of basketball?"))
-      println("Usage:         " + Cache.usageAcrossCachedCalls(base, "Who is the GOAT of basketball?"))
-    case _ => println("No LanguageModel in context.")
-}
+@main def cacheMain(): Unit =
+  Demo.withLm {
+    // Demo installs a base LM in the context; rewrap it with a memory cache and ask twice.
+    // Demo installs a base LM in the context; rewrap it with each cache and ask.
+    RuntimeEnvironment.current.lm match
+      case Some(base: LanguageModel) =>
+        println("Memory-cached: " + Cache.ask(Cache.memoryCached(base), "Who is the GOAT of basketball?"))
+        println("Custom-cached: " + Cache.ask(Cache.customCached(base), "Who is the GOAT of basketball?"))
+        println("Usage:         " + Cache.usageAcrossCachedCalls(base, "Who is the GOAT of basketball?"))
+      case _ => println("No LanguageModel in context.")
+  }

@@ -34,8 +34,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   * identifier-shaped field names.
   */
 final case class SignatureLayout private (
-    name: String,
-    inputFields: Vector[FieldSpec],
+    name        : String,
+    inputFields : Vector[FieldSpec],
     outputFields: Vector[FieldSpec],
     instructions: Option[String]
 ):
@@ -143,7 +143,7 @@ object SignatureLayout:
     * delegates to.
     */
   def parse(
-      dsl: String,
+      dsl         : String,
       instructions: String = ""
   ): Either[DspyError, SignatureLayout] =
     dspy4s.core.signatures.SignatureDsl
@@ -158,8 +158,8 @@ object SignatureLayout:
     * adapters see consistent prefixes / descriptions.
     */
   def create(
-      name: String,
-      inputFields: Vector[FieldSpec],
+      name        : String,
+      inputFields : Vector[FieldSpec],
       outputFields: Vector[FieldSpec],
       instructions: Option[String] = None
   ): Either[DspyError, SignatureLayout] =
@@ -185,8 +185,8 @@ object SignatureLayout:
     * former public case-class apply for the framework's internal call sites.
     */
   private[dspy4s] def of(
-      name: String,
-      inputFields: Vector[FieldSpec],
+      name        : String,
+      inputFields : Vector[FieldSpec],
       outputFields: Vector[FieldSpec],
       instructions: Option[String]
   ): SignatureLayout =
@@ -210,7 +210,7 @@ object SignatureLayout:
       DynamicValues.recordGet(state, "instructions") match
         case None | Some(_: DynamicValue.Null.type)                 => Right(None)
         case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(Some(s))
-        case Some(_) => Left(ValidationError("Invalid 'instructions' value in signature state"))
+        case Some(_)                                                => Left(ValidationError("Invalid 'instructions' value in signature state"))
 
     def readField(raw: DynamicValue): Either[DspyError, FieldSpec] =
       raw match
@@ -221,14 +221,14 @@ object SignatureLayout:
               case None | Some(_: DynamicValue.Null.type) => None
               case Some(dv)                               => Some(DynamicValues.toAny(dv))
             val enumValues = DynamicValues.recordGet(rec, "enumValues") match
-              case Some(seq: DynamicValue.Sequence) =>
-                seq.elements.iterator.collect {
+              case Some(seq: DynamicValue.Sequence) => seq.elements.iterator.collect {
                   case DynamicValue.Primitive(PrimitiveValue.String(value)) => value
                 }.toVector
               case _ => Vector.empty[String]
             val constraints = DynamicValues.recordGet(rec, "constraints") match
-              case Some(seq: DynamicValue.Sequence) =>
-                seq.elements.iterator.collect { case r: DynamicValue.Record => r }.flatMap(
+              case Some(seq: DynamicValue.Sequence) => seq.elements.iterator.collect { case r: DynamicValue.Record =>
+                  r
+                }.flatMap(
                   Constraint.fromState
                 ).toVector
               case _ => Vector.empty[Constraint]
@@ -261,16 +261,16 @@ object SignatureLayout:
       inputFields  <- readFields("inputFields")
       outputFields <- readFields("outputFields")
       signature    <- create(
-        name = name,
-        inputFields = inputFields,
-        outputFields = outputFields,
-        instructions = instructions
-      )
+                     name = name,
+                     inputFields = inputFields,
+                     outputFields = outputFields,
+                     instructions = instructions
+                   )
     yield signature
 
   /** Re-hydrate a layout from a JSON string produced by [[SignatureLayout.dumpJson]]. */
   def fromJson(json: String): Either[DspyError, SignatureLayout] =
     dynamicJsonCodec.decode(json.getBytes(java.nio.charset.StandardCharsets.UTF_8)) match
       case Right(rec: DynamicValue.Record) => fromState(rec)
-      case Right(other) => Left(ValidationError(s"Expected a JSON object for signature state, got: $other"))
-      case Left(err)    => Left(ValidationError(s"Invalid signature-state JSON: ${err.toString}"))
+      case Right(other)                    => Left(ValidationError(s"Expected a JSON object for signature state, got: $other"))
+      case Left(err)                       => Left(ValidationError(s"Invalid signature-state JSON: ${err.toString}"))

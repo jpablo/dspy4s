@@ -45,13 +45,13 @@ final case class Sort(by: String, descending: Boolean) derives Schema
   */
 // --8<-- [start:query-plan]
 final case class QueryPlan(
-    agg: Agg,
-    column: Option[String],
-    groupBy: List[String],
-    filters: List[Filter],
-    timeRange: Option[TimeRange],
-    sort: Option[Sort],
-    limit: Option[Int],
+    agg       : Agg,
+    column    : Option[String],
+    groupBy   : List[String],
+    filters   : List[Filter],
+    timeRange : Option[TimeRange],
+    sort      : Option[Sort],
+    limit     : Option[Int],
     answerKind: AnswerKind
 ) derives Schema
 // --8<-- [end:query-plan]
@@ -64,10 +64,10 @@ final case class Question(question: String, schema: String) derives Schema
   * is easy for the model to get right.
   */
 final case class AnalysisResult(
-    answer: String,
-    value: Option[Double],
+    answer : String,
+    value  : Option[Double],
     caveats: List[String],
-    method: String
+    method : String
 ) derives Schema
 
 /** The verifier's verdict over an [[AnalysisResult]]. */
@@ -77,13 +77,13 @@ final case class Verdict(ok: Boolean, issues: List[String]) derives Schema
   * engine operates on; the agent sees the data as CSV text.
   */
 final case class Order(
-    orderId: Int,
-    date: String,
-    region: String,
-    category: String,
-    product: String,
-    quantity: Int,
+    orderId  : Int,
+    date     : String,
+    region   : String,
+    category : String,
+    product  : String,
+    quantity : Int,
     unitPrice: Double,
-    discount: Double,
-    total: Double
+    discount : Double,
+    total    : Double
 )

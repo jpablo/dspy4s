@@ -33,14 +33,13 @@ class COPROSuite extends FunSuite:
   /** Candidate instruction pool the scripted LM proposes; selected by `rolloutId % size` so ANY rolloutId COPRO threads
     * through maps into this pool (and the winner is always reachable).
     */
-  private val proposalPool: Vector[String] =
-    Vector(
-      "INSTR_A: be brief",
-      "INSTR_B: be verbose",
-      winningInstruction,
-      "INSTR_D: be formal",
-      "INSTR_E: be casual"
-    )
+  private val proposalPool: Vector[String] = Vector(
+    "INSTR_A: be brief",
+    "INSTR_B: be verbose",
+    winningInstruction,
+    "INSTR_D: be formal",
+    "INSTR_E: be casual"
+  )
 
   /** Marker the instruction-generation layout carries so the scripted LM can tell the two sub-tasks apart. */
   private val instrGenMarker = "OPTIMIZE_THE_INSTRUCTION"
@@ -55,11 +54,9 @@ class COPROSuite extends FunSuite:
     )
         : Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
-      val q     =
-        DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
-      val bi =
-        DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
-          .getOrElse("")
+      val q     = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
+      val bi    = DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
+        .getOrElse("")
       // Single user message carrying instruction + inputs; the scripted LM keys on its contents.
       val body = s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
@@ -104,15 +101,14 @@ class COPROSuite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  private val taskLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "QA",
-      inputFields = Vector(FieldSpec(name = "question")),
-      outputFields = Vector(FieldSpec(name = "answer")),
-      instructions = Some("INSTR_INITIAL: default")
-    )
+  private val taskLayout: SignatureLayout = SignatureLayout.of(
+    name = "QA",
+    inputFields = Vector(FieldSpec(name = "question")),
+    outputFields = Vector(FieldSpec(name = "answer")),
+    instructions = Some("INSTR_INITIAL: default")
+  )
 
   private val trainset = Vector(
     Example(rec("question" := "q1", "answer" := "a1"), inputKeys = Set("question")),
@@ -124,8 +120,8 @@ class COPROSuite extends FunSuite:
 
   private def config(
       breadth: CoproBreadth = CoproBreadth(5),
-      depth: RoundCount = RoundCount(1),
-      seed: Long = 0L
+      depth  : RoundCount   = RoundCount(1),
+      seed   : Long         = 0L
   ): COPROConfig =
     COPROConfig(metric = metric, breadth = breadth, depth = depth, seed = seed, instructionMarker = instrGenMarker)
 
@@ -196,8 +192,7 @@ class COPROSuite extends FunSuite:
       assertEquals(scores.head, 100.0)
       assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
       // The top candidate carries the winning instruction.
-      val topInstr =
-        summon[OptimizableTraversal[DynamicPredict]].read(report.candidates.head.program).head.instructions
+      val topInstr = summon[OptimizableTraversal[DynamicPredict]].read(report.candidates.head.program).head.instructions
       assertEquals(topInstr, Some(winningInstruction))
       // Metadata is populated.
       assert(report.metadata.contains("best_score"))

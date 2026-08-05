@@ -24,7 +24,7 @@ import munit.FunSuite
 class GepaEngineSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** Instruction-sensitive task LM: it "follows" the instruction — only when the prompt (which carries the predictor's
     * instruction) contains the magic token "CITY" does it answer "Paris"; otherwise it answers wrong. So a better
@@ -48,10 +48,10 @@ class GepaEngineSuite extends FunSuite:
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"
     override def feedback(
-        example: Example,
-        prediction: RawPrediction,
-        trace: Vector[TraceEntry],
-        component: Option[String],
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
         componentTrace: Vector[TraceEntry]
     )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
       val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")
@@ -70,12 +70,11 @@ class GepaEngineSuite extends FunSuite:
 
   test("GEPA discovers a better instruction and improves the program's validation score") {
     val adapter = new GepaAdapter(program, metric)
-    val engine  =
-      new GepaEngine(
-        adapter,
-        new ReflectionLm,
-        GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
-      )
+    val engine  = new GepaEngine(
+      adapter,
+      new ReflectionLm,
+      GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+    )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -131,9 +130,9 @@ class GepaEngineSuite extends FunSuite:
 
   /** A TaskLm that counts model calls, so we can prove a resumed run does NOT re-evaluate the seed. */
   private final class CountingTaskLm extends LanguageModel:
-    val calls: java.util.concurrent.atomic.AtomicInteger = new java.util.concurrent.atomic.AtomicInteger(0)
-    override val id: String                              = "task"
-    override val mode: LmMode                            = LmMode.Chat
+    val calls: java.util.concurrent.atomic.AtomicInteger                                       = new java.util.concurrent.atomic.AtomicInteger(0)
+    override val id: String                                                                    = "task"
+    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val _      = calls.incrementAndGet()
       val prompt = request.messages.flatMap(_.text).mkString("\n")

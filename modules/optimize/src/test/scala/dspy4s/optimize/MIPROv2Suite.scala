@@ -37,14 +37,13 @@ class MIPROv2Suite extends FunSuite:
   /** Candidate instruction pool the scripted LM proposes for instruction-generation calls; selected by
     * `rolloutId % size` so the winner is always reachable.
     */
-  private val proposalPool: Vector[String] =
-    Vector(
-      "INSTR_A: be brief",
-      "INSTR_B: be verbose",
-      winningInstruction,
-      "INSTR_D: be formal",
-      "INSTR_E: be casual"
-    )
+  private val proposalPool: Vector[String] = Vector(
+    "INSTR_A: be brief",
+    "INSTR_B: be verbose",
+    winningInstruction,
+    "INSTR_D: be formal",
+    "INSTR_E: be casual"
+  )
 
   /** Marker the instruction-generation layout carries (GroundedProposer instructionMarker). */
   private val instrGenMarker = "PROPOSE_THE_INSTRUCTION"
@@ -64,9 +63,8 @@ class MIPROv2Suite extends FunSuite:
     )
         : Either[DspyError, FormattedPrompt] =
       val instr = invocation.layout.instructions.getOrElse("")
-      val q     =
-        DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
-      val body = s"INSTRUCTION=[$instr] QUESTION=[$q]"
+      val q     = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
+      val body  = s"INSTRUCTION=[$instr] QUESTION=[$q]"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -108,19 +106,17 @@ class MIPROv2Suite extends FunSuite:
     RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  private val taskLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "QA",
-      inputFields = Vector(FieldSpec(name = "question")),
-      outputFields = Vector(FieldSpec(name = "answer")),
-      instructions = Some("INSTR_INITIAL: default")
-    )
+  private val taskLayout: SignatureLayout = SignatureLayout.of(
+    name = "QA",
+    inputFields = Vector(FieldSpec(name = "question")),
+    outputFields = Vector(FieldSpec(name = "answer")),
+    instructions = Some("INSTR_INITIAL: default")
+  )
 
   /** The teacher already carries the winning instruction, so bootstrap demos it produces are correct. */
-  private val teacherLayout: SignatureLayout =
-    taskLayout.withInstructions(Some(winningInstruction))
+  private val teacherLayout: SignatureLayout = taskLayout.withInstructions(Some(winningInstruction))
 
   private val trainset = Vector(
     Example(rec("question" := "q1", "answer" := "a1"), inputKeys = Set("question")),
@@ -136,8 +132,8 @@ class MIPROv2Suite extends FunSuite:
 
   private def config(
       numCandidates: CandidateCount = CandidateCount(5),
-      numTrials: TrialCount = TrialCount(30),
-      seed: Long = 0L
+      numTrials    : TrialCount     = TrialCount(30),
+      seed         : Long           = 0L
   ): MIPROv2Config =
     MIPROv2Config(
       metric = metric,
@@ -180,8 +176,8 @@ class MIPROv2Suite extends FunSuite:
     val optimizer = new MIPROv2[DynamicPredict](config())
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val report   = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
-      val maxScore = report.candidates.map(_.score).max
+      val report           = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
+      val maxScore         = report.candidates.map(_.score).max
       assertEquals(report.metadata.get("best_score"), Some(maxScore))
       assertEquals(maxScore, 100.0)
     }
@@ -214,7 +210,7 @@ class MIPROv2Suite extends FunSuite:
     val optimizer = new MIPROv2[DynamicPredict](config())
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val report = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
+      val report           = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
       assert(report.candidates.nonEmpty, "report should track candidates")
       val scores = report.candidates.map(_.score)
       assertEquals(scores, scores.sorted(using Ordering[Double].reverse))

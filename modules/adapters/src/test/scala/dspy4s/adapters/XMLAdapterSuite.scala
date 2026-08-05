@@ -68,8 +68,7 @@ class XMLAdapterSuite extends FunSuite:
 
   test("parse supports fenced xml payloads") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
-    val text      =
-      """```xml
+    val text      = """```xml
         |<outputs><answer>Brussels</answer></outputs>
         |```""".stripMargin
 

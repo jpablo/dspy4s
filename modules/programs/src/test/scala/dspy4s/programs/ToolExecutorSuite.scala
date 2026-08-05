@@ -20,7 +20,7 @@ class ToolExecutorSuite extends FunSuite:
   import ToolExecutorSuite.{getWeather, repeat}
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** The point of typing tool args/results as `DynamicValue` rather than `Map[String, Any]`/`Any`: a typed primitive
     * arrives at the tool with its type intact (an Int stays an Int, not collapsed to a String through an Any
@@ -33,8 +33,7 @@ class ToolExecutorSuite extends FunSuite:
         DynamicValues.recordGet(args, "n") match
           case Some(DynamicValue.Primitive(PrimitiveValue.Int(n))) =>
             Right(DynamicValues.recordFromEntries(Seq("doubled" := n * 2, "label" := "even")))
-          case other =>
-            Left(RuntimeError("doubler", s"expected an Int 'n', got: $other"))
+          case other => Left(RuntimeError("doubler", s"expected an Int 'n', got: $other"))
 
     RuntimeEnvironment.withSettings(RuntimeContext()) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -105,8 +104,7 @@ class ToolExecutorSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result           = ToolExecutor.invoke(ToolCallRequest("picky", DynamicValue.Record.empty), Vector(picky))
       result match
-        case Right(callResult) =>
-          assert(
+        case Right(callResult) => assert(
             callResult.result.isLeft,
             s"expected the tool failure to be carried as Left, got: ${callResult.result}"
           )

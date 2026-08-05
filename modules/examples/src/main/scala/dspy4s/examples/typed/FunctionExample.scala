@@ -17,20 +17,17 @@ import dspy4s.typed.Signature
 object FunctionExample:
 
   /** Named-tuple output: signature string is `sentence -> sentiment`. */
-  val emotion =
-    Signature.fromType[(sentence: String) => (sentiment: Emotion)]
+  val emotion = Signature.fromType[(sentence: String) => (sentiment: Emotion)]
 
   /** Multi-output named tuple: signature string is `sentence -> sentiment, confidence`.
     */
-  val scored =
-    Signature.fromType[
-      (sentence: String) => (sentiment: Emotion, confidence: Double)
-    ]
+  val scored = Signature.fromType[
+    (sentence: String) => (sentiment: Emotion, confidence: Double)
+  ]
 
   /** Anonymous input and scalar output: signature string is `input -> result`.
     */
-  val anonymous =
-    Signature.fromType[String => Emotion]
+  val anonymous = Signature.fromType[String => Emotion]
 
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.strategies.Predict
@@ -38,6 +35,7 @@ object FunctionExample:
       .map(_.output.sentiment)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.functionMain"
-@main def functionMain(): Unit = Demo.withLm {
-  println("Function: " + FunctionExample.classify("i started feeling a little vulnerable"))
-}
+@main def functionMain(): Unit =
+  Demo.withLm {
+    println("Function: " + FunctionExample.classify("i started feeling a little vulnerable"))
+  }

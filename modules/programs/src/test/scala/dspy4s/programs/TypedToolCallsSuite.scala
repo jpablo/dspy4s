@@ -25,7 +25,7 @@ final case class Plan(toolCalls: Vector[ToolCall]) derives Schema
 class TypedToolCallsSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** A capable LM that returns a single native tool call (no text content). */
   private final class ToolLm extends LanguageModel:

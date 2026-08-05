@@ -21,16 +21,16 @@ import scala.collection.mutable.ArrayBuffer
 class RLMSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
 
   /** Scripted REPL: returns canned CodeResults, recording each (code, variables) execute call. */
   private final class ScriptedRepl(responses: Vector[Either[DspyError, CodeResult]]) extends ReplCodeInterpreter:
-    private val idx                                                   = new AtomicInteger(0)
-    val executed: ArrayBuffer[(String, Map[String, DynamicValue])]    = ArrayBuffer.empty
-    @volatile var closed: Boolean                                     = false
-    override def execute(code: String): Either[DspyError, CodeResult] = execute(code, Map.empty)
+    private val idx                                                                                         = new AtomicInteger(0)
+    val executed: ArrayBuffer[(String, Map[String, DynamicValue])]                                          = ArrayBuffer.empty
+    @volatile var closed: Boolean                                                                           = false
+    override def execute(code: String): Either[DspyError, CodeResult]                                       = execute(code, Map.empty)
     override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
       executed += ((code, variables))
       val i = idx.getAndIncrement()
@@ -41,8 +41,8 @@ class RLMSuite extends FunSuite:
     * text to every output field. Records the `repl_history` input of every action call.
     */
   private final class ProbeAdapter extends Adapter:
-    val actionHistories: ArrayBuffer[String] = ArrayBuffer.empty
-    override val name: String                = "scripted-rlm-adapter"
+    val actionHistories: ArrayBuffer[String]                                                                     = ArrayBuffer.empty
+    override val name: String                                                                                    = "scripted-rlm-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       if invocation.layout.outputFields.exists(_.name == "code") then
         DynamicValues.recordGet(invocation.inputs.values, "repl_history")
@@ -67,7 +67,7 @@ class RLMSuite extends FunSuite:
     }
 
   private def rlm(
-      repl: ScriptedRepl,
+      repl         : ScriptedRepl,
       maxIterations: IterationLimit = IterationLimit(5)
   ): RLM[(context: String, query: String), (answer: String)] =
     RLM(baseSignature = qaSignature, maxIterations = maxIterations, interpreterFactory = (_, _) => repl)

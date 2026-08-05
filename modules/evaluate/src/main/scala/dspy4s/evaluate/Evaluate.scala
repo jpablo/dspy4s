@@ -19,17 +19,17 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration.DurationInt
 
 final case class EvaluateConfig(
-    devset: Vector[Example],
-    metric: Metric,
-    numThreads: Option[ThreadCount] = None,
-    maxErrors: Option[ErrorLimit] = None,
-    failureScore: Double = 0.0,
-    displayProgress: Boolean = false,
-    displayTable: Either[Boolean, Int] = Left(false),
-    saveAsCsv: Option[String] = None,
-    saveAsJson: Option[String] = None,
-    provideTraceback: Boolean = false,
-    timeout: FiniteDuration = 120.seconds,
+    devset          : Vector[Example],
+    metric          : Metric,
+    numThreads      : Option[ThreadCount]  = None,
+    maxErrors       : Option[ErrorLimit]   = None,
+    failureScore    : Double               = 0.0,
+    displayProgress : Boolean              = false,
+    displayTable    : Either[Boolean, Int] = Left(false),
+    saveAsCsv       : Option[String]       = None,
+    saveAsJson      : Option[String]       = None,
+    provideTraceback: Boolean              = false,
+    timeout         : FiniteDuration       = 120.seconds,
     /** Metadata carried into the evaluation scope's [[RuntimeContext.callbackMetadata]], so callbacks firing during the
       * run can read it (Python's `Evaluate(callback_metadata=…)`). Empty default → scope unchanged.
       */
@@ -39,13 +39,13 @@ final case class EvaluateConfig(
 final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
   def apply(
-      metric: Option[Metric] = None,
-      devset: Option[Vector[Example]] = None,
-      numThreads: Option[ThreadCount] = None,
-      maxErrors: Option[ErrorLimit] = None,
-      failureScore: Option[Double] = None,
-      saveAsCsv: Option[String] = None,
-      saveAsJson: Option[String] = None,
+      metric          : Option[Metric]              = None,
+      devset          : Option[Vector[Example]]     = None,
+      numThreads      : Option[ThreadCount]         = None,
+      maxErrors       : Option[ErrorLimit]          = None,
+      failureScore    : Option[Double]              = None,
+      saveAsCsv       : Option[String]              = None,
+      saveAsJson      : Option[String]              = None,
       callbackMetadata: Option[DynamicValue.Record] = None
   )(program: Example => Either[DspyError, RawPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val mergedConfig = EvaluateConfig(
@@ -65,7 +65,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     applyInternal(program, mergedConfig)
 
   private def applyInternal(
-      fn: Example => Either[DspyError, RawPrediction],
+      fn : Example => Either[DspyError, RawPrediction],
       cfg: EvaluateConfig
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val dataset = cfg.devset
@@ -102,9 +102,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     execResultE.flatMap { execResult =>
       val evaluations = dataset.indices.map { idx =>
         execResult.results(idx) match
-          case Some((prediction, score)) =>
-            ExampleEvaluation(dataset(idx), prediction, score)
-          case None =>
+          case Some((prediction, score)) => ExampleEvaluation(dataset(idx), prediction, score)
+          case None                      =>
             val capturedError =
               if cfg.provideTraceback then
                 execResult.errors.get(idx).map(err => s"[${err.code}] ${err.message}")
@@ -128,16 +127,15 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       def persistenceError(kind: String, message: String): DspyError =
         RuntimeError("evaluation_persistence", s"Failed to save $kind results: $message")
 
-      val persisted =
-        cfg.saveAsJson
-          .fold[Either[DspyError, Unit]](Right(()))(path =>
-            EvaluationResultPersistence.saveAsJson(result, path).left.map(persistenceError("JSON", _))
+      val persisted = cfg.saveAsJson
+        .fold[Either[DspyError, Unit]](Right(()))(path =>
+          EvaluationResultPersistence.saveAsJson(result, path).left.map(persistenceError("JSON", _))
+        )
+        .flatMap { _ =>
+          cfg.saveAsCsv.fold[Either[DspyError, Unit]](Right(()))(path =>
+            EvaluationResultPersistence.saveAsCsv(result, path).left.map(persistenceError("CSV", _))
           )
-          .flatMap { _ =>
-            cfg.saveAsCsv.fold[Either[DspyError, Unit]](Right(()))(path =>
-              EvaluationResultPersistence.saveAsCsv(result, path).left.map(persistenceError("CSV", _))
-            )
-          }
+        }
 
       persisted.map { _ =>
         if cfg.displayProgress then
@@ -152,7 +150,7 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
   override def evaluate(
       predict: Example => Either[DspyError, RawPrediction],
       dataset: Vector[Example],
-      metric: Metric
+      metric : Metric
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     applyInternal(
       predict,
@@ -182,16 +180,16 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
 object Evaluate:
   def apply(
-      devset: Vector[Example],
-      metric: Metric,
-      numThreads: Option[ThreadCount] = None,
-      maxErrors: Option[ErrorLimit] = None,
-      failureScore: Double = 0.0,
-      displayProgress: Boolean = false,
-      displayTable: Int = 0,
-      saveAsCsv: Option[String] = None,
-      saveAsJson: Option[String] = None,
-      timeout: FiniteDuration = 120.seconds,
+      devset          : Vector[Example],
+      metric          : Metric,
+      numThreads      : Option[ThreadCount] = None,
+      maxErrors       : Option[ErrorLimit]  = None,
+      failureScore    : Double              = 0.0,
+      displayProgress : Boolean             = false,
+      displayTable    : Int                 = 0,
+      saveAsCsv       : Option[String]      = None,
+      saveAsJson      : Option[String]      = None,
+      timeout         : FiniteDuration      = 120.seconds,
       callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
   ): Evaluate =
     val displaySpec: Either[Boolean, Int] = if displayTable > 0 then Right(displayTable) else Left(false)

@@ -11,26 +11,20 @@ import dspy4s.programs.contracts.ProgramRuntime
 trait SettingsProgramRuntime extends ProgramRuntime:
   override def resolveModel(using RuntimeContext): Either[DspyError, LanguageModel] =
     summon[RuntimeContext].lm match
-      case Some(model: LanguageModel) =>
-        Right(model)
-      case Some(other) =>
-        Left(
+      case Some(model: LanguageModel) => Right(model)
+      case Some(other)                => Left(
           ConfigurationError(
             s"Configured 'lm' must be a LanguageModel, found: ${other.getClass.getSimpleName}"
           )
         )
-      case None =>
-        Left(ConfigurationError("Missing 'lm' in runtime context"))
+      case None => Left(ConfigurationError("Missing 'lm' in runtime context"))
 
   override def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter] =
     summon[RuntimeContext].adapter match
-      case Some(adapter: Adapter) =>
-        Right(adapter)
-      case Some(other) =>
-        Left(
+      case Some(adapter: Adapter) => Right(adapter)
+      case Some(other)            => Left(
           ConfigurationError(
             s"Configured 'adapter' must be an Adapter, found: ${other.getClass.getSimpleName}"
           )
         )
-      case None =>
-        Left(ConfigurationError("Missing 'adapter' in runtime context"))
+      case None => Left(ConfigurationError("Missing 'adapter' in runtime context"))

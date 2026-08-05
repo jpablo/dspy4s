@@ -21,9 +21,9 @@ object ParaCompile:
       * exists whenever `RecordCodec[I]` does (object-side decoding).
       */
     def copro(
-        config: COPROConfig,
+        config  : COPROConfig,
         trainset: Vector[Example],
-        valset: Option[Vector[Example]] = None
+        valset  : Option[Vector[Example]] = None
     )(using
         RuntimeContext,
         ProgramRunner[Program[I, O, N]]

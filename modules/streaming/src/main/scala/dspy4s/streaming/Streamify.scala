@@ -27,15 +27,15 @@ object Streamify:
     * each predictor's own framing.
     */
   def streamify[P](
-      program: P,
-      statusMessageProvider: Option[StatusMessageProvider] = None,
-      streamListeners: Vector[StreamListener] = Vector.empty,
-      includeFinalPrediction: Boolean = true,
-      queueCapacity: Int = 64,
-      warningSink: String => Unit = msg => System.err.println(s"[dspy4s.streamify] $msg")
+      program               : P,
+      statusMessageProvider : Option[StatusMessageProvider] = None,
+      streamListeners       : Vector[StreamListener]        = Vector.empty,
+      includeFinalPrediction: Boolean                       = true,
+      queueCapacity         : Int                           = 64,
+      warningSink           : String => Unit                = msg => System.err.println(s"[dspy4s.streamify] $msg")
   )(using
       outerContext: RuntimeContext,
-      streamable: Streamable[P]
+      streamable  : Streamable[P]
   ): DynamicValue.Record => ClosableIterator[StreamEvent] =
     // Validate listener field names against the program structure as far as
     // we can statically see it. This is dspy4s's equivalent of Python's
@@ -82,10 +82,9 @@ object Streamify:
                     given RuntimeContext = RuntimeEnvironment.current
                     try
                       streamable.run(program, inputs) match
-                        case Right(prediction) =>
-                          if includeFinalPrediction then { val _ = queue.offer(PredictionEvent(prediction)) }
-                        case Left(error) =>
-                          queue.offer(ErrorEvent(error))
+                        case Right(prediction) => if includeFinalPrediction then
+                            val _ = queue.offer(PredictionEvent(prediction))
+                        case Left(error) => queue.offer(ErrorEvent(error))
                     catch
                       case NonFatal(error) =>
                         val runtimeError = dspy4s.core.contracts.RuntimeError(
@@ -111,8 +110,8 @@ object Streamify:
     */
   private def validateListeners(
       knownSignatures: Vector[(String, SignatureLayout)],
-      listeners: Vector[StreamListener],
-      warningSink: String => Unit
+      listeners      : Vector[StreamListener],
+      warningSink    : String => Unit
   ): Unit =
     if listeners.isEmpty then return
     if knownSignatures.isEmpty then return // opaque program; skip

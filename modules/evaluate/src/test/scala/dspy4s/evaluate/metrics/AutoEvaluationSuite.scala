@@ -37,7 +37,7 @@ class AutoEvaluationSuite extends FunSuite:
     * the parsed record, so the judge sub-program's outputs are deterministic and offline.
     */
   private final class ScriptedAdapter(fields: Map[String, DynamicValue]) extends Adapter:
-    override val name: String = "scripted-adapter"
+    override val name: String                                                                                    = "scripted-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("judge")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -47,8 +47,7 @@ class AutoEvaluationSuite extends FunSuite:
 
   private def runWith[A](fields: Map[String, DynamicValue])(body: RuntimeContext ?=> A): A =
     RuntimeEnvironment.resetForTests()
-    try
-      RuntimeEnvironment.withSettings(
+    try RuntimeEnvironment.withSettings(
         RuntimeContext(lm = Some(DummyLm), adapter = Some(new ScriptedAdapter(fields)))
       ) {
         given RuntimeContext = RuntimeEnvironment.current

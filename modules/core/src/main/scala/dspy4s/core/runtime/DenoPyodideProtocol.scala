@@ -51,21 +51,22 @@ private[runtime] object DenoPyodideProtocol:
   def field(record: DynamicValue.Record, name: String): Option[DynamicValue] =
     DynamicValues.recordGet(record, name)
 
-  def asString(dv: DynamicValue): Option[String] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
-    case _                                                => None
+  def asString(dv: DynamicValue): Option[String] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
+      case _                                                => None
 
   /** Tolerant number extraction: the dynamic JSON codec may decode numbers as Int/Long/Double/BigDecimal. */
-  def asLong(dv: DynamicValue): Option[Long] = dv match
-    case DynamicValue.Primitive(p) =>
-      p match
-        case PrimitiveValue.Int(n)        => Some(n.toLong)
-        case PrimitiveValue.Long(n)       => Some(n)
-        case PrimitiveValue.Double(n)     => Some(n.toLong)
-        case PrimitiveValue.Float(n)      => Some(n.toLong)
-        case PrimitiveValue.BigDecimal(n) => Some(n.toLong)
-        case PrimitiveValue.BigInt(n)     => Some(n.toLong)
-        case PrimitiveValue.Short(n)      => Some(n.toLong)
-        case PrimitiveValue.Byte(n)       => Some(n.toLong)
-        case _                            => None
-    case _ => None
+  def asLong(dv: DynamicValue): Option[Long] =
+    dv match
+      case DynamicValue.Primitive(p) => p match
+          case PrimitiveValue.Int(n)        => Some(n.toLong)
+          case PrimitiveValue.Long(n)       => Some(n)
+          case PrimitiveValue.Double(n)     => Some(n.toLong)
+          case PrimitiveValue.Float(n)      => Some(n.toLong)
+          case PrimitiveValue.BigDecimal(n) => Some(n.toLong)
+          case PrimitiveValue.BigInt(n)     => Some(n.toLong)
+          case PrimitiveValue.Short(n)      => Some(n.toLong)
+          case PrimitiveValue.Byte(n)       => Some(n.toLong)
+          case _                            => None
+      case _ => None

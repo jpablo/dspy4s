@@ -20,13 +20,13 @@ trait Parameterization[P[_], Hom[_, _, _ <: Int]]:
 
   /** Replace every writable parameter while preserving program shape and grade. */
   def replace[A, B, N <: Int](
-      f: Hom[A, B, N],
+      f         : Hom[A, B, N],
       parameters: SizedVector[OptimizableParameters, N]
   ): Hom[A, B, N]
 
   /** Compatibility boundary for callers that have erased the vector's size. */
   def replaceUnsized[A, B, N <: Int](
-      f: Hom[A, B, N],
+      f         : Hom[A, B, N],
       parameters: Vector[OptimizableParameters]
   ): Hom[A, B, N]
 
@@ -40,7 +40,7 @@ trait Parameterization[P[_], Hom[_, _, _ <: Int]]:
     new Lens[Hom[A, B, N], SizedVector[OptimizableParameters, N]]:
       def get(f: Hom[A, B, N]): SizedVector[OptimizableParameters, N] = read(f)
       def set(
-          f: Hom[A, B, N],
+          f         : Hom[A, B, N],
           parameters: SizedVector[OptimizableParameters, N]
       ): Hom[A, B, N] = replace(f, parameters)
 

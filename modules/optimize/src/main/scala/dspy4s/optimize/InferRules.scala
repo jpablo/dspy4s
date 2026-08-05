@@ -41,13 +41,13 @@ import scala.collection.mutable
   *   offline scripted LMs can branch)
   */
 final case class InferRulesConfig(
-    metric: Metric,
-    numCandidates: CandidateCount = CandidateCount(10),
-    numRules: RuleCount = RuleCount(10),
-    initTemperature: Double = 1.0,
-    bootstrap: BootstrapFewShotConfig = BootstrapFewShotConfig(),
-    seed: Long = 0L,
-    inductionMarker: String = "You are inducing natural-language rules from labeled examples."
+    metric         : Metric,
+    numCandidates  : CandidateCount         = CandidateCount(10),
+    numRules       : RuleCount              = RuleCount(10),
+    initTemperature: Double                 = 1.0,
+    bootstrap      : BootstrapFewShotConfig = BootstrapFewShotConfig(),
+    seed           : Long                   = 0L,
+    inductionMarker: String                 = "You are inducing natural-language rules from labeled examples."
 )
 
 /** InferRules — induce explicit natural-language RULES from the trainset and append them to each predictor's
@@ -78,10 +78,10 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P] = None,
-      valset: Option[Vector[Example]] = None
+      teacher : Option[P]               = None,
+      valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     // 1) Split if no valset (upstream's 50/50 holdout).
     val (effTrain, effVal) = valset match
@@ -178,20 +178,19 @@ final class InferRules[P: {OptimizableTraversal, ProgramRunner}](config: InferRu
   /** The rule-induction signature: `examples_text -> natural_language_rules`, instructed to extract `numRules` concise,
     * non-redundant, actionable rules (a paraphrase of upstream's `CustomRulesInduction` docstring).
     */
-  private val ruleInductionLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "RulesInduction",
-      inputFields = Vector(
-        FieldSpec(name = "examples_text", description = Some("Text containing examples"))
-      ),
-      outputFields = Vector(
-        FieldSpec(
-          name = "natural_language_rules",
-          description = Some("Induced natural language rules")
-        )
-      ),
-      instructions = Some(
-        s"${config.inductionMarker} Given a set of examples, extract a list of ${config.numRules} concise and " +
-          "non-redundant natural language rules that provide clear, actionable guidance for performing the task."
+  private val ruleInductionLayout: SignatureLayout = SignatureLayout.of(
+    name = "RulesInduction",
+    inputFields = Vector(
+      FieldSpec(name = "examples_text", description = Some("Text containing examples"))
+    ),
+    outputFields = Vector(
+      FieldSpec(
+        name = "natural_language_rules",
+        description = Some("Induced natural language rules")
       )
+    ),
+    instructions = Some(
+      s"${config.inductionMarker} Given a set of examples, extract a list of ${config.numRules} concise and " +
+        "non-redundant natural language rules that provide clear, actionable guidance for performing the task."
     )
+  )

@@ -50,7 +50,7 @@ object TalkToYourData:
       case Left(err) => println(s"Q: $question\n  [error] ${err.message}\n")
       case Right(a)  =>
         val valueStr = a.result.value.fold("")(v => f" (value=$v%.2f)")
-        val verify = if a.verdict.ok then "JVM cross-check AGREED" else s"MISMATCH: ${a.verdict.issues.mkString("; ")}"
+        val verify   = if a.verdict.ok then "JVM cross-check AGREED" else s"MISMATCH: ${a.verdict.issues.mkString("; ")}"
         println(s"Q: $question")
         println(Agent.describePlan(a.plan).linesIterator.map("    " + _).mkString("  plan:\n", "\n", ""))
         println(s"  answer:  ${a.result.answer}$valueStr")
@@ -72,8 +72,7 @@ object TalkToYourData:
       println("""[talk-to-your-data] Set OPENAI_API_KEY and re-run; or try the offline foundation check:""")
       println("""    sbt "examples/runMain dspy4s.examples.tutorials.talk_to_your_data.tytdSelfCheckMain"""")
 
-    case Right(lm) =>
-      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(JSONAdapter()))) {
+    case Right(lm) => RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(JSONAdapter()))) {
         given RuntimeContext = RuntimeEnvironment.current
 
         println(s"Dataset: ${Dataset.orders.size} synthetic e-commerce orders (${Dataset.csv.length} chars of CSV).")

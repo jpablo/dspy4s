@@ -12,9 +12,9 @@ import scala.util.Random
   * score on each validation example (aligned by validation index).
   */
 final case class GepaState(
-    candidates: CandidatePool,
-    valSubscores: Vector[Vector[Double]],
-    parents: Vector[Vector[Int]],
+    candidates      : CandidatePool,
+    valSubscores    : Vector[Vector[Double]],
+    parents         : Vector[Vector[Int]],
     totalMetricCalls: MetricCallCount
 ):
   require(

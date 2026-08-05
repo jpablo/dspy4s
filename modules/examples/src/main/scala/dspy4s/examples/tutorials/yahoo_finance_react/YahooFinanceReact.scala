@@ -76,11 +76,12 @@ object YahooFinanceReact:
   )
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.yahoo_finance_react.yahooFinanceReactMain"
-@main def yahooFinanceReactMain(): Unit = Demo.withLm {
-  val agent = new YahooFinanceReact.FinancialAnalysisAgent
-  YahooFinanceReact.demoQueries.foreach { query =>
-    println(s"Query: $query")
-    println(s"Analysis: ${agent.forward(query)}")
-    println("-" * 50)
+@main def yahooFinanceReactMain(): Unit =
+  Demo.withLm {
+    val agent = new YahooFinanceReact.FinancialAnalysisAgent
+    YahooFinanceReact.demoQueries.foreach { query =>
+      println(s"Query: $query")
+      println(s"Analysis: ${agent.forward(query)}")
+      println("-" * 50)
+    }
   }
-}

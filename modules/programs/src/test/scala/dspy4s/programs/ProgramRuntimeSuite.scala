@@ -75,10 +75,11 @@ class ProgramRuntimeSuite extends FunSuite:
     RuntimeEnvironment.resetForTests()
 
   test("resolve model and adapter from settings") {
-    given RuntimeContext = RuntimeContext(
-      lm = Some(DummyLanguageModel),
-      adapter = Some(DummyAdapter)
-    )
+    given RuntimeContext =
+      RuntimeContext(
+        lm = Some(DummyLanguageModel),
+        adapter = Some(DummyAdapter)
+      )
 
     assertEquals(RuntimeResolver.resolveModel, Right(DummyLanguageModel))
     assertEquals(RuntimeResolver.resolveAdapter, Right(DummyAdapter))

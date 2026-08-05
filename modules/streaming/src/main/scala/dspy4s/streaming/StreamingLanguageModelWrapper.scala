@@ -44,9 +44,9 @@ import scala.util.control.NonFatal
   * invocation. The mutable set [[firedListeners]] holds the indices that have closed at least one field cycle.
   */
 final class StreamingLanguageModelWrapper private (
-    delegate: StreamingLanguageModel,
-    queue: StreamingQueue[StreamEvent],
-    adapter: Option[Adapter],
+    delegate : StreamingLanguageModel,
+    queue    : StreamingQueue[StreamEvent],
+    adapter  : Option[Adapter],
     listeners: Vector[StreamListener]
 ) extends StreamingLanguageModel:
 
@@ -107,7 +107,7 @@ final class StreamingLanguageModelWrapper private (
     */
   private final case class CallContext(
       predictName: String,
-      state: Option[AdapterStreamingState]
+      state      : Option[AdapterStreamingState]
   )
 
   /** Extract the provider's error message from a reified error chunk's `raw` payload (`Map("error" -> message)` by
@@ -125,16 +125,13 @@ final class StreamingLanguageModelWrapper private (
       case Some(active) =>
         val state = adapter.flatMap(_.streamingState(active.layout))
         CallContext(active.name, state)
-      case None =>
-        CallContext(predictName = "", state = None)
+      case None => CallContext(predictName = "", state = None)
 
   private def emit(ctx: CallContext, chunk: LmChunk): Unit =
     ctx.state match
-      case Some(s) =>
-        if chunk.text.nonEmpty then
+      case Some(s) => if chunk.text.nonEmpty then
           s.receive(chunk.text).foreach(emitFieldChunk(ctx, _, isFinalChunk = chunk.isFinal))
-      case None =>
-        if chunk.text.nonEmpty && listenerAccepts(ctx.predictName, "") then
+      case None => if chunk.text.nonEmpty && listenerAccepts(ctx.predictName, "") then
           val _ = queue.offer(
             TokenEvent(
               predictName = ctx.predictName,
@@ -176,9 +173,9 @@ final class StreamingLanguageModelWrapper private (
 
 object StreamingLanguageModelWrapper:
   def apply(
-      delegate: StreamingLanguageModel,
-      queue: StreamingQueue[StreamEvent],
-      adapter: Option[Adapter] = None,
+      delegate : StreamingLanguageModel,
+      queue    : StreamingQueue[StreamEvent],
+      adapter  : Option[Adapter]        = None,
       listeners: Vector[StreamListener] = Vector.empty
   ): StreamingLanguageModelWrapper =
     new StreamingLanguageModelWrapper(

@@ -13,7 +13,7 @@ import scala.compiletime.ops.int.+
 /** `a >>> b` — sequential (dependent) composition: run `a`, thread its output value into `b`. The Category operation.
   */
 final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
-    first: A,
+    first : A,
     second: B
 ) extends TransparentModule[I, O]:
   override val moduleName: String = "and_then"
@@ -40,7 +40,7 @@ object AndThen:
       pa: OptimizableTraversal.WithArity[A, NA],
       pb: OptimizableTraversal.WithArity[B, NB]
   ): OptimizableTraversal.Of[AndThen[I, X, O, A, B], NA + NB] with
-    def arity(program: AndThen[I, X, O, A, B]): Int = pa.arity(program.first) + pb.arity(program.second)
+    def arity(program: AndThen[I, X, O, A, B]): Int                       = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: AndThen[I, X, O, A, B]): Vector[OptimizableView] =
       PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
 

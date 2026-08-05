@@ -145,7 +145,6 @@ class LmCacheSuite extends FunSuite:
     if Files.exists(path) then
       if Files.isDirectory(path) then
         val children = Files.list(path)
-        try
-          children.iterator().asScala.foreach(child => deleteRecursively(child))
+        try children.iterator().asScala.foreach(child => deleteRecursively(child))
         finally children.close()
       val _ = Files.deleteIfExists(path)

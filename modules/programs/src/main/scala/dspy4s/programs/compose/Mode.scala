@@ -98,8 +98,8 @@ object Moded:
   given modedOptimizableTraversal[I, O, P <: Module[I, O], N <: Int](using
       inner: OptimizableTraversal.WithArity[P, N]
   ): OptimizableTraversal.Of[Moded[I, O, P], N] with
-    def arity(program: Moded[I, O, P]): Int                       = inner.arity(program.program)
-    def inspect(program: Moded[I, O, P]): Vector[OptimizableView] = inner.inspect(program.program)
+    def arity(program  : Moded[I, O, P]): Int                                                    = inner.arity(program.program)
+    def inspect(program: Moded[I, O, P]): Vector[OptimizableView]                                = inner.inspect(program.program)
     def replace(program: Moded[I, O, P], updates: Vector[OptimizableParameters]): Moded[I, O, P] =
       program.copy(program = inner.replace(program.program, updates))
     override def inspectNamed(program: Moded[I, O, P]): Vector[(String, OptimizableView)] =

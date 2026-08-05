@@ -53,15 +53,15 @@ import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
   */
 final case class CodeAct[I, O](
     baseSignature: Signature[I, O],
-    interpreter: CodeInterpreter,
+    interpreter  : CodeInterpreter,
     /** Tools the generated Python may call (Python `CodeAct(tools=...)`). They are listed in the codeact instructions
       * (so the LM knows they exist) and should ALSO be wired into the sandbox via [[sandboxTools]] (so the calls
       * actually execute) — same vector, both sides.
       */
-    tools: Vector[dspy4s.programs.contracts.ToolFunction] = Vector.empty,
-    override val maxIterations: IterationLimit = IterationLimit(5),
-    codeActProgramName: String = "codeact",
-    extractorProgramName: String = "codeact_extract",
+    tools                     : Vector[dspy4s.programs.contracts.ToolFunction] = Vector.empty,
+    override val maxIterations: IterationLimit                                 = IterationLimit(5),
+    codeActProgramName        : String                                         = "codeact",
+    extractorProgramName      : String                                         = "codeact_extract",
     /** Optional override for the per-iteration code-generator predict — a TYPED `Predict` over the base input plus the
       * rendered trajectory, producing a lenient [[CodeAct.CodeStep]]. When `None` (the default), it is built from
       * [[codeActSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable sub-predict
@@ -89,51 +89,46 @@ final case class CodeAct[I, O](
   /** Interpreter for CodeAct's action language. Python exceptions and runtime-interpreter failures become recoverable
     * observations; other infrastructure errors remain fatal and propagate as `Left`.
     */
-  override protected val actionInterpreter: ActionInterpreter[String, String] =
-    new ActionInterpreter[String, String]:
-      override def execute(code: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
-        interpreter.execute(code) match
-          case Right(result) if result.exitCode == 0 =>
-            Right(ActionOutcome.Succeeded(result.stdout.stripTrailing))
-          case Right(result) =>
-            Right(ActionOutcome.Failed(s"Failed to execute the generated code: ${result.stderr.stripTrailing}"))
-          case Left(err: RuntimeError) =>
-            Right(ActionOutcome.Failed(s"Interpreter failure (${err.component}): ${err.message}"))
-          case Left(other) => Left(other)
+  override protected val actionInterpreter: ActionInterpreter[String, String] = new ActionInterpreter[String, String]:
+    override def execute(code: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
+      interpreter.execute(code) match
+        case Right(result) if result.exitCode == 0 => Right(ActionOutcome.Succeeded(result.stdout.stripTrailing))
+        case Right(result)                         =>
+          Right(ActionOutcome.Failed(s"Failed to execute the generated code: ${result.stderr.stripTrailing}"))
+        case Left(err: RuntimeError) =>
+          Right(ActionOutcome.Failed(s"Interpreter failure (${err.component}): ${err.message}"))
+        case Left(other) => Left(other)
 
   /** SignatureLayout for the per-iteration code generator. Mirrors Python: inputs: baseSignature.inputs ∪ {trajectory}
     * outputs: {generated_code, finished}
     */
-  val codeActSignature: SignatureLayout =
-    baseLayout
-      // Replace any user-supplied output fields on the codeact signature with just generated_code + finished.
-      // The original outputs are produced by the extractor.
-      .appendInput(CodeAct.loopTrajectoryField)
-      .replaceOutputs(Vector(CodeAct.generatedCodeField, CodeAct.finishedField))
-      .withInstructions(Some(buildInstructions))
+  val codeActSignature: SignatureLayout = baseLayout
+    // Replace any user-supplied output fields on the codeact signature with just generated_code + finished.
+    // The original outputs are produced by the extractor.
+    .appendInput(CodeAct.loopTrajectoryField)
+    .replaceOutputs(Vector(CodeAct.generatedCodeField, CodeAct.finishedField))
+    .withInstructions(Some(buildInstructions))
 
   /** SignatureLayout for the final extractor. Mirrors Python: inputs: baseSignature.inputs ∪ {trajectory} outputs:
     * baseSignature.outputs
     */
-  val extractorSignature: SignatureLayout =
-    baseLayout.appendInput(CodeAct.extractTrajectoryField)
+  val extractorSignature: SignatureLayout = baseLayout.appendInput(CodeAct.extractTrajectoryField)
 
   /** The per-iteration code-generator predict, built once from [[codeActSignature]] (mirrors Python's `self.code =
     * Predict(...)` in `__init__`) — a TYPED `Predict[(I, String), CodeStep]`: the base input plus the rendered
     * trajectory in, a leniently-decoded [[CodeAct.CodeStep]] out (see [[CodeAct.codeStepShape]]). Addressable + tunable
     * via [[codeActPredictOverride]]; `forward` uses this member rather than rebuilding a local each call.
     */
-  val codeActPredict: Predict[(I, String), CodeAct.CodeStep] =
-    codeActPredictOverride.getOrElse(Predict(
-      signature = Signature(
-        name = baseSignature.name,
-        layout = codeActSignature,
-        inputShape =
-          InputAugmentation.appendedStringInput(baseSignature.inputShape, CodeAct.loopTrajectoryField, "CodeAct"),
-        outputShape = CodeAct.codeStepShape
-      ),
-      name = Some(codeActProgramName)
-    ))
+  val codeActPredict: Predict[(I, String), CodeAct.CodeStep] = codeActPredictOverride.getOrElse(Predict(
+    signature = Signature(
+      name = baseSignature.name,
+      layout = codeActSignature,
+      inputShape =
+        InputAugmentation.appendedStringInput(baseSignature.inputShape, CodeAct.loopTrajectoryField, "CodeAct"),
+      outputShape = CodeAct.codeStepShape
+    ),
+    name = Some(codeActProgramName)
+  ))
 
   /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
@@ -178,8 +173,7 @@ final case class CodeAct[I, O](
          |$library""".stripMargin
     ) ++ toolLines).mkString("\n")
 
-  override protected val lifecycle: ModuleLifecycle[I, Out] =
-    ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected val trajectoryKey: String = CodeAct.extractTrajectoryField.name
 
@@ -196,7 +190,7 @@ final case class CodeAct[I, O](
   /** Generate the next typed code step from the original input and current rendered trajectory.
     */
   override protected def generateStep(
-      call: ProgramCall[I],
+      call      : ProgramCall[I],
       trajectory: Vector[CodeAct.TrajectoryEntry]
   )(using RuntimeContext): Either[DspyError, StepGeneration[CodeAct.CodeStep, CodeAct.TrajectoryEntry]] =
     val rendered = CodeAct.renderTrajectory(trajectory)
@@ -208,25 +202,23 @@ final case class CodeAct[I, O](
     */
   override protected def prepareAction(step: CodeAct.CodeStep): ActionPreparation[String, String] =
     GeneratedPython.parse(step.generatedCode) match
-      case Left(parseError) =>
-        ActionPreparation.Rejected(s"Failed to parse the generated code: $parseError")
-      case Right(code) =>
-        ActionPreparation.Ready(code)
+      case Left(parseError) => ActionPreparation.Rejected(s"Failed to parse the generated code: $parseError")
+      case Right(code)      => ActionPreparation.Ready(code)
 
   /** Preserve upstream behavior: a successfully parsed action may finish the loop even when interpretation reports a
     * recoverable failure. The shared transition records the outcome before applying the model's `finished` decision.
     */
   override protected def decide(
-      step: CodeAct.CodeStep,
-      @annotation.unused action: String,
+      step                      : CodeAct.CodeStep,
+      @annotation.unused action : String,
       @annotation.unused outcome: ActionOutcome[String]
   ): ActionDecision =
     if step.finished then ActionDecision.Stop else ActionDecision.Continue
 
   override protected def recordRejection(
-      iteration: Int,
+      iteration              : Int,
       @annotation.unused step: CodeAct.CodeStep,
-      observation: String
+      observation            : String
   ): CodeAct.TrajectoryEntry =
     CodeAct.TrajectoryEntry(
       iteration,
@@ -236,10 +228,10 @@ final case class CodeAct[I, O](
     )
 
   override protected def recordOutcome(
-      iteration: Int,
+      iteration              : Int,
       @annotation.unused step: CodeAct.CodeStep,
-      action: String,
-      outcome: ActionOutcome[String]
+      action                 : String,
+      outcome                : ActionOutcome[String]
   ): CodeAct.TrajectoryEntry =
     CodeAct.TrajectoryEntry(
       iteration,
@@ -297,10 +289,10 @@ object CodeAct:
     * or an explanation of what failed (parse, execute, or interpreter error).
     */
   final case class TrajectoryEntry(
-      iteration: Int,
-      code: String,
+      iteration  : Int,
+      code       : String,
       observation: String,
-      isError: Boolean
+      isError    : Boolean
   )
 
   private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry]): String =

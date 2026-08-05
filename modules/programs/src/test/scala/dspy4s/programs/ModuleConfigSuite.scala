@@ -21,7 +21,7 @@ case class MCQAOutput(answer: String, score: Double) derives Schema
 class ModuleConfigSuite extends FunSuite:
 
   private object EchoAdapter extends Adapter:
-    override val name: String = "echo"
+    override val name: String                                                                                    = "echo"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -41,7 +41,7 @@ class ModuleConfigSuite extends FunSuite:
       ))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private def withCapture(test: (RuntimeContext ?=> Unit)): Vector[LmRequest] =
     val sink = scala.collection.mutable.ArrayBuffer.empty[LmRequest]

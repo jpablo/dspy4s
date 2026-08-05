@@ -23,17 +23,16 @@ import scala.collection.mutable.ArrayBuffer
 class RecoveryCombinatorSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private final case class Attempt(
-      name: String,
-      result: Either[DspyError, String],
+      name   : String,
+      result : Either[DspyError, String],
       predict: DynamicPredict,
-      runs: ArrayBuffer[String]
+      runs   : ArrayBuffer[String]
   ) extends Module[Int, String]:
     override val moduleName: String                                = name
-    override protected val lifecycle: ModuleLifecycle[Int, String] =
-      ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int, String] = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =
@@ -44,7 +43,7 @@ class RecoveryCombinatorSuite extends FunSuite:
 
   private object Attempt:
     given attemptOptimizable: OptimizableLeaf[Attempt] with
-      def get(program: Attempt): OptimizableParameters                   = program.predict.optimizableParameters
+      def get(program     : Attempt): OptimizableParameters              = program.predict.optimizableParameters
       def metadata(program: Attempt): OptimizableMetadata                = program.predict.optimizableView.metadata
       def set(program: Attempt, updated: OptimizableParameters): Attempt =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
@@ -155,9 +154,10 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary  = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)
     val callback = new CallbackHandler:
-      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = event match
-        case start: ModuleStartEvent => starts += start.moduleName
-        case _                       => ()
+      def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case start: ModuleStartEvent => starts += start.moduleName
+          case _                       => ()
 
     RuntimeEnvironment.withCallbacks(Vector(callback)) {
       val _ = primary.recoverWith(RecoveryPolicy.Always)(fallback)(ProgramCall(1))

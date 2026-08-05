@@ -7,19 +7,18 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.util.control.NonFatal
 
 object CacheDefaults:
-  val defaultDiskDir: Path =
-    Option(System.getenv("DSPY4S_CACHEDIR"))
-      .filter(_.nonEmpty)
-      .map(Paths.get(_))
-      .getOrElse(Paths.get(System.getProperty("user.home"), ".dspy4s_cache"))
+  val defaultDiskDir: Path = Option(System.getenv("DSPY4S_CACHEDIR"))
+    .filter(_.nonEmpty)
+    .map(Paths.get(_))
+    .getOrElse(Paths.get(System.getProperty("user.home"), ".dspy4s_cache"))
 
 final case class LmCacheConfig(
-    enableDiskCache: Boolean = true,
-    enableMemoryCache: Boolean = true,
-    diskCacheDir: Path = CacheDefaults.defaultDiskDir,
-    diskMaxEntries: CacheCapacity = CacheCapacity(200000),
-    memoryMaxEntries: CacheCapacity = CacheCapacity(1000000),
-    fallbackToMemoryOnDiskFailure: Boolean = true
+    enableDiskCache              : Boolean       = true,
+    enableMemoryCache            : Boolean       = true,
+    diskCacheDir                 : Path          = CacheDefaults.defaultDiskDir,
+    diskMaxEntries               : CacheCapacity = CacheCapacity(200000),
+    memoryMaxEntries             : CacheCapacity = CacheCapacity(1000000),
+    fallbackToMemoryOnDiskFailure: Boolean       = true
 )
 
 object LmCaches:

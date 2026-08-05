@@ -16,9 +16,10 @@ enum BatchSamplerKind derives CanEqual:
 
 object MinibatchSampler:
 
-  def of(kind: BatchSamplerKind, minibatchSize: MinibatchSize, seed: Long): MinibatchSampler = kind match
-    case BatchSamplerKind.EpochShuffled => new EpochShuffled(minibatchSize, seed)
-    case BatchSamplerKind.RandomDraw    => new RandomDraw(minibatchSize, seed)
+  def of(kind: BatchSamplerKind, minibatchSize: MinibatchSize, seed: Long): MinibatchSampler =
+    kind match
+      case BatchSamplerKind.EpochShuffled => new EpochShuffled(minibatchSize, seed)
+      case BatchSamplerKind.RandomDraw    => new RandomDraw(minibatchSize, seed)
 
   /** Independent random draw (without replacement within a draw) each iteration — GEPA v0's sampler. Simple, but a
     * given example can be starved or over-sampled across iterations since draws are independent.

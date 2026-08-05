@@ -38,7 +38,7 @@ class MultiChainComparisonSuite extends FunSuite:
     * returning a canned `{"rationale": ..., "answer": ...}`.
     */
   private object ScriptedAdapter extends Adapter:
-    override val name: String = "scripted-mcc-adapter"
+    override val name: String                                                                                    = "scripted-mcc-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("q")))))
     override def parse(layout: SignatureLayout, output: LmOutput)(using
@@ -55,7 +55,7 @@ class MultiChainComparisonSuite extends FunSuite:
   private def settings: RuntimeContext = RuntimeContext(lm = Some(DummyLm), adapter = Some(ScriptedAdapter))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("AttemptCount: rejects non-positive literals at compile time") {
     val zeroErrors     = compileErrors("dspy4s.programs.AttemptCount(0)")

@@ -10,8 +10,8 @@ enum P5Tone derives Schema:
 
 case class P5Citation(title: String, score: Double) derives Schema
 case class P5StructuredAnswer(
-    answer: String,
-    tone: P5Tone,
+    answer   : String,
+    tone     : P5Tone,
     citations: List[P5Citation]
 ) derives Schema
 

@@ -7,7 +7,7 @@ package dspy4s.gepa
   * these. See PORT_GAPS G-12.
   */
 final case class ReflectiveRecord(
-    inputs: String,
+    inputs          : String,
     generatedOutputs: String,
-    feedback: String
+    feedback        : String
 )

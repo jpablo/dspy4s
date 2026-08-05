@@ -20,16 +20,16 @@ import scala.util.boundary
 import scala.util.boundary.break
 
 final case class RandomSearchConfig(
-    metric: Metric,
-    numCandidates: SearchCandidateCount = SearchCandidateCount(16),
-    maxBootstrappedDemos: DemoCount = DemoCount(4),
-    maxLabeledDemos: DemoCount = DemoCount(16),
-    maxRounds: RoundCount = RoundCount(1),
-    numThreads: Option[ThreadCount] = None,
-    maxErrors: ErrorLimit = ErrorLimit(10),
-    stopAtScore: Option[Double] = None,
-    metricThreshold: Option[Double] = None,
-    seed: Long = 0L
+    metric              : Metric,
+    numCandidates       : SearchCandidateCount = SearchCandidateCount(16),
+    maxBootstrappedDemos: DemoCount            = DemoCount(4),
+    maxLabeledDemos     : DemoCount            = DemoCount(16),
+    maxRounds           : RoundCount           = RoundCount(1),
+    numThreads          : Option[ThreadCount]  = None,
+    maxErrors           : ErrorLimit           = ErrorLimit(10),
+    stopAtScore         : Option[Double]       = None,
+    metricThreshold     : Option[Double]       = None,
+    seed                : Long                 = 0L
 )
 
 final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRunner}](
@@ -39,14 +39,13 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
   override val name: String = "bootstrap_few_shot_random_search"
 
   override def compile(
-      student: P,
+      student : P,
       trainset: Vector[Example],
-      teacher: Option[P] = None,
-      valset: Option[Vector[Example]] = None
+      teacher : Option[P]               = None,
+      valset  : Option[Vector[Example]] = None
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val ps                               = summon[OptimizableTraversal[P]]
-    val effectiveValset: Vector[Example] =
-      valset.getOrElse(trainset)
+    val effectiveValset: Vector[Example] = valset.getOrElse(trainset)
 
     val candidates = mutable.ArrayBuffer.empty[(Int, P)]
 
@@ -59,9 +58,8 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
         LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed)
       )
       labeled.compile(student, trainset) match
-        case Right(report) =>
-          candidates += ((-2, report.bestProgram))
-        case Left(_) => ()
+        case Right(report) => candidates += ((-2, report.bestProgram))
+        case Left(_)       => ()
 
     // seed -1: bootstrap with unshuffled trainset
     val bootstrapConfig = BootstrapFewShotConfig(
@@ -130,8 +128,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
           case Right(r) =>
             val subscores: Vector[Double] = r.results.map(_.score)
             (r.score, subscores)
-          case Left(_) =>
-            (0.0, Vector.empty[Double])
+          case Left(_) => (0.0, Vector.empty[Double])
 
         val candidate = CandidateProgram(
           program = program,
@@ -159,8 +156,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
       }
 
       bestCandidate match
-        case Some(best) =>
-          Right(
+        case Some(best) => Right(
             OptimizationReport(
               bestProgram = best.program,
               candidates = allCandidates.toVector.sortBy(-_.score),
@@ -170,8 +166,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableTraversal, ProgramRu
               )
             )
           )
-        case None =>
-          Right(
+        case None => Right(
             OptimizationReport(
               bestProgram = student,
               candidates = Vector.empty,

@@ -26,7 +26,7 @@ case class TagOutput(tags: List[String], items: List[TagItem], amount: Option[Do
 class StructuredOutputSuite extends FunSuite:
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** A scripted LM returning ChatAdapter marker-framed output: a JSON array for each list field, a JSON object array
     * for the record list, and a bare number for the optional field.
@@ -37,8 +37,7 @@ class StructuredOutputSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
-  private val completion =
-    """[[ ## tags ## ]]
+  private val completion = """[[ ## tags ## ]]
       |["urgent", "billing"]
       |
       |[[ ## items ## ]]
@@ -110,8 +109,7 @@ class StructuredOutputSuite extends FunSuite:
   }
 
   test("ChatAdapter decodes an absent Option output field as None") {
-    val noneCompletion =
-      """[[ ## tags ## ]]
+    val noneCompletion = """[[ ## tags ## ]]
         |[]
         |
         |[[ ## items ## ]]

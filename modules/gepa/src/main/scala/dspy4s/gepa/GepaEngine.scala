@@ -12,10 +12,10 @@ import scala.util.Random
   */
 final case class GepaConfig(
     /** Budget: total metric (evaluation) calls before stopping. Reflection-LM calls do NOT count, matching gepa. */
-    maxMetricCalls: MetricCallCount,
-    reflectionMinibatchSize: MinibatchSize = MinibatchSize(3),
-    candidateSelector: CandidateSelector = CandidateSelector.Pareto,
-    componentSelector: ComponentSelector = ComponentSelector.RoundRobin,
+    maxMetricCalls         : MetricCallCount,
+    reflectionMinibatchSize: MinibatchSize     = MinibatchSize(3),
+    candidateSelector      : CandidateSelector = CandidateSelector.Pareto,
+    componentSelector      : ComponentSelector = ComponentSelector.RoundRobin,
     /** Minibatch sampling strategy. Default `EpochShuffled` (gepa's default): walk a per-epoch shuffle so every train
       * example is used once per epoch before repeats. `RandomDraw` is GEPA v0's independent random draw.
       */
@@ -27,24 +27,24 @@ final case class GepaConfig(
     useMerge: Boolean = true,
     /** Cap on accepted merge attempts over a run (gepa's `max_merge_invocations`). */
     maxMergeInvocations: MergeInvocationLimit = MergeInvocationLimit(5),
-    skipPerfectScore: Boolean = true,
-    perfectScore: Double = 1.0,
-    failureScore: Double = 0.0,
+    skipPerfectScore   : Boolean              = true,
+    perfectScore       : Double               = 1.0,
+    failureScore       : Double               = 0.0,
     /** Opt-in efficiency stop: halt once the best candidate is perfect (mean validation score >= `perfectScore`), since
       * nothing further can improve it. OFF by default to match upstream gepa, which has no perfect-score stopper and
       * runs to the metric-call budget (its `perfect_score` only drives the per-minibatch `skipPerfectScore` skip). The
       * budget (`maxMetricCalls`) is always an upper bound regardless.
       */
     stopOnPerfectScore: Boolean = false,
-    seed: Long = 0L
+    seed              : Long    = 0L
 )
 
 /** The outcome of a GEPA run: the best candidate (by mean validation score) and the program it yields. */
 final case class GepaResult[P](
-    bestCandidate: Candidate,
-    bestProgram: P,
-    bestScore: Double,
-    numCandidates: GepaCandidateCount,
+    bestCandidate   : Candidate,
+    bestProgram     : P,
+    bestScore       : Double,
+    numCandidates   : GepaCandidateCount,
     totalMetricCalls: MetricCallCount
 )
 
@@ -58,16 +58,16 @@ final case class GepaResult[P](
   * the next step's worst-case cost. See PORT_GAPS G-12.
   */
 final class GepaEngine[P](
-    adapter: GepaAdapter[P],
+    adapter     : GepaAdapter[P],
     reflectionLm: LanguageModel,
-    config: GepaConfig
+    config      : GepaConfig
 ):
 
   def optimize(
       seedCandidate: Candidate,
-      trainset: Vector[Example],
-      valset: Vector[Example],
-      runDir: Option[Path] = None
+      trainset     : Vector[Example],
+      valset       : Vector[Example],
+      runDir       : Option[Path] = None
   )(using
       RuntimeContext
   ): GepaResult[P] =
@@ -159,13 +159,13 @@ final class GepaEngine[P](
     * accepted (which schedules a merge).
     */
   private def iterate(
-      state: GepaState,
-      pointers: Map[Int, Int],
-      trainset: Vector[Example],
-      valset: Vector[Example],
-      rng: Random,
-      sampler: MinibatchSampler,
-      cache: GepaEvalCache[P],
+      state    : GepaState,
+      pointers : Map[Int, Int],
+      trainset : Vector[Example],
+      valset   : Vector[Example],
+      rng      : Random,
+      sampler  : MinibatchSampler,
+      cache    : GepaEvalCache[P],
       iteration: Int
   )(using RuntimeContext): (GepaState, Map[Int, Int], Boolean) =
     val parentIdx = config.candidateSelector.select(state, rng)
@@ -221,10 +221,10 @@ final class GepaEngine[P](
     * scores into the evaluation cache.
     */
   private def validateAndWarm(
-      state: GepaState,
+      state        : GepaState,
       seedCandidate: Candidate,
-      valset: Vector[Example],
-      cache: GepaEvalCache[P]
+      valset       : Vector[Example],
+      cache        : GepaEvalCache[P]
   ): Unit =
     val expectedIds = seedCandidate.keySet
     val mismatched  = state.candidates.zipWithIndex.collect {

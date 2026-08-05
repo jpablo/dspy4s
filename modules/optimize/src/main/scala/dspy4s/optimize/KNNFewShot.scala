@@ -26,9 +26,9 @@ import zio.blocks.schema.DynamicValue
   * behavior.
   */
 final class KNNFewShot[P: {OptimizableTraversal, ProgramRunner}](
-    k: NeighborCount,
-    trainset: NonEmptyTrainset,
-    embedder: Embedder,
+    k              : NeighborCount,
+    trainset       : NonEmptyTrainset,
+    embedder       : Embedder,
     bootstrapConfig: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ):
   /** Embed the trainset (eager, like upstream's `KNN.__init__`) and wrap the student. */
@@ -39,9 +39,9 @@ final class KNNFewShot[P: {OptimizableTraversal, ProgramRunner}](
   * bootstraps them onto the student as demos, and runs the result.
   */
 final class KNNFewShotProgram[P: {OptimizableTraversal, ProgramRunner}] private[optimize] (
-    val student: P,
-    teacher: Option[P],
-    knn: KNN,
+    val student    : P,
+    teacher        : Option[P],
+    knn            : KNN,
     bootstrapConfig: BootstrapFewShotConfig
 ) extends DynamicModule:
 

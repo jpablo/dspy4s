@@ -14,17 +14,17 @@ enum TokenCategory derives CanEqual:
   case RejectedPrediction
   case Other(name: String)
 
-  def wireName: String = this match
-    case Cached             => "cached_tokens"
-    case Audio              => "audio_tokens"
-    case Reasoning          => "reasoning_tokens"
-    case AcceptedPrediction => "accepted_prediction_tokens"
-    case RejectedPrediction => "rejected_prediction_tokens"
-    case Other(name)        => name
+  def wireName: String =
+    this match
+      case Cached             => "cached_tokens"
+      case Audio              => "audio_tokens"
+      case Reasoning          => "reasoning_tokens"
+      case AcceptedPrediction => "accepted_prediction_tokens"
+      case RejectedPrediction => "rejected_prediction_tokens"
+      case Other(name)        => name
 
 object TokenCategory:
-  private val known: Vector[TokenCategory] =
-    Vector(Cached, Audio, Reasoning, AcceptedPrediction, RejectedPrediction)
+  private val known: Vector[TokenCategory]           = Vector(Cached, Audio, Reasoning, AcceptedPrediction, RejectedPrediction)
   private val byWireName: Map[String, TokenCategory] = known.map(category => category.wireName -> category).toMap
 
   /** Recognize a provider/JSON key as a known category, or preserve it as [[Other]]. */
@@ -37,10 +37,10 @@ object TokenCategory:
   * category. [[empty]] is the all-zero usage value.
   */
 final case class LmUsage(
-    totalTokens: Long = 0L,
-    promptTokens: Long = 0L,
-    completionTokens: Long = 0L,
-    extras: Map[TokenCategory, Long] = Map.empty
+    totalTokens     : Long                     = 0L,
+    promptTokens    : Long                     = 0L,
+    completionTokens: Long                     = 0L,
+    extras          : Map[TokenCategory, Long] = Map.empty
 ) derives CanEqual:
   def combine(that: LmUsage): LmUsage =
     val combinedExtras = that.extras.foldLeft(extras) { case (acc, (category, value)) =>

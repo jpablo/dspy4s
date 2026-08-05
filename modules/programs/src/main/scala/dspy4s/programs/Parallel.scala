@@ -16,8 +16,8 @@ import scala.concurrent.duration.FiniteDuration
 
 final case class Parallel(
     numThreads: Option[ThreadCount] = None,
-    maxErrors: Option[ErrorLimit] = None,
-    timeout: FiniteDuration = 120.seconds
+    maxErrors : Option[ErrorLimit]  = None,
+    timeout   : FiniteDuration      = 120.seconds
 ):
   private def resolvedExecutor(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]

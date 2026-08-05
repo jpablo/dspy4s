@@ -90,7 +90,7 @@ object CompanionScopeOptimizableTraversalSuite:
   // `import ProgramPredictors.given` exists (that object no longer exists). The leaf instances must be found in
   // companion scope.
   final case class Agent(
-      planner: Predict[(question: String), (answer: String)],
+      planner : Predict[(question: String), (answer: String)],
       reasoner: ChainOfThought[(question: String), (answer: String)]
   )
 

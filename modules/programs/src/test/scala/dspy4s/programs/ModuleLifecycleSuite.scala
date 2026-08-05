@@ -20,7 +20,7 @@ class ModuleLifecycleSuite extends FunSuite:
       Right(Prediction(call.input, RawPrediction(DynamicValues.record("result" := call.input))))
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("observation is a value-level policy for a shared call and result carrier") {
     given RuntimeContext = RuntimeEnvironment.current

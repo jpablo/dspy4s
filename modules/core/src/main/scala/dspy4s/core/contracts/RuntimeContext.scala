@@ -4,9 +4,9 @@ import zio.blocks.schema.DynamicValue
 
 /** Runtime capabilities supplied by the environment. These are dependencies, not settings or accumulated output. */
 final case class RuntimeServices(
-    lm: Option[LanguageModelRef] = None,
-    adapter: Option[AdapterRef] = None,
-    callbacks: Vector[CallbackHandler] = Vector.empty
+    lm       : Option[LanguageModelRef] = None,
+    adapter  : Option[AdapterRef]       = None,
+    callbacks: Vector[CallbackHandler]  = Vector.empty
 ) derives CanEqual:
   def fillFrom(defaults: RuntimeServices): RuntimeServices =
     RuntimeServices(
@@ -19,13 +19,13 @@ final case class RuntimeServices(
   * dependencies; unlike [[RuntimeDelta]], they are inputs to execution rather than outputs accumulated by it.
   */
 final case class RuntimeConfig(
-    numThreads: Option[ThreadCount] = None,
-    maxErrors: Option[ErrorLimit] = None,
-    maxHistorySize: Option[HistoryLimit] = None,
-    disableHistory: Option[Boolean] = None,
-    trackUsage: Option[Boolean] = None,
-    callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty,
-    captureFailureTraces: Boolean = false
+    numThreads          : Option[ThreadCount]  = None,
+    maxErrors           : Option[ErrorLimit]   = None,
+    maxHistorySize      : Option[HistoryLimit] = None,
+    disableHistory      : Option[Boolean]      = None,
+    trackUsage          : Option[Boolean]      = None,
+    callbackMetadata    : DynamicValue.Record  = DynamicValue.Record.empty,
+    captureFailureTraces: Boolean              = false
 ) derives CanEqual:
   def fillFrom(defaults: RuntimeConfig): RuntimeConfig =
     RuntimeConfig(
@@ -42,9 +42,9 @@ final case class RuntimeConfig(
   * of the observable execution output captured by [[RuntimeDelta]].
   */
 final case class RuntimeScope(
-    asyncTaskId: Option[String] = None,
+    asyncTaskId : Option[String] = None,
     activeCallId: Option[String] = None,
-    callStack: Vector[String] = Vector.empty
+    callStack   : Vector[String] = Vector.empty
 ) derives CanEqual:
   def fillFrom(defaults: RuntimeScope): RuntimeScope =
     RuntimeScope(
@@ -61,9 +61,9 @@ final case class RuntimeScope(
   */
 final class RuntimeContext private (
     val services: RuntimeServices,
-    val config: RuntimeConfig,
-    val scope: RuntimeScope,
-    val delta: RuntimeDelta
+    val config  : RuntimeConfig,
+    val scope   : RuntimeScope,
+    val delta   : RuntimeDelta
 ) derives CanEqual:
 
   def lm: Option[LanguageModelRef]          = services.lm
@@ -83,33 +83,33 @@ final class RuntimeContext private (
   def history: Vector[HistoryEntry]         = delta.history
 
   def withServices(updated: RuntimeServices): RuntimeContext = RuntimeContext.fromParts(updated, config, scope, delta)
-  def withConfig(updated: RuntimeConfig): RuntimeContext     = RuntimeContext.fromParts(services, updated, scope, delta)
-  def withScope(updated: RuntimeScope): RuntimeContext = RuntimeContext.fromParts(services, config, updated, delta)
-  def withDelta(updated: RuntimeDelta): RuntimeContext = RuntimeContext.fromParts(services, config, scope, updated)
+  def withConfig(updated  : RuntimeConfig): RuntimeContext   = RuntimeContext.fromParts(services, updated, scope, delta)
+  def withScope(updated   : RuntimeScope): RuntimeContext    = RuntimeContext.fromParts(services, config, updated, delta)
+  def withDelta(updated   : RuntimeDelta): RuntimeContext    = RuntimeContext.fromParts(services, config, scope, updated)
 
   def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext =
     withServices(services.copy(callbacks = updated))
   def withHistory(updated: Vector[HistoryEntry]): RuntimeContext = withDelta(delta.copy(history = updated))
-  def appendTrace(entry: TraceEntry): RuntimeContext             = withDelta(delta.copy(trace = trace :+ entry))
+  def appendTrace(entry  : TraceEntry): RuntimeContext           = withDelta(delta.copy(trace = trace :+ entry))
   def appendHistory(entry: HistoryEntry): RuntimeContext         = withDelta(delta.copy(history = history :+ entry))
 
   /** Compatibility copy over the former flat case-class surface. */
   def copy(
-      lm: Option[LanguageModelRef] = this.lm,
-      adapter: Option[AdapterRef] = this.adapter,
-      callbacks: Vector[CallbackHandler] = this.callbacks,
-      numThreads: Option[ThreadCount] = this.numThreads,
-      maxErrors: Option[ErrorLimit] = this.maxErrors,
-      maxHistorySize: Option[HistoryLimit] = this.maxHistorySize,
-      disableHistory: Option[Boolean] = this.disableHistory,
-      trackUsage: Option[Boolean] = this.trackUsage,
-      callbackMetadata: DynamicValue.Record = this.callbackMetadata,
-      captureFailureTraces: Boolean = this.captureFailureTraces,
-      asyncTaskId: Option[String] = this.asyncTaskId,
-      activeCallId: Option[String] = this.activeCallId,
-      callStack: Vector[String] = this.callStack,
-      trace: Vector[TraceEntry] = this.trace,
-      history: Vector[HistoryEntry] = this.history
+      lm                  : Option[LanguageModelRef] = this.lm,
+      adapter             : Option[AdapterRef]       = this.adapter,
+      callbacks           : Vector[CallbackHandler]  = this.callbacks,
+      numThreads          : Option[ThreadCount]      = this.numThreads,
+      maxErrors           : Option[ErrorLimit]       = this.maxErrors,
+      maxHistorySize      : Option[HistoryLimit]     = this.maxHistorySize,
+      disableHistory      : Option[Boolean]          = this.disableHistory,
+      trackUsage          : Option[Boolean]          = this.trackUsage,
+      callbackMetadata    : DynamicValue.Record      = this.callbackMetadata,
+      captureFailureTraces: Boolean                  = this.captureFailureTraces,
+      asyncTaskId         : Option[String]           = this.asyncTaskId,
+      activeCallId        : Option[String]           = this.activeCallId,
+      callStack           : Vector[String]           = this.callStack,
+      trace               : Vector[TraceEntry]       = this.trace,
+      history             : Vector[HistoryEntry]     = this.history
   ): RuntimeContext =
     RuntimeContext(
       lm = lm,
@@ -140,10 +140,11 @@ final class RuntimeContext private (
       delta
     )
 
-  override def equals(other: Any): Boolean = other match
-    case that: RuntimeContext =>
-      services == that.services && config == that.config && scope == that.scope && delta == that.delta
-    case _ => false
+  override def equals(other: Any): Boolean =
+    other match
+      case that: RuntimeContext => services == that.services && config == that.config && scope == that.scope &&
+        delta == that.delta
+      case _ => false
 
   override def hashCode(): Int = (services, config, scope, delta).hashCode()
 
@@ -152,21 +153,21 @@ final class RuntimeContext private (
 object RuntimeContext:
   /** Flat compatibility constructor. */
   def apply(
-      lm: Option[LanguageModelRef] = None,
-      adapter: Option[AdapterRef] = None,
-      callbacks: Vector[CallbackHandler] = Vector.empty,
-      numThreads: Option[ThreadCount] = None,
-      maxErrors: Option[ErrorLimit] = None,
-      maxHistorySize: Option[HistoryLimit] = None,
-      disableHistory: Option[Boolean] = None,
-      trackUsage: Option[Boolean] = None,
-      callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty,
-      captureFailureTraces: Boolean = false,
-      asyncTaskId: Option[String] = None,
-      activeCallId: Option[String] = None,
-      callStack: Vector[String] = Vector.empty,
-      trace: Vector[TraceEntry] = Vector.empty,
-      history: Vector[HistoryEntry] = Vector.empty
+      lm                  : Option[LanguageModelRef] = None,
+      adapter             : Option[AdapterRef]       = None,
+      callbacks           : Vector[CallbackHandler]  = Vector.empty,
+      numThreads          : Option[ThreadCount]      = None,
+      maxErrors           : Option[ErrorLimit]       = None,
+      maxHistorySize      : Option[HistoryLimit]     = None,
+      disableHistory      : Option[Boolean]          = None,
+      trackUsage          : Option[Boolean]          = None,
+      callbackMetadata    : DynamicValue.Record      = DynamicValue.Record.empty,
+      captureFailureTraces: Boolean                  = false,
+      asyncTaskId         : Option[String]           = None,
+      activeCallId        : Option[String]           = None,
+      callStack           : Vector[String]           = Vector.empty,
+      trace               : Vector[TraceEntry]       = Vector.empty,
+      history             : Vector[HistoryEntry]     = Vector.empty
   ): RuntimeContext =
     fromParts(
       RuntimeServices(lm, adapter, callbacks),
@@ -185,8 +186,8 @@ object RuntimeContext:
 
   def fromParts(
       services: RuntimeServices = RuntimeServices(),
-      config: RuntimeConfig = RuntimeConfig(),
-      scope: RuntimeScope = RuntimeScope(),
-      delta: RuntimeDelta = RuntimeDelta.empty
+      config  : RuntimeConfig   = RuntimeConfig(),
+      scope   : RuntimeScope    = RuntimeScope(),
+      delta   : RuntimeDelta    = RuntimeDelta.empty
   ): RuntimeContext =
     new RuntimeContext(services, config, scope, delta)

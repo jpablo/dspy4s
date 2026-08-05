@@ -28,30 +28,29 @@ private[typed] object ZioSchemaCodec:
     * sequences are walked element-wise. Everything else (and values whose target shape doesn't match the dispatch
     * above) passes through unchanged.
     */
-  def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue = (dv, target) match
-    case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) =>
-      coercePrimitive(prim, p.primitiveType)
-    // Option-shaped variant: wrap bare/Null/string values into Some/None before the generic rules below.
-    case (value, variant: Reflect.Variant[?, ?]) if optionSomeValueReflect(variant).isDefined =>
-      normalizeOption(value, optionSomeValueReflect(variant).get)
-    case (_: DynamicValue.Null.type, _)                                               => DynamicValue.Null
-    case (DynamicValue.Primitive(PrimitiveValue.String(s)), _: Reflect.Variant[?, ?]) =>
-      DynamicValue.Variant(s, DynamicValue.Record.empty)
-    case (rec: DynamicValue.Record, recTarget: Reflect.Record[?, ?]) =>
-      mapRecordFields(rec, recTarget)
-    case (seq: DynamicValue.Sequence, seqTarget: Reflect.Sequence[?, ?, ?]) =>
-      DynamicValue.Sequence(Chunk.from(seq.elements.iterator.map(normalize(_, seqTarget.element)).toSeq))
-    case (m: DynamicValue.Map, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
-      DynamicValue.Map(Chunk.from(m.entries.iterator.map((k, v) =>
-        normalize(k, mapTarget.key) -> normalize(v, mapTarget.value)
-      ).toSeq))
-    case (rec: DynamicValue.Record, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
-      // dspy4s lifts string-keyed maps into `DynamicValue.Record` (see DynamicValues.fromAny),
-      // whereas zio-blocks `Schema[Map[K, V]]` consumes a `DynamicValue.Map`. Bridge field -> entry.
-      DynamicValue.Map(Chunk.from(rec.fields.iterator.map { (k, v) =>
-        normalize(DynamicValue.Primitive(PrimitiveValue.String(k)), mapTarget.key) -> normalize(v, mapTarget.value)
-      }.toSeq))
-    case _ => dv
+  def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue =
+    (dv, target) match
+      case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) => coercePrimitive(prim, p.primitiveType)
+      // Option-shaped variant: wrap bare/Null/string values into Some/None before the generic rules below.
+      case (value, variant: Reflect.Variant[?, ?]) if optionSomeValueReflect(variant).isDefined =>
+        normalizeOption(value, optionSomeValueReflect(variant).get)
+      case (_: DynamicValue.Null.type, _)                                               => DynamicValue.Null
+      case (DynamicValue.Primitive(PrimitiveValue.String(s)), _: Reflect.Variant[?, ?]) =>
+        DynamicValue.Variant(s, DynamicValue.Record.empty)
+      case (rec: DynamicValue.Record, recTarget: Reflect.Record[?, ?])        => mapRecordFields(rec, recTarget)
+      case (seq: DynamicValue.Sequence, seqTarget: Reflect.Sequence[?, ?, ?]) =>
+        DynamicValue.Sequence(Chunk.from(seq.elements.iterator.map(normalize(_, seqTarget.element)).toSeq))
+      case (m: DynamicValue.Map, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
+        DynamicValue.Map(Chunk.from(m.entries.iterator.map((k, v) =>
+          normalize(k, mapTarget.key) -> normalize(v, mapTarget.value)
+        ).toSeq))
+      case (rec: DynamicValue.Record, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
+        // dspy4s lifts string-keyed maps into `DynamicValue.Record` (see DynamicValues.fromAny),
+        // whereas zio-blocks `Schema[Map[K, V]]` consumes a `DynamicValue.Map`. Bridge field -> entry.
+        DynamicValue.Map(Chunk.from(rec.fields.iterator.map { (k, v) =>
+          normalize(DynamicValue.Primitive(PrimitiveValue.String(k)), mapTarget.key) -> normalize(v, mapTarget.value)
+        }.toSeq))
+      case _ => dv
 
   /** Coerce an incoming value into the `Some`/`None` Variant shape zio-blocks expects for an `Option` field.
     * `valueReflect` is the `Some` case's `value` field reflect, so a wrapped payload routes back through [[normalize]]
@@ -68,8 +67,7 @@ private[typed] object ZioSchemaCodec:
           if s.trim.isEmpty
             || s.trim.equalsIgnoreCase("null")
             || s.trim.equalsIgnoreCase("none")
-            || s.trim.equalsIgnoreCase("n/a") =>
-        none
+            || s.trim.equalsIgnoreCase("n/a") => none
       case other => some(other)
 
   private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[?, ?]): DynamicValue.Record =
@@ -83,10 +81,8 @@ private[typed] object ZioSchemaCodec:
 
   private def coercePrimitive(dv: DynamicValue, prim: PrimitiveType[?]): DynamicValue =
     dv match
-      case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
-        prim match
-          case _: PrimitiveType.Boolean =>
-            s.trim.toLowerCase match
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) => prim match
+          case _: PrimitiveType.Boolean => s.trim.toLowerCase match
               case "true"  => DynamicValue.Primitive(PrimitiveValue.Boolean(true))
               case "false" => DynamicValue.Primitive(PrimitiveValue.Boolean(false))
               case _       => dv
@@ -99,8 +95,7 @@ private[typed] object ZioSchemaCodec:
           case _: PrimitiveType.Float =>
             cleanNumeric(s).toFloatOption.fold(dv)(f => DynamicValue.Primitive(PrimitiveValue.Float(f)))
           case _ => dv
-      case DynamicValue.Primitive(PrimitiveValue.Int(i)) =>
-        prim match
+      case DynamicValue.Primitive(PrimitiveValue.Int(i)) => prim match
           case _: PrimitiveType.Long   => DynamicValue.Primitive(PrimitiveValue.Long(i.toLong))
           case _: PrimitiveType.Double => DynamicValue.Primitive(PrimitiveValue.Double(i.toDouble))
           case _: PrimitiveType.Float  => DynamicValue.Primitive(PrimitiveValue.Float(i.toFloat))
@@ -120,62 +115,62 @@ private[typed] object ZioSchemaCodec:
     */
   private def cleanNumeric(s: String): String =
     val trimmed  = s.trim
-    val noSymbol =
-      if trimmed.nonEmpty && "$€£¥".contains(trimmed.head) then trimmed.tail.trim else trimmed
-    val noSign = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
+    val noSymbol = if trimmed.nonEmpty && "$€£¥".contains(trimmed.head) then trimmed.tail.trim else trimmed
+    val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
     noSign.filter(_ != ',')
 
   /** Walk a `Reflect.Record` and produce its role-free field metadata. */
-  def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] = reflect match
-    case rec: Reflect.Record[?, ?] =>
-      rec.fields.toVector.map(term =>
-        FieldSpec(
-          name = term.name,
-          typeRef = typeRefFor(term.value),
-          enumValues = enumValuesOf(term.value)
+  def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] =
+    reflect match
+      case rec: Reflect.Record[?, ?] => rec.fields.toVector.map(term =>
+          FieldSpec(
+            name = term.name,
+            typeRef = typeRefFor(term.value),
+            enumValues = enumValuesOf(term.value)
+          )
         )
-      )
-    case _ => Vector.empty
+      case _ => Vector.empty
 
   /** Allowed case names for an enum field, i.e. a `Reflect.Variant`'s cases. Empty for any non-variant reflect. The
     * wire `typeRef` for a variant stays `TypeRef.string` (the LM sees a flat label); these values ride alongside so
     * adapters can tell the LM which labels are valid.
     */
-  private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] = reflect match
-    case variant: Reflect.Variant[?, ?] =>
-      val cases            = variant.cases.toVector
-      val allParameterless = cases.forall { term =>
-        term.value match
-          case rec: Reflect.Record[?, ?] => rec.fields.isEmpty
-          case _                         => false
-      }
-      if allParameterless then cases.map(_.name) else Vector.empty
-    case _ => Vector.empty
+  private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] =
+    reflect match
+      case variant: Reflect.Variant[?, ?] =>
+        val cases            = variant.cases.toVector
+        val allParameterless = cases.forall { term =>
+          term.value match
+            case rec: Reflect.Record[?, ?] => rec.fields.isEmpty
+            case _                         => false
+        }
+        if allParameterless then cases.map(_.name) else Vector.empty
+      case _ => Vector.empty
 
   /** Detect an `Option`-shaped `Reflect.Variant`: a `None` case (empty record) and a `Some` case whose record carries
     * exactly one field named `value`. Returns the `Some` case's value-field reflect when matched, so [[normalize]] can
     * route the wrapped payload through the existing coercion against the right target.
     */
-  private def optionSomeValueReflect(reflect: Reflect[?, ?]): Option[Reflect[?, ?]] = reflect match
-    case variant: Reflect.Variant[?, ?] =>
-      val cases = variant.cases.toVector
-      if cases.size != 2 then None
-      else
-        val noneCase = cases.find(_.name == "None").flatMap { term =>
-          term.value match
-            case rec: Reflect.Record[?, ?] if rec.fields.isEmpty => Some(rec)
-            case _                                               => None
-        }
-        val someValue = cases.find(_.name == "Some").flatMap { term =>
-          term.value match
-            case rec: Reflect.Record[?, ?] =>
-              rec.fields.toVector match
-                case Vector(field) if field.name == "value" => Some(field.value)
-                case _                                      => None
-            case _ => None
-        }
-        if noneCase.isDefined then someValue else None
-    case _ => None
+  private def optionSomeValueReflect(reflect: Reflect[?, ?]): Option[Reflect[?, ?]] =
+    reflect match
+      case variant: Reflect.Variant[?, ?] =>
+        val cases = variant.cases.toVector
+        if cases.size != 2 then None
+        else
+          val noneCase = cases.find(_.name == "None").flatMap { term =>
+            term.value match
+              case rec: Reflect.Record[?, ?] if rec.fields.isEmpty => Some(rec)
+              case _                                               => None
+          }
+          val someValue = cases.find(_.name == "Some").flatMap { term =>
+            term.value match
+              case rec: Reflect.Record[?, ?] => rec.fields.toVector match
+                  case Vector(field) if field.name == "value" => Some(field.value)
+                  case _                                      => None
+              case _ => None
+          }
+          if noneCase.isDefined then someValue else None
+      case _ => None
 
   /** Derive the wire `TypeRef` for a single value type from its `Schema`. This is the same mapping
     * `fieldSpecsFromReflect` applies to each record field, exposed for the programmatic [[SignatureBuilder]] (which
@@ -183,26 +178,28 @@ private[typed] object ZioSchemaCodec:
     */
   def typeRefForSchema[A](using schema: Schema[A]): TypeRef = typeRefFor(schema.reflect)
 
-  private def typeRefFor(reflect: Reflect[?, ?]): TypeRef = reflect match
-    case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
-    case _: Reflect.Variant[?, ?]      => TypeRef.string
-    case _: Reflect.Record[?, ?]       => TypeRef.json
-    case _: Reflect.Sequence[?, ?, ?]  => TypeRef.list
-    case _: Reflect.Map[?, ?, ?, ?]    => TypeRef.json
-    case _                             => TypeRef.json
+  private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
+    reflect match
+      case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
+      case _: Reflect.Variant[?, ?]      => TypeRef.string
+      case _: Reflect.Record[?, ?]       => TypeRef.json
+      case _: Reflect.Sequence[?, ?, ?]  => TypeRef.list
+      case _: Reflect.Map[?, ?, ?, ?]    => TypeRef.json
+      case _                             => TypeRef.json
 
-  private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef = prim match
-    case _: PrimitiveType.String    => TypeRef.string
-    case _: PrimitiveType.Char      => TypeRef.string
-    case _: PrimitiveType.Boolean   => TypeRef.bool
-    case _: PrimitiveType.Int       => TypeRef.int
-    case _: PrimitiveType.Long      => TypeRef.int
-    case _: PrimitiveType.Short     => TypeRef.int
-    case _: PrimitiveType.Byte      => TypeRef.int
-    case _: PrimitiveType.Float     => TypeRef.double
-    case _: PrimitiveType.Double    => TypeRef.double
-    case _: PrimitiveType.Unit.type => TypeRef.json
-    case _                          => TypeRef.json
+  private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef =
+    prim match
+      case _: PrimitiveType.String    => TypeRef.string
+      case _: PrimitiveType.Char      => TypeRef.string
+      case _: PrimitiveType.Boolean   => TypeRef.bool
+      case _: PrimitiveType.Int       => TypeRef.int
+      case _: PrimitiveType.Long      => TypeRef.int
+      case _: PrimitiveType.Short     => TypeRef.int
+      case _: PrimitiveType.Byte      => TypeRef.int
+      case _: PrimitiveType.Float     => TypeRef.double
+      case _: PrimitiveType.Double    => TypeRef.double
+      case _: PrimitiveType.Unit.type => TypeRef.json
+      case _                          => TypeRef.json
 
   /** Build a `Shape[A]` from a zio-blocks `Schema[A]`. Encode goes through `Schema.toDynamicValue` directly; decode
     * normalizes the input record against the target Reflect (so LM-shaped string primitives become the right primitive
@@ -221,14 +218,12 @@ private[typed] object ZioSchemaCodec:
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
-      override lazy val jsonSchemaString: Option[String] =
-        Some(schema.toJsonSchema.toJson.toString)
+      override lazy val jsonSchemaString: Option[String] = Some(schema.toJsonSchema.toJson.toString)
 
       override def encode(value: A): DynamicValue.Record =
         schema.toDynamicValue(value) match
           case rec: DynamicValue.Record => rec
-          case other                    =>
-            throw new IllegalStateException(
+          case other                    => throw new IllegalStateException(
               s"zio-blocks Schema did not encode to a Record: $other"
             )
 

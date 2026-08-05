@@ -80,9 +80,8 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       if updates == inspect(program).map(_.parameters) then program
       else
         val nextGenerator   = updateOverride(program.generatorPredict, program.generatorPredictOverride, updates(0))
-        val nextRegenerator =
-          updateOverride(program.regeneratorPredict, program.regeneratorPredictOverride, updates(1))
-        val nextAnswerer = updateOverride(program.answererPredict, program.answererPredictOverride, updates(2))
+        val nextRegenerator = updateOverride(program.regeneratorPredict, program.regeneratorPredictOverride, updates(1))
+        val nextAnswerer    = updateOverride(program.answererPredict, program.answererPredictOverride, updates(2))
         program.copy(
           generatorPredictOverride = nextGenerator,
           regeneratorPredictOverride = nextRegenerator,
@@ -107,8 +106,8 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       else program.copy(comparePredictParametersOverride = Some(updates.head))
 
   private def updateOverride[P](
-      current: P,
+      current : P,
       existing: Option[P],
-      updated: OptimizableParameters
+      updated : OptimizableParameters
   )(using OptimizableLeaf[P]): Option[P] =
     if updated == current.optimizableParameters then existing else Some(current.withOptimizableParameters(updated))

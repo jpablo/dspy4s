@@ -48,12 +48,11 @@ class TypedBestOfNSuite extends FunSuite:
   /** A typed program stub returning scripted `Prediction[Cand]`s, tracking call count + the rolloutIds it saw. */
   private final class TypedStub(results: Vector[Either[DspyError, Prediction[Cand]]])
       extends Module[Q, Cand]:
-    val rolloutIds: ArrayBuffer[Int]                           = ArrayBuffer.empty
-    val calls: AtomicInteger                                   = AtomicInteger(0)
-    private val counter                                        = AtomicInteger(0)
-    override val moduleName: String                            = "typed_stub"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] =
-      ModuleLifecycle.typedWithoutInputs
+    val rolloutIds: ArrayBuffer[Int]                                                                                = ArrayBuffer.empty
+    val calls: AtomicInteger                                                                                        = AtomicInteger(0)
+    private val counter                                                                                             = AtomicInteger(0)
+    override val moduleName: String                                                                                 = "typed_stub"
+    override protected val lifecycle: ModuleLifecycle[Q, Cand]                                                      = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       calls.incrementAndGet()
       rolloutIds += call.rolloutId.getOrElse(-1)
@@ -66,7 +65,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context: AfterEach): Unit   = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("typed BestOfN returns the highest-reward typed prediction and threads rolloutIds") {
     val stub = TypedStub(Vector(
@@ -134,14 +133,13 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f2")),
       Right(candidate("ok", 1.0))
     ))
-    val bestOfN =
-      BestOfN[TypedStub, Q, Cand](
-        stub,
-        n = AttemptCount(3),
-        rewardFn = (_, _) => 1.0,
-        threshold = 0.0,
-        failCount = Some(FailureCount(1))
-      )
+    val bestOfN = BestOfN[TypedStub, Q, Cand](
+      stub,
+      n = AttemptCount(3),
+      rewardFn = (_, _) => 1.0,
+      threshold = 0.0,
+      failCount = Some(FailureCount(1))
+    )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = bestOfN(ProgramCall(Q("x")))
@@ -160,14 +158,13 @@ class TypedBestOfNSuite extends FunSuite:
       Left(RuntimeError("typed_stub", "f4")),
       Left(RuntimeError("typed_stub", "f5"))
     ))
-    val bestOfN =
-      BestOfN[TypedStub, Q, Cand](
-        stub,
-        n = AttemptCount(5),
-        rewardFn = (_, _) => 1.0,
-        threshold = 0.0,
-        failCount = Some(FailureCount(3))
-      )
+    val bestOfN = BestOfN[TypedStub, Q, Cand](
+      stub,
+      n = AttemptCount(5),
+      rewardFn = (_, _) => 1.0,
+      threshold = 0.0,
+      failCount = Some(FailureCount(3))
+    )
 
     given RuntimeContext = RuntimeEnvironment.current
     val result           = bestOfN(ProgramCall(Q("x")))
@@ -315,8 +312,7 @@ class TypedBestOfNSuite extends FunSuite:
     val layout: SignatureLayout =
       SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(parameters.instructions)
     override val moduleName: String                            = "inner_predict"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] =
-      ModuleLifecycle.typed(call => rec("q" := call.input.q))
+    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       val ctx        = RuntimeEnvironment.current
@@ -375,13 +371,12 @@ class TypedBestOfNSuite extends FunSuite:
     // Threshold 0.0 means even the BAD answer (0.2) clears it on attempt 1 -> no feedback, best-of-N parity.
     val adapter = ScriptingAdapter()
     val lm      = ScriptingLm()
-    val refine  =
-      Refine[InnerPredict, Q, Cand](
-        InnerPredict(),
-        n = AttemptCount(3),
-        rewardFn = (_, p) => p.output.score,
-        threshold = 0.0
-      )
+    val refine  = Refine[InnerPredict, Q, Cand](
+      InnerPredict(),
+      n = AttemptCount(3),
+      rewardFn = (_, p) => p.output.score,
+      threshold = 0.0
+    )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -399,13 +394,12 @@ class TypedBestOfNSuite extends FunSuite:
     // Regression: the advice-failure branch used to `return Left(error)`, throwing away `best`.
     val adapter = ScriptingAdapter()
     val lm      = AdviceFailingLm()
-    val refine  =
-      Refine[InnerPredict, Q, Cand](
-        InnerPredict(),
-        n = AttemptCount(2),
-        rewardFn = (_, p) => p.output.score,
-        threshold = 1.0
-      )
+    val refine  = Refine[InnerPredict, Q, Cand](
+      InnerPredict(),
+      n = AttemptCount(2),
+      rewardFn = (_, p) => p.output.score,
+      threshold = 1.0
+    )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current

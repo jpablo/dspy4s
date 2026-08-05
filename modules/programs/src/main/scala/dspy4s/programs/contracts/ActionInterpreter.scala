@@ -12,13 +12,15 @@ enum ActionOutcome[+Observation]:
   case Succeeded(value: Observation)
   case Failed(value: Observation)
 
-  def observation: Observation = this match
-    case Succeeded(value) => value
-    case Failed(value)    => value
+  def observation: Observation =
+    this match
+      case Succeeded(value) => value
+      case Failed(value)    => value
 
-  def isError: Boolean = this match
-    case Succeeded(_) => false
-    case Failed(_)    => true
+  def isError: Boolean =
+    this match
+      case Succeeded(_) => false
+      case Failed(_)    => true
 
 /** Evaluates actions expressed in some agent language.
   *

@@ -24,8 +24,7 @@ import scala.collection.mutable
 final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
 
   private val outputNames: Set[String]               = outputFields.map(_.name).toSet
-  private val singleFieldFallback: Option[FieldSpec] =
-    Option.when(outputFields.size == 1)(outputFields.head)
+  private val singleFieldFallback: Option[FieldSpec] = Option.when(outputFields.size == 1)(outputFields.head)
 
   // Longest possible marker — the completed sentinel or any output-field
   // marker (`[[ ## name ## ]]`); we hold back that many trailing chars on
@@ -56,12 +55,10 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
         case Some(MarkerHit(field, markerStart, markerEnd)) =>
           // Emit any content preceding the marker to the current field
           // (closing it).
-          val precedingContent =
-            stripFramingNewlines(buffer.substring(0, markerStart))
+          val precedingContent = stripFramingNewlines(buffer.substring(0, markerStart))
           effectiveActiveField match
-            case Some(name) if precedingContent.nonEmpty =>
-              out += FieldChunk(name, precedingContent, isLast = true)
-            case _ => ()
+            case Some(name) if precedingContent.nonEmpty => out += FieldChunk(name, precedingContent, isLast = true)
+            case _                                       => ()
           buffer.delete(0, markerEnd)
           sawAnyMarker = true
           // Skip the trailing newline that follows the marker, if present,

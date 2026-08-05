@@ -66,14 +66,14 @@ import scala.util.control.NonFatal
   *   full launch command override (replaces the computed `deno run --allow-… runner.js`)
   */
 final class DenoPyodideInterpreter(
-    tools: Vector[SandboxTool] = Vector.empty,
-    outputFields: Vector[DenoPyodideInterpreter.OutputField] = Vector.empty,
-    enableReadPaths: Vector[String] = Vector.empty,
-    enableWritePaths: Vector[String] = Vector.empty,
-    enableEnvVars: Vector[String] = Vector.empty,
-    enableNetworkAccess: Vector[String] = Vector.empty,
-    syncFiles: Boolean = true,
-    denoCommand: Option[Vector[String]] = None
+    tools              : Vector[SandboxTool]                        = Vector.empty,
+    outputFields       : Vector[DenoPyodideInterpreter.OutputField] = Vector.empty,
+    enableReadPaths    : Vector[String]                             = Vector.empty,
+    enableWritePaths   : Vector[String]                             = Vector.empty,
+    enableEnvVars      : Vector[String]                             = Vector.empty,
+    enableNetworkAccess: Vector[String]                             = Vector.empty,
+    syncFiles          : Boolean                                    = true,
+    denoCommand        : Option[Vector[String]]                     = None
 ) extends ReplCodeInterpreter:
   import DenoPyodideLaunch.canonical
   import DenoPyodideProtocol.*
@@ -110,7 +110,8 @@ final class DenoPyodideInterpreter(
       catch case NonFatal(_) => ()
     }
     process.foreach { p =>
-      if !p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) then { val _ = p.destroyForcibly() }
+      if !p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) then
+        val _ = p.destroyForcibly()
     }
     process = None
     stdin = None
@@ -169,7 +170,8 @@ final class DenoPyodideInterpreter(
     if missing && !enableWritePaths.contains(path) then
       Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Cannot mount non-existent file: $path"))
     else
-      if missing then { val _ = Files.createFile(Paths.get(path)) }
+      if missing then
+        val _ = Files.createFile(Paths.get(path))
       val params = DynamicValues.record(
         "host_path"    := canonical(path),
         "virtual_path" := s"/sandbox/${Paths.get(path).getFileName}"
@@ -227,19 +229,15 @@ final class DenoPyodideInterpreter(
     while skipped <= MaxSkippedLines do
       readLine() match
         case Left(err)   => return Left(err)
-        case Right(line) =>
-          decodeJson(line) match
+        case Right(line) => decodeJson(line) match
             case None                           => skipped += 1
-            case Some(msg: DynamicValue.Record) =>
-              field(msg, "method").flatMap(asString) match
-                case Some("tool_call") =>
-                  handleToolCall(msg) match
+            case Some(msg: DynamicValue.Record) => field(msg, "method").flatMap(asString) match
+                case Some("tool_call") => handleToolCall(msg) match
                     case Left(err) => return Left(err)
                     case Right(()) => ()
                 case Some(other) =>
                   return Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Unexpected sandbox request: $other"))
-                case None =>
-                  field(msg, "result") match
+                case None => field(msg, "result") match
                     case Some(result: DynamicValue.Record) =>
                       if field(msg, "id").flatMap(asLong).contains(expectedId.toLong) then
                         field(result, "final") match
@@ -248,8 +246,7 @@ final class DenoPyodideInterpreter(
                             val out = field(result, "output").flatMap(asString).getOrElse("")
                             return Right(ExecuteOutcome.Output(out))
                       else return Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Response id mismatch"))
-                    case _ =>
-                      field(msg, "error") match
+                    case _ => field(msg, "error") match
                         case Some(error: DynamicValue.Record) =>
                           // App-level errors (code -32000..-32099) are USER-CODE errors: the message/args carry
                           // the Python exception. Unsolicited errors (id null) are treated the same way.
@@ -261,8 +258,7 @@ final class DenoPyodideInterpreter(
                           return Right(
                             ExecuteOutcome.UserError(s"$errType: ${args.orElse(message).getOrElse("Unknown error")}")
                           )
-                        case _ =>
-                          return Left(RuntimeError(
+                        case _ => return Left(RuntimeError(
                             CodeInterpreterErrors.Interpreter,
                             s"Unexpected sandbox message: ${line.take(200)}"
                           ))
@@ -286,7 +282,7 @@ final class DenoPyodideInterpreter(
         // invocation as a ToolStart/ToolEnd scope. handleToolCall runs on the thread that called `execute`,
         // so the events land on (and nest under) the caller's scope.
         CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs)) match
-          case Left(err) => encodeError(callId, ToolErrorCode, err.message)
+          case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
           case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
             encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
           case Right(other) =>
@@ -316,15 +312,13 @@ final class DenoPyodideInterpreter(
     while skipped <= MaxSkippedLines do
       readLine() match
         case Left(err)   => return Left(err)
-        case Right(line) =>
-          decodeJson(line) match
+        case Right(line) => decodeJson(line) match
             case Some(msg: DynamicValue.Record) if field(msg, "id").flatMap(asLong).contains(id.toLong) =>
               field(msg, "error") match
                 case Some(error: DynamicValue.Record) =>
                   val message = field(error, "message").flatMap(asString).getOrElse("Unknown error")
                   return Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Sandbox '$method' failed: $message"))
-                case _ =>
-                  return Right(field(
+                case _ => return Right(field(
                     msg,
                     "result"
                   ).collect { case r: DynamicValue.Record => r }.getOrElse(DynamicValue.Record.empty))
@@ -350,8 +344,9 @@ final class DenoPyodideInterpreter(
     stdout match
       case None    => Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Sandbox process is not running"))
       case Some(r) =>
-        val line = try r.readLine()
-        catch case NonFatal(_) => null
+        val line =
+          try r.readLine()
+          catch case NonFatal(_) => null
         if line != null then Right(line)
         else
           val exited = process.exists(p => !p.isAlive)
@@ -366,7 +361,9 @@ final class DenoPyodideInterpreter(
       case None    => ""
       case Some(r) =>
         val sb = new StringBuilder
-        try while r.ready() do { val _ = sb.append(r.readLine()).append('\n') }
+        try
+          while r.ready() do
+            val _ = sb.append(r.readLine()).append('\n')
         catch case NonFatal(_) => ()
         sb.toString
 

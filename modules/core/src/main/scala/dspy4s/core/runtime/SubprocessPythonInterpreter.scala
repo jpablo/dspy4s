@@ -36,7 +36,7 @@ import scala.util.control.NonFatal
   */
 final class SubprocessPythonInterpreter(
     pythonCommand: String = "python3",
-    timeoutMillis: Long = 30_000L
+    timeoutMillis: Long   = 30_000L
 ) extends CodeInterpreter:
 
   @volatile private var closed = false
@@ -60,7 +60,8 @@ final class SubprocessPythonInterpreter(
 
         val finishedInTime =
           if timeoutMillis > 0 then process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
-          else { process.waitFor(); true }
+          else
+            process.waitFor(); true
 
         if !finishedInTime then
           process.destroyForcibly()
@@ -79,13 +80,11 @@ final class SubprocessPythonInterpreter(
             exitCode = process.exitValue()
           ))
       catch
-        case e: IOException =>
-          Left(RuntimeError(
+        case e: IOException => Left(RuntimeError(
             "interpreter",
             s"Failed to spawn '$pythonCommand': ${e.getMessage}. Is Python installed and on PATH?"
           ))
-        case NonFatal(other) =>
-          Left(RuntimeError(
+        case NonFatal(other) => Left(RuntimeError(
             CodeInterpreterErrors.Interpreter,
             Option(other.getMessage).getOrElse(other.getClass.getSimpleName)
           ))
@@ -98,7 +97,7 @@ final class SubprocessPythonInterpreter(
     */
   private def drainTo(in: java.io.InputStream, out: ByteArrayOutputStream, name: String): Thread =
     val thread = new Thread(
-      () => {
+      () =>
         val buf = new Array[Byte](4096)
         try
           var n = in.read(buf)
@@ -108,8 +107,10 @@ final class SubprocessPythonInterpreter(
         catch case NonFatal(_) => ()
         finally
           try in.close()
-          catch case NonFatal(_) => ()
-      },
+          catch
+            case NonFatal(_) =>
+              ()
+      ,
       name
     )
     thread.setDaemon(true)

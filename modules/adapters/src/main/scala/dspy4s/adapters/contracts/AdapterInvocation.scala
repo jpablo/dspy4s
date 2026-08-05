@@ -11,10 +11,10 @@ import dspy4s.lm.contracts.LmRequest
   * provider options; other adapters ignore it.
   */
 final case class AdapterInvocation(
-    layout: SignatureLayout,
-    demos: Vector[Example],
-    inputs: Example,
-    request: LmRequest,
+    layout          : SignatureLayout,
+    demos           : Vector[Example],
+    inputs          : Example,
+    request         : LmRequest,
     outputJsonSchema: Option[String] = None,
     /** Tool definitions (pure [[ToolSpec]] data — name / description / parameter schema, no invoke closures) the caller
       * makes available to the model. An adapter with native function-calling enabled renders these into the provider
