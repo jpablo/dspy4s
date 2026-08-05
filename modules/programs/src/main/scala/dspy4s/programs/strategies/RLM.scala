@@ -2,37 +2,27 @@ package dspy4s.programs.strategies
 
 import dspy4s.programs.{IterationLimit, LlmCallLimit, OutputCharLimit}
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.ThreadCount
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.updated
 import dspy4s.core.runtime.DenoPyodideInterpreter
 import dspy4s.lm.contracts.LanguageModel
-import dspy4s.lm.contracts.LmRequest
-import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.AgentLoop
-import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.runtime.SandboxToolBridge
 import dspy4s.typed.{Prediction, Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
-
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicInteger
 
 /** RLM — Recursive Language Model (a port of `dspy.RLM`, upstream-`@experimental`; PORT_GAPS G-20 part 2).
   *
@@ -439,29 +429,7 @@ object RLM:
       finalOutputNames: String,
       maxLlmCalls: LlmCallLimit
   ): String =
-    s"""You are tasked with producing the following outputs given the inputs $inputs:
-       |$outputFields
-       |
-       |You have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.
-       |
-       |Available:
-       |- Variables: $inputs (your input data)
-       |- `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis
-       |- `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)
-       |- `print()` - ALWAYS print to see results
-       |- `SUBMIT($finalOutputNames)` - submit final output when done
-       |- Standard libraries: re, json, collections, math, etc.
-       |
-       |IMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.
-       |
-       |1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.
-       |2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.
-       |3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.
-       |4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.
-       |5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.
-       |6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.
-       |
-       |You have max $maxLlmCalls sub-LLM calls. When done, call SUBMIT() with your output.""".stripMargin
+    RLMReplProtocol.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls)
 
   // ── REPL prompt types (upstream repl_types.py) ──────────────────────────────────────────────────────────────
 
@@ -510,26 +478,16 @@ object RLM:
 
   /** Upstream `REPLHistory.format`. */
   private[programs] def renderHistory(entries: Vector[ReplEntry], maxOutputChars: OutputCharLimit): String =
-    if entries.isEmpty then "You have not interacted with the REPL environment yet."
-    else entries.zipWithIndex.map { case (entry, i) => entry.format(i, maxOutputChars) }.mkString("\n")
+    RLMReplProtocol.renderHistory(entries, maxOutputChars)
 
   /** Upstream `REPLEntry.format_output`: head+tail truncation with the true length in the header. */
   private[programs] def formatOutputBlock(output: String, maxOutputChars: OutputCharLimit): String =
-    val rawLen = output.length
-    val body   =
-      if rawLen > maxOutputChars then
-        val half    = maxOutputChars / 2
-        val omitted = rawLen - maxOutputChars
-        output.take(half) + s"\n\n... (${groupDigits(omitted)} characters omitted) ...\n\n" + output.takeRight(half)
-      else output
-    s"Output (${groupDigits(rawLen)} chars):\n$body"
+    RLMReplProtocol.formatOutputBlock(output, maxOutputChars)
 
   private[programs] def formatOutput(output: String): String =
-    if output.isEmpty then "(no output - did you forget to print?)" else output
+    RLMReplProtocol.formatOutput(output)
 
   // ── SUBMIT payload + code-fence handling ────────────────────────────────────────────────────────────────────
-
-  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Parse a SUBMIT payload (the interpreter's `finalOutput` JSON) and verify every output field is present. Returns
     * the upstream-style `[Error] …` message on a problem.
@@ -538,47 +496,13 @@ object RLM:
       finalJson: String,
       outputFieldNames: Vector[String]
   ): Either[String, DynamicValue.Record] =
-    dynamicJsonCodec.decode(finalJson.getBytes(StandardCharsets.UTF_8)) match
-      case Right(record: DynamicValue.Record) =>
-        val present = DynamicValues.recordKeys(record).toSet
-        val missing = outputFieldNames.filterNot(present.contains)
-        if missing.isEmpty then Right(record)
-        else
-          Left(
-            s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})"
-          )
-      case _ =>
-        Left(
-          s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
-        )
+    RLMReplProtocol.parseSubmitted(finalJson, outputFieldNames)
 
   /** Upstream `_strip_code_fences`: strip decorative outer fences, accept ```python/```py/bare fences, REJECT an
     * explicit non-Python language tag (the error becomes an `[Error]` observation).
     */
   private[programs] def stripCodeFences(raw: String): Either[String, String] =
-    var code = raw.trim
-    if !code.contains("```") then Right(code)
-    else
-      // Strip outer decorative fence pairs (e.g. ```\n```python\n...\n```\n```).
-      var lines = code.linesIterator.toVector
-      while lines.size >= 2 && lines.head.trim == "```" && lines.last.trim == "```" do
-        lines = lines.drop(1).dropRight(1)
-      code = lines.mkString("\n").trim
-      if !code.contains("```") then Right(code)
-      else
-        val fenceStart = code.indexOf("```")
-        val afterFence = code.drop(fenceStart + 3)
-        val newline    = afterFence.indexOf('\n')
-        if newline < 0 then Right(code)
-        else
-          val langLine = afterFence.take(newline).trim
-          val lang     = if langLine.isEmpty then "" else langLine.split("\\s+", 2)(0).toLowerCase
-          if !Set("python", "py", "python3", "py3", "").contains(lang) then
-            Left(s"Expected Python code but got ```$lang fence. Write Python code, not $lang.")
-          else
-            val remainder = afterFence.drop(newline + 1)
-            val blockEnd  = remainder.indexOf("```")
-            if blockEnd < 0 then Right(remainder.trim) else Right(remainder.take(blockEnd).trim)
+    RLMReplProtocol.stripCodeFences(raw)
 
   // ── Built-in llm_query tools ────────────────────────────────────────────────────────────────────────────────
 
@@ -591,103 +515,20 @@ object RLM:
       subLm: Option[LanguageModel],
       ctx: RuntimeContext
   ): Vector[SandboxTool] =
-    val counter = new AtomicInteger(0)
-
-    def checkAndIncrement(n: Int): Either[DspyError, Unit] =
-      if counter.get() + n > maxLlmCalls then
-        Left(RuntimeError(
-          "rlm",
-          s"LLM call limit exceeded: ${counter.get()} + $n > $maxLlmCalls. " +
-            "Use Python code for aggregation instead of making more LLM calls."
-        ))
-      else
-        val _ = counter.addAndGet(n)
-        Right(())
-
-    def queryLm(prompt: String): Either[DspyError, String] =
-      val lm = subLm.orElse(ctx.lm.collect { case m: LanguageModel => m })
-      lm match
-        case None        => Left(RuntimeError("rlm", "No LM configured. Configure an ambient LM or pass subLm to RLM."))
-        case Some(model) =>
-          model
-            .call(LmRequest(
-              model = model.id,
-              messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
-            ))(using ctx)
-            .map(_.outputs.headOption.map(_.text).getOrElse(""))
-
-    val llmQuery = SandboxTool(
-      name = "llm_query",
-      parameters = Vector(SandboxTool.Param("prompt", Some("str"))),
-      invoke = kwargs =>
-        val prompt = DynamicValues.recordGet(kwargs, "prompt").map(DynamicValues.renderText).getOrElse("")
-        if prompt.isEmpty then Left(RuntimeError("rlm", "prompt cannot be empty"))
-        else
-          for
-            _      <- checkAndIncrement(1)
-            answer <- queryLm(prompt)
-          yield DynamicValues.fromAny(answer)
-    )
-
-    val llmQueryBatched = SandboxTool(
-      name = "llm_query_batched",
-      parameters = Vector(SandboxTool.Param("prompts", Some("list"))),
-      invoke = kwargs =>
-        val prompts = DynamicValues.recordGet(kwargs, "prompts") match
-          case Some(seq: DynamicValue.Sequence) => seq.elements.iterator.map(DynamicValues.renderText).toVector
-          case _                                => Vector.empty
-        if prompts.isEmpty then Right(DynamicValues.fromAny(List.empty[String]))
-        else
-          checkAndIncrement(prompts.size).flatMap { _ =>
-            // Concurrent, as the tool's own instruction promises the model ("much faster") — upstream uses an
-            // 8-worker thread pool. Per-prompt failures become [ERROR] items, like upstream.
-            val executor = ParallelExecutor(
-              numThreads = ThreadCount.applyUnsafe(math.min(8, prompts.size)),
-              maxErrors = ErrorLimit.applyUnsafe(prompts.size)
-            )
-            executor
-              .execute(
-                task = (p: String) => queryLm(p).fold(err => s"[ERROR] ${err.message}", identity),
-                data = prompts
-              )(using ctx)
-              .map { outcome =>
-                val answers = prompts.indices.map { i =>
-                  outcome.results(i).getOrElse(
-                    s"[ERROR] ${outcome.errors.get(i).map(_.message).getOrElse("prompt was not executed")}"
-                  )
-                }
-                DynamicValues.fromAny(answers.toList)
-              }
-          }
-    )
-
-    Vector(llmQuery, llmQueryBatched)
+    RLMSandboxTools.build(maxLlmCalls, subLm, ctx)
 
   // ── Rendering helpers ───────────────────────────────────────────────────────────────────────────────────────
 
   /** Python-style type name for the variable metadata (upstream `type(value).__name__`). */
-  private[programs] def pythonTypeName(value: DynamicValue): String = value match
-    case DynamicValue.Primitive(p) =>
-      p match
-        case _: PrimitiveValue.String  => "str"
-        case _: PrimitiveValue.Boolean => "bool"
-        case _: PrimitiveValue.Int | _: PrimitiveValue.Long | _: PrimitiveValue.Short | _: PrimitiveValue.Byte |
-            _: PrimitiveValue.BigInt => "int"
-        case _: PrimitiveValue.Double | _: PrimitiveValue.Float | _: PrimitiveValue.BigDecimal => "float"
-        case _                                                                                 => "str"
-    case _: DynamicValue.Sequence  => "list"
-    case _: DynamicValue.Record    => "dict"
-    case _: DynamicValue.Map       => "dict"
-    case _: DynamicValue.Null.type => "NoneType"
-    case _                         => "str"
+  private[programs] def pythonTypeName(value: DynamicValue): String =
+    RLMReplProtocol.pythonTypeName(value)
 
   /** Render a variable's value for length/preview: primitives as text, records/sequences as JSON (upstream
     * pretty-prints with indent=2; ours is compact — metadata-only delta).
     */
-  private def renderValue(value: DynamicValue): String = value match
-    case DynamicValue.Primitive(_) => DynamicValues.renderText(value)
-    case _                         => new String(dynamicJsonCodec.encode(value), StandardCharsets.UTF_8)
+  private def renderValue(value: DynamicValue): String =
+    RLMReplProtocol.renderValue(value)
 
   /** Digit grouping like Python's `{:,}` (locale-independent). */
   private def groupDigits(n: Int): String =
-    String.format(java.util.Locale.US, "%,d", n)
+    RLMReplProtocol.groupDigits(n)
