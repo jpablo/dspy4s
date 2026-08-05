@@ -25,7 +25,7 @@ Every optimizer-addressable leaf exposes the same writable `OptimizableParameter
 | `demos: Vector[Example]` | Few-shot examples rendered by the adapter. |
 | `config: DynamicValue.Record` | Module-level LM option defaults; per-call options still win. |
 
-This contract is shared by typed `Predict`, typed `ChainOfThought`, and
+This contract is shared by `Predict`, `ChainOfThought`, and
 `DynamicPredict`. Framework composites expose the same parameters for each stable
 leaf—for example, `ProgramOfThought` exposes its generator, regenerator, and
 answerer. The executable predictor is not used as a parameter carrier.

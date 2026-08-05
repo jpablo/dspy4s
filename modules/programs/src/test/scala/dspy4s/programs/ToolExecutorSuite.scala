@@ -8,11 +8,11 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import munit.FunSuite
 
 object ToolExecutorSuite:
-  /** A plain typed method, the dspy4s analogue of Python's `def get_weather(city: str) -> str`. */
+  /** A plain method, the dspy4s analogue of Python's `def get_weather(city: str) -> str`. */
   @description("Get the current weather for a city.")
   def getWeather(city: String): String = s"The weather in $city is sunny and 75°F"
 
-  /** Two typed params, one numeric — exercises arg-schema reporting and LM-shaped coercion ("3" → Int). */
+  /** Two parameters, one numeric — exercises arg-schema reporting and LM-shaped coercion ("3" → Int). */
   @description("Repeat a phrase N times.")
   def repeat(phrase: String, times: Int): String = Vector.fill(times)(phrase).mkString(" ")
 
@@ -22,11 +22,11 @@ class ToolExecutorSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  /** The point of typing tool args/results as `DynamicValue` rather than `Map[String, Any]`/`Any`: a typed primitive
+  /** The point of representing tool args/results as `DynamicValue` rather than `Map[String, Any]`/`Any`: a primitive
     * arrives at the tool with its type intact (an Int stays an Int, not collapsed to a String through an Any
     * round-trip), and a structured result flows back through `ToolCallResult` verbatim — no `fromAny` re-guessing.
     */
-  test("tool args arrive as a typed Record and a structured result returns verbatim") {
+  test("tool args arrive as a Record and a structured result returns verbatim") {
     val doubler = new ToolFunction:
       override val name: String                                                                             = "doubler"
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =

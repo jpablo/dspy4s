@@ -46,7 +46,7 @@ final case class OpenAiEmbedder(
       else DynamicJson.decode(response.body).flatMap(parseRows(_, expected = batch.size))
     }
 
-  /** Map a non-2xx like the chat client: HTTP 400 with a context-window marker becomes the typed error. */
+  /** Map a non-2xx like the chat client: HTTP 400 with a context-window marker becomes a structured error. */
   private def statusError(status: Int, body: String): DspyError =
     if status == 400 && OpenAiClient.isContextWindowError(body) then
       ContextWindowExceededError(model = Some(model))

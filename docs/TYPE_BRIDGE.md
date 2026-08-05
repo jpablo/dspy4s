@@ -117,7 +117,7 @@ It's not "primitives only" — it's "**there must be a `FieldCodec[A]` or `zio.b
 | Literal-union types (`"a" \| "b"`) | Not yet — use an enum instead | no |
 | Function types, opaque types without a codec, anything that can't round-trip through `DynamicValue` | Write a custom `FieldCodec` | no, until you write one |
 
-The escape hatch for unsupported types: define `given FieldCodec[YourType] = ...` and the typed surface picks
+The escape hatch for unsupported types: define `given FieldCodec[YourType] = ...` and the `Signature` API picks
 it up.
 
 ## A concrete walkthrough
@@ -219,7 +219,7 @@ A few wrinkles that don't have direct equivalents in JSON / SQL:
 
 2. **The other side is non-deterministic.** A SQL driver returning the wrong type for a column is a bug. An LM
    returning `"true!"` when you asked for a bool is a Tuesday. So dspy4s has to do **post-hoc coercive parsing**
-   ([[RawPrediction.asBoolean]], `FieldCodec` decoders that accept either the typed value or the string
+   ([[RawPrediction.asBoolean]], `FieldCodec` decoders that accept either the value or the string
    form) that JSON / SQL libraries don't bother with.
 
 3. **Allowed-values enforcement is hint-only.** For a Scala enum field you'd send `enum.cases = "joy,sadness"`
@@ -252,7 +252,7 @@ Now `OutputField[UserId]` works in a trait spec or builder, and the LM sees a pl
 ## Where to look next
 
 - [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) — the user-facing guide to defining signatures.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — how the typed and dynamic layers fit together at the module level.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how the domain-valued and record-valued layers fit together at the module level.
 - `modules/signatures/src/main/scala/dspy4s/signatures/Shape.scala` — the three `Shape` implementations
   (`KyoProductShape`, `TupleShape`, `MapShape`).
 - `modules/signatures/src/main/scala/dspy4s/signatures/FieldCodec.scala` — the codec typeclass, the `FlatEnum` helper, and

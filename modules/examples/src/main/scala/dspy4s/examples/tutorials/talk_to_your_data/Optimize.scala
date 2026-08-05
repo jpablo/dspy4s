@@ -1,7 +1,7 @@
 /** Talk to Your Data: GEPA optimization of the planner.
   *
-  * The planner's job (English question -> typed [[QueryPlan]]) is the prompt-sensitive part: the types pin the SHAPE of
-  * a plan, but not how to map "which region sold the most?" onto group-by + sort + top-1 + a category answer. GEPA
+  * The planner's job (English question -> [[QueryPlan]]) is the prompt-sensitive part: the types pin the SHAPE of a
+  * plan, but not how to map "which region sold the most?" onto group-by + sort + top-1 + a category answer. GEPA
   * evolves the planner's INSTRUCTION to get that mapping right.
   *
   * The metric is computed in code rather than judged by an LLM: run the planner's QueryPlan through the Scala

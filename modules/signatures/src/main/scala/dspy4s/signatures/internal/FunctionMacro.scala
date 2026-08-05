@@ -266,10 +266,10 @@ private[signatures] object FunctionMacro:
                 case None => scalarOutputExpr(returnType)
         else scalarOutputExpr(returnType)
 
-  /** Implementation of the typed `Signature.fromString("a -> b")`. The DSL string must be a compile-time literal; it is
-    * parsed at compile time (reusing the runtime `SignatureLayout.parse`) and each field becomes a named-tuple element
-    * — untyped fields default to `String`; `int` / `float` / `bool` map to the matching scalar. An invalid DSL string,
-    * or a field type the typed surface doesn't support, is a compile error.
+  /** Implementation of `Signature.fromString("a -> b")`. The DSL string must be a compile-time literal; it is parsed at
+    * compile time (reusing the runtime `SignatureLayout.parse`) and each field becomes a named-tuple element — fields
+    * without an annotation default to `String`; `int` / `float` / `bool` map to the matching scalar. An invalid DSL
+    * string, or a field type the `Signature` API doesn't support, is a compile error.
     */
   def fromStringImpl(dsl: Expr[String], instructions: Expr[String])(using Quotes): Expr[Any] =
     import quotes.reflect.*
@@ -292,7 +292,7 @@ private[signatures] object FunctionMacro:
         case "double" => TypeRepr.of[Double]
         case "bool"   => TypeRepr.of[Boolean]
         case other    => report.errorAndAbort(
-            s"Signature.fromString: field '${field.name}' has type '$other', which the typed string DSL does " +
+            s"Signature.fromString: field '${field.name}' has type '$other', which the string DSL does " +
               "not support (supported: str, int, float, bool). For richer field types use Signature.of[Spec], a " +
               "case class, or Signature.fromStringDynamic."
           )

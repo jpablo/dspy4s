@@ -9,7 +9,7 @@ This example walks the full optimize-then-reuse cycle: build a `question -> answ
 ```
 
 The example uses a single dynamic `question -> answer` predictor for brevity. Optimizers and `ProgramPersistence`
-are generic over any program with `OptimizableTraversal` evidence, including typed `Predict` and `ChainOfThought` programs.
+are generic over any program with `OptimizableTraversal` evidence, including `Predict` and `ChainOfThought` programs.
 
 ## Compile it
 

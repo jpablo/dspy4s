@@ -20,16 +20,16 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 1. Core type system and signatures
 - String signature DSL (`"q -> a"`) via `Signature.fromString` / `SignatureLayout.parse`
 - Programmatic / class-like signature construction (`SignatureBuilder`, `SignatureLayout.create`)
-- **Typed signatures layer** (`dspy4s.signatures.Signature[I, O]` with case-class
+- **signatures layer** (`dspy4s.signatures.Signature[I, O]` with case-class
   derivation, function-type macro, trait-spec macro, builder, and string
   DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md))
 - Input/Output field metadata (`description`, `prefix`, constraints, defaults)
 - Signature mutation APIs (`append`, `prepend`, `insert`, `delete`,
   `withInstructions`, `withUpdatedField*`) — now `private[dspy4s]` so
-  composite programs use them while user code stays on the typed surface
+  composite programs use them while user code stays on the `Signature` API
 
 2. Core primitives and runtime
-- `Example`, `RawPrediction` (erased) / `Prediction[O]` (typed),
+- `Example`, `RawPrediction` (erased) / `Prediction[O]` (domain-valued),
   `Completions`
 - `Module[I, O]` trait: semantic `I`/`O`, with `ProgramCall[I]` and `Prediction[O]` as the execution envelopes.
   (No nested parameter/predictor traversal — that's the
@@ -49,9 +49,9 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 - Tool-calling bridge (`ToolFunction`, `ToolCallRequest` / `ToolCallResult`)
 
 4. Program modules
-- `Predict[I, O]` (typed) and `DynamicPredict` (erased), backed by a
+- `Predict[I, O]` (domain-valued) and `DynamicPredict` (erased), backed by a
   shared `PredictEngine`
-- `ChainOfThought` (typed)
+- `ChainOfThought`
 - `ReAct`, `Parallel`, `BestOfN`, `Refine`, `Aggregation.majority`
 - `MultiChainComparison`, `ProgramOfThought`, `CodeAct` (scaffolded — see
   PORT_MAP §2a for interpreter parity caveats)

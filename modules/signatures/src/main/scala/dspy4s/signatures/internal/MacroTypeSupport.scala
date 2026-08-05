@@ -2,7 +2,7 @@ package dspy4s.signatures.internal
 
 import scala.quoted.*
 
-/** Quote-dependent tuple construction and inspection shared by the typed signature macros. */
+/** Quote-dependent tuple construction and inspection shared by the signature macros. */
 private[signatures] object MacroTypeSupport:
 
   private def sameSymbol(using

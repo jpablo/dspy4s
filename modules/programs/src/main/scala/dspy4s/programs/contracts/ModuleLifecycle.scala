@@ -49,14 +49,14 @@ object ModuleLifecycle:
   val dynamic: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     observed(_.input, _.traceEnabled, _.raw.values)
 
-  /** Standard typed observation, with module-specific input encoding and the shared typed prediction projection. */
+  /** Standard observation, with module-specific input encoding and the shared prediction projection. */
   def typed[I, O](inputs: ProgramCall[I] => DynamicValue.Record): ModuleLifecycle[I, O] =
     observed(inputs, _.traceEnabled, _.raw.values)
 
-  /** Signature-backed typed observation. */
+  /** Signature-backed observation. */
   def typed[I, O](shape: Shape[I]): ModuleLifecycle[I, O] =
     typed(call => call.encodedInput(shape))
 
-  /** Typed observation for an outer wrapper that has no authoritative shape for encoding its input. */
+  /** Observation for an outer wrapper that has no authoritative shape for encoding its input. */
   def typedWithoutInputs[I, O]: ModuleLifecycle[I, O] =
     typed(_ => DynamicValue.Record.empty)

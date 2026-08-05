@@ -1,6 +1,6 @@
 # Text-based AI game module
 
-This example builds the core of a text adventure: three typed signatures for scene generation, NPC dialogue, and action resolution, composed into a single `GameAI` class that returns typed results.
+This example builds the core of a text adventure: three signatures for scene generation, NPC dialogue, and action resolution, composed into a single `GameAI` class.
 
 ## Signatures
 
@@ -8,7 +8,7 @@ This example builds the core of a text adventure: three typed signatures for sce
 --8<-- "tutorials/ai_text_game/AiTextGame.scala:signatures"
 ```
 
-A `Spec` trait declares the inputs and outputs of a generation step. Fields are typed: `InputField[String]`, `OutputField[Int]`, `OutputField[List[String]]`, and `OutputField[Map[String, Int]]` all map to the corresponding Scala types, so the output structure is known at compile time. The example defines three such traits: `StoryGenerator`, `DialogueGenerator`, and `ActionResolver`.
+A `Spec` trait declares the inputs and outputs of a generation step. `InputField[String]`, `OutputField[Int]`, `OutputField[List[String]]`, and `OutputField[Map[String, Int]]` all map to the corresponding Scala types, so the output structure is known at compile time. The example defines three such traits: `StoryGenerator`, `DialogueGenerator`, and `ActionResolver`.
 
 ## Composing the module
 
@@ -18,7 +18,7 @@ A `Spec` trait declares the inputs and outputs of a generation step. Fields are 
 
 `GameAI` holds one `ChainOfThought` predictor per signature, each built from `Signature.of[T]`. The class threads the predictors' outputs into its own methods rather than extending a base module type.
 
-## Typed results
+## Results
 
 ```scala
 --8<-- "tutorials/ai_text_game/AiTextGame.scala:generate-scene"
@@ -34,6 +34,6 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.ai_text_ga
 
 ## Notes
 
-This page covers the typed signatures and the `GameAI` module that composes them. The surrounding game plumbing is out of scope: the `Player` and `GameContext` save/load JSON, and the console rendering, menus, character creation, and input game loop. Minimal `Player` and `GameContext` carriers are kept so the formatted-string inputs match what the signatures expect. Drive `GameAI` from your own loop, threading the returned `Scene`, `Dialogue`, and `ActionOutcome` values back into state.
+This page covers the signatures and the `GameAI` module that composes them. The surrounding game plumbing is out of scope: the `Player` and `GameContext` save/load JSON, and the console rendering, menus, character creation, and input game loop. Minimal `Player` and `GameContext` carriers are kept so the formatted-string inputs match what the signatures expect. Drive `GameAI` from your own loop, threading the returned `Scene`, `Dialogue`, and `ActionOutcome` values back into state.
 
 Full source: [AiTextGame.scala](https://github.com/jpablo/dspy4s/blob/main/modules/examples/src/main/scala/dspy4s/examples/tutorials/ai_text_game/AiTextGame.scala)

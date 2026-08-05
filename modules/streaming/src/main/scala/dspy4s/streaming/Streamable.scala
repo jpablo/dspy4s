@@ -15,13 +15,13 @@ import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 
 /** What [[Streamify]] needs of a program in order to stream it, captured as a typeclass so that both dynamic
-  * `Module[DynamicValue.Record, DynamicValue.Record]` values and statically typed `Module[I, O]` values can be streamed
-  * through the same entry point. `Streamify` requires exactly two things of a program:
+  * `Module[DynamicValue.Record, DynamicValue.Record]` values and `Module[I, O]` values with statically known I/O can be
+  * streamed through the same entry point. `Streamify` requires exactly two things of a program:
   *
   *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction` for the
   *      final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
   *      `StreamingLanguageModel` consulting `ActivePredictContext`, which each `PredictEngine` execution scopes for
-  *      both typed and dynamic prediction modules — independent of how the outer program is invoked. 2.
+  *      both `Predict` and `DynamicPredict` modules — independent of how the outer program is invoked. 2.
   *      [[knownSignatures]] — best-effort `(predictName, signature)` pairs used *only* for stream-listener validation
   *      (warnings). An opaque program returns empty and validation is skipped.
   */
@@ -49,7 +49,7 @@ object Streamable:
         case _                 => Vector.empty
     }
 
-  /** A typed `Predict` has one engine-visible signature. */
+  /** A `Predict` has one engine-visible signature. */
   given predict[I, O](using ProgramRunner[Predict[I, O]]): Streamable[Predict[I, O]] =
     from(program => Vector(program.moduleName -> program.signature.layout))
 
@@ -60,8 +60,8 @@ object Streamable:
       Vector("predict" -> layout)
     }
 
-  /** Typed `ReAct`: decode the record into the typed input, run it, and emit the raw prediction. Its two sub-predicts
-    * (the per-step react predict and the final extractor) are the stream-listener targets.
+  /** `ReAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the per-step
+    * react predict and the final extractor) are the stream-listener targets.
     */
   given reAct[I, O](using ProgramRunner[ReAct[I, O]]): Streamable[ReAct[I, O]] =
     from { program =>
@@ -73,8 +73,8 @@ object Streamable:
       )
     }
 
-  /** Typed `CodeAct`: decode the record into the typed input, run it, and emit the raw prediction. Its two sub-predicts
-    * (the per-iteration code generator and the final extractor) are the stream-listener targets.
+  /** `CodeAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the
+    * per-iteration code generator and the final extractor) are the stream-listener targets.
     */
   given codeAct[I, O](using ProgramRunner[CodeAct[I, O]]): Streamable[CodeAct[I, O]] =
     from { program =>
@@ -86,8 +86,8 @@ object Streamable:
       )
     }
 
-  /** Typed `ProgramOfThought`: decode the record into the typed input, run it, and emit the raw prediction. Its three
-    * stable inner predictors are the stream-listener targets.
+  /** `ProgramOfThought`: decode the record into the input, run it, and emit the raw prediction. Its three stable inner
+    * predictors are the stream-listener targets.
     */
   given programOfThought[I, O](using ProgramRunner[ProgramOfThought[I, O]]): Streamable[ProgramOfThought[I, O]] =
     from { program =>

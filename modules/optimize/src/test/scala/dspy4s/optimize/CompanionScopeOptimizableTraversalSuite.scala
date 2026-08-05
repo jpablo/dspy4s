@@ -10,13 +10,13 @@ import munit.FunSuite
 import CompanionScopeOptimizableTraversalSuite.Agent
 
 /** Regression for the HIGH-severity scope bug: the leaf `OptimizableLeaf[Predict]` / `OptimizableLeaf[ChainOfThought]`
-  * instances (and the hand-written `OptimizableTraversal` instances for the composite typed programs) USED to live in a
+  * instances (and the hand-written `OptimizableTraversal` instances for the composite programs) USED to live in a
   * non-companion `object ProgramPredictors`, so they were only in implicit scope after an explicit
   * `import ProgramPredictors.given`.
   *
   * This suite DELIBERATELY does NOT import them: it only exercises companion-scope resolution. On the old code a user
   * composite `case class Agent(...)` with `given OptimizableTraversal[Agent] = OptimizableTraversal.derived` and no
-  * such import would resolve each typed-program field to ZERO predictors. With the instances moved to the typeclass
+  * such import would resolve each program field to ZERO predictors. With the instances moved to the typeclass
   * companions it is 2; the strict derivation boundary now also makes a future omission fail compilation instead of
   * silently falling back to `OptimizableTraversal.empty`.
   */
@@ -28,14 +28,14 @@ class CompanionScopeOptimizableTraversalSuite extends FunSuite:
       ps: OptimizableTraversal[P]
   ): OptimizableTraversal[P] = ps
 
-  test("composite of typed programs resolves field predictors WITHOUT any import (was 0, now 2)") {
+  test("composite of programs resolves field predictors WITHOUT any import (was 0, now 2)") {
     val agent = Agent(
       planner = Predict(qaSignature, name = Some("plan")),
       reasoner = ChainOfThought(qaSignature, name = Some("reason"))
     )
     val ps    = summon[OptimizableTraversal[Agent]]
     val views = ps.inspect(agent)
-    // Each typed-program leaf is found in companion scope; strict derivation would reject a missing instance.
+    // Each program leaf is found in companion scope; strict derivation would reject a missing instance.
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "plan")
     assertEquals(views(1).moduleName, "reason")
@@ -86,7 +86,7 @@ class CompanionScopeOptimizableTraversalSuite extends FunSuite:
 
 object CompanionScopeOptimizableTraversalSuite:
 
-  // A USER composite of two typed programs. Crucially: `OptimizableTraversal.derived` is the only given, and NO
+  // A USER composite of two programs. Crucially: `OptimizableTraversal.derived` is the only given, and NO
   // `import ProgramPredictors.given` exists (that object no longer exists). The leaf instances must be found in
   // companion scope.
   final case class Agent(

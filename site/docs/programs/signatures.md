@@ -1,6 +1,6 @@
 # Signatures
 
-A signature is a typed declaration of what a program takes in and what it
+A signature declares what a program takes in and what it
 produces. Instead of hand-writing a prompt, you describe the shape of the task
 and dspy4s builds the prompt from it.
 
@@ -21,11 +21,11 @@ parameters and result are **named tuples**:
 ```
 
 `classify.apply((sentence = ...))` is checked at compile time, and
-`_.output.sentiment` is a typed `Boolean`.
+`_.output.sentiment` is a `Boolean`.
 
 The same signature can also be written as a string with
 `Signature.fromString("sentence -> sentiment: bool")`. Both forms are parsed at
-compile time into the same typed signature, so pick whichever reads better.
+compile time into the same `Signature`, so pick whichever reads better.
 
 ### Adding instructions
 
@@ -46,13 +46,13 @@ is a Scala `enum`:
 ```
 
 `derives Schema` gives the enum a flat-string wire form (the case name) at the
-output boundary, so the model's answer decodes straight into a typed `Emotion`.
+output boundary, so the model's answer decodes straight into an `Emotion`.
 
 ## Case-class signatures
 
 When you already model inputs and outputs as case classes, `Signature.derived`
 builds a signature from an input type and an output type directly. The output is
-a typed value, so `_.output.sentiment` has type `Emotion` with no cast:
+a Scala value, so `_.output.sentiment` has type `Emotion` with no cast:
 
 ```scala
 --8<-- "signatures/CaseClassExample.scala:derived-types"

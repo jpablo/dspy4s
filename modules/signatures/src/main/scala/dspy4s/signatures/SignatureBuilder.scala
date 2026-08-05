@@ -5,16 +5,16 @@ import zio.blocks.schema.Schema
 
 /** Fluent, type-driven builder for runtime `SignatureLayout` values.
   *
-  * The case-class derivation in `Signature.derived[I, O]` is the primary typed-I/O surface; this builder is the
-  * complementary **programmatic** surface for callers that don't want to introduce a case class per signature (REPL
-  * exploration, dynamic shapes assembled from config, tests).
+  * The case-class derivation in `Signature.derived[I, O]` is the primary API; this builder is the complementary
+  * **programmatic** surface for callers that don't want to introduce a case class per signature (REPL exploration,
+  * dynamic shapes assembled from config, tests).
   *
   * Each `.input[T]` / `.output[T]` call summons a `zio.blocks.schema.Schema[T]` and derives the field's wire `TypeRef`
   * from it (via [[ZioSchemaCodec.typeRefForSchema]]) — the same mapping case-class derivation applies per record field.
   * Any type with a `Schema` (primitives, Scala enums, collections, nested products) works here without writing a case
   * class.
   *
-  * Returns a plain `SignatureLayout` from `.build`; callers needing typed `DynamicPredict.apply` should use
+  * Returns a plain `SignatureLayout` from `.build`; callers needing a `Signature[I, O]` should use
   * `Signature.derived[I, O]` instead.
   */
 final class SignatureBuilder private[signatures] (
@@ -24,13 +24,13 @@ final class SignatureBuilder private[signatures] (
     private val instructionsText: Option[String]
 ):
 
-  /** Append an input field typed `T`. Order of `.input` calls becomes the input-field order in the resulting
+  /** Append an input field of type `T`. Order of `.input` calls becomes the input-field order in the resulting
     * `SignatureLayout`.
     */
   def input[T](name: String)(using Schema[T]): SignatureBuilder =
     copy(inputs = inputs :+ fieldSpec(name))
 
-  /** Append an output field typed `T`. Order of `.output` calls becomes the output-field order in the resulting
+  /** Append an output field of type `T`. Order of `.output` calls becomes the output-field order in the resulting
     * `SignatureLayout`.
     */
   def output[T](name: String)(using Schema[T]): SignatureBuilder =
@@ -75,7 +75,7 @@ final class SignatureBuilder private[signatures] (
 
 object SignatureBuilder:
   /** Start a new builder. Prefer `Signature.builder(name)` at call sites — same factory, more discoverable from the
-    * typed namespace.
+    * `Signature` companion.
     */
   def apply(name: String): SignatureBuilder =
     new SignatureBuilder(name, Vector.empty, Vector.empty, None)

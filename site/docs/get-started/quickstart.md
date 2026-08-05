@@ -7,7 +7,7 @@ in the examples module, so it compiles under the project's strict flags.
 
 ## 1. Declare a signature and a program
 
-A **signature** declares typed inputs and outputs. A **program** (here
+A **signature** declares inputs and outputs. A **program** (here
 `Predict`) runs it against a language model. This one classifies sentiment:
 
 ```scala
@@ -15,7 +15,7 @@ A **signature** declares typed inputs and outputs. A **program** (here
 ```
 
 Because the input and output are named tuples, `sentence` and `sentiment` are
-real fields. A typo is a compile error, and `_.output.sentiment` is a typed
+real fields. A typo is a compile error, and `_.output.sentiment` is a
 `Boolean`, not a string lookup.
 
 ## 2. Wire up a runtime and run it
@@ -35,7 +35,7 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.ma
 
 ## 3. Add reasoning with ChainOfThought
 
-Swapping `Predict` for `ChainOfThought` prepends a typed `reasoning: String` to
+Swapping `Predict` for `ChainOfThought` prepends `reasoning: String` to
 the output, with no signature changes required:
 
 ```scala

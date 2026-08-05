@@ -11,11 +11,10 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.programs.contracts.Prediction
 
-/** Typed `BestOfN`: runs an inner typed program up to `n` times and keeps the highest-reward `Prediction[O]`,
-  * short-circuiting once `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O`
-  * unchanged (a `Module[I, O]`), so it composes around any typed program (`Predict`, `ChainOfThought`, …). The repeated
-  * samples are made distinct by a per-attempt `rolloutId` (cache-busting); `failCount` bounds tolerated failures before
-  * giving up (defaults to `n`).
+/** `BestOfN`: runs an inner program up to `n` times and keeps the highest-reward `Prediction[O]`, short-circuiting once
+  * `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O` unchanged (a `Module[I, O]`),
+  * so it composes around any program (`Predict`, `ChainOfThought`, …). The repeated samples are made distinct by a
+  * per-attempt `rolloutId` (cache-busting); `failCount` bounds tolerated failures before giving up (defaults to `n`).
   *
   * Its lifecycle observation records empty inputs: a generic wrapper has no `Signature` to encode `I` for its own trace
   * entry, so the meaningful inputs live on the nested inner program's event. The best-of-`n` selection loop lives in

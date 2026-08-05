@@ -1,5 +1,5 @@
 site_name: dspy4s
-site_description: "A Scala 3 library for building language model programs with typed signatures."
+site_description: "A Scala 3 library for building composable language model programs."
 site_author: jpablo
 site_url: https://jpablo.github.io/dspy4s/
 

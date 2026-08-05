@@ -1,18 +1,18 @@
 # dspy4s
 
-A Scala 3 library for building language model programs with typed signatures.
+A Scala 3 library for building language model programs with signatures.
 Inputs and outputs are ordinary Scala types, so the compiler checks them for you.
 
 dspy4s is a port of [DSPy](https://github.com/stanfordnlp/dspy) to Scala 3. It
 keeps DSPy's structure (signatures, modules, adapters, optimizers) and replaces
-the dynamic Python surface with a statically typed one.
+the dynamic Python surface with a compile-time-checked Scala API.
 
 > **Status:** pre-release. The API is still moving and the artifacts are not yet
 > published to Maven Central. For now, build from source.
 
 ## What it looks like
 
-A *signature* declares typed inputs and outputs. A *program* (here `Predict`)
+A *signature* declares inputs and outputs. A *program* (here `Predict`)
 runs it against a language model.
 
 ```scala
@@ -20,7 +20,7 @@ import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 
 // Inputs and outputs are named tuples, so `sentence` and `sentiment` are real
-// fields. A typo is a compile error, and `_.output.sentiment` is a typed Boolean.
+// fields. A typo is a compile error, and `_.output.sentiment` is a Boolean.
 val classify = Predict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
 classify.apply((sentence = "it's a charming and often affecting journey."))
@@ -28,17 +28,17 @@ classify.apply((sentence = "it's a charming and often affecting journey."))
 // Either[DspyError, Boolean]
 ```
 
-Swapping `Predict` for `ChainOfThought` prepends a typed `reasoning: String` to
+Swapping `Predict` for `ChainOfThought` prepends `reasoning: String` to
 the output, with no signature changes.
 
-## Why typed signatures
+## Why signatures
 
 - **Compile-time field checks.** Signatures are ordinary Scala types. A wrong
   field name is a compile error, not a runtime lookup failure, and output access
-  (`_.output.sentiment`) is typed.
+  (`_.output.sentiment`) is checked by the compiler.
 - **One codec spine.** Field values flow through a single `DynamicValue.Record`
   intermediate (from `zio-blocks-schema`) shared by adapters, programs,
-  evaluation, and the typed surface. Decode failures surface at the `run`
+  evaluation, and the program API. Decode failures surface at the `run`
   boundary as `Either[DspyError, _]`, not via lazy field access.
 - **Composable programs.** `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`,
   `ProgramOfThought`, `BestOfN`, and `Refine` are plain values you compose like
@@ -111,7 +111,7 @@ It is published at <https://jpablo.github.io/dspy4s/>.
 - [Signatures](site/docs/learn/programming/signatures.md): the full set of ways
   to declare inputs and outputs (inline, traits, enums, custom types).
 - [Architecture](docs/ARCHITECTURE.md): the design choices, module graph, and
-  the typed and dynamic stacks.
+  the static and runtime-defined stacks.
 
 To preview the docs locally:
 
@@ -125,8 +125,8 @@ uv run mkdocs serve
 dspy4s follows the upstream DSPy decomposition (the data spine, composite
 programs, adapter contracts, and optimizer pattern), so concepts carry over.
 The main differences are in the surface: signatures are produced by macros and
-typeclasses rather than Python metaclasses, inputs and outputs are typed, and
-errors are a structured `DspyError` ADT. The
+typeclasses rather than Python metaclasses, inputs and outputs are checked by
+the compiler, and errors are a structured `DspyError` ADT. The
 [`docs/port/`](docs/port/) directory tracks the per-symbol mapping and the
 behavioral deltas.
 

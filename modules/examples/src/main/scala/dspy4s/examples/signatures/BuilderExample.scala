@@ -1,8 +1,8 @@
-/** Typed signatures — programmatic builder surface.
+/** Signatures — programmatic builder surface.
   *
   * The builder is the right choice when a case class per signature is overkill (REPL exploration, dynamic shapes
-  * assembled from config, tests). It produces a runtime `SignatureLayout` directly; users who want typed
-  * `DynamicPredict.apply` should use the trait-spec, method, or case-class APIs instead.
+  * assembled from config, tests). It produces a runtime `SignatureLayout` directly; users who want compiler-checked
+  * inputs and outputs should use the trait-spec, method, or case-class APIs instead.
   *
   * Each `.input[T]` / `.output[T]` call summons a `Schema[T]` and derives the resulting `FieldSpec`'s wire `TypeRef`
   * from it.
@@ -31,8 +31,7 @@ object BuilderExample:
   // --8<-- [end:builder-sig]
 
   /** Reusing an enum that has a `Schema` (see CaseClassExample's `Emotion`) gives the builder a `TypeRef.string` field;
-    * enum allowed-values reach the LM through the typed Predict path's `Shape.jsonSchemaString` (inlined by
-    * `JSONAdapter`).
+    * enum allowed-values reach the LM through the `Predict` path's `Shape.jsonSchemaString` (inlined by `JSONAdapter`).
     */
   val classifyEmotion: SignatureLayout = Signature
     .builder("Emotion")

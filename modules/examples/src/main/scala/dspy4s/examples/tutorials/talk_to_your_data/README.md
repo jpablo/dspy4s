@@ -20,7 +20,7 @@ LLMs are good at understanding a question and unreliable at computing the answer
 
 | Stage | What happens | Feature |
 |---|---|---|
-| **Plan** | The English question becomes a typed [`QueryPlan`](Schemas.scala), a validated Scala value with enums and nested lists. | Typed signatures |
+| **Plan** | The English question becomes a [`QueryPlan`](Schemas.scala), a validated Scala value with enums and nested lists. | Signatures |
 | **Act** | The dataset (10k rows of CSV, too large to put in a prompt) goes into a sandboxed Python REPL, and the model writes code to compute the answer. | RLM |
 | **Verify** | The same plan runs again on the JVM in a pure-Scala engine. The two engines have to agree, otherwise the agent refines and retries. | trust |
 | **Optimize** | [GEPA](Optimize.scala) evolves the planner's instruction against a grounded metric until it maps questions to the right query reliably. | GEPA |
@@ -57,7 +57,7 @@ The GEPA half runs without Deno, because its metric is the Scala engine rather t
 
 ## Files
 
-- [`Schemas.scala`](Schemas.scala): the typed `QueryPlan`, `AnalysisResult`, and `Verdict` (with their enums).
+- [`Schemas.scala`](Schemas.scala): the `QueryPlan`, `AnalysisResult`, and `Verdict` (with their enums).
 - [`Dataset.scala`](Dataset.scala): a deterministic synthetic e-commerce dataset (about 10k orders) and a 24-question gold set whose answers the engine computes, so the answer key is correct by construction.
 - [`QueryEngine.scala`](QueryEngine.scala): the pure-Scala plan evaluator. It serves as both the GEPA oracle and the verify-stage cross-check.
 - [`Agent.scala`](Agent.scala): the plan, act, verify, refine loop.

@@ -51,7 +51,7 @@ import scala.util.control.NonFatal
   * @param tools
   *   host functions callable from sandboxed code (registered once, lazily)
   * @param outputFields
-  *   output names (+ optional Python types) for the typed `SUBMIT(...)` signature
+  *   output names (+ optional Python types) for the `SUBMIT(...)` signature
   * @param enableReadPaths
   *   host files/dirs the sandbox may read (mounted under `/sandbox/<basename>`)
   * @param enableWritePaths
@@ -369,5 +369,5 @@ final class DenoPyodideInterpreter(
 
 object DenoPyodideInterpreter:
 
-  /** An output field of the typed `SUBMIT(...)` signature (Python DSPy's `output_fields`). */
+  /** An output field of the `SUBMIT(...)` signature (Python DSPy's `output_fields`). */
   final case class OutputField(name: String, pythonType: Option[String] = None)

@@ -1,12 +1,12 @@
 # Tools & ReAct
 
-A **tool** is a typed function the model can call. `ReAct` is the module that
+A **tool** is a callable operation the model can invoke. `ReAct` is the module that
 lets a program use tools: it reasons, picks a tool, sees the result, and repeats
 until it has an answer.
 
 ## Defining a tool
 
-The simplest way to make a tool is to annotate a typed method with
+The simplest way to make a tool is to annotate a method with
 `@description` and lift it with `ToolFunction.fromMethod`. The macro derives the
 tool's name, description, and argument schema from the method:
 
@@ -49,7 +49,7 @@ function-calling support.
 | You want | Reach for |
 |---|---|
 | The model to fetch data or take an action | `ReAct` with one or more tools |
-| A tool from an existing typed method | `ToolFunction.fromMethod(method)` |
+| A tool from an existing method | `ToolFunction.fromMethod(method)` |
 | Structured tool calls on a capable model | `ChatAdapter(useNativeFunctionCalling = true)` |
 
 Next: [Composing programs](composing.md).

@@ -7,7 +7,7 @@ import scala.annotation.implicitNotFound
 import scala.compiletime.ops.int.+
 import scala.deriving.Mirror
 
-/** The general optimizer traversal -- the typed analogue of Python's `named_predictors` / `map_named_predictors`.
+/** The general optimizer traversal -- the dspy4s analogue of Python's `named_predictors` / `map_named_predictors`.
   *
   * [[inspect]] enumerates non-executable [[OptimizableView]] snapshots in stable order. [[read]] projects just their
   * optimizable parameters, and [[replace]] writes an arity-matched parameter vector back while preserving metadata and

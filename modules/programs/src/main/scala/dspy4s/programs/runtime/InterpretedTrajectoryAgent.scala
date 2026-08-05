@@ -30,7 +30,7 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{
   */
 trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entry]:
 
-  /** Typed output emitted by the model for one iteration. */
+  /** Output emitted by the model for one iteration. */
   type ModelStep
 
   /** Executable action obtained by lowering a [[ModelStep]]. */
@@ -41,8 +41,8 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
 
   protected def actionInterpreter: ActionInterpreter[Action, Observation]
 
-  /** Generate the next typed model step. Implementations may replace the trajectory view (for durable truncation) or
-    * halt before producing an action (for example after a persistent context-window overflow).
+  /** Generate the next model step. Implementations may replace the trajectory view (for durable truncation) or halt
+    * before producing an action (for example after a persistent context-window overflow).
     */
   protected def generateStep(
       call      : ProgramCall[I],
@@ -234,7 +234,7 @@ object InterpretedTrajectoryAgent:
     case Generated(step: ModelStep, trajectory: Vector[Entry])
     case Halted(trajectory: Vector[Entry])
 
-  /** Result of lowering a typed model step into the action language. */
+  /** Result of lowering a model step into the action language. */
   enum ActionPreparation[+Action, +Observation]:
     case Ready(action: Action)
     case Rejected(observation: Observation)

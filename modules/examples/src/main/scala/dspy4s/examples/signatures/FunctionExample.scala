@@ -1,8 +1,8 @@
-/** Typed signatures — method/function surface.
+/** Signatures — method/function surface.
   *
-  * A Scala function type can declare a dspy4s typed signature without a throwaway method body. `Signature.fromType[F]`
-  * inspects the function type at compile time and lowers it into the same typed runtime path used by trait specs and
-  * case classes. Runtime name and instructions can be supplied when useful.
+  * A Scala function type can declare a dspy4s signature without a throwaway method body. `Signature.fromType[F]`
+  * inspects the function type at compile time and lowers it into the same runtime path used by trait specs and case
+  * classes. Runtime name and instructions can be supplied when useful.
   *
   * If an implementation method already exists, `Signature.from(method)` can inspect that method's signature directly.
   *

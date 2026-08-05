@@ -1,9 +1,9 @@
-# Typed Signatures Implementation Plan
+# Signatures Implementation Plan
 
 > **Historical snapshot.** Captures the eight-phase implementation arc as
 > planned and executed. The work has shipped; subsequent refactors renamed
 > the original `Signature` trait to `SignatureLayout`, made `Signature` the
-> typed wrapper, dropped the `Typed*` prefix throughout, and narrowed the
+> wrapper, dropped the `Typed*` prefix throughout, and narrowed the
 > mutation API. For the current shape see
 > [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) and
 > [ARCHITECTURE.md](ARCHITECTURE.md). Treat the plan below as a record of
@@ -11,7 +11,7 @@
 
 ## Recommendation
 
-Implement typed signatures as an additive typed layer over the existing
+Implement signatures as an additive layer over the existing
 `Signature`, `Record`, `Prediction`, and `Predict` APIs. The first production
 version should use Kyo's `Record`/`Fields` machinery for structural field
 selection and compile-time field checking, and should evaluate `kyo-schema` as
@@ -19,8 +19,8 @@ the preferred runtime schema/codec layer before introducing DSPy4S-owned codecs.
 DSPy4S-owned APIs remain at the user boundary.
 
 The implementation should not replace the current string DSL. Existing
-untyped signatures remain the stable interoperability layer. Typed signatures
-compile down to today's `Signature` model, and typed prediction values wrap
+runtime-defined signatures remain the stable interoperability layer. The new
+generic signatures compile down to today's `Signature` model, and prediction values wrap
 today's `Prediction` so usage accounting, completions, adapter behavior, and
 runtime integration continue to work unchanged.
 
@@ -102,13 +102,13 @@ high-level execution module, while `core` remains the minimal contracts layer.
 Build changes:
 
 - Add a shared `kyoVersion` in `build.sbt`.
-- Add `kyo-data` for typed structural records.
+- Add `kyo-data` for structural records.
 - Add `kyo-schema` only if the Phase 0 spike confirms it can cover the runtime
   decoding contract for the MVP.
 - Add `lazy val signatures = project.in(file("modules/signatures")).dependsOn(core)`.
 - Add `signatures` to the root aggregate.
 - Update `programs.dependsOn(...)` to include `signatures`.
-- Keep all new Kyo imports inside `modules/signatures` and typed-specific files in
+- Keep all new Kyo imports inside `modules/signatures` and signature-specific files in
   `modules/programs`.
 
 ## Proposed Files
@@ -136,8 +136,8 @@ adding broad exports in the first slice.
 
 ## Phase 0: Dependency And Feasibility Spike
 
-Goal: prove that Kyo can cover both halves of the typed runtime bridge:
-`kyo-data` for typed dot access and `kyo-schema` for schema-backed decoding.
+Goal: prove that Kyo can cover both halves of the runtime bridge:
+`kyo-data` for direct dot access and `kyo-schema` for schema-backed decoding.
 
 Tasks:
 
@@ -148,14 +148,14 @@ Tasks:
 - Confirm how to construct a runtime `Record` value from decoded prediction
   values.
 - Confirm whether Kyo exposes enough API to wrap dynamic values safely, or
-  whether DSPy4S needs a small internal representation that only exposes typed
+  whether DSPy4S needs a small internal representation that only exposes compiler-checked
   accessors through Kyo at the boundary.
 - Confirm whether `kyo-schema` is published at a version compatible with this
   repository's Scala version.
 - Confirm whether `kyo-schema` can derive schemas for the planned MVP shapes:
   case classes, simple Scala enums, primitives, and possibly named tuples or
   structural records.
-- Confirm whether `kyo-schema` can decode from an untyped intermediate value
+- Confirm whether `kyo-schema` can decode from a runtime intermediate value
   (`Structure.Value`) or whether we should normalize adapter fields to JSON and
   call `Json.decode`.
 - Confirm whether `kyo-schema` supports literal string unions directly. If not,
@@ -164,11 +164,11 @@ Tasks:
 Acceptance criteria:
 
 - `sbt signatures/test` runs.
-- A test can construct a typed value with fields equivalent to
+- A test can construct a value with fields equivalent to
   `sentence: String` and `sentiment: String`.
 - A test can access an existing field with dot syntax.
 - A compile-time test rejects an unknown field.
-- A test can decode `{"sentiment":"joy"}` into a typed output shape.
+- A test can decode `{"sentiment":"joy"}` into an output shape.
 - A test rejects `{"sentiment":"confused"}` for an enum-like output.
 - A test maps `kyo-schema` decode failures into `DspyError`.
 
@@ -209,7 +209,7 @@ before this run. Tests live in
    `Mood.happy` encodes to `{"happy":{}}`; embedded in a case class
    `Result(mood: Mood)` it becomes `{"mood":{"happy":{}}}`. Confirmed by the
    `EncodingProbe.scala` test. LLM outputs that produce flat strings
-   (`"sentiment":"joy"`) **will not** decode against an enum-typed field
+   (`"sentiment":"joy"`) **will not** decode against an enum-valued field
    without intervening transformation. This is the discriminated `oneOf`
    pattern documented in kyo-schema's `Json` scaladoc.
 
@@ -220,10 +220,10 @@ before this run. Tests live in
 
 **Implications for Phase 2 (Output Parsing And Coercion Contract):**
 
-- The "decode from already typed values first" coercion policy needs to
+- The "decode from already-decoded values first" coercion policy needs to
   account for the enum wire format. Options to evaluate during Phase 2:
   (a) require adapters to wrap flat-string enum outputs before handoff to
-  the typed layer; (b) provide a `Schema[A]` override that uses flat-string
+  the layer; (b) provide a `Schema[A]` override that uses flat-string
   encoding for enums; (c) use an `inline given Schema[Emotion]` per-enum
   case that maps strings → cases. Option (b) is the most LLM-friendly and
   worth a spike during Phase 2 design.
@@ -234,7 +234,7 @@ before this run. Tests live in
 **Files added:**
 
 - `modules/signatures/` — new sbt module aggregating under root.
-- `build.sbt` — `kyoVersion = "1.0.0-RC2"` shared val; `typed` project added.
+- `build.sbt` — `kyoVersion = "1.0.0-RC2"` shared val; `signatures` project added.
 - `modules/signatures/src/test/scala/dspy4s/signatures/Phase0FeasibilitySuite.scala`
   (9 acceptance-criteria tests).
 - `modules/signatures/src/test/scala/dspy4s/signatures/EncodingProbe.scala` (kept as a
@@ -245,10 +245,10 @@ No production code added in Phase 0 — purely a test-only spike.
 
 ## Phase 1: Prediction Primitive Accessors
 
-Goal: improve the untyped foundation before adding the typed layer.
+Goal: improve the runtime-record foundation before adding the layer.
 
 Current `Prediction` has `value` and `asDouble`. Add a small primitive accessor
-ladder so typed decoding does not duplicate ad hoc conversions.
+ladder so decoding does not duplicate ad hoc conversions.
 
 API additions now live in `modules/core/src/main/scala/dspy4s/core/data/RawPrediction.scala`:
 
@@ -263,14 +263,14 @@ trait Prediction extends Record:
 Implementation notes:
 
 - Preserve the existing `asDouble` behavior where possible.
-- Decode from already typed values first.
+- Decode from already-decoded values first.
 - Accept string representations only for clear primitive cases.
 - Do not add an `asJson` method in this phase.
 
 Tests:
 
 - Existing `PredictionData` behavior still passes.
-- Each accessor handles typed values, reasonable string values, missing keys,
+- Each accessor handles values, reasonable string values, missing keys,
   and invalid conversions.
 
 Acceptance criteria:
@@ -310,9 +310,9 @@ same value. Mirrors the new `asInt` and `asBoolean` string-parsing.
   trimmed) accepted; `"yes"`/`"1"`/numerics rejected (no implicit
   coercion).
 
-## Phase 2: Typed Core Model
+## Phase 2: Core Model
 
-Goal: represent typed signatures independently of prediction execution.
+Goal: represent signatures independently of prediction execution.
 
 Core types in `modules/signatures`:
 
@@ -325,7 +325,7 @@ final case class Signature[I, O](
 )
 
 final case class Prediction[O](
-  typed: kyo.Record[O],
+  type: kyo.Record[O],
   raw: Prediction
 ) extends Selectable
 ```
@@ -341,8 +341,8 @@ val answer = p.answer
 
 - List fields in stable declaration order.
 - Convert field metadata to `FieldSpec`.
-- Encode typed inputs into `Map[String, Any]`.
-- Decode a raw `Prediction` into a typed output record through the selected
+- Encode inputs into `Map[String, Any]`.
+- Decode a raw `Prediction` into an output record through the selected
   schema/field codec.
 - Return structured DSPy4S errors for missing or invalid output fields.
 
@@ -350,14 +350,14 @@ val answer = p.answer
 
 - Map Scala types to existing `TypeRef` values.
 - Decode raw prediction values into Scala values.
-- Encode input values into untyped values.
+- Encode input values into runtime values.
 - Prefer delegating decoding to `kyo-schema` when a `Schema[A]` is available.
 - Provide small hand-written fallbacks only for field-level values that are not
   naturally represented by the selected schema library.
 
 ### Output Parsing And Coercion Contract
 
-Typed signatures must provide runtime value safety, not only compile-time field
+Signatures must provide runtime value safety, not only compile-time field
 selection. This mirrors Python DSPy: the signature stores the expected output
 annotation, the adapter extracts a raw field value from the LM response, and a
 parser/coercer validates that value before the prediction is exposed.
@@ -368,7 +368,7 @@ DSPy4S should split that work into two explicit responsibilities:
   adapters remain responsible for turning an LM response into named raw output
   fields. The raw values may be strings, JSON values, numbers, booleans, or
   adapter-specific values.
-- **The typed layer decodes fields.** `FieldCodec[A]` is the DSPy4S boundary
+- **The layer decodes fields.** `FieldCodec[A]` is the DSPy4S boundary
   that converts each raw field into the expected Scala type or returns a
   structured `DspyError`. Its first implementation should delegate to
   `kyo-schema` rather than recreate a general codec system.
@@ -398,7 +398,7 @@ Multiple completions:
 
 - MVP may decode only the primary prediction value if the existing completion
   model makes full decoding awkward.
-- The design must leave room to decode every completion into the same typed
+- The design must leave room to decode every completion into the same
   output shape, because Python DSPy stores parsed values in `Completions`, not
   only in the first visible prediction.
 
@@ -428,8 +428,8 @@ Tests:
 - field names match source members
 - input and output roles are correct
 - unsupported field types fail with a useful compile-time or construction error
-- missing outputs produce a typed DSPy4S error
-- invalid primitive conversions produce a typed DSPy4S error
+- missing outputs produce a `DspyError`
+- invalid primitive conversions produce a `DspyError`
 - enum-like outputs reject values outside the declared set
 - `Prediction` is never constructed after a decode failure
 - `kyo-schema` decode errors, if used, are translated into stable `DspyError`
@@ -437,7 +437,7 @@ Tests:
 
 Acceptance criteria:
 
-- `Signature` can produce the same untyped `Signature` shape as the DSL.
+- `Signature` can produce the same runtime `Signature` shape as the DSL.
 - `Prediction` preserves the original raw `Prediction`.
 - `sbt signatures/test` passes.
 
@@ -448,7 +448,7 @@ Implemented four files in `modules/signatures/src/main/scala/dspy4s/signatures/`
 - `FieldCodec.scala` — field-level codec typeclass with built-in givens for
   `String` / `Int` / `Double` / `Boolean`, plus enum support based on
   `Mirror.SumOf[A]` → case-name → enum-value tables. Decodes from `Any`
-  (already-typed adapter values), not from JSON bytes. It also exposes
+  (already-decoded adapter values), not from JSON bytes. It also exposes
   `FieldCodec.fromSchema[A](using Schema[A])` for structured field values
   and `FieldCodec.FlatEnum[A]` for enum companions that need both
   `FieldCodec[A]` and flat-string `Schema[A]`.
@@ -461,7 +461,7 @@ Implemented four files in `modules/signatures/src/main/scala/dspy4s/signatures/`
   rejects lossy conversions such as decimal values into `Int`.
 - `Signature.scala` — `final case class Signature[I, O]` with
   `derived[I <: Product, O <: Product](name, instructions)` that wires
-  two `Shape`s into an untyped `SignatureSpec` whose fields are
+  two `Shape`s into a runtime `SignatureSpec` whose fields are
   `inputs ++ outputs` in declaration order.
 - `Prediction.scala` — `final case class Prediction[O]` holding
   the decoded output case-class instance + the raw `Prediction`. The
@@ -474,11 +474,11 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
 
 **Intentional deviation from the plan's literal shape**:
 
-- `Prediction[O]` does not carry a `typed: kyo.Record[O]` field as
+- `Prediction[O]` does not carry a `type: kyo.Record[O]` field as
   the plan sketched. `Record`'s `dict` field is `private[kyo]`, so a
   general-purpose `selectDynamic` wrapper would need either reflection
   or upstream API changes. The case-class-direct approach
-  (`p.output.sentiment`) gives users the same typed dot-access through
+  (`p.output.sentiment`) gives users the same dot-access through
   ordinary case-class syntax, with no kyo Record involvement at the
   user surface. A `.toRecord` extension can be added later if users
   want intersection-typed structural composition.
@@ -509,7 +509,7 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
 
 ## Phase 3: Builder And Case Class Surfaces
 
-Goal: provide a working typed API before implementing the trait macro.
+Goal: provide a working API before implementing the trait macro.
 
 Builder API:
 
@@ -544,11 +544,11 @@ Tests:
 - builder emits expected `Signature`
 - case classes derive expected field names and types
 - case class values encode to the expected input map
-- decoded typed predictions expose fields through the chosen typed surface
+- decoded predictions expose fields through the chosen surface
 
 Acceptance criteria:
 
-- Users can define typed signatures without macros beyond derivation support.
+- Users can define signatures without macros beyond derivation support.
 - The implementation can be exercised end to end before trait syntax exists.
 
 ### Outcomes (executed 2026-05-24)
@@ -568,11 +568,11 @@ Implemented one new file:
 **Design choice: builder returns `Signature`, not `Signature[I, O]`.**
 The builder is the **programmatic** path for callers that don't want a
 case class per signature (REPL, dynamic shapes from config, tests). For
-typed input encoding / output decoding, callers use
+input encoding / output decoding, callers use
 `Signature.derived[I, O]` (case classes) from Phase 2. A future
 phase may add a `Signature.fromSignature[I, O](sig, Shape[I],
 Shape[O])` adapter if a use case emerges for upgrading a builder result
-to a typed surface; for now, the two surfaces are explicitly separate.
+to a surface; for now, the two surfaces are explicitly separate.
 
 **Test results**: `Phase3SurfacesSuite` adds 9 tests (builder ordering,
 TypeRefs from `FieldCodec`, enum metadata propagation, immutability,
@@ -591,7 +591,7 @@ to the same runtime substrate.
 
 ## Phase 4: Predict
 
-Goal: connect typed signatures to the existing prediction runtime.
+Goal: connect signatures to the existing prediction runtime.
 
 API:
 
@@ -608,15 +608,15 @@ final case class Predict[I, O](
 The implementation should:
 
 - Call `Predict(signature.untyped, demos, name, runtime)`.
-- Convert typed input into `ProgramCall` inputs through `inputShape`.
+- Convert input into `ProgramCall` inputs through `inputShape`.
 - Delegate all adapter/model behavior to existing `Predict`.
 - Decode the resulting `Prediction` through `outputShape`.
 - Preserve completions and LM usage on the raw prediction.
 
 Tests:
 
-- `Predict` passes the expected untyped inputs to the existing path.
-- `Predict` returns a typed prediction on valid output.
+- `Predict` passes the expected runtime-record inputs to the existing path.
+- `Predict` returns a prediction on valid output.
 - decode failures are returned as `Left(DspyError)`.
 - existing `PredictSuite` behavior is unchanged.
 
@@ -646,7 +646,7 @@ Implemented one file + one build-graph edit:
   Used `Vector[Example]` and `ProgramRuntime` instead to match the existing
   `Predict` case-class signature exactly, avoiding a parallel runtime-contract
   that would diverge from the rest of
-  `programs`. Typed demos (`Vector[(I, O)]` or similar) are a Phase 7
+  `programs`. demos (`Vector[(I, O)]` or similar) are a Phase 7
   consideration.
 - The plan's API sketches `run(input: I)` without an explicit context.
   Added `(using RuntimeContext)` because the underlying `Predict.run`
@@ -660,7 +660,7 @@ works directly. Programs module: 59 / 59 (was 54; +5). Full project:
 350 / 350 (was 345; +5).
 
 **No adapter changes were required**, per the acceptance criterion.
-The typed layer composes purely above the existing runtime.
+The layer composes purely above the existing runtime.
 
 ## Phase 5: Trait-As-Spec Syntax
 
@@ -723,7 +723,7 @@ Tests:
 Acceptance criteria:
 
 - The `Emotion` example compiles and runs.
-- The resulting untyped signature is equivalent to a hand-written
+- The resulting runtime signature is equivalent to a hand-written
   `Signature("sentence -> sentiment")` plus type metadata.
 
 ### Outcomes (executed 2026-05-24)
@@ -742,7 +742,7 @@ Implemented in three new files:
   matching the input and output declarations.
 - `Shape.TupleShape` (added to `Shape.scala`) — tuple-backed shape used
   by the macro. It encodes named-tuple inputs in declaration order and
-  decodes adapter output maps into named tuples with typed dot-access.
+  decodes adapter output maps into named tuples with dot-access.
 - `Shape.MapShape` remains available as a public utility for other
   surfaces that produce `FieldSpec`s without a case class.
 
@@ -765,7 +765,7 @@ Predict(sig).run((sentence = "...")).map(_.output.sentiment)
 ```
 
 This gives the trait-spec surface the important case-class parity
-properties (typed input construction, typed output dot-access, and
+properties (input construction, output dot-access, and
 compile-time field-name checks) while keeping the runtime path simple.
 Users who need case-class-specific operations (`copy`, extractors,
 pattern matching) can still use `Signature.derived[I, O]`.
@@ -779,7 +779,7 @@ What Phase 5 provides:
   builder-built or case-class-derived equivalent (asserted in
   cross-surface-parity test).
 - `Predict(sig).run((field = value))` works for spec-derived
-  signatures and returns typed named-tuple outputs.
+  signatures and returns named-tuple outputs.
 
 **Implementation lesson**: `tpe.memberType(m)` wraps parameterless
 defs in `NullaryMethodType`/`ByNameType`, so unwrapping with
@@ -809,7 +809,7 @@ Add examples:
 
 Update docs:
 
-- Add a user-facing typed signatures guide.
+- Add a user-facing signatures guide.
 - Link from `docs/TYPED_SIGNATURES.md`.
 - Document supported field types and deferred types.
 - Document the relationship between `Signature` and `Signature`.
@@ -827,19 +827,19 @@ Acceptance criteria:
 Four example files under `modules/examples/src/main/scala/dspy4s/examples/signatures/`:
 
   - `CaseClassExample.scala` — Emotion classifier with case-class I/O.
-    Shows typed dot-access (`tp.output.sentiment`) and an offline
+    Shows dot-access (`tp.output.sentiment`) and an offline
     `Prediction.from` demo for callers that want to exercise the
     decode boundary without an LM.
   - `BuilderExample.scala` — toxicity check with the programmatic
     builder; also shows that an enum reused from `CaseClassExample`
     flows its metadata through the builder for free.
   - `SpecExample.scala` — trait-as-spec for emotion + QA shapes.
-    Shows named-tuple input construction and typed output dot-access.
+    Shows named-tuple input construction and output dot-access.
   - `FunctionExample.scala` — function-type signatures via
     `Signature.fromType[F]`, including named-tuple output and the
     `input -> result` convention for anonymous input / scalar output.
 
-The `examples` module now depends on `typed` (added to `build.sbt`).
+The `examples` module now depends on `signatures` (added to `build.sbt`).
 All four files compile against the actual API and reference the
 production types only.
 
@@ -876,8 +876,8 @@ Potential extensions:
 - custom codecs for domain types not covered by `kyo-schema`
 - optional ZIO Blocks interop if `kyo-schema` cannot cover a future schema or
   format requirement
-- typed examples for optimizers and evaluation
-- typed datasets and demos
+- examples for optimizers and evaluation
+- datasets and demos
 
 ## Suggested PR Slices
 
@@ -885,13 +885,13 @@ Potential extensions:
 2. Add primitive accessors to `Prediction`.
 3. Implement `Signature`, `Shape`, schema-backed `FieldCodec`, and
    builder API.
-4. Implement `Prediction` and typed output decoding.
+4. Implement `Prediction` and output decoding.
 5. Implement `Predict`.
 6. Add case class derivation.
 7. Add trait-as-spec macro and field markers.
 8. Add examples and user-facing docs.
 
-Each slice should compile independently and avoid changing existing untyped
+Each slice should compile independently and avoid changing existing runtime-defined
 behavior except for the additive primitive accessor methods.
 
 ## Validation Commands
@@ -921,15 +921,15 @@ Resolve these during Phase 0 and Phase 1:
   values with public APIs.
 - Whether `kyo-schema` is published and stable enough to be the MVP decoder
   dependency.
-- Whether to decode typed outputs from `Structure.Value`, JSON object strings,
+- Whether to decode outputs from `Structure.Value`, JSON object strings,
   or a DSPy4S raw-value adapter into `kyo-schema`.
 - Whether `Prediction` should expose Kyo `Record[O]` directly or hide it
   behind a DSPy4S wrapper.
-- Whether `programs` should depend on `typed`, or whether a later
-  `typed-programs` module is worth the extra module complexity.
+- Whether `programs` should depend on `signatures`, or whether a later
+  `signature-programs` module is worth the extra module complexity.
 - Whether literal string unions should be included in the MVP or deferred in
   favor of Scala enums.
 - The final names for `InputField`, `OutputField`, and `Signature.Spec`.
 
 The default answer for all open decisions should favor the smallest additive
-API that can support the trait syntax and typed prediction field access.
+API that can support the trait syntax and prediction field access.

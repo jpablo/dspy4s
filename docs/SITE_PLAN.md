@@ -95,7 +95,7 @@ object ToxicityExample:
 The doc page pulls it by label — never copy-pastes it:
 
 ````markdown
-A signature declares typed inputs and outputs:
+A signature declares inputs and outputs:
 
 ```scala
 --8<-- "modules/examples/src/main/scala/dspy4s/examples/learn/programming/Signatures.scala:toxicity"

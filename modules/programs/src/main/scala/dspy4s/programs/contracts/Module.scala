@@ -23,8 +23,8 @@ import scala.concurrent.Future
   *
   *   - the dynamic spine, `Module[DynamicValue.Record, DynamicValue.Record]` (see [[DynamicModule]]), whose raw engine
   *     result is lifted by [[Prediction.dynamic]]; and
-  *   - the statically typed surface, `Module[I, O]`, used by `Predict[I, O]`, `ChainOfThought[I, O]`, and the other
-  *     typed programs — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
+  *   - the domain-valued surface, `Module[I, O]`, used by `Predict[I, O]`, `ChainOfThought[I, O]`, and the other
+  *     programs — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
   *
   * A program implements [[forward]]; [[apply]] is the `final` caller entry (Scala's `__call__`) that wraps `forward`
   * with the module lifecycle — the callback `ModuleStart`/`ModuleEnd` scope plus trace/history recording. That
@@ -93,9 +93,9 @@ trait Module[I, O]:
           result
         }
 
-  /** Convenience entry for an ordinary typed input. Constructs the uniform [[ProgramCall]] envelope and dispatches
-    * through the lifecycle-wrapped [[apply]]. Call the envelope overload directly when setting controls such as
-    * `rolloutId` that are not represented here.
+  /** Convenience entry for an ordinary input. Constructs the uniform [[ProgramCall]] envelope and dispatches through
+    * the lifecycle-wrapped [[apply]]. Call the envelope overload directly when setting controls such as `rolloutId`
+    * that are not represented here.
     */
   final def apply(
       input       : I,
@@ -131,8 +131,8 @@ private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   * result exactly once through [[Prediction.dynamic]], making the ordinary [[Module]] boundary uniform.
   *
   * [[dspy4s.programs.strategies.DynamicPredict DynamicPredict]] is the dynamic prediction module on this spine;
-  * user-defined data-bag programs may extend it too. The typed [[dspy4s.programs.strategies.Predict Predict]] is a
-  * sibling module over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
+  * user-defined data-bag programs may extend it too. [[dspy4s.programs.strategies.Predict Predict]] is a sibling module
+  * over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */
 trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
   override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] = ModuleLifecycle.dynamic

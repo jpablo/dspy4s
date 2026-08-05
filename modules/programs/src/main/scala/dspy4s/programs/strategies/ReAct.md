@@ -6,7 +6,7 @@
 2. call a tool;
 3. observe the result;
 4. repeat until enough information has been gathered;
-5. turn the completed trajectory into the requested typed output.
+5. turn the completed trajectory into the requested output.
 
 The most useful mental model is that `ReAct` contains **two predictors with different jobs**:
 
@@ -15,7 +15,7 @@ The most useful mental model is that `ReAct` contains **two predictors with diff
 
 ```mermaid
 flowchart LR
-    input["Typed input I"]
+    input["Input I"]
 
     subgraph loop["Phase 1: gather evidence"]
         react["reactPredict<br/>choose thought + tool + arguments"]
@@ -59,7 +59,7 @@ There are therefore three related—but different—pieces of information:
 |---|---|---|
 | `next_thought` | `reactPredict`, once per iteration | Why the agent chose its next tool |
 | `trajectory` | `ReAct` | Every thought, tool call, argument record, and observation |
-| `output.reasoning` | `extractorPredict`, once at the end | The final reasoning used to synthesize the typed answer |
+| `output.reasoning` | `extractorPredict`, once at the end | The final reasoning used to synthesize the answer |
 
 ## How the signature changes
 
@@ -75,7 +75,7 @@ question -> answer
 |---|---|---|
 | Public boundary | `question -> reasoning, answer` | What the caller sees |
 | React step | `question, trajectory -> next_thought, next_tool_name, next_tool_args` | Select one action |
-| Extractor | `question, trajectory -> reasoning, answer` | Produce the final typed result |
+| Extractor | `question, trajectory -> reasoning, answer` | Produce the final result |
 
 In types, the two internal predictors are:
 
@@ -130,8 +130,8 @@ is:
 generate model step → prepare action → interpret action → record outcome → decide → continue or stop
 ```
 
-ReAct supplies the typed meanings: `ReactStep`, `ToolCallRequest`, a `ToolFunction`-backed `ActionInterpreter`, and
-`TrajectoryEntry`. The shared trait represents every phase with a typed state and every legal successor set with a
+ReAct supplies the concrete meanings: `ReactStep`, `ToolCallRequest`, a `ToolFunction`-backed `ActionInterpreter`, and
+`TrajectoryEntry`. The shared trait represents every phase with a state and every legal successor set with a
 transition ADT. In particular, rejected preparation and interpreted-outcome recording are different states. A halted
 generation does not invoke or record an action, a ready action executes and records exactly once, and a fatal interpreter
 error appends nothing. For a ready action, ReAct's decision runs after recording and stops when the prepared tool name is
@@ -141,7 +141,7 @@ error appends nothing. For a ready action, ReAct's decision runs after recording
 ## Tools and the synthetic `finish` tool
 
 The user supplies `ToolFunction` values. ReAct adds one more tool named `finish` and lists every available tool in the
-react predictor's instructions, including each tool's description and typed argument schema when available.
+react predictor's instructions, including each tool's description and argument schema when available.
 
 The model does **not** use provider-native function calling here. It emits the ordinary signature fields
 `next_tool_name` and `next_tool_args`. ReAct resolves that name and invokes the corresponding `ToolFunction` locally.
@@ -153,7 +153,7 @@ the requested output fields.
 ## Example: a weather agent
 
 `ToolFunction.fromMethod` derives a tool name, description, argument schema, argument decoding, and result encoding from
-a typed Scala method.
+a Scala method whose parameters and result have `Schema` instances.
 
 ```scala
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
@@ -288,7 +288,7 @@ A useful reading order is:
 5. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
 6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
 7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
-8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and typed-method derivation.
+8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
 9. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
    tool errors, callbacks, and truncation.
 10. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)

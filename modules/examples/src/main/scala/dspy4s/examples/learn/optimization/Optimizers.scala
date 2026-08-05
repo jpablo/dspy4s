@@ -6,8 +6,8 @@
   *
   * This translation states the optimizer generically over the two capabilities every student needs
   * (`OptimizableTraversal` + `ProgramRunner`); the main below drives it with a runtime-string student built through
-  * `DynamicSignature` (parse once, mint fresh types, build a typed `Predict` over them). `compile(student, trainset)`
-  * returns an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
+  * `DynamicSignature` (parse once, mint fresh types, build a `Predict` over them). `compile(student, trainset)` returns
+  * an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
   * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
   */
 package dspy4s.examples.learn.optimization
@@ -69,7 +69,7 @@ object Optimizers:
 @main def optimizersMain(): Unit =
   Demo.withLm {
     // The runtime-string path: parse once (minting fresh input/output types with their codec), then build a
-    // typed Predict over the bundle. Optimizable through the same capabilities as any typed program.
+    // Predict over the bundle. Optimizable through the same capabilities as any program.
     val signature = DynamicSignature.parse("question -> answer")
       .fold(error => throw new IllegalArgumentException(error.message), identity)
     val program  = signature.predict()

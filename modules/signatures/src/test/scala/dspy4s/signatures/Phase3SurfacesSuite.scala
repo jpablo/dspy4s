@@ -209,13 +209,13 @@ class Phase3SurfacesSuite extends FunSuite:
       case other                  => fail(s"expected NotFoundError, got: $other")
   }
 
-  test("Signature.fromString (typed literal) is named-tuple-typed with scalar field types") {
+  test("Signature.fromString literal produces a named tuple with scalar field types") {
     // The literal is parsed at compile time into NamedTuple I/O: (question: String) -> (answer: Boolean).
     val sig = Signature.fromString("question -> answer: bool")
     assertEquals(sig.layout.inputFields.map(_.name), Vector("question"))
     assertEquals(sig.layout.outputFields.map(_.name), Vector("answer"))
 
-    // Output decodes to a typed named tuple -> `.answer` is a Boolean (typed dot-access).
+    // Output decodes to a named tuple -> `.answer` is a Boolean (dot-access).
     val decoded = sig.outputShape.decode(rec("answer" := true))
     assertEquals(decoded.map(_.answer), Right(true))
   }

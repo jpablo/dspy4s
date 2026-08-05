@@ -70,7 +70,7 @@ class PredictionAlgebraLawSuite extends FunSuite:
     assert(result.isLeft, s"expected failure but got: $result")
   }
 
-  test("Prediction.from decodes typed output and preserves the raw prediction") {
+  test("Prediction.from decodes output and preserves the raw prediction") {
     val shape = Shape.derived[PredictionScoredSentiment]
     val raw   = RawPrediction(values =
       DynamicValues.record(

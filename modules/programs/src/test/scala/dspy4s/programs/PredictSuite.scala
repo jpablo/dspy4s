@@ -92,7 +92,7 @@ class TypedPredictSuite extends FunSuite:
     }
   }
 
-  test("Predict.run supports spec-derived named-tuple input and typed output dot-access") {
+  test("Predict.run supports spec-derived named-tuple input and output dot-access") {
     val sig = Signature.of[P4QASpec]
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -124,7 +124,7 @@ class TypedPredictSuite extends FunSuite:
 
   // ── Input encoding reaches the adapter unchanged ────────────────────────
 
-  test("Predict encodes inputs through the typed shape before reaching the adapter") {
+  test("Predict encodes inputs through its Shape before reaching the adapter") {
     // The EchoQuestionAdapter echoes invocation.inputs.values("question")
     // back through the LM request -- if encoding ever dropped or renamed
     // the field, the assertion below would still pass (the LM is fixed),
@@ -172,7 +172,7 @@ class TypedPredictSuite extends FunSuite:
     }
   }
 
-  test("Predict.erase preserves engine state and commutes with valid typed execution") {
+  test("Predict.erase preserves engine state and commutes with valid execution") {
     val sig     = Signature.derived[P4QAInput, P4QAOutput]("QA")
     val runtime = new SettingsProgramRuntime {}
     val demos   = Vector(
@@ -298,12 +298,12 @@ class TypedPredictSuite extends FunSuite:
 
   // ── Decode-failure / trace consistency ──────────────────────────────────
 
-  test("decode failures: no trace/history is recorded (typed decode runs inside the wrapped forward)") {
-    // `Predict[I, O]` is now a `Module[I, O]` whose `forward` does the typed decode
+  test("decode failures: no trace/history is recorded (decode runs inside the wrapped forward)") {
+    // `Predict[I, O]` is now a `Module[I, O]` whose `forward` does the decode
     // *inside* the lifecycle wrapping. So a decode failure makes `forward` return `Left`, and `Module.apply`
     // appends neither a trace nor a history entry -- the observability layer and the return value agree.
     // (This replaces the earlier "known limitation" where execution crossed a separately wrapped dynamic
-    // module boundary that recorded success before the typed decode failed.)
+    // module boundary that recorded success before the decode failed.)
     val sig = Signature.derived[P4QAInput, P4StrictOutput]("QA-strict")
     RuntimeEnvironment.withSettings(defaultSettings) {
       given RuntimeContext = RuntimeEnvironment.current

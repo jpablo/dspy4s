@@ -65,8 +65,8 @@ trait ReplCodeInterpreter extends CodeInterpreter:
   * @param name
   *   the Python identifier the sandbox exposes
   * @param parameters
-  *   declared parameters (name + optional Python type like `"str"`/`"list"`), used by the sandbox to generate a typed
-  *   wrapper signature
+  *   declared parameters (name + optional Python type like `"str"`/`"list"`), used by the sandbox to generate a wrapper
+  *   signature
   * @param invoke
   *   the host implementation, given the call's keyword arguments. A string result crosses into the sandbox as a Python
   *   `str`; any other value crosses as JSON.

@@ -113,7 +113,7 @@ Shipped after v1:
   function-calling = G-7b deferred).
 - Field-constraint rendering (v1, commit d8c80de): `FieldSpec.constraints` +
   `FieldConstraints` (`PYDANTIC_CONSTRAINT_MAP` parity), rendered by `ChatAdapter`
-  (G-9 resolved; `XMLAdapter`/`JSONAdapter` embedding + typed-`Schema` derivation
+  (G-9 resolved; `XMLAdapter`/`JSONAdapter` embedding + `Schema` derivation
   deferred).
 
 ## Phase 5: Programs (`programs`)
@@ -236,7 +236,7 @@ Tracks:
   resume; live-model validated); **`InferRules`** (G-11, 81ffec1) — trainset-derived
   natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
   per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
-  (`OptimizableTraversal` introspection, `ProgramRunner` typed spine, instruction editing) + `Evaluate`.
+  (`OptimizableTraversal` introspection, `ProgramRunner` execution spine, instruction editing) + `Evaluate`.
   **Still deferred:** `SIMBA` (G-13), `BetterTogether` (G-15),
   `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
   remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative

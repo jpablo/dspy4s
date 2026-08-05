@@ -10,7 +10,7 @@ End-to-end applications. All but one are ported and runnable in dspy4s (each mak
 | Example | dspy4s | Key concepts |
 |---|---|---|
 | 📄 Generating llms.txt | ✅ [`llms_txt_generation/LlmsTxtGeneration.scala`](../llms_txt_generation/LlmsTxtGeneration.scala) | composing `ChainOfThought`s; documentation generation. |
-| 📧 Email Information Extraction | ✅ [`email_extraction/EmailExtraction.scala`](../email_extraction/EmailExtraction.scala) | typed structured extraction (enums, `List`, `Option`). |
+| 📧 Email Information Extraction | ✅ [`email_extraction/EmailExtraction.scala`](../email_extraction/EmailExtraction.scala) | structured extraction (enums, `List`, `Option`). |
 | 🧠 Memory-Enabled ReAct Agent (Mem0) | 🚫 [dir](../mem0_react_agent/) | no mem0 integration; the ReAct part is portable. |
 | 💰 Financial Analysis (Yahoo Finance) | ✅ [`yahoo_finance_react/YahooFinanceReact.scala`](../yahoo_finance_react/YahooFinanceReact.scala) | `ReAct` + `ToolFunction.fromMethod` (live data stubbed). |
 | 🔄 Code Generation from Docs | ✅ [`sample_code_generation/SampleCodeGeneration.scala`](../sample_code_generation/SampleCodeGeneration.scala) | multi-signature pipeline (fetching out of scope). |

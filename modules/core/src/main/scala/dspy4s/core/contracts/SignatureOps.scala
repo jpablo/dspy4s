@@ -7,7 +7,7 @@ import dspy4s.algebra.{IsEq, Law, Monoid, <->}
   * The low-level `withInputFields` / `withOutputFields` mutators on [[SignatureLayout]] stay `private[dspy4s]`; this
   * object names the augmentations composite programs actually perform, guarantees their idempotence, and gives them
   * laws, so `ChainOfThought` / `ReAct` / `CodeAct` / `MultiChainComparison` stop hand-rolling layout surgery. Kept
-  * `private[dspy4s]` for the same reason as the mutators: user code shapes I/O at the typed `Signature` surface, not by
+  * `private[dspy4s]` for the same reason as the mutators: user code shapes I/O through the `Signature` API, not by
   * editing a layout.
   */
 private[dspy4s] object SignatureOps:

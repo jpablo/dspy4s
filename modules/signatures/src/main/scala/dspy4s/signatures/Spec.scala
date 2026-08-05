@@ -1,8 +1,8 @@
 package dspy4s.signatures
 
-/** Marker trait that declares a type as a typed-signature **spec**. Subclass with abstract methods returning
-  * [[InputField]] or [[OutputField]] to describe the signature; pass the trait as the type parameter to
-  * `Signature.of[T]` to materialize the runtime metadata.
+/** Marker trait that declares a type as a signature **spec**. Subclass with abstract methods returning [[InputField]]
+  * or [[OutputField]] to describe the signature; pass the trait as the type parameter to `Signature.of[T]` to
+  * materialize the runtime metadata.
   *
   * Example:
   * {{{

@@ -10,7 +10,7 @@ dspy4s ports the *code-bearing* DSPy tutorials. The status legend and full inven
 
 ### Build AI programs
 - [Managing Conversation History](./conversation_history/) — 🚫 blocked (needs `dspy.History`, mutable demos).
-- [Classification](./classification/README.md) — external tutorial; see notes + the typed/enum examples.
+- [Classification](./classification/README.md) — external tutorial; see notes and enum examples.
 - [Privacy-Conscious Delegation (PAPILLON)](./papillon/README.md) — external notebook; see notes.
 
 ### Optimize AI programs

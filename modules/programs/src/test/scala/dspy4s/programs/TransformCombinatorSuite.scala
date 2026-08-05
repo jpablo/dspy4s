@@ -53,7 +53,7 @@ class TransformCombinatorSuite extends FunSuite:
 
   private given RuntimeContext = RuntimeEnvironment.current
 
-  test("lift and liftEither embed local functions in the typed error carrier") {
+  test("lift and liftEither embed local functions in the error carrier") {
     val lifted   = Compose.lift[Int, String](i => s"v$i")
     val fallible =
       Compose.liftEither[Int, String](i => if i >= 0 then Right(s"v$i") else Left(ValidationError("negative")))

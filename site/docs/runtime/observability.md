@@ -1,6 +1,6 @@
 # Observability
 
-dspy4s emits a typed stream of events as a program runs: modules, language-model
+dspy4s emits a stream of events as a program runs: modules, language-model
 calls, adapters, and tools each report when they start and end. You observe a
 program by installing a callback handler, or by inspecting the call history.
 

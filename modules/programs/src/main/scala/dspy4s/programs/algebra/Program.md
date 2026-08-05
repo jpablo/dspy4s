@@ -161,7 +161,7 @@ grade exactly, so the interpretation cannot forget that an `N`-parameter program
 The two equations above are its identity and composition functor laws.
 
 `params` and `reparam(Vector)` remain convenient runtime-boundary operations. Prefer `sizedParams` and `reparamSized`
-inside typed code because their lengths are checked statically.
+when the parameter count should be checked statically.
 
 ## Ordered fan-out is deliberately separate
 
@@ -203,7 +203,7 @@ val precise: Program[Question, Answer, 1] = Program.of(predict)
 val erased: SomeProgram[Question, Answer] = precise
 ```
 
-| Static type | Typed execution | `ProgramRunner` | Unsized `params` | Optimizer traversal |
+| Static type | Program execution | `ProgramRunner` | Unsized `params` | Optimizer traversal |
 |---|---:|---:|---:|---:|
 | `Program[I, O, N]` | yes | yes | yes | yes |
 | `SomeProgram[I, O]` | yes | yes | yes | intentionally unavailable |
@@ -246,7 +246,7 @@ unrelated metadata: it is the length of the ordered parameter vector produced by
 
 ## Execution paths
 
-Typed execution delegates to the packaged module's public `apply`, preserving callbacks, trace, history, and the complete
+Program execution delegates to the packaged module's public `apply`, preserving callbacks, trace, history, and the complete
 prediction envelope:
 
 ```scala
@@ -254,7 +254,7 @@ program(ProgramCall(input)): Either[DspyError, Prediction[O]]
 ```
 
 Optimizers start from a dynamic record. `ProgramRunner` resolves the canonical `RecordCodec[I]`, decodes the input while
-preserving the rest of the `ProgramCall`, executes the typed program, and projects its `RawPrediction`:
+preserving the rest of the `ProgramCall`, executes the program, and projects its `RawPrediction`:
 
 ```mermaid
 flowchart LR
@@ -271,7 +271,7 @@ flowchart LR
 Decoding belongs to the input object `I`, not to the concrete representation. Two programs with the same input type
 cannot quietly disagree about how raw records are decoded.
 
-## A typed example
+## Example
 
 ```scala
 import dspy4s.programs.*

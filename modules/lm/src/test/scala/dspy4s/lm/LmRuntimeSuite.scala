@@ -78,7 +78,7 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(lm.calls.toVector, Vector(baseRequest))
   }
 
-  test("managed language model caches by typed rolloutId and keeps it out of provider options") {
+  test("managed language model caches by rolloutId and keeps it out of provider options") {
     val delegate = new StubLanguageModel(Vector(Right(baseResponse), Right(baseResponse)))
     val managed  = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
     val request  = baseRequest.copy(rolloutId = Some(1))
@@ -96,7 +96,7 @@ class LmRuntimeSuite extends FunSuite:
     assertEquals(second.toOption.get.cacheHit, true)
     assertEquals(third.toOption.get.cacheHit, false)
     assertEquals(delegate.calls.size, 2)
-    // rolloutId rides as a typed field to the delegate (no strip) and never leaks into the provider option bag.
+    // rolloutId rides as a field to the delegate (no strip) and never leaks into the provider option bag.
     assertEquals(delegate.calls.map(_.rolloutId).toVector, Vector[Option[Int]](Some(1), Some(2)))
     assert(delegate.calls.forall(c => DynamicValues.recordGet(c.options, "rollout_id").isEmpty))
   }

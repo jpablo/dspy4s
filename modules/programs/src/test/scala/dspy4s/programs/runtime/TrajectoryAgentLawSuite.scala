@@ -76,7 +76,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
     val completions = Completions.fromRows(completionRows).toOption.get
     val usage       = LmUsage(totalTokens = 9, promptTokens = 5, completionTokens = 4)
     val extracted   = Prediction(
-      output = "typed-answer",
+      output = "expected-answer",
       raw = RawPrediction(
         values = DynamicValues.record("answer" := "first", "metadata" := "preserved"),
         completions = Some(completions),
@@ -97,7 +97,7 @@ final class TrajectoryAgentLawSuite extends FunSuite:
     )
 
     val prediction = result.toOption.get
-    assertEquals(prediction.output, "typed-answer")
+    assertEquals(prediction.output, "expected-answer")
     assertEquals(prediction.raw.asString("answer"), Right("first"))
     assertEquals(prediction.raw.asString("metadata"), Right("preserved"))
     assertEquals(prediction.raw.asString("trajectory"), Right("step-1 -> step-2"))

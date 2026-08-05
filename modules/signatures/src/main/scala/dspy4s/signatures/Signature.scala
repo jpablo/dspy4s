@@ -3,10 +3,10 @@ package dspy4s.signatures
 import dspy4s.core.contracts.{DspyError, SignatureLayout, TypeRef}
 import zio.blocks.schema.DynamicValue
 
-/** A signature with compile-time knowledge of its input (`I`) and output (`O`) shapes. Wraps an untyped
+/** A signature with compile-time knowledge of its input (`I`) and output (`O`) shapes. Wraps a runtime
   * `SignatureLayout` for compatibility with the existing `DynamicPredict` / adapter / runtime stack — adapters still
-  * see the runtime `fields` vector and consume it as today; the typed layer additionally carries `Shape[I]` /
-  * `Shape[O]` for input encoding and output decoding.
+  * see the runtime `fields` vector and consume it as today; this wrapper additionally carries `Shape[I]` / `Shape[O]`
+  * for input encoding and output decoding.
   *
   * Phase 2 supports `I <: Product` / `O <: Product` (case classes). Phase 3 adds the builder API.
   */
@@ -17,12 +17,12 @@ final case class Signature[I, O](
     outputShape: Shape[O]
 ):
 
-  /** SignatureLayout-level instructions carried into adapter prompt formatting. This mirrors the underlying untyped
-    * `SignatureLayout` API while preserving the typed input/output shapes.
+  /** SignatureLayout-level instructions carried into adapter prompt formatting. This mirrors the underlying runtime
+    * `SignatureLayout` API while preserving the input/output shapes.
     */
   def instructions: Option[String] = layout.instructions
 
-  /** Replace signature-level instructions. Empty strings keep the current untyped `SignatureLayout.withInstructions`
+  /** Replace signature-level instructions. Empty strings keep the current runtime `SignatureLayout.withInstructions`
     * behavior and leave the signature unchanged.
     */
   def withInstructions(text: String): Signature[I, O] =
@@ -34,11 +34,11 @@ final case class Signature[I, O](
 
   /** Mark the named OUTPUT field as the native tool-calls sink: sets its wire [[TypeRef]] to [[TypeRef.toolCalls]]. An
     * adapter with native function-calling enabled then fills that field from the provider's `tool_calls` rather than
-    * asking the model to produce it as text. The typed decode of the field (a `Vector[ToolCall]`) happens via `O`'s
-    * derived `Schema`, so this only adjusts the runtime layout — the shapes are untouched. No-op if no output field has
-    * the given name. See PORT_GAPS G-7b.
+    * asking the model to produce it as text. Decoding the field as a `Vector[ToolCall]` happens via `O`'s derived
+    * `Schema`, so this only adjusts the runtime layout — the shapes are untouched. No-op if no output field has the
+    * given name. See PORT_GAPS G-7b.
     *
-    * Needed because the typed derivation maps field types structurally (a `Vector[ToolCall]` becomes `TypeRef.list`)
+    * Needed because signature derivation maps field types structurally (a `Vector[ToolCall]` becomes `TypeRef.list`)
     * and `zio-blocks` `Reflect` does not expose a type name to auto-detect the tool-calls type.
     */
   def markToolCalls(fieldName: String): Signature[I, O] =
@@ -49,10 +49,10 @@ final case class Signature[I, O](
 
 object Signature:
 
-  /** Derives a `Signature[I, O]` from two case classes. The resulting untyped signature has all input fields followed
-    * by all output fields (matching the `inputFields ++ outputFields` ordering used everywhere else in dspy4s).
-    * Derivation is structural and closed: ambient custom `Schema[I]` / `Schema[O]` instances cannot change a type's
-    * boundary meaning.
+  /** Derives a `Signature[I, O]` from two case classes. The resulting runtime layout has all input fields followed by
+    * all output fields (matching the `inputFields ++ outputFields` ordering used everywhere else in dspy4s). Derivation
+    * is structural and closed: ambient custom `Schema[I]` / `Schema[O]` instances cannot change a type's boundary
+    * meaning.
     *
     * Routed through `SignatureLayout.create` so fields are normalized (inferred prefix + description) and standard
     * validations apply. Case-class field names are always valid Scala identifiers, so the `.fold(throw _, identity)` is
@@ -88,11 +88,11 @@ object Signature:
     */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
-  /** Parse a DSPy-style string DSL **literal** (`"question -> answer"`) into a fully typed `Signature` at compile time.
-    * The string is parsed during macro expansion (reusing [[SignatureLayout.parse]]) and each field becomes a
-    * named-tuple element: untyped fields default to `String`; `int` / `float` / `bool` map to the matching scalar. So
-    * `Signature.fromString("question -> answer: bool")` is a `Signature[(question: String), (answer: Boolean)]` with
-    * typed dot-access on predictions.
+  /** Parse a DSPy-style string DSL **literal** (`"question -> answer"`) into a `Signature` whose I/O types are inferred
+    * at compile time. The string is parsed during macro expansion (reusing [[SignatureLayout.parse]]) and each field
+    * becomes a named-tuple element: fields without an annotation default to `String`; `int` / `float` / `bool` map to
+    * the matching scalar. So `Signature.fromString("question -> answer: bool")` is a
+    * `Signature[(question: String), (answer: Boolean)]` with direct dot access on predictions.
     *
     * The DSL must be a compile-time literal and is validated at compile time (an invalid string, or a field type
     * outside `str` / `int` / `float` / `bool`, is a compile error). For a signature built from a **runtime** string (no
@@ -152,10 +152,10 @@ object Signature:
     ${ internal.FunctionMacro.fromTypeImpl[F]('name, 'instructions) }
 
   /** Trait-as-spec macro entry. Inspects an abstract `Spec` trait at compile time and materializes a `Signature` whose
-    * untyped `SignatureLayout` reflects the trait's `InputField` / `OutputField` members.
+    * runtime `SignatureLayout` reflects the trait's `InputField` / `OutputField` members.
     *
     * The precise input and output types are named tuples. That lets users construct inputs with named-tuple syntax and
-    * read outputs with typed dot-access while the runtime still flows through the same `Shape` / `DynamicPredict` /
+    * read outputs with direct dot access while the runtime still flows through the same `Shape` / `DynamicPredict` /
     * adapter pipeline as case-class signatures.
     */
   transparent inline def of[T <: Spec] =

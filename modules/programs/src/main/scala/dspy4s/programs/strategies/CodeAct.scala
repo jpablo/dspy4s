@@ -28,9 +28,9 @@ import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signatur
   *
   * After the loop, a reasoning-augmented [[DynamicPredict]] extractor reads the full trajectory and produces the
   * user-visible outputs declared in `baseSignature`. `CodeAct[I, O]` is a `Module[I, Prediction[WithReasoning[O]]]`: it
-  * encodes the typed input, runs the loop + extractor internally over the data-bag layer, and decodes the reply into
-  * the base outputs `O` with `reasoning: String` prepended (see [[OutputAugmentation]]). The rendered `trajectory` is
-  * kept on `.raw`.
+  * encodes the input, runs the loop + extractor internally over the data-bag layer, and decodes the reply into the base
+  * outputs `O` with `reasoning: String` prepended (see [[OutputAugmentation]]). The rendered `trajectory` is kept on
+  * `.raw`.
   *
   * '''Tools-inside-code.''' Python `CodeAct` lets the user pass functions the LM's generated Python can call. Pass them
   * as [[tools]]: they are listed in the codeact instructions (so the LM knows they exist), and on a sandboxed
@@ -63,13 +63,13 @@ final case class CodeAct[I, O](
     override val maxIterations: IterationLimit                                 = IterationLimit(5),
     codeActProgramName        : String                                         = "codeact",
     extractorProgramName      : String                                         = "codeact_extract",
-    /** Optional override for the per-iteration code-generator predict — a TYPED `Predict` over the base input plus the
+    /** Optional override for the per-iteration code-generator predict — a `Predict` over the base input plus the
       * rendered trajectory, producing a lenient [[CodeAct.CodeStep]]. When `None` (the default), it is built from
       * [[codeActSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable sub-predict
       * addressable + immutably replaceable (see the `OptimizableTraversal[CodeAct]` instance).
       */
     codeActPredictOverride: Option[Predict[(I, String), CodeAct.CodeStep]] = None,
-    /** Optional override for the final extractor predict (CoT-augmented, typed over the base input plus the rendered
+    /** Optional override for the final extractor predict (CoT-augmented, over the base input plus the rendered
       * trajectory). When `None` (the default), it is built fail-fast from [[extractorSignature]] at construction; see
       * [[extractorPredict]].
       */
@@ -116,9 +116,9 @@ final case class CodeAct[I, O](
   val extractorSignature: SignatureLayout = baseLayout.appendInput(CodeAct.extractTrajectoryField)
 
   /** The per-iteration code-generator predict, built once from [[codeActSignature]] (mirrors Python's `self.code =
-    * Predict(...)` in `__init__`) — a TYPED `Predict[(I, String), CodeStep]`: the base input plus the rendered
-    * trajectory in, a leniently-decoded [[CodeAct.CodeStep]] out (see [[CodeAct.codeStepShape]]). Addressable + tunable
-    * via [[codeActPredictOverride]]; `forward` uses this member rather than rebuilding a local each call.
+    * Predict(...)` in `__init__`) — a `Predict[(I, String), CodeStep]`: the base input plus the rendered trajectory in,
+    * a leniently-decoded [[CodeAct.CodeStep]] out (see [[CodeAct.codeStepShape]]). Addressable + tunable via
+    * [[codeActPredictOverride]]; `forward` uses this member rather than rebuilding a local each call.
     */
   val codeActPredict: Predict[(I, String), CodeAct.CodeStep] = codeActPredictOverride.getOrElse(Predict(
     signature = Signature(
@@ -131,7 +131,7 @@ final case class CodeAct[I, O](
     name = Some(codeActProgramName)
   ))
 
-  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
+  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
     * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
     */
@@ -188,7 +188,7 @@ final case class CodeAct[I, O](
   def sandboxTools(using RuntimeContext): Vector[dspy4s.core.contracts.SandboxTool] =
     SandboxToolBridge.fromToolFunctions(tools)
 
-  /** Generate the next typed code step from the original input and current rendered trajectory.
+  /** Generate the next code step from the original input and current rendered trajectory.
     */
   override protected def generateStep(
       call      : ProgramCall[I],
@@ -245,13 +245,13 @@ object CodeAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
   type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
-  // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
+  // ── The loop signature's hand-declared fields (static; hoisted so the shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec    = CodeActProtocol.loopTrajectoryField
   private[programs] val extractTrajectoryField: FieldSpec = CodeActProtocol.extractTrajectoryField
   private[programs] val generatedCodeField: FieldSpec     = CodeActProtocol.generatedCodeField
   private[programs] val finishedField: FieldSpec          = CodeActProtocol.finishedField
 
-  /** The typed output of one codeact loop step. */
+  /** The output of one codeact loop step. */
   final case class CodeStep(generatedCode: String, finished: Boolean)
 
   /** Hand-written LENIENT output shape mirroring the prior dynamic reads EXACTLY: a missing `generated_code` renders as

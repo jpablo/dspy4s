@@ -4,7 +4,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, Schema}
 
-/** Bridge between zio-blocks `Schema[A]` and dspy4s's typed `Shape[A]`.
+/** Bridge between zio-blocks `Schema[A]` and dspy4s's `Shape[A]`.
   *
   *   - [[derivedFromZioSchema]] -- the `Shape[A]` factory wired up to a `Schema[A]`. Encode goes through
   *     `Schema.toDynamicValue` directly; decode normalizes the incoming record (coercing LM-shaped string primitives
@@ -208,7 +208,7 @@ private[signatures] object ZioSchemaCodec:
   def derivedFromZioSchema[A](using schema: Schema[A]): RoundTripShape[A] =
     val rootReflect = schema.reflect
     val specs       = fieldSpecsFromReflect(rootReflect)
-    // Option-typed fields are not required on the wire: an LM that omits the key entirely means None, the
+    // Option-fields are not required on the wire: an LM that omits the key entirely means None, the
     // same as an explicit null/"none". Collected once so decode can exempt them from the missing-field check.
     val optionalFieldNames: Set[String] = rootReflect match
       case rec: Reflect.Record[?, ?] =>

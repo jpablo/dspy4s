@@ -8,13 +8,13 @@ import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Typed wire model of one OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), parsed straight from the
-  * SSE `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror the wire
-  * shape (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is lenient
-  * exactly where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and unknown fields
-  * (`id`, `object`, `role`, `type`, …) are ignored.
+/** Wire model of one OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), parsed straight from the SSE
+  * `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror the wire shape
+  * (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is lenient exactly
+  * where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and unknown fields (`id`,
+  * `object`, `role`, `type`, …) are ignored.
   *
-  * The domain mapping to `LmChunk` lives on the DTO, reading typed fields only.
+  * The domain mapping to `LmChunk` lives on the DTO, reading fields only.
   */
 private[providers] final case class OpenAiStreamChunk(
     choices: Vector[OpenAiStreamChoice] = Vector.empty,
@@ -68,7 +68,7 @@ private[providers] final case class OpenAiStreamFunction(
 private[providers] object OpenAiStreamChunk:
   private val codec = Schema[OpenAiStreamChunk].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
-  /** Parse one SSE `data:` JSON object into the typed chunk. */
+  /** Parse one SSE `data:` JSON object into an `OpenAiStreamChunk`. */
   def decode(json: String): Either[DspyError, OpenAiStreamChunk] =
     codec.decode(json) match
       case Right(chunk) => Right(chunk)

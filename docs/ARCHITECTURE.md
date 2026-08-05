@@ -3,13 +3,13 @@
 A Scala 3 port of the Stanford DSPy framework. The defining design choices:
 
 - **`Signature[I, O]` is the user-facing surface**: inputs and outputs are
-  statically typed, encoded/decoded by `Shape[A]` typeclass instances, and
+  compiler-checked, encoded/decoded by `Shape[A]` typeclass instances, and
   adapters / language models flow through a single erased runtime contract
   (`SignatureLayout`).
 - **`zio.blocks.schema.DynamicValue.Record` is the codec spine**: a single
   intermediate carried through `Example`, `ProgramCall`, `RawPrediction`,
   `ParsedOutput`, and `Shape.encode/decode`. Adapters parse straight into
-  Records; the typed surface encodes / decodes via `Schema.toDynamicValue` /
+  Records; the `Signature` API encodes / decodes via `Schema.toDynamicValue` /
   `Schema.fromDynamicValue` with no `Map[String, Any]` round-trip.
 
 ## Module graph
@@ -77,7 +77,7 @@ graph TD
 
 3. **`signatures`** — statically checked signature declarations over `SignatureLayout`. Depends on `core`.
    - `Signature[I, O]` — wraps a `SignatureLayout` plus `Shape[I]` / `Shape[O]`
-   - `Shape[A]` is the general typed/record boundary. Schema-backed product
+   - `Shape[A]` is the general domain/record boundary. Schema-backed product
      and named-tuple shapes implement `RoundTripShape[A]`, whose law is
      `decode(encode(a)) == Right(a)`. `MapShape` (for runtime string-DSL
      signatures where I and O are `DynamicValue.Record`) remains a plain
@@ -114,23 +114,23 @@ graph TD
      (`Module[DynamicValue.Record, DynamicValue.Record]`); its `RawPrediction` is lifted through
      `Prediction.dynamic` at the module boundary.
    - `DynamicPredict` — record-valued predict, extends `DynamicModule`
-   - `Predict[I, O]` — typed predict, a `Module[I, O]`; a *sibling*
+   - `Predict[I, O]` — domain-valued predict, a `Module[I, O]`; a *sibling*
      of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
-   - `ChainOfThought[I, O]` — typed `Module` that composes an inner `Predict`
+   - `ChainOfThought[I, O]` — `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
-   - All other programs are typed `Module[I, …]` too:
+   - All other programs are `Module[I, …]` too:
      `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
      data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
-     (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
+     (output-preserving best-of-n over an inner program). Output-augmenting programs share the
      `dspy4s.signatures.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf on the dynamic spine.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
    - `contracts/ProgramCall.scala` — generic `ProgramCall[I]` (input + `config` /
      `traceEnabled` / `rolloutId`)
    - `contracts/ProgramRuntime.scala` — model and adapter resolution
    - `contracts/ToolFunction.scala` / `ToolCall.scala` — callable tools and their invocation messages
-   - `RecordCodec`, `ProgramRunner` — canonical object-side dynamic-to-typed decoding and uniform execution
+   - `RecordCodec`, `ProgramRunner` — canonical record-to-domain decoding and uniform execution
 
 7. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
@@ -143,11 +143,11 @@ graph TD
    `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
    off `ActivePredictContext`. `Streamify` accepts any program via a
    `Streamable[P]` typeclass (run-from-record + best-effort sub-signatures),
-   so typed programs stream without an untyped form.
+   so programs stream without a record-valued twin.
 
 10. **`examples`** — Python DSPy doc translations (tutorials, deep dives,
    cheatsheet, learn/, production/). Translation rule: string-based
-   Python signatures become `Signature.fromString("…")` (a typed compile-time
+   Python signatures become `Signature.fromString("…")` (a compile-time
    macro) or `Signature.fromType[F]`; class-based ones become a `trait T extends Spec`.
 
 ## The two stacks
@@ -167,9 +167,9 @@ base layout with extra fields before handing it to a `DynamicPredict`.
 
 The cohort mutation helpers on `SignatureLayout` (`withInputFields` and `withOutputFields`) are
 `private[dspy4s]` — only the composite programs use them. User code
-goes through the typed surface.
+goes through the `Signature` API.
 
-### Typed chain (compile-time)
+### Domain-valued chain
 
 ```
 Signature[I, O] ──→ Predict[I, O].apply(input: I) ──→ Prediction[O]
@@ -180,7 +180,7 @@ Signature[I, O] ──→ Predict[I, O].apply(input: I) ──→ Prediction[O]
 runs the shared `PredictEngine` directly, then decodes the resulting
 `RawPrediction` through `signature.outputShape`. `Predict` and
 `DynamicPredict` are sibling modules over that engine; neither calls the
-other. Decode failures surface as `Left(DspyError)` inside the typed
+other. Decode failures surface as `Left(DspyError)` inside the
 module lifecycle, never via lazy field access.
 
 Schema-derived signature boundaries expose `RoundTripShape`, with the law
@@ -200,21 +200,22 @@ extra wire fields, so encoding the decoded value may canonicalize the record.
 | `Signature.builder("X").input[A]("a").output[B]("b").build` | programmatic, no class needed | returns a `SignatureLayout` |
 | `Signature.fromStringDynamic("q -> a")` | string DSL from a **runtime** string | `DynamicValue.Record` both sides |
 
-All but the last are static-typed surfaces — including `fromString`, whose `transparent inline` macro parses the
-literal DSL at compile time into `NamedTuple` I/O (untyped fields default to `String`; `int`/`float`/`bool` map
-to scalars). `fromStringDynamic` is the runtime escape hatch for a DSL string only known at runtime.
+The case-class, method, function-type, trait-spec, and literal `fromString` forms expose their concrete I/O types at
+compile time. `fromString` parses its literal DSL into `NamedTuple` I/O (fields without an annotation default to
+`String`; `int`/`float`/`bool` map to scalars). The builder returns a runtime `SignatureLayout`, while
+`fromStringDynamic` is the escape hatch for a DSL string only known at runtime.
 
 ## Canonical `Predict` call flow
 
 When `Predict[I, O].apply(input)` fires:
 
-1. **Build the typed call** — the convenience overload creates a
+1. **Build the call** — the convenience overload creates a
    `ProgramCall(input, config, traceEnabled)` and dispatches through the final
    `Module.apply`. Its lifecycle input projection encodes `input` through
    `signature.inputShape` into a memoized `DynamicValue.Record`.
 2. **`Module.apply` wraps** —
    `CallbackDispatcher.withModule("predict", inputs)` scopes the complete
-   typed `forward`, including output decoding. A defensive check first
+   `forward`, including output decoding. A defensive check first
    verifies that every declared input field is present.
 3. **`PredictEngine.execute`** (the shared raw execution body):
    1. Push `ActivePredict(name, layout)` onto the thread-local stack.
@@ -232,7 +233,7 @@ When `Predict[I, O].apply(input)` fires:
 4. **Decode** — still inside `forward`,
    `Prediction.from(raw, signature.outputShape)` returns
    `Either[DspyError, Prediction[O]]`.
-5. **Record success** — only a successful typed result is written to
+5. **Record success** — only a successful result is written to
    trace/history. A decode failure returns `Left` from the same module
    lifecycle and does not leave a successful prediction entry.
 
@@ -268,7 +269,7 @@ code:
 3. **Runtime mutability** is constrained to per-call context, module
    history/trace, and caches.
 4. **Errors** are a structured `DspyError` ADT (parse, validation,
-   configuration, runtime, not-found). The typed surface elevates
+   configuration, runtime, not-found). The surface elevates
    adapter-parse failures to the `run` boundary instead of lazy field
    access.
 
@@ -293,7 +294,7 @@ code:
 ## Main risks and mitigations
 
 1. **Dynamic signature / type parsing parity** with the Python DSL.
-   Mitigation: dedicated DSL parser tests; the typed surface
+   Mitigation: dedicated DSL parser tests; the `Signature` API
    normalizes through the same `SignatureLayout.create` path so
    adapter behavior is identical.
 2. **Context propagation across threads / async boundaries.**
@@ -305,7 +306,7 @@ code:
 4. **Tool introspection differences.** Mitigation: explicit Scala
    `ToolFunction` API, plus `ToolFunction.fromMethod` (the analogue of
    `dspy.Tool(fn)`) — a macro that derives a tool's name, `@description`,
-   and typed argument schema from a plain method and decodes each call
+   and argument schema from a plain method and decodes each call
    argument by name/type.
 5. **Python save / pickle compatibility.** Mitigation: a dspy4s-native,
    state-only JSON format (`OptimizableParameters` + `ProgramPersistence`);
@@ -316,7 +317,7 @@ code:
 For comparison with the upstream Python DSPy architecture:
 
 - [`port/PORT_SIMILARITIES.md`](port/PORT_SIMILARITIES.md) — what stayed the same (module decomposition, data spine, composite programs, optimizer pattern, cache/retry/history semantics).
-- [`port/PORT_DIFFERENCES.md`](port/PORT_DIFFERENCES.md) — what changed shape and why (signature definition, typed I/O layer, parameter discovery, error handling, save/load, streaming).
+- [`port/PORT_DIFFERENCES.md`](port/PORT_DIFFERENCES.md) — what changed shape and why (signature definition, I/O layer, parameter discovery, error handling, save/load, streaming).
 - [`port/PORT_MAP.md`](port/PORT_MAP.md) — per-symbol rename + behavioral-delta ledger.
 - [`port/PORT_LANGUAGE_NOTES.md`](port/PORT_LANGUAGE_NOTES.md) — Python→Scala idiom mechanics with code samples.
 
@@ -335,7 +336,7 @@ For comparison with the upstream Python DSPy architecture:
   `renderText`). Used at user-input and observability surfaces; not in
   the codec spine.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
-- `signatures/Signature.scala` — typed wrapper + six factory entry points.
+- `signatures/Signature.scala` — wrapper + six factory entry points.
 - `signatures/Shape.scala` — the general `Shape[A]` boundary, lawful
   `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures,
   `SchemaTupleShape` for named-tuple outputs, and the product shape produced
@@ -354,4 +355,4 @@ For comparison with the upstream Python DSPy architecture:
   `Map[String, Any]` at the observability boundary (callback event
   bags, `TraceEntry`, `HistoryEntry` are free-form maps, not records).
 - `programs/Predict.scala` and `programs/DynamicPredict.scala` — the
-  typed and erased facades.
+  domain-valued and erased facades.

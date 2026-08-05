@@ -13,9 +13,9 @@ import zio.blocks.schema.DynamicValue
   * The schema-uninterpreted `RawPrediction` remains available via `raw` so callers can still reach completions, LM
   * usage, and adapter metadata.
   *
-  * Phase 2 carries the typed output as the decoded value itself: case-class signatures expose ordinary case-class
-  * fields, and trait-spec signatures expose named-tuple fields. In both cases `p.output.sentiment` is typed dot-access
-  * with no lazy parsing.
+  * Phase 2 carries the output as the decoded value itself: case-class signatures expose ordinary case-class fields, and
+  * trait-spec signatures expose named-tuple fields. In both cases `p.output.sentiment` is direct dot access with no
+  * lazy parsing.
   *
   * The companion exposes the canonical writer [[dspy4s.algebra.ScalaMonad]]: [[Prediction.map]] changes only the
   * semantic output, while [[Prediction.flatMap]] accumulates `RawPrediction` evidence in execution order. Its unit and
@@ -52,7 +52,7 @@ object Prediction:
   /** Decodes a `RawPrediction` against an output `Shape`, lifting decode errors into the `Either` channel.
     *
     * Reads the field values directly from `raw.values`. Multi-completion decoding — picking a specific completion index
-    * or producing one typed prediction per completion — is deferred to a later phase.
+    * or producing one prediction per completion — is deferred to a later phase.
     */
   def from[O](raw: RawPrediction, outputShape: Shape[O]): Either[DspyError, Prediction[O]] =
     outputShape.decode(raw.values).map(o => Prediction(o, raw))

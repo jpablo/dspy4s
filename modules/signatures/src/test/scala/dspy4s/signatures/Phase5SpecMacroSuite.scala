@@ -120,7 +120,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     val raw          = rec("tone" := "calm")
     val decoded      = sig.outputShape.decode(raw).toOption.get
     val tone: P5Tone = decoded.tone
-    assertEquals(tone, P5Tone.calm) // typed enum value, not the raw string
+    assertEquals(tone, P5Tone.calm) // enum value, not the raw string
   }
 
   test("spec outputShape coerces numeric strings to the declared primitive type") {
@@ -140,7 +140,7 @@ class Phase5SpecMacroSuite extends FunSuite:
     assert(result.isLeft, s"expected decode failure for invalid enum value, got: $result")
   }
 
-  test("spec inputShape encodes typed enum values to their case-name strings") {
+  test("spec inputShape encodes enum values to their case-name strings") {
     val sig     = Signature.of[P5ToneInputSpec]
     val input   = (tone = P5Tone.urgent)
     val encoded = sig.inputShape.encode(input)

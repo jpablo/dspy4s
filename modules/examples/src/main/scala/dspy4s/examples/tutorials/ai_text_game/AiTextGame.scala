@@ -9,7 +9,7 @@
   *
   * `dspy.Signature` classes become `Spec` traits; `list[str]` → `OutputField[List[String]]`, `dict[str, int]` →
   * `OutputField[Map[String, Int]]`, `bool`/`int` map directly. The `GameAI` `dspy.Module` (three `ChainOfThought`s)
-  * becomes a plain class threading their typed outputs.
+  * becomes a plain class threading their outputs.
   */
 package dspy4s.examples.tutorials.ai_text_game
 
@@ -65,7 +65,7 @@ case class Player(name: String, level: Int = 1, health: Int = 100, skills: List[
 case class GameContext(currentLocation: String, storyProgress: Int = 0):
   def summary: String = s"Location: $currentLocation, Story progress: $storyProgress"
 
-/** Typed results, replacing Python's `dict` returns. */
+/** Result types replacing Python's `dict` returns. */
 case class Scene(description: String, actions: List[String], npcs: List[String], items: List[String])
 case class Dialogue(response: String, mood: String, quest: Boolean, info: String)
 case class ActionOutcome(

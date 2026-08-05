@@ -15,9 +15,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   * Every module result retains a `RawPrediction` on [[dspy4s.programs.contracts.Prediction.raw]]. Dynamic modules also
   * use [[values]] directly as their semantic `DynamicValue.Record` output.
   *
-  * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that the typed layer's Schema-backed
-  * decode performs (`dspy4s.signatures.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction
-  * without a typed `Signature[I, O]`.
+  * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that `Shape`'s Schema-backed decode
+  * performs (`dspy4s.signatures.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction without
+  * a `Signature[I, O]`.
   *
   * Coercion rules (deliberately strict to avoid silent surprises):
   *
@@ -29,7 +29,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   *   - [[asBoolean]] -- accepts `Boolean`, or the case-insensitive strings `"true"`/`"false"`. `"yes"`/`"1"`/`0` etc.
   *     are rejected.
   *
-  * Field missing from [[values]] is a [[NotFoundError]] from [[value]], propagated by the typed accessors. The
+  * A field missing from [[values]] is a [[NotFoundError]] from [[value]], propagated by the coercive accessors. The
   * [[score]] helper is a thin alias for `asDouble("score")` used by metrics and optimizers.
   */
 final case class RawPrediction(
@@ -45,7 +45,7 @@ final case class RawPrediction(
   def withValue(key: String, value: DynamicValue): RawPrediction =
     copy(values = values.updated(key, value))
 
-  /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. */
+  /** Convenience overload for callers passing a Scala value; lifts it via its `Schema`. */
   def withRawValue[A](key: String, value: A)(using schema: Schema[A]): RawPrediction =
     withValue(key, schema.toDynamicValue(value))
 

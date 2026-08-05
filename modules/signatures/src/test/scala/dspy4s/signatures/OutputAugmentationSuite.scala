@@ -93,16 +93,16 @@ class OutputAugmentationSuite extends FunSuite:
       case other                    => fail(s"expected ValidationError, got $other")
   }
 
-  // ── decodeAugmented: the generalized (typed field + post-decode hook) augment ──────────────────────
+  // ── decodeAugmented: the generalized (field + post-decode hook) augment ──────────────────────
 
   private def int(i: Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Int(i))
 
-  /** Read an augment field as a typed `Int` (proving the augment is not String-only). */
+  /** Read an augment field as an `Int` (proving the augment is not String-only). */
   private def readInt(record: DynamicValue.Record, field: String, label: String): Either[DspyError, Int] =
     DynamicValues.recordGet(record, field).collect { case DynamicValue.Primitive(PrimitiveValue.Int(i)) => i }
       .toRight(NotFoundError("field", s"$label: missing or non-Int field '$field'"))
 
-  test("decodeAugmented: a non-String (Int) field is read and prepended (typed-field generalization is live)") {
+  test("decodeAugmented: a non-String (Int) field is read and prepended (generic field support is live)") {
     val r = OutputAugmentation.decodeAugmented[(answer: String), "confidence", Int, (confidence: Int, answer: String)](
       rec("confidence" -> int(3), "answer" -> str("Paris")),
       answerShape,

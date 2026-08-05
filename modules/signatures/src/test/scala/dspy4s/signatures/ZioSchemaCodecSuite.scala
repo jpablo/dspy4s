@@ -97,7 +97,7 @@ class ZioSchemaCodecSuite extends FunSuite:
     )
   }
 
-  test("Variant-typed fields surface as TypeRef.string at the wire boundary") {
+  test("Variant fields surface as TypeRef.string at the wire boundary") {
     import ZsClassifyOutput.given
     val specs     = ZioSchemaCodec.fieldSpecsFromReflect(summon[Schema[ZsClassifyOutput]].reflect)
     val sentiment = specs.find(_.name == "sentiment").get

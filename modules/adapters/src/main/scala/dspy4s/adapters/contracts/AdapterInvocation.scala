@@ -6,9 +6,9 @@ import dspy4s.lm.contracts.LmRequest
 
 /** Everything an adapter needs to format one language-model request.
   *
-  * `outputJsonSchema` is populated by the typed `Predict[I, O]` path, which can render the static output schema, and is
-  * left empty by `DynamicPredict`. Adapters that understand structured-output hints use it in their instructions or
-  * provider options; other adapters ignore it.
+  * `outputJsonSchema` is populated by the `Predict[I, O]` path, which can render the static output schema, and is left
+  * empty by `DynamicPredict`. Adapters that understand structured-output hints use it in their instructions or provider
+  * options; other adapters ignore it.
   */
 final case class AdapterInvocation(
     layout          : SignatureLayout,

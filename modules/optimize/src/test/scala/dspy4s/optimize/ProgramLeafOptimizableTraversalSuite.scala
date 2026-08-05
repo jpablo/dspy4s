@@ -11,7 +11,7 @@ import munit.FunSuite
 
 import ProgramLeafOptimizableTraversalSuite.Pipe2
 
-/** P4: leaf [[OptimizableLeaf]] instances for the typed single-predictor programs [[Predict]] and [[ChainOfThought]].
+/** P4: leaf [[OptimizableLeaf]] instances for the single-predictor programs [[Predict]] and [[ChainOfThought]].
   *
   * A `Predict`/`ChainOfThought` field inside a composite must resolve to the 1-element leaf (via
   * [[OptimizableTraversal.fromOptimizableLeaf]]) rather than being structurally torn apart by
@@ -27,7 +27,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
       ps: OptimizableTraversal[P]
   ): OptimizableTraversal[P] = ps
 
-  // A concrete typed signature: (question: String) -> (answer: String).
+  // A concrete signature: (question: String) -> (answer: String).
   private val qaSignature = Signature.fromString("question -> answer")
 
   private val demo = Vector(Example(rec("question" := "q", "answer" := "x")))
@@ -165,7 +165,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
 
 object ProgramLeafOptimizableTraversalSuite:
 
-  // A composite holding a typed Predict and a typed ChainOfThought, both concrete (question -> answer).
+  // A composite holding a Predict and a ChainOfThought, both concrete (question -> answer).
   final case class Pipe2(
       a: Predict[(question: String), (answer: String)],
       b: ChainOfThought[(question: String), (answer: String)]

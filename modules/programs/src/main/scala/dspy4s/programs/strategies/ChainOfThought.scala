@@ -30,7 +30,7 @@ import zio.blocks.schema.DynamicValue
   * Like Python's `ChainOfThought` (which is `self.predict = Predict(extended_signature)` and a one-line `forward` that
   * calls it), this is a `Module` that *contains* an inner [[Predict]] and delegates to it. So a call emits a
   * `chain_of_thought` module event wrapping the inner `predict` event, mirroring Python's `CoT.__call__` → `forward` →
-  * `self.predict(**kwargs)` nesting. Because the typed decode now lives inside the inner `Predict`'s wrapped `forward`,
+  * `self.predict(**kwargs)` nesting. Because output decoding now lives inside the inner `Predict`'s wrapped `forward`,
   * a decode failure returns `Left` *and* records no trace entry — the earlier "trace says success while the call
   * returns `Left`" divergence is gone.
   */

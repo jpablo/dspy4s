@@ -4,7 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.signatures.Shape
 import zio.blocks.schema.DynamicValue
 
-/** Evidence that a typed program input can be decoded from the dynamic record boundary.
+/** Evidence that a program input can be decoded from the dynamic record boundary.
   *
   * This is independent of any particular program representation. The graded program category uses it as its OBJECT
   * constraint: identity morphisms and record-boundary evaluation both decode through the object's codec, so two
@@ -30,8 +30,8 @@ object RecordCodec:
     new RecordCodec[A]:
       def decode(record: DynamicValue.Record): Either[DspyError, A] = decoder(record)
 
-  /** Decode products through the same closed structural input shape used by typed signatures. Ambient schemas cannot
-    * change this instance's behavior; custom schema semantics need a freshly branded object type.
+  /** Decode products through the same closed structural input shape used by signatures. Ambient schemas cannot change
+    * this instance's behavior; custom schema semantics need a freshly branded object type.
     */
   inline given fromProduct[A <: Product](using
       scala.deriving.Mirror.ProductOf[A],

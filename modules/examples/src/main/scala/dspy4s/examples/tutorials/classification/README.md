@@ -11,7 +11,7 @@ that categorizes historic events with a tiny LM and then optimizes the pipeline.
 There's no separate dspy4s port of that external article, but classification is fully expressible in dspy4s:
 
 - Declare the label set as a Scala `enum` (it `derives Schema`) and make it an output field — the allowed
-  values reach the LM via the signature and decode back to the typed enum. See
+  values reach the LM via the signature and decode back to the enum. See
   [`signatures/CaseClassExample.scala`](../../signatures/CaseClassExample.scala) (an `Emotion` enum) and the
   classification snippets in [`learn/programming/Signatures.scala`](../../learn/programming/Signatures.scala).
 - Wrap it in `Predict` or `ChainOfThought`, evaluate with a metric ([`learn/evaluation`](../../learn/evaluation/README.md)),

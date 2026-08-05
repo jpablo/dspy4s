@@ -32,7 +32,7 @@ object Tools:
   // | print("Tool calls made:", result.trajectory)
   //
   // The closest analogue to Python's "pass a plain function as a tool" is `ToolFunction.fromMethod`,
-  // the dspy4s counterpart of `dspy.Tool(fn)`: annotate a typed method with `@description` and the
+  // the dspy4s counterpart of `dspy.Tool(fn)`: annotate a method with `@description` and the
   // macro derives the tool's name, description, and argument schema (`{city: string}`, surfaced in the
   // agent's prompt) and decodes each argument from the call record by name/type.
   object WeatherAgentExample:

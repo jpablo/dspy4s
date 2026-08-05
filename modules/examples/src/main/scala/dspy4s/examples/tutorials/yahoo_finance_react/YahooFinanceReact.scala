@@ -2,12 +2,12 @@
   *
   * Source: docs/docs/tutorials/yahoo_finance_react/index.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/yahoo_finance_react/index.md Status: translated
-  * (the DSPy core: the typed tools + the ReAct agent, snippets 2/3/4). The live market data is out of scope — there is
-  * no `yfinance` / LangChain bridge in dspy4s, so the tools return illustrative static quotes instead of fetching, and
-  * the LangChain `YahooFinanceNewsTool` → `Tool.from_langchain` conversion (snippet 1) is omitted.
+  * (the DSPy core: the tools + the ReAct agent, snippets 2/3/4). The live market data is out of scope — there is no
+  * `yfinance` / LangChain bridge in dspy4s, so the tools return illustrative static quotes instead of fetching, and the
+  * LangChain `YahooFinanceNewsTool` → `Tool.from_langchain` conversion (snippet 1) is omitted.
   *
   * Python passes plain `def`s with docstrings as ReAct tools; the dspy4s analogue is `ToolFunction.fromMethod` over an
-  * `@description`-annotated typed method (the macro derives the name, description, and argument schema). A
+  * `@description`-annotated method (the macro derives the name, description, and argument schema). A
   * `dict`/`json.dumps` return becomes a `Schema`-deriving case class (or `List` of them), lifted to the tool result
   * automatically.
   */
@@ -21,7 +21,7 @@ import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
-// ── Snippet 2 — the finance tools (typed methods; live data stubbed) ──
+// ── Snippet 2 — the finance tools (methods; live data stubbed) ──
 // | def get_stock_price(ticker: str) -> str: """Get current stock price and basic info."""
 // | def compare_stocks(tickers: str) -> str: """Compare multiple stocks (comma-separated)."""
 // --8<-- [start:finance-tools]

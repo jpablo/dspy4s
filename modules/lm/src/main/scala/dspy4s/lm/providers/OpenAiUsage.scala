@@ -7,11 +7,11 @@ import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Typed wire model of an OpenAI token-usage block, shared by the streaming chunk parser and the (non-streaming)
-  * response parser. Decoded by a derived `JsonCodec`, so absent fields and `null`s become `None` and unknown keys are
-  * ignored — no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the
-  * Responses (`input_tokens`/`output_tokens`) naming conventions are modeled; the nested `*_tokens_details` blocks
-  * carry the provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
+/** Wire model of an OpenAI token-usage block, shared by the streaming chunk parser and the (non-streaming) response
+  * parser. Decoded by a derived `JsonCodec`, so absent fields and `null`s become `None` and unknown keys are ignored —
+  * no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the Responses
+  * (`input_tokens`/`output_tokens`) naming conventions are modeled; the nested `*_tokens_details` blocks carry the
+  * provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
   */
 private[lm] final case class OpenAiUsage(
     promptTokens           : Option[Long]               = None,
@@ -67,7 +67,7 @@ private[lm] final case class OpenAiTokenDetails(
 private[lm] object OpenAiUsage:
   private val codec = Schema[OpenAiUsage].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
-  /** Decode a usage record (a subtree of an already-parsed response/chunk) into the typed model. Lenient: a usage block
+  /** Decode a usage record (a subtree of an already-parsed response/chunk) into `OpenAiUsage`. Lenient: a usage block
     * that fails to decode yields an empty `OpenAiUsage` rather than failing the whole response.
     */
   def fromDynamic(usage: DynamicValue): OpenAiUsage =

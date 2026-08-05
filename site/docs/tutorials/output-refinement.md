@@ -1,13 +1,13 @@
 # Output Refinement with BestOfN and Refine
 
 This example wraps a `ChainOfThought` program in `BestOfN` and `Refine` to score its
-outputs against a typed reward function and keep the best result. It covers reward
-functions over typed predictions, early stopping with `failCount`, and a reward that
+outputs against a reward function and keep the best result. It covers reward
+functions over predictions, early stopping with `failCount`, and a reward that
 calls a language model to judge the output.
 
 For a short introduction to these two modules, see [Modules](../programs/modules.md).
 
-## Scoring with a typed reward
+## Scoring with a reward function
 
 ```scala
 --8<-- "tutorials/output_refinement/BestOfNAndRefine.scala:best-of-n"

@@ -18,7 +18,7 @@ trait ToolFunction:
 
   /** The tool's parameters as `(name, wire type)` pairs, surfaced to the model by tool-using programs so it knows what
     * arguments to supply. Empty for hand-written tools and the function factories; populated by
-    * [[ToolFunction.fromMethod]] from the method's typed signature.
+    * [[ToolFunction.fromMethod]] from the method's signature.
     */
   def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
 
@@ -30,7 +30,7 @@ trait ToolFunction:
 final class description(val value: String) extends scala.annotation.StaticAnnotation
 
 object ToolFunction:
-  /** Lift a `Schema`-typed return value into the `DynamicValue` a tool yields, so authors can write
+  /** Lift a return value with a `Schema` into the `DynamicValue` a tool yields, so authors can write
     * `Right(ToolFunction.result("Brussels"))` (or return any case class with a `Schema`) instead of hand-constructing
     * `DynamicValue.Primitive(...)`.
     */
@@ -59,7 +59,7 @@ object ToolFunction:
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
         toolFn(args)
 
-  /** Like [[apply]] but the body returns a `Schema`-typed value directly (lifted via [[result]]) — no
+  /** Like [[apply]] but the body returns a value with a `Schema` directly (lifted via [[result]]) — no
     * `Right(ToolFunction.result(...))` wrapping. Use this for tools that never fail:
     *
     * {{{
@@ -73,11 +73,10 @@ object ToolFunction:
   )(using Schema[A]): ToolFunction =
     apply(name, description)(args => Right(result(invoke(args))))
 
-  /** Build a tool from a **typed method** — the dspy4s analogue of Python's `dspy.Tool(fn)`. The macro reads the
-    * method's name, its `@description` annotation, and its typed parameters, and produces a `ToolFunction` that (1)
-    * decodes each argument from the call `Record` by name/type, (2) calls the method, lifting its result via its
-    * `Schema`, and (3) carries an [[argSchema]] so tool-using programs can tell the model what arguments the tool
-    * takes:
+  /** Build a tool from a **method** — the dspy4s analogue of Python's `dspy.Tool(fn)`. The macro reads the method's
+    * name, its `@description` annotation, and its parameters, and produces a `ToolFunction` that (1) decodes each
+    * argument from the call `Record` by name/type, (2) calls the method, lifting its result via its `Schema`, and (3)
+    * carries an [[argSchema]] so tool-using programs can tell the model what arguments the tool takes:
     *
     * {{{
     * @description("Get the current weather for a city.")

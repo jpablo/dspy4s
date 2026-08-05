@@ -6,8 +6,8 @@
   * out of scope — it's plain I/O, not a dspy feature.
   *
   * Python's `class RepositoryAnalyzer(dspy.Module)` composing four `ChainOfThought`s becomes a plain class holding four
-  * typed `ChainOfThought` fields whose `forward` threads their typed outputs through an `Either` for-comprehension.
-  * `list[str]` fields map to `List[String]`.
+  * `ChainOfThought` fields whose `forward` threads their outputs through an `Either` for-comprehension. `list[str]`
+  * fields map to `List[String]`.
   */
 package dspy4s.examples.tutorials.llms_txt_generation
 

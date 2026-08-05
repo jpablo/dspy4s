@@ -19,7 +19,7 @@ read more. Differences fall into four buckets:
 1. **Language-forced** — Python idiom has no Scala equivalent, so the
    architecture had to adapt.
 2. **Scala-added** — features that exist in dspy4s with no Python
-   analogue (the typed I/O layer is the headline example).
+   analogue (the I/O layer is the headline example).
 3. **Convention** — judgment calls about cleanup or restructuring
    during the port.
 4. **Deferred** — areas where the architecture differs because work
@@ -54,7 +54,7 @@ factory entry points** that all produce the same immutable
 | `Signature.fromType[F]` | a Scala function type |
 | `Signature.of[T <: Spec]` | the trait-as-spec macro, the closest analogue to Python's class form |
 | `Signature.builder(name).input[A](...).output[B](...).build` | programmatic |
-| `Signature.fromString("q -> a")` | the string DSL — a **compile-time macro** that parses the literal into typed `NamedTuple` I/O |
+| `Signature.fromString("q -> a")` | the string DSL — a **compile-time macro** that parses the literal into `NamedTuple` I/O |
 | `Signature.fromStringDynamic("q -> a")` | the string DSL from a **runtime** string (no static types; `Record` I/O) |
 
 The trait-spec macro is what most Python class signatures translate
@@ -75,11 +75,11 @@ runtime class introspection.
 
 See [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md).
 
-## 2. Typed I/O layer (Scala-native addition)
+## 2. I/O layer (Scala-native addition)
 
 **Scala-added.** This is the single largest architectural addition.
 
-Python `Prediction.value("toxic")` returns `Any` (well, the typed
+Python `Prediction.value("toxic")` returns `Any` (well, its
 attribute access works at runtime via Pydantic, but the static type
 is opaque). Field-name typos compile; type mismatches surface at
 runtime.
@@ -92,25 +92,25 @@ dspy4s splits the picture in two:
 - `Signature[I, O]` is a **compile-time wrapper** that wraps a
   `SignatureLayout` with `Shape[I]` and `Shape[O]` typeclass
   instances. `Predict[I, O].run(input: I)` returns
-  `Either[DspyError, Prediction[O]]`. `prediction.output.toxic` is
-  statically `Boolean`.
+  `Either[DspyError, Prediction[O]]`. `prediction.output.toxic` has
+  static type `Boolean`.
 
 The `Shape[A]` typeclass has three implementations
 (the product shape from `ZioSchemaCodec.derivedFromZioSchema` for
 case-class I/O via `zio-blocks-schema`, `TupleShape` for named-tuple
 I/O from the macros, `MapShape` for the string DSL).
 The representation pattern repeats at two levels: `RawPrediction` is the raw execution evidence retained by every
-`Prediction[O]` on `.raw`, while `Predict` has dynamic and statically typed entry points, `DynamicPredict` and
-`Predict[I, O]`. The two `Predict`s are **siblings** — thin `Module`s
-over the shared `PredictEngine`, not wrapper-and-wrapped. The typed
+`Prediction[O]` on `.raw`, while prediction has record-valued and domain-valued facades, `DynamicPredict` and
+`Predict[I, O]`. The two facades are **siblings** — thin `Module`s
+over the shared `PredictEngine`, not wrapper-and-wrapped. The domain-valued
 programs are themselves `Module[I, O]` values,
 so the runtime stack sees them like any other program; `ChainOfThought`
-is a typed signature augmentation that *composes* an inner `Predict[I, O]`
+is a signature augmentation that *composes* an inner `Predict[I, O]`
 (its `forward` delegates to it).
 
-Dynamic programs retain record-valued semantics, but now share the same `Prediction[O]` module result as statically
-typed programs: use `.output` for the record and `.raw` for the engine envelope. Adapter authors still never see the
-typed layer, and new code can opt into typed I/O surface-by-surface. See
+Dynamic programs retain record-valued semantics, but now share the same `Prediction[O]` module result as domain-valued
+programs: use `.output` for the record and `.raw` for the engine envelope. Adapter authors still never see the
+layer, and new code can opt into I/O surface-by-surface. See
 [TYPED_SIGNATURES.md](../TYPED_SIGNATURES.md) for the design rationale.
 
 ## 3. Module parameter discovery: `__dict__` walking → typeclass
@@ -206,12 +206,12 @@ with a structured error ADT:
 - `RuntimeError` — unexpected provider failures
 
 Internally things still throw at deep enough layers; the boundary is
-checked. The typed layer additionally elevates adapter-parse
+checked. The layer additionally elevates adapter-parse
 failures to the `Predict.apply` boundary instead of surfacing them
-via lazy field access — a typed decode failure is a `Left`, not a
+via lazy field access — a decode failure is a `Left`, not a
 `Throwable` at first field read.
 
-## 7. Save / load: Python state/program modes → typed state restore
+## 7. Save / load: Python state/program modes → state restore
 
 **Convention.**
 
@@ -260,7 +260,7 @@ into the same package.
 Python uses decorators (`@cached`, `@retry`, etc.) to layer behavior
 onto LM calls.
 
-Scala has no decorator equivalent that composes well with typed
+Scala has no decorator equivalent that composes well with generic
 signatures. Behavior layers are explicit wrapper objects that
 decorate a `LanguageModel` and conform to the same trait:
 
@@ -301,13 +301,13 @@ parity. Documented in [PORT_MAP §2a](PORT_MAP.md#2a-programs-per-file-port-stat
 **Convention.**
 
 Python's `MultiChainComparison.__call__(attempts, **inputs)` mixes the `attempts` parameter with input kwargs.
-dspy4s models both result-determining values as `MultiChainInput[I]` (the typed base input plus candidate attempts)
+dspy4s models both result-determining values as `MultiChainInput[I]` (the base input plus candidate attempts)
 inside the same `ProgramCall` envelope used by every module. Consequently `MultiChainComparison[I, O]` is a
 `Module[MultiChainInput[I], …]`, and the real work flows through the wrapped `apply` (callbacks/trace), not a side
 method. The `compare(input, attempts)` convenience builds the semantic input and envelope. (Earlier this was an
-untyped `runWithAttempts` that side-stepped the wrapping.)
+record-valued `runWithAttempts` that side-stepped the wrapping.)
 
-## 13. Recent: typed/dynamic split inside `programs/`
+## 13. Recent: domain/record split inside `programs/`
 
 **Scala-added.** Recent refactor (six-step series in May 2026).
 
@@ -320,33 +320,33 @@ doesn't have:
   adds module callbacks and tracing. `DynamicModule` specializes both semantic types to `DynamicValue.Record` and
   lifts its `RawPrediction` through `Prediction.dynamic`.
 - `DynamicPredict` — record-valued predict, extends `DynamicModule`.
-- `Predict[I, O]` — typed predict, a `Module[I, O]`; a
+- `Predict[I, O]` — domain-valued predict, a `Module[I, O]`; a
   *sibling* of `DynamicPredict` over `PredictEngine` (not a wrapper).
 
-`ChainOfThought` is itself a `Module` that composes an inner typed `Predict`.
-The typed programs are a Scala-native addition that doesn't change the
+`ChainOfThought` is itself a `Module` that composes an inner `Predict`.
+The programs are a Scala-native addition that doesn't change the
 underlying call flow; the engine is the single home for the
 adapter/LM/callback dance that Python has spread across
 `Predict.__call__` and its helpers.
 
-**Every program is now typed.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
+**Every program now carries its domain and codomain.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
 `ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
-`DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while typed
+`DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
-typed programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
+programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
 - **`OutputAugmentation`** (`dspy4s.signatures`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
   output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
-- **Typed `Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
-  `NamedTuple` I/O, so the string DSL is a *typed* surface; `fromStringDynamic` is the runtime (`Record`) version.
-- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so the typed
-  agents stream without needing an untyped `DynamicModule` twin.
+- **`Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
+  `NamedTuple` I/O, so the string DSL is compiler-checked; `fromStringDynamic` is the runtime (`Record`) version.
+- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so the
+  agents stream without needing a record-valued `DynamicModule` twin.
 
 The cohort mutation helpers on `SignatureLayout` (`withInputFields` and
 `withOutputFields`) are `private[dspy4s]`. Composite programs use them
 internally to augment a base layout with extra fields (e.g.
 `ChainOfThought` prepending a `reasoning` field). User code goes
-through the typed `Signature` surface instead. Python has no
-equivalent boundary because there's no separate typed surface to
+through the `Signature` API instead. Python has no
+equivalent boundary because there's no separate surface to
 funnel users toward.
 
 ## 14. Deferred areas (parity gaps, not design choices)
@@ -382,7 +382,7 @@ cluster in two places:
    feels closest to Python; the function-type macro
    (`Signature.fromType[F]`) is the most compact.
 2. **Reading prediction outputs.** Decide upfront whether you want
-   the typed path (`Predict[I, O]` + `prediction.output.toxic`) or
+   the domain-valued path (`Predict[I, O]` + `prediction.output.toxic`) or
    the dynamic path (`DynamicPredict` + `prediction.value("toxic")`).
    Mixing them works but adds friction; pick one per program.
 

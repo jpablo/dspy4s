@@ -29,8 +29,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * format → call → parse → prediction assembly, and dispatches the adapter / lm callback events along the way.
   *
   * This is the raw engine -- module-level lifecycle (the `withModule` callback scope and trace/history recording) is
-  * added by `Module.apply`. Two sibling `Module`s call this engine in their `forward`: the untyped `DynamicPredict`
-  * (`Module[DynamicValue.Record, DynamicValue.Record]`) and the typed `Predict[I, O]` (`Module[I, O]`, which
+  * added by `Module.apply`. Two sibling `Module`s call this engine in their `forward`: the record-valued
+  * `DynamicPredict` (`Module[DynamicValue.Record, DynamicValue.Record]`) and the `Predict[I, O]` (`Module[I, O]`, which
   * encodes/decodes around `execute`). Neither wraps the other, so a call emits exactly one module event.
   */
 private[dspy4s] final case class PredictEngine(
@@ -38,8 +38,8 @@ private[dspy4s] final case class PredictEngine(
     demos     : Vector[Example],
     moduleName: String,
     runtime   : ProgramRuntime,
-    /** Optional pre-rendered JSON Schema for the output. Populated by the typed [[dspy4s.programs.strategies.Predict]]
-      * path (which has a `Schema[O]` to render via `Shape.jsonSchemaString`); left `None` by
+    /** Optional pre-rendered JSON Schema for the output. Populated by the [[dspy4s.programs.strategies.Predict]] path
+      * (which has a `Schema[O]` to render via `Shape.jsonSchemaString`); left `None` by
       * [[dspy4s.programs.strategies.DynamicPredict]]. Passed straight through to [[AdapterInvocation]]; adapters that
       * understand it inline the schema in their prompt instruction.
       */

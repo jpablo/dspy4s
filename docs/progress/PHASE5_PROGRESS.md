@@ -5,7 +5,7 @@
 > for the running per-feature ledger see [PORT_MAP.md](../port/PORT_MAP.md) and
 > [PORT_BACKLOG.md](../port/PORT_BACKLOG.md). Symbols referenced below may have been
 > renamed since (e.g. the original `Signature` is now `SignatureLayout` and the
-> typed wrapper carries that name).
+> wrapper carries that name).
 
 
 Phase 5 focuses on program-level parity and end-to-end runtime behavior.
@@ -25,7 +25,7 @@ Phase 5 focuses on program-level parity and end-to-end runtime behavior.
 - `ReAct` tool request extraction now supports:
   - native `tool_calls` payloads (from LM/provider path)
   - legacy `tool_name` / `tool_args` fields (backward compatible)
-- Added robust parsing for typed and map-based tool-call entries.
+- Added robust parsing for structured and map-based tool-call entries.
 
 3. Program test coverage additions
 - Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/PredictSuite.scala`

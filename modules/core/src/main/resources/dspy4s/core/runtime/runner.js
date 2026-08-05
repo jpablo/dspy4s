@@ -24,13 +24,13 @@ class FinalOutput(BaseException):
     pass
 
 # Default SUBMIT for single-output signatures (e.g., Program of Thought).
-# Only define if not already registered with typed signatures.
+# Only define if not already registered with declared output fields.
 if 'SUBMIT' not in dir():
     def SUBMIT(output):
         raise FinalOutput({"output": output})
 `;
 
-// Generate a tool wrapper function with typed signature.
+// Generate a tool wrapper function with declared parameters.
 // Parameters is an array of {name, type?, default?} objects.
 // Convert a JavaScript/JSON value to Python literal syntax
 const toPythonLiteral = (value) => {
@@ -285,7 +285,7 @@ while (true) {
   if (method === "register") {
     const toolNames = [];
 
-    // Register tools with typed signatures
+    // Register tools with declared parameter schemas
     if (params.tools) {
       for (const tool of params.tools) {
         // Support both old format (string) and new format (object with parameters)

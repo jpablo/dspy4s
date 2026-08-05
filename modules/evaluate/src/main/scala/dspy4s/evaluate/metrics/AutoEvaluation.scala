@@ -25,8 +25,8 @@ import zio.blocks.schema.DynamicValue
   *
   *   - The judge sub-program is built from a runtime [[SignatureLayout]] driving a [[DynamicPredict]] (with a leading
   *     `reasoning` field prepended via [[ChainOfThought.augmentLayout]], exactly as Python's `ChainOfThought` does),
-  *     rather than a statically-typed `Signature`/`Module`. dspy4s metrics live in the `evaluate` module and score over
-  *     untyped data bags, so there is no static `I`/`O` to carry; the dynamic layer is the right substrate.
+  *     rather than a `Signature`/`Module` with statically known I/O. dspy4s metrics live in the `evaluate` module and
+  *     score over runtime data bags, so there is no static `I`/`O` to carry; the dynamic layer is the right substrate.
   *   - Field names are configurable. Defaults follow upstream's `example.question` / `example.response` (ground truth)
   *     / `pred.response` (system response). dspy4s has no attribute access, so the values are pulled by string key from
   *     the [[Example]] and [[RawPrediction]] records.

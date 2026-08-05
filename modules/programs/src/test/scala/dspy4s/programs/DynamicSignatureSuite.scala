@@ -50,7 +50,7 @@ class DynamicSignatureSuite extends FunSuite:
   private def field(values: DynamicValue.Record, name: String): Option[String] =
     DynamicValues.recordGet(values, name).map(DynamicValues.renderText)
 
-  test("s.predict() runs end-to-end: validating entry in, typed call, outputs on the raw envelope") {
+  test("s.predict() runs end-to-end: validating entry in, call, outputs on the raw envelope") {
     val program = qa.predict().withLm(new FixedLm("stub", "42"))
     val in      = qa.input(DynamicValues.record("question" := "meaning of life?")).toOption.get
     val out     = underAdapter(program(in)).toOption.get
@@ -70,7 +70,7 @@ class DynamicSignatureSuite extends FunSuite:
     val tuned = P.replace(packaged, Vector(states.head.copy(instructions = Some("Be terse."))))
     assertEquals(P.read(tuned).head.instructions, Some("Be terse."))
 
-    // The record-boundary run decodes through the bundle's codec, then executes the typed predict.
+    // The record-boundary run decodes through the bundle's codec, then executes the Predict.
     val runner = summon[ProgramRunner[Program[qa.In, qa.Out, 1]]]
     val out    = underAdapter(runner.run(packaged, ProgramCall(input = DynamicValues.record("question" := "x"))))
     assertEquals(out.toOption.map(p => field(p.values, "answer")), Some(Some("7")))

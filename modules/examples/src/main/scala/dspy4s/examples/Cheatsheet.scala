@@ -70,7 +70,7 @@ object Cheatsheet:
 
   // ── Snippet 1 (lines 17–20) — Predict with per-call config ──
   // | predict = dspy.Predict("question -> answer"); predict(question="1+1", config={"rollout_id": 1, "temperature": 1.0})
-  // `rollout_id` is a framework control → the typed `rolloutId`; `temperature` is a provider knob → `config`.
+  // `rollout_id` is a framework control → the `rolloutId`; `temperature` is a provider knob → `config`.
   def predictWithConfig(using RuntimeContext): Either[DspyError, String] =
     Predict(Signature.fromString("question -> answer"))(
       ProgramCall((question = "1+1"), config = rec("temperature" := 1.0), rolloutId = Some(1))
@@ -265,7 +265,7 @@ object Cheatsheet:
 
   // ── Snippets 32/33 (lines 479–503) — BestOfN / Refine ──
   // | best_of_3 = dspy.BestOfN(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0); best_of_3(question=...).answer
-  // The reward `one_word_answer(args, pred)` becomes the typed `(input, prediction) => Double` below.
+  // The reward `one_word_answer(args, pred)` becomes the `(input, prediction) => Double` below.
   // --8<-- [start:best-of-n]
   def bestOfN(question: String)(using RuntimeContext): Either[DspyError, String] =
     val qa = ChainOfThought(Signature.of[BasicQA])

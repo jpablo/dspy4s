@@ -10,10 +10,10 @@ dspy4s has a small number of concepts. Each builds on the one before it.
 
 | Concept | What it is |
 |---|---|
-| **Signature** | A typed declaration of a task's inputs and outputs. It describes *what*, not *how*. |
+| **Signature** | A declaration of a task's inputs and outputs. It describes *what*, not *how*. |
 | **Module** | A strategy for answering a signature by calling a language model: `Predict`, `ChainOfThought`, `ReAct`. |
 | **Program** | A module you run, or several modules composed into a larger one. Programs are ordinary Scala values. |
-| **Adapter** | Turns a signature plus inputs into prompt messages, and parses the reply back into the typed output: `ChatAdapter`, `JSONAdapter`. |
+| **Adapter** | Turns a signature plus inputs into prompt messages, and parses the reply back into the domain output: `ChatAdapter`, `JSONAdapter`. |
 | **Language model** | The backend an adapter sends messages to: `OpenAiLanguageModel` and OpenAI-compatible servers. |
 | **Runtime context** | The ambient configuration a program runs under: which language model, which adapter, and any callbacks. |
 | **Example** | A labeled data point: some inputs and their expected outputs. |
@@ -22,12 +22,12 @@ dspy4s has a small number of concepts. Each builds on the one before it.
 
 ## Running a program
 
-When you call a program, the work flows in one direction and comes back typed:
+When you call a program, the work flows in one direction and comes back as a Scala value:
 
 <div class="flow-context">
   <span class="flow-context__label">runtime context · language model · adapter · callbacks</span>
   <div class="flow">
-    <div class="flow-step">Signature<small>typed in/out</small></div>
+    <div class="flow-step">Signature<small>input/output</small></div>
     <div class="flow-arrow">→</div>
     <div class="flow-step flow-step--accent">Module<small>Predict · CoT · ReAct</small></div>
     <div class="flow-arrow">→</div>
@@ -35,7 +35,7 @@ When you call a program, the work flows in one direction and comes back typed:
     <div class="flow-arrow">→</div>
     <div class="flow-step">Language model</div>
     <div class="flow-arrow">→</div>
-    <div class="flow-step">Typed output<small>Either[err, out]</small></div>
+    <div class="flow-step">Output<small>Either[err, out]</small></div>
   </div>
 </div>
 
@@ -45,7 +45,7 @@ When you call a program, the work flows in one direction and comes back typed:
 3. The adapter sends the messages to the language model.
 4. The adapter parses the reply back into the signature's output type.
 5. You get an `Either[DspyError, Output]`, where `Output` is a named tuple with
-   typed dot-access.
+   direct dot access.
 
 The [Quickstart](quickstart.md) shows this end to end in a few lines.
 

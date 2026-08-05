@@ -1,6 +1,6 @@
 # The interpreted trajectory state machine
 
-[`InterpretedTrajectoryAgent`](InterpretedTrajectoryAgent.scala) is the shared, typed one-iteration machine behind
+[`InterpretedTrajectoryAgent`](InterpretedTrajectoryAgent.scala) is the shared one-iteration machine behind
 [`ReAct`](../ReAct.scala) and [`CodeAct`](../CodeAct.scala). It describes agents whose model output is lowered into an
 action, interpreted by an environment, recorded in a trajectory, and then classified as either continuing or complete.
 
@@ -79,7 +79,7 @@ In full, the specializations are:
 
 `TrajectoryAgent` supplies the final `Module.forward` implementation. `InterpretedTrajectoryAgent` supplies its final
 `trajectoryStep` implementation, leaving the concrete programs to define their action language through `ModelStep`,
-`Action`, and `Observation` and to implement the typed phase hooks.
+`Action`, and `Observation` and to implement the phase hooks.
 
 ## Where it fits
 
@@ -88,7 +88,7 @@ There are three nested abstractions:
 ```mermaid
 flowchart LR
     loop["AgentLoop<br/>bounded repetition"]
-    iteration["InterpretedTrajectoryAgent<br/>one typed iteration"]
+    iteration["InterpretedTrajectoryAgent<br/>one iteration"]
     extraction["TrajectoryAgent<br/>final extraction"]
     answer["Prediction[O]"]
 
@@ -165,12 +165,12 @@ They answer three different questions:
 
 | Type | Question |
 |---|---|
-| `ModelStep` | What typed value did the model produce for this turn? |
+| `ModelStep` | What value did the model produce for this turn? |
 | `Action` | What executable value is obtained by lowering that model output? |
 | `Observation` | What value does the action environment return to the agent? |
 | `Entry` | What durable domain record is appended to the trajectory? |
 
-The distinction prevents a universal, weakly typed “agent action” vocabulary. ReAct and CodeAct share the machine while
+The distinction prevents a universal action envelope with optional, protocol-specific fields. ReAct and CodeAct share the machine while
 retaining different languages:
 
 | Agent | `ModelStep` | `Action` | `Observation` | Stop rule |
@@ -263,7 +263,7 @@ recordStep(
 
 For example, `None` together with `Succeeded` would claim an action succeeded even though no action existed.
 
-The state machine instead exposes two typed hooks:
+The state machine instead exposes two phase-specific hooks:
 
 ```scala
 protected def recordRejection(
@@ -306,7 +306,7 @@ recoverably failed terminal action all remain visible to the final extractor.
 
 ## Implementing a concrete language
 
-A concrete agent supplies meanings for the typed boundary operations. The following is an abbreviated shape, not a
+A concrete agent supplies meanings for the phase operations. The following is an abbreviated shape, not a
 standalone module:
 
 ```scala

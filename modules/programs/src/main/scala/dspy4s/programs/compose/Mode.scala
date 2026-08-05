@@ -12,7 +12,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
 import zio.blocks.schema.DynamicValue
 
-/** `Mode`: a NON-LEARNABLE middleware over a typed program (Algebra 2's `mode`; see
+/** `Mode`: a NON-LEARNABLE middleware over a program (Algebra 2's `mode`; see
   * `docs/refactor/algebra-2-program-composition.md`). It rewrites the per-call controls — the provider `config` bag
   * (model / temperature / any provider knob), plus `rolloutId` / `traceEnabled` — before delegating to the wrapped
   * program. It introduces NO learnable predict of its own; that restriction is what lets it stay closure-shaped.
@@ -44,7 +44,7 @@ final case class Mode(transform: Mode.Controls => Mode.Controls):
   infix def ++(next: Mode): Mode = Mode(transform andThen next.transform)
 
 object Mode:
-  /** The per-call controls a mode may rewrite — everything on [[ProgramCall]] except the typed input. */
+  /** The per-call controls a mode may rewrite — everything on [[ProgramCall]] except the input. */
   final case class Controls(config: DynamicValue.Record, traceEnabled: Boolean, rolloutId: Option[Int])
 
   /** The monoid unit: the identity control transform. */

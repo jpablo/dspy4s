@@ -2,9 +2,9 @@ package dspy4s.programs.optimization
 
 import dspy4s.programs.strategies.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
-/** Hand-written [[OptimizableTraversal]] instances for composite typed programs whose learnable sub-predicts are
-  * hoisted to stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion
-  * keeps them in implicit scope without mixing concrete program traversal into the core typeclass definition.
+/** Hand-written [[OptimizableTraversal]] instances for composite programs whose learnable sub-predicts are hoisted to
+  * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion keeps them
+  * in implicit scope without mixing concrete program traversal into the core typeclass definition.
   *
   * `replace` writes parameters through each current executable predictor. Unchanged parameters preserve the existing
   * override field exactly; changed parameters create an override with the same signature structure and execution

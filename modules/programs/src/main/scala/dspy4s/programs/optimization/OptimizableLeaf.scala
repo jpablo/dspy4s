@@ -41,13 +41,13 @@ object OptimizableLeaf:
           config = updated.config
         )
 
-  /** [[OptimizableLeaf]] for the typed single-leaf program [[Predict]]. A `Predict` field inside a user composite
-    * resolves here (via [[OptimizableTraversal.fromOptimizableLeaf]], 1 element) rather than being structurally torn
-    * apart by [[OptimizableTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
+  /** [[OptimizableLeaf]] for the single-leaf program [[Predict]]. A `Predict` field inside a user composite resolves
+    * here (via [[OptimizableTraversal.fromOptimizableLeaf]], 1 element) rather than being structurally torn apart by
+    * [[OptimizableTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
     * [[OptimizableLeaf]] companion so it is in implicit scope without an explicit import.
     *
     * Optimizable parameters are exactly instructions, demos, and module config. The signature field structure, output
-    * shape, name, runtime, bound LM, and tools remain on the original typed program and are exposed only as read-only
+    * shape, name, runtime, bound LM, and tools remain on the original program and are exposed only as read-only
     * metadata.
     */
   given predictOptimizableLeaf[I, O]: OptimizableLeaf[Predict[I, O]] with
@@ -66,7 +66,7 @@ object OptimizableLeaf:
           signature = program.signature.withInstructions(updated.instructions)
         )
 
-  /** [[OptimizableLeaf]] for the typed single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but the
+  /** [[OptimizableLeaf]] for the single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but the
     * exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
     *
     * Optimizable parameters remain instructions, demos, and config. The augmented signature structure is metadata only;

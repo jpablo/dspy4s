@@ -10,12 +10,12 @@
   *   - Python **class-based** signatures (`class X(dspy.Signature): ...`) become Scala **spec traits** with
   *     `InputField[T]` / `OutputField[T]` members and `Signature.of[T <: Spec]`.
   *
-  * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named tuples, so call sites get typed dot-access:
+  * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named tuples, so call sites get direct dot access:
   *
   * Predict(sig)((field = "...")).map(_.output.field)
   *
-  * `ChainOfThought` augments the output named tuple with `reasoning: String` and delegates through typed `Predict`.
-  * Snippets 3, 4, and 6 use it directly.
+  * `ChainOfThought` augments the output named tuple with `reasoning: String` and delegates through `Predict`. Snippets
+  * 3, 4, and 6 use it directly.
   *
   * Structure note: each snippet is a self-contained block — heading comment + python original + supporting types (when
   * any) + example object. Supporting types (enums, case classes, spec traits) must stay at the package level for
@@ -91,7 +91,7 @@ object SentimentExample:
 //
 // `ChainOfThought` augments the output named tuple by prepending
 // `reasoning: String`, so `tp.output.reasoning` and `tp.output.summary`
-// are both typed dot-accesses with no `.value(...)` indirection.
+// are both direct dot accesses with no `.value(...)` indirection.
 
 // --8<-- [start:summarize]
 object SummarizeExample:
@@ -224,7 +224,7 @@ object DogPictureExample:
 //
 // Pydantic models port to Scala case classes with `derives Schema`. The
 // `Schema` drives both the field's wire `TypeRef` and its nested encode/decode
-// at the typed-signature boundary.
+// at the signature boundary.
 
 // --8<-- [start:custom-types]
 case class QueryResult(text: String, score: Double) derives Schema

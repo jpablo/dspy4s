@@ -31,7 +31,7 @@ class ProgramPersistenceSuite extends FunSuite:
     Example(rec("question" := "q2", "answer" := "a2")).withInputs(Set("question"))
   )
 
-  // ── Single typed Predict ──────────────────────────────────────────────────
+  // ── Single Predict ────────────────────────────────────────────────────────
 
   test("single Predict: dumpJson then loadJson into a fresh Predict restores demos") {
     val trained = Predict(qaSignature, demos = demo, name = Some("ask"))
@@ -205,7 +205,7 @@ class ProgramPersistenceSuite extends FunSuite:
 
 object ProgramPersistenceSuite:
 
-  // A composite holding two typed Predicts (question -> answer).
+  // A composite holding two Predicts (question -> answer).
   final case class Pipe2(
       a: Predict[(question: String), (answer: String)],
       b: Predict[(question: String), (answer: String)]

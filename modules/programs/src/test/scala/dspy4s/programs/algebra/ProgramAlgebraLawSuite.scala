@@ -59,7 +59,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
 
-  /** A typed program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
+  /** A program stub: maps the input via `f` and exposes `predict` as its single learnable leaf. */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
 
@@ -461,7 +461,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
     val _ = summon[ProgramRunner[ChainOfThought[DynamicValue.Record, Wrapped]]]
 
-    // Codec-equipped typed composites package as before.
+    // Codec-equipped composites package as before.
     val productChain = Program.of(ChainOfThought(Signature.derived[Boxed, Wrapped]("ProductInput")))
     assertEquals(productChain.params.size, 1)
   }

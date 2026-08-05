@@ -1,14 +1,14 @@
-# Typed Signatures — Design Document
+# Signatures — Design Document
 
 > **Status: design archive.** This document captures the original
 > design rationale (pre-implementation). The work has shipped, and the
 > nomenclature has since shifted — what this doc calls `Signature` is
 > now `SignatureLayout`, what it calls `Prediction` is `RawPrediction`,
-> and the typed surface is `Signature[I, O]` / `Prediction[O]` /
+> and the current API is `Signature[I, O]` / `Prediction[O]` /
 > `Predict[I, O]`. For the current API see:
 >
 > - [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) — day-to-day usage
-> - [ARCHITECTURE.md](ARCHITECTURE.md) — how the typed/dynamic split fits the broader stack
+> - [ARCHITECTURE.md](ARCHITECTURE.md) — how the domain/record split fits the broader stack
 >
 > The body of this document is preserved as a record of the design
 > thinking; treat its code snippets as illustrative of intent, not as
@@ -22,15 +22,15 @@
 ## TL;DR
 
 `Prediction.value(key: String): Either[DspyError, Any]` returns `Any`,
-forcing every typed access to a runtime cast. We propose a **layered
-architecture** that gives users compile-time typed predictions while
+forcing every field access to use a runtime cast. We propose a **layered
+architecture** that gives users compile-time predictions while
 keeping the existing runtime-flexible API intact:
 
-- **Engine layer** — one canonical typed carrier (`Signature[I, O]` +
+- **Engine layer** — one canonical carrier (`Signature[I, O]` +
   `Predict` + `Prediction`) that lifts field/type info into
   the type system.
 - **Surface layers** — multiple ergonomic translators that all compile
-  down to the engine: typed builder, named tuples, case-class
+  down to the engine: type-driven builder, named tuples, case-class
   derivation, and (later) an inline macro over the string DSL.
 
 **Foundation choice (§5):** three live options have been evaluated:
@@ -38,7 +38,7 @@ keeping the existing runtime-flexible API intact:
   + `schema-toon`; broad scope, 0.0.x).
 - **Option B** — self-built engine using only Scala 3.8.1 stdlib
   features (documented as fallback).
-- **Option C** — adopt Kyo's typed stack: `kyo-data` `Record[F]` for
+- **Option C** — adopt Kyo's structural-record stack: `kyo-data` `Record[F]` for
   intersection-typed prediction access, and evaluate `kyo-schema` for
   schema-backed decoding before writing custom codecs.
 
@@ -102,7 +102,7 @@ pred.map(_.sentiment)
 ```
 
 In the example above the dot-access (`_.sentiment`) returns the **raw**
-typed value, not an `Either`. Missing-field-at-runtime would indicate
+value, not an `Either`. Missing-field-at-runtime would indicate
 a contract violation between the adapter and the LM (the adapter
 parsed a response that lacked a declared output field), not a normal
 user-facing error — see §8 Q2 for the design choice.
@@ -121,23 +121,23 @@ genuinely need runtime DSL construction.
 | Literal types + `Singleton` bound | Compiler preserves `"toxic"` as type `"toxic"` through generic code | Typing on field-name literals at call sites |
 | Match types | `type FieldType[K <: String] = K match { case "toxic" => Boolean; ... }` | Type-level lookup table from field name to type |
 | `transparent inline def` + `inline match` | A method's declared return type can specialize per call | Wrapping match types in a callable accessor |
-| `Selectable` + refined types | `pred.toxic` dispatched via `selectDynamic`, statically typed via a refinement | Dot-access instead of `.value("toxic")` |
-| Named tuples (3.7+) | `(toxic: Boolean, sentiment: Boolean)` as a first-class typed record | Final user-facing prediction shape |
-| Macros (`quotes`/`splices`) | Parse a literal DSL string at compile time, emit a typed signature type | Bridging the existing string DSL into typed form |
+| `Selectable` + refined types | `pred.toxic` dispatched via `selectDynamic`, compiler-checked via a refinement | Dot-access instead of `.value("toxic")` |
+| Named tuples (3.7+) | `(toxic: Boolean, sentiment: Boolean)` as a first-class record | Final user-facing prediction shape |
+| Macros (`quotes`/`splices`) | Parse a literal DSL string at compile time, emit a signature type | Bridging the existing string DSL into a compiler-checked form |
 | `Mirror` + derivation | Walk a case class's `MirroredElemLabels`/`MirroredElemTypes` at compile time | Case-class-driven signature derivation |
 
 ### 2.2 The fundamental constraint
 
 A signature, in dspy4s today, is a **runtime value**. To get
-compile-time typed accessors, *something* needs to bridge the runtime
+compile-time accessors, *something* needs to bridge the runtime
 field/type info into the type system. That bridge can happen in three
 ways:
 
-- **(a) Explicit user code** — a typed builder where each call enriches
+- **(a) Explicit user code** — a type-driven builder where each call enriches
   the type.
 - **(b) Literal DSL inspected at compile time** — a macro that fires
   only when the DSL string is a constant.
-- **(c) Don't bridge; stay dynamic** — add typed accessors keyed by
+- **(c) Don't bridge; stay dynamic** — add accessors keyed by
   primitive type rather than by signature field.
 
 (a) and (b) deliver field-name + type checking. (c) only addresses the
@@ -150,10 +150,10 @@ quick win that can ship in parallel.
 - All seven modules consume `Signature` (the trait) through its runtime
   contract (`fields: Vector[FieldSpec]`, `inputFields`, `outputFields`,
   `withInstructions`, etc.). Adapters in particular read field
-  metadata at runtime to format/parse messages. **The typed layer must
+  metadata at runtime to format/parse messages. **The layer must
   produce something that still satisfies the trait at runtime.**
 - `Predict` and `ChainOfThought` are case classes that take a
-  `Signature` argument. A typed companion must coexist without
+  `Signature` argument. A generic companion must coexist without
   breaking existing call sites.
 - The existing string DSL (`Signature("comment -> toxic: bool")`) is
   the primary surface today and should keep working unchanged.
@@ -181,7 +181,7 @@ val emotionSig = Signature.of[EmotionIn, EmotionOut](
 - **Pros.** Zero ceremony. Both input and output are plain values you
   can construct with `(sentence = "…")`. Named tuples preserve field
   names at the type level, so dot-access on the prediction is
-  automatically typed.
+  inferred automatically.
 - **Cons.** Named tuples are anonymous at the type level — error
   messages show the structural form, not a friendly name. The `type`
   alias mitigates this when the elaborator can keep it visible.
@@ -223,7 +223,7 @@ case class Emotion(
   a spec, never as data. Adapting it to Scala would require splitting
   into two views anyway. **Not recommended.**
 
-### 3.4 Typed builder DSL
+### 3.4 Type-driven builder DSL
 
 ```scala
 val emotionSig = Signature.builder
@@ -267,7 +267,7 @@ other surface.
   outputs is possible later, but the explicit form should ship first.
 
 **Recommendation:** Make this the primary Python-like ergonomic
-surface after the foundation and typed `Predict` are working. Keep
+surface after the foundation and `Predict` are working. Keep
 named tuples and case classes as data-oriented alternatives.
 
 ### 3.6 Comparison
@@ -277,7 +277,7 @@ named tuples and case classes as data-oriented alternatives.
 | 1. Named tuples | 3 | small (derive via `NamedTuple.From`) | clean | structural (acceptable) |
 | 2. Case classes | 4–6 | small (`Mirror`-based derive) | clean | nominal (best) |
 | 3. Single case class + In/Out | 4 | medium (derive + role partition) | **bad** (placeholder outputs at construction) | nominal (good) |
-| 4. Typed builder | 5–7 | none | clean | carrier-tuple-typed (verbose) |
+| 4. Type-driven builder | 5–7 | none | clean | carrier-tuple-typed (verbose) |
 | 5. Trait/class-as-spec | 5–7 | medium (member-inspection macro) | clean (spec-only) | nominal-ish (best Python parity) |
 
 ---
@@ -333,7 +333,7 @@ object Signature:
     def output[T](name: String & Singleton): Signature[I, (name.type, T) *: O] = ???
     def instructions(text: String): Signature[I, O] = ???
 
-    /** Erase back to the untyped trait for adapters / runtime consumers. */
+    /** Erase back to the runtime trait for adapters / runtime consumers. */
     def asUntyped: Signature = sig
 ```
 
@@ -348,13 +348,13 @@ val sig = Signature.builder
 // inferred: Signature[("sentence", String) *: EmptyTuple, ("sentiment", Emotion) *: EmptyTuple]
 ```
 
-A typed companion to `Predict`:
+A generic companion to `Predict`:
 
 ```scala
 final class Predict[I <: Tuple, O <: Tuple](sig: Signature[I, O]):
   def run(inputs: NamedTuple[Names[I], Types[I]])(using RuntimeContext)
       : Either[DspyError, Prediction[O]] = ???
-  // alternative varargs form (the untyped predict once had such a convenience overload, since removed):
+  // alternative varargs form (the record-valued predict once had such a convenience overload, since removed):
   def run(inputs: (String, Any)*)(using RuntimeContext)
       : Either[DspyError, Prediction[O]] = ???
 ```
@@ -367,12 +367,12 @@ import scala.compiletime.error
 
 final class Prediction[O <: Tuple] extends Selectable:
   // `Fields` is special-cased by the compiler on Selectable + NamedTuple,
-  // enabling typed dot-access like `pred.toxic` that expands to
+  // enabling dot-access like `pred.toxic` that expands to
   // `selectDynamic("toxic").asInstanceOf[T]` per the named-tuples spec.
   type Fields = NamedTupleOf[O]
   def selectDynamic(name: String): Any = ???
 
-  // typed accessor for explicit lookups
+  // accessor for explicit lookups
   def value[K <: String & Singleton]: FieldOf[O, K] = ???
 
 /** Recursive lookup of `K` in a `Tuple` of (name, type) pairs.
@@ -401,7 +401,7 @@ See §4.6 below for why this matters.
 | **Named tuples** (`Signature.of[I, O]`) | inline def using `NamedTuple.Names[I]` + `NamedTuple.From[I]` to walk I/O at compile time, emit a sequence of `.input`/`.output` calls |
 | **Case classes** (`derives Signature.Input/Output`) | Mirror-based: walk `m.MirroredElemLabels` + `m.MirroredElemTypes`, produce the carrier |
 | **Trait/class spec** (`trait Foo extends Signature.Spec`) | macro: inspect abstract member methods, require `InputField[T]` / `OutputField[T]` markers, emit the carrier |
-| **String DSL** (`Signature("…")`) | macro: parse the literal at compile time, emit the carrier; for non-literals, fall back to the untyped `SignatureSpec` |
+| **String DSL** (`Signature("…")`) | macro: parse the literal at compile time, emit the carrier; for non-literals, fall back to the runtime `SignatureSpec` |
 
 Each translator is approximately 50–100 lines, isolated, and exercises
 only the public engine API.
@@ -441,7 +441,7 @@ release in `~/GitHub/dotty` (HEAD `88438e2c6e Release Scala 3.8.1`):
 |---|---|---|
 | Named tuples | Stable since 3.7; full type-level API (`Names`, `From`, `Map`, `Concat`, `Zip`, `Reverse`, `Take`, `Drop`, etc.) | `library/src/scala/NamedTuple.scala`, line 14: `opaque type NamedTuple[N <: Tuple, +V <: Tuple] >: V <: AnyNamedTuple = V` |
 | Named-tuple incremental build | **Not supported**; `*:` / `:*` ops commented out | `library/src/scala/NamedTuple.scala`, lines 47–48 |
-| `Selectable.Fields` typed dot-access | Compiler-special; expands `pred.toxic` to `selectDynamic("toxic").asInstanceOf[T]` | `docs/_docs/reference/other-new-features/named-tuples.md`, lines 144–167 |
+| `Selectable.Fields` dot-access | Compiler-special; expands `pred.toxic` to `selectDynamic("toxic").asInstanceOf[T]` | `docs/_docs/reference/other-new-features/named-tuples.md`, lines 144–167 |
 | `Mirror.Of[T]`, `MirroredElemLabels`, `MirroredElemTypes` | Stable; case classes get a `Mirror.Product` for free | `library/src/scala/deriving/Mirror.scala`, lines 7–17, 51 |
 | `derives` keyword | Stable; generates `given (...) => TC[T] = TC.derived` in companion | `docs/_docs/reference/contextual/derivation.md`, lines 1–50 |
 | Opaque types with `Tuple`-parameterized phantoms | Stable; NamedTuple itself uses this shape | `library/src/scala/NamedTuple.scala`, line 14 |
@@ -501,10 +501,10 @@ neither library foundation in §5 pans out. In a library-adoption path
 replaced by primitives from the chosen library — the surface layout
 from §4.3 remains the same either way.
 
-### 4.8 The existing untyped surface stays
+### 4.8 The existing runtime-defined surface stays
 
 `Signature.apply(dsl: String, instructions: String = "")` and
-`Predict(sig: Signature)` remain available unchanged. The typed layer
+`Predict(sig: Signature)` remain available unchanged. The layer
 is purely additive. Callers who don't need typing pay nothing.
 
 When the inline macro surface (Phase 5) ships, it can opt to *replace*
@@ -517,7 +517,7 @@ the macro footprint — but that decision can be deferred.
 
 ### 5.1 Background
 
-Three live options for the typed engine have been evaluated:
+Three live options for the engine have been evaluated:
 
 - **Option A** (§5.2): adopt [zio-blocks](https://github.com/zio/zio-blocks)
   — broad `Schema` + `Codec`/`Format` ecosystem with NamedTuple-aware
@@ -550,7 +550,7 @@ with what §4 proposes to build:
 - No transitive ZIO dependencies in `schema`/`chunk`/`maybe`/`scope`/
   `context`. (`endpoint` and `mux` pull `zio.http` — avoid those.)
 
-The choice is whether to build the typed engine ourselves or adopt
+The choice is whether to build the engine ourselves or adopt
 `zio-blocks-schema` as the underlying type-and-codec substrate.
 
 ### 5.2 Option A — Adopt zio-blocks-schema
@@ -582,7 +582,7 @@ object Signature:
 Each surface from §4.3 still applies, but the carrier becomes
 `Schema[I]` × `Schema[O]` instead of `(Tuple, Tuple)`. The match-type
 work over the carrier (§4.2's `FieldOf`) becomes mostly unnecessary —
-`NamedTuple` already provides typed dot-access via Selectable.
+`NamedTuple` already provides dot-access via Selectable.
 
 **What we gain.**
 - Phases 1–3 of the rollout (§7) shrink dramatically. Case-class and
@@ -608,8 +608,8 @@ work over the carrier (§4.2's `FieldOf`) becomes mostly unnecessary —
 zio-blocks where it gives us pieces we need**. The 0.0.x churn risk
 is accepted in exchange for not reimplementing primitives. Mitigation
 is to keep `Signature` as a dspy4s-owned wrapper so churn is
-contained at one layer — typed programs see `Signature[I, O]`,
-runtime adapters still see the existing untyped `Signature` trait via
+contained at one layer — programs see `Signature[I, O]`,
+runtime adapters still see the existing runtime `Signature` trait via
 `asUntyped`, and no downstream code sees raw `Schema[A]`.
 
 ### 5.3 Option B — Self-built engine
@@ -672,7 +672,7 @@ import kyo.{Record, ~}
 val r: Record["name" ~ String & "age" ~ Int] =
   ("name" ~ "Alice") & ("age" ~ 30)
 
-r.name   // String   (typed via Fields.Have evidence)
+r.name   // String   (checked via Fields.Have evidence)
 r.age    // Int
 // r.email  // compile error: no Fields.Have evidence
 ```
@@ -714,20 +714,20 @@ final case class Signature[I, O](
 )
 ```
 
-`Prediction[O]` becomes a `Record[O]` directly — typed dot-access
+`Prediction[O]` becomes a `Record[O]` directly — dot-access
 already works via `Record.selectDynamic`. Surface translators:
 
 - **Builder DSL** — `Record["k1" ~ V1 & "k2" ~ V2]` via `~` and `&`
   (works today; no `.input[T]` chain needed)
 - **Case classes** — `Record.fromProduct(emotionIn)` (works today,
-  *transparent inline* returns the typed Record schema)
+  *transparent inline* returns the Record schema)
 - **Named-tuple types** — needs a helper we'd add: e.g.
   `Record.from[(sentence: String)]` built on `stage[NamedTuple]`
 - **String DSL (later)** — macro emits a `Record[Schema]` literal
 
 **What we gain.**
 - The structural carrier we want, already implemented.
-- A plausible schema/codec companion in `kyo-schema`, so the typed
+- A plausible schema/codec companion in `kyo-schema`, so the signature
   layer can try schema-backed runtime decoding before writing its own
   field codec stack.
 - `~` and `&` as bidirectional operators give the cleanest DSL
@@ -760,10 +760,10 @@ already works via `Record.selectDynamic`. Surface translators:
 - Smaller community + ecosystem than zio-blocks.
 
 **Possible fallback hybrid: ZIO Blocks + Kyo.** Use `kyo-data`
-`Record[F]` for the typed prediction carrier, and `zio-blocks-schema`
+`Record[F]` for the prediction carrier, and `zio-blocks-schema`
 for the runtime mirror + codec layer only if `kyo-schema` cannot cover
 the MVP or future format requirements. This is a fallback, not the
-first choice, because Kyo can now plausibly cover both typed records
+first choice, because Kyo can now plausibly cover both records
 and schema-backed decoding behind one family of dependencies.
 
 ### 5.5 Comparison
@@ -774,7 +774,7 @@ and schema-backed decoding behind one family of dependencies.
 | Macro work | None (`Schema.derived`) | Case-class + string-DSL macros | Small (thin wrappers on `stage`/`fromProduct` for NamedTuple surface) |
 | Carrier shape | `Schema[A]` / `Reflect.Record` | Tuple of pairs in opaque type | Intersection of `Name ~ Value` |
 | Schema composition | wrapper-level | tuple concat ops | `&` (intersection types) |
-| Typed dot-access | NamedTuple + Selectable | Selectable + match types | Built-in `selectDynamic` + `Fields.Have` |
+| dot-access | NamedTuple + Selectable | Selectable + match types | Built-in `selectDynamic` + `Fields.Have` |
 | Field-not-found error | clean (Mirror) | needs `summonFrom` + `compiletime.error` mitigation | clean (typeclass evidence missing) |
 | Codec ecosystem | Bundled (JSON, YAML, BSON, TOON, ...) | Hand-built per format | `kyo-schema` JSON/Protobuf + runtime `Structure`; verify MVP fit |
 | Stability risk | 0.0.x (accepted) | None external | Lower than zio-blocks; verify version + transitive deps |
@@ -796,9 +796,9 @@ that give us pieces we need**. That bias points away from Option B
 genuinely open. The key trade is **scope** vs **structural fit**:
 
 - **Option A** brings more — including a codec ecosystem (`schema-toon`,
-  JSON, YAML, etc.) that could simplify adapter work and a typed-mirror
+  JSON, YAML, etc.) that could simplify adapter work and a schema-mirror
   story. Larger vocabulary footprint and a 0.0.x version pin.
-- **Option C** is structurally a better match for the typed-carrier
+- **Option C** is structurally a better match for the structural-record carrier
   problem specifically (intersection types compose better than tuples
   for structural records; `~` and `&` are the cleanest DSL syntax we
   could ask for; `stage`/`fromProduct` is the right derivation
@@ -831,13 +831,13 @@ genuinely open. The key trade is **scope** vs **structural fit**:
 
 **Until the binding decision is made**, Phase 1 of the rollout (§7)
 remains gated. Either of A or C unblocks the same Phase 2 work
-(typed `Predict` / `Prediction`).
+(`Predict` / `Prediction`).
 
 ---
 
-## 6. Complementary: typed accessor ladder
+## 6. Complementary: accessor ladder
 
-Independently of the typed engine, we can ship a small win **today** by
+Independently of the engine, we can ship a small win **today** by
 mirroring the existing `asDouble` for every primitive value shape:
 
 ```scala
@@ -851,14 +851,14 @@ trait Prediction extends Record:
 
 This eliminates the silent-cast risk for the primitive translated
 examples without locking us out of the engine work. `TypeRef.json`
-continues to use `.value` until the typed engine or a codec-backed
+continues to use `.value` until the engine or a codec-backed
 adapter path can represent JSON without adding `ujson` to `core`.
 ~30 lines, no design commitments.
 
 ### 6.1 Runtime output parsing contract
 
-Typed prediction access is only sound if output values are decoded before
-the typed prediction is created. Python DSPy does this by keeping each
+prediction access is only sound if output values are decoded before
+the prediction is created. Python DSPy does this by keeping each
 field's annotation on the signature, extracting raw fields in the
 adapter, and then coercing each value with a parser such as Pydantic's
 `TypeAdapter`.
@@ -868,7 +868,7 @@ The Scala port needs the same contract:
 1. **The adapter extracts named fields** from the LM response. For
    example, a chat adapter extracts field sections and a JSON adapter
    extracts JSON object properties.
-2. **The typed layer decodes raw values** with a bounded field decoder.
+2. **The layer decodes raw values** with a bounded field decoder.
    The first implementation should delegate to `kyo-schema` when
    possible, falling back to hand-written decoders only for uncovered
    MVP field types. This is where strings, numbers, booleans, literal
@@ -888,13 +888,13 @@ this boundary.
 
 ## 7. Phased rollout *(foundation-neutral)*
 
-The phases are written against the public typed surface. The concrete
+The phases are written against the public surface. The concrete
 carrier underneath is foundation-specific: Option A uses
 `Schema[I]`/`Schema[O]`, Option C uses `Record[I]`/`Record[O]` plus a
 `kyo-schema` decoding spike, and Option B uses the self-built fallback
 engine from §4.2.
 
-1. **Phase 0 (optional, immediate)** — Typed accessor ladder (Section
+1. **Phase 0 (optional, immediate)** — accessor ladder (Section
    6). Pure win, independent of the foundation choice.
 
 2. **Phase 1 — Adopt the foundation chosen in §5.6 + wrap as
@@ -908,11 +908,11 @@ engine from §4.2.
    substitute the self-built engine from §4.2 enriched with the
    `Name ~ Value` and `stage`-style patterns from §5.3.
 
-3. **Phase 2 — Typed `Predict`/`Prediction`.** Add `Predict[I,
+3. **Phase 2 — `Predict`/`Prediction`.** Add `Predict[I,
    O]` (consumes `Signature[I, O]`) and `Prediction[O]`.
    The underlying prediction carrier is foundation-specific
    (`NamedTuple`/Selectable for A or B, `Record[O]` for C), but the
-   public ergonomic target is the same: typed dot-access and typed
+   public ergonomic target is the same: dot-access and compiler-checked
    `.value[K]`. This phase also implements the runtime output parsing
    contract from §6.1: raw adapter outputs are decoded with the expected
    schemas/field codecs before a `Prediction[O]` is constructed.
@@ -958,9 +958,9 @@ its weight in practice.
    would still pull it transitively via `core`, so the split is
    mostly about declared dependencies.)
 
-2. **`Either` at the typed boundary — *unilateral resolution pending
+2. **`Either` at the decoded boundary — *unilateral resolution pending
    sign-off*.** Both dot-access (`pred.sentiment`) and the explicit
-   accessor (`pred.value[K]`) currently return the **raw** typed
+   accessor (`pred.value[K]`) currently return the **raw decoded**
    value, not `Either`. Either lives one level up: `Predict.run`
    returns `Either[DspyError, Prediction[O]]`, so all error
    handling is at the prediction-as-a-whole boundary. Missing-field-
@@ -979,31 +979,31 @@ its weight in practice.
 
    The current pick was made on the rationale that the type-level
    guarantee *is the whole point* of this layer, so wrapping every
-   typed access in `Either` would undermine it. External reviewers
+   field access in `Either` would undermine it. External reviewers
    may disagree and ask for the alternative; if so, the change is
    local (swap return types in two methods + update one §1.3 example).
 
 3. **Dot-access default.** `Selectable` enables `pred.toxic`. Worth the
-   small abstraction layer? Recommendation: yes for the typed layer;
-   keep dynamic dispatch out of the untyped layer to avoid surprise.
+   small abstraction layer? Recommendation: yes for the `Signature` API;
+   keep dynamic dispatch out of the runtime layer to avoid surprise.
 
 4. **Input ergonomics.** Should `Predict.run` take a named tuple
    (`run((comment = "..."))`), varargs of pairs (`run("comment" -> "...")`),
-   or both? Named tuples are typed but more verbose. (The untyped predict once
+   or both? Named tuples provide compiler-checked fields but are more verbose. (The record-valued predict once
    had a varargs `apply` convenience for this; it was unused and removed.)
 
 5. **Surface migration policy.** Once the engine ships, do we
-   re-translate existing example files to the typed layer immediately,
+   re-translate existing example files to the `Signature` API immediately,
    or only opt in selectively? Recommendation: opt-in on a per-example
    basis; never automatic.
 
-6. **Untyped `Signature.apply` deprecation.** Should the string-DSL
+6. **Runtime `Signature.apply` deprecation.** Should the string-DSL
    `Signature.apply` eventually be replaced by the Phase 5 macro, or
    coexist forever as a runtime-DSL escape hatch? Recommendation:
    coexist; runtime DSL is a legitimate use case (config-driven
    signatures, REPL exploration).
 
-7. **Phase 0 priority.** Ship the typed-accessor ladder before Phase 1,
+7. **Phase 0 priority.** Ship the accessor ladder before Phase 1,
    in parallel, or skip it? Recommendation: ship it before Phase 1 as
    a low-risk warm-up.
 
@@ -1052,9 +1052,9 @@ its weight in practice.
   validated fields, but orthogonal.
 - Supporting every arbitrary Pydantic-style user type as a public
   compatibility goal. A bounded parser/coercer for supported
-  typed-signature fields is in scope (§6.1), and `kyo-schema` may expand
+  signature fields is in scope (§6.1), and `kyo-schema` may expand
   that surface if the spike proves it clean. Arbitrary custom domain
   codecs remain out of scope for the MVP.
-- Cross-module refactor. The typed engine is purely additive; existing
+- Cross-module refactor. The engine is purely additive; existing
   modules continue to consume `Signature` (the trait) and `Prediction`
   unchanged.

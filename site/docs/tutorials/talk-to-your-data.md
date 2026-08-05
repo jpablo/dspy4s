@@ -1,10 +1,10 @@
 # Talk to your data
 
 A type-safe analytics agent that answers questions about a dataset and gets the
-arithmetic right. It threads three ideas into one workflow: typed signatures, a
+arithmetic right. It threads three ideas into one workflow: signatures, a
 code-writing agent, and prompt optimization with a grounded metric.
 
-## The model's intent is a typed value
+## The model's intent is a domain value
 
 The agent never lets the model emit a free-form answer. It first asks the model
 to produce a `QueryPlan`: a validated Scala value describing the computation.
@@ -25,7 +25,7 @@ prompt cannot drift between "avg", "mean", and "average":
 ## Plan, then compute in code
 
 The dataset is thousands of CSV rows, too large to put in a prompt. So the agent
-runs in two stages. **Plan** asks the model for the typed `QueryPlan`. **Act**
+runs in two stages. **Plan** asks the model for a `QueryPlan`. **Act**
 hands the plan and the data to an `RLM`, which writes and runs Python in a
 sandbox to compute the answer. The arithmetic happens in code, not in the
 model's head:
@@ -57,6 +57,6 @@ foundation check (`tytdSelfCheckMain`) runs with neither.
 
 ## Notes
 
-This is a multi-file example: typed schemas, the dataset and query engine, the
+This is a multi-file example: schemas, the dataset and query engine, the
 agent, and the optimization setup each live in their own file. Full source:
 [talk_to_your_data](https://github.com/jpablo/dspy4s/tree/main/modules/examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data).

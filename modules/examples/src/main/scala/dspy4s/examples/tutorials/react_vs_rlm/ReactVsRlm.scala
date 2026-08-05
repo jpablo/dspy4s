@@ -140,7 +140,7 @@ final class CallRecorder:
       )
     }
 
-// ── The three shared tools (typed argSchema so BOTH the ReAct prompt and the RLM Python sandbox agree) ─────
+// ── The three shared tools (a shared argSchema keeps the ReAct prompt and RLM Python sandbox aligned) ────
 object DrugSafetyTools:
 
   private def arg(args: DynamicValue.Record, name: String): String =

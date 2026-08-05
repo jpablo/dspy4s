@@ -4,9 +4,9 @@
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/modules.md Status: translated (portable
   * snippets; multi-completion `n=5` access noted as unsupported)
   *
-  * Translation rule (see Signatures.scala): string-DSL Python signatures become typed `Signature.fromString("…")`
-  * (parsed to a NamedTuple at compile time); each snippet is a self-contained example object exposing a `call(...)`
-  * that wires the program.
+  * Translation rule (see Signatures.scala): string-DSL Python signatures become `Signature.fromString("…")` (parsed to
+  * a NamedTuple at compile time); each snippet is a self-contained example object exposing a `call(...)` that wires the
+  * program.
   */
 package dspy4s.examples.learn.programming
 
@@ -49,9 +49,9 @@ object Modules:
   // | print(f"Answer: {response.answer}")
   //
   // Note: Python's `n=5` samples multiple completions and exposes them via
-  // `response.completions.answer` / `response.completions[3]`. dspy4s's typed
+  // `response.completions.answer` / `response.completions[3]`. dspy4s's
   // ChainOfThought returns a single prediction; multi-completion access (snippet 4) is
-  // not part of the typed surface. The single-completion shape is shown here.
+  // not part of the program API. The single-completion shape is shown here.
   // --8<-- [start:chain-of-thought]
   object QaReasoningExample:
     val classify = ChainOfThought(Signature.fromString("question -> answer"))
@@ -63,7 +63,7 @@ object Modules:
 
   // ── Snippet 4 (lines 84–86) ────────────────────
   // | response.completions[3].reasoning == response.completions.reasoning[3]
-  // Not portable: dspy4s has no typed multi-completion (`n`) surface — a typed prediction
+  // Not portable: dspy4s has no multi-completion (`n`) API — a prediction
   // carries a single decoded output. The raw completions remain on `prediction.raw.completions`.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.modulesMain"

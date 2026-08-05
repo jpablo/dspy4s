@@ -29,9 +29,9 @@ import zio.blocks.schema.DynamicValue
   * Cardinality-shaped value dependence uses the same boundary pattern separately: `MultiChainComparison` validates a
   * vector against `m`, then hides it behind its own path-branded carrier before prediction.
   *
-  * Status: the recommended user path for runtime-string signatures. `s.predict()` builds the typed program;
-  * composition, optimization (`OptimizableTraversal` + `ProgramRunner` over a packaged `Program`), and cross-fiber
-  * pipelines (via [[DynamicSignature.bridge]]) all run through the same machinery as statically typed programs.
+  * Status: the recommended user path for runtime-string signatures. `s.predict()` builds the program; composition,
+  * optimization (`OptimizableTraversal` + `ProgramRunner` over a packaged `Program`), and cross-fiber pipelines (via
+  * [[DynamicSignature.bridge]]) all run through the same machinery as domain-valued programs.
   * `Signature.fromStringDynamic` remains the substrate, and the plain data-bag surface for consumers that never enter
   * the category (optimizer helper generations, the evaluation judge).
   */
@@ -62,8 +62,8 @@ sealed trait DynamicSignature:
   final def input(record: DynamicValue.Record): Either[DspyError, In] =
     signature.inputShape.decode(record)
 
-  /** Build a typed [[Predict]] over this bundle's signature. A path-dependent constructor, so `In` / `Out` line up
-    * without threading `signature` at call sites: `val p = s.predict()` is the runtime-string counterpart of
+  /** Build a [[Predict]] over this bundle's signature. A path-dependent constructor, so `In` / `Out` line up without
+    * threading `signature` at call sites: `val p = s.predict()` is the runtime-string counterpart of
     * `Predict(Signature.derived[Q, A](...))`. Outputs are read from the prediction's `raw` envelope (the wire record),
     * the same surface the dynamic layer always exposed.
     */

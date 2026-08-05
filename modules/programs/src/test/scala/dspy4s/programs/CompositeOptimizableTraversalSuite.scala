@@ -35,7 +35,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
 
-  /** A typed program stub with one learnable leaf (same pattern as ComposeLawSuite's Step). */
+  /** A program stub with one learnable leaf (same pattern as ComposeLawSuite's Step). */
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
     override val moduleName: String                                                                              = "leaf"

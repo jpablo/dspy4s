@@ -10,7 +10,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import scala.util.Try
 import scala.util.matching.Regex
 
-/** Decodes JSONAdapter's JSON body and provider-native tool calls into typed dynamic fields. */
+/** Decodes JSONAdapter's JSON body and provider-native tool calls into schema-backed `DynamicValue` fields. */
 private[adapters] object JSONAdapterParser:
   private val FencedJson: Regex = "(?s)```json\\s*(\\{.*?\\})\\s*```".r
 

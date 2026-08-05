@@ -128,7 +128,7 @@ object LanguageModels:
     )
 
   // | predict(question="What is 1 + 52?", config={"rollout_id": 5, "temperature": 1.0})
-  // Per-call: pass an `options`/config bag for provider params (`temperature`, …), and use the typed `rolloutId`
+  // Per-call: pass an `options`/config bag for provider params (`temperature`, …), and use the `rolloutId`
   // for cache-busting — in dspy4s `rollout_id` is a first-class field on `ProgramCall`, not a magic config key.
   // --8<-- [start:lm-config]
   def askWithConfig(question: String, temperature: Double, rolloutId: Int)(using

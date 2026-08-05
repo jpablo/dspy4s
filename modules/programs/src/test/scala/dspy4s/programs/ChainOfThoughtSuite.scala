@@ -125,7 +125,7 @@ class ChainOfThoughtSuite extends FunSuite:
     assertEquals(layout.outputFields.map(_.name), Vector("reasoning", "summary"))
   }
 
-  test("ChainOfThought.run returns a typed prediction with reasoning prepended") {
+  test("ChainOfThought.run returns a prediction with reasoning prepended") {
     val sig     = Signature.of[TcotSummarizeSpec]
     val adapter = new ScriptedAdapter(
       reasoning = "The text is about football transfers; condense the key facts.",
@@ -136,7 +136,7 @@ class ChainOfThoughtSuite extends FunSuite:
       val result           = ChainOfThought(sig)((document = "..."))
       result match
         case Right(tp) =>
-          // Typed dot-access for both reasoning and the base output field.
+          // dot-access for both reasoning and the base output field.
           val reasoning: String = tp.output.reasoning
           val summary: String   = tp.output.summary
           assertEquals(reasoning, "The text is about football transfers; condense the key facts.")

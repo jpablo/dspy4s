@@ -9,7 +9,7 @@ in the examples module.
 
 | I want to | Use | Page |
 |---|---|---|
-| Declare typed inputs and outputs | `Signature.fromType` / `Signature.fromString` | [Signatures](../programs/signatures.md) |
+| Declare inputs and outputs | `Signature.fromType` / `Signature.fromString` | [Signatures](../programs/signatures.md) |
 | Use named fields, enums, custom types | `Spec` trait + `Signature.of[T]` | [Signatures](../programs/signatures.md) |
 
 ## Run a task

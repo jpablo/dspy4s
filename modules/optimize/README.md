@@ -50,8 +50,8 @@ program class:
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
 - **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
-  consumes. This is the "spine unification": it lets the optimizers target **typed** programs (`Predict[I, O]`,
-  `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the untyped `DynamicModule` spine, with no
+  consumes. This is the "spine unification": it lets the optimizers target domain-valued programs (`Predict[I, O]`,
+  `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the record-valued `DynamicModule` spine, with no
   `asInstanceOf`.
 
 Scoring across the family goes through `Evaluate` + the metric via shared helpers in `OptimizerSupport` (the
@@ -120,7 +120,7 @@ compatibility policy.
 | File | Contents |
 |------|----------|
 | `contracts/OptimizeContracts.scala` | `Teleprompter`, `OptimizationReport`, `CandidateProgram` |
-| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` spine (typed + untyped run) |
+| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` spine for domain- and record-valued programs |
 | `OptimizerSupport.scala` | shared instruction-edit, seed→rolloutId, and scoring helpers |
 | `LabeledFewShot.scala`, `BootstrapFewShot*.scala`, `KNNFewShot.scala` | demo optimizers |
 | `COPRO.scala`, `MIPROv2.scala`, `InferRules.scala` | instruction (and demo) optimizers |

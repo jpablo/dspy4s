@@ -80,7 +80,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 | Example | Run (`…tutorials.<pkg>.<main>`) | Coverage / notes |
 |---|---|---|
 | **email_extraction** | `email_extraction.emailExtractionMain` 🔑 | Enums/case classes/`Option`/`List` via `derives Schema`; four composed `ChainOfThought`s. MLflow autolog out of scope. |
-| **output_refinement** | `output_refinement.bestOfNAndRefineMain` 🔑 | 6/6. Typed `BestOfN[I,O]` / `Refine[I,O]` with typed reward functions. |
+| **output_refinement** | `output_refinement.bestOfNAndRefineMain` 🔑 | 6/6. `BestOfN[I,O]` / `Refine[I,O]` with reward functions over `Prediction[O]`. |
 | **streaming** | `streaming.streamingMain` 🔑 | 1–9. Synchronous `streamify` → `ClosableIterator[StreamEvent]`; per-field & per-predict listeners; status provider. |
 | **async** | `async.asyncMain` 🔑 | `acall` → `applyAsync`/`ContextPropagation.future`. Async _tools_ not portable (synchronous `ToolFunction`). |
 | **cache** | `cache.cacheMain` 🔑 | Per-LM `ManagedLanguageModel(cache=…)` (Noop/InMemory/Disk/custom) + usage tracking. No global `configure_cache`. |
@@ -105,7 +105,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 
 ## 🔧 Signature demos (`signatures/`)
 
-Hand-written demonstrations of the four ways to declare a typed `Signature` (not 1:1 doc ports).
+Hand-written demonstrations of the four ways to declare a `Signature` (not 1:1 doc ports).
 
 | Example | Run | Surface |
 |---|---|---|
@@ -153,7 +153,7 @@ alternative where one exists.
 
 ## At a glance
 
-- **23** ported doc examples (✅) + **4** typed-surface demos (🔧) = **28** runnable `@main`s (the Metrics
+- **23** ported doc examples (✅) + **4** signature demos (🔧) = **28** runnable `@main`s (the Metrics
   example carries two: `metricsMain` + `metricsJudgeMain`).
 - **7** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
   `loadingCustomDataMain`, `savingMain`. The other 21 need `OPENAI_API_KEY` (🔑).

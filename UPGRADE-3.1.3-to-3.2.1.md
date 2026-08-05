@@ -29,7 +29,7 @@ Done and verified (core 61 / adapters 67 / programs 84 tests green; full `Test/c
   strings in `docs/` are baseline records tied to a `release-3.1.3` reference clone). Left as-is.
 
 Still open (decisions / deferred): **D1** type-mismatch warning (recommended skip — redundant on
-typed surface); **L1** wire `ContextWindowExceededError` detection into `OpenAiClient`;
+surface); **L1** wire `ContextWindowExceededError` detection into `OpenAiClient`;
 **P1 design** stderr vs callback-event warning channel.
 
 ## TL;DR
@@ -56,11 +56,11 @@ The 3.1.3 → 3.2.1 diff is dominated by non-actionable churn:
 
 - [ ] **D1. Port the type-mismatch warning feature?** (spans `constants.py`, `field.py`,
       `settings.py`, consumed in `predict.py`). It's diagnostic-only (warns, never raises)
-      and is **largely redundant** on the typed `Predict[I, O]` surface (types enforced at
-      compile time). Only meaningfully applies to the untyped `DynamicPredict` record path.
+      and is **largely redundant** on the `Predict[I, O]` surface (types enforced at
+      compile time). Only meaningfully applies to the `DynamicPredict` record path.
       → Recommend **skip as a unit** unless `DynamicPredict` diagnostics are wanted. Half-porting
       (flag without warning, or vice versa) gives no value.
-- [ ] **D2. Port `ContextWindowExceededError`?** Adding the typed error is cheap and correct,
+- [ ] **D2. Port `ContextWindowExceededError`?** Adding the error is cheap and correct,
       but its *value* depends on whether any adapter/module truncate-and-retry fallback that
       catches it is (or will be) ported. dspy4s adapters don't implement that fallback today.
       → Recommend **add the error type** (LM error fidelity) but treat the fallback consumer
@@ -84,7 +84,7 @@ The 3.1.3 → 3.2.1 diff is dominated by non-actionable churn:
         returns a parse error. Optionally unify the message to mirror upstream (see D3).
 
 - [ ] **C2. [out of scope] `IS_TYPE_UNDEFINED` constant** (new `dspy/utils/constants.py`).
-      Only consumer is the type-mismatch warning (D1). If D1 is taken, model it as a typed
+      Only consumer is the type-mismatch warning (D1). If D1 is taken, model it as an explicit
       `FieldSpec.typeUndefined: Boolean` set by `SignatureParser.parseField`
       (`SignatureParser.scala:43-46`) — **do not** introduce a magic-string key (per the
       "no magic string keys" convention).
@@ -106,7 +106,7 @@ The 3.1.3 → 3.2.1 diff is dominated by non-actionable churn:
       `fromState`); `Settings.load`'s `allow_pickle` security fix has no analog.
 
 - [ ] **C6. [note, do not port] Deprecated field args.** `field.py` adds deprecation warnings
-      for `prefix`/`format`/`parser` on `InputField`/`OutputField`. dspy4s's typed field
+      for `prefix`/`format`/`parser` on `InputField`/`OutputField`. dspy4s's field
       wrappers take none of these — nothing to warn about. **Forward note:** if a user-facing
       field-metadata API is ever added, do NOT add `prefix`/`format`/`parser`.
 
@@ -184,8 +184,8 @@ The 3.1.3 → 3.2.1 diff is dominated by non-actionable churn:
         runtime/callback. (`Predict.forward` `Predict.scala:61-68` validates *missing* inputs but
         not *extra* ones.)
 
-- [ ] **P2. [if D1] Type-mismatch warning.** Relevant only to the untyped `DynamicPredict`
-      record path (typed `Predict[I, O]` enforces at compile time). Requires C2 + C3.
+- [ ] **P2. [if D1] Type-mismatch warning.** Relevant only to the `DynamicPredict`
+      record path (`Predict[I, O]` enforces at compile time). Requires C2 + C3.
 
 - [ ] **P3. [cosmetic alignment] Drop hardcoded reasoning/code prefixes.**
       Upstream `chain_of_thought.py` and `program_of_thought.py` removed explicit
@@ -219,7 +219,7 @@ The 3.1.3 → 3.2.1 diff is dominated by non-actionable churn:
       `RuntimeContext`, so a metric can't call an LM). `metrics.py` — docstring-only;
       `BuiltinMetrics.scala`/`NormalizeText.scala` unaffected. `dummies.py` (`DummyLM`) — no
       analog in the port; the new structured-response contract already matches dspy4s's design
-      (runtime owns bookkeeping, `LanguageModel.call` returns a typed `LmResponse`).
+      (runtime owns bookkeeping, `LanguageModel.call` returns a `LmResponse`).
 
 ---
 

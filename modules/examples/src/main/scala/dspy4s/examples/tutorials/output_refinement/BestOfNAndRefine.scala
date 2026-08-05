@@ -4,9 +4,9 @@
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/output_refinement/best-of-n-and-refine.md Status:
   * translated (6/6 snippets)
   *
-  * Typed `BestOfN[I, O]` / `Refine[I, O]` wrap an inner typed program and take a typed reward
-  * `(I, Prediction[O]) => Double`. Wrapping a `ChainOfThought("q -> a")` makes the inner output the augmented named
-  * tuple `(reasoning, a)`, so the reward reads `pred.output.<field>`.
+  * `BestOfN[I, O]` / `Refine[I, O]` wrap an inner program and take a reward `(I, Prediction[O]) => Double`. Wrapping a
+  * `ChainOfThought("q -> a")` makes the inner output the augmented named tuple `(reasoning, a)`, so the reward reads
+  * `pred.output.<field>`.
   */
 package dspy4s.examples.tutorials.output_refinement
 

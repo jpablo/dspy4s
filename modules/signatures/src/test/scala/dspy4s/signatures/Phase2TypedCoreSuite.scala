@@ -18,7 +18,7 @@ case class P2EnumOutput(sentiment: P2Sentiment) derives Schema
 case class P2TwoInputs(question: String, context: String) derives Schema
 case class P2TwoOutputs(answer: String, score: Double) derives Schema
 
-/** Phase 2 typed-core suite per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
+/** Phase 2 signature-core suite per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *
   * Maps 1:1 to the plan's Phase 2 test list.
   */
@@ -62,7 +62,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     )
   }
 
-  test("Signature.withInstructions preserves typed shapes") {
+  test("Signature.withInstructions preserves input and output shapes") {
     val sig        = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
     val instructed = sig.withInstructions("Classify emotion.")
 
@@ -88,7 +88,7 @@ class Phase2TypedCoreSuite extends FunSuite:
     assertEquals(encoded, rec("sentiment" := "joy", "confidence" := 0.92))
   }
 
-  test("Shape.decode round-trips a typed value") {
+  test("Shape.decode round-trips a value") {
     val shape   = Shape.derived[P2ScoredSentiment]
     val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := 0.92))
     assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.92)))

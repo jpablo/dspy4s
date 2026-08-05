@@ -36,8 +36,8 @@ final case class Example(
   def withValue(key: String, value: DynamicValue): Example =
     copy(values = values.updated(key, value))
 
-  /** Convenience overload for callers passing a plain typed Scala value; lifts it via its `Schema`. A value type
-    * without a `Schema` is a compile error.
+  /** Convenience overload for callers passing a Scala value; lifts it via its `Schema`. A value type without a `Schema`
+    * is a compile error.
     */
   def withRawValue[A](key: String, value: A)(using schema: Schema[A]): Example =
     withValue(key, schema.toDynamicValue(value))

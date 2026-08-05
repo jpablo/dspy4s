@@ -18,7 +18,7 @@ import java.nio.file.Paths
 /** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's `BaseModule.dump_state` / `load_state`
   * and `save` / `load`.
   *
-  * Built entirely on [[OptimizableTraversal]], so a single typed or dynamic prediction module and an arbitrary
+  * Built entirely on [[OptimizableTraversal]], so a single `Predict` or `DynamicPredict` module and an arbitrary
   * composite use the same path: [[dumpState]] serializes every writable [[OptimizableParameters]], and [[loadState]]
   * writes those parameter values into a fresh program through `OptimizableTraversal.replace`.
   *

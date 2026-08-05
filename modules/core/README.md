@@ -9,8 +9,8 @@ every call, the error hierarchy, and the observability events. It has no depende
 Four abstractions anchor the framework:
 
 - **A single data spine.** All data — example inputs, model outputs, configs — flows as a zio-blocks
-  `DynamicValue.Record`, a schema-typed discriminated-union value rather than `Map[String, Any]`. The `:=`
-  operator and the `DynamicValues` helpers lift typed values onto this spine at the edges; internal codec paths
+  `DynamicValue.Record`, a schema-backed discriminated-union value rather than `Map[String, Any]`. The `:=`
+  operator and the `DynamicValues` helpers lift Scala values onto this spine at the edges; internal codec paths
   produce `DynamicValue` directly so nothing is lost in round-trips.
 - **A signature/field model.** A `SignatureLayout` stores ordered input and output cohorts of role-free
   `FieldSpec` metadata. Each field has a wire `TypeRef`, description, prefix, and constraints. Adapters and programs
@@ -29,8 +29,8 @@ Four abstractions anchor the framework:
 | Type | Role |
 |------|------|
 | `Example` | A training/demo data point: a `DynamicValue.Record` of fields plus the `inputKeys` partition marking inputs vs labels. |
-| `RawPrediction` | Adapter-parsed prediction data before schema decoding into semantic output `O`: field values, optional multi-candidate `Completions`, and typed `LmUsage`. "Raw" does not mean unparsed LM text. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
-| `LmUsage` / `TokenCategory` | Typed token accounting shared by predictions and LM responses; pointwise addition is a commutative monoid. |
+| `RawPrediction` | Adapter-parsed prediction data before schema decoding into semantic output `O`: field values, optional multi-candidate `Completions`, and structured `LmUsage`. "Raw" does not mean unparsed LM text. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
+| `LmUsage` / `TokenCategory` | Token accounting shared by predictions and LM responses; pointwise addition is a commutative monoid. |
 | `Completions` | A column-oriented view of N candidate completions; `at(i)` reconstructs row `i` as a `RawPrediction`. |
 | `DynamicValues` | The helper surface over the spine: `fromAny`, `recordFromEntries`, `recordGet`, `mergeRecords`, `renderText`, plus the `:=` and `updated` extensions. `fromAny` is reserved for user-facing edges. |
 
@@ -38,7 +38,7 @@ Four abstractions anchor the framework:
 
 | Type | Role |
 |------|------|
-| `SignatureLayout` | The runtime layout: name, optional instructions, and separate ordered input/output `FieldSpec` cohorts. Built via `create` (validating), `parse` (DSL), or typed derivation. |
+| `SignatureLayout` | The runtime layout: name, optional instructions, and separate ordered input/output `FieldSpec` cohorts. Built via `create` (validating), `parse` (DSL), or `Signature` derivation. |
 | `FieldSpec` | Role-free per-field metadata: name, wire type, description, prefix, default, constraints. `normalize` fills defaults so adapters see a uniform surface. |
 | `TypeRef` | The wire-format type tag the LM sees (`string`, `bool`, `json`, …); unknown tokens pass through opaque. |
 | `Constraint` | Constraint algebra mirroring Python's `PYDANTIC_CONSTRAINT_MAP` (prose hint + JSON-Schema keyword). |
@@ -53,14 +53,14 @@ Four abstractions anchor the framework:
 | `CallbackEvent` / `CallbackHandler` | The eight lifecycle events (module/LM/adapter/tool × start/end), correlated by `callId`/`parentCallId`, and the handler interface that consumes them. |
 | `TraceEntry` / `HistoryEntry` | Recorded module calls (inputs/outputs/failure) and LM calls; appended to the context when enabled, capped by `maxHistorySize`. `HistoryRenderer` produces dspy-style inspection output. |
 | `DspyError` | Sealed error hierarchy: `ConfigurationError`, `ValidationError`, `NotFoundError`, `ParseError`, `RuntimeError`, `ContextWindowExceededError`, each with a `code` + message, propagated through `Either`. |
-| `ToolCall` | A model-requested tool invocation (`name` + args record), carried as structured data through wire → adapter → typed decode. |
+| `ToolCall` | A model-requested tool invocation (`name` + args record), carried as structured data through wire → adapter → domain decode. |
 | `CodeInterpreter` / `ReplCodeInterpreter` | The code-execution sandbox interface used by `CodeAct` / `RLM`; the Deno/Pyodide and subprocess-Python implementations live here. |
 
 ## Design notes
 
-- **Schema-typed bags, not `Any`.** The `:=` operator requires a `Schema` in scope, so values lifted onto the
+- **Schema-backed bags, not `Any`.** The `:=` operator requires a `Schema` in scope, so values lifted onto the
   spine are losslessly encodable. This is what lets the same record serialize cleanly to JSON and flow through
-  both typed and dynamic call paths.
+  both domain-value and record-value call paths.
 - **The runtime owns bookkeeping.** Programs are pure; trace, history, callbacks, and the call stack live in
   `RuntimeContext`/`RuntimeEnvironment`, not on per-instance fields. Nested and concurrent scopes coexist
   without shared mutable state.
@@ -92,6 +92,6 @@ Four abstractions anchor the framework:
 ## Relation to dspy
 
 `core` is where the dspy4s-specific shape decisions live: one codec (zio-blocks `Schema`, see the two-codec note
-in the repo memory), data bags addressed by typed `:=` keys rather than Python attribute access, and the
+in the repo memory), data bags addressed by schema-checked `:=` keys rather than Python attribute access, and the
 [module-purity principle](../../README.md) (pure programs, runtime-owned bookkeeping) that the rest of the
 modules depend on.

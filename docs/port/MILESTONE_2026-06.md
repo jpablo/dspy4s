@@ -8,7 +8,7 @@ This doc is the reviewer's map; the per-gap detail lives in
 ## Headline
 
 The port went from **"blocked on G-1"** to a **verified, real-LM-validated optimizer
-stack** with 8 tracked gaps closed. The keystone was G-1 (typed predictor introspection);
+stack** with 8 tracked gaps closed. The keystone was G-1 (predictor introspection);
 everything downstream — composite save/load, the Refine feedback loop, and the COPRO /
 MIPROv2 optimizer family — builds on it.
 
@@ -22,15 +22,15 @@ MIPROv2 optimizer family — builds on it.
   optimizer; Evaluate `display_table` + `provideTraceback`; LM capability flags
   (`supportsFunctionCalling`/`ResponseSchema`/`Reasoning`); `inspect_history`.
 
-## 2. G-1 — typed predictor introspection (the keystone), P1–P6
+## 2. G-1 — predictor introspection (the keystone), P1–P6
 
 `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclasses with Scala 3 Mirror derivation: enumerate and
 immutably replace the learnable predictors of an arbitrary composite (`replace(p,read(p))==p`).
 
 - `30420f3` P1 typeclasses + derivation · `25d7e8d` P2 retarget optimizers + drop
   `LabeledSampleProgram` · `9bcf99f` P3 hoist ReAct/CodeAct/MCC sub-predicts to fields ·
-  `dd466be` P4 leaf instances for typed `Predict`/`ChainOfThought` · `c459d07` P5 **`ProgramRunner`
-  spine unification** (optimizers now target typed programs/user composites end-to-end) ·
+  `dd466be` P4 leaf instances for `Predict`/`ChainOfThought` · `c459d07` P5 **`ProgramRunner`
+  spine unification** (optimizers now target programs/user composites end-to-end) ·
   `1657f9c` P6 remove `PredictOps` (`OptimizableTraversal` is the sole introspection typeclass).
 
 ## 3. Tier-0 state gaps (built on G-1)
@@ -81,7 +81,7 @@ immutably replace the learnable predictors of an arbitrary composite (`replace(p
 - **Retrievers / Embedder → KNN** (needs an embeddings client + vector search).
 - **Heavy optimizers** — GEPA (external engine), SIMBA/GRPO/BetterTogether (training stack),
   Optuna (no JVM analog), InferRules.
-- **Follow-ups** — Refine per-module advice; G-9 typed-`Schema` constraint derivation; XML/JSON
+- **Follow-ups** — Refine per-module advice; G-9 `Schema` constraint derivation; XML/JSON
   constraint embedding.
 
 ## Notes for the reviewer

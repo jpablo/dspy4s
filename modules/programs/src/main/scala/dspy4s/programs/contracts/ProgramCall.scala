@@ -5,15 +5,15 @@ import zio.blocks.schema.DynamicValue
 
 /** The uniform invocation envelope for every program boundary.
   *
-  * `I` is the boundary's input carrier: typed modules use their Scala input type, while the dynamic spine uses
+  * `I` is the boundary's input carrier: modules use their Scala input type, while the dynamic spine uses
   * `DynamicValue.Record`. [[mapInput]] changes only that carrier and preserves every execution control, making
   * `ProgramCall` a lawful functor in `I`:
   *
   *   - `call.mapInput(identity) == call`
   *   - `call.mapInput(f).mapInput(g) == call.mapInput(g compose f)`
   *
-  * [[config]] is the provider option bag forwarded to the LM; framework controls remain typed fields. [[rolloutId]] is
-  * the cache-busting selector used by repeated sampling. Typed modules normally receive `ProgramCall[I]` and map it
+  * [[config]] is the provider option bag forwarded to the LM; framework controls remain dedicated fields. [[rolloutId]]
+  * is the cache-busting selector used by repeated sampling. Modules normally receive `ProgramCall[I]` and map it
   * through their input `Shape`; the engine receives `ProgramCall[DynamicValue.Record]`.
   */
 final case class ProgramCall[I](
@@ -26,7 +26,7 @@ final case class ProgramCall[I](
   def mapInput[J](f: I => J): ProgramCall[J] =
     ProgramCall(f(input), config, traceEnabled, rolloutId)
 
-  // Per-call memo of the encoded input record, keyed by the encoding Shape's identity. `Module.apply` and a typed
+  // Per-call memo of the encoded input record, keyed by the encoding Shape's identity. `Module.apply` and a
   // module's `forward` both need the encoding. Benign races may duplicate a pure encode but cannot change its value.
   @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
 
@@ -39,7 +39,7 @@ final case class ProgramCall[I](
       cachedEncoding = (shape, computed)
       computed
 
-  /** Map this typed call onto the dynamic record spine while reusing the memoized encoding. */
+  /** Map this call onto the dynamic record spine while reusing the memoized encoding. */
   private[dspy4s] def encoded(shape: dspy4s.signatures.Shape[I]): ProgramCall[DynamicValue.Record] =
     mapInput(_ => encodedInput(shape))
 

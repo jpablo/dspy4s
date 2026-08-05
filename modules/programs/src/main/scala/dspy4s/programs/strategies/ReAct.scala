@@ -22,7 +22,7 @@ import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signatur
 import zio.blocks.schema.DynamicValue
 
 /** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized over
-  * any typed signature.
+  * any signature.
   *
   * Each iteration, the LM is shown the task inputs and the trajectory so far and emits three output fields —
   * `next_thought` (its reasoning), `next_tool_name` (the tool to call), and `next_tool_args` (the JSON arguments).
@@ -45,13 +45,13 @@ final case class ReAct[I, O](
     override val maxIterations: IterationLimit = IterationLimit(5),
     reactProgramName          : String         = ReActKeys.reactModule,
     extractorProgramName      : String         = ReActKeys.extractModule,
-    /** Optional override for the per-iteration react predict — a TYPED `Predict` over the base input plus the rendered
+    /** Optional override for the per-iteration react predict — a `Predict` over the base input plus the rendered
       * trajectory, producing a lenient [[ReAct.ReactStep]]. When `None` (the default), the predict is built from
       * [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable sub-predict
       * addressable + immutably replaceable (see the `OptimizableTraversal[ReAct]` instance).
       */
     reactPredictOverride: Option[Predict[(I, String), ReAct.ReactStep]] = None,
-    /** Optional override for the final extractor predict (CoT-augmented, typed over the base input plus the rendered
+    /** Optional override for the final extractor predict (CoT-augmented, over the base input plus the rendered
       * trajectory). When `None` (the default), it is built fail-fast from [[extractorSignature]] at construction; see
       * [[extractorPredict]].
       */
@@ -104,7 +104,7 @@ final case class ReAct[I, O](
   val extractorSignature: SignatureLayout = baseLayout.appendInput(ReAct.extractTrajectoryField)
 
   /** The per-iteration react predict, built once from [[reactSignature]] (mirrors Python's `self.react = Predict(...)`
-    * in `__init__`) — a TYPED `Predict[(I, String), ReactStep]`: the base input plus the rendered trajectory in, a
+    * in `__init__`) — a `Predict[(I, String), ReactStep]`: the base input plus the rendered trajectory in, a
     * leniently-decoded [[ReAct.ReactStep]] out (see [[ReAct.reactStepShape]]). The layout (prompt rendering, field
     * descriptions, tool-listing instructions) is unchanged. Addressable + tunable via [[reactPredictOverride]];
     * `forward` uses this member rather than rebuilding a local each call.
@@ -119,7 +119,7 @@ final case class ReAct[I, O](
     name = Some(reactProgramName)
   ))
 
-  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a TYPED
+  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a
     * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
     * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
     */
@@ -171,8 +171,8 @@ final case class ReAct[I, O](
   override protected def renderTrajectory(trajectory: Vector[ReAct.TrajectoryEntry]): String =
     ReAct.renderTrajectory(trajectory)
 
-  /** Generate one typed ReAct step, durably truncating the oldest trajectory entry on a context-window overflow. A
-    * persistent overflow halts the action loop so final extraction can still run over the remaining view.
+  /** Generate one ReAct step, durably truncating the oldest trajectory entry on a context-window overflow. A persistent
+    * overflow halts the action loop so final extraction can still run over the remaining view.
     */
   override protected def generateStep(
       call      : ProgramCall[I],
@@ -183,7 +183,7 @@ final case class ReAct[I, O](
       case (None, used)       => StepGeneration.Halted(used)
     }
 
-  /** Lower ReAct's typed model step to its small tool-call language. */
+  /** Lower ReAct's model step to its small tool-call language. */
   override protected def prepareAction(step: ReAct.ReactStep): ActionPreparation[ToolCallRequest, String] =
     val toolName = step.nextToolName.trim
     ActionPreparation.Ready(ToolCallRequest(toolName, step.nextToolArgs))
@@ -228,10 +228,10 @@ final case class ReAct[I, O](
 
   /** Run the react predict over the trajectory, truncating the OLDEST step and retrying (up to `remaining` attempts
     * total) on a context-window overflow — Python's `_call_with_potential_trajectory_truncation` around `self.react`.
-    * Returns the typed step plus the (possibly truncated) view: truncation is DURABLE — later iterations and the
-    * extractor build on the truncated trajectory, as upstream mutates the shared dict. `(None, view)` means the
-    * overflow persisted (attempts exhausted, or nothing left to drop) — upstream's `ValueError` path, which the loop
-    * converts into a break rather than a failure.
+    * Returns the step plus the (possibly truncated) view: truncation is DURABLE — later iterations and the extractor
+    * build on the truncated trajectory, as upstream mutates the shared dict. `(None, view)` means the overflow
+    * persisted (attempts exhausted, or nothing left to drop) — upstream's `ValueError` path, which the loop converts
+    * into a break rather than a failure.
     */
   private def reactWithTruncation(
       call     : ProgramCall[I],
@@ -252,14 +252,14 @@ object ReAct:
   /** The output type: base outputs `O` with `reasoning: String` prepended (idempotent; always a named tuple). */
   type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
-  // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
+  // ── The loop signature's hand-declared fields (static; hoisted so the shapes and the layout share them) ──
   private[programs] val loopTrajectoryField: FieldSpec    = ReActProtocol.loopTrajectoryField
   private[programs] val extractTrajectoryField: FieldSpec = ReActProtocol.extractTrajectoryField
   private[programs] val nextThoughtField: FieldSpec       = ReActProtocol.nextThoughtField
   private[programs] val nextToolNameField: FieldSpec      = ReActProtocol.nextToolNameField
   private[programs] val nextToolArgsField: FieldSpec      = ReActProtocol.nextToolArgsField
 
-  /** The typed output of one react loop step. */
+  /** The output of one react loop step. */
   final case class ReactStep(
       nextThought : String,
       nextToolName: String,

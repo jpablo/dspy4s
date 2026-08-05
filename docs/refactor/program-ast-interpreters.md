@@ -7,14 +7,14 @@
 
 ## Summary
 
-The structural program classes in `Compose.scala`, `Transform.scala`, `Mode.scala`, and `Recovery.scala` form a typed,
+The structural program classes in `Compose.scala`, `Transform.scala`, `Mode.scala`, and `Recovery.scala` form a type-indexed,
 reified program tree. They are not a conventional passive AST because each node is also a `Module` and implements its
 own execution in `forward`. Other interpretations of the same structure—most notably predictor inspection and
 replacement—are implemented separately through per-node `OptimizableTraversal` instances.
 
 This proposal separates those responsibilities:
 
-1. A closed, typed `ProgramNode[I, O]` describes the framework's structural language.
+1. A closed, `ProgramNode[I, O]` describes the framework's structural language.
 2. An existential `Atom[I, O]` keeps the leaf ecosystem open by packaging an arbitrary existing `Module` together with
    the evidence needed to inspect and rebuild it.
 3. A public `Program[I, O]` owns a node and is the stable compositional type returned by every combinator.
@@ -77,7 +77,7 @@ modules extensible despite that choice.
   preserves `p`'s envelope because the identity node contributes the accumulator identity.
 - Add dynamic program selection through monadic `flatMap`. The optimizer must know the complete learnable structure
   before execution.
-- Normalize trees merely because two expressions have the same typed output. Effects, failure order, lifecycle,
+- Normalize trees merely because two expressions have the same output. Effects, failure order, lifecycle,
   predictor display paths, and the final prediction envelope are all observations that can invalidate a rewrite.
 
 ## Proposed architecture
@@ -198,13 +198,13 @@ representation does not change user signatures or optimizer type arguments.
 `Program.atom(existingModule)` is the explicit bridge from today's module ecosystem. Convenience constructors such as
 `Program.predict(signature)` can return an already-lifted atom.
 
-`Program` need not extend `Module`. It can expose typed `apply(ProgramCall[I])` through `ProgramExecutor`. Where an API
+`Program` need not extend `Module`. It can expose `apply(ProgramCall[I])` through `ProgramExecutor`. Where an API
 still requires a `Module`, `Program.asModule` can return one lifecycle-transparent adapter whose `forward` delegates to
 the interpreter. Leaves—not the adapter or structural nodes—remain the observed lifecycle boundaries.
 
 ### 4. Keep record decoding outside the AST
 
-Typed execution and decoding a `DynamicValue.Record` are separate capabilities. The current `algebra.Program` packages
+Program execution and decoding a `DynamicValue.Record` are separate capabilities. The current `algebra.Program` packages
 both, which is why independent-input `split` cannot lift into that category: `(I, J)` has no canonical decoder from one
 flat record.
 
@@ -217,7 +217,7 @@ final case class RecordProgram[I, O](
 )
 ```
 
-- `Program[I, O]` always supports typed execution, `>>>`, `&&&`, and `***`.
+- `Program[I, O]` always supports execution, `>>>`, `&&&`, and `***`.
 - `RecordProgram[I, O]` is the optimizer/`Example` entry point.
 - `RecordProgram.of(module)` obtains the decoder from the existing `ProgramInput` capability.
 - Sequential composition retains the first program's decoder.
@@ -225,7 +225,7 @@ final case class RecordProgram[I, O](
 - A split program becomes a `RecordProgram[(I, J), (A, B)]` only when the caller supplies an explicit coherent decoder
   for `(I, J)`.
 
-This preserves the honest boundary discovered by the parameterized-program prototype without weakening the core typed algebra.
+This preserves the honest boundary discovered by the parameterized-program prototype without weakening the core program algebra.
 
 The current `algebra.Program` is close to this wrapper already. Its path-dependent representation and packaged
 `OptimizableTraversal` evidence would move down into `Atom`; its decoder would remain at the `RecordProgram` boundary.
@@ -323,7 +323,7 @@ The existence of an AST must not be mistaken for proof that the whole program is
 
 The AST gives laws a structural home, but observational equality remains authoritative.
 
-- Category laws observe typed output and lifecycle, not case-class equality or the final raw envelope.
+- Category laws observe output and lifecycle, not case-class equality or the final raw envelope.
 - Ordered execution prevents tensor interchange and general effect symmetry.
 - Copy naturality holds only for deterministic morphisms under the chosen observation.
 - Recovery and modes make failures and call controls observable.
@@ -357,7 +357,7 @@ The first AST should contain only operations with stable, reusable structural se
 | `ReAct`, `CodeAct`, `RLM`, `ProgramOfThought` | Atom | Stateful algorithms with specialized loops and resources |
 | `BestOfN`, `Refine` | Atom initially | Shared attempt machinery exists, but wrapper lifecycle and feedback are richer than basic structure |
 | `MultiChainComparison` | Atom | Holds an addressable comparison predictor and runtime-arity logic |
-| `AndThen`, fanout, split | Core nodes | Fundamental typed wiring |
+| `AndThen`, fanout, split | Core nodes | Fundamental domain wiring |
 | Pure transforms | Core nodes | Parameter-free wiring with stable semantics |
 | Mode and recovery | Core nodes | Reusable execution policy over a visible child |
 | Copy, discard, swap | Core nodes | Named algebraic structure; graphically meaningful |
@@ -400,7 +400,7 @@ semantics. It offers less benefit than a deliberate AST boundary.
 ## Migration sketch
 
 No migration should begin until a compile-only spike demonstrates that Scala 3 can express the existential atom and
-the recursive typed interpreter without leaking casts into the public API.
+the recursive type-indexed interpreter without leaking casts into the public API.
 
 ### Phase 0: feasibility spike
 

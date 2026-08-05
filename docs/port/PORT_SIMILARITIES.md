@@ -64,16 +64,16 @@ analogues:
 
 | Python | dspy4s |
 |---|---|
-| `Signature` (class) | `SignatureLayout` (erased) + `Signature[I, O]` (typed wrapper) |
+| `Signature` (class) | `SignatureLayout` (erased) + `Signature[I, O]` (wrapper) |
 | `dspy.Example` | `dspy4s.core.data.Example` |
-| `dspy.Prediction` | `RawPrediction` (erased) + `Prediction[O]` (typed) |
+| `dspy.Prediction` | `RawPrediction` (erased) + `Prediction[O]` (domain-valued) |
 | `dspy.Completions` | `Completions` |
 | `dspy.LM` / `BaseLM` | `LanguageModel` |
 | `dspy.Adapter` | `Adapter` |
 | `dspy.Tool` | `ToolFunction` |
 
-The pair-of-types pattern (erased + typed) is the one substantive
-addition; the erased side mirrors Python 1:1, and the typed side sits
+The pair-of-types pattern (erased + domain-valued) is the one substantive
+addition; the erased side mirrors Python 1:1, and the domain-valued side sits
 on top as a Scala-native layer. See `PORT_DIFFERENCES.md` §2.
 
 ## Adapter pipeline
@@ -84,7 +84,7 @@ with the same purpose and the same framing:
 - `ChatAdapter` uses the `[[ ## field_name ## ]]` marker form (full
   parity — the earlier `prefix: value` form was a delta that has
   since been closed; see [PORT_MAP §4](PORT_MAP.md#4-behavioral-deltas)).
-- `JSONAdapter` emits a JSON-typed system instruction and parses
+- `JSONAdapter` emits a JSON-oriented system instruction and parses
   top-level JSON object responses.
 - `XMLAdapter` produces `<outputs>...</outputs>` framing.
 
@@ -119,8 +119,8 @@ behavior:
 
 | Python | dspy4s | Notes |
 |---|---|---|
-| `Predict` | `Predict[I, O]` + `DynamicPredict` | typed + erased pair |
-| `ChainOfThought` | `ChainOfThought[I, O]` | prepends `reasoning` output field and delegates through typed `Predict` |
+| `Predict` | `Predict[I, O]` + `DynamicPredict` | domain-valued + erased pair |
+| `ChainOfThought` | `ChainOfThought[I, O]` | prepends `reasoning` output field and delegates through `Predict` |
 | `ReAct` | `ReAct` | tool loop with `next_thought` / `next_tool_name` / `next_tool_args` |
 | `BestOfN` | `BestOfN` | run-and-score-N times |
 | `Refine` | `Refine` | iterative correction loop |
@@ -199,7 +199,7 @@ The minimum-viable streaming surface ports:
   `LmChunk`s (Python: `LM.stream(...)` returning a generator of
   delta chunks).
 - A `Streamify.streamify(program)(inputs)` entry point that wraps a
-  program and yields a stream of typed events.
+  program and yields a stream of structured events.
 - `StatusMessageProvider` for tool-call status messages, with the
   same default behavior (tool start/end).
 - `StatusStreamingCallback` bridging the callback channel into the
@@ -251,5 +251,5 @@ If you've used Python DSPy, the dspy4s API will feel familiar:
 
 What you have to learn separately is the **Scala-shaped surface for
 defining signatures** (six factories instead of one class form) and
-the **typed I/O layer** (which Python doesn't have at all). Both are
+the **I/O layer** (which Python doesn't have at all). Both are
 covered in [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md).

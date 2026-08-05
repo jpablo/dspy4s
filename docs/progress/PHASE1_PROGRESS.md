@@ -5,7 +5,7 @@
 > for the running per-feature ledger see [PORT_MAP.md](../port/PORT_MAP.md) and
 > [PORT_BACKLOG.md](../port/PORT_BACKLOG.md). Symbols referenced below may have been
 > renamed since (e.g. the original `Signature` is now `SignatureLayout` and the
-> typed wrapper carries that name).
+> wrapper carries that name).
 
 
 Phase 1 focuses on signatures and core primitives.
@@ -18,7 +18,7 @@ Phase 1 focuses on signatures and core primitives.
 - Added field normalization defaults (`prefix`, `description`)
 - Added signature insert API (`Signature.insert`)
 - Added signature field update API (`Signature.withUpdatedField`)
-- Added Python-parity update aliases (`Signature.withUpdatedFields`) including typed token updates and multi-field patching
+- Added Python-parity update aliases (`Signature.withUpdatedFields`) including token updates and multi-field patching
 - Added structural equality helper (`Signature.equalsByStructure`)
 - Added signature state serialization and restore (`dumpState`, `SignatureSpec.fromState`)
 - Added signature string rendering (`Signature.signatureString`)
@@ -26,7 +26,7 @@ Phase 1 focuses on signatures and core primitives.
 
 2. Signature DSL parser
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/core/src/main/scala/dspy4s/core/signatures/DefaultSignatureParser.scala`
-- Supports `input1, input2 -> output1, output2` and typed fields (`x: int`)
+- Supports `input1, input2 -> output1, output2` and fields (`x: int`)
 - Validates arrow count and field identifiers
 
 3. Signature convenience API

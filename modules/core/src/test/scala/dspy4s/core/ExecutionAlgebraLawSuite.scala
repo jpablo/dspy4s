@@ -167,7 +167,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     assertEquals(filled.history, Vector.empty[HistoryEntry])
   }
 
-  test("RawPrediction preserves typed provider usage without string conversion") {
+  test("RawPrediction preserves structured provider usage without string conversion") {
     val usage = LmUsage(
       totalTokens = 9,
       promptTokens = 4,

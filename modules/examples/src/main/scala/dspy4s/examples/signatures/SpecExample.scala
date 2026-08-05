@@ -1,12 +1,12 @@
-/** Typed signatures — trait-as-spec surface.
+/** Signatures — trait-as-spec surface.
   *
   * The trait-spec surface is the closest port of DSPy's Python `class Foo(dspy.Signature)` style. A trait extending
   * `Spec` declares input/output fields as abstract method members tagged with `InputField[T]` / `OutputField[T]`. The
   * macro `Signature.of[T]` walks the trait at compile time, validates each member, confirms a `Schema[T]` for the
   * wrapped type, and emits the runtime `Signature`.
   *
-  * `Signature.of[T]` exposes named-tuple input/output types, so callers get typed construction and typed dot-access
-  * while keeping the DSPy-style declaration as the source of truth.
+  * `Signature.of[T]` exposes named-tuple input/output types, so callers get compiler-checked construction and direct
+  * dot access while keeping the DSPy-style declaration as the source of truth.
   *
   * Status: example
   */
@@ -36,7 +36,7 @@ trait CitedQASpec extends Spec:
 
 object SpecExample:
 
-  /** Spec-derived signature for the emotion-classification task. The resulting `untyped` SignatureLayout is
+  /** Spec-derived signature for the emotion-classification task. The resulting runtime `SignatureLayout` is
     * structurally identical to the one produced by `CaseClassExample.signature.layout` and to one built via
     * `Signature.builder("Emotion").input[String]("sentence")...`. Cross-surface parity is proven by the signatures
     * module's test suite.
@@ -53,7 +53,7 @@ object SpecExample:
   val citedQa = Signature.of[CitedQASpec]
 
   /** Illustrative call: with an LM and adapter configured, run the spec-derived signature against a named-tuple input
-    * and read the typed named-tuple output with dot syntax.
+    * and read the named-tuple output with dot syntax.
     */
   def callEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.strategies.Predict

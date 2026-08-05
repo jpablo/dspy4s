@@ -18,7 +18,7 @@ class DecodeContractSuite extends FunSuite:
 
   private val signature = Signature.derived[TagInput, TagOutput](name = "TagContract")
 
-  test("decodeCompletion runs the real ChatAdapter + typed decode over a canned completion") {
+  test("decodeCompletion runs the real ChatAdapter + decode over a canned completion") {
     // A CORRECT ChatAdapter completion: marker-framed, JSON array of objects for the record list, and a
     // currency-formatted number for the optional field (proves the end-to-end lenient numeric path).
     val completion = """[[ ## tags ## ]]

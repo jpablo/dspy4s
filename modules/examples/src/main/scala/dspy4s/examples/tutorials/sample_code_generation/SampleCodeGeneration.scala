@@ -8,9 +8,9 @@
   * already- combined documentation text instead of fetching it.
   *
   * `dspy.Signature` classes with `list[str]` fields become `Spec` traits with `OutputField[List[String]]`; the
-  * inline-string signature `"code, feedback -> improved_code: str, changes_made: list[str]"` ports as a typed
+  * inline-string signature `"code, feedback -> improved_code: str, changes_made: list[str]"` ports as a
   * `Signature.fromString` (so `changes_made` decodes to `List[String]`). The `DocumentationLearningAgent` (a
-  * `dspy.Module` composing three `ChainOfThought`s) becomes a plain class threading their typed outputs.
+  * `dspy.Module` composing three `ChainOfThought`s) becomes a plain class threading their outputs.
   */
 package dspy4s.examples.tutorials.sample_code_generation
 
@@ -43,8 +43,8 @@ trait CodeGenerator extends Spec:
   def imports_needed: OutputField[List[String]]
 
 // | self.refine_code = dspy.ChainOfThought("code, feedback -> improved_code: str, changes_made: list[str]")
-// The typed `Signature.fromString` DSL only supports scalar field types; the `list[str]` output means this
-// inline string signature becomes a `Spec` trait (the same shape, with `changes_made` typed as `List[String]`).
+// The `Signature.fromString` DSL only supports scalar field types; the `list[str]` output means this
+// inline string signature becomes a `Spec` trait (the same shape, with `changes_made` represented as `List[String]`).
 trait RefineCode extends Spec:
   def code: InputField[String]
   def feedback: InputField[String]

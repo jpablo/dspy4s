@@ -67,7 +67,7 @@ lazy val algebra = (project in file("modules/algebra"))
 // zio-blocks-schema here because `DynamicValue` is the spine type carried
 // through `Example.values`, `ProgramCall.input`, `RawPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
-// programs, evaluate, and the typed surface.
+// programs, evaluate, and the signatures API.
 lazy val core = (project in file("modules/core"))
   .dependsOn(algebra)
   .settings(commonSettings)

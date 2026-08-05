@@ -49,8 +49,8 @@ object Async:
     private val pipeline = (predict1.mapOutput(result => (answer = result.answer)) >>> predict2)
       .mapOutput(_.simplified_answer)
 
-    /** Sequential-but-asynchronous, like Python's `aforward`: `>>>` builds the typed two-stage program, which runs
-      * inside one context-propagating off-thread computation and returns a `Future`.
+    /** Sequential-but-asynchronous, like Python's `aforward`: `>>>` builds the two-stage program, which runs inside one
+      * context-propagating off-thread computation and returns a `Future`.
       */
     def aforward(question: String)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, String]] =
       ContextPropagation.future(pipeline(ProgramCall((question = question))).map(_.output))

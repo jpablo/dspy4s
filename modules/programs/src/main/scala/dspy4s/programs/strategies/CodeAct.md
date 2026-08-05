@@ -2,13 +2,13 @@
 
 `CodeAct[I, O]` is an iterative code-generation agent. It asks a language model to write Python, executes that code,
 feeds the observation back to the model, and repeats until the model says it has gathered enough information or the
-iteration budget is exhausted. A final predictor then turns the accumulated trajectory into the requested typed output.
+iteration budget is exhausted. A final predictor then turns the accumulated trajectory into the requested output.
 
-The most useful mental model is **a code-and-observation loop followed by typed extraction**:
+The most useful mental model is **a code-and-observation loop followed by domain-output extraction**:
 
 ```mermaid
 flowchart LR
-    input["Typed input I"]
+    input["Input I"]
 
     subgraph loop["Phase 1: gather evidence with code"]
         generate["codeActPredict<br/>generate code + finished flag"]
@@ -56,7 +56,7 @@ Its fields have distinct responsibilities:
 
 | Field | Meaning |
 |---|---|
-| `baseSignature` | The original typed task, `I → O` |
+| `baseSignature` | The original task, `I → O` |
 | `interpreter` | Executes each generated Python snippet |
 | `tools` | Functions described to the model and optionally bridged into a sandbox |
 | `maxIterations` | Strictly positive upper bound on generator/execution steps |
@@ -86,7 +86,7 @@ CodeAct derives two internal signatures:
 |---|---|---|
 | Public boundary | `question -> reasoning, answer` | What the caller ultimately receives |
 | Code step | `question, trajectory -> generated_code, finished` | Choose and terminate loop actions |
-| Extractor | `question, trajectory -> reasoning, answer` | Synthesize the final typed result |
+| Extractor | `question, trajectory -> reasoning, answer` | Synthesize the final result |
 
 In types, the inner predictors are:
 
@@ -155,9 +155,9 @@ Two details are deliberate:
    trajectory, and the extractor may still be able to produce a useful answer from it.
 
 The bounded recursion itself lives in `AgentLoop`, and `TrajectoryAgent` owns the final extraction. The intermediate
-transition is the same typed template used by ReAct: `InterpretedTrajectoryAgent` generates a `CodeStep`, lowers it to a
+transition is the same state-machine template used by ReAct: `InterpretedTrajectoryAgent` generates a `CodeStep`, lowers it to a
 code-string action (or a rejected parse), invokes `ActionInterpreter[String, String]`, and records one
-`TrajectoryEntry`. Its post-outcome decision then reads `CodeStep.finished`. CodeAct supplies those typed operations;
+`TrajectoryEntry`. Its post-outcome decision then reads `CodeStep.finished`. CodeAct supplies those concrete operations;
 the shared final transition owns their ordering through explicit phase states. Rejected preparation and interpreted
 outcomes have different recording states, so the rejected branch cannot contain an action or reach `decide`.
 
@@ -240,17 +240,17 @@ The loop ends in either of two ways:
 - `maxIterations` steps have been consumed.
 
 In both cases CodeAct runs `extractorPredict` over the original input and the rendered trajectory. The extractor
-returns `reasoning` plus the base output fields using the same typed decoding rules as `ChainOfThought`.
+returns `reasoning` plus the base output fields using the same decoding rules as `ChainOfThought`.
 
 ```mermaid
 flowchart LR
     trajectory["Complete Vector[TrajectoryEntry]"]
     render["renderTrajectory"]
     extract["extractorPredict<br/>(I, rendered trajectory)"]
-    typed["Prediction[WithReasoning[O]]"]
+    result["Prediction[WithReasoning[O]]"]
     attach["Add complete trajectory<br/>to raw.values"]
 
-    trajectory --> render --> extract --> typed --> attach
+    trajectory --> render --> extract --> result --> attach
 ```
 
 If extraction exceeds the model's context window, CodeAct retries up to three total attempts, dropping the oldest
@@ -353,7 +353,7 @@ Prediction[CodeAct.WithReasoning[O]]
 ```
 
 As with `ChainOfThought`, a case-class base output is normalized to a named tuple when `reasoning` is added. The full
-trajectory is stored as a rendered string in `prediction.raw.values`, not as part of the typed domain output:
+trajectory is stored as a rendered string in `prediction.raw.values`, not as part of the domain output:
 
 ```scala
 val trajectory: Either[DspyError, String] =
@@ -398,7 +398,7 @@ outer module has no successful entry. Setting `traceEnabled = false` suppresses 
 all mapped inner calls while leaving callbacks active.
 
 `ProgramCall.mapInput` preserves per-call config, `traceEnabled`, and `rolloutId`, so every generator and extractor call
-receives the same execution controls while seeing its stage-specific typed input.
+receives the same execution controls while seeing its stage-specific input.
 
 ## Failure policy
 
@@ -414,7 +414,7 @@ CodeAct distinguishes recoverable evidence from failures of the prediction machi
 | `maxIterations` is reached | Extract from the trajectory gathered so far |
 | Extractor context overflow | Drop oldest entries and retry, up to three attempts |
 | Persistent extractor overflow | Return the final `Left(ContextWindowExceededError)` |
-| Extractor output fails typed decoding | Return `Left(DspyError)` |
+| Extractor output fails decoding | Return `Left(DspyError)` |
 
 This split lets the model learn from ordinary code mistakes without disguising failures that prevent the framework
 itself from continuing safely.
@@ -449,7 +449,7 @@ val specialized = program.copy(
 )
 ```
 
-Overrides are also the mechanism used by optimizer replacement. They preserve the expected typed signatures, module
+Overrides are also the mechanism used by optimizer replacement. They preserve the expected signatures, module
 names, runtimes, bound models, and other execution metadata.
 
 ## Optimization
@@ -518,7 +518,7 @@ A useful reading order is:
 5. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
 6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion.
 7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): oldest-first extractor retries.
-8. [`InputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/InputAugmentation.scala): typed
+8. [`InputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/InputAugmentation.scala):
    `(I, trajectory)` encoding.
 9. [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): final
    reasoning augmentation.

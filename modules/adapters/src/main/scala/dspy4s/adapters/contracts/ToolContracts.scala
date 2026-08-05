@@ -53,7 +53,7 @@ object ToolSchemaBridge:
     * ([[dspy4s.adapters.contracts.FormattedPrompt.requestOptions]]) and spread verbatim into the provider body by
     * `ProviderRequestNormalizer`. Each tool becomes `{type:"function", function:{name, description, parameters}}` where
     * `parameters` is a JSON-schema object (`type:"object"`, `properties`, `required`). This is the DynamicValue-native
-    * counterpart of [[toOpenAiTools]] (which yields the `Any`-typed map form).
+    * counterpart of [[toOpenAiTools]] (which yields the `Map[String, Any]` form).
     */
   def toOpenAiToolsDynamic(tools: Vector[ToolSpec]): DynamicValue =
     DynamicValue.Sequence(Chunk.from(tools.map(toolToDynamic)))

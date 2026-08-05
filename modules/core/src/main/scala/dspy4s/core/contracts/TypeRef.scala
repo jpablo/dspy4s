@@ -2,9 +2,9 @@ package dspy4s.core.contracts
 
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
-  * This is the *adapter / prompt* type, not the Scala type -- the typed layer's `Shape[A]` carries the static
-  * Scala-side encoding. A Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level
-  * (the LM sees a flat string like `"joy"`).
+  * This is the *adapter / prompt* type, not the Scala type -- `Shape[A]` carries the static Scala-side encoding. A
+  * Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level (the LM sees a flat
+  * string like `"joy"`).
   *
   * Six well-known refs cover the common cases. Anything outside that set passes through as an opaque token -- adapters
   * that don't recognize it fall back to rendering it as a free-form string.

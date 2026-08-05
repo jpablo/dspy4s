@@ -1,6 +1,6 @@
-# Typed Signatures — User Guide
+# Signatures — User Guide
 
-> A pragmatic guide to dspy4s's typed-signatures layer. For design
+> A pragmatic guide to dspy4s's signatures layer. For design
 > rationale see [TYPED_SIGNATURES.md](TYPED_SIGNATURES.md); for the
 > implementation arc see
 > [TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md](TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md).
@@ -26,8 +26,8 @@ given dspy4s.core.contracts.RuntimeContext =
 
 val result = Predict(sig).apply((question = "Capital of France?"))
 
-result.map(_.output.answer)   // typed: String
-result.map(_.output.score)    // typed: Double
+result.map(_.output.answer)   // type: String
+result.map(_.output.score)    // type: Double
 result.map(_.raw.lmUsage)     // raw escape hatch (completions, usage, etc.)
 ```
 
@@ -39,14 +39,14 @@ know about.
 
 ## Authoring surfaces
 
-The typed layer exposes **six ways** to define a signature. All six
+The layer exposes **six ways** to define a signature. All six
 compile down to the same `Signature[I, O]` (and pass through the same
 adapter / LM / runtime path), so you can mix them freely in one
 project — pick whichever fits each call site.
 
 ### 1. Trait-as-spec macro — `Signature.of[T <: Spec]`
 
-The recommended typed surface and closest match for Python DSPy: a
+The recommended surface and closest match for Python DSPy: a
 trait extending `Spec` declares abstract methods wrapped in
 `InputField[T]` / `OutputField[T]`.
 
@@ -69,9 +69,9 @@ The runtime name defaults to the trait name. Pass
 `name = "Emotion"` or `instructions = "Classify emotion."` when you
 want to override either value at construction time.
 
-End-to-end typed I/O uses Scala named tuples:
+End-to-end I/O uses Scala named tuples:
 `Predict(sig).apply((sentence = "..."))` accepts a named-tuple input,
-and `tp.output.sentiment` is typed as `Emotion`. Compile-time
+and `tp.output.sentiment` has type `Emotion`. Compile-time
 validation catches methods not wrapped in the marker types, methods
 with parameters, missing `FieldCodec[X]`, duplicate field names,
 concrete methods, and empty spec traits.
@@ -80,7 +80,7 @@ See [`modules/examples/.../signatures/SpecExample.scala`](../modules/examples/sr
 
 ### 2. Function signatures — `Signature.fromType[F]`
 
-Concise Scala function types can declare typed signatures without a
+Concise Scala function types can declare signatures without a
 throwaway method body. Input fields come from the function parameter
 types. Output fields come from the return type:
 
@@ -97,7 +97,7 @@ val sig =
   ]
 
 Predict(sig).apply((sentence = "..."))
-  .map(_.output.sentiment)   // typed: Emotion
+  .map(_.output.sentiment)   // type: Emotion
 ```
 
 Anonymous inputs are supported too. A single anonymous input is named
@@ -156,9 +156,9 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
 val sig = Signature.derived[EmotionInput, EmotionOutput]("Emotion")
 ```
 
-End-to-end typed I/O: `Predict(sig).apply(EmotionInput("..."))`
+End-to-end I/O: `Predict(sig).apply(EmotionInput("..."))`
 returns `Either[DspyError, Prediction[EmotionOutput]]`, and
-`tp.output.sentiment` is typed as `Emotion`.
+`tp.output.sentiment` has type `Emotion`.
 
 Requires `Schema[I]` and `Schema[O]` in scope. zio-blocks
 **auto-derives** `Schema[Product]` for case classes whose fields
@@ -188,7 +188,7 @@ val layout: SignatureLayout =
 ```
 
 Returns a plain `SignatureLayout` (the runtime, erased contract) — not
-a typed `Signature[I, O]`. Pass it to `DynamicPredict` when you need
+a `Signature[I, O]`. Pass it to `DynamicPredict` when you need
 to run it. Per-field types come from the `FieldCodec[T]` typeclass,
 so enum metadata (allowed cases, display name) flows through
 automatically.
@@ -197,10 +197,10 @@ See [`modules/examples/.../signatures/BuilderExample.scala`](../modules/examples
 
 ### 5. String DSL — `Signature.fromString("inputs -> outputs")`
 
-The DSPy-style string DSL, lifted into the typed wrapper. I/O types
+The DSPy-style string DSL, lifted into the wrapper. I/O types
 stay as `Map[String, Any]` because the DSL has no static schema, but
 the resulting signature still flows through `Predict[I, O]` and the
-typed `Prediction[O]` pipeline.
+`Prediction[O]` pipeline.
 
 ```scala
 val sig = Signature.fromString("question -> answer").toOption.get
@@ -211,17 +211,17 @@ Predict(sig).apply(Map("question" -> "Capital of France?"))
 
 Use when prototyping, when the signature shape is loaded from
 configuration, or when all fields are strings. Reach for one of the
-static-typed surfaces above the moment you want non-string outputs
+compile-time surfaces above the moment you want non-string outputs
 or enum-constrained values.
 
 Underneath, `SignatureLayout.parse(dsl, instructions = "")` is the
-lower-level entry point if you want the raw layout without the typed
+lower-level entry point if you want the raw layout without the `Signature[I, O]`
 wrapper.
 
 ### 6. Layout escape hatch — `SignatureLayout.create / parse`
 
 Rare. Direct construction of a `SignatureLayout` value, bypassing the
-typed signature surface entirely. You hand it to `DynamicPredict` and get back
+signature surface entirely. You hand it to `DynamicPredict` and get back
 `Prediction[DynamicValue.Record]`; its `.raw` retains the `RawPrediction` containing completions and usage. Use only
 when interoperating with code that already speaks the erased
 contract.
@@ -230,7 +230,7 @@ contract.
 
 ## Choosing a surface
 
-| Surface | When to reach for it | Typed I/O on results? |
+| Surface | When to reach for it | I/O on results? |
 |---|---|:---:|
 | **Trait spec** | **Most production code; DSPy-style authoring** | ✅ |
 | Method / function | Compact local signatures; scalar or named-tuple outputs | ✅ |
@@ -246,7 +246,7 @@ because each has a niche where it's a better fit.
 
 ## Signature instructions
 
-All typed signatures can carry DSPy-style signature-level instructions:
+All signatures can carry DSPy-style signature-level instructions:
 
 ```scala
 val sig =
@@ -257,7 +257,7 @@ val sig =
 
 Constructor-time `instructions = ...` is the common-case path.
 `Signature.withInstructions(...)` is also available for composition:
-it preserves the typed input and output shapes while updating the
+it preserves the input and output shapes while updating the
 underlying `SignatureLayout` that adapters use for prompt formatting.
 
 ---
@@ -272,7 +272,7 @@ The `FieldCodec` typeclass covers the MVP type vocabulary:
 | `Int` | `Int`; `Long` in `Int` range | clean integer strings like `"42"` |
 | `Double` | `Int` / `Long` / `Float` / `Double` | clean numeric strings like `"1.5"` |
 | `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
-| Scala enum (`FieldCodec.FlatEnum`) | already-typed enum value | flat case name like `"joy"` |
+| Scala enum (`FieldCodec.FlatEnum`) | already-decoded enum value | flat case name like `"joy"` |
 | Standard containers, e.g. `List[A]`, `Seq[A]`, `Vector[A]`, `Set[A]`, `Map[K, V]`, `Option[A]` | adapter-like `Map` / `Seq` / primitive tree, when nested types have `FieldCodec`s | clear primitive strings inside nested values |
 | Product with `zio.blocks.schema.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
 
@@ -314,7 +314,7 @@ enum Sentiment:
 object Sentiment extends FieldCodec.FlatEnum[Sentiment]
 ```
 
-The decoder accepts either an already-typed `Sentiment` value or a
+The decoder accepts either an already-decoded `Sentiment` value or a
 flat string carrying the case name (`"joy"`). The encoder produces the
 case name string. Adapters render enum fields with the allowed cases
 visible to the LM via `FieldSpec.metadata`:
@@ -348,7 +348,7 @@ Scala enums as `DynamicValue.Variant` (which serializes to a discriminated
 object `{"caseName":{}}`), not as flat strings. dspy4s's
 `ZioSchemaCodec.dynamicToAny` flattens the variant to the case-name string
 (`"joy"`) at the adapter boundary, so the LM sees the LLM-friendly form
-while the typed layer keeps the structural shape internally.
+while `Signature` keeps the structural shape internally.
 
 ```scala
 enum Mood:
@@ -366,20 +366,20 @@ truncation.
 
 ## Accessing `RawPrediction`
 
-The typed wrapper preserves the underlying prediction for callers
+The wrapper preserves the underlying prediction for callers
 that need completions, LM usage, or other adapter metadata:
 
 ```scala
 val tp = Predict(sig).apply((question = "...")).toOption.get
 
-tp.output.answer        // typed access
-tp.raw.lmUsage          // Option[LmUsage] — typed core + provider-specific token counts
+tp.output.answer        // direct access
+tp.raw.lmUsage          // Option[LmUsage] — core + provider-specific token counts
 tp.raw.completions      // Option[Completions] — multiple candidates
 tp.raw.value("answer")  // dynamic accessor on RawPrediction
 ```
 
 `tp.raw` is the `RawPrediction` assembled by the shared
-`PredictEngine`, before the typed output decode. `Predict[I, O]` and
+`PredictEngine`, before the output decode. `Predict[I, O]` and
 `DynamicPredict` are sibling modules over that engine; the signatures module
 preserves the raw prediction while also decoding its values into
 `tp.output`. Trace and history record those same raw values.
@@ -411,21 +411,21 @@ via `DynamicPredict`.
 `Signature[I, O]` is a thin wrapper around a `SignatureLayout` plus
 two `Shape` instances (one for input encoding, one for output
 decoding). The shared `PredictEngine` and adapters consume the
-**erased** `SignatureLayout` (`sig.layout`); the typed `Predict` adds
+**erased** `SignatureLayout` (`sig.layout`); the `Predict` adds
 encoding and decoding around that raw engine call:
 
-- New typed code can opt in surface-by-surface.
+- New code can opt in surface-by-surface.
 - Dynamic programs keep record-valued I/O; their uniform module result is `Prediction[DynamicValue.Record]`.
-- Adapter authors don't need to know the typed layer exists.
+- Adapter authors don't need to know about the `Signature[I, O]` wrapper.
 
 When you need to drop into the erased world (passing a signature to
 something that takes `SignatureLayout`), use `sig.layout`. When you
-need the typed value back, that's what `Prediction.output` is for.
+need the value back, that's what `Prediction.output` is for.
 
 Note that `SignatureLayout`'s cohort-mutation helpers (`withInputFields` and
 `withOutputFields`) are `private[dspy4s]` — only composite programs like
 `CodeAct` and `MultiChainComparison` use them. User code stays on
-the typed surface.
+the `Signature` API.
 
 ---
 
@@ -433,13 +433,13 @@ the typed surface.
 
 These are documented gaps, surfaced so you can plan around them:
 
-- **Trait spec uses named tuples for I/O**: this gives typed dot-access
+- **Trait spec uses named tuples for I/O**: this gives dot-access
   and compile-time field-name checks, but it is not a case class. If
   you need case-class `copy`, extractors, or pattern matching, use
   `Signature.derived[I, O]`.
 - **Literal-union output types**: not yet a `FieldCodec` instance;
   use a Scala enum.
-- **Multi-completion typed decoding**: only the primary prediction is
+- **Multi-completion decoding**: only the primary prediction is
   decoded into `Prediction.output` today. The raw completions are
   still on `tp.raw.completions` for manual decoding.
 

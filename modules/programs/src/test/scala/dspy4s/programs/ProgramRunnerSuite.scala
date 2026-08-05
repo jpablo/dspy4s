@@ -52,7 +52,7 @@ class ProgramRunnerSuite extends FunSuite:
     assertEquals(program.observed, Some(call))
   }
 
-  test("the typed runner decodes only the input and preserves every execution control") {
+  test("the runner decodes only the input and preserves every execution control") {
     given RuntimeContext = RuntimeContext()
     val program          = CapturingTyped()
 

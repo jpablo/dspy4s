@@ -205,7 +205,9 @@ class CodeActSuite extends FunSuite:
 
   // ── sandboxTools bridge (G-20: tools-inside-code) ──────────────────────
 
-  test("CodeAct.sandboxTools bridges ToolFunctions into SandboxTools (name, python-typed params, captured context)") {
+  test(
+    "CodeAct.sandboxTools bridges ToolFunctions into SandboxTools (name, Python parameter declarations, captured context)"
+  ) {
     val tool = new dspy4s.programs.contracts.ToolFunction:
       override val name: String                                               = "get_weather"
       override val description: String                                        = "weather lookup"

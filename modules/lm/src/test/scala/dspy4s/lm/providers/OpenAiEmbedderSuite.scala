@@ -57,7 +57,7 @@ class OpenAiEmbedderSuite extends FunSuite:
     assertEquals(transport.sent.size, 3) // 5 inputs at batchSize=2 -> 2+2+1
   }
 
-  test("a non-2xx response surfaces as a Left, and a 400 context-window body maps to the typed error") {
+  test("a non-2xx response surfaces as a Left, and a 400 context-window body maps to the error") {
     val plainFailure =
       embedder(new ScriptedTransport(Vector(Right(HttpResponse(500, Map.empty, "boom"))))).embed(Vector("x"))
     assert(plainFailure.left.exists(_.isInstanceOf[RuntimeError]), plainFailure.toString)

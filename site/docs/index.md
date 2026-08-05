@@ -9,7 +9,7 @@ hide:
 # dspy4s { .hero__title }
 
 <p class="hero__tagline">
-A Scala 3 library for building language model programs with typed signatures.
+A Scala 3 library for building language model programs with signatures.
 Inputs and outputs are ordinary Scala types, so the compiler checks them for you.
 </p>
 
@@ -22,7 +22,7 @@ Inputs and outputs are ordinary Scala types, so the compiler checks them for you
 </div>
 
 ```scala
-// A signature declares typed inputs and outputs.
+// A signature declares inputs and outputs.
 val classify = Predict(Signature.fromType[(sentence: String) => (sentiment: Boolean)])
 
 classify.apply((sentence = "it's a charming and often affecting journey.")).map(_.output.sentiment)

@@ -5,8 +5,8 @@ import dspy4s.algebra.{IsEq, Law, <->}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration
-  * order, converts each to a `FieldSpec` for the untyped `SignatureLayout`, and encodes / decodes typed values against
-  * the `DynamicValue.Record` spine carried through `ProgramCall`, adapters, and `RawPrediction`.
+  * order, converts each to a `FieldSpec` for the runtime `SignatureLayout`, and encodes / decodes values against the
+  * `DynamicValue.Record` spine carried through `ProgramCall`, adapters, and `RawPrediction`.
   *
   * The codec spine is `DynamicValue.Record` end-to-end: `Shape.encode` produces one, `Shape.decode` consumes one, and
   * adapters speak the same intermediate. There is no `Map[String, Any]` round-trip.
@@ -14,10 +14,10 @@ import zio.blocks.schema.{DynamicValue, Schema}
 trait Shape[A]:
   def fieldSpecs: Vector[FieldSpec]
 
-  /** Encode a typed value to a `DynamicValue.Record` (the codec-spine intermediate). */
+  /** Encode a value to a `DynamicValue.Record` (the codec-spine intermediate). */
   def encode(value: A): DynamicValue.Record
 
-  /** Decode a typed value from a `DynamicValue.Record` produced by an adapter or supplied by user code. */
+  /** Decode a value from a `DynamicValue.Record` produced by an adapter or supplied by user code. */
   def decode(raw: DynamicValue.Record): Either[DspyError, A]
 
   /** Render this shape as a JSON Schema string suitable for prompt instructions to LMs that follow structured-output
@@ -27,16 +27,16 @@ trait Shape[A]:
     */
   def jsonSchemaString: Option[String] = None
 
-/** A [[Shape]] whose typed carrier contains only values accepted by its decoder. Schema-backed product shapes have this
+/** A [[Shape]] whose carrier contains only values accepted by its decoder. Schema-backed product shapes have this
   * property; [[Shape.MapShape]] deliberately does not, because a plain `DynamicValue.Record` can omit fields that its
   * runtime layout requires.
   */
 trait RoundTripShape[A] extends Shape[A]:
 
-  /** Encoding followed by decoding recovers the typed value. There is deliberately no law in the opposite direction:
-    * decoding may normalize LM-produced wire values and may accept records with fields outside this shape.
+  /** Encoding followed by decoding recovers the value. There is deliberately no law in the opposite direction: decoding
+    * may normalize LM-produced wire values and may accept records with fields outside this shape.
     */
-  @Law("decoding an encoded value recovers the typed value")
+  @Law("decoding an encoded value recovers the value")
   final def decodeEncode(value: A): IsEq[Either[DspyError, A]] =
     decode(encode(value)) <-> Right(value)
 
@@ -143,7 +143,7 @@ object Shape:
     ZioSchemaCodec.derivedFromZioSchema[A](using canonicalSchema[A])
 
   /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
-    * static schema so the "typed" value stays at the spine type. `encode` is the identity; `decode` only validates that
+    * static schema, so the domain value stays at the spine type. `encode` is the identity; `decode` only validates that
     * every field listed in `fieldSpecs` is present in the raw record (no per-field coercion -- that happens upstream in
     * the adapter / `ZioSchemaCodec.normalize` for schema-backed shapes).
     */

@@ -1,7 +1,7 @@
-/** Typed signatures — case-class surface.
+/** Signatures — case-class surface.
   *
   * Mirrors DSPy's class-based signature style (snippet "Emotion" from docs/docs/learn/programming/signatures.md).
-  * Compiles against the dspy4s typed engine; no live LM calls. Run shapes below are illustrative.
+  * Compiles against the dspy4s engine; no live LM calls. Run shapes below are illustrative.
   *
   * Status: example
   */
@@ -26,13 +26,13 @@ enum Emotion derives Schema:
 case class EmotionOutput(sentiment: Emotion) derives Schema
 // --8<-- [end:derived-types]
 
-/** Build a `Signature` from two case classes — one for inputs, one for outputs. The resulting signature is fully typed
-  * at the program boundary:
+/** Build a `Signature` from two case classes — one for inputs, one for outputs. The resulting signature is
+  * compiler-checked at the program boundary:
   *
-  *   - encode: `Predict(signature)(EmotionInput("..."))` accepts a typed value; the typed shape encodes it into the
-  *     dynamic `ProgramCall.input` record.
-  *   - decode: `Prediction.output` is a typed `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no
-  *     runtime cast.
+  *   - encode: `Predict(signature)(EmotionInput("..."))` accepts a value; the shape encodes it into the dynamic
+  *     `ProgramCall.input` record.
+  *   - decode: `Prediction.output` is an `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no runtime
+  *     cast.
   *   - enum constraints reach the LM via `Shape.jsonSchemaString` (rendered from the backing `Schema[O]`); the
   *     `JSONAdapter` inlines that schema into its prompt.
   */

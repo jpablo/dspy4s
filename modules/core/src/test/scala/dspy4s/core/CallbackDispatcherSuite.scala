@@ -118,7 +118,7 @@ class CallbackDispatcherSuite extends FunSuite:
     assertEquals(observed.map(_.getClass.getSimpleName).toVector, Vector("ModuleStartEvent", "ModuleEndEvent"))
   }
 
-  test("withLm and withAdapter emit typed callback events") {
+  test("withLm and withAdapter emit structured callback events") {
     val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =

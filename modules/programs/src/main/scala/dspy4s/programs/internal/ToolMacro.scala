@@ -9,8 +9,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 import scala.quoted.*
 
 /** Runtime support for [[dspy4s.programs.contracts.ToolFunction.fromMethod]]: decode one named argument from the tool's
-  * call record, coercing LM-shaped values (string primitives → the field's type) the same way the typed predict path
-  * does.
+  * call record, coercing LM-shaped values (string primitives → the field's type) the same way the `Predict` path does.
   */
 object ToolArgs:
   def decode[A](record: DynamicValue.Record, name: String)(using Schema[A]): Either[DspyError, A] =
@@ -21,9 +20,9 @@ object ToolArgs:
 
 object ToolMacro:
 
-  /** Implementation of `ToolFunction.fromMethod(method)`: read the method's name + `@description` + typed parameters,
-    * and emit a `ToolFunction` that decodes each argument from the call record, applies the method, and lifts the
-    * result via its `Schema`.
+  /** Implementation of `ToolFunction.fromMethod(method)`: read the method's name + `@description` + parameters, and
+    * emit a `ToolFunction` that decodes each argument from the call record, applies the method, and lifts the result
+    * via its `Schema`.
     */
   def fromMethodImpl[F: Type](method: Expr[F])(using Quotes): Expr[ToolFunction] =
     import quotes.reflect.*

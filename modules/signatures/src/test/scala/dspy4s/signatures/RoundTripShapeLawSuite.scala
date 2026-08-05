@@ -7,7 +7,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 final case class RoundTripShapeLawValue(label: String, count: Int) derives Schema
 
 /** Executes the law stated on [[RoundTripShape]]. Concrete shape suites retain responsibility for their format-specific
-  * coercion and validation behavior; this suite checks the common typed/wire boundary contract.
+  * coercion and validation behavior; this suite checks the common domain/wire boundary contract.
   */
 final class RoundTripShapeLawSuite extends FunSuite:
 

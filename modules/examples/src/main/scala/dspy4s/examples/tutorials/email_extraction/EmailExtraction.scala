@@ -2,15 +2,15 @@
   *
   * Source: docs/docs/tutorials/email_extraction/index.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/email_extraction/index.md Status: translated (the
-  * typed signatures + the composed processor, snippets 3/4/5/6). The MLflow autolog setup (snippets 1/2) is
-  * observability glue, not a dspy feature, and is out of scope.
+  * signatures + the composed processor, snippets 3/4/5/6). The MLflow autolog setup (snippets 1/2) is observability
+  * glue, not a dspy feature, and is out of scope.
   *
   * Pydantic `BaseModel`s / `str, Enum`s become Scala `case class`es / `enum`s that `derive Schema`, so the
   * `email_type: EmailType` / `key_entities: list[ExtractedEntity]` / `financial_amount: Optional[float]` fields keep
-  * their structure across the typed boundary (enum → wire string, case class / list → JSON, `Optional` → `Option`).
+  * their structure across the schema boundary (enum → wire string, case class / list → JSON, `Optional` → `Option`).
   * Python's `class EmailProcessor(dspy.Module)` composing four `ChainOfThought`s becomes a plain class threading their
-  * typed outputs through an `Either` for-comprehension. DSPy's per-field `desc=` is not part of the dspy4s `Spec`
-  * surface, so those hints are dropped.
+  * outputs through an `Either` for-comprehension. DSPy's per-field `desc=` is not part of the dspy4s `Spec` surface, so
+  * those hints are dropped.
   */
 package dspy4s.examples.tutorials.email_extraction
 
@@ -74,8 +74,8 @@ trait SummarizeEmail extends Spec:
   def key_entities: InputField[List[ExtractedEntity]]
   def summary: OutputField[String]
 
-/** The aggregated result Python builds with `dspy.Prediction(...)` in snippet 5 — a single typed value holding the
-  * merged outputs of the four steps.
+/** The aggregated result Python builds with `dspy.Prediction(...)` in snippet 5 — a single value holding the merged
+  * outputs of the four steps.
   */
 case class EmailAnalysis(
     email_type      : EmailType,

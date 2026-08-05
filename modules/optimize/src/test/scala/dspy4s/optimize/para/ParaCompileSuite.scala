@@ -16,7 +16,7 @@ import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a TYPED
+/** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a
   * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction
   * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the distinction
   * between record-running and optimization: an upcast `SomeProgram[I, O]` remains runnable but has erased the arity
@@ -24,7 +24,7 @@ import zio.blocks.schema.DynamicValue
   */
 class ParaCompileSuite extends FunSuite:
 
-  // ── Fixtures (COPROSuite's, over the typed student) ───────────────────────
+  // ── Fixtures (COPROSuite's, over the student) ───────────────────────
 
   private val winningInstruction = "INSTR_C: answer precisely"
 
@@ -190,7 +190,7 @@ class ParaCompileSuite extends FunSuite:
 
   // ── 5a. Stage 3 of the bundle promotion: a runtime-string student through the same entry point ──────────
 
-  test("COPRO optimizes a DynamicSignature bundle program exactly like a typed student") {
+  test("COPRO optimizes a DynamicSignature bundle program exactly like a student") {
     // The runtime-string counterpart of test 1: the student's signature exists only as a parsed value, but the
     // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (OptimizableTraversal +
     // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.

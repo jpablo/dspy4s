@@ -6,7 +6,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
 
-/** Text and data protocol shared by the RLM prompt, persistent REPL history, and typed SUBMIT boundary. */
+/** Text and data protocol shared by the RLM prompt, persistent REPL history, and schema-validated SUBMIT boundary. */
 private[programs] object RLMReplProtocol:
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 

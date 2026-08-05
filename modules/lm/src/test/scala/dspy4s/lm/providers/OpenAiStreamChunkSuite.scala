@@ -38,7 +38,7 @@ class OpenAiStreamChunkSuite extends FunSuite:
     assertEquals(calls(1).argumentsFragment, Some("{\"q\":1}"))
   }
 
-  test("decodes the choice-less final usage chunk into typed core fields") {
+  test("decodes the choice-less final usage chunk into core fields") {
     val lm = decode("""{"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}""").toLmChunk
     assertEquals(lm.text, "")
     val usage = lm.usage.get

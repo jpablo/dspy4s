@@ -20,8 +20,8 @@ import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
-/** Laws and operational semantics for `id` / `>>>` / ordered fan-out. `>>>` threads the typed value and accumulates the
-  * raw execution envelope with its lawful sequential operation, so Category identity and associativity hold on the full
+/** Laws and operational semantics for `id` / `>>>` / ordered fan-out. `>>>` threads the value and accumulates the raw
+  * execution envelope with its lawful sequential operation, so Category identity and associativity hold on the full
   * `Prediction`. Structural combinators are lifecycle-transparent, making equality stable under association even when a
   * leaf observes the live trace.
   */
@@ -33,8 +33,8 @@ class ComposeLawSuite extends FunSuite:
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
 
-  /** A typed program stub: maps the input value via `f`, tags its raw record so `parallel`'s merge is observable, and
-    * exposes `predict` as its single learnable leaf (for the addressability laws).
+  /** A program stub: maps the input value via `f`, tags its raw record so `parallel`'s merge is observable, and exposes
+    * `predict` as its single learnable leaf (for the addressability laws).
     */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[I, O]:

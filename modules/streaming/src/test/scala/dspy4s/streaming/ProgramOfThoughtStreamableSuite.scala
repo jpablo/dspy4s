@@ -34,7 +34,7 @@ class ProgramOfThoughtStreamableSuite extends FunSuite:
     )
   }
 
-  test("Streamable derives typed Predict and ChainOfThought signatures from the shared runner") {
+  test("Streamable derives Predict and ChainOfThought signatures from the shared runner") {
     val signature = Signature.derived[StreamablePotInput, StreamablePotOutput]("StreamableTyped")
     val predict   = Predict(signature)
     val cot       = ChainOfThought(signature)

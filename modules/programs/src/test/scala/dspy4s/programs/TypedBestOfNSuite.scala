@@ -45,7 +45,7 @@ class TypedBestOfNSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-  /** A typed program stub returning scripted `Prediction[Cand]`s, tracking call count + the rolloutIds it saw. */
+  /** A program stub returning scripted `Prediction[Cand]`s, tracking call count + the rolloutIds it saw. */
   private final class TypedStub(results: Vector[Either[DspyError, Prediction[Cand]]])
       extends Module[Q, Cand]:
     val rolloutIds: ArrayBuffer[Int]                                                                                = ArrayBuffer.empty
@@ -67,7 +67,7 @@ class TypedBestOfNSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  test("typed BestOfN returns the highest-reward typed prediction and threads rolloutIds") {
+  test("BestOfN returns the highest-reward prediction and threads rolloutIds") {
     val stub = TypedStub(Vector(
       Right(candidate("A", 0.1)),
       Right(candidate("B", 0.9)),
@@ -95,7 +95,7 @@ class TypedBestOfNSuite extends FunSuite:
     )
   }
 
-  test("typed BestOfN short-circuits once the reward reaches the threshold") {
+  test("BestOfN short-circuits once the reward reaches the threshold") {
     val stub = TypedStub(Vector(
       Right(candidate("A", 0.95)), // >= threshold -> stop after the first attempt
       Right(candidate("B", 0.10))
@@ -113,7 +113,7 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(stub.calls.get(), 1)
   }
 
-  test("typed BestOfN surfaces the last error after exhausting the default fail budget") {
+  test("BestOfN surfaces the last error after exhausting the default fail budget") {
     val stub = TypedStub(Vector(
       Left(RuntimeError("typed_stub", "f1")),
       Left(RuntimeError("typed_stub", "f2")),
@@ -127,7 +127,7 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(result.left.toOption.get.message, "f3")
   }
 
-  test("typed BestOfN with a custom fail count raises earlier") {
+  test("BestOfN with a custom fail count raises earlier") {
     val stub = TypedStub(Vector(
       Left(RuntimeError("typed_stub", "f1")),
       Left(RuntimeError("typed_stub", "f2")),
@@ -148,7 +148,7 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(result.left.toOption.get.message, "f2")
   }
 
-  test("typed BestOfN tolerates exactly failCount failures (budget, not loop index)") {
+  test("BestOfN tolerates exactly failCount failures (budget, not loop index)") {
     // Regression: the abort used `idx > remainingFailures`, conflating the loop index with the failure
     // budget — so with failCount=3 it aborted on the 3rd failure instead of tolerating 3 and aborting on the 4th.
     val stub = TypedStub(Vector(
@@ -173,7 +173,7 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(result.left.toOption.get.message, "f4")
   }
 
-  test("typed BestOfN keeps a sub-threshold best when a late failure stays within budget") {
+  test("BestOfN keeps a sub-threshold best when a late failure stays within budget") {
     // Successes precede the failure, so the loop index is already high; with the index-based abort this
     // discarded the best. With the budget-based abort, the single failure is within failCount and `best` survives.
     val stub = TypedStub(Vector(
@@ -197,7 +197,7 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(stub.calls.get(), 5)
   }
 
-  test("typed Refine preserves best-of-N parity on the no-advice path (threshold met on the first attempt)") {
+  test("Refine preserves best-of-N parity on the no-advice path (threshold met on the first attempt)") {
     // When attempt 1 already meets the threshold, Refine short-circuits with no feedback step — identical to
     // BestOfN. No LM/adapter is configured, proving the OfferFeedback sub-program is never reached here.
     val stub = TypedStub(Vector(
@@ -304,8 +304,8 @@ class TypedBestOfNSuite extends FunSuite:
           ))
         ))
 
-  /** Inner typed program that drives the AMBIENT adapter + LM (so an injected `hint_` actually reaches the prompt the
-    * LM sees). Mirrors what a real `Predict[Q, Cand]` does, minus the static-Signature codec.
+  /** Inner program that drives the AMBIENT adapter + LM (so an injected `hint_` actually reaches the prompt the LM
+    * sees). Mirrors what a real `Predict[Q, Cand]` does, minus the static-Signature codec.
     */
   private final case class InnerPredict(parameters: OptimizableParameters = OptimizableParameters())
       extends Module[Q, Cand]:
@@ -432,7 +432,7 @@ class TypedBestOfNSuite extends FunSuite:
     assertEquals(result.left.toOption.get.message, "f2")
   }
 
-  test("typed Refine tolerates exactly failCount failures (budget, not loop index)") {
+  test("Refine tolerates exactly failCount failures (budget, not loop index)") {
     // Same regression as BestOfN, on Refine's module-failure path.
     val stub = TypedStub(Vector(
       Left(RuntimeError("typed_stub", "f1")),

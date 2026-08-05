@@ -85,7 +85,7 @@ private[adapters] object AdapterTextSupport:
     }.mkString("\n")
 
   /** Coerce a raw string field value into the `DynamicValue` its declared `TypeRef` demands. Shared by the Chat and XML
-    * adapters so a `json` / `list` typed field decodes identically regardless of which adapter parsed it.
+    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it.
     */
   def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     typeRef match

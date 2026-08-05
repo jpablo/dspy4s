@@ -10,12 +10,12 @@ import zio.blocks.schema.DynamicValue
   *
   * Optimizers, evaluation, and streaming all consume this same boundary: a record-valued [[ProgramCall]] goes in and
   * the program's [[RawPrediction]] comes out. The capability is external to `Module` because record decoding is not
-  * available on every typed module representation; third-party programs can supply their own instance.
+  * available on every module representation; third-party programs can supply their own instance.
   *
-  * For BARE typed modules the program's own signature is the canonical decode boundary (no identity morphism is in
-  * sight, so no coherence question arises); the framework leaves and composites carry signature-backed instances below.
-  * Inside the graded program category, decoding is instead a property of the OBJECT ([[RecordCodec]]), resolved
-  * canonically at the record boundary rather than stored in each morphism.
+  * For BARE modules the program's own signature is the canonical decode boundary (no identity morphism is in sight, so
+  * no coherence question arises); the framework leaves and composites carry signature-backed instances below. Inside
+  * the graded program category, decoding is instead a property of the OBJECT ([[RecordCodec]]), resolved canonically at
+  * the record boundary rather than stored in each morphism.
   */
 trait ProgramRunner[P]:
   def run(program: P, call: ProgramCall[DynamicValue.Record])(using
@@ -26,7 +26,7 @@ trait ProgramRunner[P]:
     run(program, ProgramCall(inputs))
 
 private[programs] trait LowPriorityProgramRunner:
-  /** Any typed module whose input type carries a [[RecordCodec]] (user composites without a hand-written runner). Lower
+  /** Any module whose input type carries a [[RecordCodec]] (user composites without a hand-written runner). Lower
     * priority than the signature-backed instances in the companion.
     */
   given fromRecordCodec[I, O, P <: Module[I, O]](using

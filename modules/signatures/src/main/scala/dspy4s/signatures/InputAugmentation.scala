@@ -3,8 +3,8 @@ package dspy4s.signatures
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, ValidationError, updated}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** Typed INPUT augmentation: the input-side dual of [[OutputAugmentation]], for the composite programs' loop signatures
-  * that extend a base input `I` with one hand-declared `String` field (`trajectory`, `previous_code`, `error`,
+/** INPUT augmentation: the input-side dual of [[OutputAugmentation]], for the composite programs' loop signatures that
+  * extend a base input `I` with one hand-declared `String` field (`trajectory`, `previous_code`, `error`,
   * `final_generated_code`, ...).
   *
   * The augmented carrier is the plain pair `(I, String)` rather than a named-tuple surgery on `I`: the pair delegates

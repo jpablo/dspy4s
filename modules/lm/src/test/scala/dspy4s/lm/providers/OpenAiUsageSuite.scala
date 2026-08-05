@@ -8,7 +8,7 @@ class OpenAiUsageSuite extends FunSuite:
   private def usage(json: String) =
     OpenAiUsage.fromDynamic(DynamicJson.decode(json).toOption.get).toLmUsage
 
-  test("chat naming maps to typed core fields; extras stays empty (no duplication)") {
+  test("chat naming maps to core fields; extras stays empty (no duplication)") {
     val u = usage("""{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}""")
     assertEquals(u.promptTokens, 5L)
     assertEquals(u.completionTokens, 7L)
@@ -28,7 +28,7 @@ class OpenAiUsageSuite extends FunSuite:
     assertEquals(usage("""{"prompt_tokens":4,"completion_tokens":6}""").totalTokens, 10L)
   }
 
-  test("nested detail blocks populate typed extras; prompt/completion-side audio is summed") {
+  test("nested detail blocks populate structured extras; prompt/completion-side audio is summed") {
     val u = usage(
       """{"prompt_tokens":50,"completion_tokens":20,"total_tokens":70,
         |"prompt_tokens_details":{"cached_tokens":10,"audio_tokens":2},

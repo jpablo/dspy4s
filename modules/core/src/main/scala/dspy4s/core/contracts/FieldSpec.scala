@@ -17,8 +17,8 @@ import scala.util.matching.Regex
   *     DSPy's `PYDANTIC_CONSTRAINT_MAP`. Empty by default; only emitted when non-empty.
   *
   * '''Constraint provenance (v1).''' Constraints are settable programmatically -- via this `FieldSpec` or
-  * [[SignatureLayout.create]]. Deriving them automatically from the typed (`zio-blocks Schema`) surface is a documented
-  * follow-up: the typed derivation has no constraint-annotation mechanism yet, so there is no path from `Schema[A]` to
+  * [[SignatureLayout.create]]. Deriving them automatically from the `zio-blocks Schema` surface is a documented
+  * follow-up: schema derivation has no constraint-annotation mechanism yet, so there is no path from `Schema[A]` to
   * these strings today.
   */
 final case class FieldSpec(
@@ -36,7 +36,7 @@ object FieldSpec:
 
   /** True if `name` is a valid Scala-style identifier (alphanumeric + underscore, must start with letter or
     * underscore). Adapters require this -- field names appear as keys in `Map[String, Any]` payloads and as named-tuple
-    * labels in the typed layer, so non-identifier names would break the typed surface.
+    * labels in the `Signature` API, so non-identifier names would break that API.
     */
   def validateName(name: String): Boolean = identifierPattern.matches(name)
 

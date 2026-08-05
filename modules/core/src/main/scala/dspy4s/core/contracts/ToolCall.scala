@@ -9,8 +9,8 @@ import zio.blocks.schema.{DynamicValue, Schema}
   * collection `Schema` on the derivation path (it resolves to `IndexedSeq`, type-mismatching `Chunk`). We build it
   * instead by narrowing/widening the dynamic schema via `Schema.transform` (the only such combinator — a `Schema`
   * round-trips both ways, so there is no one-directional `map`/`contramap`). This lets a case class carry a
-  * precisely-typed `DynamicValue.Record` field and still `derives Schema`. The narrowing throws if a value isn't a
-  * `Record`, which is safe for the call sites here (a tool call's `args` is always a JSON object / record).
+  * `DynamicValue.Record` field and still `derives Schema`. The narrowing throws if a value isn't a `Record`, which is
+  * safe for the call sites here (a tool call's `args` is always a JSON object / record).
   */
 given recordSchema: Schema[DynamicValue.Record] =
   Schema[DynamicValue].transform(
@@ -26,8 +26,8 @@ given recordSchema: Schema[DynamicValue.Record] =
   * structured data without a lossy `Any` round-trip).
   *
   * Single shared type across layers: the wire layer (`lm`) populates it from provider responses, the adapters read it,
-  * and the typed decode path uses it as a `Vector[ToolCall]` output field (paired with
-  * `dspy4s.signatures.Signature.markToolCalls`). Lives in `core` so both `lm` and `typed` — which don't depend on each
-  * other — can name it; the [[recordSchema]] given lets the typed `Schema` derivation keep the precise `args` type.
+  * and the decode path uses it as a `Vector[ToolCall]` output field (paired with
+  * `dspy4s.signatures.Signature.markToolCalls`). Lives in `core` so both `lm` and `signatures` — which don't depend on
+  * each other — can name it; the [[recordSchema]] given lets the `Schema` derivation keep the precise `args` type.
   */
 final case class ToolCall(name: String, args: DynamicValue.Record) derives Schema

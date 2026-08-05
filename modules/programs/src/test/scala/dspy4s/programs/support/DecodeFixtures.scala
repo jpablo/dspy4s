@@ -7,9 +7,9 @@ import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmRespon
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 
-/** Offline decode-test harness: drive the REAL adapter + typed decode against a canned LM completion, with no live LM
-  * and no API key. Deterministic, so it can pin down the codec/adapter contract for a structured type (the enum / list
-  * / option / number paths that historically broke).
+/** Offline decode-test harness: drive the REAL adapter + decode against a canned LM completion, with no live LM and no
+  * API key. Deterministic, so it can pin down the codec/adapter contract for a structured type (the enum / list /
+  * option / number paths that historically broke).
   */
 object DecodeFixtures:
 
@@ -53,8 +53,8 @@ object DecodeFixtures:
     }
     buf.mkString("\n")
 
-  /** Feed a canned LM completion (the exact text a model would emit) through the REAL adapter + typed decode, with no
-    * live LM. Returns the decoded typed output.
+  /** Feed a canned LM completion (the exact text a model would emit) through the REAL adapter + decode, with no live
+    * LM. Returns the decoded output.
     */
   def decodeCompletion[I, O](
       signature : Signature[I, O],

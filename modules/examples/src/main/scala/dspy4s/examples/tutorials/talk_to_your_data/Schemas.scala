@@ -1,4 +1,4 @@
-/** Talk to Your Data: typed schemas.
+/** Talk to Your Data: schemas.
   *
   * The whole pipeline is type-safe end to end. The model's *intent* (what to compute) is a [[QueryPlan]], a validated
   * Scala value, and the *result* is an [[AnalysisResult]]. Both are `derives Schema`, so there is zero hand-written
@@ -39,9 +39,9 @@ final case class TimeRange(column: String, start: Option[String], end: Option[St
 /** Ordering for grouped results; `by = "value"` sorts by the aggregate, otherwise by a group column. */
 final case class Sort(by: String, descending: Boolean) derives Schema
 
-/** The typed intent of a natural-language question: the "plan" the agent commits to before computing anything. This is
-  * the heart of the type-safety story. An English question becomes a structured, inspectable value that the rest of the
-  * program (and the optimizer) can reason about.
+/** The structured intent of a natural-language question: the "plan" the agent commits to before computing anything.
+  * This is the heart of the type-safety story. An English question becomes a structured, inspectable value that the
+  * rest of the program (and the optimizer) can reason about.
   */
 // --8<-- [start:query-plan]
 final case class QueryPlan(

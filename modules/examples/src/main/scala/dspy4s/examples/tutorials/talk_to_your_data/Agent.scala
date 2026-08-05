@@ -1,9 +1,9 @@
 /** Talk to Your Data: the plan, act, verify, refine agent.
   *
-  * PLAN (typed signatures) English question to a typed [[QueryPlan]]. The model's intent is a validated Scala value
-  * that the rest of the program reasons about directly. ACT (RLM) The dataset (10k rows of CSV, too large to put in a
-  * prompt) is injected into a sandboxed Python REPL, and the model writes code to compute the answer honoring the plan.
-  * The arithmetic happens in the sandbox, so the number is computed in code. VERIFY The same plan is re-executed
+  * PLAN (Signatures) English question to a [[QueryPlan]]. The model's intent is a validated Scala value that the rest
+  * of the program reasons about directly. ACT (RLM) The dataset (10k rows of CSV, too large to put in a prompt) is
+  * injected into a sandboxed Python REPL, and the model writes code to compute the answer honoring the plan. The
+  * arithmetic happens in the sandbox, so the number is computed in code. VERIFY The same plan is re-executed
   * independently on the JVM by [[QueryEngine]], and the two engines must agree. Two independent computations matching
   * is a real trust signal. REFINE On a mismatch, the discrepancy is fed back and the ACT stage retries (bounded).
   *
@@ -23,8 +23,8 @@ import scala.annotation.tailrec
 /** The ACT stage's inputs; each becomes a variable in the Python REPL. `data` is the whole CSV. */
 final case class ActInput(data: String, plan: String, question: String, feedback: String) derives Schema
 
-/** What the agent returns for one question: the typed plan, the computed result, the verifier's verdict, and how many
-  * ACT attempts it took.
+/** What the agent returns for one question: the plan, the computed result, the verifier's verdict, and how many ACT
+  * attempts it took.
   */
 final case class AgentAnswer(question: String, plan: QueryPlan, result: AnalysisResult, verdict: Verdict, attempts: Int)
 
@@ -36,7 +36,7 @@ object Agent:
   val plannerInstructionsBaseline: String = "Translate the user's question about the dataset into a query plan."
 
   /** The planner signature, parameterized by instruction so the agent can run the baseline or the GEPA-optimized
-    * planner. Output is the full [[QueryPlan]], a rich typed structure (enums, nested lists) the model must fill.
+    * planner. Output is the full [[QueryPlan]], a rich domain structure (enums, nested lists) the model must fill.
     */
   def plannerSignature(instructions: String): Signature[Question, QueryPlan] =
     Signature.derived[Question, QueryPlan](name = "AnalystPlanner", instructions = instructions)
@@ -59,7 +59,7 @@ object Agent:
       |  method  - one sentence on how you computed it
       |Always print intermediate results to check your work before SUBMIT.""".stripMargin
 
-  /** The ACT executor: an [[RLM]] producing a typed [[AnalysisResult]] from the SUBMIT payload. No host tools and no
+  /** The ACT executor: an [[RLM]] producing an [[AnalysisResult]] from the SUBMIT payload. No host tools and no
     * `llm_query`; it is pure deterministic computation in the sandbox.
     */
   val executor: RLM[ActInput, AnalysisResult] = RLM(

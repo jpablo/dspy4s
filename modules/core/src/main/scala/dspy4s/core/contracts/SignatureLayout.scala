@@ -2,13 +2,13 @@ package dspy4s.core.contracts
 
 import zio.blocks.schema.DynamicValue
 
-/** The compiled runtime layout of a typed Signature: a name, optional instructions, and separate ordered input and
-  * output cohorts. Adapters, programs, and the rest of the runtime stack consume this directly; the typed
-  * `Signature[I, O]` (in `dspy4s.signatures`) is the user-facing wrapper around it.
+/** The compiled runtime layout of a Signature: a name, optional instructions, and separate ordered input and output
+  * cohorts. Adapters, programs, and the rest of the runtime stack consume this directly; the `Signature[I, O]` (in
+  * `dspy4s.signatures`) is the user-facing wrapper around it.
   *
   * '''Construction paths.'''
   *
-  *   - Typed surface (`dspy4s.signatures.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
+  *   - `Signature` API (`dspy4s.signatures.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
   *     primary path; the resulting `Signature.layout` is the value adapters see.
   *   - [[SignatureLayout.create]] -- validating + normalizing factory for programmatic construction.
   *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.signatures.Signature.fromString`
@@ -22,8 +22,8 @@ import zio.blocks.schema.DynamicValue
   * '''Field mutation.''' The `withInputFields` / `withOutputFields` methods are `private[dspy4s]`. They exist because
   * composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base
   * layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User
-  * code should mutate at the typed `Signature` surface (use a different `Spec` trait, a different
-  * `Signature.derived[I, O]`, etc.) rather than reaching into the layout directly.
+  * code should use the `Signature` API (a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather
+  * than reaching into the layout directly.
   *
   * '''Invariants.''' A field's role is represented exactly once by cohort membership. Name uniqueness across both
   * cohorts is maintained by construction, not by a precondition: the primary constructor is `private`, so every layout
@@ -63,7 +63,7 @@ final case class SignatureLayout private (
   // MultiChainComparison, ProgramOfThought, ChainOfThought)
   // augment a base layout by appending / prepending / inserting fields
   // before handing it to a `DynamicPredict`. User code should use the
-  // typed `Signature` surface (`derived`, `fromType`, `of[Spec]`,
+  // `Signature` API (`derived`, `fromType`, `of[Spec]`,
   // `builder`, `fromString`) instead of mutating layouts directly.
 
   /** Replace the input cohort while keeping global field names unique (first occurrence wins). */
@@ -116,8 +116,8 @@ final case class SignatureLayout private (
 object SignatureLayout:
 
   /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a `SignatureLayout`. Prefer
-    * `dspy4s.signatures.Signature.fromString` from user code; this is the lower-level entry point that the typed
-    * surface delegates to.
+    * `dspy4s.signatures.Signature.fromString` from user code; this is the lower-level entry point that the `Signature`
+    * API delegates to.
     */
   def parse(
       dsl         : String,

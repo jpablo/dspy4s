@@ -6,9 +6,8 @@ import zio.blocks.schema.DynamicValue
 import scala.NamedTuple
 import scala.deriving.Mirror
 
-/** Reusable, type-directed output augmentation for typed programs: prepend a single named field `Name: T` to a
-  * program's output `O`, producing a named tuple — **idempotently** (skipped if `O` already declares `Name`) and
-  * **cast-free**.
+/** Reusable, type-directed output augmentation for programs: prepend a single named field `Name: T` to a program's
+  * output `O`, producing a named tuple — **idempotently** (skipped if `O` already declares `Name`) and **cast-free**.
   *
   * `O` is normalized to its named-tuple view via `NamedTuple.From` (identity for named tuples, the field tuple for case
   * classes), so case-class outputs are supported and the result is always a named tuple. A case-class output is
@@ -140,7 +139,7 @@ object OutputAugmentation:
     )
 
   /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands its
-    * inner typed `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
+    * inner `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
     * `ProgramOfThought`'s CoT-augmented steps). `field` is prepended to `base`'s specs idempotently by name (matching
     * the type-level [[WithField]] and the layout's `prependOutput` — an unconditional prepend would desync `encode`'s
     * `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base JSON schema passes through so structured
@@ -184,6 +183,6 @@ object OutputAugmentation:
   private def productOutputRequired(label: String, signatureName: String, baseOut: Any): DspyError =
     ValidationError(
       s"$label requires a product output (named tuple or case class); the signature '$signatureName' has a " +
-        s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a typed signature " +
+        s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a signature " +
         s"(Signature.of / Signature.derived / Signature.fromType)."
     )

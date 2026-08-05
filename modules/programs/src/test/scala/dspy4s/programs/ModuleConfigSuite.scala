@@ -90,7 +90,7 @@ class ModuleConfigSuite extends FunSuite:
     assertEquals(DynamicValues.recordToMap(reqs.head.options), DynamicValues.recordToMap(callConfig))
   }
 
-  // ── typed Predict[I, O] ─────────────────────────────────────────────────────
+  // ── Predict[I, O] ───────────────────────────────────────────────────────────
 
   test("Predict[I,O]: module config supplies LM options when per-call config is empty") {
     val sig    = Signature.derived[MCQAInput, MCQAOutput]("QA")
@@ -126,7 +126,7 @@ class ModuleConfigSuite extends FunSuite:
     assertEquals(DynamicValues.recordToMap(reqs.head.options), DynamicValues.recordToMap(callConfig))
   }
 
-  // ── typed ChainOfThought[I, O] ──────────────────────────────────────────────
+  // ── ChainOfThought[I, O] ────────────────────────────────────────────────────
 
   test("ChainOfThought: state config supplies defaults and per-call config wins on collision") {
     val sig    = Signature.derived[MCQAInput, MCQAOutput]("QA")

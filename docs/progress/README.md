@@ -3,7 +3,7 @@
 Per-phase implementation reports, written at the time the phase shipped.
 **Historical snapshots** — symbol names and APIs referenced inside may
 have been renamed since (notably the original `Signature` is now
-`SignatureLayout` and the typed wrapper carries that name).
+`SignatureLayout` and the wrapper carries that name).
 
 For current state, see:
 

@@ -30,7 +30,7 @@ class ModeLawSuite extends FunSuite:
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
 
-  /** A typed program stub that records the per-call controls it received and echoes its input; `predict` is its single
+  /** A program stub that records the per-call controls it received and echoes its input; `predict` is its single
     * learnable leaf (for the addressability law).
     */
   private final case class Recorder(predict: DynamicPredict) extends Module[Int, Int]:

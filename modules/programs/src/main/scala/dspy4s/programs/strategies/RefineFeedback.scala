@@ -9,7 +9,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets
 
-/** Typed OfferFeedback critic and its translation between runtime traces and per-module advice. */
+/** OfferFeedback critic and its translation between runtime traces and per-module advice. */
 private[programs] object RefineFeedback:
 
   /** The OfferFeedback signature layout: a paraphrase of upstream's `OfferFeedback` docstring, with the input fields
@@ -85,7 +85,7 @@ private[programs] object RefineFeedback:
         )
       }
 
-  /** The typed critic signature, preserving the hand-built descriptions and lenient output decoding. */
+  /** The critic signature, preserving the hand-built descriptions and lenient output decoding. */
   val signature: Signature[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] = Signature(
     name = "OfferFeedback",
     layout = layout,

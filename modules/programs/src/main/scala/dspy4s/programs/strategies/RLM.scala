@@ -28,8 +28,8 @@ import zio.blocks.schema.DynamicValue
   * SUBMIT, an extract predict produces the outputs from the trajectory (the fallback). Reference: "Recursive Language
   * Models" (Zhang, Kraska, Khattab, 2025).
   *
-  * `RLM[I, O]` is a `Module[I, O]` — SUBMIT's payload (or the extract's reply) is decoded into the typed outputs `O`;
-  * the rendered trajectory and `final_reasoning` ride on `.raw`.
+  * `RLM[I, O]` is a `Module[I, O]` — SUBMIT's payload (or the extract's reply) is decoded into the outputs `O`; the
+  * rendered trajectory and `final_reasoning` ride on `.raw`.
   *
   * ==Deltas from Python==
   *   - `llm_query_batched` runs its prompts SEQUENTIALLY (upstream uses an 8-worker thread pool); per-prompt failures
@@ -72,11 +72,11 @@ final case class RLM[I, O](
     interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
     actionProgramName : String                 = "rlm_action",
     extractProgramName: String                 = "rlm_extract",
-    /** Optional override for the per-iteration action predict (tunable; see ReAct/CodeAct's same pattern) — a TYPED
-      * `Predict` over the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
+    /** Optional override for the per-iteration action predict (tunable; see ReAct/CodeAct's same pattern) — a `Predict`
+      * over the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
       */
     actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
-    /** Optional override for the max-iterations extract-fallback predict — a TYPED `Predict` over the two declared meta
+    /** Optional override for the max-iterations extract-fallback predict — a `Predict` over the two declared meta
       * inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
       */
     extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None
@@ -133,7 +133,7 @@ final case class RLM[I, O](
     ))
     .withInstructions(Some(buildExtractInstructions))
 
-  /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a TYPED
+  /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a
     * `Predict[ActionInputs, ActionStep]`: the action signature's I/O is fully synthetic (base inputs reach the LM only
     * as REPL variable metadata), so both shapes are static. Output decode is lenient (see [[RLM.actionStepShape]]).
     */
@@ -147,8 +147,8 @@ final case class RLM[I, O](
     name = Some(actionProgramName)
   ))
 
-  /** The extract-fallback predict — a TYPED `Predict[ExtractInputs, O]`: synthetic meta inputs, base outputs `O`
-    * decoded through the base output shape (the same decode the dynamic path ran on `extracted.values`).
+  /** The extract-fallback predict — a `Predict[ExtractInputs, O]`: synthetic meta inputs, base outputs `O` decoded
+    * through the base output shape (the same decode the dynamic path ran on `extracted.values`).
     */
   val extractPredict: Predict[RLM.ExtractInputs, O] = extractPredictOverride.getOrElse(Predict(
     signature = Signature(
@@ -218,7 +218,7 @@ object RLM:
   private[programs] val codeField: FieldSpec               = RLMModel.codeField
   private[programs] val actionStepShape: Shape[ActionStep] = RLMModel.actionStepShape
 
-  /** Builds the per-forward REPL from the sandbox tools and the typed-SUBMIT output fields. */
+  /** Builds the per-forward REPL from the sandbox tools and the schema-validated SUBMIT output fields. */
   type InterpreterFactory = (Vector[SandboxTool], Vector[DenoPyodideInterpreter.OutputField]) => ReplCodeInterpreter
 
   /** Fresh sandboxed [[DenoPyodideInterpreter]] per forward (closed by RLM afterwards) — upstream's default. */

@@ -5,7 +5,7 @@ import dspy4s.programs.contracts.Module
 
 /** Public factories for value-level category composition and ordered shared- or independent-input pairing.
   *
-  * Carrier: a program is `Module[I, O]`. `andThen` threads the plain typed value `O`, while each child retains its own
+  * Carrier: a program is `Module[I, O]`. `andThen` threads the plain value `O`, while each child retains its own
   * lifecycle and the composite accumulates both raw prediction envelopes. The concrete structural nodes live in their
   * focused source files; this object is the construction façade.
   */

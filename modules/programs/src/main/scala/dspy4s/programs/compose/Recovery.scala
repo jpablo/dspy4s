@@ -10,7 +10,7 @@ import dspy4s.programs.contracts.Prediction
 
 import scala.compiletime.ops.int.+
 
-/** Explicit classification of which typed program failures may activate a fallback.
+/** Explicit classification of which program failures may activate a fallback.
   *
   * Recovery is a runtime-selected policy value, not a typeclass: several policies can coexist for the same program
   * types, and callers choose one at each recovery boundary. [[Never]] and [[Always]] make the two extremes explicit;

@@ -3,7 +3,7 @@ package dspy4s.core.contracts
 import dspy4s.algebra.Monoid
 
 /** A provider-specific token-usage category carried in [[LmUsage.extras]]. Universal prompt/completion/total counts are
-  * typed fields on [[LmUsage]]; this enum covers the provider-specific remainder without falling back to magic strings.
+  * fields on [[LmUsage]]; this enum covers the provider-specific remainder without falling back to magic strings.
   * [[Other]] is the forward-compatible escape for counters not yet modeled by dspy4s.
   */
 enum TokenCategory derives CanEqual:
@@ -30,8 +30,8 @@ object TokenCategory:
   /** Recognize a provider/JSON key as a known category, or preserve it as [[Other]]. */
   def fromWire(name: String): TokenCategory = byWireName.getOrElse(name, Other(name))
 
-/** Typed token accounting for one LM call. Usage is core execution metadata: both [[dspy4s.core.data.RawPrediction]]
-  * and the LM boundary carry this exact value, so no string-map conversion separates the two layers.
+/** Token accounting for one LM call. Usage is core execution metadata: both [[dspy4s.core.data.RawPrediction]] and the
+  * LM boundary carry this exact value, so no string-map conversion separates the two layers.
   *
   * Pointwise addition forms a commutative monoid: universal counters add and provider-specific counters combine by
   * category. [[empty]] is the all-zero usage value.

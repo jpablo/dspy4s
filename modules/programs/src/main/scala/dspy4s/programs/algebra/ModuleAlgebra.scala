@@ -20,7 +20,7 @@ type ErrorKleisli[A, B] = Kleisli[[X] =>> Either[DspyError, X], A, B]
 given errorKleisliCategory: Category[AnyObject, ErrorKleisli] =
   kleisliCategory[[X] =>> Either[DspyError, X]]
 
-/** Typed modules form a category under transparent sequential composition. */
+/** Modules form a category under transparent sequential composition. */
 given moduleCategory: Category[AnyObject, Module] with
   def id[A: AnyObject]: Module[A, A] = Compose.id[A]
 
@@ -45,7 +45,7 @@ object LiftEitherFunctor
   def mapObject[A](using AnyObject[A]): AnyObject[A] = summon
   def map[A, B](f: ErrorKleisli[A, B]): Module[A, B] = Compose.liftEither(f)
 
-/** Typed modules are contravariant in their input boundary and covariant in their semantic output boundary. */
+/** Modules are contravariant in their input boundary and covariant in their semantic output boundary. */
 object ModuleProfunctor extends ScalaProfunctor[Module](using functionCategory):
   def dimap[A, B, C, D](value: Module[A, B], before: C => A, after: B => D): Module[C, D] =
     Dimap(value, before, after)

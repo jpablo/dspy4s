@@ -12,7 +12,7 @@ import dspy4s.programs.contracts.Prediction
 
 import scala.util.control.NonFatal
 
-/** Pure and fallible local transformations lifted into the typed program carrier.
+/** Pure and fallible local transformations lifted into the program carrier.
   *
   * These nodes are lifecycle-transparent and parameter-free: they perform no LM/tool work, emit no callbacks of their
   * own, and introduce no optimizer-addressable predictors. Non-fatal exceptions from user functions are normalized into

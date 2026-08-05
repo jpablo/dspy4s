@@ -22,7 +22,7 @@
   Optimizers: `LabeledFewShot`, `BootstrapFewShot`,
   `BootstrapFewShotWithRandomSearch`, `KNNFewShot`, `Ensemble`, `GEPA`,
   `MIPROv2`, `COPRO`, `InferRules`. `Evaluate` + metrics. Adapters: Chat/JSON/XML.
-  Typed signatures (case-class / zio-blocks Schema derivation). Embedders +
+  signatures (case-class / zio-blocks Schema derivation). Embedders +
   retrievers. MCP tool calling. Streaming (minimal). LM providers:
   OpenAI-compatible + Ollama.
 - **Not supported / out of scope** — mem0 memory integration, fine-tuning
@@ -76,7 +76,7 @@ structure composition.
 | # | Example | Code | Showcases | Self-contained | Notes |
 |---|---------|------|-----------|----------------|-------|
 | 1 | **ReAct vs RLM, head-to-head** (issue 23) | [RamXX/react2rlm](https://github.com/RamXX/react2rlm) | `RLM` **and** `ReAct` on the same compositional multi-tool task; measures tool-call coverage | Needs Groq key + Deno | ✅ **Ported** → [`tutorials/react_vs_rlm/ReactVsRlm.scala`](../../modules/examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala). Drug-safety checker; shared signature + tools; per-run coverage metric over 21 pairs + 14 contraindications. |
-| 2 | **RLM codebase analyzer** (issue 22) | [weshoke gist](https://gist.github.com/weshoke/5a0f6f632dd80d34b3c0e5dc867c0d9c) | `RLM` + typed signatures (security/docs/quality/architecture audit modes), `sub_lm` cost control | Single file; runs on any source tree | Verify `sub_lm` surface in dspy4s `RLM`. Loader + CLI are trivial Scala. |
+| 2 | **RLM codebase analyzer** (issue 22) | [weshoke gist](https://gist.github.com/weshoke/5a0f6f632dd80d34b3c0e5dc867c0d9c) | `RLM` + signatures (security/docs/quality/architecture audit modes), `sub_lm` cost control | Single file; runs on any source tree | Verify `sub_lm` surface in dspy4s `RLM`. Loader + CLI are trivial Scala. |
 | 3 | **RLM needle-in-haystack** (issue 8) | [codecrack3/…RLM](https://github.com/codecrack3/Recursive-Language-Models-RLM-with-DSpy) · [halfprice06/rlm_dspy](https://github.com/halfprice06/rlm_dspy) | `RLM` recursive context partitioning over 60k-token docs | Bundled/synthetic docs | The "80% vs 0%" wow factor. Sandbox replaces RestrictedPython/E2B directly. |
 | 4 | **GEPA listwise reranker** (issue 3) | [weaviate/recipes notebook](https://github.com/weaviate/recipes/blob/main/integrations/llm-agent-frameworks/dspy/GEPA-Hands-On-Reranker.ipynb) | `GEPA` + `ChainOfThought` + **feedback metric** (score + NL feedback); Recall@1 32%→45% | 138 EnronQA Qs from HF → bundle as JSON | ⭐ Cleanest GEPA showcase. No live Weaviate needed. |
 | 5 | **Optimizer bake-off** (issue 5) | [AADARSH96/dspy-prompt-optimizer](https://github.com/AADARSH96/dspy-prompt-optimizer) | baseline vs **MIPROv2 vs GEPA** on classification, custom metrics, save/load | Ships `dataset.json` | Perfect "which optimizer wins" demo. |
@@ -117,9 +117,9 @@ biggest gap; Deno sandbox is already what dspy4s uses) or **#10 Self-Discover**
 - [dustinober1/DSPY](https://github.com/dustinober1/DSPY) (22) — optimizer notebooks on GSM8K/HotPotQA, Ollama.
 - [haizelabs/dspy-redteam](https://github.com/haizelabs/dspy-redteam) (awesome) — ~165-LOC MIPROv2 jailbreak optimizer, ships 50 AdvBench goals. **Caveat:** judge layer uses `verdict`+`instructor`+a Claude-native judge — rewrite as plain Predict calls; can't run free/offline as-is.
 - [vintrocode/dspy-opentom](https://github.com/vintrocode/dspy-opentom) (awesome) — CoT + `BootstrapFewShotWithRandomSearch` on theory-of-mind QA. Ships `.pkl` data → needs JSON re-export.
-- [scottmreed/chemistry-augmented-generation](https://github.com/scottmreed/chemistry-augmented-generation) (awesome) — MIPROv2 + typed predictor, ships offline CSVs. **Caveat:** SMARTS feature-engineering needs RDKit → use CDK or precompute into the CSV.
+- [scottmreed/chemistry-augmented-generation](https://github.com/scottmreed/chemistry-augmented-generation) (awesome) — MIPROv2 + structured predictor, ships offline CSVs. **Caveat:** SMARTS feature-engineering needs RDKit → use CDK or precompute into the CSV.
 
-### Classification / extraction / typed signatures
+### Classification / extraction / signatures
 - [TheDataQuarry "Power of Good Abstractions"](https://thedataquarry.com/blog/learning-dspy-1-the-power-of-good-abstractions/) → [prrao87/dspy-intro](https://github.com/prrao87/dspy-intro) (1) — classify + structured extract + module composition with branching.
 - [Mindfire "How DSPy Builds Prompts"](https://www.mindfiretechnology.com/blog/archive/dspy-how-it-works/) (16) — `inspect_history`, how a signature compiles into the actual prompt. Pedagogical.
 - [support_sam](https://github.com/haasonsaas/dspy-0to1-guide/blob/main/examples/personas/support_sam.py) (1) — CoT support agent (classify → retrieve → respond → CSAT) with an in-file TF-IDF retriever.
@@ -127,7 +127,7 @@ biggest gap; Deno sandbox is already what dspy4s uses) or **#10 Self-Discover**
 ### Agents / ReAct patterns
 - [joelgrus/human-in-the-loop-dspy-tool](https://github.com/joelgrus/human-in-the-loop-dspy-tool) (3) — "ask a human" as a ReAct `Tool` (blocking callback).
 - [Elicited: per-module token tracking](https://www.elicited.blog/posts/dspy-track-token-usage-per-module) (15) — callbacks attribute tokens to nested modules. **Novel** — nothing like it in dspy4s yet; fits the RuntimeContext usage model.
-- [Elicited: managing tools](https://www.elicited.blog/posts/managing-tools-in-dspy) (14) — typed tool contracts + ReAct, production composition.
+- [Elicited: managing tools](https://www.elicited.blog/posts/managing-tools-in-dspy) (14) — tool contracts + ReAct, production composition.
 - [Elicited: status streaming](https://www.elicited.blog/posts/dspy-status-streaming) (14) — progressive status updates from a ReAct agent; flag streaming-API gaps first.
 - [benvenker/dspy-agents](https://github.com/benvenker/dspy-agents) (10) — RAG agent compiled with MIPROv2, Evaluate harness, MCP tool server/client, ~28-example jsonl.
 

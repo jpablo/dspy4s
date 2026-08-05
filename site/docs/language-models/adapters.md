@@ -2,7 +2,7 @@
 
 An **adapter** sits between a module and the language model. It turns a
 signature plus inputs into prompt messages, and parses the model's reply back
-into the signature's typed output. You rarely call an adapter directly; you
+into the signature's domain output. You rarely call an adapter directly; you
 choose which one is active.
 
 dspy4s ships two:

@@ -86,9 +86,9 @@ class NativeFunctionCallingSuite extends FunSuite:
     }
   }
 
-  test("typed Predict also threads tools to the adapter (tools field on the typed path)") {
+  test("Predict also threads tools to the adapter (tools field on the path)") {
     val lm = new RecordingLm
-    // A lenient (Map-shaped) typed signature with a tool_calls output field.
+    // A lenient (Map-shaped) signature with a tool_calls output field.
     val signature = Signature.fromStringDynamic("question -> answer, tool_calls: tool_calls").toOption.get
     val predict   = Predict(signature = signature, tools = tools)
 
@@ -101,7 +101,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       assert(result.isRight, s"expected success, got: $result")
       assert(
         lm.lastOptions.exists(opts => DynamicValues.recordGet(opts, "tools").isDefined),
-        s"tools missing from request options on the typed path: ${lm.lastOptions}"
+        s"tools missing from request options on the path: ${lm.lastOptions}"
       )
     }
   }

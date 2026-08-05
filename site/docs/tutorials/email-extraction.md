@@ -1,14 +1,14 @@
 # Email extraction
 
-This example builds an email-analysis pipeline that classifies an email, pulls out structured entities, summarizes it, and decides what follow-up actions are needed. It demonstrates typed signatures over enums and case classes, and composing four `ChainOfThought` steps into one program that returns a single typed result.
+This example builds an email-analysis pipeline that classifies an email, pulls out structured entities, summarizes it, and decides what follow-up actions are needed. It demonstrates signatures over enums and case classes, and composing four `ChainOfThought` steps into one program that returns a single result.
 
-## Typed enums and models
+## Enums and models
 
 ```scala
 --8<-- "tutorials/email_extraction/EmailExtraction.scala:email-type"
 ```
 
-An `enum` that derives `Schema` crosses the typed boundary as a wire string. `EmailType` and `UrgencyLevel` are produced as outputs by one step and consumed as inputs by later steps, so the value stays a checked Scala type the whole way through. Case classes such as `ExtractedEntity` derive `Schema` the same way and travel as JSON.
+An `enum` that derives `Schema` crosses the signature boundary as a wire string. `EmailType` and `UrgencyLevel` are produced as outputs by one step and consumed as inputs by later steps, so the value remains an enum throughout. Case classes such as `ExtractedEntity` derive `Schema` the same way and travel as JSON.
 
 ## Signatures
 
@@ -24,7 +24,7 @@ Each signature is a trait extending `Spec` with `InputField` and `OutputField` m
 --8<-- "tutorials/email_extraction/EmailExtraction.scala:processor"
 ```
 
-`EmailProcessor` holds one `ChainOfThought` per signature, built with `Signature.of[...]`. Each call returns `Either[DspyError, ...]`, so `forward` threads the steps through a for-comprehension: a `Left` from any step short-circuits, and the success path reads typed fields off each step's `output` to assemble the final `EmailAnalysis`. The classification result feeds entity extraction, both feed the summary, and the three together feed action generation.
+`EmailProcessor` holds one `ChainOfThought` per signature, built with `Signature.of[...]`. Each call returns `Either[DspyError, ...]`, so `forward` threads the steps through a for-comprehension: a `Left` from any step short-circuits, and the success path reads fields from each step's `output` to assemble the final `EmailAnalysis`. The classification result feeds entity extraction, both feed the summary, and the three together feed action generation.
 
 ## Running it
 

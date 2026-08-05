@@ -25,9 +25,9 @@ import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signatur
   *      `previous_code` + `error` and emits a fix. Loops up to `maxIterations`. 3. **answer** — inputs +
   *      `final_generated_code` + `code_output` → original outputs declared in `baseSignature`.
   *
-  * `ProgramOfThought[I, O]` is a `Module[I, WithReasoning[O]]`: it encodes the typed input, runs the three passes
-  * internally over the data-bag layer, and decodes the final answer step into the base outputs `O` with
-  * `reasoning: String` prepended (see [[OutputAugmentation]]).
+  * `ProgramOfThought[I, O]` is a `Module[I, WithReasoning[O]]`: it encodes the input, runs the three passes internally
+  * over the data-bag layer, and decodes the final answer step into the base outputs `O` with `reasoning: String`
+  * prepended (see [[OutputAugmentation]]).
   *
   * '''SUBMIT vs print.''' This port instructs the LM to **print** its result (typically JSON) and the answer step
   * parses the printed output — the convention every [[CodeInterpreter]] supports. When the interpreter is
@@ -41,17 +41,17 @@ final case class ProgramOfThought[I, O](
     baseSignature: Signature[I, O],
     interpreter  : CodeInterpreter,
     maxIterations: IterationLimit = IterationLimit(3),
-    /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing an
+    /** Optional override for the initial code-generation predict — a `Predict` over the base input, producing an
       * explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
       * Carrying it as a defaulted, `copy`-reachable field makes this learnable sub-predict addressable + immutably
       * replaceable (see the `OptimizableTraversal[ProgramOfThought]` instance).
       */
     generatorPredictOverride: Option[Predict[I, ProgramOfThought.CodeOut]] = None,
-    /** Optional override for the code-regeneration predict used after a failed attempt (typed over the base input plus
+    /** Optional override for the code-regeneration predict used after a failed attempt (over the base input plus
       * `previous_code` and `error`).
       */
     regeneratorPredictOverride: Option[Predict[((I, String), String), ProgramOfThought.CodeOut]] = None,
-    /** Optional override for the final answer-extraction predict (CoT-augmented, typed over the base input plus
+    /** Optional override for the final answer-extraction predict (CoT-augmented, over the base input plus
       * `final_generated_code` and `code_output`).
       */
     answererPredictOverride: Option[Predict[((I, String), String), ProgramOfThought.WithReasoning[O]]] = None
@@ -110,9 +110,9 @@ final case class ProgramOfThought[I, O](
     )
 
   /** The initial code-generation predict, built once from the CoT-augmented [[generateSignature]] and exposed as stable
-    * optimizer state — a TYPED `Predict[I, CodeOut]` (the base input shape unchanged, with missing code modeled
-    * explicitly by [[ProgramOfThought.codeOutShape]]). Addressable + tunable via [[generatorPredictOverride]];
-    * [[forward]] executes this member rather than rebuilding a local predictor for each call.
+    * optimizer state — a `Predict[I, CodeOut]` (the base input shape unchanged, with missing code modeled explicitly by
+    * [[ProgramOfThought.codeOutShape]]). Addressable + tunable via [[generatorPredictOverride]]; [[forward]] executes
+    * this member rather than rebuilding a local predictor for each call.
     */
   val generatorPredict: Predict[I, ProgramOfThought.CodeOut] = generatorPredictOverride.getOrElse(
     Predict(
@@ -127,8 +127,8 @@ final case class ProgramOfThought[I, O](
     )
   )
 
-  /** The retry code-regeneration predict, built once from the CoT-augmented [[regenerateSignature]] — typed over the
-    * base input plus `previous_code` and `error` (two input appends).
+  /** The retry code-regeneration predict, built once from the CoT-augmented [[regenerateSignature]] — over the base
+    * input plus `previous_code` and `error` (two input appends).
     */
   val regeneratorPredict: Predict[((I, String), String), ProgramOfThought.CodeOut] = regeneratorPredictOverride
     .getOrElse(
@@ -148,8 +148,8 @@ final case class ProgramOfThought[I, O](
       )
     )
 
-  /** The final answer-extraction predict, built once from the CoT-augmented [[answerSignature]] — typed over the base
-    * input plus `final_generated_code` and `code_output`, with the reasoning-prepended decode inside the predict (the
+  /** The final answer-extraction predict, built once from the CoT-augmented [[answerSignature]] — over the base input
+    * plus `final_generated_code` and `code_output`, with the reasoning-prepended decode inside the predict (the
     * `prepend` evidence this class already carries).
     */
   val answererPredict: Predict[((I, String), String), ProgramOfThought.WithReasoning[O]] = answererPredictOverride
@@ -214,7 +214,7 @@ final case class ProgramOfThought[I, O](
   ) => Either[DspyError, AgentLoop.Step[Option[ProgramOfThought.Attempt], (String, String)]] =
     (previous, _) =>
       // Generator on the first attempt, regenerator (carrying the prior failure) thereafter. The two predicts
-      // have different typed inputs, so the dispatch happens at the call rather than on a shared predict value.
+      // have different inputs, so the dispatch happens at the call rather than on a shared predict value.
       val generated = previous match
         case None          => generatorPredict(call)
         case Some(attempt) => regeneratorPredict(call.mapInput(input => ((input, attempt.code), attempt.error)))
@@ -300,7 +300,7 @@ object ProgramOfThought:
   /** CoT-augment a step layout by prepending `reasoning`. */
   private[programs] def augmented(layout: SignatureLayout): SignatureLayout = ChainOfThought.augmentLayout(layout)
 
-  // ── The step signatures' hand-declared fields (static; hoisted so the typed shapes and the layouts share them).
+  // ── The step signatures' hand-declared fields (static; hoisted so the shapes and the layouts share them).
   // dspy 3.2.1 alignment (item P3): the hardcoded `prefix =` markers were dropped. `FieldSpec.normalize` derives
   // the marker from the field NAME (title-case via inferPrefix): generated_code -> "Generated Code:",
   // previous_code -> "Previous Code:", error -> "Error:", final_generated_code -> "Final Generated Code:",
@@ -311,9 +311,9 @@ object ProgramOfThought:
   private[programs] val finalGeneratedCodeField: FieldSpec = ProgramOfThoughtProtocol.finalGeneratedCodeField
   private[programs] val codeOutputField: FieldSpec         = ProgramOfThoughtProtocol.codeOutputField
 
-  /** The typed output consumed by the generate / regenerate loop. The augmented layout also asks the LM for
-    * `reasoning`, but that field is execution evidence rather than part of this semantic output. Missing code is an
-    * explicit `None`, never a manufactured empty string.
+  /** The output consumed by the generate / regenerate loop. The augmented layout also asks the LM for `reasoning`, but
+    * that field is execution evidence rather than part of this semantic output. Missing code is an explicit `None`,
+    * never a manufactured empty string.
     */
   final case class CodeOut(generatedCode: Option[String])
 

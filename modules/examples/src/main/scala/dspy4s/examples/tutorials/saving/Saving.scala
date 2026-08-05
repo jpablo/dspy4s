@@ -27,8 +27,8 @@ import java.nio.file.Files
 object Saving:
 
   /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`. This
-    * tutorial uses `DynamicPredict` for a compact runtime-layout example; typed `Predict` and `ChainOfThought` are
-    * supported through the same `OptimizableTraversal` / `OptimizableParameters` contract.
+    * tutorial uses `DynamicPredict` for a compact runtime-layout example; `Predict` and `ChainOfThought` are supported
+    * through the same `OptimizableTraversal` / `OptimizableParameters` contract.
     */
   // --8<-- [start:program]
   def program(): DynamicPredict =

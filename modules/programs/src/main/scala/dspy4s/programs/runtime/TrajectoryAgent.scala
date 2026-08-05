@@ -8,7 +8,7 @@ import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.programs.contracts.Prediction
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** A module that gathers a typed trajectory and then extracts its user-visible result.
+/** A module that gathers a trajectory and then extracts its user-visible result.
   *
   * `ReAct` and `CodeAct` share this execution shape even though their transitions are different: ReAct chooses and
   * invokes a tool, while CodeAct generates and executes code. Implementations provide that domain-specific
@@ -38,7 +38,7 @@ trait TrajectoryAgent[I, O, S] extends Module[I, O]:
   /** Raw-prediction field under which the complete rendered trajectory is exposed. */
   protected def trajectoryKey: String
 
-  /** Render the typed trajectory for both the iterative policy and final extractor. */
+  /** Render the trajectory for both the iterative policy and final extractor. */
   protected def renderTrajectory(trajectory: Vector[S]): String
 
   /** One domain-specific transition: act, append an entry, and decide whether the trajectory is complete. */
@@ -103,7 +103,7 @@ object TrajectoryAgent:
       extracted  <- truncateOnOverflow(trajectory, extractAttempts)(render)(extract)._1
     yield (extracted, rendered)
 
-  /** Prediction-specialized [[runAndExtract]]: preserve the extractor's complete typed/raw result and add the full,
+  /** Prediction-specialized [[runAndExtract]]: preserve the extractor's complete domain/raw result and add the full,
     * pre-extractor-truncation trajectory to its raw values.
     *
     * The extractor may have seen an oldest-first truncated view after a context-window overflow; the attached value is

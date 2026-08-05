@@ -3,8 +3,8 @@ package dspy4s.lm.contracts
 import dspy4s.core.contracts.ToolCall
 import zio.blocks.schema.DynamicValue
 
-/** Compatibility alias: usage is defined in core because both LM responses and predictions carry the same typed
-  * execution metadata.
+/** Compatibility alias: usage is defined in core because both LM responses and predictions carry the same execution
+  * metadata.
   */
 type LmUsage = dspy4s.core.contracts.LmUsage
 val LmUsage: dspy4s.core.contracts.LmUsage.type = dspy4s.core.contracts.LmUsage

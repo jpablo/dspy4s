@@ -45,7 +45,7 @@ Only non-obvious renames are listed. A class with the same name in both projects
 |---|---|---|
 | `dspy.LM` | `dspy4s.lm.contracts.LanguageModel` | Avoids two-letter abbreviation for the public trait; concrete providers (e.g. `OpenAiLanguageModel`) keep the `LanguageModel` suffix for symmetry. |
 | `dspy.streamify` (free function) | `dspy4s.streaming.Streamify.streamify` (object method) | Scala convention — companion object holds the entry point. |
-| `dspy.streaming.StreamResponse` | `dspy4s.streaming.contracts.TokenEvent` | dspy4s's `StreamEvent` ADT splits Python's `StreamResponse` into typed `TokenEvent` / `StatusEvent` / `PredictionEvent` / `ErrorEvent` sealed cases. |
+| `dspy.streaming.StreamResponse` | `dspy4s.streaming.contracts.TokenEvent` | dspy4s's `StreamEvent` ADT splits Python's `StreamResponse` into `TokenEvent` / `StatusEvent` / `PredictionEvent` / `ErrorEvent` sealed cases. |
 | `dspy.streaming.StatusMessage` | `dspy4s.streaming.contracts.StatusEvent` | Same ADT split as above. |
 | `EvalApi` (early scaffolding) | `EvaluateApi` | Module rename follow-through ([`f5d9e12`](#)). |
 
@@ -64,13 +64,13 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `refine.py` | `Refine.scala` | ✅ ported. Full `OfferFeedback` advice/feedback loop (v1, commit `ddecaf2`) **with per-module advice** (G-5 v2, commit `24e89b2`): `OfferFeedback` emits a JSON advice dict keyed by named predictor (`OptimizableTraversal.inspectNamed`), and `HintInjectingAdapter` routes each predictor's OWN advice to its `hint_` (matched by `SignatureLayout` — the stand-in for Python's `signature2name` object-identity routing). See [PORT_GAPS.md](PORT_GAPS.md#g-5--refine-is-a-thin-best-of-n-alias-no-offerfeedback-loop) (G-5 Resolved). |
 | `parallel.py` | `Parallel.scala` | ✅ ported |
 | `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
-| `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, typed `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is modeled as `ProgramCall[MultiChainInput[I]]`: the semantic input contains the base input plus candidate completions, while the uniform envelope carries execution controls. `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
+| `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is modeled as `ProgramCall[MultiChainInput[I]]`: the semantic input contains the base input plus candidate completions, while the uniform envelope carries execution controls. `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
 | `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s uses the `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclass pair instead: Scala 3 Mirror derivation enumerates `OptimizableView`s, separates read-only `OptimizableMetadata` from `OptimizableParameters` (instructions/demos/config), and immutably replaces only those parameters. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed; the interim `PredictOps` typeclass was itself superseded and removed in G-1 P6 (commit `1657f9c`), leaving `OptimizableTraversal` as the sole introspection typeclass. |
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
 | `knn.py` | `programs/retrievers/KNN.scala` | ✅ ported (G-10, commit `086e937`) — input-fields-only serialization, eager trainset embedding, raw-dot-product top-k. |
 | `code_act.py` | `CodeAct.scala` | ✅ ported, full parity pass: `tools` field (rendered into the instructions as upstream's numbered `Tool.__str__` list AND bridged into the sandbox via `sandboxTools` — same vector both sides); upstream `_parse_code` checks (cut at `---`/triple-newline, single-line-multiple-`=` rejection, trailing-assignment echo); parse failures `continue` and ignore `finished` (upstream semantics); extractor retries with oldest-iteration truncation on `ContextWindowExceededError` (3 attempts). Deltas (documented): fence regex also accepts ```py/untagged (upstream leaves backticks in — a wart); per-call `max_iters` is `.copy(maxIterations = IterationLimit(3))` for literals or uses `IterationLimit.either(n)` for runtime values (no magic config key); caller-owned interpreter lifecycle (upstream shuts it down every `forward`); tools bridge via RPC, not source-injection (so Scala-implemented tools work). |
 | `program_of_thought.py` | `ProgramOfThought.scala` | ✅ ported. Three `ChainOfThought` passes: `generate` → `regenerate` (on execution error, up to `maxIterations`) → `answer`. Caller-owned interpreter lifecycle. The print-your-JSON convention works on every interpreter; on the SUBMIT-capable `DenoPyodideInterpreter` a structured `SUBMIT(...)` early-exit is preferred over stdout (G-20 part 1 — full Python parity). |
-| `rlm.py` | `RLM.scala` | ✅ ported (G-20) — typed `RLM[I, O]` over the `ReplCodeInterpreter` surface (default: a fresh `DenoPyodideInterpreter` per forward, closed afterwards). Verbatim action template, REPL variable metadata/history rendering, `llm_query`(+batched) with a shared `maxLlmCalls` counter, SUBMIT validation with continue-on-error, extract fallback. Deltas: sequential `llm_query_batched`; Schema-decode output typing; no `SandboxSerializable`/async (`verbose` ported: per-step stderr logging). Upstream marks it `@experimental`. |
+| `rlm.py` | `RLM.scala` | ✅ ported (G-20) — `RLM[I, O]` over the `ReplCodeInterpreter` surface (default: a fresh `DenoPyodideInterpreter` per forward, closed afterwards). Verbatim action template, REPL variable metadata/history rendering, `llm_query`(+batched) with a shared `maxLlmCalls` counter, SUBMIT validation with continue-on-error, extract fallback. Deltas: sequential `llm_query_batched`; Schema-decode output typing; no `SandboxSerializable`/async (`verbose` ported: per-step stderr logging). Upstream marks it `@experimental`. |
 | `react_v2.py` | — | Deferred (PORT_GAPS G-19) — upstream's `@experimental` native-tool-calling ReAct; wait for it to stabilize, then port over the G-7b adapter seams. The existing `ReAct` deliberately stays text-protocol. |
 | `avatar/` | — | **Won't fix (by design)** (PORT_GAPS G-14, together with `AvatarOptimizer`) — `Avatar` is not in upstream's public API (deep import only), has no docs page, and sees only mechanical maintenance; the tool-agent space is covered by `ReAct`/`CodeAct`. Reopen if upstream re-exports/documents it. |
 
@@ -98,7 +98,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   `BootstrapFewShot`. Delta: returns a `KNNFewShotProgram` wrapper module (Python monkey-patches `forward`;
   dspy4s programs are immutable), so it is not a `Teleprompter`.
 - All of the above build on the **G-1** enablers (`OptimizableTraversal`/`OptimizableLeaf` introspection — relocated to
-  `programs` for G-5 v2 — `ProgramRunner` typed spine, instruction editing) + `Evaluate`. **Still deferred:**
+  `programs` for G-5 v2 — `ProgramRunner` execution spine, instruction editing) + `Evaluate`. **Still deferred:**
   `SIMBA` (G-13), `BetterTogether` (G-15), `GRPO`/`BootstrapFinetune` (G-16),
   `BootstrapFewShotWithOptuna` (G-17), and the remaining `propose` pieces (G-18).
   `AvatarOptimizer` is **Won't fix (by design)** — see G-14.
@@ -121,7 +121,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 - **Field constraints (`PYDANTIC_CONSTRAINT_MAP`).** ✅ ported (v1, commit `d8c80de`) — `FieldSpec.constraints`
   + `FieldConstraints` build the upstream constraint strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
   `multipleOf`); `ChatAdapter` renders `Constraints: <joined>`, and they round-trip through `SignatureLayout`
-  state. **v1 follow-ups:** constraints are settable programmatically only (deriving from the typed `Schema`
+  state. **v1 follow-ups:** constraints are settable programmatically only (deriving from the `Schema`
   needs an annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` don't yet embed them.
   See PORT_GAPS G-9.
 

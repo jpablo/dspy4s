@@ -5,7 +5,7 @@
 > for the running per-feature ledger see [PORT_MAP.md](../port/PORT_MAP.md) and
 > [PORT_BACKLOG.md](../port/PORT_BACKLOG.md). Symbols referenced below may have been
 > renamed since (e.g. the original `Signature` is now `SignatureLayout` and the
-> typed wrapper carries that name).
+> wrapper carries that name).
 
 
 Phase 4 focuses on adapter formatting/parsing parity.
@@ -29,7 +29,7 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/ChatAdapterSuite.scala`
 - Added coverage for:
   - format message sequencing and content
-  - typed parse extraction
+  - parse extraction
   - single-output fallback parsing
   - missing-field parse failure
 
@@ -43,7 +43,7 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Implemented parse path with:
   - raw/fenced JSON extraction
   - object validation
-  - typed field coercion
+  - field coercion
   - malformed JSON error diagnostics
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/JSONAdapterSuite.scala`
   - format instruction coverage
@@ -59,11 +59,11 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Implemented parse path with:
   - raw/fenced XML extraction
   - XML document parsing and tag extraction
-  - typed field coercion
+  - field coercion
   - malformed XML diagnostics
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/XMLAdapterSuite.scala`
   - format instruction coverage
-  - typed parse coverage
+  - parse coverage
   - fenced XML parse coverage
   - malformed output failure coverage
 - Added adapters runtime XML dependency in `/Users/jpablo/proyectos/experimentos/dspy4s/build.sbt`:

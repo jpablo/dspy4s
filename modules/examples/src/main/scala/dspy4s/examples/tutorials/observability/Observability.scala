@@ -46,8 +46,8 @@ object Observability:
   // |     def on_module_end(self, call_id, outputs, exception):
   // |         step = "Reasoning" if self._is_reasoning_output(outputs) else "Acting"
   // |         print(f"== {step} Step ==="); for k, v in outputs.items(): print(f"  {k}: {v}")
-  // dspy4s delivers one typed `CallbackEvent` stream; `on_module_end` is the `ModuleEndEvent` case. (dspy4s's
-  // output is the program's typed result rather than a string-keyed dict, so the Reasoning/Acting key-prefix
+  // dspy4s delivers one `CallbackEvent` stream; `on_module_end` is the `ModuleEndEvent` case. (dspy4s's
+  // output is the program's result rather than a string-keyed dict, so the Reasoning/Acting key-prefix
   // heuristic isn't 1:1 — we log the module name + outcome instead.)
   // --8<-- [start:callback]
   final class AgentLoggingCallback extends CallbackHandler:

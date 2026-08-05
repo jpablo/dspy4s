@@ -8,13 +8,13 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** Data exchanged between an [[RLM]] strategy, its action predictor, and its persistent Python REPL. */
 object RLMModel:
-  /** The action predict's typed input. Base inputs reach the LM only as REPL variable metadata. */
+  /** The action predict's input. Base inputs reach the LM only as REPL variable metadata. */
   final case class ActionInputs(variables_info: String, repl_history: String, iteration: String) derives Schema
 
-  /** The extract-fallback predict's typed input. */
+  /** The extract-fallback predict's input. */
   final case class ExtractInputs(variables_info: String, repl_history: String) derives Schema
 
-  /** The typed output of one action step. */
+  /** The output of one action step. */
   final case class ActionStep(reasoning: String, code: String)
 
   /** A parsed Python action ready for the per-call REPL. */

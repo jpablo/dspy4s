@@ -30,7 +30,7 @@ import scala.util.control.NonFatal
   * Per-call signature routing: on each `call()` / `stream()` the wrapper reads the innermost [[ActivePredictContext]]
   * entry. That entry carries the active predictor's name (used as `TokenEvent.predictName`) and signature (used to
   * build a fresh [[AdapterStreamingState]] from the configured adapter). This lets a single Streamify wrap a program
-  * that internally invokes multiple prediction leaves with different signatures, whether typed `Predict`s or
+  * that internally invokes multiple prediction leaves with different signatures, whether `Predict`s or
   * `DynamicPredict`s — each LM call routes to per-field chunks under the correct signature.
   *
   * When there is no active predict context (e.g. the LM is called outside any `PredictEngine.execute`, or no adapter is

@@ -10,22 +10,22 @@ import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 
-/** The fundamental typed prediction module: given a `Signature[I, O]`, `apply` takes a typed input `I`, formats and
-  * dispatches a language-model request through the configured adapter and model, and returns a typed `Prediction[O]`.
-  * Other programs (`ChainOfThought`, `ReAct`, ...) build on it.
+/** The fundamental prediction module: given a `Signature[I, O]`, `apply` takes an input `I`, formats and dispatches a
+  * language-model request through the configured adapter and model, and returns a `Prediction[O]`. Other programs
+  * (`ChainOfThought`, `ReAct`, ...) build on it.
   *
   * The signature's shapes bracket the call:
   *
   *   1. Inputs are encoded through `signature.inputShape` before the request is built. 2. The model's reply is decoded
-  *      through `signature.outputShape` into a typed `Prediction[O]`; decode failures surface as `Left(DspyError)` from
+  *      through `signature.outputShape` into a `Prediction[O]`; decode failures surface as `Left(DspyError)` from
   *      `apply`, never via lazy field access.
   *
-  * `Predict[I, O]` is a `Module[I, O]` — the typed analog of `dspy.Predict`. It is a *sibling* of the untyped
-  * [[DynamicPredict]] rather than a wrapper around it: both are thin `Module`s over the shared
-  * [[dspy4s.programs.runtime.PredictEngine PredictEngine]]. So a typed call emits exactly one module event (named by
-  * this `Predict`), and the whole encode → LM call → decode runs inside `Module.apply`'s lifecycle wrapping — adapter
-  * selection, caching, retries, callbacks, and trace/history are all bracketed around the typed boundary. The untyped
-  * prediction (raw completions and LM usage) is preserved on `Prediction.raw`.
+  * `Predict[I, O]` is a `Module[I, O]` — the domain-valued analog of `dspy.Predict`. It is a *sibling* of the
+  * record-valued [[DynamicPredict]] rather than a wrapper around it: both are thin `Module`s over the shared
+  * [[dspy4s.programs.runtime.PredictEngine PredictEngine]]. So a `Predict` call emits exactly one module event (named
+  * by this `Predict`), and the whole encode → LM call → decode runs inside `Module.apply`'s lifecycle wrapping —
+  * adapter selection, caching, retries, callbacks, and trace/history are all bracketed around the schema boundary. The
+  * raw prediction (raw completions and LM usage) is preserved on `Prediction.raw`.
   */
 final case class Predict[I, O](
     signature: Signature[I, O],
@@ -51,7 +51,7 @@ final case class Predict[I, O](
 
   override val moduleName: String = name.getOrElse("predict")
 
-  // The same engine `DynamicPredict` builds; `Predict` adds only the typed encode/decode around it.
+  // The same engine `DynamicPredict` builds; `Predict` adds only the encode/decode around it.
   private val engine = PredictEngine(
     layout = signature.layout,
     demos = demos,
@@ -74,9 +74,9 @@ final case class Predict[I, O](
   /** Forget the static input/output shapes and expose this predictor on the dynamic record spine.
     *
     * This is a one-way, immutable snapshot: it preserves the complete engine configuration, including the output JSON
-    * schema derived from `O`, but the returned module no longer validates or decodes typed values. For every input
-    * whose encoded record and model output satisfy this signature, `apply(input).map(_.raw)` and the erased module's
-    * result are equal.
+    * schema derived from `O`, but the returned module no longer validates or decodes values. For every input whose
+    * encoded record and model output satisfy this signature, `apply(input).map(_.raw)` and the erased module's result
+    * are equal.
     */
   def erase: DynamicPredict =
     DynamicPredict(

@@ -76,7 +76,7 @@ explicitly establish a context with `given RuntimeContext = RuntimeEnvironment.c
 **Cost of the delta:** every Python test that does
 `prediction.answer` becomes `prediction.values("answer")` in the port —
 mechanical but visible. No type safety on the `values` map (it's
-`Map[String, Any]`), which mirrors Python's runtime field access. A typed
+`Map[String, Any]`), which mirrors Python's runtime field access. A schema-specific
 overlay (per-signature `Prediction` subtype derived via macros) is a long-
 term option that isn't on the roadmap.
 
@@ -102,7 +102,7 @@ serialization for free. The cost is that anything Python expresses as
 | Python | dspy4s | Where |
 |---|---|---|
 | `if isinstance(value, StreamResponse): ... elif isinstance(value, StatusMessage): ...` | `sealed trait StreamEvent` with case classes `TokenEvent`, `StatusEvent`, `PredictionEvent`, `ErrorEvent`; consumed via `match`. | `streaming/contracts/StreamingContracts.scala` |
-| `if isinstance(result, dict): ... elif isinstance(result, list): ...` | sealed ADTs for typed payloads; `Map[String, Any]` for the genuinely dynamic ones. | `core/data/`, `lm/contracts/LmContracts.scala` |
+| `if isinstance(result, dict): ... elif isinstance(result, list): ...` | sealed ADTs for structured payloads; `Map[String, Any]` for the genuinely dynamic ones. | `core/data/`, `lm/contracts/LmContracts.scala` |
 | `Exception` hierarchy with `isinstance` checks | `sealed trait DspyError` ADT with `match`/`asInstanceOf`. | `core/contracts/Errors.scala` |
 
 Pattern matching also gives exhaustiveness — the compiler tells us when a
@@ -197,7 +197,7 @@ is collapsed into thematic files (`StreamingContracts.scala` holds
 | `Any` as escape hatch | Used in dspy4s for the genuinely dynamic surfaces: `Map[String, Any]` for user inputs/outputs, `Any` for raw LM payloads in `LmChunk.raw`. |
 | `Optional[T]` / `T \| None` | `Option[T]`. |
 | `Union[A, B]` | Scala 3 union types `A \| B` are available; we mostly use sealed ADTs instead for closed cases. |
-| `pydantic.BaseModel` for typed JSON | Currently `Map[String, Any]` + `ujson`. Pydantic-style typed inputs would require a per-signature codegen step (long-term TODO; not on the roadmap). |
+| `pydantic.BaseModel` for schema-validated JSON | Currently `Map[String, Any]` + `ujson`. Pydantic-style inputs would require a per-signature codegen step (long-term TODO; not on the roadmap). |
 
 ---
 

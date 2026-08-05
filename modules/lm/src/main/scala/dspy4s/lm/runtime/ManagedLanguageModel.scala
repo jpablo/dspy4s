@@ -150,7 +150,7 @@ final case class ManagedLanguageModel(
         appendHistory(request, cached, cacheHit = true)
         Right(cached.copy(cacheHit = true))
       case None =>
-        // rolloutId is a typed field (not in `options`) and `normalize` only spreads `options` to the wire,
+        // rolloutId is a field (not in `options`) and `normalize` only spreads `options` to the wire,
         // so there is nothing to strip before the provider call -- it cannot reach the request body.
         val result = executeWithRetry(request)
         result match

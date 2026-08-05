@@ -5,7 +5,7 @@ language model answers it. You wrap a signature in a module to get a runnable
 program.
 
 dspy4s ships a few modules. They all share the same shape: construct one from a
-signature, then call it with typed inputs.
+signature, then call it with its input type.
 
 ## Predict
 
@@ -24,7 +24,7 @@ outputs.
 
 `ChainOfThought` asks the model to reason before it answers. It adds a
 `reasoning: String` field to the front of the output, so you get both the
-explanation and the answer with typed dot-access:
+explanation and the answer with direct dot access:
 
 ```scala
 --8<-- "learn/programming/Modules.scala:chain-of-thought"
@@ -50,7 +50,7 @@ Two modules wrap another module to improve its output against a reward function:
 - `BestOfN` samples several completions in parallel and keeps the best one.
 - `Refine` does the same sequentially, feeding each attempt's score back in.
 
-Both take a typed reward function `(input, prediction) => Double`:
+Both take a reward function `(input, prediction) => Double`:
 
 ```scala
 --8<-- "Cheatsheet.scala:best-of-n"

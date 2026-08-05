@@ -24,11 +24,11 @@
 
 ---
 
-## G-1 — No typed predictor-introspection layer (Python's `BaseModule.named_predictors`)
+## G-1 — No predictor-introspection abstraction (Python's `BaseModule.named_predictors`)
 
 **Status:** Resolved (P1–P6, commits 30420f3 / 25d7e8d / 9bcf99f / dd466be / c459d07 / 1657f9c)
 
-**Resolution.** Closed by a typed `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclass pair
+**Resolution.** Closed by an `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclass pair
 with Scala 3 Mirror derivation (`modules/programs/.../optimization/`). `inspect`
 enumerates non-executable `OptimizableView`s (read-only metadata + optimizable parameters),
 `read` projects their `OptimizableParameters` values, and `replace` rebuilds the program immutably.
@@ -40,7 +40,7 @@ hand-written instances and had their sub-predicts **hoisted to stable fields**
 (closing the "Related" sub-gap below). Optimizers moved off the single-`DynamicPredict`
 `PredictOps` assumption onto `OptimizableTraversal` (the `LabeledSampleProgram` glue was deleted),
 and a `ProgramRunner[P]` capability (`programs/ProgramRunner.scala`) dropped the `P <: DynamicModule` bound
-so **typed** programs and user composites are now optimizable end-to-end. The legacy
+so domain-valued programs and user composites are now optimizable end-to-end. The legacy
 `PredictOps` typeclass and its bridge were removed in P6 — `OptimizableTraversal` is the sole
 introspection typeclass. Writable state is uniformly instructions + demos + module config;
 `MultiChainComparison` has no `ProgramRunner` because its `MultiChainInput` includes candidate
@@ -74,7 +74,7 @@ finds the predictors no matter how they were nested.
 ### dspy4s state before resolution
 
 We deliberately did **not** port `BaseModule` (see the rationale below — most
-of it is un-idiomatic in immutable, strictly-typed Scala). Instead:
+of it is un-idiomatic in immutable Scala, where these shapes are enforced at compile time). Instead:
 
 - [`Module`](../../modules/programs/src/main/scala/dspy4s/programs/contracts/Module.scala)
   is just the callable program base (`moduleName` / `apply` / `applyAsync` / `forward`).
@@ -109,7 +109,7 @@ an optimizer cannot generically tune a multi-predict program the way Python's
 
 ### Proposed direction
 
-A **typed** equivalent of `named_predictors` — *not* a reflective
+A typeclass-based equivalent of `named_predictors` — *not* a reflective
 `BaseModule`. Candidate shapes:
 
 - a capability method on the program contract, e.g.
@@ -159,7 +159,7 @@ get the wrapping; `BestOfN` accordingly records its own trace entry. See
 **Evolution.** `Module` later became generic again and now uses semantic parameters throughout:
 `Module[I, O]#forward` returns `Prediction[O]`. The dynamic spine is
 `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`; its `RawPrediction` is lifted into the
-uniform result by `Prediction.dynamic`. This removes the former typed/dynamic result asymmetry while `apply` remains
+uniform result by `Prediction.dynamic`. This removes the former domain/record result asymmetry while `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.
 
 ---
@@ -177,7 +177,7 @@ config is unchanged behavior.
 `lm: Option[LanguageModel]`, threaded into `PredictEngine`, which resolves the model as
 `lm.fold(runtime.resolveModel)(Right(_))` — a bound LM wins over the ambient `RuntimeContext`
 LM, so a program can pin different models to different predictors. `Predict.withLm(model)`
-(immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the typed accessors. The bound LM is
+(immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the accessors. The bound LM is
 an execution binding, not part of `OptimizableParameters` (like `runtime`), so `ProgramPersistence` excludes it.
 
 **Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
@@ -212,7 +212,7 @@ merged under the per-call override. Tier 0.
 **Status:** Resolved
 
 **Resolution.** Closed by wiring the `OptimizableTraversal[P]` traversal into `ProgramPersistence`,
-so a single typed or dynamic predictor and an arbitrary composite share one code path.
+so a single domain-valued or record-valued predictor and an arbitrary composite share one code path.
 New primitives:
 
 - `Example.dumpState` / `Example.fromState` (`modules/core/.../data/Example.scala`) —
@@ -220,7 +220,7 @@ New primitives:
 - `OptimizableParameters.dumpState` / `OptimizableParameters.fromState`
   (`modules/programs/.../OptimizableParameters.scala`) —
   `{ "instructions": <string|null>, "demos": [<Example state>..], "config": <record> }`.
-  This is the complete writable state for `DynamicPredict`, typed `Predict`, and typed `ChainOfThought`.
+  This is the complete writable state for `DynamicPredict`, `Predict`, and `ChainOfThought`.
 - `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
   `OptimizableTraversal`-based: `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`.
@@ -277,7 +277,7 @@ threshold, and injects it as a `hint_` input into the next attempt via a
 `HintInjectingAdapter`.
 
 **v2 — per-module advice (parity).** `Refine[P, I, O]` now retains the inner program type
-`P` (an upper-bounded typed module, so `I`/`O` still infer at call sites — `BestOfN`-style
+`P` (an upper-bounded module, so `I`/`O` still infer at call sites — `BestOfN`-style
 ergonomics, no call-site type annotations) and requires `OptimizableTraversal[P]`. `OfferFeedback`
 now takes a `module_names` input and emits `advice` as a JSON object `{component: advice}`
 keyed by the inner program's named predictor views (`OptimizableTraversal.inspectNamed`, G-12 P-c). Each
@@ -339,8 +339,8 @@ helper (clamp `[0,1]`, harmonic mean, `0` if either is `0`), `SemanticF1`
 (`question, ground_truth, system_response -> recall, precision` judged via a
 `ChainOfThought`-augmented `DynamicPredict`, plus a `decompositional` variant with
 key-idea fields), and `CompleteAndGrounded` (completeness × groundedness). Deltas:
-the judge runs over a runtime `SignatureLayout`/`DynamicPredict` (no static typed
-`Module`), field names are configurable string keys (defaults follow upstream's
+the judge runs over a runtime `SignatureLayout`/`DynamicPredict` (no `Module` with statically known I/O), field names
+are configurable string keys (defaults follow upstream's
 `example.question`/`example.response`/`pred.response`), the `threshold` field is
 retained for parity but scoring always returns the raw `Double`, and groundedness
 reads `pred.context` by key (dspy4s has no retriever to populate it).
@@ -388,11 +388,11 @@ unchanged. `ChatAdapter`/`JSONAdapter` gained `useNativeFunctionCalling` (off by
 `ToolSchemaBridge.toOpenAiToolsDynamic`) into `requestOptions` and fills a `TypeRef.toolCalls`
 output field from the provider's `tool_calls`, gated on `supportsFunctionCalling`. Tools reach
 the adapter via `AdapterInvocation.tools` (pure `ToolSpec` data); `DynamicPredict`/`Predict`/`PredictEngine`
-thread them through (both the dynamic and typed paths). The `tool_choice` and `parallel_tool_calls`
+thread them through (both the dynamic and paths). The `tool_choice` and `parallel_tool_calls`
 knobs are supported. Also fixed a foundational bug: `ProviderLanguageModel` dropped a tool-only
 output (`content:null` + `tool_calls`). Commits 671a37f, 1f50818, 09fa2b5, 221b404, 22c36de,
 7838fb0, 460accf. All G-7b follow-ups closed; remaining tool-call refinements (forcing a specific
-function via the object `tool_choice` form, a typed `ToolCalls` output shape) are net-new features,
+function via the object `tool_choice` form, a `ToolCalls` output shape) are net-new features,
 not gaps. (JSON-Schema constraint embedding is tracked under G-9, not here.)
 
 **Summary.** Adapters did not use native provider function-calling preprocessing,
@@ -465,7 +465,7 @@ helper builds the exact upstream strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLe
 `Constraints: <joined>` after the field description (the `get_field_description_string`
 analog; unconstrained fields render byte-identically), and constraints round-trip through
 `SignatureLayout.dumpState`/`fromState`. **v1 follow-ups:** constraints are settable
-programmatically only (deriving them from the typed `zio-blocks Schema` surface needs a
+programmatically only (deriving them from the `zio-blocks Schema` surface needs a
 constraint-annotation mechanism that doesn't exist yet). **Follow-ups now done:** constraints are a
 structured `Constraint` ADT (`.render` for prose + `.schemaKeyword`/`.schemaValue` for JSON Schema);
 `XMLAdapter`/`JSONAdapter` render the prose block (shared `AdapterConstraints`), and `JSONAdapter`
@@ -586,7 +586,7 @@ prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureF
 candidate selection, `GepaEngine` (reflective-mutation loop), and the `Gepa` facade. A deterministic
 instruction-sensitive test shows GEPA discovering a better instruction (score 0 → 1.0 within budget).
 **P-c done:** `OptimizableTraversal.inspectNamed` surfaces the latent Mirror field labels (`"self"` for a standalone leaf,
-field labels for a composite), while `readIdentified` assigns typed `OptimizableId`s from the canonical traversal.
+field labels for a composite), while `readIdentified` assigns `OptimizableId`s from the canonical traversal.
 GEPA keys candidates and trace-index association by ID; labels remain display/prompt metadata and may reflect an
 anonymous composition tree's current association. The `inspectNamed` capability is also what Refine per-module advice
 (G-5 follow-up) needs — now **done** (G-5 v2;
@@ -890,7 +890,7 @@ NOT rewire the existing `ReAct` (per the standing G-7b decision). Tier 2 once st
 ## G-20 — Sandboxed interpreter (Deno + Pyodide) and `RLM` not ported
 
 **Status:** Resolved — both halves done. **(1)** the sandboxed interpreter (below); **(2)** `RLM`
-(`programs/RLM.scala`): typed `RLM[I, O]` with the verbatim-ported action-instructions template, REPL
+(`programs/RLM.scala`): `RLM[I, O]` with the verbatim-ported action-instructions template, REPL
 prompt types (`ReplVariable` metadata with head+tail previews, `ReplEntry`/history rendering with
 upstream's `=== Step N ===` / `Output (N chars):` truncation), `llm_query`/`llm_query_batched` as
 `SandboxTool`s with a shared call counter capped at `maxLlmCalls`, user tools (reserved-name validated,

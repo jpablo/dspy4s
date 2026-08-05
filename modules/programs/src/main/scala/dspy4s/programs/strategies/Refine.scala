@@ -27,16 +27,16 @@ import zio.blocks.schema.Schema
 
 import scala.compiletime.ops.int.+
 
-/** Typed `Refine`: runs an inner typed program up to `n` times (varying `rolloutId` at `temperature=1.0`), keeps the
-  * highest-reward `Prediction[O]`, and short-circuits once `rewardFn` reaches `threshold` — the same selection surface
-  * as [[BestOfN]] — but, on each sub-threshold attempt that is not the last, it generates LM **advice** grounded in
-  * that attempt's trajectory and injects it as a `hint_` input into the next attempt via a
-  * [[Refine.HintInjectingAdapter]]. A port of DSPy 3.x's `dspy.Refine` (`OfferFeedback` iterative feedback loop).
+/** `Refine`: runs an inner program up to `n` times (varying `rolloutId` at `temperature=1.0`), keeps the highest-reward
+  * `Prediction[O]`, and short-circuits once `rewardFn` reaches `threshold` — the same selection surface as [[BestOfN]]
+  * — but, on each sub-threshold attempt that is not the last, it generates LM **advice** grounded in that attempt's
+  * trajectory and injects it as a `hint_` input into the next attempt via a [[Refine.HintInjectingAdapter]]. A port of
+  * DSPy 3.x's `dspy.Refine` (`OfferFeedback` iterative feedback loop).
   *
-  * The advice is produced by an [[Refine.offerFeedbackSignature OfferFeedback]] sub-program (a typed [[Predict]])
-  * grounded in the attempt's runtime trace plus the program I/O, the reward value, and the threshold. It is run with
-  * the ambient LM/adapter (NOT under the hint adapter), and yields a per-module advice map (component name -> advice)
-  * that is routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
+  * The advice is produced by an [[Refine.offerFeedbackSignature OfferFeedback]] sub-program (a [[Predict]]) grounded in
+  * the attempt's runtime trace plus the program I/O, the reward value, and the threshold. It is run with the ambient
+  * LM/adapter (NOT under the hint adapter), and yields a per-module advice map (component name -> advice) that is
+  * routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
   *
   * '''Per-module advice (parity with Python).''' OfferFeedback returns a JSON object `{componentName: advice}` keyed by
   * the inner program's named predictors ([[OptimizableTraversal.inspectNamed]], the dspy4s analogue of
@@ -58,8 +58,8 @@ import scala.compiletime.ops.int.+
   *     advice entry — acceptable, since identical layouts also yield identical advice.
   *
   * @tparam P
-  *   the inner program type; a typed module (so `I`/`O` infer from it) that is also introspectable for its named
-  *   optimizable leaves ([[optimization]]).
+  *   the inner program type; a module (so `I`/`O` infer from it) that is also introspectable for its named optimizable
+  *   leaves ([[optimization]]).
   */
 final case class Refine[P <: Module[I, O], I, O](
     module   : P,
@@ -78,7 +78,7 @@ final case class Refine[P <: Module[I, O], I, O](
 ) extends Module[I, O]:
   override val moduleName: String = "refine"
 
-  /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern) — a TYPED [[Predict]] over
+  /** The OfferFeedback critic predict, built once (mirrors the `reactPredict` pattern) — a [[Predict]] over
     * [[Refine.offerFeedbackSignature]] (the critic's shape is fully static). The feedback hook runs this member rather
     * than rebuilding a predict per attempt, so optimizers can tune the critic's instructions/demos like any other
     * learnable. Tunable via [[criticPredictOverride]].
@@ -197,8 +197,7 @@ object Refine:
     */
   private[programs] val offerFeedbackLayout: SignatureLayout = RefineFeedback.layout
 
-  /** The critic's typed input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout
-    * exactly.
+  /** The critic's input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout exactly.
     */
   private[programs] final case class OfferFeedbackInputs(
       program_inputs    : String,
@@ -209,13 +208,13 @@ object Refine:
       module_names      : String
   ) derives Schema
 
-  /** The critic's typed output. `discussion` is prompt-guidance only ([[generateAdvice]] never reads it), which the
-    * lenient shape below reflects.
+  /** The critic's output. `discussion` is prompt-guidance only ([[generateAdvice]] never reads it), which the lenient
+    * shape below reflects.
     */
   private[programs] final case class OfferFeedbackAdvice(discussion: String, advice: String)
 
-  /** The critic's typed signature: the hand-built [[offerFeedbackLayout]] (descriptions + instructions preserved
-    * verbatim, so prompt rendering is unchanged) paired with a derived input shape and the lenient output shape.
+  /** The critic's signature: the hand-built [[offerFeedbackLayout]] (descriptions + instructions preserved verbatim, so
+    * prompt rendering is unchanged) paired with a derived input shape and the lenient output shape.
     */
   private[programs] val offerFeedbackSignature: Signature[OfferFeedbackInputs, OfferFeedbackAdvice] =
     RefineFeedback.signature

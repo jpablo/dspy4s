@@ -1,9 +1,9 @@
 # dspy4s `signatures`
 
-The statically checked signature layer. Where [`core`](../core/README.md) carries a runtime `SignatureLayout`
-(separate untyped input and output field cohorts), `signatures` pairs that layout with static Scala types — an input type `I` and an
-output type `O` — and the bidirectional codec that moves between a typed value and the `DynamicValue.Record`
-spine. This is what gives the typed program surface (`Predict[I, O]`, `ChainOfThought[I, O]`, …) its
+The signature-definition layer. Where [`core`](../core/README.md) carries a runtime `SignatureLayout`
+(separate input and output field cohorts), `signatures` pairs that layout with Scala types — an input type `I` and an
+output type `O` — and the bidirectional codec that moves between a domain value and the `DynamicValue.Record`
+spine. This is what gives the program API (`Predict[I, O]`, `ChainOfThought[I, O]`, …) its
 compile-time safety. It depends only on `core`.
 
 ## The core idea
@@ -11,10 +11,10 @@ compile-time safety. It depends only on `core`.
 A `Signature[I, O]` wraps a `SignatureLayout` alongside a `Shape[I]` and a `Shape[O]` — schema-aware
 projections of the input and output types. At compile time a macro inspects a case-class (or named-tuple, or
 `Spec`-trait) signature, extracts each field's name and type, assigns it to an input or output cohort, and derives its wire `TypeRef` from the
-field's zio-blocks `Schema`. At runtime, `Shape` uses that same `Schema` to **encode** a typed value into a
-record (`Schema.toDynamicValue`) and to **decode** a record back into the typed value
+field's zio-blocks `Schema`. At runtime, `Shape` uses that same `Schema` to **encode** a domain value into a
+record (`Schema.toDynamicValue`) and to **decode** a record back into the domain value
 (`Schema.fromDynamicValue`, after LM-shaped coercion). The codec speaks only `DynamicValue.Record` end to end —
-no intermediate `Map[String, Any]` — so the `programs` layer can hand the adapter a fully typed `I`, decode the
+no intermediate `Map[String, Any]` — so the `programs` layer can hand the adapter an `I`, decode the
 model's reply into `O`, and pair that value with its raw execution evidence as a `Prediction[O]`.
 
 ```scala
@@ -28,8 +28,8 @@ val sig = Signature.derived[Input, Output] // layout + RoundTripShape[Input] + R
 
 | Type | Role |
 |------|------|
-| `Signature[I, O]` | The typed signature: `SignatureLayout` + `Shape[I]` + `Shape[O]`. Four entry points — `derived[I, O]` (case classes), `of[T <: Spec]` (trait spec), `from(method)` (method introspection), `fromType[F]`. |
-| `Shape[A]` | The general typed/record boundary: `fieldSpecs`, encode (`A => Record`), and decode (`Record => Either[DspyError, A]`). It does not claim a total round trip for every possible carrier. |
+| `Signature[I, O]` | A `SignatureLayout` paired with `Shape[I]` and `Shape[O]`. Four entry points — `derived[I, O]` (case classes), `of[T <: Spec]` (trait spec), `from(method)` (method introspection), `fromType[F]`. |
+| `Shape[A]` | The general domain/record boundary: `fieldSpecs`, encode (`A => Record`), and decode (`Record => Either[DspyError, A]`). It does not claim a total round trip for every possible carrier. |
 | `RoundTripShape[A]` | A lawful `Shape[A]` satisfying `decode(encode(a)) == Right(a)`. Schema-derived product and named-tuple shapes implement it. |
 | `Shape.MapShape` | The dynamic fallback for raw records. It validates required fields on decode and therefore is intentionally only a `Shape[DynamicValue.Record]`, not a `RoundTripShape`: its carrier can represent invalid records. |
 | `ZioSchemaCodec` | The bridge between a zio-blocks `Schema[A]`/`Reflect` and a dspy4s `RoundTripShape[A]`: derives `FieldSpec`s, maps wire `TypeRef`s (`typeRefFor`), and normalizes LM strings before decode. |
@@ -63,7 +63,7 @@ this dynamic counterexample.
   field's `Reflect`, and the decode path is driven by it too, so names and type mappings never drift.
 - **LM-shaped coercion before decode.** `ZioSchemaCodec.normalize` walks the `DynamicValue` and coerces
   primitives the way LM output tends to arrive — `"true"` → `Boolean`, `"42"` → `Int`, trimmed numerics,
-  Option/Variant wrapping — so a loosely-formatted model reply still decodes into the strict typed value.
+  Option/Variant wrapping — so a loosely formatted model reply still decodes into the target Scala value.
 - **Direction-neutral shapes.** `Shape[A]` derives role-free field metadata. `Signature.derived` assigns the input
   and output shapes' fields to the corresponding `SignatureLayout` cohorts.
 - **Law claims follow the carrier.** Schema-derived shapes return `RoundTripShape[A]`; validating raw-record shapes
@@ -87,7 +87,7 @@ this dynamic counterexample.
 ## Relation to dspy
 
 Python dspy has no static signature types — a `Signature` is a runtime object with attribute access. The
-`signatures` module is the dspy4s addition that makes signatures statically typed Scala values while keeping a
-faithful runtime `SignatureLayout` underneath, so the statically typed surface and dynamic spine in
+`signatures` module is the dspy4s addition that represents signature inputs and outputs as Scala types while keeping a
+faithful runtime `SignatureLayout` underneath, so the program API and runtime-record spine in
 [`programs`](../programs/README.md) share one representation. Per the [single-codec
 decision](../../README.md), zio-blocks `Schema` is the only codec involved.

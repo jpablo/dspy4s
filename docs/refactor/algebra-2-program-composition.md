@@ -1,7 +1,7 @@
 # Algebra 2: program composition (step-6 spec)
 
 **Status:** implemented contract. Operations and laws were hardened by a design grill (the five forks below are
-resolved), then refined against code truth. The current implementation adds the typed `InterpretedTrajectoryAgent`
+resolved), then refined against code truth. The current implementation adds the `InterpretedTrajectoryAgent`
 layer and behavioral law suites described below.
 **Date:** 2026-06-27
 **Relation:** the sketch and the broader ADD context live in [algebra.md](algebra.md); the step-by-step
@@ -28,7 +28,7 @@ model outputs. They are stated on **composition** and checked in whichever way i
 
 - **The unit stays `Module[I, O]`.** No parallel executable representation is introduced (this keeps
   the `OptimizableTraversal` optimizer machinery working). `Program[I, O]` below is denotational shorthand for that type.
-- **`>>>` threads the plain typed value `O`,** not `Prediction[O]`. Controls (`config`, `traceEnabled`,
+- **`>>>` threads the plain value `O`,** not `Prediction[O]`. Controls (`config`, `traceEnabled`,
   `rolloutId`) ride in `ProgramCall`; the `Prediction` envelope and the effect sit at the edges. Intermediate
   `Prediction.raw` (reasoning, completions, per-step usage) goes to the `RuntimeContext` trace, not onto the
   composite result. (Usage-merge onto the result is a deferrable, non-breaking enhancement: usage is a
@@ -61,14 +61,14 @@ dimap(before)(after)(p)         : Program[I, O] => Program[J, B]      // profunc
 
 fanout(a, b)                   : (Program[I, A], Program[I, B]) => Program[I, (A, B)] // ordered fan-out / &&&
 split(a, b)                    : (Program[I, A], Program[J, B]) => Program[(I,J), (A,B)] // ordered split / ***
-recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected typed failures only
+recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected failures only
 //   IMPLEMENTED as Both + Compose.fanout. NOTE: this is NOT the existing `Parallel` class — that is a batch
 //   executor over Vector[(DynamicModule, ProgramCall)] on a thread pool, a different abstraction. This fan-out
-//   runs two typed programs left-to-right on the same input and tuples the outputs. The raw merges both
+//   runs two programs left-to-right on the same input and tuples the outputs. The raw merges both
 //   sub-predictions' records (second wins on collision).
 
 augment[Name, T](field)(p) : Program[I, O] => Program[I, Out]                     // Thought / CoT  [IMPLEMENTED 6.4]
-//   IMPLEMENTED (opening position) as OutputAugmentation.decodeAugmented[O, Name, T, Out]: an arbitrary typed T
+//   IMPLEMENTED (opening position) as OutputAugmentation.decodeAugmented[O, Name, T, Out]: an arbitrary T
 //   read via a pluggable readField, plus an optional post-decode hook. decodePrepended (T=String, identity hook)
 //   is the instance ChainOfThought / MultiChainComparison / the agent extractors use. Out =
 //   OutputAugmentation.WithField[O, Name, T]. CLOSING position (append, self-check) stays additive (no consumer;
@@ -102,8 +102,8 @@ AgentLoop.run[St, R](state, maxIterations)(onExhausted)(step) : M[R]          //
 
 TrajectoryAgent.runAndExtract[S, E](...)(step)(extract) : M[(E, String)]      // ReAct/CodeAct  [IMPLEMENTED 6.3]
 //   bounded loop building a Vector[S] trajectory (via AgentLoop.run), then the extract closure with
-//   overflow-truncation. E is the extractor's result: since the typed-inner-predict conversion the extractors
-//   are typed Predicts, so E = Prediction[WithReasoning[O]] and the reasoning-prepended decode happens INSIDE
+//   overflow-truncation. E is the extractor's result: after the domain-valued inner-predict conversion, the extractors
+//   are Predicts, so E = Prediction[WithReasoning[O]] and the reasoning-prepended decode happens INSIDE
 //   the extractor (OutputAugmentation.prependedStringShape) rather than in the module. (= ReAct, CodeAct)
 
 InterpretedTrajectoryAgent.trajectoryStep                                  // ReAct/CodeAct action transition [IMPLEMENTED]
@@ -112,7 +112,7 @@ InterpretedTrajectoryAgent.trajectoryStep                                  // Re
 //   universal agent vocabulary. decide receives all three values after recording, so terminal behavior may depend on
 //   either the generated step/action or its interpreted outcome. Each phase is an explicit state ADT, and each private
 //   transition ADT lists only that phase's legal successors. The transition is final; ReAct and CodeAct supply only the
-//   typed phase operations.
+//   phase operations.
 
 // retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
 //   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
@@ -217,7 +217,7 @@ type, so it died under upcasts and did not exist for composed pipelines (`AndThe
 
 The close went through two forms. FIRST (historical): `Program` packaged a per-morphism
 `decodeInput`, captured through a `ProgramInput` capability typeclass and threaded through composition, with a
-documented coherence law (the packaged decoder must agree with the program's typed input boundary) as the
+documented coherence law (the packaged decoder must agree with the program's input boundary) as the
 condition under which the category laws held. SECOND (current, stage 4): decoding is a property of the OBJECT.
 `Program` packages nothing decode-related; `Program.of` requires a sealed `RecordCodec[I]` at the domain (the
 object gate) alongside `OptimizableTraversal`; the record-boundary runner demands `RecordCodec[I]` at use; composition
@@ -227,7 +227,7 @@ with no decode-side condition and an incoherent per-morphism decoder is UNREPRES
 former vehicles).
 Bare-module running is a separate concern with no coherence question (no identity morphism in sight):
 `ProgramRunner` carries signature-backed instances for the framework leaves and composites, plus a
-low-priority `RecordCodec` fallback for user composites. Typed named-tuple inputs (`fromString` / `fromType` /
+low-priority `RecordCodec` fallback for user composites. Named-tuple inputs (`fromString` / `fromType` /
 `of[Spec]`) get their codec from a `RecordCodec` derivation over the same `SchemaTupleShape` path those macros
 use, so codec and signature decode cohere definitionally; `Record`-input programs no longer package at all
 (`DynamicSignature` is the dynamic gate into the category).
@@ -244,8 +244,8 @@ same string mints a distinct object (cross-bundle composition is a compile error
 parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
 `MultiChainComparison` owns a path-branded opaque attempt block validated against `m`. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
-evaluation judge). The second step this enabled LANDED as stage 4: with every category-entering program typed
-or bundled, `decodeInput` left the `Program` package entirely and the `ProgramInput` law dissolved at the
+evaluation judge). The second step this enabled LANDED as stage 4: with every category-entering program either carrying
+concrete I/O types or bundled, `decodeInput` left the `Program` package entirely and the `ProgramInput` law dissolved at the
 category level (see "The close" above).
 
 Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)` is the path-dependent
@@ -261,11 +261,11 @@ objects properly sit over (signature, cohort) pairs and no identity-lift law (`b
 lawful statement is exactly "bridges are lifts of base compatibility arrows".
 
 Stage 3 landed and the prototype label is off: `ParaCompileSuite` drives COPRO through a packaged bundle
-program (the runtime-string student finds the winning instruction exactly like the typed one, through the same
+program (the runtime-string student finds the winning instruction exactly like the domain-valued one, through the same
 `OptimizableTraversal` + `ProgramRunner` entry point, no dynamic-specific plumbing), and the learn/optimization example
 runs its main through `DynamicSignature.parse` + `predict()` with the doc snippet generalized to the capability
 constraints. The declared stance: `DynamicSignature` is the user path for runtime-string signatures;
-`DynamicPredict` is the untyped substrate for framework-internal generations (its scaladoc now points users to
+`DynamicPredict` is the record-valued substrate for framework-internal generations (its scaladoc now points users to
 the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
 decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
 unrepresentable. Record-running is uniform over exact `Program[I, O, N]` values and the existential
@@ -364,7 +364,7 @@ showed that does not hold. PoT's inner loop (`tryIteration`) differs from `feedb
   best attempt seen. (With a binary reward + threshold = 1 the *selection* coincides, but this divergence and
   the next one do not.)
 - **Structured regenerate, not adapter-hint.** The retry runs a *different* predictor (`regenerator`) with
-  `previous_code` + `error` as typed input fields, not the same predictor under a hint-injecting adapter.
+  `previous_code` + `error` as input fields, not the same predictor under a hint-injecting adapter.
 - **Loop is a sub-step.** The retry wraps only code-gen; a separate `answer` step runs afterward, i.e.
   PoT ≈ `retryUntil(generate, regenerate, execute) >>> answer`, a `>>>` of a different primitive.
 
@@ -422,25 +422,25 @@ suites as the regression net:
    the correction above). Pinned by `AttemptSelectionLawSuite`; `TypedBestOfNSuite` / `RefinePerModuleAdviceSuite`
    green unchanged. Built on the step-4 `isolatedAttempt`/`propagateAttempt` primitives.
 2. **`>>>` (Category) and `parallel`. DONE (commit `60d2ea5`).** Added `id` / `AndThen` (`>>>`) / `Both`
-   (`parallel`) in `Compose.scala`, with hand-written `OptimizableTraversal` instances (concretely typed children, so
+   (`parallel`) in `Compose.scala`, with hand-written `OptimizableTraversal` instances (concrete child types, so
    pipelines stay addressable) and `ComposeLawSuite` covering value-category and ordered-fan-out semantics.
    **Code-truth correction:** `parallel` did NOT "largely exist as `Parallel`" — `Parallel` is a thread-pool
-   batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the typed fan-out
+   batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the domain-valued fan-out
    `parallel(a, b)` is new. Category laws are stated on the threaded `.output` value (the carrier decision),
    not the full `Prediction` envelope.
 3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`, later interpreted-agent and law refinements).** Extracted `AgentLoop.run` (bounded
    `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
    ported ReAct, CodeAct, RLM onto them and recast `ProgramOfThought`'s retry as `AgentLoop.run`
-   (regenerate-on-error). ReAct and CodeAct now also share the final `InterpretedTrajectoryAgent` transition and typed
+   (regenerate-on-error). ReAct and CodeAct now also share the final `InterpretedTrajectoryAgent` transition and
    `ActionInterpreter` boundary. `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and
    `InterpretedTrajectoryAgentLawSuite` pin the three layers; the four module suites remain green.
    **Code-truth correction:** the `env.step`/`classify`/`render` decomposition was NOT adopted (see above) —
-   the shared core stops at the final loop/extraction/action-transition templates; each module supplies its typed
+   the shared core stops at the final loop/extraction/action-transition templates; each module supplies its
    generation, preparation, interpretation, and recording operations.
 4. **`augment` generalization. DONE (commit `31aecbd`).** Raised `decodePrepended` to `decodeAugmented`
-   (arbitrary typed field via a pluggable reader + optional post-decode hook); `decodePrepended` is its
+   (arbitrary field via a pluggable reader + optional post-decode hook); `decodePrepended` is its
    String/identity instance, so the five call sites are unchanged. Closing position stays additive (no
-   consumer). `OutputAugmentationSuite` adds a typed-field test, the round-trip law, and a hook accept/reject.
+   consumer). `OutputAugmentationSuite` adds a generalized-field test, the round-trip law, and a hook accept/reject.
 5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
    `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, OptimizableTraversal
    pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay
@@ -454,8 +454,8 @@ recurring discipline was to extract the genuinely shared core and correct the sp
 grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `parallel` is new, not the batch
 `Parallel`; `agentLoop`'s env/classify/render seam does not fit).
 
-**Typed inner predicts (the class-A conversion).** Every composite whose internal signatures are statically
-shaped now runs TYPED inner `Predict`s instead of `DynamicPredict`s: Refine's OfferFeedback critic, ReAct's
+**Domain-valued inner predicts (the class-A conversion).** Every composite whose internal signatures are statically
+shaped now runs inner `Predict`s instead of `DynamicPredict`s: Refine's OfferFeedback critic, ReAct's
 loop + extractor, CodeAct's generator + extractor, RLM's action + extract, and ProgramOfThought's
 generator / regenerator / answerer. The recipe is uniform: keep the hand-built layout verbatim (prompt
 rendering unchanged), pair it with `InputAugmentation.appendedStringInput` on the input side (the pair carrier
@@ -468,7 +468,7 @@ the predict via `OutputAugmentation.prependedStringShape` (extracted from ChainO
 constructor parameter `m` — converts too: `InputAugmentation.appendedStringInputs` returns a bundle with a
 path-dependent opaque `Values` carrier and `Shape[(I, Values)]`. Its validating constructor is the only way to
 obtain `Values`, so the per-instance shape total-encodes exactly the `m` numbered `reasoning_attempt_i` fields
-without truncation or a representable wrong-length typed value. The wire format is unchanged. The remaining
+without truncation or a representable wrong-length value. The wire format is unchanged. The remaining
 `DynamicPredict` constructors in the framework are exactly the
 principled residue: layouts that exist only as runtime VALUES (COPRO / GroundedProposer / InferRules attempt
 injection over optimizer-assembled layouts, the evaluation judge), `Predict.erase`, and user
@@ -479,7 +479,7 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
 - ~~**Usage-merge on `>>>`.**~~ Resolved by `RawPrediction.followedBy`: usage combines pointwise while the
   rightmost produced values/completions win and the empty envelope is identity.
 - **`augment` closing position**: append a self-check field (the dual of opening); needs an `AppendField`
-  dual. The typed-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
+  dual. The generalized-field + post-decode-hook parts of the `Thought` form shipped in 6.4.
 - **Execution-wrapping `mode`s**: retry / pre-post hooks (6.5 shipped the pure control-transform monoid).
 - **Commutative denotational carrier**: the law hierarchy now distinguishes monoidal, symmetric monoidal,
   copy/discard, Markov, and cartesian carriers and is executed for Scala functions. Unrestricted `Module`

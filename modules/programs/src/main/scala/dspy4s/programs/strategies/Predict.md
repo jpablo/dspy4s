@@ -1,13 +1,13 @@
 # How Predict works in `dspy4s.programs.strategies`
 
-`Predict[I, O]` is the smallest typed language-model program in dspy4s. It turns an input value of type `I` into a
+`Predict[I, O]` is the smallest language-model program in dspy4s. It turns an input value of type `I` into a
 `Prediction[O]` according to a `Signature[I, O]`.
 
-The most useful mental model is a **typed boundary around a dynamic prediction engine**:
+The most useful mental model is a **domain boundary around a record-based prediction engine**:
 
 ```mermaid
 flowchart LR
-    input["Typed input I"]
+    input["Input I"]
 
     subgraph boundary["one Predict module boundary"]
         encode["Shape[I].encode"]
@@ -79,7 +79,7 @@ flowchart TD
 `SignatureLayout` tells the adapter what the prompt means. The shapes tell `Predict` how Scala values cross that
 layout. Keeping all three together prevents a predictor's declared fields from drifting away from its codecs.
 
-## Example: a typed question-answer predictor
+## Example: a question-answer predictor
 
 Case classes give the boundary concrete domain types:
 
@@ -140,7 +140,7 @@ flowchart TD
 
 The stages are:
 
-1. `Shape[I]` encodes the typed input into a record. The encoding is memoized on that `ProgramCall` because lifecycle
+1. `Shape[I]` encodes the input into a record. The encoding is memoized on that `ProgramCall` because lifecycle
    observation and `forward` both need it.
 2. `Predict` rejects missing required fields before spending an LM call. Derived case-class shapes always encode every
    field; this check mainly protects more dynamic map-backed shapes.
@@ -153,7 +153,7 @@ The stages are:
 8. `Shape[O]` decodes those first values into `O`. `Prediction.from` returns both that value and the unabridged raw
    prediction.
 
-## Typed output and raw evidence
+## Output and raw evidence
 
 `Prediction[O]` deliberately retains both views of a result:
 
@@ -213,7 +213,7 @@ invocation.
 
 ## Failure and observability semantics
 
-The module lifecycle surrounds encode, engine execution, and typed decode as one unit. That keeps the returned result
+The module lifecycle surrounds encoding, engine execution, and output decoding as one unit. That keeps the returned result
 and runtime observations consistent.
 
 | Situation | Result and observable behavior |
@@ -222,12 +222,12 @@ and runtime observations consistent.
 | Model or adapter cannot be resolved | `Left(ConfigurationError)` |
 | Adapter formatting or parsing fails | `Left(DspyError)` from that stage |
 | Model call fails | `Left(DspyError)` from the model |
-| Parsed values do not satisfy `Shape[O]` | `Left(DspyError)` during typed decode |
+| Parsed values do not satisfy `Shape[O]` | `Left(DspyError)` during output decoding |
 | Successful call with `traceEnabled = true` | One `predict` module scope plus one trace and history entry |
 | Successful call with `traceEnabled = false` | Module callbacks still run; trace and history recording is suppressed |
 | Ordinary failed call | Module callbacks report the failure; no success trace or history entry is recorded |
 
-Because typed decoding occurs before the lifecycle sees success, a decoding failure cannot leave behind a misleading
+Because decoding occurs before the lifecycle sees success, a decoding failure cannot leave behind a misleading
 successful trace. Failure traces are only recorded when the runtime explicitly enables failure-trace capture.
 
 Adapter formatting, the LM call, and parsing each completion also have their own nested callback scopes. These are
@@ -240,7 +240,7 @@ details inside the single `Predict` module boundary, not extra modules.
 ```mermaid
 flowchart TD
     engine["PredictEngine<br/>record → RawPrediction"]
-    typed["Predict[I, O]<br/>typed encode + decode"] --> engine
+    predict["Predict[I, O]<br/>encode + decode"] --> engine
     dynamic["DynamicPredict<br/>record input + record output"] --> engine
 ```
 
@@ -252,7 +252,7 @@ val dynamic: DynamicPredict = answerQuestion.erase
 ```
 
 Erasure removes the static `I` and `O` boundary; it does not add another runtime wrapper. For valid encoded inputs and
-decodable model outputs, the typed call's `.raw` value equals the erased call's `.raw` value.
+decodable model outputs, the `Predict` call's `.raw` value equals the erased call's `.raw` value.
 
 ## Optimization
 
@@ -287,14 +287,14 @@ example, ReAct exposes its two internal predictors as `react` and `extractor`.
 active, it also installs that identity in `ActivePredictContext`, allowing stream listeners to route tokens to the
 correct predictor even when predictors are nested inside a larger program.
 
-Streaming changes how partial model output is observed; it does not bypass parsing or typed output decoding for the
+Streaming changes how partial model output is observed; it does not bypass parsing or output decoding for the
 final return value.
 
 ## Reading the implementation
 
 A useful reading order is:
 
-1. [`Predict.scala`](Predict.scala): the typed boundary, required-input check, engine construction, and erasure.
+1. [`Predict.scala`](Predict.scala): the domain boundary, required-input check, engine construction, and erasure.
 2. [`runtime/PredictEngine.scala`](../runtime/PredictEngine.scala): model/adapter resolution and the raw format-call-parse
    pipeline.
 3. [`contracts/Module.scala`](../contracts/Module.scala): the uniform `ProgramCall`/`Prediction` boundary and lifecycle.
@@ -302,11 +302,11 @@ A useful reading order is:
 5. [`Signature.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/Signature.scala): the relationship among layout,
    input shape, and output shape.
 6. [`optimization/OptimizableLeaf.scala`](../optimization/OptimizableLeaf.scala): the lawful optimizer lens for `Predict`.
-7. [`PredictSuite.scala`](../../../../../test/scala/dspy4s/programs/PredictSuite.scala): executable examples for typed
+7. [`PredictSuite.scala`](../../../../../test/scala/dspy4s/programs/PredictSuite.scala): executable examples for
    execution, raw preservation, erasure, controls, and failure semantics.
 
 ## Scope and assumptions
 
 This guide describes the current dspy4s implementation. It assumes the default runtime can resolve an adapter and,
 unless the predictor has a bound model, an ambient language model from `RuntimeContext`. Prompt text and output parsing
-remain adapter-specific; the typed input/output contract and module lifecycle are not.
+remain adapter-specific; the input/output contract and module lifecycle are not.

@@ -1,6 +1,6 @@
 # Finance ReAct Agent
 
-A `ReAct` agent that answers financial queries by calling typed tools. It demonstrates how to expose annotated Scala methods as ReAct tools and wire them into an agent that reasons over the results.
+A `ReAct` agent that answers financial queries by calling tools. It demonstrates how to expose annotated Scala methods as ReAct tools and wire them into an agent that reasons over the results.
 
 ## Defining the tools
 

@@ -131,10 +131,10 @@ The descendants fall into four semantic branches:
 
 | Branch | Purpose | Descendants |
 |---|---|---|
-| Direct executable programs | Implement a complete typed strategy directly | `Predict`, `ChainOfThought`, `ProgramOfThought`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
+| Direct executable programs | Implement a complete strategy directly | `Predict`, `ChainOfThought`, `ProgramOfThought`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
 | `TransparentModule` | Structural syntax whose own node must not appear in callbacks, trace, or history | `Identity`, `AndThen`, `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, `Lift`, `LiftEither`, `MapOutput`, `ContramapInput`, `Dimap`, `Moded`, `RecoverWith` |
 | `DynamicModule` | Execute over runtime `DynamicValue.Record` inputs and outputs | `DynamicPredict`, `KNNFewShotProgram`, internal `EnsembledProgram`, example `SimplifyModule`, example `ScoringModule` |
-| `TrajectoryAgent` | Gather a typed trajectory and then extract the result | `InterpretedTrajectoryAgent`, with concrete programs `ReAct` and `CodeAct` |
+| `TrajectoryAgent` | Gather a trajectory and then extract the result | `InterpretedTrajectoryAgent`, with concrete programs `ReAct` and `CodeAct` |
 
 This is an inheritance diagram, not a catalog of every type that mentions `Module`. In particular:
 
@@ -160,7 +160,7 @@ final case class ProgramCall[I](
 ```
 
 `mapInput` changes only `I`. It preserves `config`, `traceEnabled`, and `rolloutId`, which is why `AndThen`, input
-adapters, typed encoding, and trajectory extractors can move between input carriers without silently discarding call
+adapters, schema encoding, and trajectory extractors can move between input carriers without silently discarding call
 controls.
 
 ### Output: `Prediction[O]`
@@ -174,7 +174,7 @@ final case class Prediction[O](
 )
 ```
 
-`output` is the domain result used by downstream typed modules. `raw` retains parsed field values, completions, LM usage,
+`output` is the domain result used by downstream modules. `raw` retains parsed field values, completions, LM usage,
 and adapter metadata. Composition therefore threads `prediction.output` while preserving or combining
 `prediction.raw`.
 
@@ -262,7 +262,7 @@ object ModuleLifecycle:
 
 `CallObservation` answers three questions for an observed boundary:
 
-1. How is the typed input projected into a runtime record?
+1. How is the input projected into a runtime record?
 2. Does this call permit trace/history recording?
 3. How is the prediction projected into an output record?
 
@@ -297,7 +297,7 @@ Transparency is therefore an operational distinction, not an optimization or a c
 work. `RecoverWith` can choose a fallback, `Moded` can rewrite controls, and `AndThen` can combine raw envelopes; they
 simply do not claim independent runtime identity.
 
-## Typed and dynamic modules are siblings
+## Domain-valued and record-valued modules are siblings
 
 `Predict[I, O]` extends `Module[I, O]` directly. `DynamicPredict` extends `DynamicModule`, whose fixed carrier is:
 
@@ -314,7 +314,7 @@ protected def forwardDynamic(
 ```
 
 It then lifts a successful `RawPrediction` exactly once with `Prediction.dynamic`. This makes dynamic modules obey the
-same public result boundary as typed modules without pretending that a runtime record has a statically known domain
+same public result boundary as modules without pretending that a runtime record has a statically known domain
 shape.
 
 `Predict` and `DynamicPredict` are consequently siblings over the shared `PredictEngine`; neither invokes the other.
@@ -322,7 +322,7 @@ This avoids an extra lifecycle boundary and keeps one model prediction equal to 
 
 ## A minimal custom module
 
-This module has a typed semantic function, an explicit observation projection, and no raw model evidence:
+This module has a domain-specific function, an explicit observation projection, and no raw model evidence:
 
 ```scala
 final case class LengthModule() extends Module[String, Int]:
@@ -374,7 +374,7 @@ the worker. Use `applyAsyncExecuted` when the caller must explicitly join the ch
 
 The implementation establishes these invariants:
 
-1. Every successful public call returns `Prediction[O]`; typed and dynamic modules share the same outer result shape.
+1. Every successful public call returns `Prediction[O]`; `Predict` and `DynamicPredict` share the same outer result shape.
 2. Every ordinary module call passes through exactly one `final apply` lifecycle boundary before its `forward`.
 3. A transparent module contributes no callbacks, trace, or history of its own.
 4. An observed successful call records trace/history only when `traceEnabled` is true.
@@ -407,11 +407,11 @@ sbt --error \
 ## Suggested reading order
 
 1. Read `Module.apply(call)` to see the lifecycle template.
-2. Read `ModuleLifecycle` and `CallObservation` to see how typed values become runtime records.
+2. Read `ModuleLifecycle` and `CallObservation` to see how values become runtime records.
 3. Read `ProgramCall.mapInput` and `Prediction` to understand what composition changes and preserves.
 4. Read `TransparentModule` and then `AndThen` to see structural composition without structural trace noise.
-5. Read `DynamicModule`, `Predict`, and `DynamicPredict` to compare the typed and dynamic carriers.
+5. Read `DynamicModule`, `Predict`, and `DynamicPredict` to compare domain-specific and record carriers.
 6. Read `TrajectoryAgent` and `InterpretedTrajectoryAgent` for the deepest template-method branch.
 
-For the typed state machine beneath `ReAct` and `CodeAct`, continue with
+For the state machine beneath `ReAct` and `CodeAct`, continue with
 [`InterpretedTrajectoryAgent.md`](../runtime/InterpretedTrajectoryAgent.md).

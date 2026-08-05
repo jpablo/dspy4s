@@ -3,7 +3,7 @@
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 and all of step 6 implemented on the branch (full `sbt test` green): 6.1 (`bestOf`),
 6.2 (`id`/`>>>`/`parallel`), 6.3 (`AgentLoop`/`TrajectoryAgent`, with `InterpretedTrajectoryAgent` for
-ReAct/CodeAct), 6.4 (typed
+ReAct/CodeAct), 6.4 (generic
 `augment`), 6.5 (`mode` middleware monoid). The authoritative step-6 contract is
 [algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
 are superseded where they disagree with that spec. Remaining work is optional/additive (CIO substrate, etc.).
@@ -42,7 +42,7 @@ shrank net while the duplication was removed.
 **Step 6 (complete):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`parallel` in
 `Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent`, plus the ReAct/CodeAct
 `InterpretedTrajectoryAgent` transition; RLM and PoT use `AgentLoop` directly),
-6.4 (typed `augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
+6.4 (`augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
 middleware monoid) are all landed and law-tested. Remaining is optional/additive: the kyo-compat CIO substrate
 migration, `augment` closing position, execution-wrapping modes. Sequential usage merge now ships as part of the
 lawful `RawPrediction.followedBy` envelope operation. The authoritative
@@ -87,7 +87,7 @@ below). It does not change anything in steps 1–5. The discipline for steps 1�
 - **`truncateOnOverflow` (step 3) and `isolatedAttempt` (step 4) carry the effectful seam.** Write them
   so the eventual monad swap is mechanical: the effectful work is a single trailing closure
   (`run: String => Either[DspyError, A]`, `body: RuntimeContext ?=> A`), and the only `Either`-specific
-  branch is context-overflow detection; isolate that behind a predicate so an `F`-with-typed-errors can
+  branch is context-overflow detection; isolate that behind a predicate so an `F` with an explicit error type can
   supply its own later.
 
 ## Confirmed duplication (code-truth)
@@ -106,10 +106,10 @@ below). It does not change anything in steps 1–5. The discipline for steps 1�
 
 ```
 core            (no deps)        ← signature algebra, requireString, isolatedAttempt
-typed  → core                    ← decodePrepended (needs OutputAugmentation + Shape + core errors)
+signatures → core               ← decodePrepended (needs OutputAugmentation + Shape + core errors)
 lm     → core
 adapters → core, lm
-programs → core, lm, adapters, typed   ← truncateOnOverflow (near its only callers)
+programs → core, lm, adapters, signatures ← truncateOnOverflow (near its only callers)
 ```
 
 Tests: **munit**, one suite per module under `src/test/scala/dspy4s/<pkg>/`. Per-composite regression
@@ -122,7 +122,7 @@ step also adds a focused unit suite for the extracted primitive.
 ## Step 1: Signature algebra (covers A, B)
 
 **Where:** `modules/core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala`, `private[dspy4s]`
-(consistent with the existing policy: user code mutates at the typed `Signature` surface, not the layout).
+(consistent with the existing policy: user code uses the `Signature` API, not the layout).
 The low-level `withInputFields` / `withOutputFields` cohort mutators stay private; this layer gives common edits names,
 idempotence, and laws.
 
@@ -216,9 +216,9 @@ privates (D).
 
 This is the highest-leverage cleanup: it removes C, D, and E in one move (the `extractReasoning`,
 `unsupportedOutputShape`, and the for-comprehension all collapse into the call).
-**Test:** extend `OutputAugmentationSuite` (typed) to cover the decode path incl. the fieldless-output
+**Test:** extend `OutputAugmentationSuite` (signatures) to cover the decode path incl. the fieldless-output
 error; existing composite suites cover the migrations.
-**Risk:** low-medium (touches the typed decode path of four modules; the per-composite suites guard it).
+**Risk:** low-medium (touches the decode path of four modules; the per-composite suites guard it).
 **Effect note:** pure validation; stays `Either` even under `F[_]`.
 
 ### Design ceiling: `Thought`-shaped augmentation (from kyo-ai)
@@ -231,8 +231,8 @@ helper is not a dead-end:
 - **Position.** `opening` (before the result; conditions the answer) or `closing` (after the result; a
   self-check). Today's four sites are all opening. dspy4s cannot express a closing self-check at all; the
   general shape unlocks it for free.
-- **Arbitrary typed field**, decoded via its own `Shape`, not pulled as a String by name. `requireString`
-  (step 2) exists only because the field is hard-coded to String; under a typed field it is just
+- **Arbitrary field**, decoded via its own `Shape`, not pulled as a String by name. `requireString`
+  (step 2) exists only because the field is hard-coded to String; under a field it is just
   `Shape.decode`, so step 2's helper is the degenerate case and is **retired over time**, not load-bearing.
 - **Optional post-decode hook** (kyo-ai's `process`): verify, record a metric, or drive a follow-up.
 
@@ -325,8 +325,8 @@ annotated with their current (post-grill, post-6.1) status.
 - **The agentic `loop`. DONE (6.3, commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
   `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
   ReAct/CodeAct/RLM all run on them. ReAct and CodeAct additionally share `InterpretedTrajectoryAgent`'s final
-  generate → prepare → interpret → record → decide transition, encoded as typed phase states with state-specific
-  legal-successor ADTs, and the typed `ActionInterpreter` boundary. **Corrected:** the universal
+  generate → prepare → interpret → record → decide transition, encoded as phase states with state-specific
+  legal-successor ADTs, and the `ActionInterpreter` boundary. **Corrected:** the universal
   `env.step`/`classify`/`render` decomposition was NOT adopted (done-detection and terminal shapes still differ);
   associated types retain each action language, while RLM and PoT stay directly on `AgentLoop`.
   `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin these layers. The control
@@ -374,7 +374,7 @@ wrong.
 
 **Lesson 3: `Thought`-shaped augmentation.** Covered as the
 [step 3 ceiling](#design-ceiling-thought-shaped-augmentation-from-kyo-ai): position (opening/closing),
-typed field via `Shape`, optional post-decode hook; ship opening-String now, generalize additively.
+field via `Shape`, optional post-decode hook; ship opening-String now, generalize additively.
 
 ### Guardrails: what NOT to copy from kyo-ai
 
@@ -409,9 +409,9 @@ A "write once, ship to 6 backends" layer. Library code is written against `kyo.c
   Every method is an `inline def` that lowers at the call site to the backend's primitive. No
   typeclass/`F[_]` dispatch, no adapter, zero overhead. The backend is chosen by which jar is on the
   classpath; cross-published via an sbt-projectmatrix plugin.
-- **One portable error lane: `Throwable`.** `CIO` carries no typed `E`. The library's own guidance:
+- **One portable error lane: `Throwable`.** `CIO` carries no `E`. The library's own guidance:
   keep domain errors as values in the success type (`CIO[Result[E, A]]`); reserve the failure lane for
-  genuine runtime/transport failures. Backend-specific typed recovery is reached via `.lower`.
+  genuine runtime/transport failures. Backend-specific error recovery is reached via `.lower`.
 - **Effect/concurrency/stream layer only.** It is codec-agnostic (says nothing about `Schema`). `CStream`
   gives a portable stream type but not an HTTP client or SSE parser.
 
@@ -457,7 +457,7 @@ kyo-ai is the blueprint for what to build on it. Full feature-by-feature compari
 - **Young, single-vendor dependency** (`main`, may be pre-release). Mitigate by wrapping it behind a thin
   internal alias (still inline, no overhead) and scoping the dependency to only the effectful modules.
 - **Build restructuring.** The effectful modules (`lm`, the runtime/agent-loop, `streaming`) become
-  projectMatrix rows × backend × platform. Pure modules (`core`, `typed`, optimizer logic) stay a normal
+  projectMatrix rows × backend × platform. Pure modules (`core`, `signatures`, optimizer logic) stay a normal
   build. The matrix is contained to the seam but is real new machinery (sbt-projectmatrix + the plugin +
   per-backend source roots).
 - **Compile-time backend selection → N artifacts** (`dspy4s-zio`, `dspy4s-ce`, …); no single all-backends

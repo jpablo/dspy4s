@@ -22,7 +22,7 @@ self-contained Scala guide and does not assume any DSPy background.
 
 ## Signatures
 
-DSPy has two ways to write a signature. Both map onto a typed `Signature` in
+DSPy has two ways to write a signature. Both map onto a `Signature` in
 dspy4s.
 
 A **string signature** becomes a function type whose parameters and result are
@@ -78,7 +78,7 @@ result.sentiment            # dynamic attribute, KeyError if misspelled
 ```
 
 In dspy4s a call returns `Either[DspyError, Output]`, and the output is a named
-tuple with typed dot-access. A misspelled field is a compile error:
+tuple with direct dot access. A misspelled field is a compile error:
 
 ```scala
 // dspy4s

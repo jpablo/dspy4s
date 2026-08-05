@@ -2,13 +2,13 @@
 
 `ProgramOfThought[I, O]` asks a language model to solve a task by writing a complete Python program. It executes that
 program, gives failures back to the model for repair, and—once execution succeeds—uses a final predictor to turn the
-code and its output into the requested typed answer.
+code and its output into the requested answer.
 
 The most useful mental model is **generate, repair until executable, then answer**:
 
 ```mermaid
 flowchart LR
-    input["Typed input I"] --> generate["generatorPredict<br/>write a Python program"]
+    input["Input I"] --> generate["generatorPredict<br/>write a Python program"]
     generate --> parse{"parseCode succeeds?"}
     parse -->|"yes"| execute["CodeInterpreter.execute"]
     parse -->|"no"| repair["regeneratorPredict<br/>I + previous_code + error"]
@@ -27,7 +27,7 @@ There are three predictors with different responsibilities:
 
 - `generatorPredict` writes the first candidate program;
 - `regeneratorPredict` repairs a candidate after a parse or Python execution error;
-- `answererPredict` interprets the first successful program and its output as the final typed response.
+- `answererPredict` interprets the first successful program and its output as the final response.
 
 The successful program does not construct `O` directly. Even a structured `SUBMIT(...)` result becomes evidence for
 `answererPredict`; the answerer remains the only stage that produces the public output.
@@ -54,7 +54,7 @@ Its fields have distinct responsibilities:
 
 | Field | Meaning |
 |---|---|
-| `baseSignature` | The original typed task, `I → O` |
+| `baseSignature` | The original task, `I → O` |
 | `interpreter` | Executes generated Python and returns stdout, stderr, and optional `finalOutput` |
 | `maxIterations` | Maximum total code attempts, including the initial generation |
 | `generatorPredictOverride` | Immutable replacement for the initial program generator |
@@ -100,13 +100,13 @@ question -> reasoning, answer
 The public `reasoning` comes from `answererPredict`. Reasoning emitted by the generator or regenerator belongs to
 those inner calls and is not copied into the final output.
 
-## Four typed boundaries
+## Four program boundaries
 
 ProgramOfThought derives three internal signatures from the base task:
 
 | Boundary | Effective signature | Purpose |
 |---|---|---|
-| Public module | `I -> reasoning, O` | Return the typed answer |
+| Public module | `I -> reasoning, O` | Return the answer |
 | Generator | `I -> reasoning, generated_code` | Write the first complete Python program |
 | Regenerator | `I, previous_code, error -> reasoning, generated_code` | Repair the last failed program |
 | Answerer | `I, final_generated_code, code_output -> reasoning, O` | Interpret successful execution evidence |
@@ -150,7 +150,7 @@ The hand-written `Shape[CodeOut]` gives missing code an honest representation: `
 
 A call to `ProgramOfThought[I, O]` proceeds as follows:
 
-1. `Module` validates the typed input through `baseSignature.inputShape`.
+1. `Module` validates the input through `baseSignature.inputShape`.
 2. `AgentLoop` starts with no previous attempt.
 3. `generatorPredict` receives `I` and produces optional `generated_code`.
 4. The shared runtime helper `GeneratedPython.parse` normalizes the generated program and optional Markdown fence.
@@ -159,7 +159,7 @@ A call to `ProgramOfThought[I, O]` proceeds as follows:
 7. `regeneratorPredict` receives `I`, the failed code, and its error, then produces another complete program.
 8. The first exit-code-zero result ends the repair loop.
 9. `answererPredict` receives `I`, the successful parsed code, and its execution output.
-10. The answerer returns `reasoning` plus the base output fields as a typed prediction.
+10. The answerer returns `reasoning` plus the base output fields as a prediction.
 
 An execution-error path with one successful repair looks like this:
 
@@ -386,7 +386,7 @@ ProgramOfThought distinguishes failures the LM can repair from failures of the p
 | Generator or regenerator prediction fails | Return `Left(error)` immediately |
 | All attempts fail | Return `RuntimeError("program_of_thought", last failure)` |
 | Successful code has empty stdout | Still run the answerer with an empty `code_output` |
-| Answerer prediction or typed decoding fails | Return `Left(error)` |
+| Answerer prediction or decoding fails | Return `Left(error)` |
 
 An interpreter timeout, process-start failure, or I/O failure is not presumed repairable by changing Python source,
 so it bypasses the regenerator. A normal Python exception is represented by a `CodeResult` with a non-zero exit code
@@ -449,7 +449,7 @@ val specialized = program.copy(
 )
 ```
 
-Changing optimizer parameters through these overrides preserves the interpreter, typed shapes, predictor runtimes,
+Changing optimizer parameters through these overrides preserves the interpreter, shapes, predictor runtimes,
 module names, and other execution metadata.
 
 ## Optimization
@@ -462,7 +462,7 @@ flowchart TD
 
     root -->|"0: generator"| generator["generatorPredict<br/>initial program"]
     root -->|"1: regenerator"| regenerator["regeneratorPredict<br/>error repair"]
-    root -->|"2: answerer"| answerer["answererPredict<br/>typed synthesis"]
+    root -->|"2: answerer"| answerer["answererPredict<br/>answer synthesis"]
 
     generator --> generatorParams["OptimizableParameters"]
     generatorParams --> generatorInstructions["instructions"]
@@ -504,7 +504,7 @@ later stage fails.
 
 ## ProgramOfThought compared with nearby programs
 
-| Program | Generated action | Feedback and stopping | Final typed output |
+| Program | Generated action | Feedback and stopping | Final output |
 |---|---|---|---|
 | `ChainOfThought` | No executable action | One LM completion | Same predictor returns reasoning + `O` |
 | `CodeAct` | One Python snippet per iteration | Every observation returns to the policy; `finished` stops | Extractor always returns reasoning + `O` |
@@ -525,7 +525,7 @@ A useful reading order is:
 3. [`runtime/GeneratedPython.scala`](../runtime/GeneratedPython.scala): code-fence and generated-code normalization shared
    with CodeAct.
 4. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion behavior.
-5. [`InputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/InputAugmentation.scala): typed
+5. [`InputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/InputAugmentation.scala):
    appending of retry and answer evidence.
 6. [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): public
    reasoning augmentation.
@@ -545,5 +545,5 @@ A useful reading order is:
 
 This guide describes the current dspy4s implementation. It assumes the ambient `RuntimeContext` supplies an LM and
 adapter, the base output has statically known fields, and the caller supplies an interpreter appropriate to the trust
-boundary. Exact generated Python and adapter parsing remain model-specific; the typed stages, retry conditions,
+boundary. Exact generated Python and adapter parsing remain model-specific; the stages, retry conditions,
 attempt budget, answer synthesis, lifecycle ownership, and optimizer structure are defined by ProgramOfThought itself.

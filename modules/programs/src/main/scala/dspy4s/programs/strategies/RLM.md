@@ -3,11 +3,11 @@
 `RLM` means **Recursive Language Model**. It is designed for tasks where the input may be too large to place directly
 in every language-model prompt. Instead, RLM gives the model a stateful Python REPL:
 
-1. encode the typed input and inject its fields as Python variables;
+1. encode the input and inject its fields as Python variables;
 2. show the model metadata and bounded previews of those variables;
 3. ask the model for a small Python action;
 4. execute the action and add its output to a history;
-5. repeat until the code calls `SUBMIT(...)` with a valid typed answer;
+5. repeat until the code calls `SUBMIT(...)` with an answer accepted by `Shape[O]`;
 6. if the iteration budget runs out, ask a second predictor to extract an answer from the history.
 
 The most useful mental model is that RLM separates the **data plane** from the **prompt plane**. The full input lives
@@ -15,7 +15,7 @@ in the REPL. The action model sees variable descriptions and the results of deli
 
 ```mermaid
 flowchart LR
-    input["Typed input I"] --> encode["Encode with Shape[I]"]
+    input["Input I"] --> encode["Encode with Shape[I]"]
 
     subgraph dataPlane["Data plane: per-call Python REPL"]
         variables["Input fields as Python variables"]
@@ -70,7 +70,7 @@ Its fields have distinct responsibilities:
 
 | Field | Meaning |
 |---|---|
-| `baseSignature` | The typed task, including the input and output shapes |
+| `baseSignature` | The task, including the input and output shapes |
 | `maxIterations` | Maximum number of action-predict/REPL steps before fallback extraction |
 | `maxLlmCalls` | Per-forward budget shared by `llm_query` and `llm_query_batched` |
 | `maxOutputChars` | Head-and-tail limit for each REPL output rendered into history |
@@ -87,7 +87,7 @@ The outer module name is always `rlm`. Unlike `ChainOfThought`, `ReAct`, and `Co
 field to `O`. It returns the base output type directly. The final action reasoning and rendered trajectory are kept in
 `Prediction.raw` instead.
 
-## Three typed boundaries
+## Three prediction boundaries
 
 Given this base signature:
 
@@ -99,7 +99,7 @@ RLM creates two internal signatures:
 
 | Boundary | Effective signature | Purpose |
 |---|---|---|
-| Public module | `I -> O` | Accept typed input and return the typed task output |
+| Public module | `I -> O` | Accept input and return the task output |
 | Action predictor | `variables_info, repl_history, iteration -> reasoning, code` | Choose the next Python action |
 | Fallback predictor | `variables_info, repl_history -> O` | Produce `O` if no valid `SUBMIT` arrives in time |
 
@@ -172,7 +172,7 @@ sequenceDiagram
         R->>P: execute ReplAction with input variables
         alt ordinary observation
             P-->>R: stdout, error, or invalid SUBMIT
-        else valid typed SUBMIT
+        else schema-valid SUBMIT
             P-->>R: submitted output record
             R->>R: decode and prepare Prediction[O]
         end
@@ -326,7 +326,7 @@ deterministically first, then use a sub-LM only for the slices that require sema
 For a real sandboxed three-step example that proves variable injection, persistent state, `llm_query`, and `SUBMIT`,
 see [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala).
 
-## `SUBMIT` is typed termination
+## `SUBMIT` is schema-validated termination
 
 `SUBMIT(...)` is different from `print(...)`:
 
@@ -363,11 +363,11 @@ flowchart LR
     exhausted["Iteration budget exhausted"] --> warn["Write warning to stderr"]
     warn --> inputs["ExtractInputs<br/>variable metadata + REPL history"]
     inputs --> extract["extractPredict"]
-    extract --> typed["Prediction[O]"]
-    typed --> attach["Attach trajectory and<br/>fallback final_reasoning"]
+    extract --> result["Prediction[O]"]
+    result --> attach["Attach trajectory and<br/>fallback final_reasoning"]
 ```
 
-The extractor receives neither the full typed input nor direct access to the REPL. It must synthesize `O` from the
+The extractor receives neither the full input nor direct access to the REPL. It must synthesize `O` from the
 metadata and evidence the action loop printed. This is why the action instructions tell the model to print useful
 intermediate results.
 
@@ -382,7 +382,7 @@ Generated Python has four reserved built-in names:
 | Name | Purpose |
 |---|---|
 | `print(...)` | Put selected evidence into the next action prompt |
-| `SUBMIT(...)` | Return the declared typed output fields |
+| `SUBMIT(...)` | Return the declared output fields |
 | `llm_query(prompt=...)` | Ask a sub-LM to analyze one prompt |
 | `llm_query_batched(prompts=...)` | Analyze several prompts concurrently |
 
@@ -439,7 +439,7 @@ the trajectory. Earlier action and sub-LM calls remain observable through their 
 `RLM.defaultInterpreterFactory` creates a fresh `DenoPyodideInterpreter` for every forward call. It supports the
 features RLM depends on:
 
-- typed `DynamicValue` variables injected into Python;
+- `DynamicValue` variables injected into Python;
 - state that persists across action iterations;
 - host tools callable from sandboxed code;
 - structured `SUBMIT` output.
@@ -493,7 +493,7 @@ copies:
 val shorter = agent.copy(maxIterations = IterationLimit(4))
 ```
 
-The override fields allow the two predictors to be specialized independently while preserving their typed
+The override fields allow the two predictors to be specialized independently while preserving their
 signatures:
 
 ```scala
@@ -553,7 +553,7 @@ programs.
 
 RLM is most useful when the data itself is the object being explored: a large document, dataset, collection, or nested
 value that code can inspect selectively. ReAct is clearer when the domain is naturally a small vocabulary of explicit
-actions. CodeAct is a better fit when code execution gathers evidence but the final typed answer should always be
+actions. CodeAct is a better fit when code execution gathers evidence but the final answer should always be
 synthesized by a separate predictor.
 
 ## Reading the implementation
@@ -591,5 +591,5 @@ A useful reading order is:
 This guide describes the current dspy4s implementation. It assumes the ambient `RuntimeContext` supplies an adapter
 and an action LM, the base signature has statically known output fields, and the selected interpreter supports
 variable injection, persistent state, host tools, and `SUBMIT`. Exact generated Python and adapter parsing remain
-model-specific; the typed boundaries, loop control, recovery policy, fallback, resource ownership, and optimizer
+model-specific; the signature boundaries, loop control, recovery policy, fallback, resource ownership, and optimizer
 structure are defined by RLM itself.

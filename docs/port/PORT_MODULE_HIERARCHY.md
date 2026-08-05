@@ -35,25 +35,25 @@ Module[I, O]                            # ONE semantic base (port of dspy.Module
   │    │                                # the base lifts it with Prediction.dynamic
   │    └─ DynamicPredict                # dynamic executable sibling over PredictEngine
   │
-  └─ statically typed layer = Module[I, O]
+  └─ domain-valued branch = Module[I, O]
        ├─ Predict[I, O]                 # forward = encode -> PredictEngine -> decode (sibling of DynamicPredict)
        ├─ ChainOfThought[I, O]          # forward delegates to an inner Predict[I, Out]
        ├─ ReAct[I,O] / CodeAct[I,O] / ProgramOfThought[I,O]   # run loop/extractor internally; decode -> WithField[O,"reasoning",String]
        ├─ MultiChainComparison[I, O]    # Module[MultiChainInput[I], …]; decode -> WithField[O,"rationale",String]
-       └─ BestOfN[I, O] / Refine[I, O]  # best-of-n over an inner typed program (output-preserving)
+       └─ BestOfN[I, O] / Refine[I, O]  # best-of-n over an inner program (output-preserving)
 ```
 
 dspy4s has **one semantic base `Module[I, O]`** — the port of `dspy.Module` — whose uniform execution type is
 `ProgramCall[I] => Either[DspyError, Prediction[O]]`. Its `apply` is `final` (the lifecycle wrapping) over an abstract
 `forward`. The dynamic spine chooses `DynamicValue.Record` for both semantic parameters; **`DynamicModule`** adds a
-raw `forwardDynamic: ... => RawPrediction` hook and lifts it with `Prediction.dynamic`. Statically typed programs
+raw `forwardDynamic: ... => RawPrediction` hook and lifts it with `Prediction.dynamic`. Domain-valued programs
 use their domain types directly — `Predict` / `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` /
 `MultiChainComparison` / `BestOfN` / `Refine`. **`DynamicPredict`** is the data-bag executable for runtime-built
-signatures; typed `Predict` is its sibling over `PredictEngine`, and
-`ChainOfThought` composes an inner typed `Predict`. `ProgramCall[I]` is the uniform boundary envelope at both layers:
-typed modules choose a Scala domain type for `I`, while the dynamic spine chooses `DynamicValue.Record`; in either
+signatures; `Predict` is its sibling over `PredictEngine`, and
+`ChainOfThought` composes an inner `Predict`. `ProgramCall[I]` is the uniform boundary envelope at both layers:
+modules choose a Scala domain type for `I`, while the dynamic spine chooses `DynamicValue.Record`; in either
 case the envelope adds `config` / `traceEnabled` / `rolloutId`. The agents run their loop/extractor over the data-bag
-layer internally and decode the result back to the typed output. `MultiChainComparison` uses
+layer internally and decode the result back to the output. `MultiChainComparison` uses
 `MultiChainInput[I]`—base input plus candidate completions—as its semantic `I`, mirroring Python's
 `forward(completions, **kwargs)` without introducing a second invocation envelope.
 
@@ -61,17 +61,17 @@ Output-augmenting programs (`ChainOfThought`, `ReAct`, `CodeAct`, `ProgramOfThou
 prepend a field to the output via the shared
 [`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala) helper
 (`WithField[O, Name, T]` + the `PrependField` typeclass — idempotent, cast-free, always a named tuple). Every
-typed signature surface (`of` / `fromType` / `from` / a **literal** `fromString`) yields a product type, so these
-programs are uniformly typed; only the genuinely-runtime `Signature.fromStringDynamic` (Record I/O) is outside
-the typed surface.
+signature surface (`of` / `fromType` / `from` / a **literal** `fromString`) yields a product type, so these
+programs uniformly carry their domain types; only the genuinely-runtime `Signature.fromStringDynamic` (Record I/O) is outside
+the `Signature` API.
 
 Because `apply` is `final` on the single common base, the lifecycle wrapping is universal and non-bypassable —
-statically typed **and** dynamic — so [G-2](PORT_GAPS.md) stays resolved even though `Module` is generic. (`Module` was
-briefly collapsed to a non-generic dynamic module; the semantic type parameters returned once the typed layer joined.
+compiler-checked **and** dynamic — so [G-2](PORT_GAPS.md) stays resolved even though `Module` is generic. (`Module` was
+briefly collapsed to a non-generic dynamic module; the semantic type parameters returned once the layer joined.
 There is still **no `PredictProgram` alias** and **no separate
 `BasePredictProgram`**.)
 
-There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS.md G-1](PORT_GAPS.md#g-1--no-typed-predictor-introspection-layer-pythons-basemodulenamed_predictors).
+There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS.md G-1](PORT_GAPS.md#g-1--no-predictor-introspection-abstraction-pythons-basemodulenamed_predictors).
 
 ## Method-name mapping
 
@@ -100,7 +100,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | **CodeAct** | `Module` | `forward` | `CodeAct[I,O]` ◂ `Module[I,WithReasoning[O]]` | inherited `apply` → `forward`: run loop+extractor → decode |
 | **ProgramOfThought** | `Module` | `forward` | `ProgramOfThought[I,O]` ◂ `Module[I,WithReasoning[O]]` | inherited `apply` → `forward`: generate/regenerate/answer → decode |
 | **MultiChainComparison** | `Module` | `forward(completions, **kwargs)` | `MultiChainComparison[I,O]` ◂ `Module[MultiChainInput[I],WithField[O,"rationale",String]]` | inherited `apply` → `forward` (the semantic input carries the completions) |
-| **BestOfN / Refine** | `Module` | `forward` | `BestOfN[I,O]` / `Refine[I,O]` ◂ `Module[I,O]` | inherited `apply` → `forward`: best-of-n over inner typed program *(output-preserving)* |
+| **BestOfN / Refine** | `Module` | `forward` | `BestOfN[I,O]` / `Refine[I,O]` ◂ `Module[I,O]` | inherited `apply` → `forward`: best-of-n over inner program *(output-preserving)* |
 
 ## Key structural differences (callouts)
 
@@ -114,10 +114,10 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    override point.
 
 3. **Python `Predict` overrides the caller entry too; dspy4s only overrides `forward`.** Python customizes
-   `__call__`/`acall`, not just `forward`/`aforward`. In dspy4s `apply` is `final` on `Module`, so the typed
-   `Predict[I,O]` — itself a `Module[I, O]` — overrides only `forward`, where the typed
+   `__call__`/`acall`, not just `forward`/`aforward`. In dspy4s `apply` is `final` on `Module`, so
+   `Predict[I,O]` — itself a `Module[I, O]` — overrides only `forward`, where
    encode/decode runs *inside* the lifecycle wrapping. `Predict[I,O]` is a **sibling of `DynamicPredict`** over
-   the shared `PredictEngine` (each a thin `Module`), **not** a wrapper around it — so a typed call emits exactly
+   the shared `PredictEngine` (each a thin `Module`), **not** a wrapper around it — so a call emits exactly
    one module event. (A convenience `apply(input, config, traceEnabled)` overload builds the `ProgramCall` and
    dispatches through the `final apply`.)
 
@@ -132,35 +132,35 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    `Predict` and whose `forward` returns `self.predict(**kwargs)`. dspy4s is now the same shape:
    `ChainOfThought[I,O]` *is a* `Module[I, WithReasoning[O]]` that holds an inner `Predict[I, Out]`
    (built once, memoized) and whose `forward` delegates to it — so a CoT call emits a `chain_of_thought` module
-   event wrapping the inner `predict` event, mirroring Python's nesting. The typed layer is **not** a separate
+   event wrapping the inner `predict` event, mirroring Python's nesting. The layer is **not** a separate
    surface beside the spine anymore; `Predict`/`ChainOfThought` are `Module`s like every other program.
 
 6. **Cross-cutting wrapping is universal (matches Python).** Python puts the
    callback/trace/usage wrapping on `Module.__call__` — universal and
    non-bypassable. dspy4s does the same: `apply` is `final` on the single generic
-   `Module[I, O]`, wrapping `forward`, so *every* program — typed or dynamic — is observed identically and
+   `Module[I, O]`, wrapping `forward`, so *every* program — domain-valued or record-valued — is observed identically and
    nothing can bypass it. (Earlier the wrapping lived on a separate
    `BasePredictProgram` you opted into, letting `Refine`/`BestOfN`/etc. skip it
    — that was [G-2](PORT_GAPS.md), resolved by merging into one `Module` base; re-genericizing `Module` for the
-   typed layer kept `apply` `final`, so it stays resolved.)
+   layer kept `apply` `final`, so it stays resolved.)
 
-7. **The agents are typed-only, and stream via a typeclass.** `ReAct` / `CodeAct` / `ProgramOfThought` are
-   `Module[I, …]` with no untyped `Dynamic*` twin. They were the one place that *seemed* to need an
-   untyped form: `Streamify` only accepted a `DynamicModule`. Rather than keep untyped twins, `Streamify` was
+7. **The agents have no dynamic twin and stream via a typeclass.** `ReAct` / `CodeAct` / `ProgramOfThought` are
+   `Module[I, …]` with no record-valued `Dynamic*` twin. They were the one place that *seemed* to need a
+   record-valued form: `Streamify` only accepted a `DynamicModule`. Rather than keep record-valued twins, `Streamify` was
    generalized to take **any** program through a
    [`Streamable[P]`](../../modules/streaming/src/main/scala/dspy4s/streaming/Streamable.scala) typeclass that
    captures its two real requirements — *run from a record → `RawPrediction`* and *best-effort sub-signatures
-   for listener validation*. Each typed agent provides a `Streamable` instance (decode the record → typed input →
+   for listener validation*. Each agent provides a `Streamable` instance (decode the record → input →
    run → `.raw`), so it streams with no `DynamicModule` form and emits a single module event (no
-   wrapper-over-untyped double event). Only `DynamicPredict` keeps the `dynamicModule` `Streamable` instance.
+   wrapper-over-record double event). Only `DynamicPredict` keeps the `dynamicModule` `Streamable` instance.
 
-8. **The string DSL is a *typed*, compile-time surface.** `Signature.fromString("q -> a: bool")` is a
+8. **The string DSL is compiler-checked.** `Signature.fromString("q -> a: bool")` is a
    `transparent inline` macro: it parses the **literal** at compile time (reusing the runtime `SignatureLayout.parse`)
-   and synthesizes `NamedTuple` I/O — `Signature[(q: String), (a: Boolean)]` — so the string DSL gives typed
+   and synthesizes `NamedTuple` I/O — `Signature[(q: String), (a: Boolean)]` — so the string DSL gives direct
    dot-access like `Signature.of[Spec]` / `fromType[F]`. An invalid DSL or an unsupported field type is a compile
    error. The previous runtime, `Record`-returning version is `Signature.fromStringDynamic` (for genuinely
-   runtime-built strings). This is what lets the augmenting programs be uniformly typed: every static signature
-   surface produces a product type, never a bare `Record`.
+   runtime-built strings). This gives the augmenting programs concrete I/O types: every compile-time signature API
+   produces a product type, never a bare `Record`.
 
 ## Design principle: a module is pure; the runtime owns the bookkeeping
 

@@ -41,7 +41,7 @@ use `LanguageModel.call`, which returns `Either[DspyError, LmResponse]`:
 ## Per-call generation settings
 
 Generation parameters such as `temperature` go in a per-call config bag.
-`rolloutId` is a typed field used to bust the cache for an otherwise-identical
+`rolloutId` is a dedicated field used to bust the cache for an otherwise-identical
 call:
 
 ```scala

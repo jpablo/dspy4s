@@ -2,9 +2,9 @@
   *
   * An original dspy4s flagship example. It threads three ideas into one useful workflow:
   *
-  *   1. TYPED SIGNATURES The model's intent is a `QueryPlan`: a validated Scala value with enums and nested lists. The
-  *      same types constrain the LM, decode its reply, drive the optimizer's metric, and render the report. Change a
-  *      field and the compiler finds every site that breaks. (See Schemas.scala.)
+  *   1. SIGNATURES The model's intent is a `QueryPlan`: a validated Scala value with enums and nested lists. The same
+  *      types constrain the LM, decode its reply, drive the optimizer's metric, and render the report. Change a field
+  *      and the compiler finds every site that breaks. (See Schemas.scala.)
   *   2. RLM The dataset (10k rows of CSV, too large to put in a prompt) is handed to a sandboxed Python REPL, and the
   *      model writes code to compute the answer. The arithmetic happens in the sandbox, and the JVM independently
   *      re-computes the same plan and must agree.
@@ -93,7 +93,7 @@ object TalkToYourData:
 
         // Part 2: the full agent answers questions with the optimized planner (needs Deno).
         if denoAvailable then
-          println("== The agent: plan (typed) -> act (RLM writes Python over the CSV) -> verify (JVM re-computes) ==")
+          println("== The agent: plan -> act (RLM writes Python over the CSV) -> verify (JVM re-computes) ==")
           demoQuestions.foreach(runAndPrint(_, report.optimizedInstruction))
         else
           println("== Agent demo SKIPPED: the RLM act stage needs Deno on the PATH (https://deno.com) ==")

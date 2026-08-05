@@ -5,7 +5,7 @@ import dspy4s.signatures.{Shape, Signature}
 
 import scala.quoted.*
 
-/** Runtime signature assembly emitted by the typed signature macros. */
+/** Runtime signature assembly emitted by the signature macros. */
 private[signatures] object MacroSignatureSupport:
 
   def materialize[I: Type, O: Type](

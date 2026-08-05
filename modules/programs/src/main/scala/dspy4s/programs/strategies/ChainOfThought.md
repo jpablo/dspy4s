@@ -157,7 +157,7 @@ def ask(question: String)(using RuntimeContext): Either[DspyError, (String, Stri
 ```
 
 Notice that `prediction.output` is not an `Answer`. It is the named tuple
-`(reasoning: String, answer: String, confidence: Double)`, with typed dot access for all three fields.
+`(reasoning: String, answer: String, confidence: Double)`, with direct dot access for all three fields.
 
 The lightweight string DSL works the same way:
 
@@ -192,7 +192,7 @@ flowchart TD
 
 In order:
 
-1. The outer `chain_of_thought` module lifecycle observes the original typed input.
+1. The outer `chain_of_thought` module lifecycle observes the original input.
 2. The same `ProgramCall[I]` is passed unchanged to the inner `Predict`, preserving config, `traceEnabled`, and
    `rolloutId`.
 3. The inner predictor encodes the input with `baseSignature.inputShape` and runs the standard adapter/LM pipeline.
@@ -200,13 +200,13 @@ In order:
 5. The augmented shape requires `reasoning` to exist as a string.
 6. That same record is decoded through `baseSignature.outputShape` to recover `O`.
 7. `PrependField` combines the reasoning string with `O`'s named-tuple view.
-8. The inner `Predict` returns the typed output together with its complete `RawPrediction`; the outer module returns it
+8. The inner `Predict` returns the output together with its complete `RawPrediction`; the outer module returns it
    unchanged.
 
 The inner `Predict` is a `lazy val`, so a `ChainOfThought` instance builds it once and reuses the same predictor across
 calls. It is left unnamed, giving the executable prediction boundary the stable module name `predict`.
 
-## Typed output and raw evidence
+## Output and raw evidence
 
 The returned value retains both the augmented semantic output and the engine record:
 
@@ -222,9 +222,9 @@ Prediction[WithReasoning[O]]
 ```
 
 `prediction.output.reasoning` and `prediction.raw.asString("reasoning")` refer to the same parsed field at different
-abstraction levels. The first is statically typed and already validated; the second accesses the dynamic record.
+abstraction levels. The first is a validated domain value; the second accesses the runtime record.
 
-Only the first raw completion is decoded into the typed output. Additional candidates remain available through
+Only the first raw completion is decoded into the output. Additional candidates remain available through
 `prediction.raw.completions`.
 
 ## Lifecycle and observability
@@ -351,7 +351,7 @@ A useful reading order is:
    type, `PrependField` evidence, and augmented output shape.
 3. [`SignatureOps.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala): idempotent
    runtime-layout augmentation.
-4. [`Predict.scala`](Predict.scala) and [`Predict.md`](Predict.md): the inner typed prediction pipeline.
+4. [`Predict.scala`](Predict.scala) and [`Predict.md`](Predict.md): the inner prediction pipeline.
 5. [`optimization/OptimizableLeaf.scala`](../optimization/OptimizableLeaf.scala): the lawful optimizer lens.
 6. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): the inner prediction
    signature exposed for streaming.
@@ -362,7 +362,7 @@ A useful reading order is:
 
 ## Scope and assumptions
 
-This guide describes the current dspy4s implementation. It assumes a typed signature whose output has statically known
+This guide describes the current dspy4s implementation. It assumes a signature whose output has statically known
 fields and a runtime that can resolve a language model and adapter. The adapter determines the exact prompt format, but
 the augmented field order, output type, decoding behavior, lifecycle nesting, and optimization surface are defined by
 `ChainOfThought` itself.

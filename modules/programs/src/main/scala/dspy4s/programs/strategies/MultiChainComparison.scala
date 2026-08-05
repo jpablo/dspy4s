@@ -19,7 +19,7 @@ import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Signature}
 import zio.blocks.schema.DynamicValue
 
-/** The semantic input to [[MultiChainComparison]]: the base typed input `I` plus the candidate completions to compare.
+/** The semantic input to [[MultiChainComparison]]: the base input `I` plus the candidate completions to compare.
   * Invocation controls live in the enclosing [[ProgramCall]], just as they do for every other [[Module]] boundary.
   * Keeping `attempts` here reflects that changing them changes the comparison result; they are input data rather than
   * execution metadata.
@@ -30,13 +30,13 @@ final case class MultiChainInput[I](
 )
 
 /** Compares multiple candidate reasoning chains for the same task and asks an LM to produce a corrected reasoning +
-  * final answer. Typed port of Python DSPy's `dspy.MultiChainComparison`. The flow:
+  * final answer. Port of Python DSPy's `dspy.MultiChainComparison`. The flow:
   *
   *   1. Take the user's `baseSignature` (e.g. `question -> answer`). 2. Append `m` `reasoning_attempt_i` input fields
   *      to its layout. 3. Prepend a `rationale` output field for the corrected reasoning. 4. Render each candidate
   *      completion as `«I'm trying to <rationale>. I'm not sure but my prediction is <answer>»` and feed them as the
   *      new attempt inputs. 5. Run the augmented predict, then decode the reply into `Prediction[WithRationale[O]]` —
-  *      the base output with a typed `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
+  *      the base output with a `rationale: String` prepended (always a named tuple; see [[OutputAugmentation]]).
   *
   * `MultiChainComparison[I, O]` is a `Module[MultiChainInput[I], WithRationale[O]]`. Callers normally use the
   * [[compare]] convenience, which builds the semantic input and its uniform [[ProgramCall]] envelope.
@@ -77,8 +77,8 @@ final case class MultiChainComparison[I, O](
     answerFieldOverride.orElse(baseSignature.layout.outputFields.lastOption.map(_.name))
 
   /** The `m` attempt-input fields (runtime arity: one per expected candidate, with per-instance descriptions and
-    * `Student Attempt #i:` prefixes). Shared by the layout and the typed input shape, which is what keeps the
-    * value-level field expansion and the prompt in lockstep.
+    * `Student Attempt #i:` prefixes). Shared by the layout and the input shape, which is what keeps the value-level
+    * field expansion and the prompt in lockstep.
     */
   private val attemptFields: Vector[FieldSpec] = (1 to m).toVector.map { idx =>
     FieldSpec(
@@ -106,8 +106,8 @@ final case class MultiChainComparison[I, O](
   private[programs] type Attempts = attemptInputs.Values
 
   /** The comparison predict, built once from [[augmentedSignatureLayout]] over this instance's opaque [[Attempts]]
-    * carrier. Only [[attemptInputs.validate]] can construct that carrier, so every typed input encodes exactly `m`
-    * numbered fields. Kept package-private for optimizer traversal; public execution goes through [[compare]].
+    * carrier. Only [[attemptInputs.validate]] can construct that carrier, so every input encodes exactly `m` numbered
+    * fields. Kept package-private for optimizer traversal; public execution goes through [[compare]].
     */
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
     val base = Predict(

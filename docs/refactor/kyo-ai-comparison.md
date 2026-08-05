@@ -14,14 +14,14 @@ Related: the effect-substrate evaluation (kyo-compat) lives in
 
 ## TL;DR
 
-The overlap is the **"one typed generation" core**: typed I/O, a tool-call loop, structured reasoning,
-provider/config/retry/parallel/streaming, and a typed error model. Above that core the two diverge and are
+The overlap is the **"one generation" core**: I/O, a tool-call loop, structured reasoning,
+provider/config/retry/parallel/streaming, and a structured error model. Above that core the two diverge and are
 **complementary**:
 
 - **dspy4s** adds the *optimizer / compiler* layer (teleprompters, evaluation, few-shot, a manipulable
   `Signature`). It treats a program as something you compile against a metric.
 - **kyo-ai** adds the *memory / agent / effect-runtime* layer (conversation instances, actor agents,
-  sessions, built natively on Kyo's effect system). It treats an LLM call as a typed effectful value you
+  sessions, built natively on Kyo's effect system). It treats an LLM call as an effectful value you
   compose.
 
 Neither has the other's upper layer. So kyo-ai is best read as a **reference design** for the runtime
@@ -31,16 +31,16 @@ primitives dspy4s lacks, not a competitor and not a dependency.
 
 | Feature | kyo-ai | dspy4s | Sameness |
 |---|---|---|---|
-| **Typed structured output** (derive schema, force the model to that shape, decode) | `AI.gen[A]` with `A: Schema` (kyo-schema) → `result_tool` envelope → decode | `Predict[I,O]` with `Signature`+`Shape` (zio-blocks `Schema`) → structured-output adapter → decode | same idea; different codec |
-| **Typed inputs** (structured value encoded into the request) | `gen[A](input: B)` JSON-encodes `B: Schema` into a user message | `Signature.inputShape.encode` → record → adapter formats | same idea |
+| **Structured output** (derive schema, force the model to that shape, decode) | `AI.gen[A]` with `A: Schema` (kyo-schema) → `result_tool` envelope → decode | `Predict[I,O]` with `Signature`+`Shape` (zio-blocks `Schema`) → structured-output adapter → decode | same idea; different codec |
+| **inputs** (structured value encoded into the request) | `gen[A](input: B)` JSON-encodes `B: Schema` into a user message | `Signature.inputShape.encode` → record → adapter formats | same idea |
 | **Tool abstraction + agentic loop** (surface tools, dispatch, decode args with the tool's schema, feed result back, contain tool failures as messages) | `Tool.init` + eval loop (`Tool.internal.handle`: bad-decode → corrective system msg, throw → tool msg) | `ToolFunction` + `ReAct`/`CodeAct` loops (`ToolExecutor.invoke`; tool errors become observations) | same idea; **different protocol** (see asterisks) |
-| **Structured reasoning woven into output** (CoT as typed fields, not free text) | `Thought` (opening/closing reasoning fields in the result schema, `@doc` → field instructions, `process` hook); `Thought.reflective` | `ChainOfThought` (prepend `reasoning: String`); ReAct/CodeAct extractors are CoT-augmented | same idea; kyo-ai more general (arbitrary typed reasoning, opening + closing, hooks) |
+| **Structured reasoning woven into output** (CoT as fields, not free text) | `Thought` (opening/closing reasoning fields in the result schema, `@doc` → field instructions, `process` hook); `Thought.reflective` | `ChainOfThought` (prepend `reasoning: String`); ReAct/CodeAct extractors are CoT-augmented | same idea; kyo-ai more general (arbitrary reasoning fields, opening + closing, hooks) |
 | **Provider-agnostic LM interface** | `AI.Config.Provider` + 2 wire backends (OpenAI-compatible ×6, Anthropic) | `LanguageModel` trait + options bag | abstraction common; **breadth differs**: 7 providers vs 1 (OpenAI) |
-| **Config / runtime knobs** (temperature, seed, timeout, iteration cap) | `AI.Config` copy-on-write builders | per-call/per-module `config` bag (`DynamicValue.Record`) + `RuntimeContext` settings | same idea; typed builders vs untyped bag |
+| **Config / runtime knobs** (temperature, seed, timeout, iteration cap) | `AI.Config` copy-on-write builders | per-call/per-module `config` bag (`DynamicValue.Record`) + `RuntimeContext` settings | same idea; dedicated builders vs runtime record |
 | **Retry + timeout around the LM call** | eval loop wraps `meter → retry → timeout` | `RetryPolicy` (+ `LmCache`) typeclasses in `lm` | same idea |
 | **Parallel generation / concurrency** | `LLM.given` + `Async.foreach/fill/race`; asymmetric `Isolate` merges per-conversation state | `Parallel` combinator + `ParallelExecutor` (thread pool, context propagation) | same idea; fibers vs threads |
 | **Streaming** | async SSE: prefix mode (String, token-by-token) and element mode (object-by-object) | `Streamify` synchronous per-field token streaming | both have it; **materially different** (async vs sync) |
-| **Typed/structured error hierarchy** | sealed `AIException` (transport, eval-exhausted, decode, missing-key, …) on the `Abort` residual | sealed `DspyError` ADT as `Either` values | same idea; **effect channel vs values** |
+| **Structured error hierarchy** | sealed `AIException` (transport, eval-exhausted, decode, missing-key, …) on the `Abort` residual | sealed `DspyError` ADT as `Either` values | same idea; **effect channel vs values** |
 | **Instructions to the model** | `Prompt` (composable, primary + floating reminder, `andThen` merge) | instructions on `SignatureLayout` (`withInstructions`) + field descriptions + ReAct/CodeAct `buildInstructions` | partial: first-class composable `Prompt` vs signature-bound instructions |
 
 ## Where "common" needs an asterisk
@@ -97,5 +97,5 @@ kyo-ai owns the **harness/runtime** layer. Consequences for dspy4s:
    direction), kyo-ai's `AI` / `Agent` / `AISession` are the reference for memory, persistence, and
    long-lived entities, the layer dspy4s does not have today.
 
-The shortest statement: **the overlap is one typed generation; above it, dspy4s compiles and kyo-ai
+The shortest statement: **the overlap is one generation; above it, dspy4s compiles and kyo-ai
 remembers.**

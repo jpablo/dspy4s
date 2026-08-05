@@ -6,14 +6,14 @@ import zio.blocks.schema.DynamicValue
 import scala.annotation.nowarn
 
 trait StatusMessageProvider:
-  // Start hooks receive the observability input bag as a `DynamicValue.Record` (spine-typed, not free-form Map).
+  // Start hooks receive the observability input bag as a `DynamicValue.Record`, not a free-form `Map`.
   // End hooks still receive the raw domain result (`RawPrediction` / `LmResponse`) erased to `Any`.
   def moduleStart(instanceName: String, inputs: DynamicValue.Record): Option[String] = None
   def moduleEnd(instanceName  : String, output: Any): Option[String]                 = None
   def lmStart(modelId         : String, inputs: DynamicValue.Record): Option[String] = None
   def lmEnd(modelId           : String, output: Any): Option[String]                 = None
   // Tool args/result travel the spine as DynamicValue (unlike the module/lm payloads above, which are still
-  // free-form Maps); the tool callbacks are typed to match.
+  // free-form Maps); the tool callback signatures match those values.
   @nowarn("msg=unused")
   def toolStart(toolName: String, args: DynamicValue.Record): Option[String] =
     Some(s"Calling tool $toolName...")

@@ -1,6 +1,6 @@
 # Code Generation from Documentation
 
-This example learns a library's API from documentation text and generates worked code examples for a set of use cases. It demonstrates list-valued output fields, composing several `ChainOfThought` predictors, and threading their typed outputs through a plain Scala class.
+This example learns a library's API from documentation text and generates worked code examples for a set of use cases. It demonstrates list-valued output fields, composing several `ChainOfThought` predictors, and threading their outputs through a plain Scala class.
 
 ## Signatures with list-valued fields
 
@@ -8,7 +8,7 @@ This example learns a library's API from documentation text and generates worked
 --8<-- "tutorials/sample_code_generation/SampleCodeGeneration.scala:signatures"
 ```
 
-A `Spec` trait declares the input and output fields. Output fields typed as `OutputField[List[String]]` decode to `List[String]`, so a single predictor call returns several structured lists at once. The example defines three such specs: one to analyze documentation, one to generate code for a use case, and one to refine code given feedback.
+A `Spec` trait declares the input and output fields. An `OutputField[List[String]]` decodes to `List[String]`, so a single predictor call returns several structured lists at once. The example defines three such specs: one to analyze documentation, one to generate code for a use case, and one to refine code given feedback.
 
 ## Composing ChainOfThought predictors
 
@@ -16,9 +16,9 @@ A `Spec` trait declares the input and output fields. Output fields typed as `Out
 --8<-- "tutorials/sample_code_generation/SampleCodeGeneration.scala:agent-predictors"
 ```
 
-`DocumentationLearningAgent` holds one `ChainOfThought` predictor per signature, built from `Signature.of[T]`. Each predictor is a field on the class; the agent's methods call them and map their typed outputs into the `LibraryInfo` and `GeneratedExample` case classes.
+`DocumentationLearningAgent` holds one `ChainOfThought` predictor per signature, built from `Signature.of[T]`. Each predictor is a field on the class; the agent's methods call them and map their outputs into the `LibraryInfo` and `GeneratedExample` case classes.
 
-## Threading typed outputs
+## Threading outputs
 
 ```scala
 --8<-- "tutorials/sample_code_generation/SampleCodeGeneration.scala:learn-and-generate"

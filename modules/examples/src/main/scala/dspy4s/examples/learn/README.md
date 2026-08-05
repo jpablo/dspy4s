@@ -5,7 +5,7 @@
 > (MIT-licensed, © Stanford Future Data Systems). Rewritten for the Scala port.
 
 dspy4s, like DSPy, has a small core API but is used through an iterative development loop. You compose
-typed modules and design patterns to optimize for *your* objective. The same three stages apply:
+modules and design patterns to optimize for *your* objective. The same three stages apply:
 
 1. **Programming** — define the task (its inputs and outputs), sketch an initial pipeline out of modules,
    and try a handful of examples by hand. → [`programming/`](./programming/README.md)
@@ -17,6 +17,6 @@ typed modules and design patterns to optimize for *your* objective. The same thr
 Work in this order: optimizing a poorly-designed program against a weak metric is wasted effort. Get the
 program and the metric reasonable first, then optimize.
 
-dspy4s keeps the typed boundary throughout — programs are `Module[I, O]` values, signatures are typed
-(`Signature[I, O]`), and results decode into typed outputs — so the "write code, not strings" philosophy is
+dspy4s keeps domain values throughout — programs are `Module[I, O]` values, signatures carry input and output shapes
+(`Signature[I, O]`), and results decode into domain outputs — so the "write code, not strings" philosophy is
 enforced by the Scala compiler.

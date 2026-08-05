@@ -59,7 +59,7 @@ class ProviderLanguageModelSuite extends FunSuite:
 
     val n = DynamicValues.recordToMap(ProviderRequestNormalizer.normalize(request))
 
-    // Provider knobs from `options` are spread in; the typed control field is not.
+    // Provider knobs from `options` are spread in; the dedicated control field is not.
     assertEquals(n("temperature"), 0.2: Any)
     assert(!n.contains("rollout_id"), s"rolloutId leaked into the request body: $n")
     assert(!n.contains("rolloutId"), s"rolloutId leaked into the request body: $n")

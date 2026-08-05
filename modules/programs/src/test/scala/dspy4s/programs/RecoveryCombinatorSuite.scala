@@ -119,7 +119,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     assertEquals(primary.recoverWith(RecoveryPolicy.Always)(fallback)(ProgramCall(1)), Left(fallbackError))
   }
 
-  test("a throwing policy is normalized into the typed error channel") {
+  test("a throwing policy is normalized into the error channel") {
     val runs     = ArrayBuffer.empty[String]
     val primary  = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
     val fallback = Attempt("fallback", Right("fallback"), predictor("f"), runs)

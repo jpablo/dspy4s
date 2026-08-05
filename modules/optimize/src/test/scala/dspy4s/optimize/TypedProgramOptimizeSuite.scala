@@ -20,7 +20,7 @@ import zio.blocks.schema.Schema
 final case class QAInput(question: String) derives Schema
 final case class QAOutput(answer: String) derives Schema
 
-/** A small USER composite of two typed `Predict` programs. It is a plain `case class` of typed programs:
+/** A small USER composite of two `Predict` programs. It is a plain `case class` of programs:
   *   - `OptimizableTraversal[TwoStageQA]` is structurally derived (each `Predict` field resolves to the
   *     `predictOptimizableLeaf` leaf, so the composite reads as 2 predictors and replaces them positionally);
   *   - it supplies its OWN `ProgramRunner` (a one-liner) because a bare composite does not expose a signature.
@@ -85,9 +85,9 @@ class TypedProgramOptimizeSuite extends FunSuite:
     Example(rec("question" := "q3", "answer" := "a3"), inputKeys = Set("question"))
   )
 
-  // ── 1. Bootstrap over a typed Predict[I, O] student ───────────────────────
+  // ── 1. Bootstrap over a Predict[I, O] student ─────────────────────────────
 
-  test("BootstrapFewShot optimizes a TYPED Predict[I, O] via the ProgramRunner spine") {
+  test("BootstrapFewShot optimizes a Predict[I, O] via the ProgramRunner spine") {
     val student = Predict[QAInput, QAOutput](sig)
     // Teacher (== student here) answers each training question correctly, so every example bootstraps.
     val answers   = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
@@ -103,13 +103,13 @@ class TypedProgramOptimizeSuite extends FunSuite:
       val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best = result.toOption.get.bestProgram
-      // Demos were attached to the typed Predict (predictOptimizableLeaf.set is demos-only).
+      // Demos were attached to the Predict (predictOptimizableLeaf.set is demos-only).
       assertEquals(best.demos.size, 3)
       assert(best.demos.forall(_.augmented), "all bootstrapped demos should be augmented")
     }
   }
 
-  // ── 2. LabeledFewShot over a user composite of typed programs ─────────────
+  // ── 2. LabeledFewShot over a user composite of programs ─────────────
 
   test("LabeledFewShot attaches demos to BOTH predictors of a user composite (derived OptimizableTraversal)") {
     val student = TwoStageQA(

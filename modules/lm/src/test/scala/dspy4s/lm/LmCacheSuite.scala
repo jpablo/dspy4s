@@ -79,7 +79,7 @@ class LmCacheSuite extends FunSuite:
     finally deleteRecursively(tempDir)
   }
 
-  test("disk cache round-trips typed tool-call args faithfully (not stringified)") {
+  test("disk cache round-trips tool-call args faithfully (not stringified)") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache-tools")
     try
       val toolResponse = LmResponse(outputs =

@@ -9,7 +9,7 @@ import dspy4s.core.signatures.SignatureDsl
 import munit.FunSuite
 
 class SignatureParserSuite extends FunSuite:
-  test("parse simple untyped signature") {
+  test("parse a simple signature without field annotations") {
     val parser = new SignatureParser()
     val parsed = parser.parse("question -> answer")
 
@@ -19,7 +19,7 @@ class SignatureParserSuite extends FunSuite:
     assertEquals(signature.outputFields.map(_.name), Vector("answer"))
   }
 
-  test("parse typed signature") {
+  test("parse signature") {
     val parser = new SignatureParser()
     val parsed = parser.parse("question: str, top_k: int -> answer: string, score: double")
 

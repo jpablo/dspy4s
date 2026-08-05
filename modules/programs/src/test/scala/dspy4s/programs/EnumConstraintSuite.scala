@@ -18,7 +18,7 @@ enum TicketKind derives Schema:
 
 case class TicketOutput(kind: TicketKind) derives Schema
 
-/** Reproduces the email_extraction runtime failure: an enum-typed output field's *allowed values* must reach the LM,
+/** Reproduces the email_extraction runtime failure: an enum-valued output field's *allowed values* must reach the LM,
   * otherwise the model free-texts a human label ("Order Confirmation") that fails to decode ("Unknown case 'Order
   * Confirmation' at: .kind"). The root cause is that `Reflect.Variant` collapses to `TypeRef.string` in the derived
   * `SignatureLayout`, so the enum cases are lost before any adapter sees them.

@@ -14,7 +14,7 @@ import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
 
-/** The dynamic prediction module: the data-bag counterpart to statically typed [[Predict]]. Given a
+/** The dynamic prediction module: the data-bag counterpart to [[Predict]]. Given a
   * [[dspy4s.core.contracts.SignatureLayout SignatureLayout]] (input/output cohorts and wire types known only at
   * runtime), it runs the full adapter -> language-model -> parse pipeline and returns a
   * `Prediction[DynamicValue.Record]`. Its semantic output is the parsed value record; its `raw` field retains the
@@ -23,7 +23,7 @@ import zio.blocks.schema.DynamicValue
   * `Prediction.dynamic`, and the surrounding [[dspy4s.programs.contracts.Module Module]] adds callbacks, tracing, and
   * history. Mirrors DSPy's `dspy.Predict` at the dynamic boundary.
   *
-  * Why it exists separately from [[Predict]]: `Predict[I, O]` is the user-facing, statically typed surface;
+  * Why it exists separately from [[Predict]]: `Predict[I, O]` carries Scala-known input and output types;
   * `DynamicPredict` is the executable data-bag surface for signatures whose Scala input/output types are not known.
   * They are siblings rather than wrappers: each configures its own shared [[PredictEngine]]. The dynamic surface is
   * needed wherever there is no static `I`/`O` to carry, including:
@@ -34,7 +34,7 @@ import zio.blocks.schema.DynamicValue
   *
   * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it mints
   * fresh input/output types with their decoder, so the program composes and optimizes through the same machinery as
-  * statically typed programs. `DynamicPredict` is the untyped substrate those helpers run on.
+  * programs with statically known I/O. `DynamicPredict` is the record-valued substrate those helpers run on.
   *
   * @param layout
   *   the signature whose input/output fields drive encoding, prompting, and parsing
@@ -54,9 +54,9 @@ final case class DynamicPredict(
     demos  : Vector[Example] = Vector.empty,
     name   : Option[String]  = None,
     runtime: ProgramRuntime  = new SettingsProgramRuntime {},
-    /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. A typed
-      * [[Predict]] derives the same input for its own engine from `signature.outputShape.jsonSchemaString`; users who
-      * construct `DynamicPredict` directly usually leave it `None`.
+    /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. A [[Predict]]
+      * derives the same input for its own engine from `signature.outputShape.jsonSchemaString`; users who construct
+      * `DynamicPredict` directly usually leave it `None`.
       */
     outputJsonSchema: Option[String] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged

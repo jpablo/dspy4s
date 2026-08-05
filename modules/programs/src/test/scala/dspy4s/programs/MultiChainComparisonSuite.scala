@@ -28,7 +28,7 @@ trait MccQaSpec extends Spec:
   def question: InputField[String]
   def answer: OutputField[String]
 
-/** Typed port of Python DSPy's `tests/predict/test_multi_chain_comparison.py`. */
+/** Port of Python DSPy's `tests/predict/test_multi_chain_comparison.py`. */
 class MultiChainComparisonSuite extends FunSuite:
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
@@ -114,7 +114,7 @@ class MultiChainComparisonSuite extends FunSuite:
       val result           = mcc.compare((question = "What is the color of the sky?"), completions)
       assert(result.isRight, s"compare failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
       val pred = result.toOption.get
-      // typed dot-access on the augmented named tuple
+      // dot-access on the augmented named tuple
       assertEquals(pred.output.rationale, "my rationale")
       assertEquals(pred.output.answer, "blue")
     }

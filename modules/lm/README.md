@@ -11,11 +11,11 @@ The module is three layers stacked so a new provider plugs in without touching c
 - **Contracts** (`contracts/`) — the request/response shapes, token accounting, and the `LanguageModel` /
   `Embedder` interfaces. Provider-neutral.
 - **Providers** (`providers/`) — the concrete bridge to OpenAI-compatible servers over HTTP/SSE, plus the
-  typed wire DTOs that decode loose provider JSON leniently.
+  wire DTOs that decode loose provider JSON leniently.
 - **Runtime** (`runtime/`) — composable middleware that wraps a `LanguageModel` with a cache-then-retry stack,
   usage tracking, and request normalization/parsing for generic providers.
 
-A request crosses the provider boundary as an untyped `DynamicValue.Record` (normalized from `LmRequest`), and
+A request crosses the provider boundary as a schema-free `DynamicValue.Record` (normalized from `LmRequest`), and
 the response comes back as `DynamicValue` to be parsed — so any provider's wire shape can be adapted without
 changing the domain types.
 
@@ -27,12 +27,12 @@ changing the domain types.
 |------|------|
 | `LanguageModel` | The primary trait: `call(request): Either[DspyError, LmResponse]`. Advertises `supportsFunctionCalling` / `supportsResponseSchema`. |
 | `StreamingLanguageModel` | Adds `stream(request): Iterator[LmChunk]` over server-sent events. |
-| `LmRequest` | model + `LmMode` + `Vector[Message]` + provider `options` (untyped record) + optional `rolloutId`. |
+| `LmRequest` | model + `LmMode` + `Vector[Message]` + provider `options` (schema-free record) + optional `rolloutId`. |
 | `LmResponse` | outputs + optional `LmUsage` + model name + cache-hit flag. |
 | `Message` / `MessageRole` / `ContentPart` | A chat message (System/User/Assistant) with `text` or multimodal `parts`. |
-| `LmOutput` | One response item: text, typed `Vector[ToolCall]`, metadata. |
+| `LmOutput` | One response item: text, `Vector[ToolCall]`, metadata. |
 | `LmMode` | `Chat` / `Text` / `Responses` — selects the wire shape. |
-| `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a typed map of extras (cached, reasoning, audio, …); re-exported here for source compatibility. |
+| `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a `TokenCategory`-keyed map of extras (cached, reasoning, audio, …); re-exported here for source compatibility. |
 | `Embedder` | `embed(texts): Either[DspyError, Vector[Vector[Float]]]`, with an `Embedder.cached` factory. |
 | `LmChunk` / `LmToolCallDelta` | One streaming chunk (text, finish reason, usage) and incremental tool-call fragments. |
 | `LmCache` / `RetryPolicy` | The memoization and retry interfaces the runtime layer composes. |
@@ -44,8 +44,8 @@ changing the domain types.
 | `OpenAiLanguageModel` | Concrete `StreamingLanguageModel` for OpenAI-compatible chat completions; factories `apply`, `fromEnv`, `local`. |
 | `OpenAiEmbedder` | Concrete `Embedder` over the embeddings endpoint, batching by a configurable size. |
 | `OpenAiClient` / `HttpTransport` | The HTTP client (chat + SSE streaming, context-window error detection) and the pluggable transport (`HttpTransport.jdk()`). |
-| `ProviderLanguageModel` | A generic wrapper over an untyped `invoke: DynamicValue => Either[DspyError, DynamicValue]`, normalized by `ProviderRequestNormalizer` and parsed by `ProviderResponseParser`. |
-| `OpenAiUsage` / `OpenAiStreamChunk` / `ToolCallAssembler` | Typed, leniently-decoded wire DTOs and the assembler that merges streaming tool-call deltas into complete `ToolCall`s. |
+| `ProviderLanguageModel` | A generic wrapper over `invoke: DynamicValue => Either[DspyError, DynamicValue]`, normalized by `ProviderRequestNormalizer` and parsed by `ProviderResponseParser`. |
+| `OpenAiUsage` / `OpenAiStreamChunk` / `ToolCallAssembler` | Leniently decoded wire DTOs and the assembler that merges streaming tool-call deltas into complete `ToolCall`s. |
 
 ### Runtime
 
@@ -58,12 +58,12 @@ changing the domain types.
 
 ## Design notes
 
-- **The provider boundary is untyped JSON.** Requests serialize to a `DynamicValue.Record`; responses parse
+- **The provider boundary is schema-free JSON.** Requests serialize to a `DynamicValue.Record`; responses parse
   back from `DynamicValue`. This is the seam that keeps domain types provider-neutral.
-- **Option bags are provider-bound; control values are typed.** `LmRequest.options` holds provider-specific
+- **Option bags are provider-bound; control values are first-class fields.** `LmRequest.options` holds provider-specific
   knobs (`temperature`, `max_tokens`, `response_format`) and is spread verbatim into the payload. Framework
-  control like `rolloutId` is a typed field that never reaches the provider — it folds into the cache key so
-  repeated samples don't collide. (See the [provider-bag vs typed-control](../../README.md) decision.)
+  control like `rolloutId` is a dedicated field that never reaches the provider — it folds into the cache key so
+  repeated samples don't collide. (See the [provider-bag vs request-control](../../README.md) decision.)
 - **Caching is rollout-aware and layered.** The cache key (`RequestHash`, SHA-256) includes the rolloutId;
   `CompositeLmCache` promotes disk hits into memory.
 - **Streaming closes cleanly.** `stream` returns a lazy `Iterator[LmChunk]`; a setup error is reified as a
@@ -81,7 +81,7 @@ changing the domain types.
 | `contracts/LanguageModel.scala`, `LmCache.scala`, `RetryPolicy.scala` | model, cache, and retry interfaces |
 | `contracts/Embedder.scala`, `LmStreaming.scala`, `TokenCategory.scala` | embeddings, streaming chunk types, and the core `TokenCategory` compatibility alias |
 | `providers/OpenAiLanguageModel.scala`, `OpenAiEmbedder.scala`, `OpenAiClient.scala` | the OpenAI-compatible model, embedder, and HTTP client |
-| `providers/OpenAiUsage.scala`, `OpenAiStreamChunk.scala`, `DynamicJson.scala`, `WireKeys.scala` | typed wire DTOs, JSON helpers, wire-field constants |
+| `providers/OpenAiUsage.scala`, `OpenAiStreamChunk.scala`, `DynamicJson.scala`, `WireKeys.scala` | wire DTOs, JSON helpers, wire-field constants |
 | `providers/HttpTransport.scala`, `JdkHttpTransport.scala` | transport interface + JDK implementation |
 | `runtime/ProviderLanguageModel.scala` | generic provider wrapper + request normalizer / response parser |
 | `runtime/ManagedLanguageModel.scala` | cache+retry wrapper, `RetryPolicies`, usage tracking |
