@@ -3,12 +3,10 @@ package dspy4s.programs.strategies
 import dspy4s.programs.IterationLimit
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -18,8 +16,6 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, Actio
 import dspy4s.programs.runtime.{GeneratedPython, SandboxToolBridge}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Iterative code-generation agent. Port of Python DSPy's `dspy.CodeAct`.
   *
@@ -257,26 +253,10 @@ object CodeAct:
   type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
-  private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
-    name = "trajectory",
-    typeRef = TypeRef.string,
-    description = Some("History of generated code and observations so far.")
-  )
-  private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
-    name = "trajectory",
-    typeRef = TypeRef.string,
-    description = Some("History of generated code and observations.")
-  )
-  private[programs] val generatedCodeField: FieldSpec = FieldSpec(
-    name = "generated_code",
-    typeRef = TypeRef.string,
-    description = Some("Python code that, when executed, produces output relevant to answering the question.")
-  )
-  private[programs] val finishedField: FieldSpec = FieldSpec(
-    name = "finished",
-    typeRef = TypeRef.bool,
-    description = Some("Set to true once enough information has been collected to produce the final outputs.")
-  )
+  private[programs] val loopTrajectoryField: FieldSpec    = CodeActProtocol.loopTrajectoryField
+  private[programs] val extractTrajectoryField: FieldSpec = CodeActProtocol.extractTrajectoryField
+  private[programs] val generatedCodeField: FieldSpec     = CodeActProtocol.generatedCodeField
+  private[programs] val finishedField: FieldSpec          = CodeActProtocol.finishedField
 
   /** The typed output of one codeact loop step. */
   final case class CodeStep(generatedCode: String, finished: Boolean)
@@ -286,24 +266,7 @@ object CodeAct:
     * the string "true" (case-insensitive), anything else — including absence — reading as `false`. Decode never fails;
     * `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
     */
-  private[programs] val codeStepShape: Shape[CodeStep] = new Shape[CodeStep]:
-    val fieldSpecs: Vector[FieldSpec] = Vector(generatedCodeField, finishedField)
-
-    def encode(value: CodeStep): DynamicValue.Record =
-      DynamicValue.Record(Chunk.from(Seq(
-        "generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(value.generatedCode)),
-        "finished"       -> DynamicValue.Primitive(PrimitiveValue.Boolean(value.finished))
-      )))
-
-    def decode(raw: DynamicValue.Record): Either[DspyError, CodeStep] =
-      val finished = DynamicValues.recordGet(raw, "finished") match
-        case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(b))) => b
-        case Some(DynamicValue.Primitive(PrimitiveValue.String(s)))  => s.trim.equalsIgnoreCase("true")
-        case _                                                       => false
-      Right(CodeStep(
-        generatedCode = DynamicValues.recordGet(raw, "generated_code").map(DynamicValues.renderText).getOrElse(""),
-        finished = finished
-      ))
+  private[programs] val codeStepShape: Shape[CodeStep] = CodeActProtocol.codeStepShape
 
   /** Bridge [[dspy4s.programs.contracts.ToolFunction]]s into [[dspy4s.core.contracts.SandboxTool]]s so the LM's
     * generated Python can call them BY NAME from inside a sandboxed interpreter — Python `CodeAct`'s tools-inside-code,
@@ -328,11 +291,7 @@ object CodeAct:
     * [[dspy4s.programs.contracts.ToolFunction.argSchema]] (upstream renders its JSON-schema dict).
     */
   private[programs] def renderTool(tool: dspy4s.programs.contracts.ToolFunction): String =
-    val desc =
-      if tool.description.nonEmpty then s", whose description is <desc>${tool.description.replace("\n", "  ")}</desc>."
-      else "."
-    val args = tool.argSchema.map { case (name, typeRef) => s"$name: ${typeRef.repr}" }.mkString("{", ", ", "}")
-    s"${tool.name}$desc It takes arguments $args."
+    CodeActProtocol.renderTool(tool)
 
   /** One step in the CodeAct trajectory. `code` is what we ran; `observation` is either the captured stdout (success)
     * or an explanation of what failed (parse, execute, or interpreter error).
@@ -345,12 +304,4 @@ object CodeAct:
   )
 
   private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry]): String =
-    if entries.isEmpty then "(empty)"
-    else
-      entries.iterator.map { entry =>
-        val codeBlock =
-          if entry.code.isEmpty then "(no code)"
-          else s"```python\n${entry.code}\n```"
-        val obsLabel = if entry.isError then "observation" else "code_output"
-        s"## Iteration ${entry.iteration + 1}\n$codeBlock\n${obsLabel}_${entry.iteration}: ${entry.observation}"
-      }.mkString("\n\n")
+    CodeActProtocol.renderTrajectory(entries)
