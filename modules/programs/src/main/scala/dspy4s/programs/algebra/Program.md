@@ -73,7 +73,7 @@ flowchart LR
     constructor --> packaged
 ```
 
-The private `packageWith` constructor ties `Rep`, its value, its optimizable structure, and `N` together. Application
+The private `packageModule` constructor ties `Rep`, its value, its optimizable structure, and `N` together. Application
 code cannot package a module with structure evidence for a different representation or claim the wrong parameter count.
 
 ## Parameter arity is a grade
