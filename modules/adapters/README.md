@@ -68,7 +68,10 @@ text. This is handled uniformly at the adapter level, independent of any ReAct-s
 | `JSONAdapter.scala`, `JsonStreamingState.scala` | JSON instructions / `response_format` / schema embedding and the char-by-char streaming JSON parser |
 | `XMLAdapter.scala`, `XmlStreamingState.scala` | XML framing and its streaming parser |
 | `TwoStepAdapter.scala` | natural-language-then-extract two-stage adapter |
-| `contracts/AdapterContracts.scala` | `Adapter`, `AdapterInvocation`, `FormattedPrompt`, `ParsedOutput`, `FieldChunk`, `AdapterStreamingState` |
+| `contracts/Adapter.scala` | adapter formatting, parsing, streaming, and execution interface |
+| `contracts/AdapterInvocation.scala`, `FormattedPrompt.scala`, `ParsedOutput.scala` | adapter input, formatted prompt, and parsed result data |
+| `contracts/AdapterStreamingState.scala` | field chunks and the per-call streaming state machine |
+| `contracts/AdapterFailure.scala` | fallback policy and shared parse-error construction |
 | `contracts/NativeFunctionCalling.scala` | tool-call gating + option injection helpers |
 | `contracts/ToolContracts.scala` | `ToolSpec`, `ToolParameterSpec`, `ToolSchemaBridge` |
 | `contracts/AdapterConstraints.scala` | constraint-prose rendering |
