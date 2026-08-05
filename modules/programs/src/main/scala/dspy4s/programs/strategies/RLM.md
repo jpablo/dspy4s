@@ -560,24 +560,28 @@ synthesized by a separate predictor.
 
 A useful reading order is:
 
-1. [`RLM.scala`](RLM.scala): derived signatures, protocol data types, loop step, and result assembly.
-2. [`RLMReplProtocol.scala`](RLMReplProtocol.scala): prompt instructions, history rendering, code-fence handling, and
+1. [`RLM.scala`](RLM.scala): configuration, derived signatures, addressable predictors, and the public `RLM.*` facade.
+2. [`RLMModel.scala`](RLMModel.scala): action inputs/outputs, REPL commands, execution outcomes, variable metadata, and
+   history entries.
+3. [`RLMExecution.scala`](RLMExecution.scala): one invocation's interpreter lifecycle, loop transitions, validated
+   `SUBMIT`, result assembly, and extraction fallback.
+4. [`RLMReplProtocol.scala`](RLMReplProtocol.scala): prompt instructions, history rendering, code-fence handling, and
    `SUBMIT` decoding.
-3. [`RLMSandboxTools.scala`](RLMSandboxTools.scala): bounded `llm_query` and `llm_query_batched` sandbox functions.
-4. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): recoverable action outcomes versus fatal
+5. [`RLMSandboxTools.scala`](RLMSandboxTools.scala): bounded `llm_query` and `llm_query_batched` sandbox functions.
+6. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): recoverable action outcomes versus fatal
    interpreter errors.
-5. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion handling.
-6. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
+7. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion handling.
+8. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `ReplCodeInterpreter`, `CodeResult`, and `SandboxTool` contracts.
-7. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
+9. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
    the default stateful sandbox and host-tool bridge.
-8. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
+10. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
    two-leaf optimizer traversal.
-9. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
+11. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
    submissions, code errors, call limits, metadata, logging, and fallback.
-10. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the
+12. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the
    real Deno/Pyodide REPL.
-11. [`talk_to_your_data/Agent.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/Agent.scala):
+13. [`talk_to_your_data/Agent.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/Agent.scala):
    RLM as the execution stage over a CSV that is too large for the prompt.
 12. [`react_vs_rlm/ReactVsRlm.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala):
     the same task and tools expressed with ReAct and RLM.

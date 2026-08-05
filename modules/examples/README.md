@@ -103,16 +103,16 @@ Examples marked _offline_ below make no LM calls and need no key.
 
 ---
 
-## 🔧 Typed-signature demos (`typed/`)
+## 🔧 Signature demos (`signatures/`)
 
 Hand-written demonstrations of the four ways to declare a typed `Signature` (not 1:1 doc ports).
 
 | Example | Run | Surface |
 |---|---|---|
-| **BuilderExample** | `…typed.builderMain` _(offline)_ | Programmatic `Signature.builder(...)`. |
-| **CaseClassExample** | `…typed.caseClassMain` 🔑 | `Signature.derived[In, Out]` from two case classes. |
-| **FunctionExample** | `…typed.functionMain` 🔑 | `Signature.fromType[(in: I) => (out: O)]`. |
-| **SpecExample** | `…typed.specMain` 🔑 | `Signature.of[T <: Spec]` from a trait with `InputField`/`OutputField`. |
+| **BuilderExample** | `…signatures.builderMain` _(offline)_ | Programmatic `Signature.builder(...)`. |
+| **CaseClassExample** | `…signatures.caseClassMain` 🔑 | `Signature.derived[In, Out]` from two case classes. |
+| **FunctionExample** | `…signatures.functionMain` 🔑 | `Signature.fromType[(in: I) => (out: O)]`. |
+| **SpecExample** | `…signatures.specMain` 🔑 | `Signature.of[T <: Spec]` from a trait with `InputField`/`OutputField`. |
 
 ---
 

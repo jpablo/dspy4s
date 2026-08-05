@@ -323,8 +323,10 @@ For comparison with the upstream Python DSPy architecture:
 ## Where to look in the source
 
 - `core/contracts/SignatureLayout.scala` — the layout case class +
-  factories (`parse`, `create`, `fromState`). Mutation helpers are
+  factories (`parse`, `create`) and persistence delegates. Mutation helpers are
   `private[dspy4s]`.
+- `core/contracts/SignatureLayoutStateCodec.scala` — state/JSON encoding and
+  decoding behind `dumpState`, `dumpJson`, `fromState`, and `fromJson`.
 - `core/data/` — individual `Example`, `RawPrediction`, and `Completions`
   files. All field values live in a `DynamicValue.Record`.
 - `core/contracts/DynamicValues.scala` — boundary helpers for lifting
@@ -333,18 +335,18 @@ For comparison with the upstream Python DSPy architecture:
   `renderText`). Used at user-input and observability surfaces; not in
   the codec spine.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
-- `typed/Signature.scala` — typed wrapper + six factory entry points.
-- `typed/Shape.scala` — the general `Shape[A]` boundary, lawful
+- `signatures/Signature.scala` — typed wrapper + six factory entry points.
+- `signatures/Shape.scala` — the general `Shape[A]` boundary, lawful
   `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures,
   `SchemaTupleShape` for named-tuple outputs, and the product shape produced
   by `ZioSchemaCodec.derivedFromZioSchema`. All speak `DynamicValue.Record` natively in
   `encode` / `decode` — there is no `Map[String, Any]` shim.
-- `typed/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
+- `signatures/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
   the product `RoundTripShape[A]` factory (`derivedFromZioSchema`), `FieldSpec`
   derivation from `Reflect.Record`, and `normalize(dv, target)` which
   coerces LM-shaped primitives against the target Reflect on the
   decode path. Encode uses `Schema.toDynamicValue` directly.
-- `typed/Spec.scala` — `InputField[+A]` / `OutputField[+A]` opaque
+- `signatures/Spec.scala` — `InputField[+A]` / `OutputField[+A]` opaque
   types and the `Spec` trait.
 - `programs/runtime/PredictEngine.scala` — the shared execute body.
 - `programs/contracts/Module.scala` — the single program base; `final apply`

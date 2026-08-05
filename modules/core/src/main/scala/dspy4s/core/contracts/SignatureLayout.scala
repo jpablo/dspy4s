@@ -1,7 +1,6 @@
 package dspy4s.core.contracts
 
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.DynamicValue
 
 /** The compiled runtime layout of a typed Signature: a name, optional instructions, and separate ordered input and
   * output cohorts. Adapters, programs, and the rest of the runtime stack consume this directly; the typed
@@ -106,37 +105,15 @@ final case class SignatureLayout private (
     * `OptimizableParameters` contract instead of serializing a whole layout.
     */
   def dumpState: DynamicValue.Record =
-    def str(s: String): DynamicValue                = DynamicValue.Primitive(PrimitiveValue.String(s))
-    def opt(o: Option[Any]): DynamicValue           = o.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
-    def fieldRecord(field: FieldSpec): DynamicValue =
-      DynamicValue.Record(Chunk.from(Seq(
-        "name"         -> str(field.name),
-        "typeRef"      -> str(field.typeRef.repr),
-        "description"  -> opt(field.description),
-        "prefix"       -> opt(field.prefix),
-        "defaultValue" -> opt(field.defaultValue),
-        "enumValues"   -> DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))),
-        "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue)))
-      )))
-    DynamicValue.Record(Chunk.from(Seq(
-      "name"         -> str(name),
-      "instructions" -> opt(instructions),
-      "inputFields"  -> DynamicValue.Sequence(Chunk.from(inputFields.map(fieldRecord))),
-      "outputFields" -> DynamicValue.Sequence(Chunk.from(outputFields.map(fieldRecord)))
-    )))
+    SignatureLayoutStateCodec.dumpState(this)
 
   /** Serialize the state to a JSON string via zio-blocks' `DynamicValue` JSON codec. Round-trips with
     * [[SignatureLayout.fromJson]].
     */
   def dumpJson: String =
-    new String(SignatureLayout.dynamicJsonCodec.encode(dumpState), java.nio.charset.StandardCharsets.UTF_8)
+    SignatureLayoutStateCodec.dumpJson(this)
 
 object SignatureLayout:
-
-  /** JSON codec for the `DynamicValue`-shaped state, backed by zio-blocks' schema for `DynamicValue`. Encodes
-    * `dumpState` to clean, natural JSON (records → objects, `Null` → `null`).
-    */
-  private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a `SignatureLayout`. Prefer
     * `dspy4s.signatures.Signature.fromString` from user code; this is the lower-level entry point that the typed
@@ -196,81 +173,8 @@ object SignatureLayout:
     * persistence is state-only and therefore does not use this codec.
     */
   def fromState(state: DynamicValue.Record): Either[DspyError, SignatureLayout] =
-    def getString(rec: DynamicValue.Record, key: String): Option[String] =
-      DynamicValues.recordGet(rec, key) match
-        case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Some(s)
-        case _                                                      => None
-
-    def readName: Either[DspyError, String] =
-      getString(state, "name")
-        .filter(_.nonEmpty)
-        .toRight(ValidationError("SignatureLayout state is missing non-empty 'name'"))
-
-    def readInstructions: Either[DspyError, Option[String]] =
-      DynamicValues.recordGet(state, "instructions") match
-        case None | Some(_: DynamicValue.Null.type)                 => Right(None)
-        case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => Right(Some(s))
-        case Some(_)                                                => Left(ValidationError("Invalid 'instructions' value in signature state"))
-
-    def readField(raw: DynamicValue): Either[DspyError, FieldSpec] =
-      raw match
-        case rec: DynamicValue.Record =>
-          getString(rec, "name").toRight(ValidationError("Field state is missing 'name'")).map { name =>
-            val typeRef      = getString(rec, "typeRef").map(TypeRef.fromToken).getOrElse(TypeRef.string)
-            val defaultValue = DynamicValues.recordGet(rec, "defaultValue") match
-              case None | Some(_: DynamicValue.Null.type) => None
-              case Some(dv)                               => Some(DynamicValues.toAny(dv))
-            val enumValues = DynamicValues.recordGet(rec, "enumValues") match
-              case Some(seq: DynamicValue.Sequence) => seq.elements.iterator.collect {
-                  case DynamicValue.Primitive(PrimitiveValue.String(value)) => value
-                }.toVector
-              case _ => Vector.empty[String]
-            val constraints = DynamicValues.recordGet(rec, "constraints") match
-              case Some(seq: DynamicValue.Sequence) => seq.elements.iterator.collect { case r: DynamicValue.Record =>
-                  r
-                }.flatMap(
-                  Constraint.fromState
-                ).toVector
-              case _ => Vector.empty[Constraint]
-            FieldSpec(
-              name = name,
-              typeRef = typeRef,
-              description = getString(rec, "description"),
-              prefix = getString(rec, "prefix"),
-              defaultValue = defaultValue,
-              enumValues = enumValues,
-              constraints = constraints
-            )
-          }
-        case _ => Left(ValidationError("Invalid field entry in signature state"))
-
-    def readFields(key: String): Either[DspyError, Vector[FieldSpec]] =
-      DynamicValues.recordGet(state, key) match
-        case Some(seq: DynamicValue.Sequence) =>
-          seq.elements.iterator.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, raw) =>
-            for
-              fields <- acc
-              field  <- readField(raw)
-            yield fields :+ field
-          }
-        case _ => Left(ValidationError(s"SignatureLayout state is missing '$key'"))
-
-    for
-      name         <- readName
-      instructions <- readInstructions
-      inputFields  <- readFields("inputFields")
-      outputFields <- readFields("outputFields")
-      signature    <- create(
-                     name = name,
-                     inputFields = inputFields,
-                     outputFields = outputFields,
-                     instructions = instructions
-                   )
-    yield signature
+    SignatureLayoutStateCodec.fromState(state)
 
   /** Re-hydrate a layout from a JSON string produced by [[SignatureLayout.dumpJson]]. */
   def fromJson(json: String): Either[DspyError, SignatureLayout] =
-    dynamicJsonCodec.decode(json.getBytes(java.nio.charset.StandardCharsets.UTF_8)) match
-      case Right(rec: DynamicValue.Record) => fromState(rec)
-      case Right(other)                    => Left(ValidationError(s"Expected a JSON object for signature state, got: $other"))
-      case Left(err)                       => Left(ValidationError(s"Invalid signature-state JSON: ${err.toString}"))
+    SignatureLayoutStateCodec.fromJson(json)
