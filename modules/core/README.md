@@ -81,7 +81,7 @@ Four abstractions anchor the framework:
 | `contracts/RuntimeContext.scala` | `RuntimeContext`, services/config/scope partitions, and the flat compatibility surface |
 | `contracts/RuntimeOutput.scala` | `TraceEntry`, `HistoryEntry`, the `RuntimeDelta` monoid, and `Executed[A]` |
 | `contracts/Errors.scala` | the `DspyError` hierarchy |
-| `contracts/SignatureLayout.scala` | `SignatureLayout`, `FieldSpec`, `TypeRef`, `Constraint` |
+| `contracts/TypeRef.scala`, `Constraint.scala`, `FieldSpec.scala`, `SignatureLayout.scala` | signature wire types, field constraints and metadata, and the compiled layout |
 | `contracts/SignatureOps.scala` | idempotent layout-surgery extensions (prepend/append/replace) |
 | `contracts/Callbacks.scala` | `CallbackEvent` events + `CallbackHandler` |
 | `contracts/ToolCall.scala`, `CodeInterpreter.scala`, `ClosableIterator.scala`, `HistoryRenderer.scala` | tool calls, code-exec primitives, streaming iterator, history rendering |
