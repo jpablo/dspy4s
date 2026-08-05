@@ -9,8 +9,8 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
-import dspy4s.programs.DynamicPredict
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.programs.strategies.Predict
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.typed.Signature

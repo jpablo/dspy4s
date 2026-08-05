@@ -12,7 +12,8 @@ package dspy4s.examples.tutorials.output_refinement
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.{AttemptCount, BestOfN, ChainOfThought, FailureCount, Refine}
+import dspy4s.programs.{AttemptCount, FailureCount}
+import dspy4s.programs.strategies.{BestOfN, ChainOfThought, Refine}
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 
 // Snippet 5 judge signature (top-level for Mirror derivation).

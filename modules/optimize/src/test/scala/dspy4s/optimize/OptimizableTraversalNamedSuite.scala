@@ -5,7 +5,7 @@ import dspy4s.programs.optimization.{optimizableParameters, optimizableView}
 import dspy4s.programs.optimization.OptimizableTraversal
 
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 

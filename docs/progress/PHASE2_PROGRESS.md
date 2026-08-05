@@ -61,22 +61,22 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 - Added coverage for async configure ownership and cancellation stop behavior
 
 8. First concrete program module
-- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/Predict.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/Predict.scala`
 - Implemented settings-backed `Predict` pipeline (`adapter.format -> lm.call -> adapter.parse`)
 - Wired callback dispatcher for adapter format/parse and LM call stages
 - Added prediction completion/usage construction from parsed LM outputs
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/PredictSuite.scala`
 
 9. Additional program wrappers
-- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ChainOfThought.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/ChainOfThought.scala`
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/Parallel.scala`
 - Added `ParallelExecutor.executeEither` for structured module-level failure tracking
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ChainOfThoughtSuite.scala`
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ParallelSuite.scala`
 
 10. Selection wrappers (`BestOfN` / `Refine`)
-- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/BestOfN.scala`
-- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/Refine.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/BestOfN.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/Refine.scala`
 - Added rollout-aware repeated execution (`rollout_id`, `temperature`) with reward-based best-candidate selection
 - Added fail-count behavior compatible with DSPy tests (default and custom fail thresholds)
 - Added best-attempt trace/history propagation back to outer runtime context
@@ -85,7 +85,7 @@ Phase 2 focuses on settings, callbacks, and context propagation semantics.
 
 11. ReAct and tool execution parity foundations
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/runtime/ToolExecutor.scala`
-- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ReAct.scala`
+- Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/ReAct.scala`
 - Added iterative tool-orchestration loop with bounded iterations and explicit exhaustion error semantics
 - Added tool lookup/invocation path with callback-dispatched tool start/end events
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/test/scala/dspy4s/programs/ReActSuite.scala`

@@ -8,7 +8,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContex
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 
 /** Offline InferRules suite. One scripted LM serves two sub-tasks through the ambient model:

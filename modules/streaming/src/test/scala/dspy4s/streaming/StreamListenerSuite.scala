@@ -3,9 +3,9 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.XMLAdapter
-import dspy4s.programs.ChainOfThought
+import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.IterationLimit
-import dspy4s.programs.ReAct
+import dspy4s.programs.strategies.ReAct
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.core.contracts.DspyError
@@ -20,7 +20,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.streaming.contracts.StreamEvent

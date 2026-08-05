@@ -355,7 +355,7 @@ plus the new combinator law suites are green:
 ### Code-truth correction: ProgramOfThought is not `feedback`
 
 The grill's spec claimed `ProgramOfThought = feedback(critic = regenerate-on-error)`. Reading the actual
-[`ProgramOfThought`](../../modules/programs/src/main/scala/dspy4s/programs/ProgramOfThought.scala) during 6.1
+[`ProgramOfThought`](../../modules/programs/src/main/scala/dspy4s/programs/strategies/ProgramOfThought.scala) during 6.1
 showed that does not hold. PoT's inner loop (`tryIteration`) differs from `feedback`/`bestOf` on every axis:
 
 - **No reward, no keep-best.** It retries on *execution failure* (parse error or non-zero exit), not on a

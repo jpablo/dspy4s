@@ -131,9 +131,9 @@ private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   * record shapes. Subclasses implement [[forwardDynamic]] in terms of the raw engine envelope; this trait lifts that
   * result exactly once through [[Prediction.dynamic]], making the ordinary [[Module]] boundary uniform.
   *
-  * [[dspy4s.programs.DynamicPredict DynamicPredict]] is the dynamic prediction module on this spine; user-defined
-  * data-bag programs may extend it too. The typed [[dspy4s.programs.Predict Predict]] is a sibling module over the
-  * shared `PredictEngine`, not a wrapper around `DynamicPredict`.
+  * [[dspy4s.programs.strategies.DynamicPredict DynamicPredict]] is the dynamic prediction module on this spine;
+  * user-defined data-bag programs may extend it too. The typed [[dspy4s.programs.strategies.Predict Predict]] is a
+  * sibling module over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */
 trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
   override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =

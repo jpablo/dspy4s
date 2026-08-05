@@ -1,4 +1,4 @@
-# How RLM works in dspy4s
+# How RLM works in `dspy4s.programs.strategies`
 
 `RLM` means **Recursive Language Model**. It is designed for tasks where the input may be too large to place directly
 in every language-model prompt. Instead, RLM gives the model a stateful Python REPL:
@@ -283,7 +283,8 @@ The default interpreter is a Deno/Pyodide REPL, so the host needs `deno` availab
 
 ```scala
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
-import dspy4s.programs.{IterationLimit, LlmCallLimit, RLM}
+import dspy4s.programs.{IterationLimit, LlmCallLimit}
+import dspy4s.programs.strategies.RLM
 import dspy4s.typed.Signature
 
 val agent = RLM(
@@ -323,7 +324,7 @@ The important point is not that every RLM run must use `llm_query`. Python can s
 deterministically first, then use a sub-LM only for the slices that require semantic interpretation.
 
 For a real sandboxed three-step example that proves variable injection, persistent state, `llm_query`, and `SUBMIT`,
-see [`RLMLiveSuite.scala`](../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala).
+see [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala).
 
 ## `SUBMIT` is typed termination
 
@@ -536,7 +537,7 @@ The inner predictors are stable members, so callbacks and tracing can observe ev
 `rlm_extract` call. Direct REPL execution is not a module boundary, though its rendered result appears in later action
 inputs and in the final trajectory.
 
-The current [`Streamable.scala`](../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) defines
+The current [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) defines
 dedicated instances for `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`, and `ProgramOfThought`, but not for `RLM`.
 Consequently, RLM does not yet have the same `Streamify` entry point and listener-signature validation as those
 programs.
@@ -560,22 +561,22 @@ synthesized by a separate predictor.
 A useful reading order is:
 
 1. [`RLM.scala`](RLM.scala): derived signatures, variable metadata, loop step, `SUBMIT`, tools, and result assembly.
-2. [`contracts/ActionInterpreter.scala`](contracts/ActionInterpreter.scala): recoverable action outcomes versus fatal
+2. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): recoverable action outcomes versus fatal
    interpreter errors.
-3. [`runtime/AgentLoop.scala`](runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion handling.
-4. [`CodeInterpreter.scala`](../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
+3. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion handling.
+4. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `ReplCodeInterpreter`, `CodeResult`, and `SandboxTool` contracts.
-5. [`DenoPyodideInterpreter.scala`](../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
+5. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
    the default stateful sandbox and host-tool bridge.
-6. [`CompositeOptimizableTraversalInstances.scala`](optimization/CompositeOptimizableTraversalInstances.scala): the
+6. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
    two-leaf optimizer traversal.
-7. [`RLMSuite.scala`](../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
+7. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
    submissions, code errors, call limits, metadata, logging, and fallback.
-8. [`RLMLiveSuite.scala`](../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the
+8. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the
    real Deno/Pyodide REPL.
-9. [`talk_to_your_data/Agent.scala`](../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/Agent.scala):
+9. [`talk_to_your_data/Agent.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/Agent.scala):
    RLM as the execution stage over a CSV that is too large for the prompt.
-10. [`react_vs_rlm/ReactVsRlm.scala`](../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala):
+10. [`react_vs_rlm/ReactVsRlm.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala):
     the same task and tools expressed with ReAct and RLM.
 
 ## Scope and assumptions

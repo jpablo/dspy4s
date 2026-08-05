@@ -56,7 +56,7 @@ object SpecExample:
     * and read the typed named-tuple output with dot syntax.
     */
   def callEmotion(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    import dspy4s.programs.Predict
+    import dspy4s.programs.strategies.Predict
     Predict(emotion)((sentence = sentence)).map(_.output.sentiment)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.specMain"

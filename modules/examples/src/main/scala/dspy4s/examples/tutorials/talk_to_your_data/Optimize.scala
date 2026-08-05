@@ -16,7 +16,7 @@ import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.contracts.LanguageModel
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.contracts.ProgramCall
 

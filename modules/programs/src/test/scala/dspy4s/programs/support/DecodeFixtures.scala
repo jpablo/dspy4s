@@ -4,7 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.Predict
 import dspy4s.typed.Signature
 
 /** Offline decode-test harness: drive the REAL adapter + typed decode against a canned LM completion, with no live LM

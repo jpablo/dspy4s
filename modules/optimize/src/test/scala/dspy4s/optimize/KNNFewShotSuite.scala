@@ -6,7 +6,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, Signatur
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{Embedder, LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.retrievers.NeighborCount
 import dspy4s.programs.retrievers.NonEmptyTrainset
 import dspy4s.programs.contracts.ProgramCall

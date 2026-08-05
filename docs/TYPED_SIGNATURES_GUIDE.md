@@ -8,7 +8,7 @@
 ## Quick start
 
 ```scala
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.Predict
 import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 
 // 1. Describe your I/O as a DSPy-style spec trait.

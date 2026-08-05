@@ -13,8 +13,8 @@ trait LowPriorityOptimizableTraversal:
     *
     * The `NotGiven[OptimizableLeaf[P]]` guard keeps the structural derivation from competing with
     * [[OptimizableTraversal.fromOptimizableLeaf]]: a type that is itself a leaf (e.g.
-    * [[dspy4s.programs.DynamicPredict]]) must resolve to the 1-element leaf instance, not be torn apart into its
-    * case-class fields.
+    * [[dspy4s.programs.strategies.DynamicPredict]]) must resolve to the 1-element leaf instance, not be torn apart into
+    * its case-class fields.
     */
   inline given derived[P <: Product, N <: Int](using
       m: Mirror.ProductOf[P],

@@ -128,7 +128,7 @@ composite. Decide the shape before extending optimizer coverage.
   ([react.py](../../../dspy/dspy/predict/react.py) L88–89); dspy4s rebuilds
   the `DynamicPredict` instances (and re-runs `ChainOfThought.augmentLayout`)
   on every `execute`
-  ([ReAct.scala](../../modules/programs/src/main/scala/dspy4s/programs/ReAct.scala)) in `forward`.
+  ([ReAct.scala](../../modules/programs/src/main/scala/dspy4s/programs/strategies/ReAct.scala)) in `forward`.
   `CodeAct` has the same pattern. This is currently harmless *because* there
   is no predictor-introspection layer that would need those predicts to be
   stable, addressable fields — i.e. it is a **symptom of G-1**. When G-1 is

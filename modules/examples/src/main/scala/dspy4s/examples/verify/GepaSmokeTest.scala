@@ -29,7 +29,7 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 
 import java.util.concurrent.atomic.AtomicInteger

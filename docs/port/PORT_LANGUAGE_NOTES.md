@@ -177,7 +177,7 @@ but never surprises with reflection failures.
 
 | Python | dspy4s |
 |---|---|
-| `dspy/__init__.py` re-exports the user-facing API | No equivalent. Users import the qualified name (`dspy4s.programs.Predict`). A top-level façade object could be added later. |
+| `dspy/__init__.py` re-exports the user-facing API | No equivalent. Users import the qualified name (`dspy4s.programs.strategies.Predict`). A top-level façade object could be added later. |
 | One package = one directory with `__init__.py` | One package = one directory; package declaration on each file (`package dspy4s.foo`). |
 | Free functions at module top level | Companion `object` methods (`Streamify.streamify`, `JsonCodec.encode`). |
 

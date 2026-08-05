@@ -1,5 +1,6 @@
-package dspy4s.programs
+package dspy4s.programs.strategies
 
+import dspy4s.programs.{AttemptCount, FailureCount, Mode, mode}
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext

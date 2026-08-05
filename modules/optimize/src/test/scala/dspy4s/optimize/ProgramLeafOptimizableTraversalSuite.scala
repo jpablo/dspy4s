@@ -4,8 +4,8 @@ import dspy4s.programs.optimization.{OptimizableLeaf, OptimizableTraversal}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
-import dspy4s.programs.ChainOfThought
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.ChainOfThought
+import dspy4s.programs.strategies.Predict
 import dspy4s.typed.Signature
 import munit.FunSuite
 

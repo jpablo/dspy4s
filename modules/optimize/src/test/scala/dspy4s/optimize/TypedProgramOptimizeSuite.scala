@@ -10,7 +10,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, Signatur
 import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.Predict
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Signature
 import munit.FunSuite

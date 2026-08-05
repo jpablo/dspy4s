@@ -41,7 +41,8 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.programs.{IterationLimit, ReAct, RLM}
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.strategies.{ReAct, RLM}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.typed.Signature
 import zio.blocks.schema.DynamicValue

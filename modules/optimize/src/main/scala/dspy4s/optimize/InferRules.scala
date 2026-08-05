@@ -14,7 +14,7 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.contracts.ProgramCall

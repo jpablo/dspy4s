@@ -10,8 +10,8 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.TypeRef
 import dspy4s.evaluate.contracts.Metric
-import dspy4s.programs.ChainOfThought
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.ChainOfThought
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 

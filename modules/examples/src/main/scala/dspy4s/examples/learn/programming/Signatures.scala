@@ -28,7 +28,7 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.providers.OpenAiLanguageModel
-import dspy4s.programs.{ChainOfThought, Predict}
+import dspy4s.programs.strategies.{ChainOfThought, Predict}
 import dspy4s.typed.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
 

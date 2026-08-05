@@ -10,9 +10,9 @@ import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.programs.AttemptCount
-import dspy4s.programs.CodeAct
-import dspy4s.programs.MultiChainComparison
-import dspy4s.programs.ReAct
+import dspy4s.programs.strategies.CodeAct
+import dspy4s.programs.strategies.MultiChainComparison
+import dspy4s.programs.strategies.ReAct
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.typed.Signature

@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.programs.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
+import dspy4s.programs.strategies.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
 /** Hand-written [[OptimizableTraversal]] instances for composite typed programs whose learnable sub-predicts are
   * hoisted to stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion

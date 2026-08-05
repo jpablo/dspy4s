@@ -23,7 +23,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}
 import dspy4s.lm.runtime.ManagedLanguageModel
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.Predict
 import dspy4s.typed.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.{DynamicValue, Schema}
 

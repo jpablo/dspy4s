@@ -12,7 +12,8 @@ import dspy4s.adapters.{ChatAdapter, JSONAdapter}
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.{IterationLimit, ReAct}
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 

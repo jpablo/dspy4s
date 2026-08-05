@@ -16,8 +16,8 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.ChainOfThought
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.ChainOfThought
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.optimization.OptimizableLeaf
 import dspy4s.programs.optimization.OptimizableMetadata

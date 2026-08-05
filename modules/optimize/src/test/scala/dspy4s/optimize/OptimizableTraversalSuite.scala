@@ -7,7 +7,7 @@ import dspy4s.programs.optimization.{OptimizableParameters, OptimizableTraversal
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 
 class OptimizableTraversalSuite extends FunSuite:
@@ -72,7 +72,7 @@ class OptimizableTraversalSuite extends FunSuite:
 
   test("derived rejects a field without OptimizableTraversal evidence instead of silently treating it as empty") {
     val errors = compileErrors("""
-      import dspy4s.programs.DynamicPredict
+      import dspy4s.programs.strategies.DynamicPredict
       import dspy4s.programs.optimization.OptimizableTraversal
 
       final class Opaque

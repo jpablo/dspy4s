@@ -19,7 +19,8 @@ import dspy4s.core.contracts.{DspyError, ModuleEndEvent, RuntimeContext}
 import dspy4s.core.contracts.{CallbackEvent, CallbackHandler}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.programs.{IterationLimit, ReAct}
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 

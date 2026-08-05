@@ -24,7 +24,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, LmUsage, Message, MessageRole}
 import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
-import dspy4s.programs.ChainOfThought
+import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.typed.Signature
 

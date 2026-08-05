@@ -11,7 +11,7 @@ import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.CandidateCount
 import dspy4s.optimize.DatasetSampleSize
 import dspy4s.programs.optimization.OptimizableTraversal
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.contracts.ProgramCall
 

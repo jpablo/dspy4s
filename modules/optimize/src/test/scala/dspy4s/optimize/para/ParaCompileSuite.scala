@@ -10,7 +10,7 @@ import dspy4s.optimize.{COPROConfig, CoproBreadth, QAInput, QAOutput, RoundCount
 import dspy4s.programs.ProgramRunner
 import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.DynamicSignature
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.Predict
 import dspy4s.programs.algebra.{Program, SomeProgram}
 import dspy4s.typed.Signature
 import munit.FunSuite

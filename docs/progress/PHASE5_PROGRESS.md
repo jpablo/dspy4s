@@ -13,7 +13,7 @@ Phase 5 focuses on program-level parity and end-to-end runtime behavior.
 ## Implemented in this step
 
 1. Native tool-call propagation into `Predict`
-- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/Predict.scala`
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/Predict.scala`
 - `Predict` now surfaces LM-native tool calls in prediction values under:
   - `tool_calls: Vector[Map[String, Any]]`
 - Tool call payload is derived from the first LM output choice, preserving:
@@ -21,7 +21,7 @@ Phase 5 focuses on program-level parity and end-to-end runtime behavior.
   - `args`
 
 2. ReAct native tool-call execution path
-- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ReAct.scala`
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/ReAct.scala`
 - `ReAct` tool request extraction now supports:
   - native `tool_calls` payloads (from LM/provider path)
   - legacy `tool_name` / `tool_args` fields (backward compatible)
@@ -34,7 +34,7 @@ Phase 5 focuses on program-level parity and end-to-end runtime behavior.
   - added coverage for native `tool_calls` execution flow in `ReAct`
 
 4. ReAct multi-tool-call sequencing and result stitching
-- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/ReAct.scala`
+- Updated `/Users/jpablo/proyectos/experimentos/dspy4s/modules/programs/src/main/scala/dspy4s/programs/strategies/ReAct.scala`
 - `ReAct` now executes multiple native `tool_calls` entries in a single iteration, sequentially.
 - Added batched result stitching fields:
   - `tool_results`: current iteration batch as `Vector[Map[String, Any]]` with `tool_name`, `tool_args`, `result`, `index`

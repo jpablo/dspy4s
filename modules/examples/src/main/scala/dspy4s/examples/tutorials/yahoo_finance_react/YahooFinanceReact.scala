@@ -15,7 +15,8 @@ package dspy4s.examples.tutorials.yahoo_finance_react
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.{IterationLimit, ReAct}
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 import zio.blocks.schema.Schema

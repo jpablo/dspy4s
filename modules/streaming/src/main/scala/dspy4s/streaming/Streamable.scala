@@ -4,13 +4,13 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.CodeAct
-import dspy4s.programs.ChainOfThought
-import dspy4s.programs.DynamicPredict
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.CodeAct
+import dspy4s.programs.strategies.ChainOfThought
+import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.programs.strategies.Predict
 import dspy4s.programs.ProgramRunner
-import dspy4s.programs.ProgramOfThought
-import dspy4s.programs.ReAct
+import dspy4s.programs.strategies.ProgramOfThought
+import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 

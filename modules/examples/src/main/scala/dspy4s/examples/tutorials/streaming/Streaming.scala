@@ -21,7 +21,7 @@ package dspy4s.examples.tutorials.streaming
 import dspy4s.core.contracts.{ClosableIterator, DspyError, DynamicValues, RuntimeContext, :=}
 import dspy4s.core.data.RawPrediction
 import dspy4s.examples.Demo
-import dspy4s.programs.{DynamicPredict, ReAct}
+import dspy4s.programs.strategies.{DynamicPredict, ReAct}
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
 import dspy4s.streaming.{StatusMessageProvider, Streamify}
 import dspy4s.streaming.contracts.{ErrorEvent, PredictionEvent, StatusEvent, StreamEvent, StreamListener, TokenEvent}

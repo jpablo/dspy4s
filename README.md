@@ -16,7 +16,7 @@ A *signature* declares typed inputs and outputs. A *program* (here `Predict`)
 runs it against a language model.
 
 ```scala
-import dspy4s.programs.Predict
+import dspy4s.programs.strategies.Predict
 import dspy4s.typed.Signature
 
 // Inputs and outputs are named tuples, so `sentence` and `sentiment` are real

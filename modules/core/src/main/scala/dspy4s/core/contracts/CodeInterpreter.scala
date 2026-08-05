@@ -39,7 +39,7 @@ object CodeInterpreterErrors:
   *   - `close()` releases any held resources (long-lived subprocesses, REPL handles). Idempotent. After `close()`,
   *     behavior of further `execute` calls is implementation-defined — most impls should fail fast.
   *
-  * Used by [[dspy4s.programs.CodeAct]], `ProgramOfThought`, and `RLM`.
+  * Used by [[dspy4s.programs.strategies.CodeAct]], `ProgramOfThought`, and `RLM`.
   */
 trait CodeInterpreter extends AutoCloseable:
   def execute(code: String): Either[DspyError, CodeResult]

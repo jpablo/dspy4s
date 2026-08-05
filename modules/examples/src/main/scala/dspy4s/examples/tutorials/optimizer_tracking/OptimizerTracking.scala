@@ -20,7 +20,7 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
 import dspy4s.optimize.{CandidateCount, DemoCount, MIPROv2, MIPROv2Config, ProgramPersistence, TrialCount}
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.typed.Signature
 
 import java.util.concurrent.atomic.AtomicInteger

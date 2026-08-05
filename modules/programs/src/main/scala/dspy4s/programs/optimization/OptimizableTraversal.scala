@@ -95,8 +95,8 @@ object OptimizableTraversal extends CompositeOptimizableTraversalInstances with 
       traversal.replaceSized(program, updates)
 
   /** Lifts a single [[OptimizableLeaf]] leaf to a 1-element [[OptimizableTraversal]]. A type that is itself a leaf
-    * (e.g. [[dspy4s.programs.DynamicPredict]], which is also a `Product`) resolves here and is not torn into its
-    * case-class fields by structural derivation.
+    * (e.g. [[dspy4s.programs.strategies.DynamicPredict]], which is also a `Product`) resolves here and is not torn into
+    * its case-class fields by structural derivation.
     */
   given fromOptimizableLeaf[P](using leaf: OptimizableLeaf[P]): OptimizableTraversal.Of[P, 1] with
     def arity(@annotation.unused program: P): Int                      = 1

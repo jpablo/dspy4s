@@ -24,7 +24,8 @@ import dspy4s.optimize.{
   RandomSearchConfig,
   SearchCandidateCount
 }
-import dspy4s.programs.{DynamicPredict, DynamicSignature, ProgramRunner}
+import dspy4s.programs.{DynamicSignature, ProgramRunner}
+import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableTraversal
 
 object Optimizers:

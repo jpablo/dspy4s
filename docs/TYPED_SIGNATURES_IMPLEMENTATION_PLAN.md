@@ -122,7 +122,7 @@ New files:
 - `modules/typed/src/main/scala/dspy4s/typed/KyoSchemaFieldCodec.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/Shape.scala`
 - `modules/typed/src/main/scala/dspy4s/typed/internal/ShapeMacros.scala`
-- `modules/programs/src/main/scala/dspy4s/programs/Predict.scala`
+- `modules/programs/src/main/scala/dspy4s/programs/strategies/Predict.scala`
 
 Test files:
 
@@ -629,7 +629,7 @@ Acceptance criteria:
 
 Implemented one file + one build-graph edit:
 
-- `modules/programs/src/main/scala/dspy4s/programs/Predict.scala` —
+- `modules/programs/src/main/scala/dspy4s/programs/strategies/Predict.scala` —
   `final case class Predict[I, O](signature, demos, name, runtime)`.
   `run(input: I)(using RuntimeContext): Either[DspyError, Prediction[O]]`
   encodes via `signature.inputShape`, dispatches through the existing

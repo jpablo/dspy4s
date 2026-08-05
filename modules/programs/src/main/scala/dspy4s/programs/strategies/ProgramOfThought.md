@@ -1,4 +1,4 @@
-# How ProgramOfThought works in dspy4s
+# How ProgramOfThought works in `dspy4s.programs.strategies`
 
 `ProgramOfThought[I, O]` asks a language model to solve a task by writing a complete Python program. It executes that
 program, gives failures back to the model for repair, and—once execution succeeds—uses a final predictor to turn the
@@ -272,7 +272,8 @@ the program to print a JSON object explicitly, because stdout is the portable re
 ```scala
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.SubprocessPythonInterpreter
-import dspy4s.programs.{IterationLimit, ProgramOfThought}
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.strategies.ProgramOfThought
 import dspy4s.typed.Signature
 
 def solve(question: String)(using RuntimeContext): Either[DspyError, String] =
@@ -520,21 +521,21 @@ A useful reading order is:
 
 1. [`ProgramOfThought.scala`](ProgramOfThought.scala): derived signatures, retry state, execution, and answer assembly.
 2. [`CodeAct.scala`](CodeAct.scala): the shared `parseCode` normalization.
-3. [`runtime/AgentLoop.scala`](runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion behavior.
-4. [`InputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
+3. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion behavior.
+4. [`InputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
    appending of retry and answer evidence.
-5. [`OutputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): public
+5. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): public
    reasoning augmentation.
-6. [`CodeInterpreter.scala`](../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
+6. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `CodeResult`, interpreter failures, and lifecycle.
-7. [`CompositeOptimizableTraversalInstances.scala`](optimization/CompositeOptimizableTraversalInstances.scala): the
+7. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
    three-leaf optimizer traversal.
-8. [`Streamable.scala`](../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
-9. [`ProgramOfThoughtSuite.scala`](../../../../test/scala/dspy4s/programs/ProgramOfThoughtSuite.scala): executable cases
+8. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
+9. [`ProgramOfThoughtSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtSuite.scala): executable cases
    for first-attempt success, regeneration, exhaustion, lifecycle, subprocess execution, and `SUBMIT` precedence.
-10. [`ProgramOfThoughtOptimizableTraversalSuite.scala`](../../../../test/scala/dspy4s/programs/ProgramOfThoughtOptimizableTraversalSuite.scala):
+10. [`ProgramOfThoughtOptimizableTraversalSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtOptimizableTraversalSuite.scala):
     optimizer order and replacement laws.
-11. [`Cheatsheet.scala`](../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise usage
+11. [`Cheatsheet.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise usage
     example.
 
 ## Scope and assumptions

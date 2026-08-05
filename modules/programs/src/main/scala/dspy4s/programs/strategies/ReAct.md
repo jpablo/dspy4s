@@ -1,4 +1,4 @@
-# How ReAct works in dspy4s
+# How ReAct works in `dspy4s.programs.strategies`
 
 `ReAct` means **Reasoning and Acting**. It gives a language model a small control loop:
 
@@ -121,9 +121,9 @@ flowchart TD
     budget -->|"no"| done
 ```
 
-The bounded recursion lives in [`runtime/AgentLoop.scala`](runtime/AgentLoop.scala), while
-[`runtime/TrajectoryAgent.scala`](runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct and CodeAct
-also share [`runtime/InterpretedTrajectoryAgent.scala`](runtime/InterpretedTrajectoryAgent.scala), whose final transition
+The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala), while
+[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct and CodeAct
+also share [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
 is:
 
 ```text
@@ -157,7 +157,8 @@ a typed Scala method.
 
 ```scala
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
-import dspy4s.programs.{IterationLimit, ReAct}
+import dspy4s.programs.IterationLimit
+import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.typed.Signature
 
@@ -212,7 +213,7 @@ answer: The weather in Tokyo is sunny and 25°C.
 ```
 
 For the runnable version of this pattern, see
-[`WeatherAgentExample`](../../../../../../examples/src/main/scala/dspy4s/examples/learn/programming/Tools.scala).
+[`WeatherAgentExample`](../../../../../../../examples/src/main/scala/dspy4s/examples/learn/programming/Tools.scala).
 
 ## What happens when things go wrong?
 
@@ -278,18 +279,18 @@ values. Detailed inner calls remain available through the runtime's callbacks, t
 A useful reading order is:
 
 1. [`ReAct.scala`](ReAct.scala): signatures, tools, one iteration, and result assembly.
-2. [`runtime/InterpretedTrajectoryAgent.scala`](runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
+2. [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
    record, and stop.
-3. [`contracts/ActionInterpreter.scala`](contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
+3. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
    action outcomes.
-4. [`runtime/TrajectoryAgent.scala`](runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
-5. [`runtime/AgentLoop.scala`](runtime/AgentLoop.scala): the bounded continue/done recursion.
-6. [`runtime/TrajectoryTruncation.scala`](runtime/TrajectoryTruncation.scala): context-window retry behavior.
-7. [`contracts/ToolFunction.scala`](contracts/ToolFunction.scala): the tool abstraction and typed-method derivation.
-8. [`ReActSuite.scala`](../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
+4. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
+5. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
+6. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
+7. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and typed-method derivation.
+8. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
    tool errors, callbacks, and truncation.
-9. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
-   and [`TrajectoryAgentLawSuite.scala`](../../../../test/scala/dspy4s/programs/runtime/TrajectoryAgentLawSuite.scala):
+9. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
+   and [`TrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/TrajectoryAgentLawSuite.scala):
    the shared transition and extraction contracts.
 
 ## Scope and assumptions

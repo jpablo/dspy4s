@@ -12,8 +12,9 @@ import dspy4s.programs.FailureCount
 
 import scala.util.control.NonFatal
 
-/** The shared best-of-`n` reducer behind [[dspy4s.programs.BestOfN]] and [[dspy4s.programs.Refine]] (the `bestOf`
-  * operation of the program-composition algebra; see `docs/refactor/algebra-2-program-composition.md`).
+/** The shared best-of-`n` reducer behind [[dspy4s.programs.strategies.BestOfN]] and
+  * [[dspy4s.programs.strategies.Refine]] (the `bestOf` operation of the program-composition algebra; see
+  * `docs/refactor/algebra-2-program-composition.md`).
   *
   * Generic over the attempt result `A`. Each attempt runs in an isolated trace/history context; the winning attempt's
   * trace/history are propagated to the caller. The reducer keeps the highest-reward attempt, short-circuits at
@@ -21,9 +22,10 @@ import scala.util.control.NonFatal
   *
   * The two combinators differ in the state carried between attempts:
   *
-  *   - '''selectBest''' (= [[dspy4s.programs.BestOfN]]) passes no `feedback`: attempts vary only by `rolloutId` /
-  *     `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier attempts.
-  *   - '''feedback''' (sequential stream, = [[dspy4s.programs.Refine]]) passes a `feedback` hook: after a
+  *   - '''selectBest''' (= [[dspy4s.programs.strategies.BestOfN]]) passes no `feedback`: attempts vary only by
+  *     `rolloutId` / `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier
+  *     attempts.
+  *   - '''feedback''' (sequential stream, = [[dspy4s.programs.strategies.Refine]]) passes a `feedback` hook: after a
   *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the adapter
   *     override the NEXT attempt runs under (Refine's `hint_`-injecting adapter), making the stream order-dependent.
   */

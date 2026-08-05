@@ -1,4 +1,4 @@
-# How ChainOfThought works in dspy4s
+# How ChainOfThought works in `dspy4s.programs.strategies`
 
 `ChainOfThought[I, O]` is a small transformation on top of `Predict`. It takes a base `Signature[I, O]`, prepends a
 `reasoning: String` field to its outputs, and runs the augmented signature through one inner predictor.
@@ -132,7 +132,7 @@ schema, while the plain string reasoning field is already described by the augme
 
 ```scala
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
-import dspy4s.programs.ChainOfThought
+import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.typed.Signature
 import zio.blocks.schema.Schema
 
@@ -347,17 +347,17 @@ model or emit tokens.
 A useful reading order is:
 
 1. [`ChainOfThought.scala`](ChainOfThought.scala): outer module, augmented signature, and inner predictor.
-2. [`OutputAugmentation.scala`](../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): the match
+2. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): the match
    type, `PrependField` evidence, and augmented output shape.
-3. [`SignatureOps.scala`](../../../../../../core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala): idempotent
+3. [`SignatureOps.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala): idempotent
    runtime-layout augmentation.
 4. [`Predict.scala`](Predict.scala) and [`Predict.md`](Predict.md): the inner typed prediction pipeline.
-5. [`optimization/OptimizableLeaf.scala`](optimization/OptimizableLeaf.scala): the lawful optimizer lens.
-6. [`Streamable.scala`](../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): the inner prediction
+5. [`optimization/OptimizableLeaf.scala`](../optimization/OptimizableLeaf.scala): the lawful optimizer lens.
+6. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): the inner prediction
    signature exposed for streaming.
-7. [`ChainOfThoughtSuite.scala`](../../../../test/scala/dspy4s/programs/ChainOfThoughtSuite.scala): executable examples
+7. [`ChainOfThoughtSuite.scala`](../../../../../test/scala/dspy4s/programs/ChainOfThoughtSuite.scala): executable examples
    of augmentation, case classes, idempotence, raw preservation, and failures.
-8. [`Modules.scala`](../../../../../../examples/src/main/scala/dspy4s/examples/learn/programming/Modules.scala): a concise
+8. [`Modules.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/learn/programming/Modules.scala): a concise
    runnable usage example.
 
 ## Scope and assumptions

@@ -9,7 +9,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
 import dspy4s.optimize.propose.GroundedProposerConfig
-import dspy4s.programs.DynamicPredict
+import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 
 /** Offline MIPROv2 suite.

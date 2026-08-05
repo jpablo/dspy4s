@@ -1,4 +1,4 @@
-package dspy4s.programs
+package dspy4s.programs.strategies
 
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext}

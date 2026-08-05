@@ -49,7 +49,7 @@ object CaseClassExample:
     * `Either[DspyError, Prediction[EmotionOutput]]`.
     */
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
-    import dspy4s.programs.Predict
+    import dspy4s.programs.strategies.Predict
     Predict(signature)(EmotionInput(sentence))
       .map(_.output.sentiment)
 
