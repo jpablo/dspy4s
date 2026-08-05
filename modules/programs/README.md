@@ -3,7 +3,7 @@
 The program (module) layer — the inference patterns you actually compose: `Predict`, `ChainOfThought`,
 `ReAct`, `CodeAct`, `ProgramOfThought`, `MultiChainComparison`, `BestOfN`, `Refine`, `RLM`, plus the
 introspection type-class the optimizers rely on and the in-memory retrievers. Depends on `core`, `lm`,
-`adapters`, and [`typed`](../typed/README.md).
+`adapters`, and [`signatures`](../signatures/README.md).
 
 ## The core idea
 

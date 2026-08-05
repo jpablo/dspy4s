@@ -8,7 +8,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, SignatureLayout}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue

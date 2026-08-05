@@ -20,7 +20,7 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence, RoundCount}
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableTraversal
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 import java.nio.file.Files
 

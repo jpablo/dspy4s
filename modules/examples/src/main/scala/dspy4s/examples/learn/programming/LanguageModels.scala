@@ -26,7 +26,7 @@ import dspy4s.lm.contracts.{LanguageModel, LmRequest, LmUsage, Message, MessageR
 import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 object LanguageModels:
 

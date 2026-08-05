@@ -12,7 +12,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

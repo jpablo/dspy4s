@@ -6,7 +6,8 @@ import dspy4s.core.data.Example
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
-import dspy4s.typed.{Prediction, Signature}
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 
 /** The fundamental typed prediction module: given a `Signature[I, O]`, `apply` takes a typed input `I`, formats and

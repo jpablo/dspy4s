@@ -11,7 +11,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.{InputField, OutputField, Shape, Spec, Signature}
+import dspy4s.signatures.{InputField, OutputField, Shape, Spec, Signature}
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).

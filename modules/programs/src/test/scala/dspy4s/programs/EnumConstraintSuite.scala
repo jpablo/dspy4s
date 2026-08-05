@@ -6,7 +6,7 @@ import dspy4s.core.contracts.{DynamicValues, RuntimeContext, :=}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LmMode, LmRequest}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.{DynamicValue, Schema}
 import munit.FunSuite
 

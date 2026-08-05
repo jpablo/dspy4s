@@ -13,7 +13,7 @@ import dspy4s.lm.contracts.{
   LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
   Message, MessageRole
 }
-import dspy4s.typed.{InputField, OutputField, Spec, Signature}
+import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import scala.NamedTuple
 import munit.FunSuite
 

@@ -28,9 +28,9 @@ import dspy4s.programs.RecordObject
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Prediction
-import dspy4s.typed.Shape
-import dspy4s.typed.Signature
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.Shape
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema

@@ -317,7 +317,7 @@ macro-friendly aliases). For dspy4s specifically:
 ### 4.2 Engine sketch
 
 ```scala
-package dspy4s.typed
+package dspy4s.signatures
 
 import dspy4s.core.contracts.{Signature, SignatureSpec}
 

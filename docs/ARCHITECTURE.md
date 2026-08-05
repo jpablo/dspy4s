@@ -18,7 +18,7 @@ A Scala 3 port of the Stanford DSPy framework. The defining design choices:
 graph TD
   algebra[dspy4s-algebra]
   core[dspy4s-core]
-  typed[dspy4s-typed]
+  signatures[dspy4s-signatures]
   lm[dspy4s-lm]
   adapters[dspy4s-adapters]
   programs[dspy4s-programs]
@@ -28,14 +28,14 @@ graph TD
   examples[dspy4s-examples]
 
   core --> algebra
-  typed --> core
+  signatures --> core
   lm --> core
   adapters --> core
   adapters --> lm
   programs --> core
   programs --> lm
   programs --> adapters
-  programs --> typed
+  programs --> signatures
   evaluate --> core
   evaluate --> programs
   optimize --> core
@@ -75,7 +75,7 @@ graph TD
      (`CallbackDispatcher`, `ActivePredictContext`, `ContextPropagation`)
    - DSL parser (`SignatureDsl.parse`)
 
-3. **`typed`** — typed surface over `SignatureLayout`. Depends on `core`.
+3. **`signatures`** — statically checked signature declarations over `SignatureLayout`. Depends on `core`.
    - `Signature[I, O]` — wraps a `SignatureLayout` plus `Shape[I]` / `Shape[O]`
    - `Shape[A]` is the general typed/record boundary. Schema-backed product
      and named-tuple shapes implement `RoundTripShape[A]`, whose law is
@@ -84,7 +84,6 @@ graph TD
      validating `Shape`: an unrestricted record can omit a required field,
      so a total round-trip claim would be false.
    - `Spec` trait + `InputField[+A]` / `OutputField[+A]` opaque types
-   - `Prediction[O]` typed wrapper
    - Macros: `Signature.from(method)`, `Signature.fromType[F]`,
      `Signature.of[T <: Spec]`, plus `Signature.derived[I, O]` (inline)
    - Backed by `zio-blocks-schema` (`Schema` / `Reflect` / `DynamicValue`)
@@ -107,6 +106,7 @@ graph TD
    - Adapter fallback policy (chat → json)
 
 6. **`programs`** — orchestration.
+   - `contracts/Prediction` — decoded semantic output plus the complete `RawPrediction` evidence
    - `runtime/PredictEngine` — the shared execute body (private)
    - `contracts/Module` — the semantic program base `Module[I, O]`; its abstract `forward`
      consumes `ProgramCall[I]` and returns `Prediction[O]`, while `final apply` adds module callbacks and tracing.
@@ -124,7 +124,7 @@ graph TD
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
      (output-preserving best-of-n over an inner typed program). Output-augmenting programs share the
-     `dspy4s.typed.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf on the dynamic spine.
+     `dspy4s.signatures.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf on the dynamic spine.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
    - `contracts/ProgramCall.scala` — generic `ProgramCall[I]` (input + `config` /
      `traceEnabled` / `rolloutId`)

@@ -12,7 +12,7 @@ package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 object FunctionExample:
 

@@ -334,7 +334,7 @@ adapter/LM/callback dance that Python has spread across
 `DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while typed
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 typed programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
-- **`OutputAugmentation`** (`dspy4s.typed`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
+- **`OutputAugmentation`** (`dspy4s.signatures`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
   output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
 - **Typed `Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
   `NamedTuple` I/O, so the string DSL is a *typed* surface; `fromStringDynamic` is the runtime (`Record`) version.

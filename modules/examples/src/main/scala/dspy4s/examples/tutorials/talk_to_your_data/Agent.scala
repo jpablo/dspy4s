@@ -15,7 +15,7 @@ package dspy4s.examples.tutorials.talk_to_your_data
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.{IterationLimit, LlmCallLimit}
 import dspy4s.programs.strategies.{Predict, RLM}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
 import scala.annotation.tailrec

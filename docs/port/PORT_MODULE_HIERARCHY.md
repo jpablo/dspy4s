@@ -59,7 +59,7 @@ layer internally and decode the result back to the typed output. `MultiChainComp
 
 Output-augmenting programs (`ChainOfThought`, `ReAct`, `CodeAct`, `ProgramOfThought`, `MultiChainComparison`)
 prepend a field to the output via the shared
-[`OutputAugmentation`](../../modules/typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala) helper
+[`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala) helper
 (`WithField[O, Name, T]` + the `PrependField` typeclass — idempotent, cast-free, always a named tuple). Every
 typed signature surface (`of` / `fromType` / `from` / a **literal** `fromString`) yields a product type, so these
 programs are uniformly typed; only the genuinely-runtime `Signature.fromStringDynamic` (Record I/O) is outside

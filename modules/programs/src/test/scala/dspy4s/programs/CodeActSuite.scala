@@ -19,7 +19,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 

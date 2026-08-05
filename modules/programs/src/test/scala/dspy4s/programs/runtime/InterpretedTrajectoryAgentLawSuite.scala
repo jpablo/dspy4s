@@ -5,7 +5,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome, Module, ModuleLifecycle, ProgramCall}
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger

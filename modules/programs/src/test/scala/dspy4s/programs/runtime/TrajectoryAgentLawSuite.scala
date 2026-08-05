@@ -3,7 +3,7 @@ package dspy4s.programs.runtime
 import dspy4s.core.contracts.{:=, ContextWindowExceededError, DynamicValues, RuntimeError}
 import dspy4s.core.data.{Completions, RawPrediction}
 import dspy4s.lm.contracts.LmUsage
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger

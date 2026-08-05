@@ -274,7 +274,7 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.strategies.ProgramOfThought
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 def solve(question: String)(using RuntimeContext): Either[DspyError, String] =
   val interpreter = new SubprocessPythonInterpreter(timeoutMillis = 10_000)
@@ -525,9 +525,9 @@ A useful reading order is:
 3. [`runtime/GeneratedPython.scala`](../runtime/GeneratedPython.scala): code-fence and generated-code normalization shared
    with CodeAct.
 4. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion behavior.
-5. [`InputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
+5. [`InputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/InputAugmentation.scala): typed
    appending of retry and answer evidence.
-6. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): public
+6. [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): public
    reasoning augmentation.
 7. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `CodeResult`, interpreter failures, and lifecycle.

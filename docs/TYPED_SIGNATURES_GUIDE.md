@@ -9,7 +9,7 @@
 
 ```scala
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.{InputField, OutputField, Spec, Signature}
+import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 
 // 1. Describe your I/O as a DSPy-style spec trait.
 trait QA extends Spec:
@@ -51,12 +51,12 @@ trait extending `Spec` declares abstract methods wrapped in
 `InputField[T]` / `OutputField[T]`.
 
 ```scala
-import dspy4s.typed.{InputField, OutputField, Spec, Signature}
+import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 
 enum Emotion:
   case sadness, joy, love
 
-object Emotion extends dspy4s.typed.FieldCodec.FlatEnum[Emotion]
+object Emotion extends dspy4s.signatures.FieldCodec.FlatEnum[Emotion]
 
 trait EmotionSpec extends Spec:
   def sentence:  InputField[String]
@@ -380,7 +380,7 @@ tp.raw.value("answer")  // dynamic accessor on RawPrediction
 
 `tp.raw` is the `RawPrediction` assembled by the shared
 `PredictEngine`, before the typed output decode. `Predict[I, O]` and
-`DynamicPredict` are sibling modules over that engine; the typed module
+`DynamicPredict` are sibling modules over that engine; the signatures module
 preserves the raw prediction while also decoding its values into
 `tp.output`. Trace and history record those same raw values.
 
@@ -455,6 +455,6 @@ These are documented gaps, surfaced so you can plan around them:
 - **Design doc**: [TYPED_SIGNATURES.md](TYPED_SIGNATURES.md)
 - **Implementation arc** (phase-by-phase outcomes, design deviations,
   open questions): [TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md](TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md)
-- **Tests as documentation**: the typed module's test files
-  (`modules/typed/src/test/scala/dspy4s/typed/PhaseN*.scala`) double
+- **Tests as documentation**: the signatures module's test files
+  (`modules/signatures/src/test/scala/dspy4s/signatures/PhaseN*.scala`) double
   as worked examples for every behavior described above.

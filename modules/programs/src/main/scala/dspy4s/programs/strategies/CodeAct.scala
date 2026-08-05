@@ -14,8 +14,8 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
 import dspy4s.programs.runtime.{GeneratedPython, SandboxToolBridge}
-import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
+import dspy4s.signatures.OutputAugmentation.PrependField
+import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signature}
 
 /** Iterative code-generation agent. Port of Python DSPy's `dspy.CodeAct`.
   *

@@ -19,7 +19,7 @@ import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.{FunctionMetric, SemanticF1}
 import dspy4s.examples.Demo
-import dspy4s.typed.{InputField, OutputField, Spec}
+import dspy4s.signatures.{InputField, OutputField, Spec}
 
 // Snippet 5 (lines 89–97) — the LLM-judge signature, as a spec trait (must be top-level for Mirror).
 // | class Assess(dspy.Signature):

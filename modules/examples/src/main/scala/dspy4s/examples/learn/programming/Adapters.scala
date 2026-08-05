@@ -24,7 +24,7 @@ import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 // ── Snippet 5/6 — a Pydantic model + a multi-field signature with a structured-list output ──

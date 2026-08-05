@@ -15,7 +15,7 @@ import dspy4s.programs.strategies.MultiChainComparison
 import dspy4s.programs.strategies.ReAct
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

@@ -1,0 +1,166 @@
+package dspy4s.signatures
+
+import zio.blocks.schema.Schema
+
+import dspy4s.core.contracts.{NotFoundError, ValidationError, :=}
+import munit.FunSuite
+
+// Top-level: Schema/Mirror derivation does not work for path-dependent types
+// declared inside test classes (Phase 0 finding).
+case class P2SentenceInput(sentence: String) derives Schema
+case class P2ScoredSentiment(sentiment: String, confidence: Double) derives Schema
+
+enum P2Sentiment derives Schema:
+  case sadness, joy, love, anger, fear, surprise
+
+case class P2EnumOutput(sentiment: P2Sentiment) derives Schema
+
+case class P2TwoInputs(question: String, context: String) derives Schema
+case class P2TwoOutputs(answer: String, score: Double) derives Schema
+
+/** Phase 2 typed-core suite per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
+  *
+  * Maps 1:1 to the plan's Phase 2 test list.
+  */
+class Phase2TypedCoreSuite extends FunSuite:
+
+  // ── Shape derivation: field metadata ─────────────────────────────────────
+
+  test("Shape field order matches case-class declaration order") {
+    val shape = Shape.derived[P2TwoOutputs]
+    assertEquals(shape.fieldSpecs.map(_.name), Vector("answer", "score"))
+  }
+
+  test("Shape field names match source members") {
+    val shape = Shape.derived[P2SentenceInput]
+    assertEquals(shape.fieldSpecs.map(_.name), Vector("sentence"))
+  }
+
+  test("Signature.derived assigns fields to the input and output cohorts") {
+    val sig     = Signature.derived[P2SentenceInput, P2ScoredSentiment](name = "Emotion")
+    val inputs  = sig.layout.inputFields.map(_.name)
+    val outputs = sig.layout.outputFields.map(_.name)
+    assertEquals(inputs, Vector("sentence"))
+    assertEquals(outputs, Vector("sentiment", "confidence"))
+  }
+
+  test("Signature.layout emits the same shape as a hand-written SignatureLayout") {
+    val sig = Signature.derived[P2SentenceInput, P2ScoredSentiment](
+      name = "Emotion",
+      instructions = "Classify emotion."
+    )
+    assertEquals(sig.layout.name, "Emotion")
+    assertEquals(sig.layout.instructions, Some("Classify emotion."))
+    assertEquals(sig.layout.signatureString, "sentence -> sentiment, confidence")
+    assertEquals(
+      sig.layout.inputFields.map(f => (f.name, f.typeRef.repr)),
+      Vector(("sentence", "string"))
+    )
+    assertEquals(
+      sig.layout.outputFields.map(f => (f.name, f.typeRef.repr)),
+      Vector(("sentiment", "string"), ("confidence", "double"))
+    )
+  }
+
+  test("Signature.withInstructions preserves typed shapes") {
+    val sig        = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+    val instructed = sig.withInstructions("Classify emotion.")
+
+    assertEquals(instructed.instructions, Some("Classify emotion."))
+    assertEquals(instructed.layout.instructions, Some("Classify emotion."))
+    assertEquals(
+      instructed.inputShape.encode(P2SentenceInput("hello")),
+      rec("sentence" := "hello")
+    )
+    assertEquals(
+      instructed.outputShape.decode(rec("sentiment" := "joy", "confidence" := 0.9)),
+      Right(P2ScoredSentiment("joy", 0.9))
+    )
+
+    assertEquals(instructed.withInstructions(None).instructions, None)
+  }
+
+  // ── Shape encode/decode round-trip ────────────────────────────────────────
+
+  test("Shape.encode produces a DynamicValue.Record keyed by field name") {
+    val shape   = Shape.derived[P2ScoredSentiment]
+    val encoded = shape.encode(P2ScoredSentiment("joy", 0.92))
+    assertEquals(encoded, rec("sentiment" := "joy", "confidence" := 0.92))
+  }
+
+  test("Shape.decode round-trips a typed value") {
+    val shape   = Shape.derived[P2ScoredSentiment]
+    val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := 0.92))
+    assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.92)))
+  }
+
+  test("Shape.decode tolerates primitive coercion (string -> double)") {
+    val shape   = Shape.derived[P2ScoredSentiment]
+    val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := "0.5"))
+    assertEquals(decoded, Right(P2ScoredSentiment("joy", 0.5)))
+  }
+
+  // ── Failure modes: missing / invalid fields ──────────────────────────────
+
+  test("missing required output field produces a NotFoundError") {
+    val shape   = Shape.derived[P2ScoredSentiment]
+    val decoded = shape.decode(rec("sentiment" := "joy"))
+    decoded match
+      case Left(_: NotFoundError) => ()
+      case other                  => fail(s"expected NotFoundError, got: $other")
+  }
+
+  test("invalid primitive conversion produces a ValidationError") {
+    val shape   = Shape.derived[P2ScoredSentiment]
+    val decoded = shape.decode(rec("sentiment" := "joy", "confidence" := "not-a-number"))
+    decoded match
+      case Left(_: ValidationError) => ()
+      case other                    => fail(s"expected ValidationError, got: $other")
+  }
+
+  // ── Enum decoding ────────────────────────────────────────────────────────
+
+  test("enum output decodes case names from raw strings through the field's Schema") {
+    val shape = Shape.derived[P2EnumOutput]
+    assertEquals(shape.decode(rec("sentiment" := "joy")), Right(P2EnumOutput(P2Sentiment.joy)))
+    assertEquals(shape.decode(rec("sentiment" := "sadness")), Right(P2EnumOutput(P2Sentiment.sadness)))
+  }
+
+  test("enum-like outputs reject values outside the declared set") {
+    val shape   = Shape.derived[P2EnumOutput]
+    val decoded = shape.decode(rec("sentiment" := "confused"))
+    decoded match
+      case Left(_: ValidationError) => () // zio-blocks Schema error format is opaque; just verify it's a Left
+      case other                    => fail(s"expected ValidationError, got: $other")
+  }
+
+  test("enum field uses TypeRef.string at the wire boundary") {
+    val shape = Shape.derived[P2EnumOutput]
+    val fs    = shape.fieldSpecs.head
+    assertEquals(fs.name, "sentiment")
+    assertEquals(fs.typeRef, dspy4s.core.contracts.TypeRef.string)
+  }
+
+  test("enum output round-trips through Shape encode/decode by case name") {
+    val shape   = Shape.derived[P2EnumOutput]
+    val encoded = shape.encode(P2EnumOutput(P2Sentiment.love))
+    // Encoded wire form carries the flat case-name string, not a discriminated object.
+    assertEquals(lookup(encoded, "sentiment"), Some("love": Any))
+    assertEquals(shape.decode(encoded), Right(P2EnumOutput(P2Sentiment.love)))
+  }
+
+  // ── End-to-end: Signature round-trip ────────────────────────────────
+
+  test("Signature encodes inputs and decodes outputs end-to-end") {
+    val sig   = Signature.derived[P2SentenceInput, P2ScoredSentiment]("Emotion")
+    val input = P2SentenceInput("i started feeling vulnerable")
+
+    // Encode input → Record (what Predict will hand to ProgramCall)
+    val inputRec = sig.inputShape.encode(input)
+    assertEquals(inputRec, rec("sentence" := "i started feeling vulnerable"))
+
+    // Decode output ← Record (what Predict will receive from RawPrediction)
+    val outputRec = rec("sentiment" := "joy", "confidence" := 0.85)
+    val output    = sig.outputShape.decode(outputRec)
+    assertEquals(output, Right(P2ScoredSentiment("joy", 0.85)))
+  }

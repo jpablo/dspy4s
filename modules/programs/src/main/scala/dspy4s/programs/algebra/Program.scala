@@ -16,7 +16,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.optimization.OptimizableTraversal
 import dspy4s.programs.optimization.OptimizableView
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import zio.blocks.schema.DynamicValue
 
 import scala.compiletime.ops.int.+

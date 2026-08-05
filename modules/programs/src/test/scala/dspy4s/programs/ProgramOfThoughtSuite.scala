@@ -16,7 +16,7 @@ import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue

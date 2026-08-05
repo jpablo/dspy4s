@@ -6,7 +6,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.optimization.OptimizableTraversal
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 
 /** `id[I]` — the Category unit: a pure passthrough that returns its input as the output, with an empty raw envelope.
   * Sequential composition accumulates envelopes through [[RawPrediction.followedBy]], for which the empty envelope is

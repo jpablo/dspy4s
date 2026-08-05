@@ -6,7 +6,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 
 import ProgramLeafOptimizableTraversalSuite.Pipe2

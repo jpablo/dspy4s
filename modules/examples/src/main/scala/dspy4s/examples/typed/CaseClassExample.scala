@@ -12,7 +12,8 @@ import zio.blocks.schema.Schema
 import dspy4s.core.contracts.{DspyError, RuntimeContext, :=}
 import dspy4s.core.data.RawPrediction
 import dspy4s.examples.Demo
-import dspy4s.typed.{Prediction, Signature}
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.Signature
 
 // Top-level types: Mirror derivation needs top-level case classes, and the
 // enum's Schema must come from outside any enclosing class.

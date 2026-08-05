@@ -8,7 +8,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest, LmResponse}
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue

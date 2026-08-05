@@ -9,7 +9,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import zio.blocks.schema.DynamicValue
 
 /** `Mode`: a NON-LEARNABLE middleware over a typed program (Algebra 2's `mode`; see

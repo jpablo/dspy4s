@@ -4,7 +4,7 @@ import dspy4s.core.contracts.{:=, CallbackEvent, CallbackHandler, DspyError, Dyn
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall}
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
 
 import scala.collection.mutable.ArrayBuffer

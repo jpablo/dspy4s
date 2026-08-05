@@ -17,7 +17,7 @@ The modules, in dependency order:
 | Module | Artifact | Covers |
 |---|---|---|
 | core | `dspy4s-core` | `Example`, `DynamicValue`, `RuntimeContext`. |
-| typed | `dspy4s-typed` | `Signature`, `Spec`, `InputField`, `OutputField`. |
+| signatures | `dspy4s-signatures` | `Signature`, `Spec`, `InputField`, `OutputField`. |
 | lm | `dspy4s-lm` | `LanguageModel`, `OpenAiLanguageModel`, caching, usage. |
 | adapters | `dspy4s-adapters` | `ChatAdapter`, `JSONAdapter`. |
 | programs | `dspy4s-modules` | `Predict`, `ChainOfThought`, `ReAct`, `BestOfN`, `Refine`. |

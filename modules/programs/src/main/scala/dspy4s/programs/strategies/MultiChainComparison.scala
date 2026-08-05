@@ -14,8 +14,9 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.{OptimizableParameters, withOptimizableParameters}
-import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Signature}
+import dspy4s.signatures.OutputAugmentation.PrependField
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Signature}
 import zio.blocks.schema.DynamicValue
 
 /** The semantic input to [[MultiChainComparison]]: the base typed input `I` plus the candidate completions to compare.

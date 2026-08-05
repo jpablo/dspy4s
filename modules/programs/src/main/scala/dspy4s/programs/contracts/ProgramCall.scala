@@ -31,7 +31,7 @@ final case class ProgramCall[I](
   @volatile private var cachedEncoding: (AnyRef, DynamicValue.Record) = null
 
   /** Encode `input` through `shape`, memoized per call instance (see the field note above). */
-  private[dspy4s] def encodedInput(shape: dspy4s.typed.Shape[I]): DynamicValue.Record =
+  private[dspy4s] def encodedInput(shape: dspy4s.signatures.Shape[I]): DynamicValue.Record =
     val cached = cachedEncoding
     if (cached ne null) && (cached._1 eq shape) then cached._2
     else
@@ -40,7 +40,7 @@ final case class ProgramCall[I](
       computed
 
   /** Map this typed call onto the dynamic record spine while reusing the memoized encoding. */
-  private[dspy4s] def encoded(shape: dspy4s.typed.Shape[I]): ProgramCall[DynamicValue.Record] =
+  private[dspy4s] def encoded(shape: dspy4s.signatures.Shape[I]): ProgramCall[DynamicValue.Record] =
     mapInput(_ => encodedInput(shape))
 
 object ProgramCall:

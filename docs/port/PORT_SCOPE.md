@@ -20,7 +20,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 1. Core type system and signatures
 - String signature DSL (`"q -> a"`) via `Signature.fromString` / `SignatureLayout.parse`
 - Programmatic / class-like signature construction (`SignatureBuilder`, `SignatureLayout.create`)
-- **Typed signatures layer** (`dspy4s.typed.Signature[I, O]` with case-class
+- **Typed signatures layer** (`dspy4s.signatures.Signature[I, O]` with case-class
   derivation, function-type macro, trait-spec macro, builder, and string
   DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md))
 - Input/Output field metadata (`description`, `prefix`, constraints, defaults)

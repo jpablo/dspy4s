@@ -19,7 +19,7 @@ import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmCache, LmRequest, LmResponse, LmUsage}
 import dspy4s.lm.runtime.{DiskLmCache, InMemoryLmCache, ManagedLanguageModel, NoopLmCache, RequestHash, UsageTracking}
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 import java.nio.file.Path
 import scala.collection.concurrent.TrieMap

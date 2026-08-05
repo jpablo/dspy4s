@@ -13,7 +13,7 @@ import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.strategies.Predict
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue

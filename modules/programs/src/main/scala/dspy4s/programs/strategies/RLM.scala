@@ -20,7 +20,8 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.SandboxToolBridge
-import dspy4s.typed.{Prediction, Shape, Signature}
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 

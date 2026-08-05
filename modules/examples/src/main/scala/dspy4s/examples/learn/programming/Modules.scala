@@ -13,7 +13,7 @@ package dspy4s.examples.learn.programming
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
 import dspy4s.programs.strategies.{ChainOfThought, Predict}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 object Modules:
 

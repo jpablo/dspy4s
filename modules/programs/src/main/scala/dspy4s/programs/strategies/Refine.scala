@@ -21,8 +21,8 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
-import dspy4s.typed.Prediction
-import dspy4s.typed.Signature
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
 import scala.compiletime.ops.int.+

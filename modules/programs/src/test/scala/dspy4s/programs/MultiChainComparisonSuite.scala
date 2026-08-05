@@ -19,7 +19,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

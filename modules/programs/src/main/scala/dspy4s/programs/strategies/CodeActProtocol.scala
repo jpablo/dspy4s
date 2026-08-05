@@ -2,7 +2,7 @@ package dspy4s.programs.strategies
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.typed.Shape
+import dspy4s.signatures.Shape
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 

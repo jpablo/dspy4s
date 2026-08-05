@@ -34,7 +34,7 @@ dspy4s is split into focused modules; depend only on what you need.
 ```scala title="build.sbt"
 libraryDependencies ++= Seq(
   "io.github.jpablo" %% "dspy4s-core"      % "0.1.0",
-  "io.github.jpablo" %% "dspy4s-typed"     % "0.1.0", // typed signatures
+  "io.github.jpablo" %% "dspy4s-signatures" % "0.1.0", // static signatures
   "io.github.jpablo" %% "dspy4s-lm"        % "0.1.0", // language-model providers
   "io.github.jpablo" %% "dspy4s-adapters"  % "0.1.0", // chat / JSON adapters
   "io.github.jpablo" %% "dspy4s-modules"   % "0.1.0", // Predict, ChainOfThought, ReAct
@@ -47,7 +47,7 @@ libraryDependencies ++= Seq(
 | Module | Artifact | What it gives you |
 |---|---|---|
 | core | `dspy4s-core` | The contract layer (`Example`, `DynamicValue`, runtime context). |
-| typed | `dspy4s-typed` | Typed `Signature` / `Spec` surface. |
+| signatures | `dspy4s-signatures` | Statically checked `Signature` / `Spec` surface. |
 | lm | `dspy4s-lm` | Language-model providers (OpenAI). |
 | adapters | `dspy4s-adapters` | Chat / JSON adapters and native function-calling. |
 | programs | `dspy4s-modules` | `Predict`, `ChainOfThought`, `ReAct`, refinement. |

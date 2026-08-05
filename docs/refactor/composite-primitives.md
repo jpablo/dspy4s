@@ -184,7 +184,7 @@ pins prose, either keep that wording via `label` or update the assertion in the 
 
 ## Step 3: `decodePrepended` (covers D, E; subsumes C)
 
-**Where:** `dspy4s.typed.OutputAugmentation` (it already owns the `PrependField` given and can see core's
+**Where:** `dspy4s.signatures.OutputAugmentation` (it already owns the `PrependField` given and can see core's
 `Shape`, `DynamicValues`, errors).
 
 ```scala

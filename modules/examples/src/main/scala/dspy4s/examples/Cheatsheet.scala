@@ -53,7 +53,7 @@ import dspy4s.programs.{
 }
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
 import dspy4s.programs.retrievers.{KNN, NeighborCount, NonEmptyTrainset}
-import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.DynamicValue
 
 // ── Snippet 2 (lines 24–30) — a class-based signature ──

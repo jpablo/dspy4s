@@ -17,7 +17,7 @@ package dspy4s.examples.tutorials.sample_code_generation
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
 import dspy4s.programs.strategies.ChainOfThought
-import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 1 — the two analysis/generation signatures (top-level traits for Mirror derivation) ──
 // | class LibraryAnalyzer(dspy.Signature): """Analyze library documentation ..."""

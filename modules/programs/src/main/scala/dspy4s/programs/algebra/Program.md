@@ -276,7 +276,7 @@ cannot quietly disagree about how raw records are decoded.
 ```scala
 import dspy4s.programs.*
 import dspy4s.programs.algebra.*
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
 final case class Question(question: String) derives Schema

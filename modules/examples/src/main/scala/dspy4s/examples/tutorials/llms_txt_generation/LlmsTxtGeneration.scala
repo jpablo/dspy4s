@@ -14,7 +14,7 @@ package dspy4s.examples.tutorials.llms_txt_generation
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
 import dspy4s.programs.strategies.ChainOfThought
-import dspy4s.typed.{InputField, OutputField, Signature, Spec}
+import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 1 (lines 23–57) — the three analysis signatures (top-level for Mirror) ──
 // --8<-- [start:signatures]

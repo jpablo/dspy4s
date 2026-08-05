@@ -3,7 +3,7 @@ package dspy4s.programs.internal
 import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext, ValidationError}
 import dspy4s.core.contracts.TypeRef as DspyTypeRef
 import dspy4s.programs.contracts.{ToolFunction, description}
-import dspy4s.typed.SchemaInterop
+import dspy4s.signatures.SchemaInterop
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.quoted.*

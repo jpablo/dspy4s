@@ -2,7 +2,7 @@ package dspy4s.programs.optimization
 
 import dspy4s.algebra.{IsEq, Law, Lens, <->}
 import dspy4s.programs.strategies.{ChainOfThought, DynamicPredict, Predict}
-import dspy4s.typed.OutputAugmentation.PrependField
+import dspy4s.signatures.OutputAugmentation.PrependField
 
 /** A program that is one independently optimizable leaf of the introspection tree.
   *

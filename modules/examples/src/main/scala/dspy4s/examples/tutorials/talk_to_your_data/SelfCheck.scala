@@ -17,7 +17,7 @@ object SelfCheck:
   /** Round-trip a value through its signature Shape, the exact decode path the planner output and the RLM SUBMIT rely
     * on. If these fail, the structured outputs won't parse at runtime (so catch it offline).
     */
-  private def roundTrips[A](shape: dspy4s.typed.Shape[A], value: A): Boolean =
+  private def roundTrips[A](shape: dspy4s.signatures.Shape[A], value: A): Boolean =
     shape.decode(shape.encode(value)).toOption.map(_.toString).contains(value.toString)
 
   private val sampleQp = QueryPlan(

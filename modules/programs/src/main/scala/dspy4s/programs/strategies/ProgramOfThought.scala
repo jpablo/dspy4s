@@ -12,8 +12,9 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.GeneratedPython
-import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Shape, Signature}
+import dspy4s.signatures.OutputAugmentation.PrependField
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signature}
 
 /** Generate Python code that programmatically computes the answer, run it, and feed the output back to the LM for a
   * structured response. Port of Python DSPy's `dspy.ProgramOfThought`.

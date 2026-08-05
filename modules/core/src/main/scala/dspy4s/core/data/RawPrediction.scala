@@ -7,16 +7,16 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** Adapter-parsed, schema-uninterpreted prediction data.
   *
-  * "Raw" is relative to [[dspy4s.typed.Prediction]]: [[values]] have already been parsed by an adapter into a
-  * `DynamicValue.Record`, but have not been decoded against an output `Shape` into the semantic output type `O`. This
-  * is therefore not the unparsed text returned by an LM. It retains the primary completion's field values, optional
-  * [[completions]] (when the LM returned multiple candidates), and [[lmUsage]] (token accounting).
+  * "Raw" is relative to [[dspy4s.programs.contracts.Prediction]]: [[values]] have already been parsed by an adapter
+  * into a `DynamicValue.Record`, but have not been decoded against an output `Shape` into the semantic output type `O`.
+  * This is therefore not the unparsed text returned by an LM. It retains the primary completion's field values,
+  * optional [[completions]] (when the LM returned multiple candidates), and [[lmUsage]] (token accounting).
   *
-  * Every module result retains a `RawPrediction` on [[dspy4s.typed.Prediction.raw]]. Dynamic modules also use
-  * [[values]] directly as their semantic `DynamicValue.Record` output.
+  * Every module result retains a `RawPrediction` on [[dspy4s.programs.contracts.Prediction.raw]]. Dynamic modules also
+  * use [[values]] directly as their semantic `DynamicValue.Record` output.
   *
   * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that the typed layer's Schema-backed
-  * decode performs (`dspy4s.typed.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction
+  * decode performs (`dspy4s.signatures.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction
   * without a typed `Signature[I, O]`.
   *
   * Coercion rules (deliberately strict to avoid silent surprises):

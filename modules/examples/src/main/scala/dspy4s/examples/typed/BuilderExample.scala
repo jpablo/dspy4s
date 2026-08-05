@@ -12,7 +12,7 @@
 package dspy4s.examples.typed
 
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 object BuilderExample:
 

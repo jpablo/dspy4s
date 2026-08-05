@@ -6,7 +6,7 @@ import dspy4s.core.data.Example
 import dspy4s.programs.algebra.Program
 import dspy4s.programs.compose.LiftEither
 import dspy4s.programs.optimization.OptimizableTraversal
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 
 /** A runtime-parsed signature whose input and output types are FRESH abstract types minted by the parse, restoring

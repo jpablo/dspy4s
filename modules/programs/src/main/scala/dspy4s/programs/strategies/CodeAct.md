@@ -266,7 +266,7 @@ their own callbacks, traces, and history rather than being merged into the final
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.programs.strategies.CodeAct
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 def factorial(n: Int)(using RuntimeContext): Either[DspyError, String] =
   val interpreter = new SubprocessPythonInterpreter(timeoutMillis = 10_000)
@@ -518,9 +518,9 @@ A useful reading order is:
 5. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
 6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion.
 7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): oldest-first extractor retries.
-8. [`InputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
+8. [`InputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/InputAugmentation.scala): typed
    `(I, trajectory)` encoding.
-9. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): final
+9. [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): final
    reasoning augmentation.
 10. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala): execution
    result and sandbox-tool contracts.

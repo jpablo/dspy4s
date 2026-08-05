@@ -5,15 +5,15 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** The compiled runtime layout of a typed Signature: a name, optional instructions, and separate ordered input and
   * output cohorts. Adapters, programs, and the rest of the runtime stack consume this directly; the typed
-  * `Signature[I, O]` (in `dspy4s.typed`) is the user-facing wrapper around it.
+  * `Signature[I, O]` (in `dspy4s.signatures`) is the user-facing wrapper around it.
   *
   * '''Construction paths.'''
   *
-  *   - Typed surface (`dspy4s.typed.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
+  *   - Typed surface (`dspy4s.signatures.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
   *     primary path; the resulting `Signature.layout` is the value adapters see.
   *   - [[SignatureLayout.create]] -- validating + normalizing factory for programmatic construction.
-  *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.typed.Signature.fromString` from
-  *     user code.
+  *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.signatures.Signature.fromString`
+  *     from user code.
   *   - [[SignatureLayout.fromState]] -- re-hydrate from the `DynamicValue.Record` produced by [[dumpState]] (or from
   *     JSON via [[SignatureLayout.fromJson]]).
   *
@@ -139,8 +139,8 @@ object SignatureLayout:
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a `SignatureLayout`. Prefer
-    * `dspy4s.typed.Signature.fromString` from user code; this is the lower-level entry point that the typed surface
-    * delegates to.
+    * `dspy4s.signatures.Signature.fromString` from user code; this is the lower-level entry point that the typed
+    * surface delegates to.
     */
   def parse(
       dsl         : String,

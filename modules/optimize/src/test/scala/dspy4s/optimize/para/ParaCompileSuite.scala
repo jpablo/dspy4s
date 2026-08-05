@@ -12,7 +12,7 @@ import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.strategies.Predict
 import dspy4s.programs.algebra.{Program, SomeProgram}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

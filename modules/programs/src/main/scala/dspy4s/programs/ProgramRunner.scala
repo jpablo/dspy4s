@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.{DynamicModule, Module, ProgramCall}
-import dspy4s.typed.Shape
+import dspy4s.signatures.Shape
 import zio.blocks.schema.DynamicValue
 
 /** Capability for evaluating a program from the dynamic record boundary.

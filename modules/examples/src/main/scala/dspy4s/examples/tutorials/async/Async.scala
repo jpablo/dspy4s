@@ -18,7 +18,7 @@ import dspy4s.core.runtime.ContextPropagation
 import dspy4s.examples.Demo
 import dspy4s.programs.*
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration.DurationInt

@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.support.DecodeFixtures
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 
 /** Demonstrates the offline decode-test harness on a representative structured signature. These tests are

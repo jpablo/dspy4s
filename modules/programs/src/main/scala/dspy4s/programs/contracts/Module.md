@@ -22,7 +22,7 @@ ProgramCall[I]  ── Module ──>  Either[DspyError, Prediction[O]]
 ```
 
 `I` and `O` describe the program's domain-level function. [`ProgramCall`](ProgramCall.scala) and
-[`Prediction`](../../../../../../../typed/src/main/scala/dspy4s/typed/Prediction.scala) add the operational context that
+[`Prediction`](Prediction.scala) adds the operational context that
 every program boundary needs.
 
 ## Class hierarchy

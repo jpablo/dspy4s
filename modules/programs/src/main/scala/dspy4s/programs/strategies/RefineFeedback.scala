@@ -3,7 +3,8 @@ package dspy4s.programs.strategies
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TraceEntry, :=}
 import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.{Prediction, Shape, Signature}
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets

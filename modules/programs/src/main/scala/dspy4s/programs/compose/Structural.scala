@@ -6,7 +6,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.optimization.OptimizableTraversal
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 
 /** `copy`: duplicate the input `I` into `(I, I)`. Parameter-free (like `id`); the first half of a fan-out, so
   * `parallel(a, b) = copy >>> tensor(a, b)`. Copy commutes with deterministic programs but not effect-observing

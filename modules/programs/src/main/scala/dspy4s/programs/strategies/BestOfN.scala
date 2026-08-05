@@ -9,7 +9,7 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 
 /** Typed `BestOfN`: runs an inner typed program up to `n` times and keeps the highest-reward `Prediction[O]`,
   * short-circuiting once `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O`

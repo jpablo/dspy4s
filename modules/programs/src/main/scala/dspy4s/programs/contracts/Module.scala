@@ -12,7 +12,6 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.typed.Prediction
 import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.ExecutionContext

@@ -25,7 +25,7 @@ import dspy4s.programs.strategies.{DynamicPredict, ReAct}
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
 import dspy4s.streaming.{StatusMessageProvider, Streamify}
 import dspy4s.streaming.contracts.{ErrorEvent, PredictionEvent, StatusEvent, StreamEvent, StreamListener, TokenEvent}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.{DynamicValue, Schema}
 
 object Streaming:

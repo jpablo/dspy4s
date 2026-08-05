@@ -3,7 +3,7 @@ package dspy4s.programs
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
 import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.{DynamicModule, Module, ModuleLifecycle, ProgramCall}
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, Schema}
 

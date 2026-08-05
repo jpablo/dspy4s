@@ -5,8 +5,9 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
-import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{OutputAugmentation, Prediction, Shape, Signature}
+import dspy4s.signatures.OutputAugmentation.PrependField
+import dspy4s.programs.contracts.Prediction
+import dspy4s.signatures.{OutputAugmentation, Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
 /** ChainOfThought, defined as a small signature transformation on top of [[Predict]]. Wraps a `Signature[I, O]` and
@@ -101,6 +102,6 @@ object ChainOfThought:
     layout.prependOutput(reasoningField)
 
   /** The augmented output type — `reasoning: String` prepended to `O`'s named-tuple view, idempotently. A thin alias
-    * over the shared [[dspy4s.typed.OutputAugmentation.WithField]]; see there for the full semantics.
+    * over the shared [[dspy4s.signatures.OutputAugmentation.WithField]]; see there for the full semantics.
     */
   type WithReasoning[O] = OutputAugmentation.WithField[O, ReasoningName, String]

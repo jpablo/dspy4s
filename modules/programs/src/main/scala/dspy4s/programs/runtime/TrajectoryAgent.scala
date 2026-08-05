@@ -5,7 +5,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.contracts.{Module, ProgramCall}
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** A module that gathers a typed trajectory and then extracts its user-visible result.

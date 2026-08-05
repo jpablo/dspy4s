@@ -44,7 +44,7 @@ import dspy4s.examples.Demo
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.strategies.{ReAct, RLM}
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger

@@ -17,7 +17,7 @@ runs it against a language model.
 
 ```scala
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 // Inputs and outputs are named tuples, so `sentence` and `sentiment` are real
 // fields. A typo is a compile error, and `_.output.sentiment` is a typed Boolean.
@@ -58,7 +58,7 @@ dspy4s is split into focused modules so you can depend only on what you need.
 |-------------|--------------------|-------------------------------------------------------------|
 | `algebra`   | `dspy4s-algebra`   | Categories, functors, monads, optics, and executable laws. |
 | `core`      | `dspy4s-core`      | Contract layer: `Example`, `DynamicValue` spine, runtime.   |
-| `typed`     | `dspy4s-typed`     | Typed `Signature` / `Spec` surface and `Shape` codecs.      |
+| `signatures` | `dspy4s-signatures` | Static `Signature` / `Spec` surface and `Shape` codecs.   |
 | `lm`        | `dspy4s-lm`        | Provider-agnostic LM API and the OpenAI client.             |
 | `adapters`  | `dspy4s-adapters`  | Chat / JSON / XML adapters and native function-calling.     |
 | `programs`  | `dspy4s-modules`   | `Predict`, `ChainOfThought`, `ReAct`, refinement programs.  |

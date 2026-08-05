@@ -133,7 +133,7 @@ schema, while the plain string reasoning field is already described by the augme
 ```scala
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.strategies.ChainOfThought
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
 final case class Question(question: String) derives Schema
@@ -347,7 +347,7 @@ model or emit tokens.
 A useful reading order is:
 
 1. [`ChainOfThought.scala`](ChainOfThought.scala): outer module, augmented signature, and inner predictor.
-2. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): the match
+2. [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): the match
    type, `PrependField` evidence, and augmented output shape.
 3. [`SignatureOps.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala): idempotent
    runtime-layout augmentation.

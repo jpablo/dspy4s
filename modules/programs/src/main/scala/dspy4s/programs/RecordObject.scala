@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.typed.Shape
+import dspy4s.signatures.Shape
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A custom record-boundary object whose value type is fresh for this stable path.

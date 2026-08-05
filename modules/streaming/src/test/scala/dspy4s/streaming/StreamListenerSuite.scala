@@ -13,7 +13,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput

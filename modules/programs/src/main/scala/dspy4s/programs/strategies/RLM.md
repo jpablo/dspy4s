@@ -285,7 +285,7 @@ The default interpreter is a Deno/Pyodide REPL, so the host needs `deno` availab
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.{IterationLimit, LlmCallLimit}
 import dspy4s.programs.strategies.RLM
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 val agent = RLM(
   baseSignature = Signature.fromString(

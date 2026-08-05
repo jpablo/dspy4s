@@ -86,7 +86,7 @@ Case classes give the boundary concrete domain types:
 ```scala
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
 final case class Question(question: String) derives Schema
@@ -299,7 +299,7 @@ A useful reading order is:
    pipeline.
 3. [`contracts/Module.scala`](../contracts/Module.scala): the uniform `ProgramCall`/`Prediction` boundary and lifecycle.
 4. [`contracts/ProgramCall.scala`](../contracts/ProgramCall.scala): per-call controls and memoized input encoding.
-5. [`Signature.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/Signature.scala): the relationship among layout,
+5. [`Signature.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/Signature.scala): the relationship among layout,
    input shape, and output shape.
 6. [`optimization/OptimizableLeaf.scala`](../optimization/OptimizableLeaf.scala): the lawful optimizer lens for `Predict`.
 7. [`PredictSuite.scala`](../../../../../test/scala/dspy4s/programs/PredictSuite.scala): executable examples for typed

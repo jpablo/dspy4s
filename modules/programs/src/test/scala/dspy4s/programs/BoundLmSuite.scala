@@ -9,7 +9,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 import munit.FunSuite
 
 // Top-level fixtures (Mirror derivation requires top-level types).

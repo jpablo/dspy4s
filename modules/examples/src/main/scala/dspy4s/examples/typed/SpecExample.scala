@@ -14,7 +14,7 @@ package dspy4s.examples.typed
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.typed.{InputField, OutputField, Spec, Signature}
+import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
 
 trait EmotionSpec extends Spec:
@@ -38,8 +38,8 @@ object SpecExample:
 
   /** Spec-derived signature for the emotion-classification task. The resulting `untyped` SignatureLayout is
     * structurally identical to the one produced by `CaseClassExample.signature.layout` and to one built via
-    * `Signature.builder("Emotion").input[String]("sentence")...`. Cross-surface parity is proven by the typed module's
-    * test suite.
+    * `Signature.builder("Emotion").input[String]("sentence")...`. Cross-surface parity is proven by the signatures
+    * module's test suite.
     */
   val emotion = Signature.of[EmotionSpec]
 

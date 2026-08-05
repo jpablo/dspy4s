@@ -1,6 +1,6 @@
 package dspy4s.programs.contracts
 
-import dspy4s.typed.{Prediction, Shape}
+import dspy4s.signatures.Shape
 import zio.blocks.schema.DynamicValue
 
 /** The observable projections of one module boundary.

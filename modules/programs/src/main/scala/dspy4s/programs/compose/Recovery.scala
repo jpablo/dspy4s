@@ -6,7 +6,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.typed.Prediction
+import dspy4s.programs.contracts.Prediction
 
 import scala.compiletime.ops.int.+
 

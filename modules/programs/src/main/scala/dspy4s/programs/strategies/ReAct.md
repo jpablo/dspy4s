@@ -160,7 +160,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.{ToolFunction, description}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 object WeatherAgent:
   @description("Get the current weather for a city.")

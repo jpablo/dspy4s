@@ -20,7 +20,7 @@ For any field in a signature, there are three "types" in play:
 | Layer | What it stores | Owner |
 |---|---|---|
 | **Scala type** | The static type in your code (e.g. `Sentiment`, `List[Citation]`, `Boolean`) | You |
-| **Codec** (`Shape[A]` + `FieldCodec[A]`) | The encode / decode logic that turns Scala values into a `DynamicValue` (and into the adapter-facing `Map[String, Any]` view) | `dspy4s.typed` (backed by `zio-blocks-schema`) |
+| **Codec** (`Shape[A]` + `FieldCodec[A]`) | The encode / decode logic that turns Scala values into a `DynamicValue` (and into the adapter-facing `Map[String, Any]` view) | `dspy4s.signatures` (backed by `zio-blocks-schema`) |
 | **Wire format** (`TypeRef` + `FieldSpec.metadata`) | The label / hint the LM sees in the prompt | `dspy4s.core.contracts` |
 
 The **codec** is the funnel: it knows how to take your `Sentiment.joy` and produce the string `"joy"` that ships
@@ -253,9 +253,9 @@ Now `OutputField[UserId]` works in a trait spec or builder, and the LM sees a pl
 
 - [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) — the user-facing guide to defining signatures.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the typed and dynamic layers fit together at the module level.
-- `modules/typed/src/main/scala/dspy4s/typed/Shape.scala` — the three `Shape` implementations
+- `modules/signatures/src/main/scala/dspy4s/signatures/Shape.scala` — the three `Shape` implementations
   (`KyoProductShape`, `TupleShape`, `MapShape`).
-- `modules/typed/src/main/scala/dspy4s/typed/FieldCodec.scala` — the codec typeclass, the `FlatEnum` helper, and
+- `modules/signatures/src/main/scala/dspy4s/signatures/FieldCodec.scala` — the codec typeclass, the `FlatEnum` helper, and
   the built-in primitive instances.
 - `modules/core/src/main/scala/dspy4s/core/contracts/SignatureLayout.scala` — where `TypeRef`, `FieldSpec`, and
   `FieldMetadata` live.

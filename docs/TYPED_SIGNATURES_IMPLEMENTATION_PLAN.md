@@ -80,7 +80,7 @@ return keeps output field labels; a scalar return becomes a single
 
 ## Module Strategy
 
-Add a new `typed` module rather than putting Kyo directly into `core`.
+Add a new `signatures` module rather than putting signature derivation directly into `core`.
 
 Proposed dependency direction:
 
@@ -88,14 +88,14 @@ Proposed dependency direction:
 core
   ^
   |
-typed
+signatures
   ^
   |
 programs
 ```
 
-This keeps `core` free of a Kyo dependency while allowing `programs` to expose
-`Predict`. The tradeoff is that `programs` users will receive the typed
+This keeps `core` free of signature macros while allowing `programs` to expose
+`Predict`. The tradeoff is that `programs` users receive the signatures
 module transitively. That is acceptable because `programs` is already the
 high-level execution module, while `core` remains the minimal contracts layer.
 
@@ -105,30 +105,30 @@ Build changes:
 - Add `kyo-data` for typed structural records.
 - Add `kyo-schema` only if the Phase 0 spike confirms it can cover the runtime
   decoding contract for the MVP.
-- Add `lazy val typed = project.in(file("modules/typed")).dependsOn(core)`.
-- Add `typed` to the root aggregate.
-- Update `programs.dependsOn(...)` to include `typed`.
-- Keep all new Kyo imports inside `modules/typed` and typed-specific files in
+- Add `lazy val signatures = project.in(file("modules/signatures")).dependsOn(core)`.
+- Add `signatures` to the root aggregate.
+- Update `programs.dependsOn(...)` to include `signatures`.
+- Keep all new Kyo imports inside `modules/signatures` and typed-specific files in
   `modules/programs`.
 
 ## Proposed Files
 
 New files:
 
-- `modules/typed/src/main/scala/dspy4s/typed/Signature.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/Prediction.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/FieldMarkers.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/FieldCodec.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/KyoSchemaFieldCodec.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/Shape.scala`
-- `modules/typed/src/main/scala/dspy4s/typed/internal/ShapeMacros.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/Signature.scala`
+- `modules/programs/src/main/scala/dspy4s/programs/contracts/Prediction.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/FieldMarkers.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/FieldCodec.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/KyoSchemaFieldCodec.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/Shape.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/internal/ShapeMacros.scala`
 - `modules/programs/src/main/scala/dspy4s/programs/strategies/Predict.scala`
 
 Test files:
 
-- `modules/typed/src/test/scala/dspy4s/typed/TypedSignatureSuite.scala`
-- `modules/typed/src/test/scala/dspy4s/typed/ShapeSuite.scala`
-- `modules/typed/src/test/scala/dspy4s/typed/TypedPredictionSuite.scala`
+- `modules/signatures/src/test/scala/dspy4s/signatures/TypedSignatureSuite.scala`
+- `modules/signatures/src/test/scala/dspy4s/signatures/ShapeSuite.scala`
+- `modules/signatures/src/test/scala/dspy4s/signatures/TypedPredictionSuite.scala`
 - `modules/programs/src/test/scala/dspy4s/programs/TypedPredictSuite.scala`
 
 Optional package objects or exports can be added after the API settles. Avoid
@@ -141,7 +141,7 @@ Goal: prove that Kyo can cover both halves of the typed runtime bridge:
 
 Tasks:
 
-- Add the `typed` module and Kyo dependencies behind the smallest possible
+- Add the `signatures` module and Kyo dependencies behind the smallest possible
   surface.
 - Create a tiny internal test that derives field names and field types from a
   Kyo-supported record shape.
@@ -163,7 +163,7 @@ Tasks:
 
 Acceptance criteria:
 
-- `sbt typed/test` runs.
+- `sbt signatures/test` runs.
 - A test can construct a typed value with fields equivalent to
   `sentence: String` and `sentiment: String`.
 - A test can access an existing field with dot syntax.
@@ -186,7 +186,7 @@ Risk gate:
 Phase 0 was completed against `io.getkyo:kyo-data_3:1.0.0-RC2` and
 `io.getkyo:kyo-schema_3:1.0.0-RC2` — both published on Maven Central two weeks
 before this run. Tests live in
-`modules/typed/src/test/scala/dspy4s/typed/Phase0FeasibilitySuite.scala`
+`modules/signatures/src/test/scala/dspy4s/signatures/Phase0FeasibilitySuite.scala`
 (9 tests, all passing). All Phase 0 acceptance criteria met.
 
 **Resolved confirmations (per the Tasks list above):**
@@ -233,11 +233,11 @@ before this run. Tests live in
 
 **Files added:**
 
-- `modules/typed/` — new sbt module aggregating under root.
+- `modules/signatures/` — new sbt module aggregating under root.
 - `build.sbt` — `kyoVersion = "1.0.0-RC2"` shared val; `typed` project added.
-- `modules/typed/src/test/scala/dspy4s/typed/Phase0FeasibilitySuite.scala`
+- `modules/signatures/src/test/scala/dspy4s/signatures/Phase0FeasibilitySuite.scala`
   (9 acceptance-criteria tests).
-- `modules/typed/src/test/scala/dspy4s/typed/EncodingProbe.scala` (kept as a
+- `modules/signatures/src/test/scala/dspy4s/signatures/EncodingProbe.scala` (kept as a
   record of how the enum wire format was discovered; useful for future
   diagnostic work, low maintenance cost).
 
@@ -314,7 +314,7 @@ same value. Mirrors the new `asInt` and `asBoolean` string-parsing.
 
 Goal: represent typed signatures independently of prediction execution.
 
-Core types in `modules/typed`:
+Core types in `modules/signatures`:
 
 ```scala
 final case class Signature[I, O](
@@ -439,11 +439,11 @@ Acceptance criteria:
 
 - `Signature` can produce the same untyped `Signature` shape as the DSL.
 - `Prediction` preserves the original raw `Prediction`.
-- `sbt typed/test` passes.
+- `sbt signatures/test` passes.
 
 ### Outcomes (executed 2026-05-24)
 
-Implemented four files in `modules/typed/src/main/scala/dspy4s/typed/`:
+Implemented four files in `modules/signatures/src/main/scala/dspy4s/signatures/`:
 
 - `FieldCodec.scala` — field-level codec typeclass with built-in givens for
   `String` / `Int` / `Double` / `Boolean`, plus enum support based on
@@ -498,7 +498,7 @@ project remains green at 333 / 333 (was 318; +15 from this suite).
 
 - Inline def + anonymous class issues warning `-W E197` ("New anonymous
   class definition will be duplicated at each inline site"). Extract
-  to a named `private[typed]` class to silence; the class still needs
+  to a named `private[signatures]` class to silence; the class still needs
   to be visible from inline-expansion call sites.
 - Case-class / enum fixtures must be top-level (Phase 0 finding) AND
   must not collide with other top-level fixtures in the same package
@@ -555,7 +555,7 @@ Acceptance criteria:
 
 Implemented one new file:
 
-- `modules/typed/src/main/scala/dspy4s/typed/SignatureBuilder.scala` —
+- `modules/signatures/src/main/scala/dspy4s/signatures/SignatureBuilder.scala` —
   fluent, immutable builder. `.input[T](name)` / `.output[T](name)`
   summon a `FieldCodec[T]` to derive `TypeRef` + well-known metadata
   (enum cases, etc.) for the resulting `FieldSpec`. `.instructions(text)`
@@ -622,7 +622,7 @@ Tests:
 
 Acceptance criteria:
 
-- `sbt programs/test typed/test core/test` passes.
+- `sbt programs/test signatures/test core/test` passes.
 - No adapter changes are required.
 
 ### Outcomes (executed 2026-05-24)
@@ -636,8 +636,8 @@ Implemented one file + one build-graph edit:
   `Predict(signature.untyped, demos, name, runtime).run(ProgramCall(...))`,
   then decodes via `Prediction.from(raw, signature.outputShape)`.
 
-- `build.sbt` — `programs.dependsOn(core, lm, adapters, typed)` (was
-  `core, lm, adapters`). The typed module already depends on core only,
+- `build.sbt` — `programs.dependsOn(core, lm, adapters, signatures)` (was
+  `core, lm, adapters`). The signatures module already depends on core only,
   so the new edge stays acyclic.
 
 **Plan deviations** (called out for the next reviewer):
@@ -730,11 +730,11 @@ Acceptance criteria:
 
 Implemented in three new files:
 
-- `modules/typed/src/main/scala/dspy4s/typed/Spec.scala` — `trait Spec`
+- `modules/signatures/src/main/scala/dspy4s/signatures/Spec.scala` — `trait Spec`
   marker plus opaque types `InputField[+A]` / `OutputField[+A]` (both
   erase to `A` at runtime; the wrapping only exists so the macro can
   classify by role).
-- `modules/typed/src/main/scala/dspy4s/typed/internal/SpecMacro.scala`
+- `modules/signatures/src/main/scala/dspy4s/signatures/internal/SpecMacro.scala`
   — quotes/splices macro that inspects abstract methods on the spec
   trait, validates each returns `InputField[X]` or `OutputField[X]`,
   summons `FieldCodec[X]` evidence at the call site, and emits a
@@ -881,7 +881,7 @@ Potential extensions:
 
 ## Suggested PR Slices
 
-1. Add `typed` module and Kyo feasibility tests, including `kyo-schema`.
+1. Add `signatures` module and Kyo feasibility tests, including `kyo-schema`.
 2. Add primitive accessors to `Prediction`.
 3. Implement `Signature`, `Shape`, schema-backed `FieldCodec`, and
    builder API.
@@ -900,7 +900,7 @@ Run focused tests while developing:
 
 ```bash
 sbt core/test
-sbt typed/test
+sbt signatures/test
 sbt programs/test
 ```
 

@@ -17,8 +17,8 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
-import dspy4s.typed.OutputAugmentation.PrependField
-import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
+import dspy4s.signatures.OutputAugmentation.PrependField
+import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
 /** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized over

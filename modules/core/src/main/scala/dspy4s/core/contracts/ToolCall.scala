@@ -27,7 +27,7 @@ given recordSchema: Schema[DynamicValue.Record] =
   *
   * Single shared type across layers: the wire layer (`lm`) populates it from provider responses, the adapters read it,
   * and the typed decode path uses it as a `Vector[ToolCall]` output field (paired with
-  * `dspy4s.typed.Signature.markToolCalls`). Lives in `core` so both `lm` and `typed` — which don't depend on each other
-  * — can name it; the [[recordSchema]] given lets the typed `Schema` derivation keep the precise `args` type.
+  * `dspy4s.signatures.Signature.markToolCalls`). Lives in `core` so both `lm` and `typed` — which don't depend on each
+  * other — can name it; the [[recordSchema]] given lets the typed `Schema` derivation keep the precise `args` type.
   */
 final case class ToolCall(name: String, args: DynamicValue.Record) derives Schema

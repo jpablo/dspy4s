@@ -5,7 +5,7 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.programs.strategies.Predict
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 /** Offline decode-test harness: drive the REAL adapter + typed decode against a canned LM completion, with no live LM
   * and no API key. Deterministic, so it can pin down the codec/adapter contract for a structured type (the enum / list

@@ -22,7 +22,7 @@ import dspy4s.examples.Demo
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.{ToolFunction, description}
-import dspy4s.typed.Signature
+import dspy4s.signatures.Signature
 
 object Observability:
 
