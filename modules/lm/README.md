@@ -84,7 +84,9 @@ changing the domain types.
 | `providers/HttpTransport.scala`, `JdkHttpTransport.scala` | transport interface + JDK implementation |
 | `runtime/ProviderLanguageModel.scala` | generic provider wrapper + request normalizer / response parser |
 | `runtime/ManagedLanguageModel.scala` | cache+retry wrapper, `RetryPolicies`, usage tracking |
-| `runtime/CacheRuntime.scala` | `RequestHash` and the in-memory / disk / composite caches + registry |
+| `runtime/RequestHash.scala` | canonical request encoding and cache-key hashing |
+| `runtime/InMemoryLmCache.scala`, `DiskLmCache.scala`, `CompositeLmCache.scala` | memory, disk, composite, and no-op cache implementations |
+| `runtime/LmCacheConfiguration.scala` | cache defaults, configuration, construction, and registry |
 | `runtime/ToolCallAssembler.scala` | streaming tool-call delta merging |
 
 ## Relation to dspy
