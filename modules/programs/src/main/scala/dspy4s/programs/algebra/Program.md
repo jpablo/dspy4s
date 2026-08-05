@@ -56,20 +56,20 @@ Keeping `N` visible makes invalid parameter updates unrepresentable and lets com
 
 `Program.of(module)` packages an existing module. It compiles only when Scala can find:
 
-- `OptimizableStructure[module.Type]`, proving that every optimizer leaf is addressable;
-- `RecordCodec[I]`, giving the input object one canonical record decoder.
+- `OptimizableStructure[module.Type]`, proving that every optimizer leaf is addressable.
+
+No record decoder is needed to construct or compose a program. `RecordCodec[I]` enters only when a `ProgramRunner`
+invokes the program from a dynamic record.
 
 ```mermaid
 flowchart LR
     moduleValue["F extends Module[I, O]"]
     structure["OptimizableStructure.WithArity[F, N]"]
-    codec["RecordCodec[I]"]
     constructor["Program.of"]
     packaged["Program[I, O, N]<br/>Rep = F"]
 
     moduleValue --> constructor
     structure -->|"stored"| constructor
-    codec -->|"construction gate"| constructor
     constructor --> packaged
 ```
 
@@ -88,7 +88,7 @@ grade(f >>> g) = grade(f) + grade(g)
 The abstraction expressing this is:
 
 ```scala
-NatGradedCategory[RecordCodec, Program]
+NatGradedCategory[AnyObject, Program]
 ```
 
 Its important operations have these types:
@@ -205,11 +205,12 @@ val erased: SomeProgram[Question, Answer] = precise
 
 | Static type | Program execution | `ProgramRunner` | Unsized `params` | Optimizable structure |
 |---|---:|---:|---:|---:|
-| `Program[I, O, N]` | yes | yes | yes | yes |
-| `SomeProgram[I, O]` | yes | yes | yes | intentionally unavailable |
+| `Program[I, O, N]` | yes | when `RecordCodec[I]` exists | yes | yes |
+| `SomeProgram[I, O]` | yes | when `RecordCodec[I]` exists | yes | intentionally unavailable |
 
-The optimizable structure is unavailable after erasure because its result must name the same `N` as the program. Execution
-does not need that information, so `ProgramRunner[SomeProgram[I, O]]` remains available.
+The optimizable structure is unavailable after erasure because its result must name the same `N` as the program.
+Record-boundary execution does not need that information, so `ProgramRunner[SomeProgram[I, O]]` remains available
+whenever the input type has a `RecordCodec`.
 
 `Program.erasedCategory` supplies ordinary category operations for code that intentionally works at this boundary. It is
 an explicit value rather than a `given`; exact programs therefore select graded composition and retain `N + M` by
@@ -325,7 +326,7 @@ have grade zero, so a pipeline across two runtime signatures retains only the gr
 4. Parameter identity, composition, and fan-out laws.
 5. Exact-grade `Parameterization.readFunctor`, plus the view and parameter monoids, their deloopings, and the laws of
    the arity-erased `InspectFunctor`, `ForgetMetadataFunctor`, and `ReadFunctor`.
-6. Canonical object-side decoding and construction gates.
+6. Canonical record-boundary decoding, independent of program construction.
 7. The effectful copying non-law.
 
 Optimizer integration is checked by

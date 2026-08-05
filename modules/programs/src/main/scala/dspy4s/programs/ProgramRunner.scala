@@ -13,9 +13,9 @@ import zio.blocks.schema.DynamicValue
   * available on every module representation; third-party programs can supply their own instance.
   *
   * For BARE modules the program's own signature is the canonical decode boundary (no identity morphism is in sight, so
-  * no coherence question arises); the framework leaves and composites carry signature-backed instances below. Inside
-  * the graded program category, decoding is instead a property of the OBJECT ([[RecordCodec]]), resolved canonically at
-  * the record boundary rather than stored in each morphism.
+  * no coherence question arises); the framework leaves and composites carry signature-backed instances below. For a
+  * packaged `Program`, decoding is likewise resolved canonically from [[RecordCodec]] at this boundary rather than
+  * stored in the morphism or required by the program algebra.
   */
 trait ProgramRunner[P]:
   def run(program: P, call: ProgramCall[DynamicValue.Record])(using

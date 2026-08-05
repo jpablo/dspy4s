@@ -215,30 +215,33 @@ runnable)` and surfaced the finding: **parameterization evidence alone is not en
 `ProgramRunner` (decode a record, run), which was not packaged; it resolved only against the packaging-refined
 type, so it died under upcasts and did not exist for composed pipelines (`AndThen`) at all.
 
-The close went through two forms. FIRST (historical): `Program` packaged a per-morphism
+The close went through three forms. FIRST (historical): `Program` packaged a per-morphism
 `decodeInput`, captured through a `ProgramInput` capability typeclass and threaded through composition, with a
 documented coherence law (the packaged decoder must agree with the program's input boundary) as the
-condition under which the category laws held. SECOND (current, stage 4): decoding is a property of the OBJECT.
+condition under which the category laws held. SECOND (historical stage 4): decoding became a property of the OBJECT.
 `Program` packages nothing decode-related; `Program.of` requires a sealed `RecordCodec[I]` at the domain (the
 object gate) alongside `OptimizableStructure`; the record-boundary runner demands `RecordCodec[I]` at use; composition
 threads nothing. `ProgramInput`, the morphism-specific decoder, and the coherence law are GONE: identity, every
 program at an object, and the runner all decode through the object's one canonical codec, so the unit laws hold
 with no decode-side condition and an incoherent per-morphism decoder is UNREPRESENTABLE (compile gates pin both
-former vehicles).
+former vehicles). THIRD (current): because neither identity nor composition performs record decoding, the residual
+constructor and category constraints were removed. `Program.of` requires only `OptimizableStructure`, the category is
+`NatGradedCategory[AnyObject, Program]`, and only `ProgramRunner` requires `RecordCodec[I]` when entering from a record.
 Bare-module running is a separate concern with no coherence question (no identity morphism in sight):
 `ProgramRunner` carries signature-backed instances for the framework leaves and composites, plus a
 low-priority `RecordCodec` fallback for user composites. Named-tuple inputs (`fromString` / `fromType` /
 `of[Spec]`) get their codec from a `RecordCodec` derivation over the same `SchemaTupleShape` path those macros
-use, so codec and signature decode cohere definitionally; `Record`-input programs no longer package at all
-(`DynamicSignature` is the dynamic gate into the category).
+use, so codec and signature decode cohere definitionally. `Record`-input programs may be packaged, but the packaged
+value has no generic record-boundary runner because `DynamicValue.Record` deliberately has no single canonical codec;
+`DynamicSignature` is the type-safe dynamic execution boundary.
 
 **The `DynamicSignature` bundle (prototype): fresh types for runtime signatures.** The reason the coherence law
 exists at all is that every `fromStringDynamic` program shares the input type `DynamicValue.Record` while needing
 its own field-validating decoder, so the type cannot determine the decoder. `DynamicSignature.parse` removes that
 collapse for programs that enter the category: each parse mints fresh abstract `In` / `Out` type members (fresh
 per stable path, the path-dependent freshness the compiler enforces) and carries the matching sealed `RecordCodec`s, born from
-the same parse behind the abstraction. Identity and any program over the bundle then decode identically as a
-consequence of abstraction: the unit laws hold on bundle objects with NO coherence caveat, and re-parsing the
+the same parse behind the abstraction. Every record-boundary execution over the bundle then decodes identically as a
+consequence of abstraction, and re-parsing the
 same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
 `ProgramAlgebraLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
 parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
@@ -267,15 +270,15 @@ runs its main through `DynamicSignature.parse` + `predict()` with the doc snippe
 constraints. The declared stance: `DynamicSignature` is the user path for runtime-string signatures;
 `DynamicPredict` is the record-valued substrate for framework-internal generations (its scaladoc now points users to
 the bundle). Stage 4 then LANDED (the no-users API-break window): `decodeInput` and `ProgramInput` are deleted,
-decoding is object-side, and the coherence law is not discharged but DISSOLVED, its counterexample
+decoding is type-indexed at the record boundary, and the coherence law is not discharged but DISSOLVED, its counterexample
 unrepresentable. Record-running is uniform over exact `Program[I, O, N]` values and the existential
 `SomeProgram[I, O]`, while optimization deliberately retains the grade `N`. An upcast to `SomeProgram[I, O]`
 therefore remains runnable but erases the parameter shape required by `OptimizableStructure`; shape-preserving composed pipelines
 still optimize end-to-end, and `.copro` preserves their arity in its report type. Pinned by
-`ProgramAlgebraLawSuite` (object-side decoding + the unrepresentability gates) and `ParaCompileSuite`
+`ProgramAlgebraLawSuite` (boundary decoding + the unrepresentability gates) and `ParaCompileSuite`
 (erasure boundary + composed-pipeline + bundle optimization).
 
-**Codec-equipped objects (commit `876442a`), the id wrinkle RESOLVED.** The close left one law wrinkle:
+**Codec-equipped objects (commit `876442a`, historical intermediate).** The close left one law wrinkle:
 `id[A]` carried a failing decoder (nothing decodes an arbitrary `A` from a record), so the left unit
 degraded on the evaluation observation. The fix is the `CategoryTC[P[_], Hom]` object-constraint slot from
 jpablo/math-with-scala, applied where it belongs: `NatGradedCategory` is instantiated for `Program` at
@@ -288,8 +291,10 @@ Result, pinned by the suites: the left unit holds on the evaluation observation 
 definitionally: one canonical codec per object is the only decode path); an id-headed pipeline optimizes end-to-end
 through COPRO; and `id` at a non-codec object is a compile error, the honest statement that over
 codec-equipped objects the structure is a genuine category while elsewhere it is a semicategory (morphisms
-compose, no unit). After stage 4 the object constraint also gates `Program.of` and the record-boundary runner;
-no decoder evidence is stored in a morphism.
+compose, no unit). After stage 4 the object constraint also gated `Program.of` and the record-boundary runner;
+no decoder evidence was stored in a morphism. The later separation removed this residual coupling: categorical
+identity is now available for every Scala type through `AnyObject`, while `RecordCodec[I]` gates only the
+`ProgramRunner` interpretation that actually decodes a record.
 
 **Law statements, the read functor, and fan-out (commit `446ccb6`, adopted from jpablo/math-with-scala).**
 Three encodings from the math library, fitted to dspy4s's executable-laws discipline:
@@ -298,7 +303,7 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   and the `@Law` annotation. The parameterized structures now state their laws as `@Law` methods ON the traits, and
   `ProgramAlgebraLawSuite` executes the statements instead of hand-building both sides, each under the honest
   observation (structural `==` for parameter vectors; complete prediction + params + lifecycle for `Program`
-  morphisms, decoding having moved to the objects in stage 4). Sequential raw evidence has an associative
+  morphisms, with canonical decoding supplied only when the observation enters from a record). Sequential raw evidence has an associative
   accumulator with the empty envelope as identity, so `p >>> id` is indistinguishable even through `ProgramRunner`.
   The former unlawful-decoder counterexample is UNREPRESENTABLE: `RecordCodec` is sealed and its removal is pinned
   by compile gates. The deliberate split from the
@@ -487,7 +492,7 @@ injection over optimizer-assembled layouts, the evaluation judge), `Predict.eras
   commutative carrier could implement the appropriate level. A pair-input decoder would still be needed to lift
   ordered tensor into the packaged `Program` algebra.
 - **Full parameterized-program adoption**: promote the packaged `Program` (see the formalization above; the entry-point
-  loop is closed, decoding is object-side with codec-equipped objects gating `of` / `id` / the runner, the
+  loop is closed, decoding is a separate boundary capability gating only the runner, the
   signature-backed `ProgramRunner` instances cover the framework leaves and composites for bare-module
   running, and the BestOfN / Refine / RLM `OptimizableStructure` instances are in place, so the layer and its instance
   coverage are functionally complete) to the DOCUMENTED public optimizer entry-point API (docs-site guide +

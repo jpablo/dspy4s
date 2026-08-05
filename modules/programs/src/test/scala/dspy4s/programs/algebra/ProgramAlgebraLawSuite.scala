@@ -8,13 +8,12 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.algebra.{AnyGrade, IsEq, Lens, Monoid, NatGradedCategory, OrderedFanout}
+import dspy4s.algebra.{AnyGrade, AnyObject, IsEq, Lens, Monoid, NatGradedCategory, OrderedFanout}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.strategies.DynamicPredict
@@ -37,7 +36,7 @@ import zio.blocks.schema.Schema
 
 import java.util.concurrent.atomic.AtomicInteger
 
-// Top-level fixtures (Schema derivation requires top-level types): codec-equipped objects for the id laws.
+// Top-level fixtures (Schema derivation requires top-level types): codec-equipped inputs for runner observations.
 final case class Boxed(n: Int) derives Schema
 final case class Wrapped(s: String) derives Schema
 final case class NestedValue(n: Int) derives Schema
@@ -47,9 +46,10 @@ final case class ArrayBox(values: Array[Int]) derives Schema
 /** Executes the `@Law` statements of the graded program structures ([[NatGradedCategory]], [[GradedFunctor]], and
   * [[Parameterization]] over [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation
   * honest for it: structural `==` for parameter vectors and delooping morphisms, observational equality (complete
-  * prediction / params / coherent decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no
-  * `OptimizableStructure`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
-  * shares its input; copying is not natural for effectful morphisms).
+  * prediction / params / lifecycle) for `Program` morphisms. Separate checks pin canonical boundary decoding, the
+  * construction gate (no `OptimizableStructure`, no `Program`), the separation between program construction and
+  * record-boundary decoding, and the copy NON-law (`fanout` shares its input; copying is not natural for effectful
+  * morphisms).
   */
 class ProgramAlgebraLawSuite extends FunSuite:
 
@@ -88,9 +88,9 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   private given RuntimeContextProvider: RuntimeContext = RuntimeEnvironment.current
 
-  private val C = summon[NatGradedCategory[RecordCodec, Program]]
+  private val C = summon[NatGradedCategory[AnyObject, Program]]
   private val U = C.forgetGrade
-  private val P = summon[Parameterization[RecordCodec, Program]]
+  private val P = summon[Parameterization[AnyObject, Program]]
   private val F = summon[OrderedFanout[Program]]
 
   // ── Bundle-tagged dynamic objects: fresh types minted per parse (DynamicSignature) ─────────────────────────
@@ -108,16 +108,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   private def step[I, O](tag: String, sig: String)(f: I => O): Step[I, O] = Step(tag, f, predict(sig))
 
-  // ── Stub OBJECT codecs for the plain test carriers. Decoding is object-side now: a stub lives at the TYPE
-  //    (these tests never exercise record decoding), not on any program — there is nowhere program-local to
-  //    put a decoder anymore. ─────────────────────────────────────────────────────────────────────────────────
-  private given RecordCodec[Int] =
-    RecordCodec.fromDecoder(_ => Left(ValidationError("test stub: no input codec")))
-  private given RecordCodec[String] =
-    RecordCodec.fromDecoder(_ => Left(ValidationError("test stub: no input codec")))
-
-  /** Package a Step at its (codec-equipped) domain object. */
-  private def pack[I, O](m: Step[I, O])(using RecordCodec[I]): Program[I, O, 1] = Program.of(m)
+  /** Package a Step independently of record-boundary decoding. */
+  private def pack[I, O](m: Step[I, O]): Program[I, O, 1] = Program.of(m)
 
   // Fixture for the Record-input compile gate below (suite-level so compileErrors snippets can reference
   // it; referenced only inside the snippet, which the unused checker cannot see).
@@ -158,7 +150,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     }
 
   /** Execute an IsEq under the documented Program observation (params + complete prediction + executable semantics;
-    * decoding is a property of the object, so it no longer varies between the two sides by construction).
+    * record decoding is external to the morphism, so it cannot vary between the two sides).
     */
   private def assertObsEq[I, O](
       eq   : IsEq[AnyGrade[Program, I, O]],
@@ -330,16 +322,15 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assertEquals(ReadFunctor.map(a), ForgetMetadataFunctor.map(aViews))
   }
 
-  // ── Object-side decoding: the coherence condition is gone because nothing per-program remains ───────────
-  test("decoding is object-side: one codec per object, shared by id, every program, and the runner") {
-    // There is no per-program decoder left to compare: RecordCodec[Boxed] is THE decode path for identity,
-    // for any program at Boxed, and for the record-boundary runner. The former coherence law has nothing to
-    // range over; the unit laws need no decode-side condition at all.
+  // ── Boundary decoding: the coherence condition is gone because nothing per-program remains ──────────────
+  test("record-boundary decoding uses one canonical codec per input type") {
+    // There is no per-program decoder left to compare: RecordCodec[Boxed] is THE decode path for every packaged
+    // program runner at Boxed. The former coherence law has nothing to range over.
     val boxedRecord = DynamicValues.record("n" := 5)
     assertEquals(summon[RecordCodec[Boxed]].decode(boxedRecord), Right(Boxed(5)))
     val p   = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
     val ran = summon[ProgramRunner[SomeProgram[Boxed, Wrapped]]].run(p, boxedRecord)
-    assert(ran.isRight, s"object-side record run failed: ${ran.left.toOption}")
+    assert(ran.isRight, s"record-boundary run failed: ${ran.left.toOption}")
   }
 
   test("an incoherent per-program decoder is UNREPRESENTABLE (was: the ProgramInput coherence law)") {
@@ -421,9 +412,9 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assert(crossing.nonEmpty, "separate custom-schema bundles must mint separate object types")
   }
 
-  test("a bundle-tagged dynamic object is a codec-equipped category object (packaged in one step)") {
-    // The bundle mints fresh In/Out types whose codec is born from the same parse as the signature; packaged()
-    // supplies that codec to the object gate, so the runtime-string program is an ordinary category citizen.
+  test("a bundle-tagged dynamic input carries its canonical boundary codec") {
+    // The bundle mints fresh In/Out types whose codec is born from the same parse as the signature. Packaging itself
+    // is codec-independent; importing the bundle givens enables record-boundary execution.
     val p = qaBundle.packaged()
     assertEquals(p.params.size, 1)
     import qaBundle.given
@@ -449,28 +440,25 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assertEquals(same.signature.inputShape.encode(aliasedAgain), qaBundle.signature.inputShape.encode(input))
   }
 
-  test("a bare Record-input program no longer packages: bundles are the only dynamic gate") {
-    // The old world derived a per-program decoder for these from the signature. Object-side decoding demands
-    // RecordCodec[DynamicValue.Record], which deliberately does not exist: the collapsed Record object is not
-    // a lawful category object, and DynamicSignature is the route in. BARE-module running is untouched (the
-    // signature-backed ProgramRunner below needs no codec and no category).
+  test("program construction is independent of record-boundary decoding") {
+    // The collapsed Record object deliberately has no canonical codec: different dynamic signatures validate
+    // different fields. That no longer prevents packaging, because the algebra operates directly on I. It prevents
+    // only record-boundary execution of the package. BARE-module running remains signature-backed.
     val gate = compileErrors("summon[RecordCodec[DynamicValue.Record]]")
     assert(gate.nonEmpty, "the collapsed Record object must stay codec-less")
-    val errors = compileErrors("Program.of(ChainOfThought(recordSignature))")
-    assert(errors.nonEmpty, "expected packaging a Record-input program to fail compilation")
+    val packaged = Program.of(ChainOfThought(recordSignature))
+    assertEquals(packaged.params.size, 1)
+    val errors = compileErrors("summon[ProgramRunner[Program[DynamicValue.Record, Wrapped, 1]]]")
+    assert(errors.nonEmpty, "expected record-boundary execution without a codec to fail compilation")
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
     val _ = summon[ProgramRunner[ChainOfThought[DynamicValue.Record, Wrapped]]]
-
-    // Codec-equipped composites package as before.
-    val productChain = Program.of(ChainOfThought(Signature.derived[Boxed, Wrapped]("ProductInput")))
-    assertEquals(productChain.params.size, 1)
   }
 
-  test("id at a non-codec object does not compile (the structure is only a semicategory there)") {
-    // Opaque carries no RecordCodec: id[Opaque] has no evaluation evidence and is rejected at compile time.
-    // Morphisms touching such objects still compose; only the unit (and the record-boundary runner) is gated.
-    val errors = compileErrors("C.id[Opaque]")
-    assert(errors.nonEmpty, "expected id at a non-codec object to fail compilation")
+  test("identity exists at every object while record-boundary execution remains codec-gated") {
+    val identity = C.id[Opaque]
+    assertEquals(identity.params, Vector.empty)
+    val errors = compileErrors("summon[ProgramRunner[Program[Opaque, Opaque, 0]]]")
+    assert(errors.nonEmpty, "expected record-boundary execution at a non-codec input to fail compilation")
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }
 

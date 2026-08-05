@@ -275,16 +275,16 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     composition concatenates parameters; `replace` is the reparameterization 2-cell; homogeneous
     homogeneous `OptimizableParameters` values make `Vector` the exact, not approximate, parameter object, while layout/module
     metadata remains read-only). Prototyped as
-    `NatGradedCategory[RecordCodec, Program]` over `Program[I, O, N]` morphisms, with canonical lossless grade erasure
+    `NatGradedCategory[AnyObject, Program]` over `Program[I, O, N]` morphisms, with canonical lossless grade erasure
     modeled as a `GradedFunctor` into the ordinary `AnyGrade` category; parameter access and
-    ordered fan-out separated into `Parameterization` and `OrderedFanout`; `Program` packages addressability while its
-    domain object supplies a sealed canonical codec. Exact programs provide uniform `OptimizableStructure[Program[I, O, N]]`
+    ordered fan-out separated into `Parameterization` and `OrderedFanout`; `Program` packages addressability while
+    record-boundary execution separately resolves a sealed canonical codec. Exact programs provide uniform `OptimizableStructure[Program[I, O, N]]`
     plus `ProgramRunner[Program[I, O, N]]`; `SomeProgram[I, O]` is the explicit runnable grade-erasure boundary. Two
-    compile-time gates: no `OptimizableStructure`, no `Program`;
-    no `RecordCodec`, no `id` (a genuine category over codec-equipped objects, a semicategory elsewhere).
-    Decoding is OBJECT-side (stage 4, after the lawfulness-review arc that first replaced `unsafeOf` with a
-    `ProgramInput` coherence law and then deleted `ProgramInput` outright): `Program.of` and the record-boundary
-    runner require `RecordCodec[I]` at the domain, nothing decode-related is packaged, and an
+    compile-time boundaries: no `OptimizableStructure`, no `Program`;
+    no `RecordCodec[I]`, no record-boundary `ProgramRunner` (the category itself remains available for every object).
+    Decoding is type-indexed at the record boundary (after the lawfulness-review arc that first replaced `unsafeOf` with a
+    `ProgramInput` coherence law and then deleted `ProgramInput` outright): only the record-boundary runner requires
+    `RecordCodec[I]`, nothing decode-related is packaged, and an
     incoherent per-program decoder is unrepresentable (compile gates pin both former vehicles). Named-tuple
     inputs derive their codec through the same `SchemaTupleShape` path the signature macros use; bare-module
     running is signature-backed `ProgramRunner` instances (no identity in sight, no coherence question);

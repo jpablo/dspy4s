@@ -12,13 +12,13 @@ import dspy4s.programs.algebra.Program
 /** A packaged [[Program]] as the optimizer entry point.
   *
   * `COPRO[P]` needs `OptimizableStructure[P]` and `ProgramRunner[P]`. The packaged entry point therefore retains
-  * `Program[I, O, N]`: the runner depends only on the codec-equipped input object, while optimizer access uses the
-  * parameter grade retained by `N`.
+  * `Program[I, O, N]`: optimizer access uses the parameter grade retained by `N`, while the runner separately requires
+  * whatever capability can enter the program's input boundary (normally `RecordCodec[I]`).
   */
 object ParaCompile:
   extension [I, O, N <: Int](program: Program[I, O, N])
-    /** Run COPRO over a packaged program while preserving its static parameter arity. The required `ProgramRunner`
-      * exists whenever `RecordCodec[I]` does (object-side decoding).
+    /** Run COPRO over a packaged program while preserving its static parameter arity. The usual `ProgramRunner`
+      * instance exists whenever `RecordCodec[I]` does (record-boundary decoding).
       */
     def copro(
         config  : COPROConfig,

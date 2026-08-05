@@ -13,14 +13,14 @@ import zio.blocks.schema.DynamicValue
   * one-decoder-per-type for the dynamic layer.
   *
   * The problem this solves: every `Signature.fromStringDynamic` program shares the input type `DynamicValue.Record`,
-  * while each needs its own field-validating decoder, so the type cannot determine the decoder and the parameterized
-  * category's left unit holds only under the `ProgramInput` coherence law. The bundle makes the fibration honest in the
-  * type system: each parse mints its own `In` / `Out` as abstract type members (fresh per stable path, the
-  * path-dependent freshness the compiler enforces), and the codec and the signature are born from the same parse behind
-  * that abstraction. Outside, the only source of a `RecordCodec[s.In]` is `s.inputCodec` and the only source of a
-  * `Signature[s.In, _]` is `s.signature`, so a signature from one parse cannot be recombined with a codec from another:
-  * identity and any program over the bundle decode identically as a consequence of abstraction, not as an instance
-  * obligation. `RecordCodec` is sealed, so application code cannot introduce a competing decoder for either fresh type.
+  * while each needs its own field-validating decoder, so the shared type cannot determine the decoder. The bundle
+  * restores that distinction in the type system: each parse mints its own `In` / `Out` as abstract type members (fresh
+  * per stable path, the path-dependent freshness the compiler enforces), and the codec and the signature are born from
+  * the same parse behind that abstraction. Outside, the only source of a `RecordCodec[s.In]` is `s.inputCodec` and the
+  * only source of a `Signature[s.In, _]` is `s.signature`, so a signature from one parse cannot be recombined with a
+  * codec from another: every record-boundary execution over the bundle decodes identically as a consequence of
+  * abstraction, not as an instance obligation. `RecordCodec` is sealed, so application code cannot introduce a
+  * competing decoder for either fresh type.
   *
   * Scala widens an ordinary `val alias = s` back to `DynamicSignature`, which gives the alias a new path projection.
   * Use [[stable]] when a second binding must retain this bundle's exact `In` / `Out` types. Re-parsing the same string
@@ -39,7 +39,7 @@ sealed trait DynamicSignature:
   /** The fresh input type: externally abstract, so this bundle's codec and signature are its only sources. */
   type In
 
-  /** The fresh output type (codec-equipped so mid-pipeline objects support identity too). */
+  /** The fresh output type (codec-equipped so it can later serve as a record-boundary input). */
   type Out
 
   val signature: Signature[In, Out]
@@ -74,15 +74,13 @@ sealed trait DynamicSignature:
   ): Predict[In, Out] =
     Predict(signature, demos = demos, name = name, config = config)
 
-  /** Package this bundle's predict as a graded-category morphism in one step: the object codec comes from the bundle
-    * itself, so no `import s.given` is needed at the call site.
-    */
+  /** Package this bundle's predict as a graded-category morphism in one step. */
   final def packaged(
       demos : Vector[Example]     = Vector.empty,
       name  : Option[String]      = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
   ): Program[In, Out, 1] =
-    Program.of(predict(demos, name, config))(using summon[OptimizableStructure[Predict[In, Out]]], inputCodec)
+    Program.of(predict(demos, name, config))
 
 object DynamicSignature:
 
@@ -145,9 +143,4 @@ object DynamicSignature:
         s"bridge: target inputs not covered by source outputs; missing: ${missing.mkString(", ")}"
       ))
     else
-      import from.outputCodec
       Right(Program.of(LiftEither[from.Out, to.In](value => to.input(from.signature.outputShape.encode(value)))))
-
-  // Note: `bridge` packages at the SOURCE bundle's output object (`import from.outputCodec` supplies the
-  // object codec `Program.of` now requires); the target side needs no codec, since only domains are objects
-  // a package is created at.

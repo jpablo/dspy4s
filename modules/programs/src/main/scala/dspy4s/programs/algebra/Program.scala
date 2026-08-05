@@ -24,8 +24,8 @@ import scala.compiletime.ops.int.+
 /** An optimizable module packaged with the exact number of writable parameter leaves.
   *
   * `Rep` hides the concrete module representation while `N` remains visible as the natural-number grade. Construction
-  * through [[Program.of]] requires both complete optimizable-structure evidence for the representation and the
-  * canonical [[RecordCodec]] for the input object.
+  * through [[Program.of]] requires complete optimizable-structure evidence for the representation. Decoding from a
+  * dynamic record is a separate boundary capability supplied by [[ProgramRunner]].
   */
 sealed trait Program[I, O, N <: Int]:
   type Rep <: Module[I, O]
@@ -42,24 +42,23 @@ type SomeProgram[I, O] = Program[I, O, ?]
 
 object Program:
 
-  private def packageModule[I, O, F <: Module[I, O]](
-      module: F
-  )(using structure: OptimizableStructure[F]): Program[I, O, structure.Arity] { type Rep = F } =
+  private def packageModule[I, O, M <: Module[I, O]](
+      module: M
+  )(using structure: OptimizableStructure[M]): Program[I, O, structure.Arity] { type Rep = M } =
     new Program[I, O, structure.Arity]:
-      type Rep = F
+      type Rep = M
       val program               = module
       val optimizableParameters = structure
 
-  /** Package a module at a codec-equipped input object while retaining its exact parameter grade. */
-  def of[I, O, F <: Module[I, O]](f: F)(using
-      structure               : OptimizableStructure[F],
-      @annotation.unused codec: RecordCodec[I]
-  ): Program[I, O, structure.Arity] { type Rep = F } =
-    packageModule(f)
+  /** Package a module while retaining its exact parameter grade. */
+  def of[I, O, M <: Module[I, O]](module: M)(using
+      structure: OptimizableStructure[M]
+  ): Program[I, O, structure.Arity] { type Rep = M } =
+    packageModule(module)
 
   /** Naturals grade program composition: identity contributes zero leaves and composition adds leaf counts. */
-  given gradedProgramCategory: NatGradedCategory[RecordCodec, Program] with
-    def id[A](using @annotation.unused codec: RecordCodec[A]): Program[A, A, 0] =
+  given gradedProgramCategory: NatGradedCategory[AnyObject, Program] with
+    def id[A: AnyObject]: Program[A, A, 0] =
       Program.packageModule(Compose.id[A])
 
     def compose[A, B, C, N <: Int, M <: Int](
@@ -87,8 +86,8 @@ object Program:
       )
 
   /** The complete parameter vector is a lawful lens whose size is the program's grade. */
-  given programParameterization: Parameterization[RecordCodec, Program] with
-    val category: NatGradedCategory[RecordCodec, Program] = gradedProgramCategory
+  given programParameterization: Parameterization[AnyObject, Program] with
+    val category: NatGradedCategory[AnyObject, Program] = gradedProgramCategory
 
     def read[A, B, N <: Int](f: Program[A, B, N]): SizedVector[OptimizableParameters, N] =
       f.optimizableParameters.readSized(f.program)
@@ -146,8 +145,8 @@ object Program:
     * This value is explicit rather than a `given`, so exact `Program[I, O, N]` composition always selects the graded
     * operation and retains `N + M`.
     */
-  val erasedCategory: Category[RecordCodec, SomeProgram] = new Category[RecordCodec, SomeProgram]:
-    def id[A](using @annotation.unused codec: RecordCodec[A]): SomeProgram[A, A] = gradedProgramCategory.id[A]
+  val erasedCategory: Category[AnyObject, SomeProgram] = new Category[AnyObject, SomeProgram]:
+    def id[A: AnyObject]: SomeProgram[A, A] = gradedProgramCategory.id[A]
 
     extension [A, B](f: SomeProgram[A, B])
       infix def >>>[C](g: SomeProgram[B, C]): SomeProgram[A, C] =
@@ -155,20 +154,20 @@ object Program:
 
 /** Optimizer-view projection from arity-erased programs into the delooped ordered view monoid. */
 object InspectFunctor
-    extends Functor[Id, RecordCodec, SomeProgram, AnyObject, ViewsHom](using
+    extends Functor[Id, AnyObject, SomeProgram, AnyObject, ViewsHom](using
       Program.erasedCategory,
       viewsDeloop
     ):
-  def mapObject[A](using RecordCodec[A]): AnyObject[A] = summon
-  def map[A, B](f: SomeProgram[A, B]): ViewsHom[A, B]  =
+  def mapObject[A](using AnyObject[A]): AnyObject[A]  = summon
+  def map[A, B](f: SomeProgram[A, B]): ViewsHom[A, B] =
     f.optimizableParameters.inspect(f.program)
 
 /** Parameter projection from arity-erased programs into the delooped ordered parameter monoid. */
 object ReadFunctor
-    extends Functor[Id, RecordCodec, SomeProgram, AnyObject, ParamsHom](using
+    extends Functor[Id, AnyObject, SomeProgram, AnyObject, ParamsHom](using
       Program.erasedCategory,
       paramsDeloop
     ):
-  def mapObject[A](using RecordCodec[A]): AnyObject[A] = summon
+  def mapObject[A](using AnyObject[A]): AnyObject[A]   = summon
   def map[A, B](f: SomeProgram[A, B]): ParamsHom[A, B] =
     ForgetMetadataFunctor.map(InspectFunctor.map(f))
