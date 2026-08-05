@@ -40,7 +40,7 @@ class TypedBestOfNSuite extends FunSuite:
   // an empty named-predictor set for them (the faithful analogue of Python's `named_predictors() == []`). `InnerPredict`
   // hand-rolls a single LM call on a fixed layout, so it exposes that layout as its one "self" predictor — enough for
   // advice to route back to it (its advice degrades to uniform, matching the single-predictor case).
-  private given OptimizableTraversal[TypedStub] = OptimizableTraversal.empty
+  private given OptimizableStructure[TypedStub] = OptimizableStructure.empty
 
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)

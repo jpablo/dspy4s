@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.{OptimizableLeaf, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableLeaf, OptimizableStructure}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -9,23 +9,23 @@ import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import munit.FunSuite
 
-import ProgramLeafOptimizableTraversalSuite.Pipe2
+import ProgramLeafOptimizableStructureSuite.Pipe2
 
 /** P4: leaf [[OptimizableLeaf]] instances for the single-predictor programs [[Predict]] and [[ChainOfThought]].
   *
   * A `Predict`/`ChainOfThought` field inside a composite must resolve to the 1-element leaf (via
-  * [[OptimizableTraversal.fromOptimizableLeaf]]) rather than being structurally torn apart by
-  * [[OptimizableTraversal.derived]].
+  * [[OptimizableStructure.fromOptimizableLeaf]]) rather than being structurally torn apart by
+  * [[OptimizableStructure.derived]].
   */
-class ProgramLeafOptimizableTraversalSuite extends FunSuite:
+class ProgramLeafOptimizableStructureSuite extends FunSuite:
 
-  /** Resolves the right [[OptimizableLeaf]]/[[OptimizableTraversal]] from the program's *static* type, so the `[I, O]`
+  /** Resolves the right [[OptimizableLeaf]]/[[OptimizableStructure]] from the program's *static* type, so the `[I, O]`
     * of the given are inferred at the call site rather than pinned to `Nothing`.
     */
   private def predictorOf[P](@annotation.unused program: P)(using leaf: OptimizableLeaf[P]): OptimizableLeaf[P] = leaf
   private def predictorsOf[P](@annotation.unused program: P)(using
-      ps: OptimizableTraversal[P]
-  ): OptimizableTraversal[P] = ps
+      ps: OptimizableStructure[P]
+  ): OptimizableStructure[P] = ps
 
   // A concrete signature: (question: String) -> (answer: String).
   private val qaSignature = Signature.fromString("question -> answer")
@@ -118,19 +118,19 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
 
   // ── Resolution priority: leaf, not structural derivation ─────────────────
 
-  test("OptimizableTraversal[Predict] resolves to the leaf fromOptimizableLeaf instance, not derived") {
+  test("OptimizableStructure[Predict] resolves to the leaf fromOptimizableLeaf instance, not derived") {
     val predict = Predict(qaSignature, name = Some("ask"))
     assertEquals(
       predictorsOf(predict).getClass.getName,
-      "dspy4s.programs.optimization.OptimizableTraversal$fromOptimizableLeaf"
+      "dspy4s.programs.optimization.OptimizableStructure$fromOptimizableLeaf"
     )
   }
 
-  test("OptimizableTraversal[ChainOfThought] resolves to the leaf fromOptimizableLeaf instance, not derived") {
+  test("OptimizableStructure[ChainOfThought] resolves to the leaf fromOptimizableLeaf instance, not derived") {
     val cot = ChainOfThought(qaSignature, name = Some("think"))
     assertEquals(
       predictorsOf(cot).getClass.getName,
-      "dspy4s.programs.optimization.OptimizableTraversal$fromOptimizableLeaf"
+      "dspy4s.programs.optimization.OptimizableStructure$fromOptimizableLeaf"
     )
   }
 
@@ -141,7 +141,7 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = ChainOfThought(qaSignature, name = Some("think"))
     )
-    val ps    = summon[OptimizableTraversal[Pipe2]]
+    val ps    = summon[OptimizableStructure[Pipe2]]
     val views = ps.inspect(pipe)
     assertEquals(views.size, 2)
     assertEquals(views(0).moduleName, "ask")
@@ -157,13 +157,13 @@ class ProgramLeafOptimizableTraversalSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = ChainOfThought(qaSignature, name = Some("think"))
     )
-    val ps       = summon[OptimizableTraversal[Pipe2]]
+    val ps       = summon[OptimizableStructure[Pipe2]]
     val attached = ps.replace(pipe, ps.read(pipe).map(_.copy(demos = demo)))
     assertEquals(attached.a.demos, demo)
     assertEquals(attached.b.demos, demo)
   }
 
-object ProgramLeafOptimizableTraversalSuite:
+object ProgramLeafOptimizableStructureSuite:
 
   // A composite holding a Predict and a ChainOfThought, both concrete (question -> answer).
   final case class Pipe2(
@@ -172,4 +172,4 @@ object ProgramLeafOptimizableTraversalSuite:
   )
 
   object Pipe2:
-    given OptimizableTraversal[Pipe2] = OptimizableTraversal.derived
+    given OptimizableStructure[Pipe2] = OptimizableStructure.derived

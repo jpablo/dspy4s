@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
@@ -136,7 +136,7 @@ class COPROSuite extends FunSuite:
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report  = result.toOption.get
       val best    = report.bestProgram
-      val applied = summon[OptimizableTraversal[DynamicPredict]].read(best).head.instructions
+      val applied = summon[OptimizableStructure[DynamicPredict]].read(best).head.instructions
       assertEquals(applied, Some(winningInstruction))
       // The winner scored 100% (gold on every example).
       assertEquals(report.metadata.get("best_score"), Some(100.0))
@@ -152,7 +152,7 @@ class COPROSuite extends FunSuite:
       RuntimeEnvironment.withSettings(settings) {
         given RuntimeContext = RuntimeEnvironment.current
         optimizer.compile(student, trainset).toOption
-          .flatMap(r => summon[OptimizableTraversal[DynamicPredict]].read(r.bestProgram).headOption)
+          .flatMap(r => summon[OptimizableStructure[DynamicPredict]].read(r.bestProgram).headOption)
           .flatMap(_.instructions)
       }
     val a = run()
@@ -171,7 +171,7 @@ class COPROSuite extends FunSuite:
       val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best    = result.toOption.get.bestProgram
-      val applied = summon[OptimizableTraversal[DynamicPredict]].read(best).head.instructions
+      val applied = summon[OptimizableStructure[DynamicPredict]].read(best).head.instructions
       assertEquals(applied, Some(winningInstruction))
     }
   }
@@ -192,7 +192,7 @@ class COPROSuite extends FunSuite:
       assertEquals(scores.head, 100.0)
       assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
       // The top candidate carries the winning instruction.
-      val topInstr = summon[OptimizableTraversal[DynamicPredict]].read(report.candidates.head.program).head.instructions
+      val topInstr = summon[OptimizableStructure[DynamicPredict]].read(report.candidates.head.program).head.instructions
       assertEquals(topInstr, Some(winningInstruction))
       // Metadata is populated.
       assert(report.metadata.contains("best_score"))

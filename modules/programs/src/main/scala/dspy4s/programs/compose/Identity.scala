@@ -5,7 +5,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TransparentModule
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.contracts.Prediction
 
 /** `id[I]` — the Category unit: a pure passthrough that returns its input as the output, with an empty raw envelope.
@@ -18,5 +18,5 @@ final case class Identity[I]() extends TransparentModule[I, I]:
     Right(Prediction(call.input, RawPrediction.empty))
 
 object Identity:
-  given identityOptimizableTraversal[I]: OptimizableTraversal.WithArity[Identity[I], 0] =
-    OptimizableTraversal.empty
+  given identityOptimizableStructure[I]: OptimizableStructure.WithArity[Identity[I], 0] =
+    OptimizableStructure.empty

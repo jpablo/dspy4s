@@ -509,7 +509,7 @@ Optimizers see two independently tunable leaves in stable order:
 
 ```mermaid
 flowchart TD
-    root["RLM[I, O]<br/>OptimizableTraversal arity = 2"]
+    root["RLM[I, O]<br/>OptimizableStructure arity = 2"]
 
     root -->|"0: action"| action["actionPredict<br/>per-iteration exploration policy"]
     root -->|"1: extract"| extract["extractPredict<br/>budget-exhaustion fallback"]
@@ -575,8 +575,8 @@ A useful reading order is:
    `ReplCodeInterpreter`, `CodeResult`, and `SandboxTool` contracts.
 9. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
    the default stateful sandbox and host-tool bridge.
-10. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
-   two-leaf optimizer traversal.
+10. [`CompositeOptimizableStructureInstances.scala`](../optimization/CompositeOptimizableStructureInstances.scala): the
+   two-leaf optimizable structure.
 11. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
    submissions, code errors, call limits, metadata, logging, and fallback.
 12. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the

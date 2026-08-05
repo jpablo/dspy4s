@@ -107,7 +107,7 @@ final case class MultiChainComparison[I, O](
 
   /** The comparison predict, built once from [[augmentedSignatureLayout]] over this instance's opaque [[Attempts]]
     * carrier. Only [[attemptInputs.validate]] can construct that carrier, so every input encodes exactly `m` numbered
-    * fields. Kept package-private for optimizer traversal; public execution goes through [[compare]].
+    * fields. Kept package-private for optimizer inspection and replacement; public execution goes through [[compare]].
     */
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
     val base = Predict(

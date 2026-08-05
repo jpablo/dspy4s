@@ -247,12 +247,12 @@ consequences:
 - callbacks and runtime tracing can observe the nested predictor and tool calls;
 - immutable overrides can replace either predictor without changing the tools, schemas, runtime, or module names.
 
-The optimization traversal is a two-branch tree. Traversal order is stable: `react` is index 0 and `extractor` is
+The optimizable structure is a two-branch tree. Its leaf order is stable: `react` is index 0 and `extractor` is
 index 1.
 
 ```mermaid
 flowchart TD
-    root["ReAct[I, O]<br/>OptimizableTraversal arity = 2"]
+    root["ReAct[I, O]<br/>OptimizableStructure arity = 2"]
 
     root -->|"0: react"| react["reactPredict<br/>per-iteration policy"]
     root -->|"1: extractor"| extractor["extractorPredict<br/>final synthesis"]

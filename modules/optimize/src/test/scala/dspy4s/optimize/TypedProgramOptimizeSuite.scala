@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
@@ -21,7 +21,7 @@ final case class QAInput(question: String) derives Schema
 final case class QAOutput(answer: String) derives Schema
 
 /** A small USER composite of two `Predict` programs. It is a plain `case class` of programs:
-  *   - `OptimizableTraversal[TwoStageQA]` is structurally derived (each `Predict` field resolves to the
+  *   - `OptimizableStructure[TwoStageQA]` is structurally derived (each `Predict` field resolves to the
   *     `predictOptimizableLeaf` leaf, so the composite reads as 2 predictors and replaces them positionally);
   *   - it supplies its OWN `ProgramRunner` (a one-liner) because a bare composite does not expose a signature.
   * This is the worked example of how user composites participate in the unified optimize spine.
@@ -111,7 +111,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
 
   // ── 2. LabeledFewShot over a user composite of programs ─────────────
 
-  test("LabeledFewShot attaches demos to BOTH predictors of a user composite (derived OptimizableTraversal)") {
+  test("LabeledFewShot attaches demos to BOTH predictors of a user composite (derived OptimizableStructure)") {
     val student = TwoStageQA(
       classify = Predict[QAInput, QAOutput](sig, name = Some("classify")),
       answer = Predict[QAInput, QAOutput](sig, name = Some("answer"))
@@ -122,11 +122,11 @@ class TypedProgramOptimizeSuite extends FunSuite:
       val result           = optimizer.compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val best = result.toOption.get.bestProgram
-      // OptimizableTraversal derivation reads 2 predictors; replace writes the same 2 demos to each Predict leaf.
+      // OptimizableStructure derivation reads 2 predictors; replace writes the same 2 demos to each Predict leaf.
       assertEquals(best.classify.demos.size, 2)
       assertEquals(best.answer.demos.size, 2)
       // Round-trip sanity: read after replace still yields exactly 2 predictors.
-      assertEquals(summon[OptimizableTraversal[TwoStageQA]].read(best).size, 2)
+      assertEquals(summon[OptimizableStructure[TwoStageQA]].read(best).size, 2)
     }
   }
 

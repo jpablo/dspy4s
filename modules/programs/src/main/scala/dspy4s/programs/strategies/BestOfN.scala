@@ -23,7 +23,7 @@ import dspy4s.programs.contracts.Prediction
   *
   * @tparam P
   *   the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the pass-through
-  *   `OptimizableTraversal` instance ([[BestOfN.bestOfNOptimizableTraversal]]) can delegate to the inner program's own
+  *   `OptimizableStructure` instance ([[BestOfN.bestOfNOptimizableStructure]]) can delegate to the inner program's own
   *   instance; an abstract `Module[...]` field would erase that evidence.
   */
 final case class BestOfN[P <: Module[I, O], I, O](
@@ -50,9 +50,9 @@ object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any learnable
     * predict of its own, so `inspect` / `replace` / `inspectNamed` delegate to the inner program's instance unchanged.
     */
-  given bestOfNOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
-      inner: OptimizableTraversal.WithArity[P, N]
-  ): OptimizableTraversal.Of[BestOfN[P, I, O], N] with
+  given bestOfNOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
+      inner: OptimizableStructure.WithArity[P, N]
+  ): OptimizableStructure.Of[BestOfN[P, I, O], N] with
     def arity(program: BestOfN[P, I, O]): Int                       = inner.arity(program.module)
     def inspect(program: BestOfN[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module)

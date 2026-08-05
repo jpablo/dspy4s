@@ -42,8 +42,8 @@ object OptimizableLeaf:
         )
 
   /** [[OptimizableLeaf]] for the single-leaf program [[Predict]]. A `Predict` field inside a user composite resolves
-    * here (via [[OptimizableTraversal.fromOptimizableLeaf]], 1 element) rather than being structurally torn apart by
-    * [[OptimizableTraversal.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
+    * here (via [[OptimizableStructure.fromOptimizableLeaf]], 1 element) rather than being structurally torn apart by
+    * [[OptimizableStructure.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
     * [[OptimizableLeaf]] companion so it is in implicit scope without an explicit import.
     *
     * Optimizable parameters are exactly instructions, demos, and module config. The signature field structure, output

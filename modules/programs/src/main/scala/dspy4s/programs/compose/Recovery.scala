@@ -56,7 +56,7 @@ final case class RecoverWith[
         }
 
 object RecoverWith:
-  given recoverWithOptimizableTraversal[
+  given recoverWithOptimizableStructure[
       I,
       O,
       P <: Module[I, O],
@@ -64,9 +64,9 @@ object RecoverWith:
       NP <: Int,
       NF <: Int
   ](using
-      primary: OptimizableTraversal.WithArity[P, NP],
-      fallback: OptimizableTraversal.WithArity[F, NF]
-  ): OptimizableTraversal.Of[RecoverWith[I, O, P, F], NP + NF] with
+      primary: OptimizableStructure.WithArity[P, NP],
+      fallback: OptimizableStructure.WithArity[F, NF]
+  ): OptimizableStructure.Of[RecoverWith[I, O, P, F], NP + NF] with
     def arity(program: RecoverWith[I, O, P, F]): Int =
       primary.arity(program.primary) + fallback.arity(program.fallback)
     def inspect(program: RecoverWith[I, O, P, F]): Vector[OptimizableView] =

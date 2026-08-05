@@ -10,7 +10,7 @@
 The structural program classes in `Compose.scala`, `Transform.scala`, `Mode.scala`, and `Recovery.scala` form a type-indexed,
 reified program tree. They are not a conventional passive AST because each node is also a `Module` and implements its
 own execution in `forward`. Other interpretations of the same structure—most notably predictor inspection and
-replacement—are implemented separately through per-node `OptimizableTraversal` instances.
+replacement—are implemented separately through per-node `OptimizableStructure` instances.
 
 This proposal separates those responsibilities:
 
@@ -38,15 +38,15 @@ of program structure grows.
 |---|---|
 | Execution | `forward` on every structural case class |
 | Lifecycle transparency | Inheritance from `TransparentModule` |
-| OptimizableLeaf traversal and replacement | A `OptimizableTraversal` instance for every node |
+| Optimizable-leaf inspection and replacement | An `OptimizableStructure` instance for every node |
 | Record-boundary decoding | The existential package in `algebra.Program` |
-| Optimizer state persistence | A traversal through `OptimizableTraversal` |
-| Laws | Tests observing execution, lifecycle, and parameter traversal |
+| Optimizer state persistence | The ordered leaves described by `OptimizableStructure` |
+| Laws | Tests observing execution, lifecycle, and parameter structure |
 | Potential graphing, normalization, or full persistence | No common interpreter boundary yet |
 
-Adding a combinator currently means defining its representation, execution, and optimizer traversal in different
-places. Binary nodes also repeat state-vector slicing, reconstruction, and structural naming. `PairOptimizableTraversal` and
-`UnaryOptimizableTraversal` reduce that duplication but do not remove the architectural coupling.
+Adding a combinator currently means defining its representation, execution, and optimizable structure in different
+places. Binary nodes also repeat state-vector slicing, reconstruction, and structural naming. `PairOptimizableStructure` and
+`UnaryOptimizableStructure` reduce that duplication but do not remove the architectural coupling.
 
 A central syntax makes new *interpretations* additive. The cost is the other side of the expression problem: adding a
 new core instruction requires changing each interpreter. The open `Atom` boundary is what keeps ordinary third-party
@@ -58,7 +58,7 @@ modules extensible despite that choice.
   nested implementation types such as `AndThen[I, X, O, A, B]`.
 - Define execution semantics in one interpreter, including `ProgramCall` control propagation and `Prediction.raw`
   behavior.
-- Derive one lawful `OptimizableTraversal.WithArity[Program[I, O, N], N]` implementation from the tree
+- Derive one lawful `OptimizableStructure.WithArity[Program[I, O, N], N]` implementation from the tree
   instead of one instance per structural node.
 - Preserve arbitrary user and framework `Module`s as executable, optimizer-addressable leaves.
 - Keep learnable children structurally visible. In particular, do not introduce a closure-based
@@ -157,11 +157,11 @@ that the current combinators carry as type parameters:
 sealed trait Atom[I, O]:
   type Repr <: Module[I, O]
   val value: Repr
-  val optimizableParameters: OptimizableTraversal[Repr]
+  val optimizableParameters: OptimizableStructure[Repr]
 ```
 
-`Atom.of(module)` requires `OptimizableTraversal[module.type-or-concrete-type]`. A genuinely parameter-free custom module must
-continue to opt in explicitly with `OptimizableTraversal.empty`; missing evidence must remain a compile error. This retains the
+`Atom.of(module)` requires `OptimizableStructure[module.type-or-concrete-type]`. A genuinely parameter-free custom module must
+continue to opt in explicitly with `OptimizableStructure.empty`; missing evidence must remain a compile error. This retains the
 current protection against silently hiding learnable subtrees.
 
 The execution interpreter invokes `atom.value.apply(call)`. The existing module therefore retains responsibility for
@@ -228,7 +228,7 @@ final case class RecordProgram[I, O](
 This preserves the honest boundary discovered by the parameterized-program prototype without weakening the core program algebra.
 
 The current `algebra.Program` is close to this wrapper already. Its path-dependent representation and packaged
-`OptimizableTraversal` evidence would move down into `Atom`; its decoder would remain at the `RecordProgram` boundary.
+`OptimizableStructure` evidence would move down into `Atom`; its decoder would remain at the `RecordProgram` boundary.
 
 ## Interpreters
 
@@ -264,19 +264,19 @@ pipelines are shallow today, so stack safety should be measured rather than assu
 
 ### OptimizableLeaf inspection and replacement
 
-One tree interpreter replaces the structural `OptimizableTraversal` instances:
+One tree interpreter replaces the structural `OptimizableStructure` instances:
 
 - Parameter-free nodes contribute no views.
 - Unary nodes recurse into their child.
 - Binary nodes concatenate left then right.
-- Leaves delegate to their packaged `OptimizableTraversal[Repr]`.
+- Leaves delegate to their packaged `OptimizableStructure[Repr]`.
 - Replacement consumes the corresponding state slices and rebuilds nodes on the return path.
 
 The public typeclass becomes a single adapter:
 
 ```scala
 given [I, O, N <: Int]
-    : OptimizableTraversal.WithArity[Program[I, O, N], N] =
+    : OptimizableStructure.WithArity[Program[I, O, N], N] =
   ProgramPredictorInterpreter.instance
 ```
 
@@ -285,10 +285,10 @@ The existing laws remain the contract:
 - `replace(p, read(p)) = p`
 - `read(replace(p, states)) = states`
 - metadata is unchanged by state replacement
-- binary traversal order is left then right
+- binary leaf order is left then right
 
-Human-readable structural paths can still be derived during traversal. Ordinal `OptimizableId`s remain assigned once at
-the root from traversal order, keeping identity independent of nested nodes resetting their own counters. If stable
+Human-readable structural paths can still be derived while inspecting the structure. Ordinal `OptimizableId`s remain assigned once at
+the root from leaf order, keeping identity independent of nested nodes resetting their own counters. If stable
 identity across arbitrary graph rewrites is required later, it should be represented as an explicit leaf identity—not
 inferred from display paths.
 
@@ -308,7 +308,7 @@ not become materially simpler than traversing the current classes, the AST separ
 ### Persistence
 
 Current `ProgramPersistence` saves only `OptimizableParameters`; it does not save program structure or executable resources.
-That behavior should remain the default and becomes simpler through `OptimizableTraversal[Program]`.
+That behavior should remain the default and becomes simpler through `OptimizableStructure[Program]`.
 
 Full AST persistence is a separate, explicitly partial capability. `Lift` functions, arbitrary atoms, tools, runtimes,
 and interpreter instances are not generally serializable. A future `ProgramCodec` should therefore either:
@@ -327,7 +327,7 @@ The AST gives laws a structural home, but observational equality remains authori
 - Ordered execution prevents tensor interchange and general effect symmetry.
 - Copy naturality holds only for deterministic morphisms under the chosen observation.
 - Recovery and modes make failures and call controls observable.
-- OptimizableLeaf traversal must be a homomorphism from structural composition into parameter-vector concatenation.
+- The optimizable-parameter projection must be a homomorphism from structural composition into parameter-vector concatenation.
 
 Consequently, a normalizer may safely perform a rewrite only for a declared observation. For example, reassociating
 `AndThen` can preserve execution and parameter order while changing diagnostic display paths. Removing a right identity
@@ -370,7 +370,7 @@ semantics and all learnable children can be stored visibly in the node.
 ### Keep the executable Composite design
 
 This remains viable. It is direct, open to new module types, and easy to debug. Shared helpers can continue reducing
-per-node `OptimizableTraversal` boilerplate. It should be preferred if execution and predictor traversal remain the only important
+per-node `OptimizableStructure` boilerplate. It should be preferred if execution and optimizer inspection remain the only important
 interpretations.
 
 ### A fully closed AST containing every module
@@ -423,7 +423,7 @@ The spike is disposable and should not change existing combinators.
 
 - Add `Program.atom(module)` and `Program.asModule`.
 - Introduce `RecordProgram` using the current `ProgramInput` decoders.
-- Provide `OptimizableTraversal[Program]` and `ProgramRunner[RecordProgram]`.
+- Provide `OptimizableStructure[Program]` and `ProgramRunner[RecordProgram]`.
 - Verify that all optimizers can target the stable two-parameter carrier.
 
 ### Phase 3: switch combinators
@@ -434,7 +434,7 @@ The spike is disposable and should not change existing combinators.
 
 ### Phase 4: retire duplicate structure
 
-- Remove self-interpreting structural case classes and their hand-written `OptimizableTraversal` instances once parity is proven.
+- Remove self-interpreting structural case classes and their hand-written `OptimizableStructure` instances once parity is proven.
 - Keep domain modules as atoms until independently justified for promotion.
 - Revisit CIO only after the representation migration is stable, so the two semantic changes do not obscure each
   other.
@@ -446,14 +446,14 @@ The alternative should be adopted only if a spike demonstrates all of the follow
 1. Public composition has the simple type `Program[I, O]` with good named-tuple inference and no user-visible casts.
 2. Arbitrary third-party modules lift as atoms while preserving lifecycle and optimizer addressability.
 3. A single execution interpreter matches every existing structural combinator's behavior.
-4. A single predictor interpreter satisfies the current lens/frame and composite traversal laws.
+4. A single optimizer interpreter satisfies the current lens/frame and composite-structure laws.
 5. `RecordProgram` supports existing optimizer and persistence workflows without an incoherent universal decoder.
 6. At least one additional interpretation—preferably graphing—becomes substantially simpler.
 7. Compile times, error messages, and runtime overhead remain acceptable.
 8. A deliberate decision is made about recursive versus stack-safe execution before the old representation is removed.
 
 If the existential/GADT machinery makes ordinary errors inscrutable, if atom replacement requires unsafe public casts,
-or if no meaningful second interpreter emerges, the current executable Composite plus shared traversal helpers is the
+or if no meaningful second interpreter emerges, the current executable Composite plus shared structure helpers is the
 better design.
 
 ## Recommendation

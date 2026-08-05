@@ -48,7 +48,7 @@ final case class ReAct[I, O](
     /** Optional override for the per-iteration react predict — a `Predict` over the base input plus the rendered
       * trajectory, producing a lenient [[ReAct.ReactStep]]. When `None` (the default), the predict is built from
       * [[reactSignature]]. Carrying it as a defaulted, `copy`-reachable field is what makes the learnable sub-predict
-      * addressable + immutably replaceable (see the `OptimizableTraversal[ReAct]` instance).
+      * addressable + immutably replaceable (see the `OptimizableStructure[ReAct]` instance).
       */
     reactPredictOverride: Option[Predict[(I, String), ReAct.ReactStep]] = None,
     /** Optional override for the final extractor predict (CoT-augmented, over the base input plus the rendered

@@ -148,10 +148,10 @@ class ModeLawSuite extends FunSuite:
     assertEquals(RuntimeEnvironment.current.trace.map(_.component), Vector("recorder"))
   }
 
-  test("OptimizableTraversal passes through the wrapped program (mode is non-learnable)") {
+  test("OptimizableStructure passes through the wrapped program (mode is non-learnable)") {
     val r     = Recorder(predict("a -> b"))
     val moded = Compose.mode(Mode.temperature(1.0))(r)
-    val P     = summon[OptimizableTraversal[Moded[Int, Int, Recorder]]]
+    val P     = summon[OptimizableStructure[Moded[Int, Int, Recorder]]]
     assertEquals(P.read(moded), Vector(r.predict.optimizableParameters))
     assertEquals(P.readNamed(moded).map(_._1), Vector("self"))
     assertEquals(P.read(P.replace(moded, P.read(moded))), P.read(moded))

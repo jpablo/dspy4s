@@ -174,8 +174,8 @@ final class OptimizableParametersSuite extends FunSuite:
     assertEquals(updated.tools, tools)
   }
 
-  test("OptimizableTraversal.empty rejects non-empty parameter vectors") {
-    val empty = OptimizableTraversal.empty[Int]
+  test("OptimizableStructure.empty rejects non-empty parameter vectors") {
+    val empty = OptimizableStructure.empty[Int]
     assertEquals(empty.read(42), Vector.empty[OptimizableParameters])
     assertEquals(empty.replace(42, Vector.empty), 42)
 

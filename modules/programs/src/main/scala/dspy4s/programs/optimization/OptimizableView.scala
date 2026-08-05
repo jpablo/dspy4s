@@ -6,7 +6,7 @@ import dspy4s.core.contracts.SignatureLayout
   *
   * [[structure]] contains the signature name and fields but never its instructions: instructions are writable
   * [[OptimizableParameters]]. [[moduleName]] is the execution/lifecycle name. Neither field is accepted by
-  * [[OptimizableTraversal.replace]], so inspection cannot accidentally turn architecture into optimizer parameters.
+  * [[OptimizableStructure.replace]], so inspection cannot accidentally turn architecture into optimizer parameters.
   */
 final case class OptimizableMetadata(structure: SignatureLayout, moduleName: String) derives CanEqual:
   require(structure.instructions.isEmpty, "OptimizableMetadata.structure must not contain writable instructions")

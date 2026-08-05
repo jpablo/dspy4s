@@ -4,26 +4,26 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 private final case class CandidatePair(first: DynamicPredict, second: DynamicPredict)
 private object CandidatePair:
-  given OptimizableTraversal[CandidatePair] = OptimizableTraversal.derived
+  given OptimizableStructure[CandidatePair] = OptimizableStructure.derived
 
 private final case class LeftNested(pair: CandidatePair, third: DynamicPredict)
 private object LeftNested:
-  given OptimizableTraversal[LeftNested] = OptimizableTraversal.derived
+  given OptimizableStructure[LeftNested] = OptimizableStructure.derived
 
 private final case class RightNested(first: DynamicPredict, pair: CandidatePair)
 private object RightNested:
-  given OptimizableTraversal[RightNested] = OptimizableTraversal.derived
+  given OptimizableStructure[RightNested] = OptimizableStructure.derived
 
 class CandidateSuite extends FunSuite:
 
-  private given OptimizableTraversal[DynamicPredict] = summon[OptimizableTraversal[DynamicPredict]]
+  private given OptimizableStructure[DynamicPredict] = summon[OptimizableStructure[DynamicPredict]]
 
   private def predict(instruction: String): DynamicPredict =
     DynamicPredict(layout =
@@ -57,8 +57,8 @@ class CandidateSuite extends FunSuite:
     )
     val applied = Candidate.applyTo(p, Candidate.seed(p))
     assertEquals(
-      summon[OptimizableTraversal[DynamicPredict]].read(applied),
-      summon[OptimizableTraversal[DynamicPredict]].read(p)
+      summon[OptimizableStructure[DynamicPredict]].read(applied),
+      summon[OptimizableStructure[DynamicPredict]].read(p)
     )
   }
 
@@ -82,15 +82,15 @@ class CandidateSuite extends FunSuite:
     val left  = LeftNested(CandidatePair(a, b), c)
     val right = RightNested(a, CandidatePair(b, c))
 
-    val leftEntries  = summon[OptimizableTraversal[LeftNested]].readIdentified(left)
-    val rightEntries = summon[OptimizableTraversal[RightNested]].readIdentified(right)
+    val leftEntries  = summon[OptimizableStructure[LeftNested]].readIdentified(left)
+    val rightEntries = summon[OptimizableStructure[RightNested]].readIdentified(right)
     assertEquals(leftEntries.map(_.id), rightEntries.map(_.id))
     assertNotEquals(leftEntries.map(_.displayName), rightEntries.map(_.displayName))
 
     val edited  = Candidate.seed(left).map { case (id, instruction) => id -> instruction.map(_ + "!") }
     val applied = Candidate.applyTo(right, edited)
     assertEquals(
-      summon[OptimizableTraversal[RightNested]].read(applied).map(_.instructions),
+      summon[OptimizableStructure[RightNested]].read(applied).map(_.instructions),
       Vector(Some("A!"), Some("B!"), Some("C!"))
     )
   }

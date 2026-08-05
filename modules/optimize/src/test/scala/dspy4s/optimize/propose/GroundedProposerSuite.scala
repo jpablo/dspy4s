@@ -220,7 +220,7 @@ class GroundedProposerSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-/** A two-predictor program for the multi-predictor test; `OptimizableTraversal` is structurally derived over its
+/** A two-predictor program for the multi-predictor test; `OptimizableStructure` is structurally derived over its
   * fields.
   */
 final case class TwoStage(first: DynamicPredict, second: DynamicPredict)

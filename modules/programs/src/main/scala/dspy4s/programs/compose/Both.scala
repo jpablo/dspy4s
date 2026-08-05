@@ -33,8 +33,8 @@ final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
     )
 
 object Both:
-  /** Same structural distribution as [[AndThen.andThenOptimizableTraversal]], via [[PairOptimizableTraversal]]. */
-  given bothOptimizableTraversal[
+  /** Same structural distribution as [[AndThen.andThenOptimizableStructure]], via [[PairOptimizableStructure]]. */
+  given bothOptimizableStructure[
       I,
       OA,
       OB,
@@ -44,17 +44,17 @@ object Both:
       NB <: Int
   ](
       using
-      pa: OptimizableTraversal.WithArity[A, NA],
-      pb: OptimizableTraversal.WithArity[B, NB]
-  ): OptimizableTraversal.Of[Both[I, OA, OB, A, B], NA + NB] with
+      pa: OptimizableStructure.WithArity[A, NA],
+      pb: OptimizableStructure.WithArity[B, NB]
+  ): OptimizableStructure.Of[Both[I, OA, OB, A, B], NA + NB] with
     def arity(program: Both[I, OA, OB, A, B]): Int                       = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: Both[I, OA, OB, A, B]): Vector[OptimizableView] =
-      PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
+      PairOptimizableStructure.inspect(pa, pb)(program.first, program.second)
 
     def replace(program: Both[I, OA, OB, A, B], updates: Vector[OptimizableParameters]): Both[I, OA, OB, A, B] =
-      PairOptimizableTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
+      PairOptimizableStructure.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
     override def inspectNamed(program: Both[I, OA, OB, A, B]): Vector[(String, OptimizableView)] =
-      PairOptimizableTraversal.inspectNamed(pa, pb)(program.first, program.second)
+      PairOptimizableStructure.inspectNamed(pa, pb)(program.first, program.second)

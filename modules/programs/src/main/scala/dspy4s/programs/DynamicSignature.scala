@@ -5,7 +5,7 @@ import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
 import dspy4s.programs.algebra.Program
 import dspy4s.programs.compose.LiftEither
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 
@@ -30,7 +30,7 @@ import zio.blocks.schema.DynamicValue
   * vector against `m`, then hides it behind its own path-branded carrier before prediction.
   *
   * Status: the recommended user path for runtime-string signatures. `s.predict()` builds the program; composition,
-  * optimization (`OptimizableTraversal` + `ProgramRunner` over a packaged `Program`), and cross-fiber pipelines (via
+  * optimization (`OptimizableStructure` + `ProgramRunner` over a packaged `Program`), and cross-fiber pipelines (via
   * [[DynamicSignature.bridge]]) all run through the same machinery as domain-valued programs.
   * `Signature.fromStringDynamic` remains the substrate, and the plain data-bag surface for consumers that never enter
   * the category (optimizer helper generations, the evaluation judge).
@@ -82,7 +82,7 @@ sealed trait DynamicSignature:
       name  : Option[String]      = None,
       config: DynamicValue.Record = DynamicValue.Record.empty
   ): Program[In, Out, 1] =
-    Program.of(predict(demos, name, config))(using summon[OptimizableTraversal[Predict[In, Out]]], inputCodec)
+    Program.of(predict(demos, name, config))(using summon[OptimizableStructure[Predict[In, Out]]], inputCodec)
 
 object DynamicSignature:
 

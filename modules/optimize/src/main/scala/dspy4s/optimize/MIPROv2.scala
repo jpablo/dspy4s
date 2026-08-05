@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
-import dspy4s.programs.optimization.{OptimizableParameters, OptimizableTraversal}
+import dspy4s.programs.optimization.{OptimizableParameters, OptimizableStructure}
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
@@ -52,7 +52,7 @@ final case class MIPROv2Config(
   * '''Three-phase composition (reuses, does not reinvent).'''
   *   1. '''Demo-set candidates''' (Step 1, "bootstrap few-shot examples"). Runs [[BootstrapFewShot]] `numCandidates`
   *      times with distinct seeds (`seed + k`), collecting each compiled program's per-predictor demos via
-  *      `OptimizableTraversal.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is
+  *      `OptimizableStructure.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is
   *      also included. The result is a `Vector` of demo-assignments, each a per-predictor `Vector[Vector[Example]]` of
   *      length == predictor count. 2. '''Instruction candidates''' (Step 2, GroundedProposer). Calls
   *      [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates = <first bootstrapped assignment,
@@ -60,7 +60,7 @@ final case class MIPROv2Config(
   *      instruction is prepended as an extra candidate. 3. '''Search''' (Step 3, "find optimal prompt parameters"). For
   *      `numTrials` trials with a seeded RNG, randomly picks one demo-assignment index (applied whole-program) and, per
   *      predictor, one instruction-candidate index. The trial program is built with a single
-  *      [[OptimizableTraversal.replace]] applying each chosen instruction (`parameters.copy(instructions =
+  *      [[OptimizableStructure.replace]] applying each chosen instruction (`parameters.copy(instructions =
   *      Some(instr))`) AND chosen demos (`.copy(demos = ...)`). Each trial is scored on the valset (falling back to the
   *      trainset) via [[dspy4s.evaluate.Evaluate]] + [[ProgramRunner]] + the metric. A baseline candidate (the
   *      unmodified student) is always scored too. The best-scoring candidate is returned as `bestProgram`; all scored
@@ -88,11 +88,11 @@ final case class MIPROv2Config(
   *   - '''`track_stats`, `log_dir`, LM-call estimation, and program persistence are omitted.''' The
   *     [[OptimizationReport]] carries the scored candidate list and summary metadata instead.
   */
-final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
+final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
 
   override val name: String = "mipro_v2"
 
-  private val ps: OptimizableTraversal[P] = summon[OptimizableTraversal[P]]
+  private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
   override def compile(
@@ -220,8 +220,8 @@ final class MIPROv2[P: {OptimizableTraversal, ProgramRunner}](config: MIPROv2Con
       )
     )
 
-  /** Build a trial program by applying, via a single [[OptimizableTraversal.replace]], each predictor's chosen
-    * instruction and chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[OptimizableTraversal.read]]
+  /** Build a trial program by applying, via a single [[OptimizableStructure.replace]], each predictor's chosen
+    * instruction and chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[OptimizableStructure.read]]
     * order.
     */
   private def applyTrial(

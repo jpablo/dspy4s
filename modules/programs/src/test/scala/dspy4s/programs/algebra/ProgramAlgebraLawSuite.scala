@@ -48,7 +48,7 @@ final case class ArrayBox(values: Array[Int]) derives Schema
   * [[Parameterization]] over [[Program]], the [[paramsDeloop]] delooping, [[ReadFunctor]]), each under the observation
   * honest for it: structural `==` for parameter vectors and delooping morphisms, observational equality (complete
   * prediction / params / coherent decode / lifecycle) for `Program` morphisms. Also pins the two construction gates (no
-  * `OptimizableTraversal`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
+  * `OptimizableStructure`, no `Program`; no `RecordCodec`, no `id`), decoder threading, and the copy NON-law (`fanout`
   * shares its input; copying is not natural for effectful morphisms).
   */
 class ProgramAlgebraLawSuite extends FunSuite:
@@ -77,7 +77,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
-  /** A NON-product module: no `OptimizableLeaf` leaf, no `Mirror`, hence no `OptimizableTraversal` instance. Used to
+  /** A NON-product module: no `OptimizableLeaf` leaf, no `Mirror`, hence no `OptimizableStructure` instance. Used to
     * prove the construction gate below.
     */
   private final class Opaque extends Module[Int, Int]:
@@ -474,14 +474,14 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }
 
-  // ── The construction gate: no OptimizableTraversal evidence, no Program ───────────────────────────────────────────────
-  test("packaging a program without OptimizableTraversal evidence does not compile") {
-    // Opaque is a plain (non-Product) Module: no OptimizableLeaf leaf, no Mirror, so OptimizableTraversal[Opaque] cannot be
+  // ── The construction gate: no OptimizableStructure evidence, no Program ───────────────────────────────────────────────
+  test("packaging a program without OptimizableStructure evidence does not compile") {
+    // Opaque is a plain (non-Product) Module: no OptimizableLeaf leaf, no Mirror, so OptimizableStructure[Opaque] cannot be
     // summoned and Program.of is a compile error. In the ambient Module world the same program runs fine but is
     // silently un-addressable; in the packaged category it cannot exist.
     val opaque = new Opaque
     assertEquals(opaque(ProgramCall(3)).map(_.output), Right(3)) // valid ambient program
     val errors = compileErrors("Program.of(new Opaque)")
     assert(errors.nonEmpty, "expected Program.of(new Opaque) to fail compilation")
-    assert(errors.contains("OptimizableTraversal"), s"expected a missing-OptimizableTraversal error, got:\n$errors")
+    assert(errors.contains("OptimizableStructure"), s"expected a missing-OptimizableStructure error, got:\n$errors")
   }

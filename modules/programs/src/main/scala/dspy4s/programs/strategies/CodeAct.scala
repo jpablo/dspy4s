@@ -66,7 +66,7 @@ final case class CodeAct[I, O](
     /** Optional override for the per-iteration code-generator predict — a `Predict` over the base input plus the
       * rendered trajectory, producing a lenient [[CodeAct.CodeStep]]. When `None` (the default), it is built from
       * [[codeActSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the learnable sub-predict
-      * addressable + immutably replaceable (see the `OptimizableTraversal[CodeAct]` instance).
+      * addressable + immutably replaceable (see the `OptimizableStructure[CodeAct]` instance).
       */
     codeActPredictOverride: Option[Predict[(I, String), CodeAct.CodeStep]] = None,
     /** Optional override for the final extractor predict (CoT-augmented, over the base input plus the rendered

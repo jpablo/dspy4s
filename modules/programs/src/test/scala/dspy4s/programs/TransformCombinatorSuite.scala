@@ -48,8 +48,8 @@ class TransformCombinatorSuite extends FunSuite:
   private def step[I, O](tag: String, signature: String)(f: I => O): Step[I, O] =
     Step(tag, input => Right(f(input)), predictor(signature))
 
-  private def params[P](program: P)(using traversal: OptimizableTraversal[P]): Vector[OptimizableParameters] =
-    traversal.read(program)
+  private def params[P](program: P)(using structure: OptimizableStructure[P]): Vector[OptimizableParameters] =
+    structure.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
 

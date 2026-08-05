@@ -6,7 +6,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.retrievers.KNN
@@ -25,7 +25,7 @@ import zio.blocks.schema.DynamicValue
   * `P`): [[compile]] instead returns a [[KNNFewShotProgram]] — a wrapper [[DynamicModule]] with the same per-call
   * behavior.
   */
-final class KNNFewShot[P: {OptimizableTraversal, ProgramRunner}](
+final class KNNFewShot[P: {OptimizableStructure, ProgramRunner}](
     k              : NeighborCount,
     trainset       : NonEmptyTrainset,
     embedder       : Embedder,
@@ -38,7 +38,7 @@ final class KNNFewShot[P: {OptimizableTraversal, ProgramRunner}](
 /** The compiled artifact of [[KNNFewShot]]: a module that, per call, retrieves the query's nearest trainset neighbors,
   * bootstraps them onto the student as demos, and runs the result.
   */
-final class KNNFewShotProgram[P: {OptimizableTraversal, ProgramRunner}] private[optimize] (
+final class KNNFewShotProgram[P: {OptimizableStructure, ProgramRunner}] private[optimize] (
     val student    : P,
     teacher        : Option[P],
     knn            : KNN,

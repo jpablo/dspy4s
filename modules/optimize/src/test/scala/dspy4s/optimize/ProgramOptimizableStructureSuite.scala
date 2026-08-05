@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.optimization.optimizableParameters
 
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CodeInterpreter
@@ -19,14 +19,14 @@ import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-class ProgramOptimizableTraversalSuite extends FunSuite:
+class ProgramOptimizableStructureSuite extends FunSuite:
 
-  /** Resolves the right [[OptimizableTraversal]] instance from the program's *static* type, so the `[I, O]` of the
+  /** Resolves the right [[OptimizableStructure]] instance from the program's *static* type, so the `[I, O]` of the
     * given are inferred at the call site (accessing the `given ... with` object directly would pin them to `Nothing`).
     */
   private def predictorsOf[P](@annotation.unused program: P)(using
-      ps: OptimizableTraversal[P]
-  ): OptimizableTraversal[P] = ps
+      ps: OptimizableStructure[P]
+  ): OptimizableStructure[P] = ps
 
   private val qaSignature = Signature.fromString("question -> answer")
 

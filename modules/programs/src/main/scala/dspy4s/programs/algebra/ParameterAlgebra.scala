@@ -22,8 +22,8 @@ given viewsDeloop: Category[AnyObject, ViewsHom] = delooping[Vector[OptimizableV
 
 /** The free monoid of homogeneous optimizable parameters under concatenation.
   *
-  * This is the codomain of the `OptimizableTraversal` homomorphism and makes parameter composition explicit rather than
-  * encoding it in an ad-hoc category whose composition merely happens to be `++`.
+  * This is the codomain of the parameter projection induced by `OptimizableStructure` and makes parameter composition
+  * explicit rather than encoding it in an ad-hoc category whose composition merely happens to be `++`.
   */
 given paramsMonoid: Monoid[Vector[OptimizableParameters]] with
   def empty: Vector[OptimizableParameters] = Vector.empty

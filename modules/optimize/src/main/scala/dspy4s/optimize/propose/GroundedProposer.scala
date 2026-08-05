@@ -10,7 +10,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.CandidateCount
 import dspy4s.optimize.DatasetSampleSize
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.contracts.ProgramCall
@@ -57,7 +57,7 @@ final case class GroundedProposerConfig(
   * predictor, grounded in the task data and (optionally) bootstrapped demos. A v1 port of the proposer slice of DSPy's
   * `dspy.propose.grounded_proposer` (`grounded_proposer.py`, `dataset_summary_generator.py`).
   *
-  * '''What it does.''' For each learnable predictor exposed by [[OptimizableTraversal.read]] (in read order), it emits
+  * '''What it does.''' For each learnable predictor exposed by [[OptimizableStructure.read]] (in read order), it emits
   * `config.numInstructions` candidate instruction strings via an instruction-generation [[DynamicPredict]] (the
   * `GenerateModuleInstruction` analogue). Each proposal is grounded in:
   *   1. a '''dataset summary''' — a short observations string bootstrapped once per call from a sample of the trainset
@@ -92,17 +92,17 @@ final case class GroundedProposerConfig(
   *     optimizer's accumulated attempts; the standalone proposer has none, and MIPROv2 (a later phase) owns that loop.
   *     Only round-0-style proposal is implemented here.
   */
-final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: OptimizableTraversal[P]):
+final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: OptimizableStructure[P]):
 
   /** Propose `config.numInstructions` candidate instruction strings for EACH optimizable leaf of `program` (in
-    * [[OptimizableTraversal.read]] order), grounded in `trainset` and (optionally) `demoCandidates`.
+    * [[OptimizableStructure.read]] order), grounded in `trainset` and (optionally) `demoCandidates`.
     *
     * @param program
     *   the program whose optimizable leaves get fresh instruction proposals
     * @param trainset
     *   task data; a sample grounds the dataset-summary step
     * @param demoCandidates
-    *   per-leaf bootstrapped demo sets (outer index aligns with [[OptimizableTraversal.read]] order); empty (the
+    *   per-leaf bootstrapped demo sets (outer index aligns with [[OptimizableStructure.read]] order); empty (the
     *   default) means no demos are rendered into proposals
     * @return
     *   for each leaf (in read order) a vector of `numInstructions` candidate instruction strings, or the first

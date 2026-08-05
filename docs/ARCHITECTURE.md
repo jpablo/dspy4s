@@ -135,7 +135,7 @@ graph TD
 7. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
 8. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
-   Uses `OptimizableTraversal[P]` to inspect read-only predictor metadata, read/write
+   Uses `OptimizableStructure[P]` to inspect read-only predictor metadata, read/write
    `OptimizableParameters` (instructions, demos, config), and rebuild candidates;
    `ProgramRunner[P]` supplies uniform static/dynamic execution.
 
@@ -284,7 +284,7 @@ code:
   extra fields via the `private[dspy4s]` mutation helpers, internally
   construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
   `MultiChainComparison` are the templates.
-- **New optimizer** — use `OptimizableTraversal[P].inspect` for layout/name metadata,
+- **New optimizer** — use `OptimizableStructure[P].inspect` for layout/name metadata,
   `read` / `replace` for writable `OptimizableParameters`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.
 - **New stream listener** — implement `StreamListener[A]`, pass to

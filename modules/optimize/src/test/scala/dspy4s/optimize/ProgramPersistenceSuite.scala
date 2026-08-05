@@ -2,7 +2,7 @@ package dspy4s.optimize
 
 import dspy4s.programs.optimization.optimizableParameters
 
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
@@ -176,7 +176,7 @@ class ProgramPersistenceSuite extends FunSuite:
       a = Predict(qaSignature, name = Some("ask")),
       b = Predict(qaSignature, name = Some("answer"))
     )
-    val oneState  = summon[OptimizableTraversal[Pipe2]].read(program).head.dumpState
+    val oneState  = summon[OptimizableStructure[Pipe2]].read(program).head.dumpState
     val malformed = DynamicValue.Record(Chunk.from(Seq(
       "optimizableParameters" -> DynamicValue.Record(Chunk.from(Seq(
         OptimizableId(0).render -> oneState,
@@ -212,4 +212,4 @@ object ProgramPersistenceSuite:
   )
 
   object Pipe2:
-    given OptimizableTraversal[Pipe2] = OptimizableTraversal.derived
+    given OptimizableStructure[Pipe2] = OptimizableStructure.derived

@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
@@ -83,7 +83,7 @@ class InferRulesSuite extends FunSuite:
   private val metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
 
   private def instructionOf(report: dspy4s.optimize.contracts.OptimizationReport[DynamicPredict]): String =
-    summon[OptimizableTraversal[DynamicPredict]].read(report.bestProgram).head.instructions.getOrElse("")
+    summon[OptimizableStructure[DynamicPredict]].read(report.bestProgram).head.instructions.getOrElse("")
 
   test("InferRules induces rules, appends them to the instruction, and the rule-augmented program wins") {
     val student   = DynamicPredict(layout = taskLayout)

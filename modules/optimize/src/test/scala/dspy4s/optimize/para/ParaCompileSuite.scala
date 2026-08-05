@@ -117,7 +117,7 @@ class ParaCompileSuite extends FunSuite:
       val result           = student.copro(config(), trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
-      // The whole assertion goes through the parameterized surface: no OptimizableTraversal summon at the call site.
+      // The whole assertion goes through the parameterized surface: no OptimizableStructure summon at the call site.
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
       assertEquals(report.metadata.get("best_score"), Some(100.0))
       assert(report.candidates.nonEmpty)
@@ -152,9 +152,9 @@ class ParaCompileSuite extends FunSuite:
       assert(ran.isRight, s"record-run of the erased program failed: ${ran.left.toOption}")
     }
     val errors = compileErrors(
-      "summon[dspy4s.programs.optimization.OptimizableTraversal[SomeProgram[QAInput, QAOutput]]]"
+      "summon[dspy4s.programs.optimization.OptimizableStructure[SomeProgram[QAInput, QAOutput]]]"
     )
-    assert(errors.nonEmpty, "expected erased Program traversal lookup to fail")
+    assert(errors.nonEmpty, "expected erased Program structure lookup to fail")
   }
 
   // ── 4. The closed loop, part 2: a COMPOSED pipeline is record-runnable and optimizable ──────────────────
@@ -192,7 +192,7 @@ class ParaCompileSuite extends FunSuite:
 
   test("COPRO optimizes a DynamicSignature bundle program exactly like a student") {
     // The runtime-string counterpart of test 1: the student's signature exists only as a parsed value, but the
-    // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (OptimizableTraversal +
+    // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (OptimizableStructure +
     // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.
     val bundle = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
     import bundle.given // the object codec, for the record-boundary runner `.copro` demands

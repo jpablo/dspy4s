@@ -122,7 +122,7 @@ recurses through nested modules, yields anything that looks like a
 `Parameter`. Optimizers consume that iterator.
 
 Scala has no `__dict__`. The optimizer side uses **`OptimizableLeaf[P]`** for
-one leaf and **`OptimizableTraversal[P]`** for composite traversal. Each leaf exposes
+one leaf and **`OptimizableStructure[P]`** for composite structure. Each leaf exposes
 read-only metadata separately from the exact optimizable parameters:
 
 ```scala
@@ -135,7 +135,7 @@ trait OptimizableLeaf[P]:
 `OptimizableParameters` contains instructions, demos, and module config;
 signature structure, names, runtimes, schemas, LMs, and tools cannot be
 replaced through the optimizer lens. Mirror derivation builds a
-`OptimizableTraversal[P]` traversal for composites. The trade-off is explicit by design.
+`OptimizableStructure[P]` evidence for composites. The trade-off is explicit by design.
 
 ## 4. `predict_name` resolution: frame introspection → explicit naming
 
@@ -222,7 +222,7 @@ LM. Only `save_program=True` serializes the whole architecture with
 `cloudpickle`.
 
 dspy4s `ProgramPersistence` serializes each leaf's `OptimizableParameters`
-(instructions, demos, config) into clean JSON keyed by traversal ordinal.
+(instructions, demos, config) into clean JSON keyed by leaf ordinal.
 It applies that state to a fresh program while preserving architecture and
 execution resources. The format is dspy4s-native and **deliberately not**
 compatible with Python state/pickle artifacts or the former layout-bearing

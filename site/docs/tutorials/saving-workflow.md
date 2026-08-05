@@ -9,7 +9,7 @@ This example walks the full optimize-then-reuse cycle: build a `question -> answ
 ```
 
 The example uses a single dynamic `question -> answer` predictor for brevity. Optimizers and `ProgramPersistence`
-are generic over any program with `OptimizableTraversal` evidence, including `Predict` and `ChainOfThought` programs.
+are generic over any program with `OptimizableStructure` evidence, including `Predict` and `ChainOfThought` programs.
 
 ## Compile it
 
@@ -34,7 +34,7 @@ does not write signature field structure, module names, runtime bindings, tools,
 --8<-- "tutorials/saving/Saving.scala:load"
 ```
 
-`load` takes a freshly built program with the same optimizable traversal/order, then returns a new immutable program
+`load` takes a freshly built program with the same optimizable structure and leaf order, then returns a new immutable program
 with the saved instructions, demos, and config written into it. The fresh value keeps its signature structure,
 name, runtime, output schema, bound LM, and tools. For the complete contract and ordinal-ID caveat, see
 [Saving and loading](../runtime/saving-and-loading.md).

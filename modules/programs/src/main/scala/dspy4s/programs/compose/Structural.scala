@@ -5,7 +5,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TransparentModule
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.contracts.Prediction
 
 /** `copy`: duplicate the input `I` into `(I, I)`. Parameter-free (like `id`); the first half of a fan-out, so
@@ -18,8 +18,8 @@ final case class Copy[I]() extends TransparentModule[I, (I, I)]:
     Right(Prediction((call.input, call.input), RawPrediction.empty))
 
 object Copy:
-  given copyOptimizableTraversal[I]: OptimizableTraversal.WithArity[Copy[I], 0] =
-    OptimizableTraversal.empty
+  given copyOptimizableStructure[I]: OptimizableStructure.WithArity[Copy[I], 0] =
+    OptimizableStructure.empty
 
 /** `discard`: drop the input, producing `()`. Parameter-free. Although `f >>> discard` and `discard` return the same
   * value, the former still runs `f` and can fail, spend tokens, or invoke tools. No naturality law is claimed for
@@ -31,8 +31,8 @@ final case class Discard[I]() extends TransparentModule[I, Unit]:
     Right(Prediction((), RawPrediction.empty))
 
 object Discard:
-  given discardOptimizableTraversal[I]: OptimizableTraversal.WithArity[Discard[I], 0] =
-    OptimizableTraversal.empty
+  given discardOptimizableStructure[I]: OptimizableStructure.WithArity[Discard[I], 0] =
+    OptimizableStructure.empty
 
 /** `swap`: exchange two components. Parameter-free and involutive (`swap >>> swap = id`) as a structural value
   * transformation; it does not make ordered effectful execution symmetric.
@@ -46,5 +46,5 @@ final case class Swap[I, J]() extends TransparentModule[(I, J), (J, I)]:
     Right(Prediction((j, i), RawPrediction.empty))
 
 object Swap:
-  given swapOptimizableTraversal[I, J]: OptimizableTraversal.WithArity[Swap[I, J], 0] =
-    OptimizableTraversal.empty
+  given swapOptimizableStructure[I, J]: OptimizableStructure.WithArity[Swap[I, J], 0] =
+    OptimizableStructure.empty

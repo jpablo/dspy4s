@@ -11,8 +11,8 @@ import dspy4s.programs.algebra.Program
 
 /** A packaged [[Program]] as the optimizer entry point.
   *
-  * `COPRO[P]` needs `OptimizableTraversal[P]` and `ProgramRunner[P]`. The packaged entry point therefore retains
-  * `Program[I, O, N]`: the runner depends only on the codec-equipped input object, while optimizer traversal uses the
+  * `COPRO[P]` needs `OptimizableStructure[P]` and `ProgramRunner[P]`. The packaged entry point therefore retains
+  * `Program[I, O, N]`: the runner depends only on the codec-equipped input object, while optimizer access uses the
   * parameter grade retained by `N`.
   */
 object ParaCompile:

@@ -20,7 +20,7 @@ Programs live on two layers that share one engine:
   boundary. `DynamicPredict` is the executable prediction leaf on this spine. The
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
-The bridge for optimization is `OptimizableTraversal[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
+The bridge for optimization is `OptimizableStructure[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
 non-executable predictor views (`inspect` / `readIdentified`) and `OptimizableParameters` values (`read`), then writes
 an arity-matched parameter vector back through `replace`. This is what the [`optimize`](../optimize/README.md) and
 [`gepa`](../gepa/README.md) modules drive.
@@ -65,7 +65,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
 | `ProgramRunner[P]` | Runs domain-valued or record-valued `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
 | `Prediction[O]` | Domain output `O` + its `RawPrediction` evidence (completions, usage). |
-| `OptimizableTraversal[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
+| `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
 | `ActionInterpreter[Action, Observation]` | Executes an agent action and distinguishes success, recoverable failure, and fatal `Left`. |
 | `AgentLoop` | The bounded `Continue` / `Done` / exhaustion state-machine kernel shared by ReAct, CodeAct, RLM, and ProgramOfThought. |
@@ -83,8 +83,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
   from their signature representation, so a `Predict` call emits one `predict` module lifecycle rather than a
   wrapper-over-dynamic pair. `Predict.erase` creates a one-way dynamic snapshot with the same engine state;
   programs that start with a runtime-known layout construct `DynamicPredict` directly.
-- **`OptimizableTraversal` is the optimizer backbone.** Optimizers never special-case program types — they read the
-  predictor genome through `OptimizableTraversal`, build edited copies, and `replace`. This is why one optimizer codepath
+- **`OptimizableStructure` is the optimizer backbone.** Optimizers never special-case program types — they read the
+  predictor genome through `OptimizableStructure`, build edited copies, and `replace`. This is why one optimizer codepath
   covers a bare `Predict` and an arbitrary composite.
 - **Config layering and bound LMs.** Module-level and per-call `config` merge with per-call winning;
   `rolloutId` is a first-class cache-busting field, not part of the provider bag. A predictor can bind its own
@@ -108,8 +108,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `Predict.scala`, `DynamicPredict.scala` | sibling domain-value and runtime-record predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
-| `optimization/OptimizableLeaf.scala`, `OptimizableTraversal.scala` | leaf lens and composite optimizer-traversal typeclasses |
-| `optimization/CompositeOptimizableTraversalInstances.scala`, `OptimizableTraversalDerivation.scala` | built-in composite instances and strict Mirror derivation |
+| `optimization/OptimizableLeaf.scala`, `OptimizableStructure.scala` | leaf lens and composite optimizer-structure typeclasses |
+| `optimization/CompositeOptimizableStructureInstances.scala`, `OptimizableStructureDerivation.scala` | built-in composite instances and strict Mirror derivation |
 | `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
 | `contracts/ToolFunction.scala`, `ToolCall.scala`, `ActionInterpreter.scala` | callable tools, action messages, and the action-execution boundary |
 | `ProgramRunner.scala` | the shared domain/record running capability |
@@ -122,5 +122,5 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 ## Relation to dspy
 
 This ports `dspy.predict` and the module family. The shape decisions specific to dspy4s — pure modules with
-runtime-owned bookkeeping, the domain/record split sharing one engine, and `OptimizableTraversal` standing in for
+runtime-owned bookkeeping, the domain/record split sharing one engine, and `OptimizableStructure` standing in for
 `named_predictors()` — are what let the program API and the optimizers coexist over one substrate.

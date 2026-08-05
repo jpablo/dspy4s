@@ -19,7 +19,7 @@ import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence, RoundCount}
 import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.signatures.Signature
 
 import java.nio.file.Files
@@ -28,7 +28,7 @@ object Saving:
 
   /** A `question -> answer` predictor — the dspy4s analogue of `dspy.ChainOfThought("question -> answer")`. This
     * tutorial uses `DynamicPredict` for a compact runtime-layout example; `Predict` and `ChainOfThought` are supported
-    * through the same `OptimizableTraversal` / `OptimizableParameters` contract.
+    * through the same `OptimizableStructure` / `OptimizableParameters` contract.
     */
   // --8<-- [start:program]
   def program(): DynamicPredict =
@@ -58,7 +58,7 @@ object Saving:
   // ── Snippets 2/3 — save the compiled program's state to disk ──
   // | compiled_dspy_program.save("./dspy_program/program.json", save_program=False)
   // | compiled_dspy_program.save("./dspy_program/program.pkl", save_program=False)   # .pkl variant: N/A in dspy4s
-  // `ProgramPersistence.save` writes OptimizableParameters keyed by traversal ordinals (`predictor-0`, ...) as JSON.
+  // `ProgramPersistence.save` writes OptimizableParameters keyed by leaf ordinals (`predictor-0`, ...) as JSON.
   // --8<-- [start:save]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)
@@ -103,7 +103,7 @@ object Saving:
   roundTrip match
     case Left(err)     => sys.error(s"save/load failed: ${err.message}")
     case Right(loaded) =>
-      val ps     = summon[OptimizableTraversal[DynamicPredict]]
+      val ps     = summon[OptimizableStructure[DynamicPredict]]
       val before = ps.read(compiled).head.demos.size
       val after  = ps.read(loaded).head.demos.size
       println(s"saved program state to: $path")

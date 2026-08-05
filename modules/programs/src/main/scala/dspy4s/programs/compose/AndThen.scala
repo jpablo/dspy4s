@@ -27,7 +27,7 @@ final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
 
 object AndThen:
   /** Structural `read(a) ++ read(b)`; `replace` slices the updates by `first`'s read-arity. */
-  given andThenOptimizableTraversal[
+  given andThenOptimizableStructure[
       I,
       X,
       O,
@@ -37,17 +37,17 @@ object AndThen:
       NB <: Int
   ](
       using
-      pa: OptimizableTraversal.WithArity[A, NA],
-      pb: OptimizableTraversal.WithArity[B, NB]
-  ): OptimizableTraversal.Of[AndThen[I, X, O, A, B], NA + NB] with
+      pa: OptimizableStructure.WithArity[A, NA],
+      pb: OptimizableStructure.WithArity[B, NB]
+  ): OptimizableStructure.Of[AndThen[I, X, O, A, B], NA + NB] with
     def arity(program: AndThen[I, X, O, A, B]): Int                       = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: AndThen[I, X, O, A, B]): Vector[OptimizableView] =
-      PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
+      PairOptimizableStructure.inspect(pa, pb)(program.first, program.second)
 
     def replace(program: AndThen[I, X, O, A, B], updates: Vector[OptimizableParameters]): AndThen[I, X, O, A, B] =
-      PairOptimizableTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
+      PairOptimizableStructure.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
     override def inspectNamed(program: AndThen[I, X, O, A, B]): Vector[(String, OptimizableView)] =
-      PairOptimizableTraversal.inspectNamed(pa, pb)(program.first, program.second)
+      PairOptimizableStructure.inspectNamed(pa, pb)(program.first, program.second)

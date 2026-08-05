@@ -95,9 +95,9 @@ final case class Moded[I, O, P <: Module[I, O]](mode: Mode, program: P)
 
 object Moded:
   /** `mode` is non-learnable, so addressability passes straight through to the wrapped program (fork 4). */
-  given modedOptimizableTraversal[I, O, P <: Module[I, O], N <: Int](using
-      inner: OptimizableTraversal.WithArity[P, N]
-  ): OptimizableTraversal.Of[Moded[I, O, P], N] with
+  given modedOptimizableStructure[I, O, P <: Module[I, O], N <: Int](using
+      inner: OptimizableStructure.WithArity[P, N]
+  ): OptimizableStructure.Of[Moded[I, O, P], N] with
     def arity(program  : Moded[I, O, P]): Int                                                    = inner.arity(program.program)
     def inspect(program: Moded[I, O, P]): Vector[OptimizableView]                                = inner.inspect(program.program)
     def replace(program: Moded[I, O, P], updates: Vector[OptimizableParameters]): Moded[I, O, P] =

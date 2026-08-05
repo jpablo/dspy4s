@@ -5,22 +5,22 @@ import io.github.iltotore.iron.RefinedSubtype
 import io.github.iltotore.iron.constraint.numeric.Positive0
 import scala.compiletime.error
 
-/** A non-negative position in the canonical optimizable traversal. */
+/** A non-negative position in the canonical optimizable structure. */
 type OptimizableOrdinal = OptimizableOrdinal.T
 
 object OptimizableOrdinal extends RefinedSubtype[Int, Positive0]
 
-/** Stable identity of an optimizable leaf within a program's [[OptimizableTraversal]].
+/** Stable identity of an optimizable leaf within a program's [[OptimizableStructure]].
   *
-  * The identity is the leaf's zero-based ordinal in [[OptimizableTraversal.read]] order. That order is the canonical
-  * optimizer-facing structure: composition concatenates child traversals, while parameter-free structure contributes no
+  * The identity is the leaf's zero-based ordinal in [[OptimizableStructure.read]] order. That order is the canonical
+  * optimizer-facing structure: composition concatenates child structures, while parameter-free structure contributes no
   * entries. Consequently IDs are unique within one program and remain unchanged by `replace`, category identity nodes,
   * and reassociation of ordered composition.
   *
   * A [[OptimizableId]] is deliberately not a display path. Human-readable paths come from
-  * [[OptimizableTraversal.inspectNamed]] and may reflect the current case-class/combinator syntax. Nor does an ID
+  * [[OptimizableStructure.inspectNamed]] and may reflect the current case-class/combinator syntax. Nor does an ID
   * survive an arbitrary schema edit that inserts, removes, or reorders leaves; such a change defines a different
-  * traversal.
+  * optimizable structure.
   */
 final class OptimizableId private (val ordinal: OptimizableOrdinal) extends Ordered[OptimizableId] derives CanEqual:
 
@@ -57,8 +57,8 @@ object OptimizableId:
           )
         case None => Left(s"Invalid optimizable id '$value': ordinal must be a non-negative integer")
 
-/** One focus of a [[OptimizableTraversal]] traversal: stable machine identity, structural display name, and a
-  * non-executable snapshot of its read-only metadata plus optimizable parameters.
+/** One focus of an [[OptimizableStructure]]: stable machine identity, structural display name, and a non-executable
+  * snapshot of its read-only metadata plus optimizable parameters.
   */
 final case class IdentifiedOptimizable(id: OptimizableId, displayName: String, view: OptimizableView) derives CanEqual:
   def parameters: OptimizableParameters = view.parameters

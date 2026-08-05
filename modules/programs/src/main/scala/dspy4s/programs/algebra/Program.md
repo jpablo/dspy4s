@@ -6,7 +6,7 @@ every tunable leaf, read those leaves in a stable order, and rebuild the same co
 `Program` packages those two capabilities together:
 
 1. A runnable `Module[I, O]`.
-2. The exact traversal that reads and replaces all of that module's optimizer parameters.
+2. The exact optimizable structure that reads and replaces all of that module's optimizer parameters.
 
 It also records the number of tunable leaves in its type:
 
@@ -15,7 +15,7 @@ sealed trait Program[I, O, N <: Int]:
   type Rep <: Module[I, O]
 
   val program: Rep
-  val optimizableParameters: OptimizableTraversal.WithArity[Rep, N]
+  val optimizableParameters: OptimizableStructure.WithArity[Rep, N]
 ```
 
 The three type arguments mean:
@@ -47,7 +47,7 @@ therefore remains an associated type hidden inside the package, while `N` is a p
 Program[I, O, N]
   = some hidden Rep <: Module[I, O]
   + that exact Rep value
-  + OptimizableTraversal.WithArity[Rep, N]
+  + OptimizableStructure.WithArity[Rep, N]
 ```
 
 Keeping `N` visible makes invalid parameter updates unrepresentable and lets composition calculate its new arity.
@@ -56,25 +56,25 @@ Keeping `N` visible makes invalid parameter updates unrepresentable and lets com
 
 `Program.of(module)` packages an existing module. It compiles only when Scala can find:
 
-- `OptimizableTraversal[module.Type]`, proving that every optimizer leaf is addressable;
+- `OptimizableStructure[module.Type]`, proving that every optimizer leaf is addressable;
 - `RecordCodec[I]`, giving the input object one canonical record decoder.
 
 ```mermaid
 flowchart LR
     moduleValue["F extends Module[I, O]"]
-    traversal["OptimizableTraversal.WithArity[F, N]"]
+    structure["OptimizableStructure.WithArity[F, N]"]
     codec["RecordCodec[I]"]
     constructor["Program.of"]
     packaged["Program[I, O, N]<br/>Rep = F"]
 
     moduleValue --> constructor
-    traversal -->|"stored"| constructor
+    structure -->|"stored"| constructor
     codec -->|"construction gate"| constructor
     constructor --> packaged
 ```
 
-The private `packageWith` constructor ties `Rep`, its value, its traversal, and `N` together. Application code cannot
-package a module with traversal evidence for a different representation or claim the wrong parameter count.
+The private `packageWith` constructor ties `Rep`, its value, its optimizable structure, and `N` together. Application
+code cannot package a module with structure evidence for a different representation or claim the wrong parameter count.
 
 ## Parameter arity is a grade
 
@@ -203,12 +203,12 @@ val precise: Program[Question, Answer, 1] = Program.of(predict)
 val erased: SomeProgram[Question, Answer] = precise
 ```
 
-| Static type | Program execution | `ProgramRunner` | Unsized `params` | Optimizer traversal |
+| Static type | Program execution | `ProgramRunner` | Unsized `params` | Optimizable structure |
 |---|---:|---:|---:|---:|
 | `Program[I, O, N]` | yes | yes | yes | yes |
 | `SomeProgram[I, O]` | yes | yes | yes | intentionally unavailable |
 
-The optimizer traversal is unavailable after erasure because its result must name the same `N` as the program. Execution
+The optimizable structure is unavailable after erasure because its result must name the same `N` as the program. Execution
 does not need that information, so `ProgramRunner[SomeProgram[I, O]]` remains available.
 
 `Program.erasedCategory` supplies ordinary category operations for code that intentionally works at this boundary. It is

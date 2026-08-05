@@ -2,16 +2,16 @@ package dspy4s.programs.optimization
 
 import dspy4s.programs.strategies.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
 
-/** Hand-written [[OptimizableTraversal]] instances for composite programs whose learnable sub-predicts are hoisted to
-  * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableTraversal]] companion keeps them
-  * in implicit scope without mixing concrete program traversal into the core typeclass definition.
+/** Hand-written [[OptimizableStructure]] instances for composite programs whose learnable sub-predicts are hoisted to
+  * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableStructure]] companion keeps them
+  * in implicit scope without mixing concrete program structure into the core typeclass definition.
   *
   * `replace` writes parameters through each current executable predictor. Unchanged parameters preserve the existing
   * override field exactly; changed parameters create an override with the same signature structure and execution
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
   */
-private[optimization] trait CompositeOptimizableTraversalInstances:
-  given reactOptimizableTraversal[I, O]: OptimizableTraversal.Of[ReAct[I, O], 2] with
+private[optimization] trait CompositeOptimizableStructureInstances:
+  given reactOptimizableStructure[I, O]: OptimizableStructure.Of[ReAct[I, O], 2] with
     def arity(@annotation.unused program: ReAct[I, O]): Int    = 2
     def inspect(program: ReAct[I, O]): Vector[OptimizableView] =
       Vector(program.reactPredict.optimizableView, program.extractorPredict.optimizableView)
@@ -25,7 +25,7 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
 
-  given codeActOptimizableTraversal[I, O]: OptimizableTraversal.Of[CodeAct[I, O], 2] with
+  given codeActOptimizableStructure[I, O]: OptimizableStructure.Of[CodeAct[I, O], 2] with
     def arity(@annotation.unused program: CodeAct[I, O]): Int    = 2
     def inspect(program: CodeAct[I, O]): Vector[OptimizableView] =
       Vector(program.codeActPredict.optimizableView, program.extractorPredict.optimizableView)
@@ -42,7 +42,7 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
       program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
 
-  given rlmOptimizableTraversal[I, O]: OptimizableTraversal.Of[RLM[I, O], 2] with
+  given rlmOptimizableStructure[I, O]: OptimizableStructure.Of[RLM[I, O], 2] with
     def arity(@annotation.unused program: RLM[I, O]): Int    = 2
     def inspect(program: RLM[I, O]): Vector[OptimizableView] =
       Vector(program.actionPredict.optimizableView, program.extractPredict.optimizableView)
@@ -56,7 +56,7 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
       val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
       program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
 
-  given programOfThoughtOptimizableTraversal[I, O]: OptimizableTraversal.Of[ProgramOfThought[I, O], 3] with
+  given programOfThoughtOptimizableStructure[I, O]: OptimizableStructure.Of[ProgramOfThought[I, O], 3] with
     def arity(@annotation.unused program: ProgramOfThought[I, O]): Int    = 3
     def inspect(program: ProgramOfThought[I, O]): Vector[OptimizableView] =
       Vector(
@@ -88,8 +88,8 @@ private[optimization] trait CompositeOptimizableTraversalInstances:
           answererPredictOverride = nextAnswerer
         )
 
-  given multiChainComparisonOptimizableTraversal[I, O]
-      : OptimizableTraversal.Of[MultiChainComparison[I, O], 1] with
+  given multiChainComparisonOptimizableStructure[I, O]
+      : OptimizableStructure.Of[MultiChainComparison[I, O], 1] with
     def arity(@annotation.unused program: MultiChainComparison[I, O]): Int    = 1
     def inspect(program: MultiChainComparison[I, O]): Vector[OptimizableView] =
       Vector(program.comparePredict.optimizableView)

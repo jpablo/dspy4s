@@ -183,7 +183,7 @@ Shipped in Phase 7 v2 (commit b01c627):
   majority-vote default
 
 Shipped after v1 (predictor-introspection + persistence track):
-- `OptimizableTraversal[P]` / `OptimizableLeaf[P]` typeclass pair (Scala 3 Mirror derivation),
+- `OptimizableStructure[P]` / `OptimizableLeaf[P]` typeclass pair (Scala 3 Mirror derivation),
   replacing `PredictOps` (G-1 resolved, P1–P6; `PredictOps` removed in 1657f9c).
   Composite multi-predictor programs are now introspectable/optimizable end-to-end.
 - Program `save`/`load` + `dumpState`/`loadState` via `ProgramPersistence`
@@ -236,7 +236,7 @@ Tracks:
   resume; live-model validated); **`InferRules`** (G-11, 81ffec1) — trainset-derived
   natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
   per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
-  (`OptimizableTraversal` introspection, `ProgramRunner` execution spine, instruction editing) + `Evaluate`.
+  (`OptimizableStructure` introspection, `ProgramRunner` execution spine, instruction editing) + `Evaluate`.
   **Still deferred:** `SIMBA` (G-13), `BetterTogether` (G-15),
   `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
   remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative

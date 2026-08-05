@@ -39,7 +39,7 @@ import scala.compiletime.ops.int.+
   * routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
   *
   * '''Per-module advice (parity with Python).''' OfferFeedback returns a JSON object `{componentName: advice}` keyed by
-  * the inner program's named predictors ([[OptimizableTraversal.inspectNamed]], the dspy4s analogue of
+  * the inner program's named predictors ([[OptimizableStructure.inspectNamed]], the dspy4s analogue of
   * `named_predictors()`). Each predictor's call is matched to its advice by its [[SignatureLayout]] — the dspy4s
   * stand-in for Python's `signature2name[signature]` object-identity routing — and only that predictor's `hint_` is
   * injected. A predictor whose advice is absent or `N/A` gets no hint. When OfferFeedback returns a bare (non-JSON)
@@ -69,12 +69,12 @@ final case class Refine[P <: Module[I, O], I, O](
     failCount: Option[FailureCount] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
       * [[Refine.offerFeedbackSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
-      * addressable + immutably replaceable (see [[Refine.refineOptimizableTraversal]]), mirroring the ReAct/CodeAct
+      * addressable + immutably replaceable (see [[Refine.refineOptimizableStructure]]), mirroring the ReAct/CodeAct
       * override pattern.
       */
     criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
-    optimization: OptimizableTraversal[P]
+    optimization: OptimizableStructure[P]
 ) extends Module[I, O]:
   override val moduleName: String = "refine"
 
@@ -124,9 +124,9 @@ object Refine:
     * the leading states to the inner program and the trailing state to the critic. An unchanged critic state retains
     * the existing override exactly; a changed state preserves the critic's execution bindings.
     */
-  given refineOptimizableTraversal[P <: Module[I, O], I, O, N <: Int](using
-      inner: OptimizableTraversal.WithArity[P, N]
-  ): OptimizableTraversal.Of[Refine[P, I, O], N + 1] with
+  given refineOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
+      inner: OptimizableStructure.WithArity[P, N]
+  ): OptimizableStructure.Of[Refine[P, I, O], N + 1] with
     def arity(program: Refine[P, I, O]): Int                       = inner.arity(program.module) + 1
     def inspect(program: Refine[P, I, O]): Vector[OptimizableView] =
       inner.inspect(program.module) :+ program.criticPredict.optimizableView

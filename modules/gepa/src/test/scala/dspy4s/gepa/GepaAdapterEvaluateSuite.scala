@@ -17,7 +17,7 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId

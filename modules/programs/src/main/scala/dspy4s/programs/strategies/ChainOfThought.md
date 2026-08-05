@@ -302,7 +302,7 @@ Although execution contains an inner `Predict`, optimizers see `ChainOfThought` 
 
 ```mermaid
 flowchart TD
-    root["ChainOfThought[I, O]<br/>OptimizableTraversal arity = 1"]
+    root["ChainOfThought[I, O]<br/>OptimizableStructure arity = 1"]
     root -->|"self"| leaf["ChainOfThought leaf<br/>metadata uses augmented layout"]
     leaf --> params["OptimizableParameters"]
     params --> instructions["base-signature instructions"]
@@ -317,7 +317,7 @@ Base field structure and shapes, the runtime, and module name remain read-only e
 `OptimizableLeaf[ChainOfThought[I, O]]` instance is a lawful lens: writing parameters preserves that metadata, and
 reading after a write returns the written parameters.
 
-When `ChainOfThought` is a field of a composite program, its traversal name becomes that field path rather than
+When `ChainOfThought` is a field of a composite program, its structural name becomes that field path rather than
 `self`.
 
 ## Streaming

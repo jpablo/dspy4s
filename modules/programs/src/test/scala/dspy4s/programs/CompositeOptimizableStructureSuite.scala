@@ -19,13 +19,13 @@ import zio.blocks.schema.Schema
 final case class RlmIn(question: String) derives Schema
 final case class RlmOut(answer: String) derives Schema
 
-/** Round-trip and distribution laws for the `OptimizableTraversal` instances added for the remaining composites
+/** Round-trip and distribution laws for the `OptimizableStructure` instances added for the remaining composites
   * ([[BestOfN]] pass-through, [[Refine]] `read = inner ++ [critic]`, [[RLM]] action+extract) — the gap-closing
   * counterpart of `ComposeLawSuite` / `ModeLawSuite`'s addressability sections. The invariant under test is the spec's
   * homomorphism contract: `read` distributes structurally, `replace(p, read(p)) == p`, and a genuine replace writes
   * back positionally.
   */
-class CompositeOptimizableTraversalSuite extends FunSuite:
+class CompositeOptimizableStructureSuite extends FunSuite:
 
   private object Interpreter extends CodeInterpreter:
     def execute(code: String): Either[DspyError, CodeResult] =
@@ -50,7 +50,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
       def set(program: Leaf[I, O], updated: OptimizableParameters): Leaf[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
-  test("hand-written composite traversals expose logical predictor names") {
+  test("hand-written composite structures expose logical parameter names") {
     val signature  = Signature.derived[RlmIn, RlmOut]("CompositeNames")
     val react      = ReAct(baseSignature = signature, tools = Vector.empty)
     val codeAct    = CodeAct(baseSignature = signature, interpreter = Interpreter)
@@ -58,19 +58,19 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
     val comparison = MultiChainComparison(baseSignature = signature)
 
     assertEquals(
-      summon[OptimizableTraversal[ReAct[RlmIn, RlmOut]]].inspectNamed(react).map(_._1),
+      summon[OptimizableStructure[ReAct[RlmIn, RlmOut]]].inspectNamed(react).map(_._1),
       Vector("react", "extractor")
     )
     assertEquals(
-      summon[OptimizableTraversal[CodeAct[RlmIn, RlmOut]]].inspectNamed(codeAct).map(_._1),
+      summon[OptimizableStructure[CodeAct[RlmIn, RlmOut]]].inspectNamed(codeAct).map(_._1),
       Vector("codeact", "extractor")
     )
     assertEquals(
-      summon[OptimizableTraversal[RLM[RlmIn, RlmOut]]].inspectNamed(rlm).map(_._1),
+      summon[OptimizableStructure[RLM[RlmIn, RlmOut]]].inspectNamed(rlm).map(_._1),
       Vector("action", "extract")
     )
     assertEquals(
-      summon[OptimizableTraversal[MultiChainComparison[RlmIn, RlmOut]]].inspectNamed(comparison).map(_._1),
+      summon[OptimizableStructure[MultiChainComparison[RlmIn, RlmOut]]].inspectNamed(comparison).map(_._1),
       Vector("compare")
     )
   }
@@ -80,7 +80,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
   test("BestOfN read/inspectNamed pass through to the inner program; replace round-trips") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
     val b    = BestOfN[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
-    val P    = summon[OptimizableTraversal[BestOfN[Leaf[Int, Int], Int, Int]]]
+    val P    = summon[OptimizableStructure[BestOfN[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.read(b), Vector(leaf.predict.optimizableParameters))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("self"))
@@ -101,7 +101,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
       threshold = 1.0
     )
     val P =
-      summon[OptimizableTraversal[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
+      summon[OptimizableStructure[BestOfN[AndThen[Int, String, Int, Leaf[Int, String], Leaf[String, Int]], Int, Int]]]
     assertEquals(P.read(b), Vector(first.predict.optimizableParameters, second.predict.optimizableParameters))
     assertEquals(P.inspectNamed(b).map(_._1), Vector("first", "second"))
   }
@@ -111,7 +111,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
   test("Refine read = read(inner) :+ critic; the default critic is the OfferFeedback predict") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
     val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
-    val P    = summon[OptimizableTraversal[Refine[Leaf[Int, Int], Int, Int]]]
+    val P    = summon[OptimizableStructure[Refine[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.read(r), Vector(leaf.predict.optimizableParameters, r.criticPredict.optimizableParameters))
     assertEquals(P.inspectNamed(r).map(_._1), Vector("self", "critic"))
@@ -122,7 +122,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
   test("Refine replace round-trips; a genuine critic replace writes back (and only the critic)") {
     val leaf = Leaf[Int, Int](identity, predict("a -> b"))
     val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
-    val P    = summon[OptimizableTraversal[Refine[Leaf[Int, Int], Int, Int]]]
+    val P    = summon[OptimizableStructure[Refine[Leaf[Int, Int], Int, Int]]]
 
     assertEquals(P.replace(r, P.read(r)), r) // exact no-op state round-trip
     // Swap only the critic: the inner leaf is untouched, the critic is written back.
@@ -142,7 +142,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
 
   test("RLM read = [actionPredict, extractPredict]; replace round-trips and writes back") {
     val rlm = RLM(baseSignature = Signature.derived[RlmIn, RlmOut]("RlmQA"))
-    val P   = summon[OptimizableTraversal[RLM[RlmIn, RlmOut]]]
+    val P   = summon[OptimizableStructure[RLM[RlmIn, RlmOut]]]
 
     assertEquals(P.read(rlm), Vector(rlm.actionPredict.optimizableParameters, rlm.extractPredict.optimizableParameters))
     assertEquals(P.replace(rlm, P.read(rlm)), rlm) // round-trip: overrides stay None
@@ -160,7 +160,7 @@ class CompositeOptimizableTraversalSuite extends FunSuite:
 
   test("override-backed composites observe read-after-write and change-revert through state") {
     val rlm      = RLM(baseSignature = Signature.derived[RlmIn, RlmOut]("RlmQA"))
-    val P        = summon[OptimizableTraversal[RLM[RlmIn, RlmOut]]]
+    val P        = summon[OptimizableStructure[RLM[RlmIn, RlmOut]]]
     val original = P.read(rlm)
     val metadata = P.inspect(rlm).map(_.metadata)
     val changed  = original.updated(0, original.head.copy(instructions = Some("Explore methodically.")))

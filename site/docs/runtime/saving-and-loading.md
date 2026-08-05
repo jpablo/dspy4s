@@ -37,15 +37,15 @@ answerer. The executable predictor is not used as a parameter carrier.
 - Put-Put: only the last parameters written matter.
 - Frame: writing parameters does not change predictor metadata.
 
-At the composite level, `OptimizableTraversal.replace(program, OptimizableTraversal.read(program))`
+At the composite level, `OptimizableStructure.replace(program, OptimizableStructure.read(program))`
 returns the original program, and an arity-matched replacement reads back as the
 same parameter vector.
 
 Algebraically, `OptimizableLeaf[P]` is a lawful lens focused on one `OptimizableParameters`,
-while `OptimizableTraversal[P]` is an ordered finite traversal. Composition concatenates
-the child traversals, parameter-free structure contributes the empty vector, and
+while `OptimizableStructure[P]` describes a finite, ordered collection of such leaves. Composition concatenates
+the child structures, parameter-free structure contributes the empty vector, and
 `Vector[OptimizableParameters]` forms the parameter monoid under concatenation. Named
-inspection is checked against the canonical traversal so labels cannot silently
+inspection is checked against the canonical structure so labels cannot silently
 reorder or substitute parameters.
 
 ## Metadata and execution resources
@@ -67,13 +67,13 @@ execution resources. Recreate and configure those normally, then load state into
 ## OptimizableLeaf IDs and compatibility
 
 The JSON object keys are `predictor-0`, `predictor-1`, and so on. They are ordinal
-IDs derived from the root `OptimizableTraversal` traversal:
+IDs derived from the root `OptimizableStructure` leaf order:
 
 - JSON object order does not matter.
 - Missing and unknown ordinals are rejected.
 - An equal-size reorder cannot be detected, because the IDs are not semantic names.
 
-Load only into a compatible program with the same optimizable-leaf count and traversal
+Load only into a compatible program with the same optimizable-leaf count and leaf
 order. Structural display names are useful diagnostics, but they are not persisted
 identity.
 

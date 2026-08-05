@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableParameters
 
@@ -18,15 +18,14 @@ import java.nio.file.Paths
 /** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's `BaseModule.dump_state` / `load_state`
   * and `save` / `load`.
   *
-  * Built entirely on [[OptimizableTraversal]], so a single `Predict` or `DynamicPredict` module and an arbitrary
+  * Built entirely on [[OptimizableStructure]], so a single `Predict` or `DynamicPredict` module and an arbitrary
   * composite use the same path: [[dumpState]] serializes every writable [[OptimizableParameters]], and [[loadState]]
-  * writes those parameter values into a fresh program through `OptimizableTraversal.replace`.
+  * writes those parameter values into a fresh program through `OptimizableStructure.replace`.
   *
   * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature field
   * structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the fresh
-  * target program and are preserved during loading. Loading therefore requires the same optimizable-leaf
-  * traversal/order and a compatible architecture; ordinal IDs detect missing or extra entries, not a same-cardinality
-  * reorder.
+  * target program and are preserved during loading. Loading therefore requires the same optimizable-leaf structure and
+  * order, plus a compatible architecture; ordinal IDs detect missing or extra entries, not a same-cardinality reorder.
   *
   * The JSON is produced by zio-blocks' `DynamicValue` JSON codec (the same codec `SignatureLayout.dumpJson` uses) —
   * clean, natural JSON with no ADT tags.
@@ -40,8 +39,8 @@ object ProgramPersistence:
     * `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`. [[OptimizableId]] keys make
     * loading independent of JSON object order and detect missing/unknown ordinals.
     */
-  def dumpState[P](program: P)(using traversal: OptimizableTraversal[P]): DynamicValue.Record =
-    val parameters: Seq[(String, DynamicValue)] = traversal.readIdentified(program).map { identified =>
+  def dumpState[P](program: P)(using structure: OptimizableStructure[P]): DynamicValue.Record =
+    val parameters: Seq[(String, DynamicValue)] = structure.readIdentified(program).map { identified =>
       identified.id.render -> (identified.parameters.dumpState: DynamicValue)
     }
     DynamicValue.Record(Chunk.from(Seq(
@@ -54,9 +53,9 @@ object ProgramPersistence:
       case _                        => Left(ValidationError(s"Program state optimizable '$at' must be a record"))
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
-      traversal: OptimizableTraversal[P]
+      structure: OptimizableStructure[P]
   ): Either[DspyError, P] =
-    val expectedIds = traversal.readIdentified(program).map(_.id)
+    val expectedIds = structure.readIdentified(program).map(_.id)
     val parsed      = record.fields.toVector.foldLeft[Either[DspyError, Vector[(OptimizableId, OptimizableParameters)]]](
       Right(Vector.empty)
     ) { case (acc, (rawId, rawParameters)) =>
@@ -84,12 +83,12 @@ object ProgramPersistence:
         Left(ValidationError(s"Program state optimizable ids do not match the program ($details)"))
       else
         val byId = entries.toMap
-        Right(traversal.replace(program, expectedIds.map(byId)))
+        Right(structure.replace(program, expectedIds.map(byId)))
     }
 
   /** Rebuild a program from the state produced by [[dumpState]], matching state by stable optimizable id. */
   def loadState[P](program: P, state: DynamicValue.Record)(using
-      traversal: OptimizableTraversal[P]
+      structure: OptimizableStructure[P]
   ): Either[DspyError, P] =
     DynamicValues.recordGet(state, "optimizableParameters") match
       case Some(record: DynamicValue.Record) => loadById(program, record)
@@ -99,18 +98,18 @@ object ProgramPersistence:
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
     * [[loadJson]].
     */
-  def dumpJson[P](program: P)(using OptimizableTraversal[P]): String =
+  def dumpJson[P](program: P)(using OptimizableStructure[P]): String =
     new String(dynamicJsonCodec.encode(dumpState(program)), StandardCharsets.UTF_8)
 
   /** Rebuild a program from the JSON string produced by [[dumpJson]]. */
-  def loadJson[P](program: P, json: String)(using OptimizableTraversal[P]): Either[DspyError, P] =
+  def loadJson[P](program: P, json: String)(using OptimizableStructure[P]): Either[DspyError, P] =
     dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
       case Right(rec: DynamicValue.Record) => loadState(program, rec)
       case Right(other)                    => Left(ValidationError(s"Expected a JSON object for program state, got: $other"))
       case Left(err)                       => Left(ValidationError(s"Invalid program-state JSON: ${err.toString}"))
 
   /** Write a program's state JSON to `path`. IO failures are wrapped into a [[RuntimeError]]. */
-  def save[P](program: P, path: String)(using OptimizableTraversal[P]): Either[DspyError, Unit] =
+  def save[P](program: P, path: String)(using OptimizableStructure[P]): Either[DspyError, Unit] =
     try
       Files.write(Paths.get(path), dumpJson(program).getBytes(StandardCharsets.UTF_8))
       Right(())
@@ -121,7 +120,7 @@ object ProgramPersistence:
   /** Read a program's state JSON from `path` and rebuild it. IO failures are wrapped into a [[RuntimeError]]; malformed
     * JSON / state surfaces as the [[loadJson]] error.
     */
-  def load[P](program: P, path: String)(using OptimizableTraversal[P]): Either[DspyError, P] =
+  def load[P](program: P, path: String)(using OptimizableStructure[P]): Either[DspyError, P] =
     val read: Either[DspyError, String] =
       try Right(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8))
       catch

@@ -63,7 +63,7 @@ scoring failures.
 ### Adapter
 
 `GepaAdapter` bridges a dspy4s program into the engine (Python's `DspyAdapter`). It applies a `Candidate` to
-the program (rewriting each predictor's instruction by stable traversal ID) and evaluates a batch in one of two
+the program (rewriting each optimizable leaf's instruction by stable structure ID) and evaluates a batch in one of two
 modes:
 
 - **Scores-only** (acceptance / full-eval fast path) — runs through `Evaluate` for scores.
@@ -138,7 +138,7 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 
 ## Relation to dspy
 
-GEPA uses the shared `OptimizableTraversal` / `ProgramRunner` introspection and execution spines also used by
+GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and execution spines also used by
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns a `GepaResult[P]` rather than an `OptimizationReport[P]`.
 Deferred relative to upstream: multi-objective frontiers and run-dir resume beyond the single-objective

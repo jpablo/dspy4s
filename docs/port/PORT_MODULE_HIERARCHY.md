@@ -84,7 +84,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | Universal callable base | `Module` | `Module[I, O]` *(semantic domain/codomain; execution returns `Prediction[O]`)* |
 | Container/persistence base | `BaseModule` | — *(absent; immutability + typeclasses, G-1)* |
 | Learnable-leaf marker | `Parameter` | — *(typeclass `OptimizableLeaf[P]`; writable carrier `OptimizableParameters`)* |
-| Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | `OptimizableTraversal[P].inspect` / `inspectNamed` |
+| Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | `OptimizableStructure[P].inspect` / `inspectNamed` |
 | Attach demos | mutate `predictor.demos` | update `OptimizableParameters.demos`, then immutable `replace` |
 | Set the LM | `set_lm` / `get_lm` | ambient LM or immutable per-module `Predict.withLm` / `boundLm` |
 | Where cross-cutting wrapping lives | `Module.__call__` (universal, non-bypassable) | `Module.apply` (`final`; universal, non-bypassable — [G-2 resolved](PORT_GAPS.md)) |
@@ -125,8 +125,8 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    `Predict` is simultaneously a `Module` and a mutable `Parameter`. dspy4s has
    no marker base class: `OptimizableLeaf[P]` exposes the leaf's writable
    `OptimizableParameters` (instructions, demos, config), while `OptimizableMetadata`
-   keeps signature structure and module identity read-only. `OptimizableTraversal[P]`
-   derives composite traversal and immutable replacement (G-1).
+   keeps signature structure and module identity read-only. `OptimizableStructure[P]`
+   derives composite structure and immutable replacement (G-1).
 
 5. **ChainOfThought composes a Predict (matches Python).** Python's `ChainOfThought` *is a* `Module` that *has a*
    `Predict` and whose `forward` returns `self.predict(**kwargs)`. dspy4s is now the same shape:

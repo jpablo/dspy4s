@@ -47,7 +47,7 @@ import dspy4s.optimize.{
 }
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -154,7 +154,7 @@ object OptimizerSmokeTest:
             case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0
 
         def instructionOf(program: DynamicPredict): String =
-          summon[OptimizableTraversal[DynamicPredict]].read(
+          summon[OptimizableStructure[DynamicPredict]].read(
             program
           ).headOption.flatMap(_.instructions).getOrElse("(none)")
 
@@ -202,7 +202,7 @@ object OptimizerSmokeTest:
             val best  = report.bestProgram
             val score = report.metadata.get("best_score").collect { case d: Double => d }.getOrElse(scoreOf(best))
             val demos =
-              summon[OptimizableTraversal[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
+              summon[OptimizableStructure[DynamicPredict]].read(best).headOption.map(_.demos.size).getOrElse(0)
             checkpoint(f"MIPROv2  score: $score%.1f%%   (baseline $baseScore%.1f%%)")
             println(s"""[smoke] MIPROv2  chose instruction: "${instructionOf(best)}"  (+ $demos demos)""")
           case Left(err) => println(s"\n[smoke] MIPROv2 failed: ${err.message}")

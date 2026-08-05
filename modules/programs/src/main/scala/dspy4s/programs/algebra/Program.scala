@@ -14,7 +14,7 @@ import dspy4s.programs.compose.&&&
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableParameters
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.contracts.Prediction
 import zio.blocks.schema.DynamicValue
@@ -24,14 +24,14 @@ import scala.compiletime.ops.int.+
 /** An optimizable module packaged with the exact number of writable parameter leaves.
   *
   * `Rep` hides the concrete module representation while `N` remains visible as the natural-number grade. Construction
-  * through [[Program.of]] requires both complete optimizer traversal evidence for the representation and the canonical
-  * [[RecordCodec]] for the input object.
+  * through [[Program.of]] requires both complete optimizable-structure evidence for the representation and the
+  * canonical [[RecordCodec]] for the input object.
   */
 sealed trait Program[I, O, N <: Int]:
   type Rep <: Module[I, O]
 
   val program: Rep
-  val optimizableParameters: OptimizableTraversal.WithArity[Rep, N]
+  val optimizableParameters: OptimizableStructure.WithArity[Rep, N]
 
   /** Run the packaged program through the module's wrapped `apply`. */
   def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
@@ -44,15 +44,15 @@ object Program:
 
   private def packageWith[I, O, F <: Module[I, O]](
       f: F
-  )(using ev: OptimizableTraversal[F]): Program[I, O, ev.Arity] { type Rep = F } =
+  )(using ev: OptimizableStructure[F]): Program[I, O, ev.Arity] { type Rep = F } =
     new Program[I, O, ev.Arity]:
       type Rep = F
       val program: F                                                         = f
-      val optimizableParameters: OptimizableTraversal.WithArity[F, ev.Arity] = ev
+      val optimizableParameters: OptimizableStructure.WithArity[F, ev.Arity] = ev
 
   /** Package a module at a codec-equipped input object while retaining its exact parameter grade. */
   def of[I, O, F <: Module[I, O]](f: F)(using
-      ev                      : OptimizableTraversal[F],
+      ev                      : OptimizableStructure[F],
       @annotation.unused codec: RecordCodec[I]
   ): Program[I, O, ev.Arity] { type Rep = F } =
     packageWith(f)
@@ -67,7 +67,7 @@ object Program:
         g: Program[B, C, M]
     ): Program[A, C, N + M] =
       Program.packageWith(f.program.andThen(g.program))(using
-        AndThen.andThenOptimizableTraversal[A, B, C, f.Rep, g.Rep, N, M](using
+        AndThen.andThenOptimizableStructure[A, B, C, f.Rep, g.Rep, N, M](using
           f.optimizableParameters,
           g.optimizableParameters
         )
@@ -80,7 +80,7 @@ object Program:
         g: Program[I, B, M]
     ): Program[I, (A, B), N + M] =
       Program.packageWith(f.program &&& g.program)(using
-        Both.bothOptimizableTraversal[I, A, B, f.Rep, g.Rep, N, M](using
+        Both.bothOptimizableStructure[I, A, B, f.Rep, g.Rep, N, M](using
           f.optimizableParameters,
           g.optimizableParameters
         )
@@ -110,8 +110,8 @@ object Program:
       : Lens[Program[I, O, N], SizedVector[OptimizableParameters, N]] =
     programParameterization.parameterLens[I, O, N]
 
-  /** Optimizer traversal delegates to the packaged representation while preserving `N`. */
-  given programOptimizableTraversal[I, O, N <: Int]: OptimizableTraversal.Of[Program[I, O, N], N] with
+  /** Optimizable structure delegates to the packaged representation while preserving `N`. */
+  given programOptimizableStructure[I, O, N <: Int]: OptimizableStructure.Of[Program[I, O, N], N] with
     def arity(program: Program[I, O, N]): Int =
       program.optimizableParameters.arity(program.program)
 

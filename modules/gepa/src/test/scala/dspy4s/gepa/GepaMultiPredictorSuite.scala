@@ -18,7 +18,7 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.programs.optimization.OptimizableTraversal
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.strategies.DynamicPredict
@@ -27,7 +27,7 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 /** Two-predictor pipeline: `hinter` produces a hint, `answerer` answers using it. Top-level so
-  * `OptimizableTraversal.derived` sees its Mirror field labels ("hinter", "answerer").
+  * `OptimizableStructure.derived` sees its Mirror field labels ("hinter", "answerer").
   */
 final case class Pipeline(hinter: DynamicPredict, answerer: DynamicPredict)
 

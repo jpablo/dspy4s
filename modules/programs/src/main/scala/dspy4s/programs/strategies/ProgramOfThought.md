@@ -458,7 +458,7 @@ Optimizers see three independently tunable leaves in stable order:
 
 ```mermaid
 flowchart TD
-    root["ProgramOfThought[I, O]<br/>OptimizableTraversal arity = 3"]
+    root["ProgramOfThought[I, O]<br/>OptimizableStructure arity = 3"]
 
     root -->|"0: generator"| generator["generatorPredict<br/>initial program"]
     root -->|"1: regenerator"| regenerator["regeneratorPredict<br/>error repair"]
@@ -480,7 +480,7 @@ flowchart TD
     answererParams --> answererConfig["config"]
 ```
 
-The traversal names are `generator`, `regenerator`, and `answerer`. The interpreter and retry budget are architectural
+The structural names are `generator`, `regenerator`, and `answerer`. The interpreter and retry budget are architectural
 state, not optimizable parameters. A no-op replacement preserves the original ProgramOfThought value and leaves all
 override fields empty.
 
@@ -531,12 +531,12 @@ A useful reading order is:
    reasoning augmentation.
 7. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `CodeResult`, interpreter failures, and lifecycle.
-8. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
-   three-leaf optimizer traversal.
+8. [`CompositeOptimizableStructureInstances.scala`](../optimization/CompositeOptimizableStructureInstances.scala): the
+   three-leaf optimizable structure.
 9. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
 10. [`ProgramOfThoughtSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtSuite.scala): executable cases
    for first-attempt success, regeneration, exhaustion, lifecycle, subprocess execution, and `SUBMIT` precedence.
-11. [`ProgramOfThoughtOptimizableTraversalSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtOptimizableTraversalSuite.scala):
+11. [`ProgramOfThoughtOptimizableStructureSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtOptimizableStructureSuite.scala):
     optimizer order and replacement laws.
 12. [`Cheatsheet.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise usage
     example.

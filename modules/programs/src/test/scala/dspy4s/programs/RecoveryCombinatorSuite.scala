@@ -51,8 +51,8 @@ class RecoveryCombinatorSuite extends FunSuite:
   private def predictor(instruction: String): DynamicPredict =
     DynamicPredict(SignatureLayout.parse("i -> s").toOption.get.withInstructions(Some(instruction)))
 
-  private def params[P](program: P)(using traversal: OptimizableTraversal[P]): Vector[OptimizableParameters] =
-    traversal.read(program)
+  private def params[P](program: P)(using structure: OptimizableStructure[P]): Vector[OptimizableParameters] =
+    structure.read(program)
 
   private given RuntimeContext = RuntimeEnvironment.current
 
@@ -137,7 +137,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     val primary   = Attempt("primary", Left(ValidationError("primary")), predictor("p"), runs)
     val fallback  = Attempt("fallback", Right("fallback"), predictor("f"), runs)
     val recovered = primary.recoverWith(RecoveryPolicy.Always)(fallback)
-    val P         = summon[OptimizableTraversal[RecoverWith[Int, String, Attempt, Attempt]]]
+    val P         = summon[OptimizableStructure[RecoverWith[Int, String, Attempt, Attempt]]]
 
     assertEquals(
       params(recovered),

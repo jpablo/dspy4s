@@ -44,8 +44,8 @@ final case class Tensor[
     )
 
 object Tensor:
-  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both` (via [[PairOptimizableTraversal]]). */
-  given tensorOptimizableTraversal[
+  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both` (via [[PairOptimizableStructure]]). */
+  given tensorOptimizableStructure[
       I,
       J,
       A,
@@ -56,20 +56,20 @@ object Tensor:
       NB <: Int
   ](
       using
-      pa: OptimizableTraversal.WithArity[FA, NA],
-      pb: OptimizableTraversal.WithArity[FB, NB]
-  ): OptimizableTraversal.Of[Tensor[I, J, A, B, FA, FB], NA + NB] with
+      pa: OptimizableStructure.WithArity[FA, NA],
+      pb: OptimizableStructure.WithArity[FB, NB]
+  ): OptimizableStructure.Of[Tensor[I, J, A, B, FA, FB], NA + NB] with
     def arity(program: Tensor[I, J, A, B, FA, FB]): Int                       = pa.arity(program.first) + pb.arity(program.second)
     def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[OptimizableView] =
-      PairOptimizableTraversal.inspect(pa, pb)(program.first, program.second)
+      PairOptimizableStructure.inspect(pa, pb)(program.first, program.second)
 
     def replace(
         program: Tensor[I, J, A, B, FA, FB],
         updates: Vector[OptimizableParameters]
     ): Tensor[I, J, A, B, FA, FB] =
-      PairOptimizableTraversal.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
+      PairOptimizableStructure.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
         program.copy(first = a, second = b)
       )
 
     override def inspectNamed(program: Tensor[I, J, A, B, FA, FB]): Vector[(String, OptimizableView)] =
-      PairOptimizableTraversal.inspectNamed(pa, pb)(program.first, program.second)
+      PairOptimizableStructure.inspectNamed(pa, pb)(program.first, program.second)

@@ -458,7 +458,7 @@ Optimizers see two independently tunable leaves in stable order:
 
 ```mermaid
 flowchart TD
-    root["CodeAct[I, O]<br/>OptimizableTraversal arity = 2"]
+    root["CodeAct[I, O]<br/>OptimizableStructure arity = 2"]
 
     root -->|"0: codeact"| generator["codeActPredict<br/>code-generation policy"]
     root -->|"1: extractor"| extractor["extractorPredict<br/>final synthesis"]
@@ -524,8 +524,8 @@ A useful reading order is:
    reasoning augmentation.
 10. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala): execution
    result and sandbox-tool contracts.
-11. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
-   two-leaf optimizer traversal.
+11. [`CompositeOptimizableStructureInstances.scala`](../optimization/CompositeOptimizableStructureInstances.scala): the
+   two-leaf optimizable structure.
 12. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
 13. [`CodeActSuite.scala`](../../../../../test/scala/dspy4s/programs/CodeActSuite.scala): executable examples of stopping,
     parsing, interpreter failures, tools, subprocess execution, and truncation.

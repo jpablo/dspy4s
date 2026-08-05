@@ -260,7 +260,7 @@ A standalone `Predict` is one independently tunable leaf named `self`:
 
 ```mermaid
 flowchart TD
-    root["Predict[I, O]<br/>OptimizableTraversal arity = 1"]
+    root["Predict[I, O]<br/>OptimizableStructure arity = 1"]
     root -->|"self"| leaf["Predict leaf"]
     leaf --> params["OptimizableParameters"]
     params --> instructions["instructions"]
@@ -278,7 +278,7 @@ Signature fields and shapes, the module name, runtime, bound model, and tools ar
 `OptimizableLeaf[Predict[I, O]]` instance is a lawful lens: reading after a write returns the written parameters, and
 writing cannot change that metadata.
 
-When a `Predict` is a field of a composite program, structural traversal replaces `self` with the field path. For
+When a `Predict` is a field of a composite program, structural derivation replaces `self` with the field path. For
 example, ReAct exposes its two internal predictors as `react` and `extractor`.
 
 ## Streaming
