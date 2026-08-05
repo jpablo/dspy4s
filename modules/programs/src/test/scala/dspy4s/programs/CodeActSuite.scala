@@ -285,22 +285,6 @@ class CodeActSuite extends FunSuite:
     }
   }
 
-  test("CodeAct.parseCode ports upstream _parse_code: format checks, separators, trailing-assignment echo") {
-    // Empty.
-    assertEquals(CodeAct.parseCode("```python\n\n```"), Left("Empty code after parsing."))
-    // Single line with multiple '=' (upstream's "format is not correct").
-    assertEquals(CodeAct.parseCode("a=1; b=2"), Left("Code format is not correct."))
-    // Cut at --- and triple newline.
-    assertEquals(CodeAct.parseCode("print(1)\n---\ngarbage"), Right("print(1)"))
-    assertEquals(CodeAct.parseCode("print(1)\n\n\ngarbage"), Right("print(1)"))
-    // Trailing bare assignment gets the variable echoed (multi-line only).
-    assertEquals(CodeAct.parseCode("y = 2\nx = y + 1"), Right("y = 2\nx = y + 1\nx"))
-    assertEquals(CodeAct.parseCode("x = 1"), Right("x = 1")) // single-line: no echo
-    // Fences: tagged and untagged both accepted (delta from upstream, which only matches ```python).
-    assertEquals(CodeAct.parseCode("```py\nprint(2)\n```"), Right("print(2)"))
-    assertEquals(CodeAct.parseCode("```\nprint(3)\n```"), Right("print(3)"))
-  }
-
   test("CodeAct: extractor truncates the oldest iteration and retries on a context-window overflow") {
     val signature   = Signature.fromString("q -> answer")
     val interpreter = new RecordingInterpreter(Vector(Right(CodeResult(stdout = "ok\n", stderr = "", exitCode = 0))))

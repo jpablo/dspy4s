@@ -14,6 +14,7 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AgentLoop
+import dspy4s.programs.runtime.GeneratedPython
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Shape, Signature}
 import zio.blocks.chunk.Chunk
@@ -236,7 +237,7 @@ final case class ProgramOfThought[I, O](
           case Some(rawCode) =>
             // Shared with CodeAct — upstream's `_parse_code` is one function serving both programs, so both get
             // the same LM-output tolerance (fence stripping, `---` truncation, trailing-assignment echo).
-            CodeAct.parseCode(rawCode) match
+            GeneratedPython.parse(rawCode) match
               case Left(parseErr) =>
                 Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
                   rawCode,

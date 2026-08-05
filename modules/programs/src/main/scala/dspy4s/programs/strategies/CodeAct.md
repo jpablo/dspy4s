@@ -168,7 +168,8 @@ independently of CodeAct's Python parsing and execution details.
 
 ## How generated code is parsed
 
-`CodeAct.parseCode` normalizes the model's `generated_code` before execution:
+The shared runtime helper `GeneratedPython.parse` normalizes the model's `generated_code` before execution. CodeAct
+uses this helper rather than owning a Python-output format that other strategies also need:
 
 - content after `---` or the first triple newline is discarded;
 - fenced blocks tagged `python`, tagged `py`, or untagged are accepted;

@@ -26,6 +26,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.ParallelExecutor
+import dspy4s.programs.runtime.SandboxToolBridge
 import dspy4s.typed.{Prediction, Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -218,7 +219,7 @@ final case class RLM[I, O](
       RLM.ReplVariable.fromValue(f.name, inputVars(f.name), Some(f))
     }
 
-    val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ CodeAct.sandboxTools(tools)
+    val sandboxTools = RLM.makeLlmTools(maxLlmCalls, subLm, ctx) ++ SandboxToolBridge.fromToolFunctions(tools)
     val outputFields =
       baseLayout.outputFields.map(f => DenoPyodideInterpreter.OutputField(f.name, f.typeRef.pythonTypeName))
     val interpreter       = interpreterFactory(sandboxTools, outputFields)

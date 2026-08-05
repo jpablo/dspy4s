@@ -15,12 +15,11 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
+import dspy4s.programs.runtime.{GeneratedPython, SandboxToolBridge}
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
-
-import scala.util.matching.Regex
 
 /** Iterative code-generation agent. Port of Python DSPy's `dspy.CodeAct`.
   *
@@ -196,7 +195,7 @@ final case class CodeAct[I, O](
     * [[CodeAct.sandboxTools]].
     */
   def sandboxTools(using RuntimeContext): Vector[dspy4s.core.contracts.SandboxTool] =
-    CodeAct.sandboxTools(tools)
+    SandboxToolBridge.fromToolFunctions(tools)
 
   /** Generate the next typed code step from the original input and current rendered trajectory.
     */
@@ -212,7 +211,7 @@ final case class CodeAct[I, O](
     * consumes the iteration, records an error entry, and deliberately ignores the model's `finished` flag.
     */
   override protected def prepareAction(step: CodeAct.CodeStep): ActionPreparation[String, String] =
-    CodeAct.parseCode(step.generatedCode) match
+    GeneratedPython.parse(step.generatedCode) match
       case Left(parseError) =>
         ActionPreparation.Rejected(s"Failed to parse the generated code: $parseError")
       case Right(code) =>
@@ -322,38 +321,7 @@ object CodeAct:
   def sandboxTools(tools: Vector[dspy4s.programs.contracts.ToolFunction])(using
       ctx: dspy4s.core.contracts.RuntimeContext
   ): Vector[dspy4s.core.contracts.SandboxTool] =
-    tools.map { tool =>
-      dspy4s.core.contracts.SandboxTool(
-        name = tool.name,
-        parameters = tool.argSchema.map { case (name, typeRef) =>
-          dspy4s.core.contracts.SandboxTool.Param(name, typeRef.pythonTypeName)
-        },
-        invoke = kwargs => tool.invoke(kwargs)(using ctx)
-      )
-    }
-
-  /** Matches a fenced code block, optionally tagged ```python. Captures the snippet body in group 1. Multiline-aware.
-    */
-  private val FencedBlock: Regex = """(?s)```(?:python|py)?\s*\n?(.*?)```""".r
-
-  private val LastLineAssignment: Regex = """^(\w+)\s*=""".r
-
-  /** Parse the LM's `generated_code` field — a port of upstream's `_parse_code` (shared by PoT/CodeAct): cut at `---` /
-    * triple-newline, strip the code fence, reject empty code and the single-line-multiple-`=` shape ("Code format is
-    * not correct."), and when the LAST line is a bare assignment append the assigned variable as a trailing expression
-    * (so REPL-style evaluation echoes it). Delta: our fence regex also accepts ```py and UNTAGGED fences (upstream only
-    * matches ```python and otherwise leaves the backticks in the code — a wart, not a behavior to reproduce).
-    */
-  private[programs] def parseCode(raw: String): Either[String, String] =
-    val pre       = raw.split("---", 2)(0).split("\n\n\n", 2)(0).trim
-    val codeBlock = FencedBlock.findFirstMatchIn(pre).map(_.group(1).trim).getOrElse(pre)
-    if codeBlock.isEmpty then Left("Empty code after parsing.")
-    else if !codeBlock.contains("\n") && codeBlock.count(_ == '=') > 1 then Left("Code format is not correct.")
-    else
-      val lines = codeBlock.split("\n", -1)
-      LastLineAssignment.findPrefixMatchOf(lines.last.trim) match
-        case Some(m) if lines.length > 1 => Right(codeBlock + "\n" + m.group(1))
-        case _                           => Right(codeBlock)
+    SandboxToolBridge.fromToolFunctions(tools)
 
   /** Render one tool for the instruction list — upstream `Tool.__str__`: name, `<desc>`-wrapped description (newlines
     * flattened), and the argument schema. Args render as `{name: wireType, …}` from

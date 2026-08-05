@@ -153,7 +153,7 @@ A call to `ProgramOfThought[I, O]` proceeds as follows:
 1. `Module` validates the typed input through `baseSignature.inputShape`.
 2. `AgentLoop` starts with no previous attempt.
 3. `generatorPredict` receives `I` and produces optional `generated_code`.
-4. `CodeAct.parseCode` normalizes the generated program and optional Markdown fence.
+4. The shared runtime helper `GeneratedPython.parse` normalizes the generated program and optional Markdown fence.
 5. The configured `CodeInterpreter` executes the parsed program.
 6. Missing code, parse errors, and non-zero Python exits become repair state.
 7. `regeneratorPredict` receives `I`, the failed code, and its error, then produces another complete program.
@@ -239,8 +239,8 @@ program—not a patch or diff.
 
 ## How generated code is parsed
 
-ProgramOfThought intentionally shares `CodeAct.parseCode`, because both programs accept the same model-produced Python
-format. Parsing:
+ProgramOfThought and CodeAct intentionally use the same runtime parser, `GeneratedPython.parse`, because both programs
+accept the same model-produced Python format. Parsing:
 
 - ignores content after `---` or the first triple newline;
 - accepts `python`, `py`, or untagged fences, as well as unfenced code;
