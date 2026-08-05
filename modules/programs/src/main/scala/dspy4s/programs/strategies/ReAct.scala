@@ -7,7 +7,6 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -20,10 +19,7 @@ import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Shape, Signature}
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
-
-import java.nio.charset.StandardCharsets
+import zio.blocks.schema.DynamicValue
 
 /** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized over
   * any typed signature.
@@ -260,31 +256,11 @@ object ReAct:
   type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
   // ── The loop signature's hand-declared fields (static; hoisted so the typed shapes and the layout share them) ──
-  private[programs] val loopTrajectoryField: FieldSpec = FieldSpec(
-    name = ReActKeys.trajectory,
-    typeRef = TypeRef.string,
-    description = Some("The sequence of thoughts, tool calls, and observations so far.")
-  )
-  private[programs] val extractTrajectoryField: FieldSpec = FieldSpec(
-    name = ReActKeys.trajectory,
-    typeRef = TypeRef.string,
-    description = Some("The completed sequence of thoughts, tool calls, and observations.")
-  )
-  private[programs] val nextThoughtField: FieldSpec = FieldSpec(
-    name = ReActKeys.nextThought,
-    typeRef = TypeRef.string,
-    description = Some("Reasoning about the current situation and what to do next.")
-  )
-  private[programs] val nextToolNameField: FieldSpec = FieldSpec(
-    name = ReActKeys.nextToolName,
-    typeRef = TypeRef.string,
-    description = Some("The name of the tool to call next; use `finish` when ready to produce the outputs.")
-  )
-  private[programs] val nextToolArgsField: FieldSpec = FieldSpec(
-    name = ReActKeys.nextToolArgs,
-    typeRef = TypeRef.json,
-    description = Some("Arguments for the next tool, as a JSON object.")
-  )
+  private[programs] val loopTrajectoryField: FieldSpec    = ReActProtocol.loopTrajectoryField
+  private[programs] val extractTrajectoryField: FieldSpec = ReActProtocol.extractTrajectoryField
+  private[programs] val nextThoughtField: FieldSpec       = ReActProtocol.nextThoughtField
+  private[programs] val nextToolNameField: FieldSpec      = ReActProtocol.nextToolNameField
+  private[programs] val nextToolArgsField: FieldSpec      = ReActProtocol.nextToolArgsField
 
   /** The typed output of one react loop step. */
   final case class ReactStep(
@@ -299,55 +275,13 @@ object ReAct:
     * or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the prior direct
     * `DynamicPredict` construction.
     */
-  private[programs] val reactStepShape: Shape[ReactStep] = new Shape[ReactStep]:
-    val fieldSpecs: Vector[FieldSpec] = Vector(nextThoughtField, nextToolNameField, nextToolArgsField)
-
-    def encode(value: ReactStep): DynamicValue.Record =
-      DynamicValue.Record(Chunk.from(Seq(
-        ReActKeys.nextThought  -> DynamicValue.Primitive(PrimitiveValue.String(value.nextThought)),
-        ReActKeys.nextToolName -> DynamicValue.Primitive(PrimitiveValue.String(value.nextToolName)),
-        ReActKeys.nextToolArgs -> (value.nextToolArgs: DynamicValue)
-      )))
-
-    def decode(raw: DynamicValue.Record): Either[DspyError, ReactStep] =
-      Right(ReactStep(
-        nextThought = DynamicValues.recordGet(raw, ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse(""),
-        nextToolName = DynamicValues.recordGet(raw, ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse(""),
-        nextToolArgs = toolArgsRecord(DynamicValues.recordGet(raw, ReActKeys.nextToolArgs))
-      ))
-
-  /** Normalize the `next_tool_args` output into the `Record` a tool receives. JSONAdapter yields a `Record` directly;
-    * ChatAdapter yields the raw JSON text as a `String` (it has no `json` coercion), so parse that.
-    */
-  private def toolArgsRecord(value: Option[DynamicValue]): DynamicValue.Record =
-    value match
-      case Some(rec: DynamicValue.Record)                         => rec
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => parseJsonRecord(s)
-      case _                                                      => DynamicValue.Record.empty
-
-  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
-
-  /** Parse a JSON-object string (as ChatAdapter surfaces a `json` field) into a `Record`; non-objects / blanks / parse
-    * failures yield the empty record.
-    */
-  private def parseJsonRecord(text: String): DynamicValue.Record =
-    if text.trim.isEmpty then DynamicValue.Record.empty
-    else
-      dynamicJsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)) match
-        case Right(rec: DynamicValue.Record) => rec
-        case _                               => DynamicValue.Record.empty
+  private[programs] val reactStepShape: Shape[ReactStep] = ReActProtocol.reactStepShape
 
   /** The injected tool the model selects to end the loop. It does no work — selecting it signals "I have enough to
     * produce the outputs"; the observation is a fixed marker and the extractor then produces the real outputs.
     */
   private def finishTool(baseLayout: SignatureLayout): ToolFunction =
-    val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
-    new ToolFunction:
-      override val name: String        = FinishToolName
-      override val description: String =
-        s"Marks the task complete: signals that all information needed to produce $outputs is now available."
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        Right(ToolFunction.result("Completed."))
+    ReActProtocol.finishTool(baseLayout)
 
   /** One step of the agent's trajectory: its thought, the tool it chose with arguments, and the observation. */
   final case class TrajectoryEntry(
@@ -359,25 +293,4 @@ object ReAct:
   )
 
   private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry]): String =
-    if entries.isEmpty then "(empty)"
-    else
-      entries.iterator.map { entry =>
-        s"""## Step ${entry.iteration + 1}
-           |thought: ${entry.thought}
-           |tool_name: ${entry.toolName}
-           |tool_args: ${DynamicValues.renderText(entry.toolArgs)}
-           |observation: ${entry.observation}""".stripMargin
-      }.mkString("\n\n")
-
-/** Names ReAct hard-codes: its module / sub-predict names, and the field-name keys it adds to the augmented signatures
-  * and reads back from predictions. Named rather than scattered as string literals. (Prose — field descriptions,
-  * instructions, observations — stays inline; only the keys/identifiers are constants.)
-  */
-private object ReActKeys:
-  val reactModule: String   = "react"
-  val extractModule: String = "react_extract"
-
-  val trajectory: String   = "trajectory"
-  val nextThought: String  = "next_thought"
-  val nextToolName: String = "next_tool_name"
-  val nextToolArgs: String = "next_tool_args"
+    ReActProtocol.renderTrajectory(entries)

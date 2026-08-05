@@ -278,18 +278,20 @@ values. Detailed inner calls remain available through the runtime's callbacks, t
 
 A useful reading order is:
 
-1. [`ReAct.scala`](ReAct.scala): signatures, tools, one iteration, and result assembly.
-2. [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
+1. [`ReAct.scala`](ReAct.scala): agent configuration, signatures, transition decisions, and result assembly.
+2. [`ReActProtocol.scala`](ReActProtocol.scala): step fields and decoding, tool-argument normalization, the synthetic
+   `finish` tool, and trajectory rendering.
+3. [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
    record, and stop.
-3. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
+4. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
    action outcomes.
-4. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
-5. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
-6. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
-7. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and typed-method derivation.
-8. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
+5. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
+6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
+7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
+8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and typed-method derivation.
+9. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
    tool errors, callbacks, and truncation.
-9. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
+10. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
    and [`TrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/TrajectoryAgentLawSuite.scala):
    the shared transition and extraction contracts.
 
