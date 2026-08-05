@@ -254,7 +254,6 @@ class ProgramAlgebraLawSuite extends FunSuite:
     val paired: Program[Int, (String, Int), 2] = F.fanout(f, g)
     assertEquals(paired(ProgramCall(4)).map(_.output), Right(("v4", 5)))
     assertIsEq(P.paramsFanout(f, g))
-    assertEquals(F.parallel(f, g)(ProgramCall(4)), F.fanout(f, g)(ProgramCall(4)))
   }
 
   test("copy is NOT natural: h >>> fanout(f, g) shares h; fanout(h >>> f, h >>> g) re-runs it") {

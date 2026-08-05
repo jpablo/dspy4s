@@ -53,8 +53,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 - `Compose.lift` / `liftEither` embed local transformations.
 - `>>>` composes dependent stages.
 - `mapOutput`, `contramapInput`, and `dimap` adapt domain boundaries while preserving the inner raw prediction.
-- `fanout` pairs two programs over one shared input, left-to-right; `parallel` remains its compatibility name.
-- `split` pairs two programs over independent tuple inputs, left-to-right; `tensor` remains its compatibility name.
+- `fanout` pairs two programs over one shared input, left-to-right.
+- `split` pairs two programs over independent tuple inputs, left-to-right.
 - `recoverWith(policy)(fallback)` makes error selection explicit and retains both branches for optimization.
 
 ### Contracts & introspection

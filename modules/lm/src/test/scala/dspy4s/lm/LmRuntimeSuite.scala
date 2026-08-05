@@ -1,8 +1,17 @@
 package dspy4s.lm
 
-import dspy4s.core.contracts.{ConfigurationError, DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
+import dspy4s.core.contracts.{
+  ConfigurationError,
+  DspyError,
+  DynamicValues,
+  LmUsage,
+  RuntimeContext,
+  RuntimeError,
+  TokenCategory,
+  :=
+}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, TokenCategory}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.lm.runtime.{
   CacheCapacity,
   InMemoryLmCache,

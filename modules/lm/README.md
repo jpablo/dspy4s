@@ -32,7 +32,7 @@ changing the domain types.
 | `Message` / `MessageRole` / `ContentPart` | A chat message (System/User/Assistant) with `text` or multimodal `parts`. |
 | `LmOutput` | One response item: text, `Vector[ToolCall]`, metadata. |
 | `LmMode` | `Chat` / `Text` / `Responses` — selects the wire shape. |
-| `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a `TokenCategory`-keyed map of extras (cached, reasoning, audio, …); re-exported here for source compatibility. |
+| `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a `TokenCategory`-keyed map of extras (cached, reasoning, audio, …). |
 | `Embedder` | `embed(texts): Either[DspyError, Vector[Vector[Float]]]`, with an `Embedder.cached` factory. |
 | `LmChunk` / `LmToolCallDelta` | One streaming chunk (text, finish reason, usage) and incremental tool-call fragments. |
 | `LmCache` / `RetryPolicy` | The memoization and retry interfaces the runtime layer composes. |
@@ -77,9 +77,9 @@ changing the domain types.
 
 | File | Contents |
 |------|----------|
-| `contracts/LmRequest.scala`, `LmResponse.scala` | message, request, output, response, and usage data |
+| `contracts/LmRequest.scala`, `LmResponse.scala` | message, request, output, and response data; usage types live in `core` |
 | `contracts/LanguageModel.scala`, `LmCache.scala`, `RetryPolicy.scala` | model, cache, and retry interfaces |
-| `contracts/Embedder.scala`, `LmStreaming.scala`, `TokenCategory.scala` | embeddings, streaming chunk types, and the core `TokenCategory` compatibility alias |
+| `contracts/Embedder.scala`, `LmStreaming.scala` | embeddings and streaming chunk types |
 | `providers/OpenAiLanguageModel.scala`, `OpenAiEmbedder.scala`, `OpenAiClient.scala` | the OpenAI-compatible model, embedder, and HTTP client |
 | `providers/OpenAiUsage.scala`, `OpenAiStreamChunk.scala`, `DynamicJson.scala`, `WireKeys.scala` | wire DTOs, JSON helpers, wire-field constants |
 | `providers/HttpTransport.scala`, `JdkHttpTransport.scala` | transport interface + JDK implementation |

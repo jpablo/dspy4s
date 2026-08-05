@@ -14,8 +14,7 @@ final case class CodeResult(
     stderr     : String,
     exitCode   : Int,
     finalOutput: Option[String] = None
-):
-  def isSuccess: Boolean = exitCode == 0 && finalOutput.isEmpty || finalOutput.isDefined
+)
 
 /** Conventional component strings for [[RuntimeError]]s that originate from a [[CodeInterpreter]]. User code errors —
   * `NameError`, `SyntaxError`, etc. — surface as a successful [[CodeResult]] with non-zero `exitCode` and the traceback

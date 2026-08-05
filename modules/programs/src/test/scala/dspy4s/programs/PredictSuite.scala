@@ -3,12 +3,12 @@ package dspy4s.programs
 import zio.blocks.schema.Schema
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput, ToolSpec}
-import dspy4s.core.contracts.{DspyError, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext, SignatureLayout}
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.signatures.{InputField, OutputField, Shape, Spec, Signature}

@@ -254,7 +254,7 @@ object Cheatsheet:
   // | dspy.configure(track_usage=True); result = dspy.ChainOfThought(BasicQA)(question="..."); result.get_lm_usage()
   def withUsageTracking(question: String)(using
       RuntimeContext
-  ): Either[DspyError, Map[String, dspy4s.lm.contracts.LmUsage]] =
+  ): Either[DspyError, Map[String, dspy4s.core.contracts.LmUsage]] =
     UsageTracking.withNewTracker { tracker =>
       ChainOfThought(Signature.of[BasicQA])((question = question)).map(_ => tracker.totalUsage)
     }

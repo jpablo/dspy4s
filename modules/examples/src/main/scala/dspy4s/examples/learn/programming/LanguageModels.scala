@@ -22,7 +22,8 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.lm.contracts.{LanguageModel, LmRequest, LmUsage, Message, MessageRole}
+import dspy4s.core.contracts.LmUsage
+import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
 import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.contracts.ProgramCall

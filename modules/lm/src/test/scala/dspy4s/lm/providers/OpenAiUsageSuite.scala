@@ -1,6 +1,6 @@
 package dspy4s.lm.providers
 
-import dspy4s.lm.contracts.TokenCategory
+import dspy4s.core.contracts.TokenCategory
 import munit.FunSuite
 
 class OpenAiUsageSuite extends FunSuite:

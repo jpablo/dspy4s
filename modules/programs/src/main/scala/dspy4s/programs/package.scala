@@ -32,10 +32,8 @@ package object programs:
     fanout,
     mapOutput,
     mode,
-    parallel,
     recoverWith,
-    split,
-    tensor
+    split
   }
   export strategies.{
     BestOfN,

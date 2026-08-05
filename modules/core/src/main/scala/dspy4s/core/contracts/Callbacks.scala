@@ -158,10 +158,3 @@ final case class ToolEndEvent(
   */
 trait CallbackHandler:
   def onEvent(event: CallbackEvent)(using RuntimeContext): Unit
-
-object CallbackHandler:
-  /** Discards every event. [[RuntimeContext.callbacks]] defaults to an empty `Vector`, so this instance is offered for
-    * callers that explicitly want a placeholder handler (tests, dependency injection where `null` is undesired).
-    */
-  val noop: CallbackHandler = new CallbackHandler:
-    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = ()

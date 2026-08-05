@@ -111,7 +111,7 @@ object AttemptSelection:
 
     best match
       case Some(value) =>
-        RuntimeEnvironment.propagateAttempt(bestDelta)
+        RuntimeEnvironment.propagate(bestDelta)
         Right(value)
       case None => Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))
 

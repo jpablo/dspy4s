@@ -12,16 +12,16 @@ import dspy4s.programs.contracts.Prediction
 
 import scala.compiletime.ops.int.+
 
-/** `fanout(a, b)` (compatibility name `parallel`) — run both programs on the same input and tuple their outputs. On the
-  * synchronous `Either` substrate the two attempts run left-to-right and fail fast; this is Arrow-like `&&&`, not
-  * concurrent execution and not by itself an `Applicative` instance. The result's raw merges both sub-predictions'
-  * value records (`second` wins on a key collision).
+/** `fanout(a, b)` — run both programs on the same input and tuple their outputs. On the synchronous `Either` substrate
+  * the two attempts run left-to-right and fail fast; this is Arrow-like `&&&`, not concurrent execution and not by
+  * itself an `Applicative` instance. The result's raw merges both sub-predictions' value records (`second` wins on a
+  * key collision).
   */
 final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
     first : A,
     second: B
 ) extends TransparentModule[I, (OA, OB)]:
-  override val moduleName: String = "parallel"
+  override val moduleName: String = "fanout"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[(OA, OB)]] =
     for

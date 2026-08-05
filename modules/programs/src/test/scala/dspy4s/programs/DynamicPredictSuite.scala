@@ -8,7 +8,9 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.TokenCategory
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -18,10 +20,8 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import dspy4s.lm.contracts.TokenCategory
 import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite

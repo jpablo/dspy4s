@@ -33,7 +33,7 @@ class ComposeLawSuite extends FunSuite:
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
 
-  /** A program stub: maps the input value via `f`, tags its raw record so `parallel`'s merge is observable, and exposes
+  /** A program stub: maps the input value via `f`, tags its raw record so `fanout`'s merge is observable, and exposes
     * `predict` as its single learnable leaf (for the addressability laws).
     */
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
@@ -173,10 +173,10 @@ class ComposeLawSuite extends FunSuite:
   }
 
   // ── Ordered fan-out ─────────────────────────────────────────────────────────────────────────────────────
-  test("parallel(a, b) runs both on the same input and tuples the outputs") {
+  test("fanout(a, b) runs both on the same input and tuples the outputs") {
     val a      = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b      = step[Int, Int]("b", "i -> n")(i => i * 10)
-    val result = Compose.parallel(a, b)(ProgramCall(4))
+    val result = Compose.fanout(a, b)(ProgramCall(4))
     assertEquals(result.map(_.output), Right(("s4", 40)))
     // raw merges both sub-predictions' value records (second wins on key collision; here both write "tag").
     assertEquals(
@@ -185,12 +185,12 @@ class ComposeLawSuite extends FunSuite:
     )
   }
 
-  test("parallel associates up to tuple reassociation") {
+  test("fanout associates up to tuple reassociation") {
     val a           = step[Int, String]("a", "i -> s")(i => s"a$i")
     val b           = step[Int, String]("b", "i -> s")(i => s"b$i")
     val c           = step[Int, String]("c", "i -> s")(i => s"c$i")
-    val leftNested  = Compose.parallel(Compose.parallel(a, b), c)(ProgramCall(1)).map(_.output)
-    val rightNested = Compose.parallel(a, Compose.parallel(b, c))(ProgramCall(1)).map(_.output)
+    val leftNested  = Compose.fanout(Compose.fanout(a, b), c)(ProgramCall(1)).map(_.output)
+    val rightNested = Compose.fanout(a, Compose.fanout(b, c))(ProgramCall(1)).map(_.output)
     // ((x, y), z)  reassociates to  (x, (y, z))
     val reassociated = leftNested.map { case ((x, y), z) => (x, (y, z)) }
     assertEquals(reassociated, rightNested)
@@ -214,20 +214,20 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(P.read(P.replace(ab, updates)), updates)
   }
 
-  test("parallel read = read(a) ++ read(b)") {
+  test("fanout read = read(a) ++ read(b)") {
     val a   = step[Int, String]("a", "i -> s")(i => s"v$i")
     val b   = step[Int, Int]("b", "i -> n")(i => i)
-    val par = Compose.parallel(a, b)
+    val par = Compose.fanout(a, b)
     val P   = summon[OptimizableStructure[Both[Int, String, Int, Step[Int, String], Step[Int, Int]]]]
     assertEquals(P.read(par), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(par).map(_._1), Vector("first", "second"))
   }
 
   // ── Ordered tensor and structural copy ──────────────────────────────────────────────────────────────────
-  test("tensor(a, b) runs INDEPENDENT programs on independent inputs and pairs them") {
+  test("split(a, b) runs independent programs on independent inputs and pairs them") {
     val a      = step[Int, String]("a", "i -> s")(i => s"s$i")
     val b      = step[Boolean, Int]("b", "p -> n")(p => if p then 1 else 0)
-    val result = Compose.tensor(a, b)(ProgramCall((4, true)))
+    val result = Compose.split(a, b)(ProgramCall((4, true)))
     assertEquals(result.map(_.output), Right(("s4", 1)))
   }
 
@@ -235,32 +235,32 @@ class ComposeLawSuite extends FunSuite:
     assertEquals(Compose.copy[Int](ProgramCall(7)).map(_.output), Right((7, 7)))
   }
 
-  test("parallel(a, b) = copy >>> tensor(a, b)  (fan-out is copy-then-tensor)") {
-    val a             = step[Int, String]("a", "i -> s")(i => s"s$i")
-    val b             = step[Int, Int]("b", "i -> n")(i => i * 10)
-    val viaFanout     = Compose.parallel(a, b)(ProgramCall(4)).map(_.output)
-    val viaCopyTensor = (Compose.copy[Int] >>> Compose.tensor(a, b))(ProgramCall(4)).map(_.output)
-    assertEquals(viaFanout, viaCopyTensor)
+  test("fanout(a, b) = copy >>> split(a, b)") {
+    val a            = step[Int, String]("a", "i -> s")(i => s"s$i")
+    val b            = step[Int, Int]("b", "i -> n")(i => i * 10)
+    val viaFanout    = Compose.fanout(a, b)(ProgramCall(4)).map(_.output)
+    val viaCopySplit = (Compose.copy[Int] >>> Compose.split(a, b))(ProgramCall(4)).map(_.output)
+    assertEquals(viaFanout, viaCopySplit)
     assertEquals(viaFanout, Right(("s4", 40)))
   }
 
-  test("tensor read = read(a) ++ read(b) (structural, same as parallel)") {
+  test("split read = read(a) ++ read(b) (structural, same as fanout)") {
     val a  = step[Int, String]("a", "i -> s")(i => s"v$i")
     val b  = step[Boolean, Int]("b", "p -> n")(_ => 0)
-    val tn = Compose.tensor(a, b)
+    val tn = Compose.split(a, b)
     val P  = summon[OptimizableStructure[Tensor[Int, Boolean, String, Int, Step[Int, String], Step[Boolean, Int]]]]
     assertEquals(P.read(tn), Vector(a.predict.optimizableParameters, b.predict.optimizableParameters))
     assertEquals(P.readNamed(tn).map(_._1), Vector("first", "second"))
   }
 
   // ── Determinism classifier: copy commutes with a deterministic morphism ─────────────────────────────────
-  // h >>> copy  =  copy >>> tensor(h, h)   holds because our Step is deterministic (a pure function). For an
+  // h >>> copy  =  copy >>> split(h, h)   holds because our Step is deterministic (a pure function). For an
   // effect-observing h the two sides run h once vs twice and diverge — the copy NON-naturality is already pinned
   // in ProgramAlgebraLawSuite. This is a useful classifier, not a law of unrestricted executable programs.
-  test("copy is natural for a deterministic morphism: h >>> copy = copy >>> tensor(h, h)") {
+  test("copy is natural for a deterministic morphism: h >>> copy = copy >>> split(h, h)") {
     val h   = step[Int, String]("h", "i -> s")(i => s"v$i")
     val lhs = (h >>> Compose.copy[String])(ProgramCall(5)).map(_.output)
-    val rhs = (Compose.copy[Int] >>> Compose.tensor(h, h))(ProgramCall(5)).map(_.output)
+    val rhs = (Compose.copy[Int] >>> Compose.split(h, h))(ProgramCall(5)).map(_.output)
     assertEquals(lhs, rhs)
     assertEquals(lhs, Right(("v5", "v5")))
   }

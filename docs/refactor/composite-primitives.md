@@ -2,7 +2,7 @@
 
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 and all of step 6 implemented on the branch (full `sbt test` green): 6.1 (`bestOf`),
-6.2 (`id`/`>>>`/`parallel`), 6.3 (`AgentLoop`/`TrajectoryAgent`, with `InterpretedTrajectoryAgent` for
+6.2 (`id`/`>>>`/`fanout`), 6.3 (`AgentLoop`/`TrajectoryAgent`, with `InterpretedTrajectoryAgent` for
 ReAct/CodeAct), 6.4 (generic
 `augment`), 6.5 (`mode` middleware monoid). The authoritative step-6 contract is
 [algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
@@ -21,7 +21,7 @@ runs, 0 failed) under `-Werror -Wunused:all -Wsafe-init -Wshadow:all`.
 | 1 | `0c4e299` | `SignatureOps` (`prependOutput` / `appendInput` / `replaceOutputs`) | A, B |
 | 2 | `217f2a4` | `DynamicValues.requireString` | C |
 | 3 | `d52c45f` | `OutputAugmentation.decodePrepended` (+ `productOutputRequired`) | C call sites, D, E |
-| 4 | `eb12e2b` | `RuntimeEnvironment.isolatedAttempt` / `propagateAttempt` | G |
+| 4 | `eb12e2b` | `RuntimeEnvironment.isolatedAttempt` / `propagate` | G |
 | 5 | `4b1b6e2` | `TrajectoryTruncation.truncateOnOverflow` | F |
 
 Net `+430 / −206` over 15 Scala files; ~197 of the insertions are new test coverage, so production code
@@ -39,7 +39,7 @@ shrank net while the duplication was removed.
   signature used with a composite). `decodePrepended` ships the opening-String case only, shaped and named
   as the general `Thought`-form so the generalization stays additive.
 
-**Step 6 (complete):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`parallel` in
+**Step 6 (complete):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`fanout` in
 `Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent`, plus the ReAct/CodeAct
 `InterpretedTrajectoryAgent` transition; RLM and PoT use `AgentLoop` directly),
 6.4 (`augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
@@ -246,7 +246,7 @@ self-check would be the first new case.
 stay introspectable/replaceable by `OptimizableStructure` (optimizer-addressable). kyo-ai's `Thought` has no
 optimizer dimension; ours does. See [Step 6 design lessons](#step-6-design-lessons-from-kyo-ai).
 
-## Step 4: `isolatedAttempt` + `propagateAttempt` (covers G)
+## Step 4: `isolatedAttempt` + `propagate` (covers G)
 
 **Where:** `RuntimeEnvironment` (core); it already owns `withContext`/`appendTrace`/`appendHistory`.
 
@@ -265,14 +265,14 @@ def isolatedAttempt[A](base: RuntimeContext, adapter: Option[AdapterRef] = None)
   }
 
 /** Replay a winning attempt's captured output into the caller's context. */
-def propagateAttempt(delta: RuntimeDelta): Unit =
+def propagate(delta: RuntimeDelta): Unit =
   delta.trace.foreach(appendTrace); delta.history.foreach(appendHistory)
 ```
 
 **Migrations:** `BestOfN.selectBest` (lines 90–96, 118–119) and `Refine.forward` (102–115, 153–154) call
 these. Refine passes its per-attempt `HintInjectingAdapter` as the `adapter` argument.
 **Test:** new `IsolatedAttemptSuite` (core) asserting isolation (inner trace/history do not leak unless
-propagated) and that `propagateAttempt` replays in order; existing `TypedBestOfNSuite` /
+propagated) and that `propagate` replays in order; existing `TypedBestOfNSuite` /
 `RefinePerModuleAdviceSuite` cover the migrations.
 **Risk:** low-medium (mutable-state plumbing; keep capture order identical). `RuntimeDelta` is an ordered monoid,
 and `Executed[A]` makes the previously anonymous result/trace/history tuple an explicit writer-like carrier.
@@ -359,7 +359,7 @@ for two of them kyo-ai's general abstraction is cleaner than treating each as a 
 is a value run zero/one/many times; BestOfN ("run N, keep best"), Refine ("run N with advice between"),
 model-switching, and pre/post all collapse to that one shape, pipelined in registration order. Our
 `selectBest(runAttempt: Int => …)` is a lower-altitude API. **Design step 6's control layer as middleware
-over a re-runnable generation value**; `isolatedAttempt`, `propagateAttempt`, and `truncateOnOverflow`
+over a re-runnable generation value**; `isolatedAttempt`, `propagate`, and `truncateOnOverflow`
 (steps 4–5) are the low-level pieces *beneath* it, not the user-facing surface. In the `Either` world the
 generation value is a `() => Either[…]` / `RuntimeContext ?=> Either[…]` thunk; it gets cleaner once the
 CIO substrate lands (a referentially-transparent `CIO` value is re-runnable for free).

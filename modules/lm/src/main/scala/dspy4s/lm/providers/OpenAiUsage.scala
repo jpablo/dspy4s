@@ -1,7 +1,6 @@
 package dspy4s.lm.providers
 
-import dspy4s.lm.contracts.LmUsage
-import dspy4s.lm.contracts.TokenCategory
+import dspy4s.core.contracts.{LmUsage, TokenCategory}
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema

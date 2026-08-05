@@ -2,7 +2,7 @@
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
 algebra 2 (program composition) is specified and fully implemented (steps 6.1–6.5 landed: `bestOf`, the
-`id`/`>>>`/`parallel` combinators, the `AgentLoop` / `TrajectoryAgent` / `InterpretedTrajectoryAgent` iteration
+`id`/`>>>`/`fanout` combinators, the `AgentLoop` / `TrajectoryAgent` / `InterpretedTrajectoryAgent` iteration
 layers, the `augment`, and the `mode` middleware monoid; see the status section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
@@ -111,12 +111,11 @@ p >>> q       : (Program[I, X], Program[X, O]) => Program[I, O]       -- CATEGOR
 augment[n, T] : Program[I, O] => Program[I, (n: T) *: O]           -- Thought / CoT
 mode(m)       : Program[I, O] => Program[I, O]                     -- MONOID (middleware)
 selectBest    : (Program[I, O], n, reward, threshold) => Program[I, O]
-parallel      : (Program[I, A], Program[I, B]) => Program[I, (A, B)]  -- ordered fan-out / &&&
 lift          : (I => O) => Program[I, O]                              -- parameter-free local transform
 mapOutput     : (O => B) => Program[I, O] => Program[I, B]             -- preserves final raw prediction
 contramapInput: (J => I) => Program[I, O] => Program[J, O]
 dimap         : (J => I, O => B) => Program[I, O] => Program[J, B]
-fanout        : (Program[I, A], Program[I, B]) => Program[I, (A, B)]   -- honest name for ordered `parallel`
+fanout        : (Program[I, A], Program[I, B]) => Program[I, (A, B)]   -- ordered shared-input pairing / &&&
 split         : (Program[I, A], Program[J, B]) => Program[(I,J),(A,B)] -- ordered independent inputs
 recover       : (RecoveryPolicy, Program[I,O]) => Program[I,O] => Program[I,O]
 loop          : (step, env, done) => Program[I, O]              -- the agentic scheme
@@ -127,7 +126,7 @@ loop          : (step, env, done) => Program[I, O]              -- the agentic s
 ```
 Category    id >>> p = p = p >>> id        (p >>> q) >>> r = p >>> (q >>> r)
 Mode monoid mode(m1 ⊕ m2) = mode(m1) ∘ mode(m2)     mode(idMode) = id     ⊕ associative
-Fan-out     parallel is left-to-right and fail-fast; associative on values up to tuple reassociation
+Fan-out     fanout is left-to-right and fail-fast; associative on values up to tuple reassociation
 augment     base(run(augment[r](p))(i)) = run(p)(i)         -- the prepended field is extra (round-trip)
             augment[r] ∘ augment[r] = augment[r]            -- idempotent (OutputAugmentation.Contains)
 argMax      exhaustive selection returns a maximum under a finite score and explicit tie-break
@@ -136,7 +135,7 @@ selectBest  ordered search additionally observes rollout controls, early-stop po
 
 **Symmetry (free features).** `augment` opening (prepend, conditions the answer) has a dual: `augment`
 closing (append, a self-check); dspy4s has only opening. `selectBest` (pick-one of N) is the dual of
-`ensemble` / majority (reduce N). `>>>` (dependent) is dual to `parallel` (independent).
+`ensemble` / majority (reduce N). `>>>` (dependent) is dual to `fanout` (independent).
 
 ### The executable program carrier is ordered, not Markov
 
@@ -152,7 +151,7 @@ interchange, symmetry of effects, or discard naturality:
 
 ```
 >>>            sequential value composition                         Category / AndThen        ✅
-tensor a,b     ordered independent inputs, paired outputs            Tensor / Compose.tensor   ✅ (Module level)
+split a,b      ordered independent inputs, paired outputs            Tensor / Compose.split    ✅ (Module level)
 copy           duplicate the input I => (I, I)                       Copy / Compose.copy       ✅
 discard        drop a value I => ()                                  Discard / Compose.discard ✅
 swap           exchange two value components                         Swap / Compose.swap       ✅
@@ -185,11 +184,10 @@ The load-bearing facts, all executable:
   `ComposeLawSuite`, the failure (an effect-observing `h` run once vs twice; params 3 vs 4) in
   `ProgramAlgebraLawSuite`. This remains useful without claiming a Markov structure for execution.
 
-**Why `split` lives at the Module level, not on `OrderedFanout[Program]`.** `fanout` lifts into the packaged `Program`
-algebra because both legs share one input, so the pair reuses that input's decoder. The split's
-input `(I, J)` has no canonical single-record decoder (two independent inputs, one flat `Example` record), so
-`split` stays a `Module`-level combinator. That asymmetry is itself informative: the packaged (optimizable)
-category naturally supports fan-out, and the raw split is the structural op beneath it.
+**Why `split` currently lives at the Module level, not on `OrderedFanout[Program]`.** `OrderedFanout` specifically
+models two legs sharing one input, whereas `split` has two independent inputs. Lifting `split` into the graded `Program`
+algebra would require a separate graded ordered-tensor operation; record decoding is not part of `Program` construction
+and therefore is not a blocker. The raw split remains the structural operation beneath fan-out.
 
 **Endofunctor structure is used where it belongs.** `Monad[F, P, Hom]` now models a monad as a monoid in `End(X)`:
 an endofunctor plus natural unit `Id => F` and multiplication `F ∘ F => F`. `ScalaMonad` specializes the structure to
@@ -201,8 +199,8 @@ be required before monoidal or Markov coherence becomes meaningful.
 **Ugly laws in the current code = the work to do.**
 
 - ~~No `>>>`: programs are sequenced with hand-written `for`-comprehensions.~~ **Resolved (step 6.2).** `>>>`
-  (`AndThen`) + `id` (`Identity`) + `parallel` (`Both`) are first-class in `Compose.scala`; the Category buys
-  associativity + identity (on the threaded value) and a real pipe, `parallel` the independent dual.
+  (`AndThen`) + `id` (`Identity`) + `fanout` (`Both`) are first-class in `Compose.scala`; the Category buys
+  associativity + identity (on the threaded value) and a real pipe, with `fanout` as ordered shared-input pairing.
 - ~~`Refine` reimplements `selectBest` inline.~~ **Resolved (step 6.1).** Both now reduce to the shared
   `AttemptSelection.bestOf`: `BestOfN` is the independent instance (no feedback), `Refine` the sequential
   instance (feedback = advice→adapter hook). The law `refine = bestOf + critic-hint` is structural.
@@ -255,10 +253,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.1 done** (commit `96c9072`): `bestOf` extracted as `AttemptSelection.bestOf`; `BestOfN` + `Refine`
     reduced onto it; `AttemptSelectionLawSuite` pins the reducer laws. Code-truth correction recorded: PoT is
     `retryUntil`, not `feedback`.
-  - **6.2 done** (commit `60d2ea5`, later law-audit correction): `id` / `>>>` / `parallel` in `Compose.scala`;
+  - **6.2 done** (commit `60d2ea5`, later law-audit correction): `id` / `>>>` / `fanout` in `Compose.scala`;
     `ComposeLawSuite` covers value-category laws, lifecycle-transparent association, ordered fan-out, and
-    addressability. `fanout` is Arrow-like ordered pairing, not an Applicative or the batch-executor `Parallel`;
-    `parallel` remains its compatibility name.
+    addressability. `fanout` is Arrow-like ordered pairing, not an Applicative or the batch-executor `Parallel`.
   - **6.3 done** (commit `6faa94e`, later interpreted-agent and law refinements): `AgentLoop.run` +
     `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT all reduced onto them. ReAct and CodeAct additionally share
     `InterpretedTrajectoryAgent` and `ActionInterpreter` without erasing their action languages. `AgentLoopLawSuite`,
@@ -303,7 +300,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     structures from the parameterization pass: the delooping of the parameter monoid as an explicit `Category` instance;
     `ReadFunctor` (`OptimizableStructure.read` as a functor value; its functor laws — preserves id + composition — are
     carried on the `Functor` trait and are exactly the parameter projection laws); and
-    `fanout` as ordered shared-input pairing, with `parallel` retained as a compatibility name and the copy NON-law
+    `fanout` as ordered shared-input pairing, with the copy NON-law
     (sharing vs re-running an effectful `h` differ, in
     behavior and in parameters) pinned as an executable counterexample. The `IsEq`/`@Law` vocabulary is now the
     uniform law-statement style across the codebase; every use must name an observational equality preserved by
@@ -341,7 +338,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     parameterization's separate `readFunctor` preserves each exact natural-number grade. The associated suites execute
     the laws rather than relying on the names alone.
   - **Ordered tensor operations** (original commits `508a8e6`, `71c8880`; corrected after an effectful-law
-    audit): `split` (`tensor` compatibility name) / `copy` / `discard` / `swap` remain useful `Compose` generators and
+    audit): `split` / `copy` / `discard` / `swap` remain useful `Compose` generators and
     `fanout = copy >>> split`, but unrestricted `Module` now implements `OrderedTensorOps`, not
     `CDCategory`. `OrderedTensorOpsSuite` pins the fail-fast interchange counterexample (`g1` versus `f2`),
     while `ComposeLawSuite` pins lifecycle-transparent association. The complete symmetric-monoidal,

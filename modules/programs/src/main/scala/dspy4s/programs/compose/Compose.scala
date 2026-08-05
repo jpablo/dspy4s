@@ -31,23 +31,11 @@ object Compose:
       b: B
   ): Both[I, OA, OB, A, B] = Both(a, b)
 
-  /** Compatibility name for [[fanout]]. This operation is ordered, not concurrent. */
-  def parallel[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
-      a: A,
-      b: B
-  ): Both[I, OA, OB, A, B] = fanout(a, b)
-
   /** Ordered independent-input split (`***`): run `a` on the first input, then `b` on the second. */
   def split[I, J, A, B, FA <: Module[I, A], FB <: Module[J, B]](
       a: FA,
       b: FB
   ): Tensor[I, J, A, B, FA, FB] = Tensor(a, b)
-
-  /** Compatibility name for [[split]]. */
-  def tensor[I, J, A, B, FA <: Module[I, A], FB <: Module[J, B]](
-      a: FA,
-      b: FB
-  ): Tensor[I, J, A, B, FA, FB] = split(a, b)
 
   /** Try `primary`, then a fixed fallback only when `policy` selects the primary error. */
   def recover[I, O, P <: Module[I, O], F <: Module[I, O]](
@@ -88,20 +76,12 @@ extension [I, X, A <: Module[I, X]](self: A)
   infix def &&&[O, B <: Module[I, O]](other: B): Both[I, X, O, A, B] =
     self.fanout(other)
 
-  /** Compatibility name for [[fanout]]. */
-  def parallel[O, B <: Module[I, O]](other: B): Both[I, X, O, A, B] =
-    self.fanout(other)
-
   /** Fluent ordered independent-input split. */
   def split[J, O, B <: Module[J, O]](other: B): Tensor[I, J, X, O, A, B] =
     Compose.split(self, other)
 
   /** Arrow operator for ordered independent-input [[split]]. */
   infix def ***[J, O, B <: Module[J, O]](other: B): Tensor[I, J, X, O, A, B] =
-    self.split(other)
-
-  /** Compatibility name for [[split]]. */
-  def tensor[J, O, B <: Module[J, O]](other: B): Tensor[I, J, X, O, A, B] =
     self.split(other)
 
   /** Apply non-learnable control middleware to this program. */

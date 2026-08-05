@@ -45,7 +45,7 @@ class OpenAiStreamChunkSuite extends FunSuite:
     assertEquals(usage.promptTokens, 3L)
     assertEquals(usage.completionTokens, 2L)
     assertEquals(usage.totalTokens, 5L)
-    assertEquals(usage.extras, Map.empty[dspy4s.lm.contracts.TokenCategory, Long])
+    assertEquals(usage.extras, Map.empty[dspy4s.core.contracts.TokenCategory, Long])
   }
 
   test("total_tokens falls back to prompt + completion when absent") {

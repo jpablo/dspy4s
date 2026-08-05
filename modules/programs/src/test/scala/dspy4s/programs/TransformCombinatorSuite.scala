@@ -178,9 +178,7 @@ class TransformCombinatorSuite extends FunSuite:
     val result = Compose.fanout(first, second)(ProgramCall(4))
     assertEquals(result.map(_.output), Right(("v4", 5)))
     assertEquals(order.toVector, Vector("first", "second"))
-    assertEquals(result, Compose.parallel(first, second)(ProgramCall(4)))
     assertEquals(result, first.fanout(second)(ProgramCall(4)))
-    assertEquals(result, first.parallel(second)(ProgramCall(4)))
     assertEquals(result, (first &&& second)(ProgramCall(4)))
   }
 
@@ -202,6 +200,5 @@ class TransformCombinatorSuite extends FunSuite:
     val expectedStates = Vector(first.predict.optimizableParameters, second.predict.optimizableParameters)
     assertEquals(params(Compose.split(first, second)), expectedStates)
     assertEquals(params(first.split(second)), expectedStates)
-    assertEquals(params(first.tensor(second)), expectedStates)
     assertEquals(params(first *** second), expectedStates)
   }

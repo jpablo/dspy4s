@@ -12,9 +12,3 @@ trait OrderedFanout[Hom[_, _, _ <: Int]]:
       f: Hom[I, A, N],
       g: Hom[I, B, M]
   ): Hom[I, (A, B), N + M]
-
-  /** Compatibility name for [[fanout]]. The operation remains ordered, not concurrent. */
-  final def parallel[I, A, B, N <: Int, M <: Int](
-      f: Hom[I, A, N],
-      g: Hom[I, B, M]
-  ): Hom[I, (A, B), N + M] = fanout(f, g)

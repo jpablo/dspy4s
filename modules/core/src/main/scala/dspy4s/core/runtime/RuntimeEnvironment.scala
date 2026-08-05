@@ -188,7 +188,7 @@ object RuntimeEnvironment:
 
   /** Run `body` under a fresh [[RuntimeDelta]] derived from `base` (optionally swapping the adapter), returning the
     * body's result and accumulated output as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate
-    * each attempt then propagate only the winner's observability via [[propagateAttempt]].
+    * each attempt then propagate only the winner's observability via [[propagate]].
     */
   def isolatedAttempt[A](base: RuntimeContext, adapter: Option[AdapterRef] = None)(
       body: RuntimeContext ?=> A
@@ -208,9 +208,6 @@ object RuntimeEnvironment:
   def propagate(delta: RuntimeDelta): Unit =
     delta.trace.foreach(appendTrace)
     delta.history.foreach(appendHistory)
-
-  /** Compatibility name for the winning-attempt propagation path. */
-  def propagateAttempt(delta: RuntimeDelta): Unit = propagate(delta)
 
   /** Render the last `n` LM-call history entries on the active context as a human-readable string, in the spirit of
     * upstream `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread

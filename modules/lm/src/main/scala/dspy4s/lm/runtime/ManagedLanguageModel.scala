@@ -13,7 +13,7 @@ import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.lm.contracts.LmUsage
+import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
 

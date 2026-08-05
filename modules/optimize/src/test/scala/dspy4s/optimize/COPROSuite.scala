@@ -4,10 +4,10 @@ import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, LmUsage, RuntimeContext, SignatureLayout}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage, Message, MessageRole}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 

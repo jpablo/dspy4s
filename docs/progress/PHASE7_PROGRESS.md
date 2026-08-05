@@ -16,7 +16,6 @@ Phase 7 focuses on the first optimizers.
 - `ExampleData` extended with `augmented: Boolean = false` flag in `dspy4s.core.contracts`
   - `withAugmented(flag)` mutator on `Example` trait
   - Traces produced by bootstrap are marked `augmented=true`, preserving Python parity
-- `OptimizeApi.contractsPhase = "phase-7"`
 - `munit` added as test dependency for `optimize` subproject
 
 2. `PredictOps[P]` typeclass

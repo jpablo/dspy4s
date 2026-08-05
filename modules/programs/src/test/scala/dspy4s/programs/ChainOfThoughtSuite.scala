@@ -4,15 +4,12 @@ import zio.blocks.schema.Schema
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
-  :=, DspyError, DynamicValues, NotFoundError, RuntimeContext, SignatureLayout,
+  :=, DspyError, DynamicValues, LmUsage, NotFoundError, RuntimeContext, SignatureLayout,
   ValidationError
 }
 import zio.blocks.schema.DynamicValue
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{
-  LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, LmUsage,
-  Message, MessageRole
-}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import scala.NamedTuple
 import munit.FunSuite

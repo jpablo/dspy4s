@@ -5,6 +5,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.ActivePredictContext
@@ -14,7 +15,6 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.contracts.LmUsage
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.ToolCallAssembler
 import dspy4s.streaming.contracts.StreamEvent

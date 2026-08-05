@@ -37,8 +37,8 @@ model outputs. They are stated on **composition** and checked in whichever way i
   (errors as values, synchronous; the async sibling is `Future[Either[DspyError, _]]`). The kyo-compat
   future is `CIO[Either[DspyError, _]]` (same two-level shape as `Future[Either]`), swapped at the
   build/seam level per kyo-compat's compile-time model. Combinators are written against the concrete carrier;
-  the laws below are stated substrate-agnostically (they hold for any monad, plus an applicative for
-  `parallel`), which is what makes the later swap a mechanical body-rewrite rather than a redesign.
+  the laws below are stated substrate-agnostically (they hold for any monad, plus ordered pairing for
+  `fanout`), which is what makes the later swap a mechanical body-rewrite rather than a redesign.
 
 ## Operations
 
@@ -126,8 +126,8 @@ InterpretedTrajectoryAgent.trajectoryStep                                  // Re
 Category          id >>> p = p = p >>> id
                   (p >>> q) >>> r = p >>> (q >>> r)
 
-Ordered fan-out   parallel runs left-to-right and fail-fast
-                  parallel associates on values up to tuple reassociation
+Ordered fan-out   fanout runs left-to-right and fail-fast
+                  fanout associates on values up to tuple reassociation
 
 Mode monoid       mode(m1 ⊕ m2) = mode(m1) ∘ mode(m2)        mode(idMode) = id        ⊕ associative
 
@@ -172,7 +172,7 @@ typeclasses, not new machinery. The rule:
 - **Learnable predicts are addressable immutable fields; fixed behavior is closures.** A combinator that
   captures a learnable predict inside a closure is un-addressable and therefore wrong.
 - `read` distributes over the algebra (the homomorphism law above). Per combinator:
-  - `>>>`, `parallel`: structural (`read(a) ++ read(b)`; Mirror-derivable from the two child fields).
+  - `>>>`, `fanout`: structural (`read(a) ++ read(b)`; Mirror-derivable from the two child fields).
   - `augment(p)`, `selectBest(p)`: pass-through (`read(p)`). DONE (commit `dd2fd4f`): `BestOfN` is now
     parameterized over the concrete inner type (`BestOfN[P, I, O]`, mirroring `Refine`) with a pass-through
     instance in its companion.
@@ -335,10 +335,11 @@ Three encodings from the math library, fitted to dspy4s's executable-laws discip
   is precisely why fan-out naturality cannot be a law for LLM morphisms. This is also the categorical
   restatement of why the spec's fan-out is not independent execution: sharing vs re-running are
   different programs, and the algebra keeps them distinguishable.
-  The underlying ordered independent-input operation (`Tensor` / `Compose.tensor`) and `Copy` were later added
+  The underlying ordered independent-input operation (`Tensor` / `Compose.split`) and `Copy` were later added
   for completeness (commit `508a8e6`), so `fanout = copy >>> split`; deterministic and effect-observing copy
-  cases are executable. The corrected framing is in [algebra.md](algebra.md). `tensor` stays at the `Module` level
-  as the compatibility name for `split` (its `(I, J)` input has no single-record decoder).
+  cases are executable. The corrected framing is in [algebra.md](algebra.md). `split` currently stays at the `Module`
+  level because lifting it would require a separate graded ordered-tensor operation; record decoding is not part of
+  `Program` construction.
 
 ## Acceptance criteria: each composite reduces to a recipe
 
@@ -355,7 +356,7 @@ plus the new combinator law suites are green:
 | `ReAct` | DONE (6.3 + interpreted transition): `TrajectoryAgent` + `InterpretedTrajectoryAgent`; `ReactStep` lowers to a `ToolCallRequest` interpreted by the tool environment. |
 | `CodeAct` | DONE (6.3 + interpreted transition): `TrajectoryAgent` + `InterpretedTrajectoryAgent`; `CodeStep` lowers to Python interpreted by `ActionInterpreter[String, String]`. |
 | `RLM` | DONE (6.3): `AgentLoop.run` (SUBMIT = Done inside the loop; extract fallback = onExhausted) |
-| user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) — DONE (6.2): `AndThen` + `>>>`, plus `parallel` |
+| user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) — DONE (6.2): `AndThen` + `>>>`, plus `fanout` |
 
 ### Code-truth correction: ProgramOfThought is not `feedback`
 
@@ -401,7 +402,7 @@ each language's domain semantics. The phases and terminal states are explicit AD
 encode the legal successor relation, including distinct rejection-recording and interpreted-outcome-recording states.
 The post-outcome decision can depend on the generated step, prepared action, and interpreted result without allowing a
 subclass to reorder or omit recording. RLM and PoT remain directly on `AgentLoop` because their terminal-result shapes
-still do not fit trajectory-then-extract. Same discipline as the PoT and `parallel` corrections: extract the real
+still do not fit trajectory-then-extract. Same discipline as the PoT and `fanout` corrections: extract the real
 shared core, do not force a universal vocabulary the code rejects.
 
 ## Resolved on paper vs deferred (fork 5)
@@ -425,13 +426,13 @@ suites as the regression net:
    feedback hook); `BestOfN` is the `feedback = None` instance and `Refine` is the feedback (advice→adapter)
    instance. `ProgramOfThought` was NOT migrated — code-truth showed it is `retryUntil`, not `feedback` (see
    the correction above). Pinned by `AttemptSelectionLawSuite`; `TypedBestOfNSuite` / `RefinePerModuleAdviceSuite`
-   green unchanged. Built on the step-4 `isolatedAttempt`/`propagateAttempt` primitives.
-2. **`>>>` (Category) and `parallel`. DONE (commit `60d2ea5`).** Added `id` / `AndThen` (`>>>`) / `Both`
-   (`parallel`) in `Compose.scala`, with hand-written `OptimizableStructure` instances (concrete child types, so
+   green unchanged. Built on the step-4 `isolatedAttempt`/`propagate` primitives.
+2. **`>>>` (Category) and `fanout`. DONE (commit `60d2ea5`).** Added `id` / `AndThen` (`>>>`) / `Both`
+   (`fanout`) in `Compose.scala`, with hand-written `OptimizableStructure` instances (concrete child types, so
    pipelines stay addressable) and `ComposeLawSuite` covering value-category and ordered-fan-out semantics.
-   **Code-truth correction:** `parallel` did NOT "largely exist as `Parallel`" — `Parallel` is a thread-pool
-   batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the domain-valued fan-out
-   `parallel(a, b)` is new. Category laws are stated on the threaded `.output` value (the carrier decision),
+   **Code-truth correction:** the former `parallel` name did NOT refer to the existing `Parallel` — `Parallel` is
+   a thread-pool batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the
+   domain-valued `fanout(a, b)` was new. Category laws are stated on the threaded `.output` value (the carrier decision),
    not the full `Prediction` envelope.
 3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`, later interpreted-agent and law refinements).** Extracted `AgentLoop.run` (bounded
    `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
@@ -456,7 +457,7 @@ suites as the regression net:
 Steps 1–5 (the behavior-preserving primitive extractions) and step 6.1–6.5 (this algebra) are implemented and
 law-tested on the branch; every composite reduces to a combinator expression and the full suite is green. The
 recurring discipline was to extract the genuinely shared core and correct the spec against code-truth where the
-grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `parallel` is new, not the batch
+grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `fanout` is not the batch
 `Parallel`; `agentLoop`'s env/classify/render seam does not fit).
 
 **Domain-valued inner predicts (the class-A conversion).** Every composite whose internal signatures are statically

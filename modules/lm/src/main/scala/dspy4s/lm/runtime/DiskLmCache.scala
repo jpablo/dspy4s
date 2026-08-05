@@ -1,7 +1,7 @@
 package dspy4s.lm.runtime
 
-import dspy4s.core.contracts.ToolCall
-import dspy4s.lm.contracts.{LmCache, LmOutput, LmRequest, LmResponse, LmUsage, TokenCategory}
+import dspy4s.core.contracts.{LmUsage, TokenCategory, ToolCall}
+import dspy4s.lm.contracts.{LmCache, LmOutput, LmRequest, LmResponse}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}

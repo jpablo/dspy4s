@@ -9,8 +9,8 @@ import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.contracts.Prediction
 
 /** `copy`: duplicate the input `I` into `(I, I)`. Parameter-free (like `id`); the first half of a fan-out, so
-  * `parallel(a, b) = copy >>> tensor(a, b)`. Copy commutes with deterministic programs but not effect-observing
-  * programs; this is a useful classifier rather than a law of the unrestricted execution carrier.
+  * `fanout(a, b) = copy >>> split(a, b)`. Copy commutes with deterministic programs but not effect-observing programs;
+  * this is a useful classifier rather than a law of the unrestricted execution carrier.
   */
 final case class Copy[I]() extends TransparentModule[I, (I, I)]:
   override val moduleName: String                                                                                   = "copy"

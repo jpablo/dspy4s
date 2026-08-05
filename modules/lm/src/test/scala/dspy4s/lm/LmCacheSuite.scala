@@ -1,7 +1,7 @@
 package dspy4s.lm
 
-import dspy4s.core.contracts.{DynamicValues, ToolCall, :=}
-import dspy4s.lm.contracts.{LmMode, LmOutput, LmRequest, LmResponse, LmUsage, TokenCategory}
+import dspy4s.core.contracts.{DynamicValues, LmUsage, TokenCategory, ToolCall, :=}
+import dspy4s.lm.contracts.{LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.lm.runtime.{
   CacheCapacity,
   CompositeLmCache,

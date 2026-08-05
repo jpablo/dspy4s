@@ -28,7 +28,7 @@ class IsolatedAttemptSuite extends munit.FunSuite:
     assertEquals(RuntimeEnvironment.current.history, Vector.empty[HistoryEntry])
   }
 
-  test("propagateAttempt replays the captured trace/history into the current context, in order") {
+  test("propagate replays the captured trace/history into the current context, in order") {
     RuntimeEnvironment.resetForTests()
     val executed = RuntimeEnvironment.isolatedAttempt(RuntimeEnvironment.current) {
       RuntimeEnvironment.appendHistory(hist(1))
@@ -36,6 +36,6 @@ class IsolatedAttemptSuite extends munit.FunSuite:
       ()
     }
     assertEquals(RuntimeEnvironment.current.history, Vector.empty[HistoryEntry]) // not propagated yet
-    RuntimeEnvironment.propagateAttempt(executed.delta)
+    RuntimeEnvironment.propagate(executed.delta)
     assertEquals(RuntimeEnvironment.current.history, executed.delta.history)
   }

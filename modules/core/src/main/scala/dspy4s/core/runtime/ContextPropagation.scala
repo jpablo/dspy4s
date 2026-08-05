@@ -15,11 +15,11 @@ import scala.concurrent.Future
   * consumer thread) that worker starts with a fresh, empty context. Without propagation, a predictor call executed
   * there would find no LM configured and fire no callbacks.
   *
-  * This object closes that gap: [[capture]] snapshots the submitting thread's context, and the run helpers re-install
-  * it on the worker for the duration of the task, so dependencies and dynamic scope behave as if the work had run
-  * inline. Worker mutations remain isolated when its thread-local is restored; [[futureExecuted]] returns trace/history
-  * explicitly for callers that need to join that output. It is dspy4s's equivalent of DSPy's context propagation into
-  * parallel and async execution.
+  * This object closes that gap: [[captureAll]] snapshots the submitting thread's context and registered carriers, and
+  * the run helpers re-install them on the worker for the duration of the task, so dependencies and dynamic scope behave
+  * as if the work had run inline. Worker mutations remain isolated when its thread-local is restored;
+  * [[futureExecuted]] returns trace/history explicitly for callers that need to join that output. It is dspy4s's
+  * equivalent of DSPy's context propagation into parallel and async execution.
   *
   * Scope: the [[RuntimeContext]] plus every registered [[Carrier]] travels (e.g. the usage-tracker stack registered by
   * the lm module). The [[ActivePredictContext]] stack lives in a separate thread-local and is not copied here.
@@ -66,26 +66,18 @@ object ContextPropagation:
     carriers.forEach(carrier => out += carrier.capture())
     out.result()
 
-  /** Snapshot the calling thread's active context, to be replayed on a worker thread. Prefer [[captureAll]] — this
-    * legacy form carries only the [[RuntimeContext]], not registered carriers.
-    */
-  def capture: RuntimeContext = RuntimeEnvironment.current
-
   /** Snapshot the calling thread's active context AND every registered carrier's state. */
   def captureAll: Captured = new Captured(RuntimeEnvironment.current, captureSnapshots())
-
-  /** Run `thunk` with `context` installed as the active context, restoring the previous one on exit. Used to replay a
-    * captured context on a thread that didn't produce it (e.g. a streaming consumer thread).
-    */
-  def inContext[A](context: RuntimeContext)(thunk: => A): A =
-    RuntimeEnvironment.withContext(context)(thunk)
 
   /** Wrap `base` so every `Runnable` it runs executes under `captured` (plus the carrier snapshots taken at wrap time)
     * and a fresh generated async-task id. `Future`s submitted to the returned `ExecutionContext` therefore inherit the
     * captured configuration and accumulated state; the per-task id makes each future a distinct async task for
     * [[RuntimeEnvironment.configure]] ownership purposes.
     */
-  def wrapExecutionContext(base: ExecutionContext, captured: RuntimeContext = capture): ExecutionContext =
+  def wrapExecutionContext(
+      base    : ExecutionContext,
+      captured: RuntimeContext = RuntimeEnvironment.current
+  ): ExecutionContext =
     val capturedAll = new Captured(captured, captureSnapshots())
     new ExecutionContext:
       override def execute(runnable: Runnable): Unit =
