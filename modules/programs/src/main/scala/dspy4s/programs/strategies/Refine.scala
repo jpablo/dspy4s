@@ -14,9 +14,7 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
-import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
-import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
@@ -24,9 +22,7 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.typed.Prediction
-import dspy4s.typed.Shape
 import dspy4s.typed.Signature
-import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.Schema
 
 import scala.compiletime.ops.int.+
@@ -201,58 +197,7 @@ object Refine:
     * object keyed by module name (`{module_name: advice}`).
     */
   private[programs] val offerFeedbackLayout: SignatureLayout =
-    SignatureLayout.create(
-      name = "OfferFeedback",
-      inputFields = Vector(
-        FieldSpec(
-          "program_inputs",
-          description = Some("The inputs to the program that we are analyzing")
-        ),
-        FieldSpec(
-          "program_trajectory",
-          description = Some("The trajectory of the program's execution, showing each module's I/O")
-        ),
-        FieldSpec(
-          "program_outputs",
-          description = Some("The outputs of the program that we are analyzing")
-        ),
-        FieldSpec(
-          "reward_value",
-          description = Some("The reward value assigned to the program's outputs")
-        ),
-        FieldSpec(
-          "target_threshold",
-          description = Some("The target threshold for the reward function")
-        ),
-        FieldSpec(
-          "module_names",
-          description = Some("The names of the modules in the program, for which we seek advice")
-        )
-      ),
-      outputFields = Vector(
-        FieldSpec(
-          "discussion",
-          description = Some("Discussing blame of where each module went wrong, if it did")
-        ),
-        FieldSpec(
-          "advice",
-          description = Some(
-            "A JSON object mapping each module name (from module_names) to concrete, actionable advice for that " +
-              "module: the specific scenarios in which it made mistakes and what it should do differently on the " +
-              "same or similar inputs in the future. Each module will NOT see its own history, so its advice must be " +
-              "entirely self-contained. Use \"N/A\" for a module that is not to blame. Example: " +
-              "{\"module_a\": \"...\", \"module_b\": \"N/A\"}."
-          )
-        )
-      ),
-      instructions = Some(
-        "Assign blame for the final reward being below the threshold to each named module. Then prescribe " +
-          "concrete, actionable advice for how each module should act on its future input if it were to receive " +
-          "the same or similar inputs on a retry. A module will not see its own history, so it must rely entirely " +
-          "on concrete and actionable advice from you to avoid the same mistake. Return the advice as a JSON " +
-          "object keyed by module name; if a module is not to blame, its advice should be \"N/A\"."
-      )
-    ).getOrElse(throw new IllegalStateException("OfferFeedback layout failed to construct"))
+    RefineFeedback.layout
 
   /** The critic's typed input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout
     * exactly.
@@ -271,45 +216,17 @@ object Refine:
     */
   private[programs] final case class OfferFeedbackAdvice(discussion: String, advice: String)
 
-  /** Hand-written LENIENT output shape mirroring the prior dynamic consumption exactly: `advice` is required (with
-    * `RawPrediction.asString`'s primitive coercion, the accessor the dynamic path used), `discussion` tolerates absence
-    * (defaults to ""). A derived shape would reject completions that omit `discussion`, which today's critic consumers
-    * accept; `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
-    */
-  private val offerFeedbackOutputShape: Shape[OfferFeedbackAdvice] = new Shape[OfferFeedbackAdvice]:
-    val fieldSpecs: Vector[FieldSpec]                           = offerFeedbackLayout.outputFields
-    def encode(value: OfferFeedbackAdvice): DynamicValue.Record =
-      DynamicValues.record("discussion" := value.discussion, "advice" := value.advice)
-    def decode(raw: DynamicValue.Record): Either[DspyError, OfferFeedbackAdvice] =
-      RawPrediction(values = raw).asString("advice").map { advice =>
-        OfferFeedbackAdvice(
-          discussion = DynamicValues.recordGet(raw, "discussion").map(DynamicValues.renderText).getOrElse(""),
-          advice = advice
-        )
-      }
-
   /** The critic's typed signature: the hand-built [[offerFeedbackLayout]] (descriptions + instructions preserved
     * verbatim, so prompt rendering is unchanged) paired with a derived input shape and the lenient output shape.
     */
   private[programs] val offerFeedbackSignature: Signature[OfferFeedbackInputs, OfferFeedbackAdvice] =
-    Signature(
-      name = "OfferFeedback",
-      layout = offerFeedbackLayout,
-      inputShape = Shape.derived[OfferFeedbackInputs],
-      outputShape = offerFeedbackOutputShape
-    )
+    RefineFeedback.signature
 
   /** Render an attempt's runtime [[TraceEntry]] vector as a readable text block — dspy4s's stand-in for Python's
     * source-grounded trajectory. One block per component: `component: <inputs> -> <outputs>`.
     */
   private[programs] def renderTrajectory(trace: Vector[TraceEntry]): String =
-    if trace.isEmpty then "(no recorded module calls)"
-    else
-      trace.map { entry =>
-        val inputs  = DynamicValues.renderText(entry.inputs)
-        val outputs = DynamicValues.renderText(entry.outputs)
-        s"${entry.component}: $inputs -> $outputs"
-      }.mkString("\n")
+    RefineFeedback.renderTrajectory(trace)
 
   /** Run the OfferFeedback critic (the instance's addressable [[Refine.criticPredict]], passed in) with the ambient
     * LM/adapter (NOT under the hint adapter) to produce a per-module advice map, grounded in the attempt's trace, the
@@ -326,20 +243,7 @@ object Refine:
       threshold: Double,
       moduleNames: Vector[String]
   )(using RuntimeContext): Either[DspyError, Map[String, String]] =
-    val programInputs = trace.headOption
-      .map(e => DynamicValues.renderText(e.inputs))
-      .getOrElse(input.toString)
-    val programOutputs = DynamicValues.renderText(prediction.raw.values)
-    critic(ProgramCall(input =
-      OfferFeedbackInputs(
-        program_inputs = programInputs,
-        program_trajectory = renderTrajectory(trace),
-        program_outputs = programOutputs,
-        reward_value = reward,
-        target_threshold = threshold,
-        module_names = moduleNames.mkString(", ")
-      )
-    )).map(result => parseAdvice(result.output.advice, moduleNames))
+    RefineFeedback.generateAdvice(critic, input, prediction, trace, reward, threshold, moduleNames)
 
   /** Parse the OfferFeedback `advice` output into a per-module advice map. Faithful path: the output is a JSON object
     * `{module_name: advice}`, decoded leniently (an embedded object is extracted first, tolerating prose or code fences
@@ -347,20 +251,4 @@ object Refine:
     * to the old single-advice behavior, and to the natural single-predictor case).
     */
   private[programs] def parseAdvice(raw: String, moduleNames: Vector[String]): Map[String, String] =
-    extractJsonObject(raw).flatMap(decodeStringMap).filter(_.nonEmpty)
-      .getOrElse(moduleNames.iterator.map(_ -> raw.trim).toMap)
-
-  /** Extract the first balanced-looking JSON object substring (first `{` to the last `}`), or `None` if absent. */
-  private def extractJsonObject(raw: String): Option[String] =
-    val start = raw.indexOf('{')
-    val end   = raw.lastIndexOf('}')
-    if start >= 0 && end > start then Some(raw.substring(start, end + 1)) else None
-
-  /** Decode a JSON object into a `Map[String, String]` via the dynamic codec, rendering each value as text. Returns
-    * `None` if the JSON does not decode to an object.
-    */
-  private def decodeStringMap(json: String): Option[Map[String, String]] =
-    Schema.dynamic.jsonCodec.decode(json.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toOption.collect {
-      case record: DynamicValue.Record =>
-        record.fields.iterator.map((name, value) => name -> DynamicValues.renderText(value)).toMap
-    }
+    RefineFeedback.parseAdvice(raw, moduleNames)
