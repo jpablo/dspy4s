@@ -35,6 +35,7 @@ lazy val commonSettings = Seq(
 
 lazy val root = (project in file("."))
   .aggregate(
+    algebra,
     core,
     typed,
     lm,
@@ -52,12 +53,23 @@ lazy val root = (project in file("."))
     publish / skip := true
   )
 
+// Generic algebraic and categorical structures. This module is intentionally
+// dependency-free so every higher layer can share the same law vocabulary
+// without pulling in runtime, schema, or program machinery.
+lazy val algebra = (project in file("modules/algebra"))
+  .settings(commonSettings)
+  .settings(name := "dspy4s-algebra")
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
+  )
+
 // `core` owns the contract layer that everything else builds on. We pull in
 // zio-blocks-schema here because `DynamicValue` is the spine type carried
 // through `Example.values`, `ProgramCall.input`, `RawPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
 // programs, evaluate, and the typed surface.
 lazy val core = (project in file("modules/core"))
+  .dependsOn(algebra)
   .settings(commonSettings)
   .settings(name := "dspy4s-core")
   .settings(

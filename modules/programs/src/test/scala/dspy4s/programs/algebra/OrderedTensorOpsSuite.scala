@@ -1,5 +1,6 @@
 package dspy4s.programs.algebra
 
+import dspy4s.algebra.OrderedTensorOps
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -26,7 +27,7 @@ class OrderedTensorOpsSuite extends FunSuite:
   private val C = summon[OrderedTensorOps[Module]]
 
   test("unrestricted modules do not have a CDCategory instance") {
-    val errors = compileErrors("summon[CDCategory[Module]]")
+    val errors = compileErrors("summon[dspy4s.algebra.CDCategory[Module]]")
     assert(errors.nonEmpty)
   }
 

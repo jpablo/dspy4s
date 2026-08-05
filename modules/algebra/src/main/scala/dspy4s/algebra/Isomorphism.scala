@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A pair of mutually inverse morphisms between `A` and `B`. */
 trait Isomorphism[P[_], Hom[_, _], A: P, B: P](using category: Category[P, Hom]):

@@ -1,6 +1,6 @@
 package dspy4s.core.collections
 
-import dspy4s.core.algebra.{AnyObject, Endofunctor, functionCategory}
+import dspy4s.algebra.{AnyObject, Endofunctor, functionCategory}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.FixedLength
 
@@ -12,7 +12,7 @@ import scala.compiletime.ops.int.+
   * exposed here preserve the length invariant in their result types. Ordinary `Vector` operations remain available
   * because Iron refinements are subtypes of their underlying values, but operations whose result length is known should
   * use this API so that information is not erased. At every fixed `N`, mapping is exposed as a lawful
-  * [[dspy4s.core.algebra.Endofunctor]] and therefore cannot change the tracked length.
+  * [[dspy4s.algebra.Endofunctor]] and therefore cannot change the tracked length.
   */
 type SizedVector[A, N <: Int] = Vector[A] :| FixedLength[N]
 

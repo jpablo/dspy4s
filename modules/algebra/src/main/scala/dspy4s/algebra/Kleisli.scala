@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A Kleisli morphism for `F`: an ordinary input followed by an effectful output. */
 type Kleisli[F[_], A, B] = A => F[B]

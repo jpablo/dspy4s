@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** An equation between two `A`s, as a VALUE (the `IsEq` shape from jpablo/math-with-scala): the lhs/rhs of a law,
   * stated as a method WHERE THE STRUCTURE LIVES and executed by the law suites. The statement carries no notion of

@@ -199,7 +199,7 @@ reparameterization; signature structure and module identity remain in the morphi
 
 Prototype (commit `9d4b5cd`, encoding inspired by the constraint-parameterized `CategoryTC` in
 jpablo/math-with-scala, with the constraint moved from objects to the morphism representation):
-`dspy4s.programs.algebra.NatGradedCategory` (grade-zero `id` and grade-additive `>>>`), whose canonical
+`dspy4s.algebra.NatGradedCategory` (grade-zero `id` and grade-additive `>>>`), whose canonical
 `GradedFunctor` hides the grade into its ordinary `AnyGrade` category. `Parameterization.readFunctor` instead uses a
 `GradePreservingFunctor` into sized parameter vectors, retaining `N` exactly; `OrderedFanout` remains a separate
 structure. These structures operate over `dspy4s.programs.algebra.Program[I, O, N]` (the packaged Sigma-type morphism bundling a concrete `Rep` with its

@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A natural transformation between two functors with the same source and target categories.
   *

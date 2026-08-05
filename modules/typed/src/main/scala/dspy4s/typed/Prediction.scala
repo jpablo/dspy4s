@@ -2,7 +2,7 @@ package dspy4s.typed
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
-import dspy4s.core.algebra.ScalaMonad
+import dspy4s.algebra.ScalaMonad
 import zio.blocks.schema.DynamicValue
 
 /** A prediction whose raw field values have been decoded into a semantic output value `O`. Constructed only after every
@@ -16,7 +16,7 @@ import zio.blocks.schema.DynamicValue
   * fields, and trait-spec signatures expose named-tuple fields. In both cases `p.output.sentiment` is typed dot-access
   * with no lazy parsing.
   *
-  * The companion exposes the canonical writer [[dspy4s.core.algebra.ScalaMonad]]: [[Prediction.map]] changes only the
+  * The companion exposes the canonical writer [[dspy4s.algebra.ScalaMonad]]: [[Prediction.map]] changes only the
   * semantic output, while [[Prediction.flatMap]] accumulates `RawPrediction` evidence in execution order. Its unit and
   * multiplication are natural transformations satisfying the categorical monad laws.
   */

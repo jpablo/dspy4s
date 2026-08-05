@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A left action of the monoid `M` on values of `A`.
   *

@@ -1,6 +1,6 @@
 package dspy4s.core
 
-import dspy4s.core.algebra.Monoid
+import dspy4s.algebra.Monoid
 import dspy4s.core.data.Completions
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues

@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{AnyObject, Category, Delooped, Functor, Id, Monoid, delooping}
+import dspy4s.algebra.{AnyObject, Category, Delooped, Functor, Id, Monoid, NatGradedCategory, delooping}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.programs.optimization.OptimizableParameters

@@ -6,7 +6,7 @@ import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.LmUsage
-import dspy4s.core.algebra.{Monoid, ScalaMonad}
+import dspy4s.algebra.{Monoid, ScalaMonad}
 import dspy4s.core.contracts.RuntimeConfig
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta

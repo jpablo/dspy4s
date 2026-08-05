@@ -1,6 +1,6 @@
 package dspy4s.typed
 
-import dspy4s.core.algebra.ScalaMonad
+import dspy4s.algebra.ScalaMonad
 import dspy4s.core.contracts.{DynamicValues, :=}
 import dspy4s.core.data.RawPrediction
 import munit.FunSuite

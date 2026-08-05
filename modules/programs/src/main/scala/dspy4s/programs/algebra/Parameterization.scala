@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{AnyObject, Id, IsEq, Law, Lens, <->}
+import dspy4s.algebra.{AnyObject, GradePreservingFunctor, Id, IsEq, Law, Lens, NatGradedCategory, OrderedFanout, <->}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.programs.optimization.OptimizableParameters

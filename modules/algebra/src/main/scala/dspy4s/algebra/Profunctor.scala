@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A profunctor over the category `Hom`: contravariant in its first index and covariant in its second. */
 trait Profunctor[P[_], Hom[_, _], F[_, _]](using category: Category[P, Hom]):

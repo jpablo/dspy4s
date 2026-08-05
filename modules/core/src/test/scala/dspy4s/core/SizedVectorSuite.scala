@@ -1,6 +1,6 @@
 package dspy4s.core
 
-import dspy4s.core.algebra.Endofunctor
+import dspy4s.algebra.Endofunctor
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.core.collections.SizedVector.given

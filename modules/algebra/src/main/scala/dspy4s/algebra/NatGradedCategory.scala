@@ -1,6 +1,4 @@
-package dspy4s.programs.algebra
-
-import dspy4s.core.algebra.{Category, IsEq, Law, <->}
+package dspy4s.algebra
 
 import scala.compiletime.ops.int.+
 

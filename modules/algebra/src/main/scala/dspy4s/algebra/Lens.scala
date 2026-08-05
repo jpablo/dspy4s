@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A lawful lens: a focused `get`/`set` pair from a whole `S` onto a part `A`, carrying the three classic optic laws ON
   * the trait as `@Law`/[[IsEq]] statements (the same shape as [[Monoid]]; see `Laws.scala`). Concrete types provide

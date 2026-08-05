@@ -1,6 +1,5 @@
-package dspy4s.programs.algebra
+package dspy4s.algebra
 
-import dspy4s.core.algebra.{AnyObject, IsEq, Isomorphism}
 import munit.FunSuite
 
 /** Executes the complete symmetric-monoidal and copy/discard law vocabulary on Scala's cartesian product. */

@@ -1,7 +1,7 @@
 package dspy4s.typed
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError}
-import dspy4s.core.algebra.{IsEq, Law, <->}
+import dspy4s.algebra.{IsEq, Law, <->}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration

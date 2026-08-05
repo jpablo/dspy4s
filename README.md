@@ -56,6 +56,7 @@ dspy4s is split into focused modules so you can depend only on what you need.
 
 | Module      | Artifact           | What it gives you                                            |
 |-------------|--------------------|-------------------------------------------------------------|
+| `algebra`   | `dspy4s-algebra`   | Categories, functors, monads, optics, and executable laws. |
 | `core`      | `dspy4s-core`      | Contract layer: `Example`, `DynamicValue` spine, runtime.   |
 | `typed`     | `dspy4s-typed`     | Typed `Signature` / `Spec` surface and `Shape` codecs.      |
 | `lm`        | `dspy4s-lm`        | Provider-agnostic LM API and the OpenAI client.             |

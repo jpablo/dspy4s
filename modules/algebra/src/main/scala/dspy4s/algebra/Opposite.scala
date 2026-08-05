@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** The opposite of `Hom`: every morphism has its direction reversed. */
 type Opposite[Hom[_, _]] = [A, B] =>> Hom[B, A]

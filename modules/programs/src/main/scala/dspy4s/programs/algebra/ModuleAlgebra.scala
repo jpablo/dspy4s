@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{
+import dspy4s.algebra.{
   AnyObject,
   Category,
   Functor,

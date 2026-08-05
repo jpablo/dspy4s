@@ -8,7 +8,7 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.algebra.{IsEq, Lens, Monoid}
+import dspy4s.algebra.{AnyGrade, IsEq, Lens, Monoid, NatGradedCategory, OrderedFanout}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.core.contracts.ModuleStartEvent

@@ -2,7 +2,7 @@ package dspy4s.core.data
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, NotFoundError, ValidationError}
 import dspy4s.core.contracts.updated
-import dspy4s.core.algebra.Monoid
+import dspy4s.algebra.Monoid
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** Adapter-parsed, schema-uninterpreted prediction data.

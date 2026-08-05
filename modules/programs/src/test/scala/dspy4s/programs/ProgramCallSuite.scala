@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.algebra.Endofunctor
+import dspy4s.algebra.Endofunctor
 import dspy4s.core.contracts.{:=, DynamicValues}
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite

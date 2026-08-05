@@ -145,8 +145,9 @@ operation runs the left program before the right program, so execution order is 
 carrier does **not** form a symmetric monoidal, CD, or Markov category.
 
 The reusable executable interface is
-[`OrderedTensorOps[Hom]`](../../modules/programs/src/main/scala/dspy4s/programs/algebra/OrderedExecution.scala), with the
-`given orderedProgram` instance over `Module`. It deliberately exposes operations without asserting tensor
+[`OrderedTensorOps[Hom]`](../../modules/algebra/src/main/scala/dspy4s/algebra/OrderedTensorOps.scala), with the
+[`given orderedProgram`](../../modules/programs/src/main/scala/dspy4s/programs/algebra/OrderedExecution.scala) instance
+over `Module`. It deliberately exposes operations without asserting tensor
 interchange, symmetry of effects, or discard naturality:
 
 ```

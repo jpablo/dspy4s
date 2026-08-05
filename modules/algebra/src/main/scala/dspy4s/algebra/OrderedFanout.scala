@@ -1,4 +1,4 @@
-package dspy4s.programs.algebra
+package dspy4s.algebra
 
 import scala.compiletime.ops.int.+
 

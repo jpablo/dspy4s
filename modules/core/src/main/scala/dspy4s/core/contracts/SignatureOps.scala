@@ -1,6 +1,6 @@
 package dspy4s.core.contracts
 
-import dspy4s.core.algebra.{IsEq, Law, Monoid, <->}
+import dspy4s.algebra.{IsEq, Law, Monoid, <->}
 
 /** The value-level "signature algebra": idempotent, cohort-aware, named transforms over [[SignatureLayout]].
   *

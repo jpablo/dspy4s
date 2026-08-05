@@ -1,6 +1,6 @@
 package dspy4s.programs.contracts
 
-import dspy4s.core.algebra.{AnyObject, Endofunctor, functionCategory}
+import dspy4s.algebra.{AnyObject, Endofunctor, functionCategory}
 import zio.blocks.schema.DynamicValue
 
 /** The uniform invocation envelope for every program boundary.

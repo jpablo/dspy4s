@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.core.algebra.{AnyObject, Category, Functor, Id, Lens}
+import dspy4s.algebra.{AnyObject, Category, Functor, Id, Lens, NatGradedCategory, OrderedFanout}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext

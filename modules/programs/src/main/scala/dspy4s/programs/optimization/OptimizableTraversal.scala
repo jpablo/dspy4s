@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.core.algebra.{IsEq, Law, Lens, <->}
+import dspy4s.algebra.{IsEq, Law, Lens, <->}
 import dspy4s.core.collections.SizedVector
 
 import scala.annotation.implicitNotFound

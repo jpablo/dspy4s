@@ -1,4 +1,4 @@
-package dspy4s.core.algebra
+package dspy4s.algebra
 
 /** A monad in an arbitrary category: an endofunctor equipped with a natural unit and multiplication.
   *

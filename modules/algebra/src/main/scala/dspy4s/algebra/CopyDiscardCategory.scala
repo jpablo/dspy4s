@@ -1,6 +1,4 @@
-package dspy4s.programs.algebra
-
-import dspy4s.core.algebra.{AnyObject, IsEq, Isomorphism, Law, <->}
+package dspy4s.algebra
 
 /** A monoidal category whose object tensor is Scala's tuple and whose unit is `Unit`.
   *

@@ -1,6 +1,5 @@
-package dspy4s.core
+package dspy4s.algebra
 
-import dspy4s.core.algebra.{IsEq, Kleisli, ScalaMonad, kleisliCategory}
 import munit.FunSuite
 
 /** Executable checks for generic algebra constructors rather than any domain-specific carrier. */

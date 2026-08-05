@@ -16,6 +16,7 @@ A Scala 3 port of the Stanford DSPy framework. The defining design choices:
 
 ```mermaid
 graph TD
+  algebra[dspy4s-algebra]
   core[dspy4s-core]
   typed[dspy4s-typed]
   lm[dspy4s-lm]
@@ -26,6 +27,7 @@ graph TD
   streaming[dspy4s-streaming]
   examples[dspy4s-examples]
 
+  core --> algebra
   typed --> core
   lm --> core
   adapters --> core
@@ -51,7 +53,13 @@ graph TD
 
 ## Modules
 
-1. **`core`** — contracts. Single external dependency: `zio-blocks-schema`
+1. **`algebra`** — dependency-free algebraic vocabulary.
+   - Categories, functors, natural transformations, monads, and Kleisli categories
+   - Monoids, actions, lenses, profunctors, and isomorphisms
+   - Natural-number-graded, ordered-tensor, monoidal, and copy/discard category interfaces
+   - `@Law` / `IsEq` statements shared by higher-level executable law suites
+
+2. **`core`** — contracts. Depends on `algebra`; its primary external dependency is `zio-blocks-schema`
    (for `DynamicValue`, the codec spine type).
    - `SignatureLayout` and `FieldSpec` (erased runtime contract for adapters)
    - `Example`, `RawPrediction`, `Completions` — all field-carrying types
@@ -67,7 +75,7 @@ graph TD
      (`CallbackDispatcher`, `ActivePredictContext`, `ContextPropagation`)
    - DSL parser (`SignatureDsl.parse`)
 
-2. **`typed`** — typed surface over `SignatureLayout`. Depends on `core`.
+3. **`typed`** — typed surface over `SignatureLayout`. Depends on `core`.
    - `Signature[I, O]` — wraps a `SignatureLayout` plus `Shape[I]` / `Shape[O]`
    - `Shape[A]` is the general typed/record boundary. Schema-backed product
      and named-tuple shapes implement `RoundTripShape[A]`, whose law is
@@ -88,17 +96,17 @@ graph TD
    - See [TYPE_BRIDGE.md](TYPE_BRIDGE.md) for how Scala types translate to
      the LM-visible wire vocabulary on the way out and back.
 
-3. **`lm`** — provider-agnostic LM API.
+4. **`lm`** — provider-agnostic LM API.
    - `LanguageModel` trait, `LmRequest` / `LmResponse` / `Message` / `ToolCall`
    - `OpenAiClient` (chat + responses modes)
    - Retry policy, cache hooks, usage accounting
 
-4. **`adapters`** — prompt building + output parsing.
+5. **`adapters`** — prompt building + output parsing.
    - `ChatAdapter` (the default), `JSONAdapter`, `XMLAdapter`
    - Each owns an `AdapterStreamingState` for incremental field parsing
    - Adapter fallback policy (chat → json)
 
-5. **`programs`** — orchestration.
+6. **`programs`** — orchestration.
    - `runtime/PredictEngine` — the shared execute body (private)
    - `contracts/Module` — the semantic program base `Module[I, O]`; its abstract `forward`
      consumes `ProgramCall[I]` and returns `Prediction[O]`, while `final apply` adds module callbacks and tracing.
@@ -124,20 +132,20 @@ graph TD
    - `contracts/ToolFunction.scala` / `ToolCall.scala` — callable tools and their invocation messages
    - `RecordCodec`, `ProgramRunner` — canonical object-side dynamic-to-typed decoding and uniform execution
 
-6. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
+7. **`evaluate`** — `Evaluate` runner, score/result aggregation, metrics.
 
-7. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
+8. **`optimize`** — `BootstrapFewShot` and `BootstrapFewShotWithRandomSearch`.
    Uses `OptimizableTraversal[P]` to inspect read-only predictor metadata, read/write
    `OptimizableParameters` (instructions, demos, config), and rebuild candidates;
    `ProgramRunner[P]` supplies uniform static/dynamic execution.
 
-8. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
+9. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
    `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
    off `ActivePredictContext`. `Streamify` accepts any program via a
    `Streamable[P]` typeclass (run-from-record + best-effort sub-signatures),
    so typed programs stream without an untyped form.
 
-9. **`examples`** — Python DSPy doc translations (tutorials, deep dives,
+10. **`examples`** — Python DSPy doc translations (tutorials, deep dives,
    cheatsheet, learn/, production/). Translation rule: string-based
    Python signatures become `Signature.fromString("…")` (a typed compile-time
    macro) or `Signature.fromType[F]`; class-based ones become a `trait T extends Spec`.
