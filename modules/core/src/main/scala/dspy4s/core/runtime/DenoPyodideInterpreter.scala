@@ -10,7 +10,6 @@ import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
-import zio.blocks.schema.Schema
 
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -18,7 +17,6 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.nio.file.Path
 import java.nio.file.Paths
 import scala.util.control.NonFatal
 
@@ -77,7 +75,8 @@ final class DenoPyodideInterpreter(
     syncFiles: Boolean = true,
     denoCommand: Option[Vector[String]] = None
 ) extends ReplCodeInterpreter:
-  import DenoPyodideInterpreter.*
+  import DenoPyodideLaunch.canonical
+  import DenoPyodideProtocol.*
 
   private var process: Option[Process]             = None
   private var stdin: Option[BufferedWriter]        = None
@@ -94,7 +93,7 @@ final class DenoPyodideInterpreter(
     */
   override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
     for
-      injected <- injectVariables(code, variables)
+      injected <- DenoPyodideVariables.inject(code, variables)
       _        <- ensureProcess()
       _        <- mountFiles()
       _        <- registerTools()
@@ -127,7 +126,12 @@ final class DenoPyodideInterpreter(
     else
       toolsRegistered = false
       filesMounted = false
-      val command = denoCommand.getOrElse(buildCommand())
+      val command = denoCommand.getOrElse(DenoPyodideLaunch.command(
+        enableReadPaths,
+        enableWritePaths,
+        enableEnvVars,
+        enableNetworkAccess
+      ))
       try
         val p = new ProcessBuilder(command*).start()
         process = Some(p)
@@ -142,20 +146,6 @@ final class DenoPyodideInterpreter(
             CodeInterpreterErrors.Interpreter,
             "Deno executable not found. Install Deno (https://docs.deno.com/runtime/getting_started/installation/), e.g. `brew install deno`."
           ))
-
-  private def buildCommand(): Vector[String] =
-    val runner    = runnerPath.toString
-    val readPaths = (Vector(runner) ++ denoCacheDir.toVector ++ enableReadPaths ++ enableWritePaths).map(canonical)
-    val args      = Vector.newBuilder[String]
-    args += "deno"
-    args += "run"
-    args += s"--allow-read=${readPaths.mkString(",")}"
-    if enableEnvVars.nonEmpty then args += s"--allow-env=${enableEnvVars.mkString(",")}"
-    if enableNetworkAccess.nonEmpty then args += s"--allow-net=${enableNetworkAccess.mkString(",")}"
-    if enableWritePaths.nonEmpty then args += s"--allow-write=${enableWritePaths.map(canonical).mkString(",")}"
-    args += canonical(runner)
-    if enableEnvVars.nonEmpty then args += enableEnvVars.mkString(",") // runner.js reads Deno.args[0]
-    args.result()
 
   private def healthCheck(): Either[DspyError, Unit] =
     executeRequest("print(1+1)").flatMap { result =>
@@ -384,150 +374,3 @@ object DenoPyodideInterpreter:
 
   /** An output field of the typed `SUBMIT(...)` signature (Python DSPy's `output_fields`). */
   final case class OutputField(name: String, pythonType: Option[String] = None)
-
-  private val MaxSkippedLines = 100
-  private val ToolErrorCode   = -32008 // upstream's CodeInterpreterError app-error code
-
-  private val PythonKeywords: Set[String] = Set(
-    "False",
-    "None",
-    "True",
-    "and",
-    "as",
-    "assert",
-    "async",
-    "await",
-    "break",
-    "class",
-    "continue",
-    "def",
-    "del",
-    "elif",
-    "else",
-    "except",
-    "finally",
-    "for",
-    "from",
-    "global",
-    "if",
-    "import",
-    "in",
-    "is",
-    "lambda",
-    "nonlocal",
-    "not",
-    "or",
-    "pass",
-    "raise",
-    "return",
-    "try",
-    "while",
-    "with",
-    "yield"
-  )
-  private val IdentifierPattern = "^[A-Za-z_][A-Za-z0-9_]*$".r
-
-  /** Prepend `name = json.loads("<json>")` assignments for each variable (plus `import json`). One uniform JSON-based
-    * mechanism vs upstream's literal/file split; same JSON-compatible value semantics.
-    */
-  private def injectVariables(code: String, variables: Map[String, DynamicValue]): Either[DspyError, String] =
-    if variables.isEmpty then Right(code)
-    else
-      val invalid = variables.keys.find(k => !IdentifierPattern.matches(k) || PythonKeywords.contains(k) || k == "json")
-      invalid match
-        case Some(k) => Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Invalid variable name: '$k'"))
-        case None    =>
-          val assignments = variables.toVector.map { case (name, value) =>
-            // Double JSON-encoding: the inner JSON text becomes a valid Python string literal.
-            s"$name = json.loads(${encodeJson(DynamicValues.fromAny(encodeJson(value)))})"
-          }
-          Right((("import json" +: assignments) :+ code).mkString("\n"))
-
-  // ── Runner resource + Deno discovery ────────────────────────────────────────────────────────────────────────
-
-  /** Extract the vendored `runner.js` to a temp file once per JVM (Deno needs a real path it can --allow-read). */
-  private lazy val runnerPath: Path =
-    val stream = Option(getClass.getResourceAsStream("/dspy4s/core/runtime/runner.js"))
-      .getOrElse(throw new IllegalStateException("runner.js resource missing from dspy4s-core"))
-    val file = Files.createTempFile("dspy4s-runner", ".js")
-    try Files.write(file, stream.readAllBytes())
-    finally stream.close()
-    file.toFile.deleteOnExit()
-    file
-
-  /** Deno's cache directory (`DENO_DIR` or `deno info --json`), allow-read'd so Pyodide can load its files. */
-  private lazy val denoCacheDir: Option[String] =
-    sys.env.get("DENO_DIR").orElse {
-      try
-        val p   = new ProcessBuilder("deno", "info", "--json").start()
-        val out = new String(p.getInputStream.readAllBytes(), StandardCharsets.UTF_8)
-        if p.waitFor() == 0 then
-          decodeJson(out).collect { case r: DynamicValue.Record => r }.flatMap(field(_, "denoDir")).flatMap(asString)
-        else None
-      catch case NonFatal(_) => None
-    }
-
-  private def canonical(path: String): String =
-    try Paths.get(path).toRealPath().toString
-    catch case NonFatal(_) => Paths.get(path).toAbsolutePath.normalize().toString
-
-  private enum ExecuteOutcome:
-    case Output(text: String)
-    case Submitted(json: String)
-    case UserError(message: String)
-
-  // ── JSON-RPC encoding/decoding on the dynamic codec ─────────────────────────────────────────────────────────
-
-  private lazy val jsonCodec = Schema.dynamic.jsonCodec
-
-  private def encodeJson(value: DynamicValue): String =
-    new String(jsonCodec.encode(value), StandardCharsets.UTF_8)
-
-  private def decodeJson(line: String): Option[DynamicValue] =
-    val trimmed = line.trim
-    if !trimmed.startsWith("{") then None
-    else jsonCodec.decode(trimmed.getBytes(StandardCharsets.UTF_8)).toOption
-
-  private def encodeRequest(method: String, params: DynamicValue.Record, id: Int): String =
-    encodeJson(DynamicValues.record("jsonrpc" := "2.0", "method" := method, "params" -> params, "id" := id))
-
-  private def encodeNotification(method: String, params: Option[DynamicValue.Record]): String =
-    val entries = Vector[(String, DynamicValue)]("jsonrpc" := "2.0", "method" := method) ++
-      params.map(p => ("params", p: DynamicValue)).toVector
-    encodeJson(DynamicValues.recordFromEntries(entries))
-
-  private def encodeResult(id: DynamicValue, result: DynamicValue.Record): String =
-    encodeJson(DynamicValues.recordFromEntries(Vector[(String, DynamicValue)](
-      "jsonrpc" := "2.0",
-      "result"  -> result,
-      "id"      -> id
-    )))
-
-  private def encodeError(id: DynamicValue, code: Int, message: String): String =
-    encodeJson(DynamicValues.recordFromEntries(Vector[(String, DynamicValue)](
-      "jsonrpc" := "2.0",
-      "error"   -> DynamicValues.record("code" := code, "message" := message),
-      "id"      -> id
-    )))
-
-  private def field(record: DynamicValue.Record, name: String): Option[DynamicValue] =
-    DynamicValues.recordGet(record, name)
-
-  private def asString(dv: DynamicValue): Option[String] = dv match
-    case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
-    case _                                                => None
-
-  /** Tolerant number extraction: the dynamic JSON codec may decode numbers as Int/Long/Double/BigDecimal. */
-  private def asLong(dv: DynamicValue): Option[Long] = dv match
-    case DynamicValue.Primitive(p) =>
-      p match
-        case PrimitiveValue.Int(n)        => Some(n.toLong)
-        case PrimitiveValue.Long(n)       => Some(n)
-        case PrimitiveValue.Double(n)     => Some(n.toLong)
-        case PrimitiveValue.Float(n)      => Some(n.toLong)
-        case PrimitiveValue.BigDecimal(n) => Some(n.toLong)
-        case PrimitiveValue.BigInt(n)     => Some(n.toLong)
-        case PrimitiveValue.Short(n)      => Some(n.toLong)
-        case PrimitiveValue.Byte(n)       => Some(n.toLong)
-        case _                            => None
-    case _ => None
