@@ -3,13 +3,10 @@ package dspy4s.programs.strategies
 import dspy4s.programs.IterationLimit
 import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.ValidationError
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -17,8 +14,6 @@ import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.GeneratedPython
 import dspy4s.typed.OutputAugmentation.PrependField
 import dspy4s.typed.{InputAugmentation, OutputAugmentation, Prediction, Shape, Signature}
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Generate Python code that programmatically computes the answer, run it, and feed the output back to the LM for a
   * structured response. Port of Python DSPy's `dspy.ProgramOfThought`.
@@ -43,7 +38,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   */
 final case class ProgramOfThought[I, O](
     baseSignature: Signature[I, O],
-    interpreter: CodeInterpreter,
+    interpreter  : CodeInterpreter,
     maxIterations: IterationLimit = IterationLimit(3),
     /** Optional override for the initial code-generation predict — a TYPED `Predict` over the base input, producing an
       * explicit [[ProgramOfThought.CodeOut]]. When `None` (the default), it is built from [[generateSignature]].
@@ -59,14 +54,13 @@ final case class ProgramOfThought[I, O](
       * `final_generated_code` and `code_output`).
       */
     answererPredictOverride: Option[Predict[((I, String), String), ProgramOfThought.WithReasoning[O]]] = None
-)(using
-    prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
-) extends Module[I, ProgramOfThought.WithReasoning[O]]:
+)(using prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O])
+    extends Module[I, ProgramOfThought.WithReasoning[O]]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */
   type Out = ProgramOfThought.WithReasoning[O]
 
-  override val moduleName: String         = "program_of_thought"
+  override val moduleName: String = "program_of_thought"
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   import ProgramOfThought.{codeOutputField, errorField, finalGeneratedCodeField, generatedCodeField, previousCodeField}
@@ -74,56 +68,53 @@ final case class ProgramOfThought[I, O](
   private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): SignatureLayout =
     // The generate / regenerate signatures retain the user's inputs, append the step inputs, and replace the user's
     // outputs with the step outputs.
-    baseLayout
-      .withInputFields(baseLayout.inputFields ++ extraInputs)
-      .withOutputFields(extraOutputs)
+    baseLayout.withInputFields(baseLayout.inputFields ++ extraInputs).withOutputFields(extraOutputs)
 
   /** SignatureLayout for the initial code-generation step. Inputs from the user's signature; outputs a `generated_code`
     * string.
     */
-  val generateSignature: SignatureLayout =
-    buildSig(
-      extraInputs = Vector.empty,
-      extraOutputs = Vector(generatedCodeField)
-    ).withInstructions(Some({
+  val generateSignature: SignatureLayout = buildSig(
+    extraInputs = Vector.empty,
+    extraOutputs = Vector(generatedCodeField)
+  ).withInstructions(
+    Some({
       val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
       s"""You will be given the input fields and you will respond with `generated_code`.
          |Generate executable Python code that programmatically computes the correct $outputs.
          |Print the result as a JSON object whose keys are the output field names — for example
          |    print(json.dumps({"answer": value, ...}))
          |The downstream step parses this output and produces the final structured response.""".stripMargin
-    }))
+    })
+  )
 
   /** SignatureLayout for the retry step when execution failed. Adds `previous_code` and `error` as inputs.
     */
-  val regenerateSignature: SignatureLayout =
-    buildSig(
-      extraInputs = Vector(previousCodeField, errorField),
-      extraOutputs = Vector(generatedCodeField)
-    ).withInstructions(Some(
-      """You are given the previous Python code and the error message it produced.
+  val regenerateSignature: SignatureLayout = buildSig(
+    extraInputs = Vector(previousCodeField, errorField),
+    extraOutputs = Vector(generatedCodeField)
+  ).withInstructions(Some("""You are given the previous Python code and the error message it produced.
         |Your task is to fix the error and emit corrected `generated_code`.
-        |The corrected code must still print its result as a JSON object.""".stripMargin
-    ))
+        |The corrected code must still print its result as a JSON object.""".stripMargin))
 
   /** SignatureLayout for the final answer-extraction step. Has the user's original outputs plus `final_generated_code`
     * + `code_output` as inputs.
     */
-  val answerSignature: SignatureLayout =
-    baseLayout
-      .withInputFields(baseLayout.inputFields ++ Vector(finalGeneratedCodeField, codeOutputField))
-      .withInstructions(Some({
+  val answerSignature: SignatureLayout = baseLayout
+    .withInputFields(baseLayout.inputFields ++ Vector(finalGeneratedCodeField, codeOutputField))
+    .withInstructions(
+      Some({
         val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
         s"Given the final Python code and its printed output, produce the final $outputs."
-      }))
+      })
+    )
 
   /** The initial code-generation predict, built once from the CoT-augmented [[generateSignature]] and exposed as stable
     * optimizer state — a TYPED `Predict[I, CodeOut]` (the base input shape unchanged, with missing code modeled
     * explicitly by [[ProgramOfThought.codeOutShape]]). Addressable + tunable via [[generatorPredictOverride]];
     * [[forward]] executes this member rather than rebuilding a local predictor for each call.
     */
-  val generatorPredict: Predict[I, ProgramOfThought.CodeOut] =
-    generatorPredictOverride.getOrElse(Predict(
+  val generatorPredict: Predict[I, ProgramOfThought.CodeOut] = generatorPredictOverride.getOrElse(
+    Predict(
       signature = Signature(
         name = baseSignature.name,
         layout = ProgramOfThought.augmented(generateSignature),
@@ -132,55 +123,63 @@ final case class ProgramOfThought[I, O](
       ),
       name = Some(ProgramOfThought.generatorModuleName),
       runtime = ProgramOfThought.SignatureProgramRuntime
-    ))
+    )
+  )
 
   /** The retry code-regeneration predict, built once from the CoT-augmented [[regenerateSignature]] — typed over the
     * base input plus `previous_code` and `error` (two input appends).
     */
-  val regeneratorPredict: Predict[((I, String), String), ProgramOfThought.CodeOut] =
-    regeneratorPredictOverride.getOrElse(Predict(
-      signature = Signature(
-        name = baseSignature.name,
-        layout = ProgramOfThought.augmented(regenerateSignature),
-        inputShape = InputAugmentation.appendedStringInput(
-          InputAugmentation.appendedStringInput(baseSignature.inputShape, previousCodeField, "ProgramOfThought"),
-          errorField,
-          "ProgramOfThought"
+  val regeneratorPredict: Predict[((I, String), String), ProgramOfThought.CodeOut] = regeneratorPredictOverride
+    .getOrElse(
+      Predict(
+        signature = Signature(
+          name = baseSignature.name,
+          layout = ProgramOfThought.augmented(regenerateSignature),
+          inputShape = InputAugmentation.appendedStringInput(
+            InputAugmentation.appendedStringInput(baseSignature.inputShape, previousCodeField, "ProgramOfThought"),
+            errorField,
+            "ProgramOfThought"
+          ),
+          outputShape = ProgramOfThought.codeOutShape
         ),
-        outputShape = ProgramOfThought.codeOutShape
-      ),
-      name = Some(ProgramOfThought.regeneratorModuleName),
-      runtime = ProgramOfThought.SignatureProgramRuntime
-    ))
+        name = Some(ProgramOfThought.regeneratorModuleName),
+        runtime = ProgramOfThought.SignatureProgramRuntime
+      )
+    )
 
   /** The final answer-extraction predict, built once from the CoT-augmented [[answerSignature]] — typed over the base
     * input plus `final_generated_code` and `code_output`, with the reasoning-prepended decode inside the predict (the
     * `prepend` evidence this class already carries).
     */
-  val answererPredict: Predict[((I, String), String), ProgramOfThought.WithReasoning[O]] =
-    answererPredictOverride.getOrElse(Predict(
-      signature = Signature(
-        name = baseSignature.name,
-        layout = ProgramOfThought.augmented(answerSignature),
-        inputShape = InputAugmentation.appendedStringInput(
-          InputAugmentation.appendedStringInput(baseSignature.inputShape, finalGeneratedCodeField, "ProgramOfThought"),
-          codeOutputField,
-          "ProgramOfThought"
+  val answererPredict: Predict[((I, String), String), ProgramOfThought.WithReasoning[O]] = answererPredictOverride
+    .getOrElse(
+      Predict(
+        signature = Signature(
+          name = baseSignature.name,
+          layout = ProgramOfThought.augmented(answerSignature),
+          inputShape = InputAugmentation.appendedStringInput(
+            InputAugmentation.appendedStringInput(
+              baseSignature.inputShape,
+              finalGeneratedCodeField,
+              "ProgramOfThought"
+            ),
+            codeOutputField,
+            "ProgramOfThought"
+          ),
+          outputShape = OutputAugmentation.prependedStringShape(
+            baseSignature.outputShape,
+            ChainOfThought.reasoningField,
+            ChainOfThought.reasoningName,
+            "ProgramOfThought",
+            baseSignature.name
+          )
         ),
-        outputShape = OutputAugmentation.prependedStringShape(
-          baseSignature.outputShape,
-          ChainOfThought.reasoningField,
-          ChainOfThought.reasoningName,
-          "ProgramOfThought",
-          baseSignature.name
-        )
-      ),
-      name = Some(ProgramOfThought.answererModuleName),
-      runtime = ProgramOfThought.SignatureProgramRuntime
-    ))
+        name = Some(ProgramOfThought.answererModuleName),
+        runtime = ProgramOfThought.SignatureProgramRuntime
+      )
+    )
 
-  override protected val lifecycle: ModuleLifecycle[I, Out] =
-    ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     for
@@ -194,13 +193,13 @@ final case class ProgramOfThought[I, O](
     * error)` into `regenerator` for the next attempt; the first success wins; exhausting the budget surfaces the last
     * failure. An interpreter-level failure aborts immediately (no LM fix).
     */
-  private def runCode(
-      call: ProgramCall[I]
-  )(using RuntimeContext): Either[DspyError, (String, String)] =
+  private def runCode(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, (String, String)] =
     AgentLoop.run[Option[ProgramOfThought.Attempt], (String, String)](None, 0, maxIterations)(
       onExhausted = {
-        case Some(attempt) => Left(RuntimeError("program_of_thought", attempt.exhaustionMessage))
-        case None          => Left(RuntimeError("program_of_thought", s"Max attempts ($maxIterations) reached."))
+        case Some(attempt) =>
+          Left(RuntimeError("program_of_thought", attempt.exhaustionMessage))
+        case None =>
+          Left(RuntimeError("program_of_thought", s"Max attempts ($maxIterations) reached."))
       }
     )(potStep(call))
 
@@ -208,9 +207,7 @@ final case class ProgramOfThought[I, O](
     * prior failure), generate + parse + execute, and either finish with `(code, output)` or carry the failure to the
     * next attempt.
     */
-  private def potStep(
-      call: ProgramCall[I]
-  )(using
+  private def potStep(call: ProgramCall[I])(using
       RuntimeContext
   ): (
       Option[ProgramOfThought.Attempt],
@@ -219,31 +216,48 @@ final case class ProgramOfThought[I, O](
     (previous, _) =>
       // Generator on the first attempt, regenerator (carrying the prior failure) thereafter. The two predicts
       // have different typed inputs, so the dispatch happens at the call rather than on a shared predict value.
-      val generated = previous match
-        case None =>
-          generatorPredict(call)
-        case Some(attempt) =>
-          regeneratorPredict(call.mapInput(input => ((input, attempt.code), attempt.error)))
+      val generated =
+        previous match
+          case None =>
+            generatorPredict(call)
+          case Some(attempt) =>
+            regeneratorPredict(call.mapInput(input => ((input, attempt.code), attempt.error)))
 
       generated.flatMap { prediction =>
         prediction.output.generatedCode match
           case None =>
             val missing = "The model response did not contain the required generated_code field."
-            Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
-              code = "",
-              error = missing,
-              exhaustionMessage = s"Max attempts ($maxIterations) reached. Last generation error: $missing"
-            ))))
+            Right(
+              AgentLoop
+                .Step
+                .Continue(
+                  Some(
+                    ProgramOfThought.Attempt(
+                      code = "",
+                      error = missing,
+                      exhaustionMessage = s"Max attempts ($maxIterations) reached. Last generation error: $missing"
+                    )
+                  )
+                )
+            )
           case Some(rawCode) =>
             // Shared with CodeAct — upstream's `_parse_code` is one function serving both programs, so both get
             // the same LM-output tolerance (fence stripping, `---` truncation, trailing-assignment echo).
             GeneratedPython.parse(rawCode) match
               case Left(parseErr) =>
-                Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
-                  rawCode,
-                  parseErr,
-                  s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
-                ))))
+                Right(
+                  AgentLoop
+                    .Step
+                    .Continue(
+                      Some(
+                        ProgramOfThought.Attempt(
+                          rawCode,
+                          parseErr,
+                          s"Max attempts ($maxIterations) reached. Last parse error: $parseErr"
+                        )
+                      )
+                    )
+                )
               case Right(code) =>
                 interpreter.execute(code) match
                   case Right(result) if result.exitCode == 0 =>
@@ -253,11 +267,19 @@ final case class ProgramOfThought[I, O](
                     Right(AgentLoop.Step.Done(code -> result.finalOutput.getOrElse(result.stdout.stripTrailing)))
                   case Right(result) =>
                     val stderr = result.stderr.stripTrailing
-                    Right(AgentLoop.Step.Continue(Some(ProgramOfThought.Attempt(
-                      code,
-                      stderr,
-                      s"Max attempts ($maxIterations) reached. Last execution error: $stderr"
-                    ))))
+                    Right(
+                      AgentLoop
+                        .Step
+                        .Continue(
+                          Some(
+                            ProgramOfThought.Attempt(
+                              code,
+                              stderr,
+                              s"Max attempts ($maxIterations) reached. Last execution error: $stderr"
+                            )
+                          )
+                        )
+                    )
                   case Left(interpreterErr) =>
                     // Interpreter itself failed (process couldn't start, timed out, …). Don't retry — no LM fix.
                     Left(interpreterErr)
@@ -272,9 +294,9 @@ object ProgramOfThought:
     */
   private[programs] final case class Attempt(code: String, error: String, exhaustionMessage: String)
 
-  private[programs] val generatorModuleName   = "program_of_thought_generate"
-  private[programs] val regeneratorModuleName = "program_of_thought_regenerate"
-  private[programs] val answererModuleName    = "program_of_thought_answer"
+  private[programs] val generatorModuleName: String = ProgramOfThoughtProtocol.generatorModuleName
+  private[programs] val regeneratorModuleName: String = ProgramOfThoughtProtocol.regeneratorModuleName
+  private[programs] val answererModuleName: String = ProgramOfThoughtProtocol.answererModuleName
 
   /** Use one stateless settings-based runtime for default inner predictors. Keeping it in the companion means a
     * state-only `copy` rebuild retains the same execution resource.
@@ -282,39 +304,18 @@ object ProgramOfThought:
   private[programs] object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
 
   /** CoT-augment a step layout by prepending `reasoning`. */
-  private[programs] def augmented(layout: SignatureLayout): SignatureLayout =
-    ChainOfThought.augmentLayout(layout)
+  private[programs] def augmented(layout: SignatureLayout): SignatureLayout = ChainOfThought.augmentLayout(layout)
 
   // ── The step signatures' hand-declared fields (static; hoisted so the typed shapes and the layouts share them).
   // dspy 3.2.1 alignment (item P3): the hardcoded `prefix =` markers were dropped. `FieldSpec.normalize` derives
   // the marker from the field NAME (title-case via inferPrefix): generated_code -> "Generated Code:",
   // previous_code -> "Previous Code:", error -> "Error:", final_generated_code -> "Final Generated Code:",
   // code_output -> "Code Output:". The old code reused "Code:" on two distinct fields; derivation disambiguates. ──
-  private[programs] val generatedCodeField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name = "generated_code",
-    typeRef = TypeRef.string,
-    description = Some("Python code that, when executed, computes the answer and prints it as JSON.")
-  ))
-  private[programs] val previousCodeField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name = "previous_code",
-    typeRef = TypeRef.string,
-    description = Some("The Python code from the previous attempt that errored.")
-  ))
-  private[programs] val errorField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name = "error",
-    typeRef = TypeRef.string,
-    description = Some("Error message produced by the previous Python code.")
-  ))
-  private[programs] val finalGeneratedCodeField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name = "final_generated_code",
-    typeRef = TypeRef.string,
-    description = Some("The final Python code that produced the answer.")
-  ))
-  private[programs] val codeOutputField: FieldSpec = FieldSpec.normalize(FieldSpec(
-    name = "code_output",
-    typeRef = TypeRef.string,
-    description = Some("The printed output of the final Python code.")
-  ))
+  private[programs] val generatedCodeField: FieldSpec = ProgramOfThoughtProtocol.generatedCodeField
+  private[programs] val previousCodeField: FieldSpec = ProgramOfThoughtProtocol.previousCodeField
+  private[programs] val errorField: FieldSpec = ProgramOfThoughtProtocol.errorField
+  private[programs] val finalGeneratedCodeField: FieldSpec = ProgramOfThoughtProtocol.finalGeneratedCodeField
+  private[programs] val codeOutputField: FieldSpec = ProgramOfThoughtProtocol.codeOutputField
 
   /** The typed output consumed by the generate / regenerate loop. The augmented layout also asks the LM for
     * `reasoning`, but that field is execution evidence rather than part of this semantic output. Missing code is an
@@ -326,20 +327,4 @@ object ProgramOfThought:
     * retry state can represent the failure honestly; a present non-string value is rejected in the ordinary error
     * channel. `jsonSchemaString` stays `None` for parity with the prior direct `DynamicPredict` construction.
     */
-  private[programs] val codeOutShape: Shape[CodeOut] = new Shape[CodeOut]:
-    val fieldSpecs: Vector[FieldSpec] = Vector(generatedCodeField)
-
-    def encode(value: CodeOut): DynamicValue.Record =
-      value.generatedCode match
-        case Some(code) => DynamicValue.Record(Chunk(
-            "generated_code" -> DynamicValue.Primitive(PrimitiveValue.String(code))
-          ))
-        case None => DynamicValue.Record.empty
-
-    def decode(raw: DynamicValue.Record): Either[DspyError, CodeOut] =
-      DynamicValues.recordGet(raw, "generated_code") match
-        case None                                                      => Right(CodeOut(None))
-        case Some(DynamicValue.Primitive(PrimitiveValue.String(code))) => Right(CodeOut(Some(code)))
-        case Some(other)                                               => Left(ValidationError(
-            s"ProgramOfThought generated_code must be a String, got: $other"
-          ))
+  private[programs] val codeOutShape: Shape[CodeOut] = ProgramOfThoughtProtocol.codeOutShape

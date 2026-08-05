@@ -520,22 +520,25 @@ observations between snippets. RLM is intended for selective exploration of inpu
 A useful reading order is:
 
 1. [`ProgramOfThought.scala`](ProgramOfThought.scala): derived signatures, retry state, execution, and answer assembly.
-2. [`CodeAct.scala`](CodeAct.scala): the shared `parseCode` normalization.
-3. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion behavior.
-4. [`InputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
+2. [`ProgramOfThoughtProtocol.scala`](ProgramOfThoughtProtocol.scala): step fields, predictor names, and generated-code
+   decoding.
+3. [`runtime/GeneratedPython.scala`](../runtime/GeneratedPython.scala): code-fence and generated-code normalization shared
+   with CodeAct.
+4. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion behavior.
+5. [`InputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/InputAugmentation.scala): typed
    appending of retry and answer evidence.
-5. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): public
+6. [`OutputAugmentation.scala`](../../../../../../../typed/src/main/scala/dspy4s/typed/OutputAugmentation.scala): public
    reasoning augmentation.
-6. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
+7. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `CodeResult`, interpreter failures, and lifecycle.
-7. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
+8. [`CompositeOptimizableTraversalInstances.scala`](../optimization/CompositeOptimizableTraversalInstances.scala): the
    three-leaf optimizer traversal.
-8. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
-9. [`ProgramOfThoughtSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtSuite.scala): executable cases
+9. [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala): streaming targets.
+10. [`ProgramOfThoughtSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtSuite.scala): executable cases
    for first-attempt success, regeneration, exhaustion, lifecycle, subprocess execution, and `SUBMIT` precedence.
-10. [`ProgramOfThoughtOptimizableTraversalSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtOptimizableTraversalSuite.scala):
+11. [`ProgramOfThoughtOptimizableTraversalSuite.scala`](../../../../../test/scala/dspy4s/programs/ProgramOfThoughtOptimizableTraversalSuite.scala):
     optimizer order and replacement laws.
-11. [`Cheatsheet.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise usage
+12. [`Cheatsheet.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/Cheatsheet.scala): a concise usage
     example.
 
 ## Scope and assumptions
