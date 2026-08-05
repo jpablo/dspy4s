@@ -126,7 +126,7 @@ lazy val adapters = (project in file("modules/adapters"))
 lazy val programs = (project in file("modules/programs"))
   .dependsOn(core, lm, adapters, signatures)
   .settings(commonSettings)
-  .settings(name := "dspy4s-modules")
+  .settings(name := "dspy4s-programs")
   .settings(
     libraryDependencies ++= Seq(
       "io.github.iltotore" %% "iron"  % ironVersion,

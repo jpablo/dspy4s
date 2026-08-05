@@ -8,7 +8,7 @@
   *
   * Status: example
   */
-package dspy4s.examples.typed
+package dspy4s.examples.signatures
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
@@ -34,7 +34,7 @@ object FunctionExample:
     Predict(emotion)((sentence = sentence))
       .map(_.output.sentiment)
 
-// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.functionMain"
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.signatures.functionMain"
 @main def functionMain(): Unit =
   Demo.withLm {
     println("Function: " + FunctionExample.classify("i started feeling a little vulnerable"))

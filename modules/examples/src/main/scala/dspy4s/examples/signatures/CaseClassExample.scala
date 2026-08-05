@@ -5,7 +5,7 @@
   *
   * Status: example
   */
-package dspy4s.examples.typed
+package dspy4s.examples.signatures
 
 import zio.blocks.schema.Schema
 
@@ -61,7 +61,7 @@ object CaseClassExample:
       RawPrediction(values = dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" := rawSentiment)))
     Prediction.from(raw, signature.outputShape)
 
-// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.caseClassMain"
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.signatures.caseClassMain"
 @main def caseClassMain(): Unit =
   Demo.withLm {
     println("CaseClass: " + CaseClassExample.classify("i started feeling a little vulnerable"))

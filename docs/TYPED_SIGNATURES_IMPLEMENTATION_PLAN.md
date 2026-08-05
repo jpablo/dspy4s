@@ -824,7 +824,7 @@ Acceptance criteria:
 
 ### Outcomes (executed 2026-05-24)
 
-Four example files under `modules/examples/src/main/scala/dspy4s/examples/typed/`:
+Four example files under `modules/examples/src/main/scala/dspy4s/examples/signatures/`:
 
   - `CaseClassExample.scala` — Emotion classifier with case-class I/O.
     Shows typed dot-access (`tp.output.sentiment`) and an offline

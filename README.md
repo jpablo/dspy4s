@@ -61,7 +61,7 @@ dspy4s is split into focused modules so you can depend only on what you need.
 | `signatures` | `dspy4s-signatures` | Static `Signature` / `Spec` surface and `Shape` codecs.   |
 | `lm`        | `dspy4s-lm`        | Provider-agnostic LM API and the OpenAI client.             |
 | `adapters`  | `dspy4s-adapters`  | Chat / JSON / XML adapters and native function-calling.     |
-| `programs`  | `dspy4s-modules`   | `Predict`, `ChainOfThought`, `ReAct`, refinement programs.  |
+| `programs`  | `dspy4s-programs`  | `Predict`, `ChainOfThought`, `ReAct`, refinement programs.  |
 | `evaluate`  | `dspy4s-evaluate`  | `Evaluate` runner, metrics, LLM-as-judge.                   |
 | `optimize`  | `dspy4s-optimize`  | Bootstrap few-shot, COPRO, MIPROv2, KNN, ensembles.         |
 | `gepa`      | `dspy4s-gepa`      | The reflective Genetic-Pareto prompt optimizer.             |

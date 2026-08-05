@@ -9,7 +9,7 @@
   *
   * Status: example
   */
-package dspy4s.examples.typed
+package dspy4s.examples.signatures
 
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.signatures.Signature
@@ -41,7 +41,7 @@ object BuilderExample:
     .instructions("Classify emotion in the given sentence.")
     .build
 
-// Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.typed.builderMain"
+// Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.signatures.builderMain"
 @main def builderMain(): Unit =
   println("toxicity outputs:  " + BuilderExample.toxicity.outputFields.map(_.name))
   println("emotion outputs:   " + BuilderExample.classifyEmotion.outputFields.map(_.name))

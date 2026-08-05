@@ -55,11 +55,11 @@ builds a signature from an input type and an output type directly. The output is
 a typed value, so `_.output.sentiment` has type `Emotion` with no cast:
 
 ```scala
---8<-- "typed/CaseClassExample.scala:derived-types"
+--8<-- "signatures/CaseClassExample.scala:derived-types"
 ```
 
 ```scala
---8<-- "typed/CaseClassExample.scala:derived-sig"
+--8<-- "signatures/CaseClassExample.scala:derived-sig"
 ```
 
 ## Building a signature programmatically
@@ -69,7 +69,7 @@ config, tests), `Signature.builder` constructs one fluently. Each `input`/
 `output` call summons the field's `Schema`:
 
 ```scala
---8<-- "typed/BuilderExample.scala:builder-sig"
+--8<-- "signatures/BuilderExample.scala:builder-sig"
 ```
 
 ## Custom types

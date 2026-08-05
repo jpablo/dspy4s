@@ -10,7 +10,7 @@
   *
   * Status: example
   */
-package dspy4s.examples.typed
+package dspy4s.examples.signatures
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
@@ -59,7 +59,7 @@ object SpecExample:
     import dspy4s.programs.strategies.Predict
     Predict(emotion)((sentence = sentence)).map(_.output.sentiment)
 
-// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.typed.specMain"
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.signatures.specMain"
 @main def specMain(): Unit =
   Demo.withLm {
     println("Spec: " + SpecExample.callEmotion("i started feeling a little vulnerable"))

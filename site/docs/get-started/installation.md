@@ -37,7 +37,7 @@ libraryDependencies ++= Seq(
   "io.github.jpablo" %% "dspy4s-signatures" % "0.1.0", // static signatures
   "io.github.jpablo" %% "dspy4s-lm"        % "0.1.0", // language-model providers
   "io.github.jpablo" %% "dspy4s-adapters"  % "0.1.0", // chat / JSON adapters
-  "io.github.jpablo" %% "dspy4s-modules"   % "0.1.0", // Predict, ChainOfThought, ReAct
+  "io.github.jpablo" %% "dspy4s-programs"  % "0.1.0", // Predict, ChainOfThought, ReAct
   "io.github.jpablo" %% "dspy4s-evaluate"  % "0.1.0", // metrics + Evaluate
   "io.github.jpablo" %% "dspy4s-optimize"  % "0.1.0", // COPRO, MIPROv2, bootstrap
   "io.github.jpablo" %% "dspy4s-gepa"      % "0.1.0"  // GEPA optimizer
@@ -50,7 +50,7 @@ libraryDependencies ++= Seq(
 | signatures | `dspy4s-signatures` | Statically checked `Signature` / `Spec` surface. |
 | lm | `dspy4s-lm` | Language-model providers (OpenAI). |
 | adapters | `dspy4s-adapters` | Chat / JSON adapters and native function-calling. |
-| programs | `dspy4s-modules` | `Predict`, `ChainOfThought`, `ReAct`, refinement. |
+| programs | `dspy4s-programs` | `Predict`, `ChainOfThought`, `ReAct`, refinement. |
 | evaluate | `dspy4s-evaluate` | `Evaluate`, metrics, LLM-as-judge. |
 | optimize | `dspy4s-optimize` | Bootstrap few-shot, COPRO, MIPROv2. |
 | gepa | `dspy4s-gepa` | The reflective Genetic-Pareto optimizer. |

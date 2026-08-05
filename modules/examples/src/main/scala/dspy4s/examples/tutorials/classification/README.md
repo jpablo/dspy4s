@@ -12,7 +12,7 @@ There's no separate dspy4s port of that external article, but classification is 
 
 - Declare the label set as a Scala `enum` (it `derives Schema`) and make it an output field — the allowed
   values reach the LM via the signature and decode back to the typed enum. See
-  [`typed/CaseClassExample.scala`](../../typed/CaseClassExample.scala) (an `Emotion` enum) and the
+  [`signatures/CaseClassExample.scala`](../../signatures/CaseClassExample.scala) (an `Emotion` enum) and the
   classification snippets in [`learn/programming/Signatures.scala`](../../learn/programming/Signatures.scala).
 - Wrap it in `Predict` or `ChainOfThought`, evaluate with a metric ([`learn/evaluation`](../../learn/evaluation/README.md)),
   and tune demos with `BootstrapFewShot*` ([`learn/optimization`](../../learn/optimization/README.md)).
