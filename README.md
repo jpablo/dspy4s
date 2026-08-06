@@ -38,7 +38,7 @@ the output, with no signature changes.
   (`_.output.sentiment`) is checked by the compiler.
 - **One codec spine.** Field values flow through a single `DynamicValue.Record`
   intermediate (from `zio-blocks-schema`) shared by adapters, programs,
-  evaluation, and the program API. Decode failures surface at the `run`
+  evaluation, and the program API. Decode failures surface at the call
   boundary as `Either[DspyError, _]`, not via lazy field access.
 - **Composable programs.** `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`,
   `ProgramOfThought`, `BestOfN`, and `Refine` are plain values you compose like
@@ -46,9 +46,9 @@ the output, with no signature changes.
   program for reasoning over long contexts without placing them in the prompt:
   inputs become variables in a sandboxed REPL that the model explores with
   generated code.
-- **Compiler-verified docs.** Every code sample on the docs site is extracted
-  from the `examples` module, which builds under strict flags (`-Werror`,
-  `-Wunused:all`). A snippet that would not compile fails the build.
+- **Compiler-verified examples.** Scala samples extracted into the docs site
+  from the `examples` module build under strict flags (`-Werror`,
+  `-Wunused:all`). An extracted snippet that would not compile fails the build.
 
 ## Modules
 
@@ -108,7 +108,7 @@ It is published at <https://jpablo.github.io/dspy4s/>.
 
 - [Quickstart](site/docs/get-started/quickstart.md): write your first signature
   and run it end to end.
-- [Signatures](site/docs/learn/programming/signatures.md): the full set of ways
+- [Signatures](site/docs/programs/signatures.md): the full set of ways
   to declare inputs and outputs (inline, traits, enums, custom types).
 - [Architecture](docs/ARCHITECTURE.md): the design choices, module graph, and
   the static and runtime-defined stacks.
