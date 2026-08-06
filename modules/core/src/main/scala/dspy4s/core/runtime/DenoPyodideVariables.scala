@@ -46,11 +46,17 @@ private[runtime] object DenoPyodideVariables:
   )
   private val IdentifierPattern = "^[A-Za-z_][A-Za-z0-9_]*$".r
 
-  /** Prepend `name = json.loads("<json>")` assignments for each variable (plus `import json`). One uniform JSON-based
-    * mechanism vs upstream's literal/file split; same JSON-compatible value semantics.
+  /** Build the `name = json.loads("<json>")` assignment prelude for `variables` (plus `import json`); the empty string
+    * when there are none. One uniform JSON-based mechanism vs upstream's literal/file split; same JSON-compatible value
+    * semantics.
+    *
+    * The caller prepends this to EVERY executed code block (upstream parity: variables are re-assigned at the top of
+    * each block, so a sandbox-side mutation of an injected variable does not survive to the next `execute`). The built
+    * text depends only on `variables`, so callers may cache it across calls -- the per-variable JSON encoding is
+    * proportional to total value size, which for RLM is the whole input context.
     */
-  def inject(code: String, variables: Map[String, DynamicValue]): Either[DspyError, String] =
-    if variables.isEmpty then Right(code)
+  def prelude(variables: Map[String, DynamicValue]): Either[DspyError, String] =
+    if variables.isEmpty then Right("")
     else
       val invalid = variables.keys.find(k => !IdentifierPattern.matches(k) || PythonKeywords.contains(k) || k == "json")
       invalid match
@@ -60,4 +66,4 @@ private[runtime] object DenoPyodideVariables:
             // Double JSON-encoding: the inner JSON text becomes a valid Python string literal.
             s"$name = json.loads(${encodeJson(DynamicValues.fromAny(encodeJson(value)))})"
           }
-          Right((("import json" +: assignments) :+ code).mkString("\n"))
+          Right(("import json" +: assignments).mkString("\n"))

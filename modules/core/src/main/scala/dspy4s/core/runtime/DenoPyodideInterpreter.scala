@@ -85,20 +85,36 @@ final class DenoPyodideInterpreter(
   private var requestId                            = 0
   private var toolsRegistered                      = false
   private var filesMounted                         = false
+  // Single-entry, identity-keyed cache of the variable-assignment prelude. The prelude depends only on the
+  // `variables` map, and RLM's iteration loop passes the SAME immutable map on every execute while the values can
+  // be an entire long context -- caching makes the serialization once per map instance instead of once per call.
+  // The prelude is still prepended to (and re-run with) every code block, so re-assignment semantics are unchanged.
+  private var cachedPrelude: Option[(Map[String, DynamicValue], String)] = None
 
   override def execute(code: String): Either[DspyError, CodeResult] = execute(code, Map.empty)
 
   /** Like [[execute]], but first defines each of `variables` as a Python variable in the sandbox (JSON-compatible
     * values only). Variable names must be plain Python identifiers (and not `json`, which the injection uses).
+    * Variables are re-assigned at the top of every call's code block (upstream parity), so a sandbox-side mutation of
+    * an injected variable does not survive to the next `execute`.
     */
   override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
     for
-      injected <- DenoPyodideVariables.inject(code, variables)
-      _        <- ensureProcess()
-      _        <- mountFiles()
-      _        <- registerTools()
-      result   <- executeRequest(injected)
+      prelude <- injectionPrelude(variables)
+      _       <- ensureProcess()
+      _       <- mountFiles()
+      _       <- registerTools()
+      result  <- executeRequest(if prelude.isEmpty then code else s"$prelude\n$code")
     yield result
+
+  private def injectionPrelude(variables: Map[String, DynamicValue]): Either[DspyError, String] =
+    cachedPrelude match
+      case Some((cached, prelude)) if cached eq variables => Right(prelude)
+      case _ =>
+        DenoPyodideVariables.prelude(variables).map { prelude =>
+          cachedPrelude = Some((variables, prelude))
+          prelude
+        }
 
   override def close(): Unit =
     stdin.foreach { w =>

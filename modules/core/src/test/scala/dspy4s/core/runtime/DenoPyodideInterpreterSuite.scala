@@ -82,6 +82,19 @@ class DenoPyodideInterpreterSuite extends FunSuite:
     assert(plain.execute("print(1)", Map("json" -> DynamicValues.fromAny(1))).isLeft)
   }
 
+  test("variables are re-assigned on every execute: a sandbox-side mutation does not survive to the next call") {
+    assumeDeno()
+    // The SAME map instance across calls, as RLM's loop does — this also exercises the interpreter's cached
+    // assignment prelude, which must still be prepended (and re-run) on every call.
+    val variables = Map[String, DynamicValue]("counter" -> DynamicValues.fromAny(10))
+    assertEquals(plain.execute("counter = counter + 1\nprint(counter)", variables).toOption.get.stdout.trim, "11")
+    // Upstream parity: the injection prelude resets `counter` to 10 before this block runs.
+    assertEquals(plain.execute("print(counter)", variables).toOption.get.stdout.trim, "10")
+    // Other sandbox globals still persist across calls (the REPL itself is stateful).
+    assertEquals(plain.execute("keep = counter * 2", variables).map(_.exitCode), Right(0))
+    assertEquals(plain.execute("print(keep)", variables).toOption.get.stdout.trim, "20")
+  }
+
   test("host tools are callable from sandboxed code, and SUBMIT returns a structured finalOutput") {
     assumeDeno()
     val greet = SandboxTool(

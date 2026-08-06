@@ -90,6 +90,11 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
         }
       }
 
+  /** Bridges [[RLM.ReplAction]]s onto the REPL. `inputVars` (the same map instance) rides on EVERY `execute` --
+    * upstream parity: the interpreter re-assigns the variables at the top of each code block, so a model-side mutation
+    * of an input variable deliberately does not survive to the next step. The interpreter caches the serialized
+    * assignment prelude per map instance, so the repeated injection costs no host-side re-encoding.
+    */
   private def replActionInterpreter(
       interpreter: ReplCodeInterpreter,
       inputVars  : Map[String, DynamicValue]
