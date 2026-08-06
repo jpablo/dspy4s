@@ -53,7 +53,7 @@ final case class DynamicPredict(
     layout : SignatureLayout,
     demos  : Vector[Example] = Vector.empty,
     name   : Option[String]  = None,
-    runtime: ProgramRuntime  = new SettingsProgramRuntime {},
+    runtime: ProgramRuntime  = SettingsProgramRuntime.default,
     /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. A [[Predict]]
       * derives the same input for its own engine from `signature.outputShape.jsonSchemaString`; users who construct
       * `DynamicPredict` directly usually leave it `None`.

@@ -2,7 +2,7 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError}
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets
 
@@ -52,18 +52,6 @@ private[lm] object DynamicJson:
       case seq: DynamicValue.Sequence => seq.elements.iterator.toVector
       case _                          => Vector.empty
 
-  def asString(value: DynamicValue): Option[String] =
-    value match
-      case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
-      case _                                                => None
+  def asString(value: DynamicValue): Option[String] = DynamicValues.asString(value)
 
-  def asLong(value: DynamicValue): Option[Long] =
-    value match
-      case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Some(n)
-      case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Some(n.toLong)
-      case DynamicValue.Primitive(PrimitiveValue.Short(n))  => Some(n.toLong)
-      case DynamicValue.Primitive(PrimitiveValue.Byte(n))   => Some(n.toLong)
-      case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n.toLong)
-      case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Some(n.toLong)
-      case DynamicValue.Primitive(PrimitiveValue.String(s)) => s.toLongOption
-      case _                                                => None
+  def asLong(value: DynamicValue): Option[Long] = DynamicValues.asLong(value)

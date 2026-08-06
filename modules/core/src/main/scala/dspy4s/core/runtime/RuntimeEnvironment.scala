@@ -1,6 +1,5 @@
 package dspy4s.core.runtime
 
-import dspy4s.core.contracts.AdapterRef
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
@@ -63,8 +62,8 @@ object RuntimeEnvironment:
     val caller = Thread.currentThread().threadId()
     val owner  = configureOwnerThreadId.get()
     if owner == -1L then
-      if configureOwnerThreadId.compareAndSet(-1L, caller) then ensureConfigureAllowed()
-      else ensureConfigureAllowed()
+      val _ = configureOwnerThreadId.compareAndSet(-1L, caller)
+      ensureConfigureAllowed()
     else if owner != caller then
       Left(ConfigurationError("Cannot call RuntimeEnvironment.configure from a non-owner thread"))
     else
@@ -127,26 +126,20 @@ object RuntimeEnvironment:
   def activeCallDepth: Int = activeCallStack.size
 
   /** The innermost open scope's `callId`, if any -- the `parentCallId` a newly-opened scope should inherit. */
-  def activeCallId: Option[String] = current.callStack.lastOption.orElse(current.activeCallId)
+  def activeCallId: Option[String] = current.activeCallId
 
-  /** Push `callId` onto the call stack (and mark it the active call) for the duration of `thunk`, then unwind just the
+  /** Push `callId` onto the call stack (making it the active call) for the duration of `thunk`, then unwind just the
     * call-tracking fields. Unlike [[withContext]], trace / history accumulated inside `thunk` are preserved on exit,
     * since those bubble up to the enclosing scope.
     */
   def withActiveCall[A](callId: String)(thunk: => A): A =
     val previous     = localContext
-    val updatedScope = previous.scope.copy(
-      activeCallId = Some(callId),
-      callStack = previous.callStack :+ callId
-    )
+    val updatedScope = previous.scope.copy(callStack = previous.callStack :+ callId)
     contextRef.set(previous.withScope(updatedScope))
     try thunk
     finally
       val after         = localContext
-      val restoredScope = after.scope.copy(
-        activeCallId = previous.activeCallId,
-        callStack = previous.callStack
-      )
+      val restoredScope = after.scope.copy(callStack = previous.callStack)
       contextRef.set(after.withScope(restoredScope))
 
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay on
@@ -186,16 +179,14 @@ object RuntimeEnvironment:
       val nextHistory = (base.history :+ entry).takeRight(cap)
       contextRef.set(base.withHistory(nextHistory))
 
-  /** Run `body` under a fresh [[RuntimeDelta]] derived from `base` (optionally swapping the adapter), returning the
-    * body's result and accumulated output as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate
-    * each attempt then propagate only the winner's observability via [[propagate]].
+  /** Run `body` under a fresh [[RuntimeDelta]] derived from `base`, returning the body's result and accumulated output
+    * as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate each attempt (applying any per-attempt
+    * service overrides to `base` first) then propagate only the winner's observability via [[propagate]].
     */
-  def isolatedAttempt[A](base: RuntimeContext, adapter: Option[AdapterRef] = None)(
+  def isolatedAttempt[A](base: RuntimeContext)(
       body: RuntimeContext ?=> A
   ): Executed[A] =
-    val isolated = base
-      .withServices(base.services.copy(adapter = adapter.orElse(base.adapter)))
-      .withDelta(RuntimeDelta.empty)
+    val isolated = base.withDelta(RuntimeDelta.empty)
     withContext(isolated) {
       given RuntimeContext = current
       val result           = body
@@ -230,22 +221,30 @@ object RuntimeEnvironment:
   /** The callback handlers registered on the active context. */
   def activeCallbacks: Vector[CallbackHandler] = current.callbacks
 
+  /** Emit a one-off framework diagnostic to stderr under the shared `WARN [dspy4s]` convention. Diagnostics are not
+    * callback events (those are strictly Start/End scope pairs -- see [[dspy4s.core.contracts.CallbackEvent]]); this is
+    * the single seam warning sites route through, so the convention -- and any future redirection -- lives in one place.
+    */
+  def warn(component: String, message: String): Unit =
+    Console.err.println(s"WARN [dspy4s] $component: $message")
+
   /** Deliver `event` to every active callback handler, with the active [[RuntimeContext]] in implicit scope. Handlers
     * are observational: a non-fatal failure is reported and delivery continues, so an observer cannot replace the
     * result of the work it watches or starve later observers.
     */
   def emit(event: CallbackEvent): Unit =
-    val context          = current
-    given RuntimeContext = context
-    activeCallbacks.foreach { callback =>
-      try callback.onEvent(event)
-      catch
-        case NonFatal(error) =>
-          val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
-          Console.err.println(
-            s"dspy4s callback ${callback.getClass.getName} failed for ${event.getClass.getSimpleName}: $detail"
-          )
-    }
+    val context = current
+    if context.callbacks.nonEmpty then
+      given RuntimeContext = context
+      context.callbacks.foreach { callback =>
+        try callback.onEvent(event)
+        catch
+          case NonFatal(error) =>
+            val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+            Console.err.println(
+              s"dspy4s callback ${callback.getClass.getName} failed for ${event.getClass.getSimpleName}: $detail"
+            )
+      }
 
   /** Reset all global and thread-local state to defaults: clears configure ownership, the id counters, the global
     * default context, and this thread's overlay. Test-only.

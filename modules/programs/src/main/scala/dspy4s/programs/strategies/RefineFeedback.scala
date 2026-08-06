@@ -5,9 +5,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{Shape, Signature}
-import zio.blocks.schema.{DynamicValue, Schema}
-
-import java.nio.charset.StandardCharsets
+import zio.blocks.schema.DynamicValue
 
 /** OfferFeedback critic and its translation between runtime traces and per-module advice. */
 private[programs] object RefineFeedback:
@@ -139,7 +137,6 @@ private[programs] object RefineFeedback:
     if start >= 0 && end > start then Some(raw.substring(start, end + 1)) else None
 
   private def decodeStringMap(json: String): Option[Map[String, String]] =
-    Schema.dynamic.jsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)).toOption.collect {
-      case record: DynamicValue.Record =>
-        record.fields.iterator.map((name, value) => name -> DynamicValues.renderText(value)).toMap
+    DynamicValues.parseJsonRecord(json).map { record =>
+      record.fields.iterator.map((name, value) => name -> DynamicValues.renderText(value)).toMap
     }

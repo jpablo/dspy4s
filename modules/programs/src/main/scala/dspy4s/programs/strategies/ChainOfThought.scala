@@ -37,7 +37,7 @@ import zio.blocks.schema.DynamicValue
 final case class ChainOfThought[I, O](
     baseSignature: Signature[I, O],
     demos        : Vector[Example] = Vector.empty,
-    runtime      : ProgramRuntime  = new SettingsProgramRuntime {},
+    runtime      : ProgramRuntime  = SettingsProgramRuntime.default,
     name         : Option[String]  = None,
     /** Module-level LM defaults carried in [[OptimizableParameters]], matching [[Predict]] and [[DynamicPredict]].
       * Per-call config still wins on key collisions.

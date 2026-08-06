@@ -42,14 +42,15 @@ final case class RuntimeConfig(
   * of the observable execution output captured by [[RuntimeDelta]].
   */
 final case class RuntimeScope(
-    asyncTaskId : Option[String] = None,
-    activeCallId: Option[String] = None,
-    callStack   : Vector[String] = Vector.empty
+    asyncTaskId: Option[String] = None,
+    callStack  : Vector[String] = Vector.empty
 ) derives CanEqual:
+  /** The innermost open call scope's id -- always the top of [[callStack]]. */
+  def activeCallId: Option[String] = callStack.lastOption
+
   def fillFrom(defaults: RuntimeScope): RuntimeScope =
     RuntimeScope(
       asyncTaskId = asyncTaskId.orElse(defaults.asyncTaskId),
-      activeCallId = activeCallId.orElse(defaults.activeCallId),
       callStack = if callStack.nonEmpty then callStack else defaults.callStack
     )
 
@@ -106,7 +107,6 @@ final class RuntimeContext private (
       callbackMetadata    : DynamicValue.Record      = this.callbackMetadata,
       captureFailureTraces: Boolean                  = this.captureFailureTraces,
       asyncTaskId         : Option[String]           = this.asyncTaskId,
-      activeCallId        : Option[String]           = this.activeCallId,
       callStack           : Vector[String]           = this.callStack,
       trace               : Vector[TraceEntry]       = this.trace,
       history             : Vector[HistoryEntry]     = this.history
@@ -123,7 +123,6 @@ final class RuntimeContext private (
       callbackMetadata = callbackMetadata,
       captureFailureTraces = captureFailureTraces,
       asyncTaskId = asyncTaskId,
-      activeCallId = activeCallId,
       callStack = callStack,
       trace = trace,
       history = history
@@ -164,7 +163,6 @@ object RuntimeContext:
       callbackMetadata    : DynamicValue.Record      = DynamicValue.Record.empty,
       captureFailureTraces: Boolean                  = false,
       asyncTaskId         : Option[String]           = None,
-      activeCallId        : Option[String]           = None,
       callStack           : Vector[String]           = Vector.empty,
       trace               : Vector[TraceEntry]       = Vector.empty,
       history             : Vector[HistoryEntry]     = Vector.empty
@@ -180,7 +178,7 @@ object RuntimeContext:
         callbackMetadata,
         captureFailureTraces
       ),
-      RuntimeScope(asyncTaskId, activeCallId, callStack),
+      RuntimeScope(asyncTaskId, callStack),
       RuntimeDelta(trace, history)
     )
 

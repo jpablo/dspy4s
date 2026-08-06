@@ -32,13 +32,11 @@ import zio.blocks.schema.DynamicValue
   * rendered trajectory and `final_reasoning` ride on `.raw`.
   *
   * ==Deltas from Python==
-  *   - `llm_query_batched` runs its prompts SEQUENTIALLY (upstream uses an 8-worker thread pool); per-prompt failures
-  *     still yield `[ERROR] …` entries in the result list, like upstream.
   *   - Output-type validation is the signature's `Schema` decode over the whole SUBMIT payload, not per-field pydantic
   *     `parse_value`; a failed decode becomes a `[Type Error] …` observation and the loop continues.
   *   - Upstream's `SandboxSerializable` custom-serialization path (bespoke setup/assignment code per value) is not
   *     ported — inputs are plain `DynamicValue`s injected by the interpreter.
-  *   - `verbose` logging and the async path are omitted.
+  *   - The async path is omitted.
   *
   * @param baseSignature
   *   the task signature; inputs become REPL variables, outputs the SUBMIT fields
@@ -277,9 +275,3 @@ object RLM:
       ctx        : RuntimeContext
   ): Vector[SandboxTool] =
     RLMSandboxTools.build(maxLlmCalls, subLm, ctx)
-
-  // ── Rendering helpers ───────────────────────────────────────────────────────────────────────────────────────
-
-  /** Python-style type name for the variable metadata (upstream `type(value).__name__`). */
-  private[programs] def pythonTypeName(value: DynamicValue): String =
-    RLMReplProtocol.pythonTypeName(value)

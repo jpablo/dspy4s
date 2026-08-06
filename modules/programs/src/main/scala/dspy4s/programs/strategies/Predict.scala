@@ -31,7 +31,7 @@ final case class Predict[I, O](
     signature: Signature[I, O],
     demos    : Vector[Example] = Vector.empty,
     name     : Option[String]  = None,
-    runtime  : ProgramRuntime  = new SettingsProgramRuntime {},
+    runtime  : ProgramRuntime  = SettingsProgramRuntime.default,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `config` (per-call keys win on collision), so it supplies defaults a call may override.
       * Empty by default — then the merged options are exactly the per-call config.
@@ -50,6 +50,9 @@ final case class Predict[I, O](
 ) extends Module[I, O]:
 
   override val moduleName: String = name.getOrElse("predict")
+
+  // The declared input names, computed once: `forward` checks them on every call.
+  private val requiredInputs: Set[String] = signature.layout.inputFields.iterator.map(_.name).toSet
 
   // The same engine `DynamicPredict` builds; `Predict` adds only the encode/decode around it.
   private val engine = PredictEngine(
@@ -98,9 +101,8 @@ final case class Predict[I, O](
     // (notably the Map-based shape used by trait specs) could let a caller silently omit a required input.
     // Validate before spending an LM call. Case-class derivations always produce a complete record, so the
     // check never fires for them; cost is one Set.diff per call.
-    val requiredInputs = signature.layout.inputFields.iterator.map(_.name).toSet
-    val presentInputs  = DynamicValues.recordKeys(inputRecord).toSet
-    val missing        = requiredInputs.diff(presentInputs)
+    val presentInputs = DynamicValues.recordKeys(inputRecord).toSet
+    val missing       = requiredInputs.diff(presentInputs)
     if missing.nonEmpty then
       Left(NotFoundError(
         resource = "program_input",

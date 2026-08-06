@@ -76,8 +76,8 @@ private[adapters] object AdapterTextSupport:
   def renderFields(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
     fields.flatMap { field =>
       val rendered = DynamicValues.recordGet(values, field.name)
+        .orElse(field.defaultValue)
         .map(DynamicValues.renderText)
-        .orElse(field.defaultValue.map(_.toString))
       rendered.map { value =>
         val prefix = field.prefix.getOrElse(s"${field.name}:")
         s"$prefix $value"

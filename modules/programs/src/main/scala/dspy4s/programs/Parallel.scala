@@ -20,12 +20,7 @@ final case class Parallel(
     timeout   : FiniteDuration      = 120.seconds
 ):
   private def resolvedExecutor(using RuntimeContext): ParallelExecutor =
-    val ctx = summon[RuntimeContext]
-    ParallelExecutor(
-      numThreads = numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8))),
-      maxErrors = maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10))),
-      timeout = timeout
-    )
+    ParallelExecutor.fromSettings(timeout = timeout, numThreads = numThreads, maxErrors = maxErrors)
 
   def run(
       tasks: Vector[(DynamicModule, ProgramCall[DynamicValue.Record])]

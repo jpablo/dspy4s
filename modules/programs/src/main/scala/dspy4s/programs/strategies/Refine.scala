@@ -13,6 +13,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.updated
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -178,7 +179,7 @@ object Refine:
             name = "hint_",
             description = Some("A hint to the module from an earlier run")
           )
-          val layoutWithHint = invocation.layout.withInputFields(invocation.layout.inputFields :+ hintField)
+          val layoutWithHint = invocation.layout.appendInput(hintField)
           val inputsWithHint = invocation.inputs.copy(
             values = invocation.inputs.values.updated("hint_", DynamicValues.fromAny(advice)),
             inputKeys = invocation.inputs.inputKeys + "hint_"
@@ -190,14 +191,8 @@ object Refine:
     ): Either[DspyError, ParsedOutput] =
       baseAdapter.parse(layout, output)
 
-  /** The OfferFeedback signature layout: a paraphrase of upstream's `OfferFeedback` docstring, with the input fields
-    * dspy4s can ground from the runtime (program I/O, the runtime trajectory, reward + threshold, and the
-    * `module_names` for which advice is sought) and the `discussion` / `advice` outputs. Per parity, `advice` is a JSON
-    * object keyed by module name (`{module_name: advice}`).
-    */
-  private[programs] val offerFeedbackLayout: SignatureLayout = RefineFeedback.layout
-
-  /** The critic's input: the six grounding fields of [[offerFeedbackLayout]], field names matching the layout exactly.
+  /** The critic's input: the six grounding fields of [[RefineFeedback.layout]], field names matching the layout
+    * exactly.
     */
   private[programs] final case class OfferFeedbackInputs(
       program_inputs    : String,
@@ -213,17 +208,11 @@ object Refine:
     */
   private[programs] final case class OfferFeedbackAdvice(discussion: String, advice: String)
 
-  /** The critic's signature: the hand-built [[offerFeedbackLayout]] (descriptions + instructions preserved verbatim, so
-    * prompt rendering is unchanged) paired with a derived input shape and the lenient output shape.
+  /** The critic's signature: the hand-built [[RefineFeedback.layout]] (descriptions + instructions preserved verbatim,
+    * so prompt rendering is unchanged) paired with a derived input shape and the lenient output shape.
     */
   private[programs] val offerFeedbackSignature: Signature[OfferFeedbackInputs, OfferFeedbackAdvice] =
     RefineFeedback.signature
-
-  /** Render an attempt's runtime [[TraceEntry]] vector as a readable text block — dspy4s's stand-in for Python's
-    * source-grounded trajectory. One block per component: `component: <inputs> -> <outputs>`.
-    */
-  private[programs] def renderTrajectory(trace: Vector[TraceEntry]): String =
-    RefineFeedback.renderTrajectory(trace)
 
   /** Run the OfferFeedback critic (the instance's addressable [[Refine.criticPredict]], passed in) with the ambient
     * LM/adapter (NOT under the hint adapter) to produce a per-module advice map, grounded in the attempt's trace, the

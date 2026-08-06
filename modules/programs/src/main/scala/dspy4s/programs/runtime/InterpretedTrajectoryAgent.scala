@@ -2,16 +2,7 @@ package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome, ProgramCall}
-import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{
-  ActionDecision,
-  ActionPreparation,
-  DecisionTransition,
-  GenerationTransition,
-  InterpretationTransition,
-  PreparationTransition,
-  State,
-  StepGeneration
-}
+import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, State, StepGeneration}
 
 /** A trajectory agent whose iterations interpret actions produced by a model.
   *
@@ -22,11 +13,12 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{
   * Associated types keep the public agent type focused on input, output, and trajectory entry while allowing each
   * action language to choose its own model-step, action, and observation types.
   *
-  * The phases are explicit state ADTs under [[InterpretedTrajectoryAgent.State State]], and private transition ADTs
-  * enumerate each phase's legal successors. The final [[trajectoryStep]] interprets that machine and supplies the
-  * shared branch laws: `Halted` neither interprets nor records; `Rejected` records one failed outcome without
-  * interpreting; `Ready` interprets exactly once and records exactly one outcome; [[decide]] runs exactly once after
-  * that outcome is recorded; and a fatal interpreter `Left` propagates without recording or deciding.
+  * The phases are explicit state ADTs under [[InterpretedTrajectoryAgent.State State]], and each private `transition*`
+  * method's union return type enumerates that phase's legal successors. The final [[trajectoryStep]] interprets that
+  * machine and supplies the shared branch laws: `Halted` neither interprets nor records; `Rejected` records one failed
+  * outcome without interpreting; `Ready` interprets exactly once and records exactly one outcome; [[decide]] runs
+  * exactly once after that outcome is recorded; and a fatal interpreter `Left` propagates without recording or
+  * deciding.
   */
 trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entry]:
 
@@ -83,38 +75,28 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
   private final def transitionGeneration(
       call   : ProgramCall[I],
       current: State.Generating[Entry]
-  )(using RuntimeContext): GenerationTransition[ModelStep, Entry] =
+  )(using RuntimeContext): State.Failed | State.Completed[Entry] | State.Preparing[ModelStep, Entry] =
     generateStep(call, current.trajectory) match
-      case Left(error)                                 => GenerationTransition.Fail(State.Failed(error))
-      case Right(StepGeneration.Halted(used))          => GenerationTransition.Complete(State.Completed(used))
-      case Right(StepGeneration.Generated(step, used)) =>
-        GenerationTransition.Prepare(State.Preparing(step, used, current.iteration))
+      case Left(error)                                 => State.Failed(error)
+      case Right(StepGeneration.Halted(used))          => State.Completed(used)
+      case Right(StepGeneration.Generated(step, used)) => State.Preparing(step, used, current.iteration)
 
   private final def transitionPreparation(
       current: State.Preparing[ModelStep, Entry]
-  ): PreparationTransition[ModelStep, Action, Observation, Entry] =
+  ): State.RecordingRejection[ModelStep, Observation, Entry] | State.Interpreting[ModelStep, Action, Entry] =
     prepareAction(current.step) match
-      case ActionPreparation.Rejected(observation) => PreparationTransition.RecordRejection(
-          State.RecordingRejection(current.step, observation, current.trajectory, current.iteration)
-        )
-      case ActionPreparation.Ready(action) => PreparationTransition.Interpret(
-          State.Interpreting(current.step, action, current.trajectory, current.iteration)
-        )
+      case ActionPreparation.Rejected(observation) =>
+        State.RecordingRejection(current.step, observation, current.trajectory, current.iteration)
+      case ActionPreparation.Ready(action) =>
+        State.Interpreting(current.step, action, current.trajectory, current.iteration)
 
   private final def transitionInterpretation(
       current: State.Interpreting[ModelStep, Action, Entry]
-  )(using RuntimeContext): InterpretationTransition[ModelStep, Action, Observation, Entry] =
+  )(using RuntimeContext): State.Failed | State.RecordingOutcome[ModelStep, Action, Observation, Entry] =
     actionInterpreter.execute(current.action) match
-      case Left(error)    => InterpretationTransition.Fail(State.Failed(error))
-      case Right(outcome) => InterpretationTransition.RecordOutcome(
-          State.RecordingOutcome(
-            current.step,
-            current.action,
-            outcome,
-            current.trajectory,
-            current.iteration
-          )
-        )
+      case Left(error)    => State.Failed(error)
+      case Right(outcome) =>
+        State.RecordingOutcome(current.step, current.action, outcome, current.trajectory, current.iteration)
 
   private final def transitionRejectionRecording(
       current: State.RecordingRejection[ModelStep, Observation, Entry]
@@ -130,26 +112,24 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
 
   private final def transitionDecision(
       current: State.Deciding[ModelStep, Action, Observation, Entry]
-  ): DecisionTransition[Entry] =
+  ): State.Continuing[Entry] | State.Completed[Entry] =
     decide(current.step, current.action, current.outcome) match
-      case ActionDecision.Continue => DecisionTransition.Continue(State.Continuing(current.trajectory))
-      case ActionDecision.Stop     => DecisionTransition.Complete(State.Completed(current.trajectory))
+      case ActionDecision.Continue => State.Continuing(current.trajectory)
+      case ActionDecision.Stop     => State.Completed(current.trajectory)
 
   private final def runStateMachine(
       call   : ProgramCall[I],
       initial: State.Generating[Entry]
   )(using RuntimeContext): State.Terminal[Entry] =
     transitionGeneration(call, initial) match
-      case GenerationTransition.Fail(failed)       => failed
-      case GenerationTransition.Complete(complete) => complete
-      case GenerationTransition.Prepare(preparing) => transitionPreparation(preparing) match
-          case PreparationTransition.RecordRejection(recording) => transitionRejectionRecording(recording)
-          case PreparationTransition.Interpret(interpreting)    => transitionInterpretation(interpreting) match
-              case InterpretationTransition.Fail(failed)             => failed
-              case InterpretationTransition.RecordOutcome(recording) =>
-                transitionDecision(transitionOutcomeRecording(recording)) match
-                  case DecisionTransition.Continue(continuing) => continuing
-                  case DecisionTransition.Complete(complete)   => complete
+      case failed: State.Failed                 => failed
+      case completed @ State.Completed(_)       => completed
+      case preparing @ State.Preparing(_, _, _) => transitionPreparation(preparing) match
+          case recording @ State.RecordingRejection(_, _, _, _) => transitionRejectionRecording(recording)
+          case interpreting @ State.Interpreting(_, _, _, _)    => transitionInterpretation(interpreting) match
+              case failed: State.Failed                              => failed
+              case recording @ State.RecordingOutcome(_, _, _, _, _) =>
+                transitionDecision(transitionOutcomeRecording(recording))
 
   final override protected def trajectoryStep(call: ProgramCall[I])(using
       RuntimeContext
@@ -207,27 +187,6 @@ object InterpretedTrajectoryAgent:
     final case class Continuing[+Entry](trajectory: Vector[Entry]) extends Terminal[Entry]
     final case class Completed[+Entry](trajectory: Vector[Entry])  extends Terminal[Entry]
     final case class Failed(error: DspyError)                      extends Terminal[Nothing]
-
-  /** Legal successors of [[State.Generating]]. */
-  private enum GenerationTransition[+ModelStep, +Entry]:
-    case Prepare(next: State.Preparing[ModelStep, Entry])
-    case Complete(next: State.Completed[Entry])
-    case Fail(next: State.Failed)
-
-  /** Legal successors of [[State.Preparing]]. */
-  private enum PreparationTransition[+ModelStep, +Action, +Observation, +Entry]:
-    case Interpret(next: State.Interpreting[ModelStep, Action, Entry])
-    case RecordRejection(next: State.RecordingRejection[ModelStep, Observation, Entry])
-
-  /** Legal successors of [[State.Interpreting]]. */
-  private enum InterpretationTransition[+ModelStep, +Action, +Observation, +Entry]:
-    case RecordOutcome(next: State.RecordingOutcome[ModelStep, Action, Observation, Entry])
-    case Fail(next: State.Failed)
-
-  /** Legal successors of [[State.Deciding]]. */
-  private enum DecisionTransition[+Entry]:
-    case Continue(next: State.Continuing[Entry])
-    case Complete(next: State.Completed[Entry])
 
   /** Result of the model-generation phase for one iteration. */
   enum StepGeneration[+ModelStep, +Entry]:

@@ -4,9 +4,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContex
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.signatures.Shape
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
-
-import java.nio.charset.StandardCharsets
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** ReAct's model-facing step schema, synthetic finish tool, and rendered trajectory protocol. */
 private[programs] object ReActProtocol:
@@ -86,14 +84,9 @@ private[programs] object ReActProtocol:
       case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => parseJsonRecord(s)
       case _                                                      => DynamicValue.Record.empty
 
-  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
-
   private def parseJsonRecord(text: String): DynamicValue.Record =
     if text.trim.isEmpty then DynamicValue.Record.empty
-    else
-      dynamicJsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)) match
-        case Right(rec: DynamicValue.Record) => rec
-        case _                               => DynamicValue.Record.empty
+    else DynamicValues.parseJsonRecord(text).getOrElse(DynamicValue.Record.empty)
 
 /** Names ReAct hard-codes in module identities and augmented signatures. */
 private[programs] object ReActKeys:

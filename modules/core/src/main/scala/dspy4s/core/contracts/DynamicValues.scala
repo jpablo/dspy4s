@@ -3,6 +3,7 @@ package dspy4s.core.contracts
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
+import java.nio.charset.StandardCharsets
 import java.util.Objects
 
 /** `"name" := value` builds a schema-lifted `(name, DynamicValue)` entry for the data-bag constructors (`Example(...)`,
@@ -72,6 +73,41 @@ object DynamicValues:
   /** Lookup by field name. Returns `None` if the record has no such field. */
   def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
     rec.fields.iterator.collectFirst { case (k, v) if k == name => v }
+
+  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
+
+  /** Decode a JSON text and keep it only when it is a JSON object, as a `DynamicValue.Record`. `None` for invalid JSON
+    * or a non-object payload. The shared "loose JSON text -> record" boundary used by the strategy protocols (ReAct
+    * tool args, RLM SUBMIT payloads, Refine advice maps); each caller supplies its own fallback semantics.
+    */
+  def parseJsonRecord(text: String): Option[DynamicValue.Record] =
+    dynamicJsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)) match
+      case Right(record: DynamicValue.Record) => Some(record)
+      case _                                  => None
+
+  /** Project a `String` primitive; `None` for anything else. */
+  def asString(dv: DynamicValue): Option[String] =
+    dv match
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) => Some(s)
+      case _                                                => None
+
+  /** Tolerant `Long` projection: any numeric primitive (JSON codecs may decode numbers as Int / Long / Double /
+    * BigDecimal / BigInt) or a clean numeric string.
+    */
+  def asLong(dv: DynamicValue): Option[Long] =
+    dv match
+      case DynamicValue.Primitive(p) => p match
+          case PrimitiveValue.Int(n)        => Some(n.toLong)
+          case PrimitiveValue.Long(n)       => Some(n)
+          case PrimitiveValue.Short(n)      => Some(n.toLong)
+          case PrimitiveValue.Byte(n)       => Some(n.toLong)
+          case PrimitiveValue.Double(n)     => Some(n.toLong)
+          case PrimitiveValue.Float(n)      => Some(n.toLong)
+          case PrimitiveValue.BigDecimal(n) => Some(n.toLong)
+          case PrimitiveValue.BigInt(n)     => Some(n.toLong)
+          case PrimitiveValue.String(s)     => s.toLongOption
+          case _                            => None
+      case _ => None
 
   /** Read a required `String` field from a record, with structured errors: a non-String value is a [[ValidationError]],
     * a missing field a [[NotFoundError]] on the `prediction_field` resource. `label` names the producing component in

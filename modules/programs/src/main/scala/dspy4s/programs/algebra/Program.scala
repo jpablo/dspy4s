@@ -126,12 +126,14 @@ object Program:
     override def inspectNamed(program: Program[I, O, N]): Vector[(String, OptimizableView)] =
       program.optimizableParameters.inspectNamed(program.program)
 
-  /** Record-boundary execution for a program whose grade is known. */
-  given programRunner[I, O, N <: Int](using codec: RecordCodec[I]): ProgramRunner[Program[I, O, N]] with
+  /** Record-boundary execution for a program whose grade is known. A `Program[I, O, N]` is a `SomeProgram[I, O]`, so
+    * this delegates to [[someProgramRunner]] — the decode-then-run logic lives once.
+    */
+  given programRunner[I, O, N <: Int](using RecordCodec[I]): ProgramRunner[Program[I, O, N]] with
     def run(program: Program[I, O, N], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
-      codec.decode(call.input).flatMap(input => program(call.mapInput(_ => input)).map(_.raw))
+      someProgramRunner[I, O].run(program, call)
 
   /** Record-boundary execution does not require the parameter grade. */
   given someProgramRunner[I, O](using codec: RecordCodec[I]): ProgramRunner[SomeProgram[I, O]] with

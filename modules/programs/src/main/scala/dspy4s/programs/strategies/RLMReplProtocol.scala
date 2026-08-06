@@ -67,8 +67,8 @@ private[programs] object RLMReplProtocol:
       finalJson       : String,
       outputFieldNames: Vector[String]
   ): Either[String, DynamicValue.Record] =
-    dynamicJsonCodec.decode(finalJson.getBytes(StandardCharsets.UTF_8)) match
-      case Right(record: DynamicValue.Record) =>
+    DynamicValues.parseJsonRecord(finalJson) match
+      case Some(record) =>
         val present = DynamicValues.recordKeys(record).toSet
         val missing = outputFieldNames.filterNot(present.contains)
         if missing.isEmpty then Right(record)
@@ -76,7 +76,7 @@ private[programs] object RLMReplProtocol:
           Left(
             s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})"
           )
-      case _ => Left(
+      case None => Left(
           s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
         )
 

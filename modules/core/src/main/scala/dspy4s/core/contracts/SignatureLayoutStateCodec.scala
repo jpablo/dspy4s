@@ -15,14 +15,14 @@ private[dspy4s] object SignatureLayoutStateCodec:
 
   def dumpState(layout: SignatureLayout): DynamicValue.Record =
     def str(value: String): DynamicValue            = DynamicValue.Primitive(PrimitiveValue.String(value))
-    def opt(value: Option[Any]): DynamicValue       = value.fold(DynamicValue.Null: DynamicValue)(DynamicValues.fromAny)
+    def opt(value: Option[String]): DynamicValue    = value.fold(DynamicValue.Null: DynamicValue)(str)
     def fieldRecord(field: FieldSpec): DynamicValue =
       DynamicValue.Record(Chunk.from(Seq(
         "name"         -> str(field.name),
         "typeRef"      -> str(field.typeRef.repr),
         "description"  -> opt(field.description),
         "prefix"       -> opt(field.prefix),
-        "defaultValue" -> opt(field.defaultValue),
+        "defaultValue" -> field.defaultValue.getOrElse(DynamicValue.Null),
         "enumValues"   -> DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))),
         "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue)))
       )))
@@ -61,7 +61,7 @@ private[dspy4s] object SignatureLayoutStateCodec:
             val typeRef      = getString(record, "typeRef").map(TypeRef.fromToken).getOrElse(TypeRef.string)
             val defaultValue = DynamicValues.recordGet(record, "defaultValue") match
               case None | Some(_: DynamicValue.Null.type) => None
-              case Some(value)                            => Some(DynamicValues.toAny(value))
+              case Some(value)                            => Some(value)
             val enumValues = DynamicValues.recordGet(record, "enumValues") match
               case Some(sequence: DynamicValue.Sequence) => sequence.elements.iterator.collect {
                   case DynamicValue.Primitive(PrimitiveValue.String(value)) => value

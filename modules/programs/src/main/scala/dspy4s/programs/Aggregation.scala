@@ -44,8 +44,8 @@ object Aggregation:
   ): Either[DspyError, RawPrediction] =
     if rows.isEmpty then Left(ValidationError("Cannot compute majority over an empty set of completions"))
     else
-      // "Last key" must skip the synthetic `tool_calls` value PredictEngine appends to every prediction —
-      // otherwise the default vote runs over identical empty tool-call payloads instead of the answer field.
+      // "Last key" must skip the synthetic `tool_calls` value PredictEngine appends on native-tool turns —
+      // otherwise the default vote runs over tool-call payloads instead of the answer field.
       val resolvedField = field.getOrElse {
         val keys = DynamicValues.recordKeys(rows.head)
         keys.filterNot(_ == runtime.PredictEngine.ToolCallsKey).lastOption.getOrElse(keys.last)

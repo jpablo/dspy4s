@@ -182,11 +182,11 @@ final case class CodeAct[I, O](
     CodeAct.renderTrajectory(trajectory)
 
   /** This program's [[tools]] bridged for a sandboxed interpreter — pass as `new DenoPyodideInterpreter(tools =
-    * program.sandboxTools)` so the prompt's tool list and the sandbox's callable surface come from the same vector. See
-    * [[CodeAct.sandboxTools]].
+    * program.sandboxTools)` so the prompt's tool list and the sandbox's callable surface come from the same vector.
+    * Convenience for [[CodeAct.sandboxTools]] over this program's own tool vector.
     */
   def sandboxTools(using RuntimeContext): Vector[dspy4s.core.contracts.SandboxTool] =
-    SandboxToolBridge.fromToolFunctions(tools)
+    CodeAct.sandboxTools(tools)
 
   /** Generate the next code step from the original input and current rendered trajectory.
     */

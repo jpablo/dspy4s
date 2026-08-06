@@ -300,6 +300,6 @@ class RLMSuite extends FunSuite:
       }
     }
     val logged = captured.toString
-    assert(logged.contains("RLM reached max iterations, using extract to get final output"), logged)
+    assert(logged.contains("WARN [dspy4s] RLM: reached max iterations, using extract to get final output"), logged)
     assert(!logged.contains("RLM iteration"), logged)
   }

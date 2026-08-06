@@ -13,7 +13,6 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
@@ -30,10 +29,13 @@ final class ParallelExecutor(
     timeout   : FiniteDuration = 120.seconds
 ):
 
+  // The public entry points declare `using RuntimeContext` as an API contract (workers run under the caller's
+  // context), but propagation happens via `ContextPropagation.captureAll` reading the ambient environment, so the
+  // parameter itself is unused.
   def execute[A, B](
       task: A => B,
       data: Vector[A]
-  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+  )(using @annotation.unused ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
     // executeInternal already wraps each task call in a try/catch that turns a throw into the same
     // `RuntimeError`, so a total `task` only needs lifting into `Right` — no second catch here.
     executeInternal(task = (item: A) => Right(task(item)), data = data)
@@ -41,14 +43,13 @@ final class ParallelExecutor(
   def executeEither[A, B](
       task: A => Either[DspyError, B],
       data: Vector[A]
-  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+  )(using @annotation.unused ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
     executeInternal(task = task, data = data)
 
-  @nowarn("msg=unused")
   private def executeInternal[A, B](
       task: A => Either[DspyError, B],
       data: Vector[A]
-  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+  ): Either[DspyError, ParallelExecutionResult[B]] =
     if data.isEmpty then
       return Right(ParallelExecutionResult(results = Vector.empty, failedIndices = Vector.empty, errors = Map.empty))
 
@@ -141,10 +142,18 @@ final class ParallelExecutor(
       val _ = pool.shutdownNow()
 
 object ParallelExecutor:
-  def fromSettings(timeout: FiniteDuration = 120.seconds)(using RuntimeContext): ParallelExecutor =
+  /** Build an executor from the ambient context's `numThreads` / `maxErrors`, falling back to the defaults. Explicit
+    * `numThreads` / `maxErrors` arguments win over the context (the resolution chain [[dspy4s.programs.Parallel]]
+    * uses); the fallback constants live only here.
+    */
+  def fromSettings(
+      timeout   : FiniteDuration      = 120.seconds,
+      numThreads: Option[ThreadCount] = None,
+      maxErrors : Option[ErrorLimit]  = None
+  )(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
-      numThreads = ctx.numThreads.getOrElse(ThreadCount(8)),
-      maxErrors = ctx.maxErrors.getOrElse(ErrorLimit(10)),
+      numThreads = numThreads.orElse(ctx.numThreads).getOrElse(ThreadCount(8)),
+      maxErrors = maxErrors.orElse(ctx.maxErrors).getOrElse(ErrorLimit(10)),
       timeout = timeout
     )

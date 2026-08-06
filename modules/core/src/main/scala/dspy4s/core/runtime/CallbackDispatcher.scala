@@ -41,75 +41,27 @@ object CallbackDispatcher:
       moduleName: String,
       inputs    : DynamicValue.Record
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope(prefix = "module") { (callId, parentCallId) =>
-      emit(
-        ModuleStartEvent(
-          moduleName = moduleName,
-          inputs = inputs,
-          callId = callId,
-          parentCallId = parentCallId
-        )
-      )
-      runWithEnd(thunk) { output =>
-        emit(
-          ModuleEndEvent(
-            moduleName = moduleName,
-            output = output,
-            callId = callId,
-            parentCallId = parentCallId
-          )
-        )
-      }
-    }
+    withEvents[A](prefix = "module")(
+      start = (callId, parentCallId) => ModuleStartEvent(moduleName, inputs, callId, parentCallId),
+      end = (output, callId, parentCallId) => ModuleEndEvent(moduleName, output, callId, parentCallId)
+    )(thunk)
 
   /** Wrap a language-model call in an `LmStartEvent` / `LmEndEvent` pair. */
   def withLm[A](modelId: String, request: DynamicValue.Record)(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope(prefix = "lm") { (callId, parentCallId) =>
-      emit(
-        LmStartEvent(
-          modelId = modelId,
-          request = request,
-          callId = callId,
-          parentCallId = parentCallId
-        )
-      )
-      runWithEnd(thunk) { output =>
-        emit(
-          LmEndEvent(
-            modelId = modelId,
-            response = output,
-            callId = callId,
-            parentCallId = parentCallId
-          )
-        )
-      }
-    }
+    withEvents[A](prefix = "lm")(
+      start = (callId, parentCallId) => LmStartEvent(modelId, request, callId, parentCallId),
+      end = (output, callId, parentCallId) => LmEndEvent(modelId, output, callId, parentCallId)
+    )(thunk)
 
   /** Wrap an adapter pass (format or parse) in an `AdapterStartEvent` / `AdapterEndEvent` pair. */
   def withAdapter[A](
       adapterName: String,
       inputs     : DynamicValue.Record
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    withCallScope(prefix = "adapter") { (callId, parentCallId) =>
-      emit(
-        AdapterStartEvent(
-          adapterName = adapterName,
-          inputs = inputs,
-          callId = callId,
-          parentCallId = parentCallId
-        )
-      )
-      runWithEnd(thunk) { output =>
-        emit(
-          AdapterEndEvent(
-            adapterName = adapterName,
-            output = output,
-            callId = callId,
-            parentCallId = parentCallId
-          )
-        )
-      }
-    }
+    withEvents[A](prefix = "adapter")(
+      start = (callId, parentCallId) => AdapterStartEvent(adapterName, inputs, callId, parentCallId),
+      end = (output, callId, parentCallId) => AdapterEndEvent(adapterName, output, callId, parentCallId)
+    )(thunk)
 
   /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. Fixed to `DynamicValue` (not generic like the
     * other scopes) because tool args and results travel the spine as `DynamicValue` end to end.
@@ -118,38 +70,25 @@ object CallbackDispatcher:
       toolName: String,
       args    : DynamicValue.Record
   )(thunk: => Either[DspyError, DynamicValue]): Either[DspyError, DynamicValue] =
-    withCallScope(prefix = "tool") { (callId, parentCallId) =>
-      emit(
-        ToolStartEvent(
-          toolName = toolName,
-          args = args,
-          callId = callId,
-          parentCallId = parentCallId
-        )
-      )
-      runWithEnd(thunk) { output =>
-        emit(
-          ToolEndEvent(
-            toolName = toolName,
-            output = output,
-            callId = callId,
-            parentCallId = parentCallId
-          )
-        )
-      }
-    }
+    withEvents[DynamicValue](prefix = "tool")(
+      start = (callId, parentCallId) => ToolStartEvent(toolName, args, callId, parentCallId),
+      end = (output, callId, parentCallId) => ToolEndEvent(toolName, output, callId, parentCallId)
+    )(thunk)
 
-  /** Allocate a fresh `prefix`-tagged `callId`, capture the enclosing scope's id as the parent, and run `thunk` with
-    * the new id installed as the active call so any nested scope nests under it. The thunk receives
-    * `(callId, parentCallId)` to stamp onto its start/end events.
+  /** The shared scope discipline behind every `with*` helper: allocate a fresh `prefix`-tagged `callId`, capture the
+    * enclosing scope's id as the parent, install the new id as the active call for the duration of `thunk` (so nested
+    * scopes inherit it as their `parentCallId`), emit `start` before the thunk, and attempt `end` exactly once with its
+    * outcome (see [[runWithEnd]]).
     */
-  private def withCallScope[A](
-      prefix: String
-  )(thunk: (String, Option[String]) => Either[DspyError, A]): Either[DspyError, A] =
+  private def withEvents[A](prefix: String)(
+      start: (String, Option[String]) => CallbackEvent,
+      end  : (Either[DspyError, A], String, Option[String]) => CallbackEvent
+  )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
     val parentCallId = RuntimeEnvironment.activeCallId
     val callId       = RuntimeEnvironment.nextCallId(prefix)
     RuntimeEnvironment.withActiveCall(callId) {
-      thunk(callId, parentCallId)
+      emit(start(callId, parentCallId))
+      runWithEnd(thunk)(output => emit(end(output, callId, parentCallId)))
     }
 
   /** Run `thunk` and attempt `emitEnd` exactly once with its outcome. If the body throws, an end carrying a

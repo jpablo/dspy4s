@@ -151,8 +151,8 @@ private[adapters] object ChatAdapterPrompt:
       .flatMap { field =>
         val resolved = DynamicValues
           .recordGet(values, field.name)
+          .orElse(field.defaultValue)
           .map(DynamicValues.renderText)
-          .orElse(field.defaultValue.map(_.toString))
         resolved.map(rendered => s"[[ ## ${field.name} ## ]]\n$rendered")
       }
       .mkString("\n\n")

@@ -3,6 +3,7 @@ package dspy4s.programs.runtime
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.data.Completions
@@ -15,6 +16,7 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -22,8 +24,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 /** Shared execution body for the predict module: pushes the `ActivePredict` scope, resolves the model + adapter, runs
   * format → call → parse → prediction assembly, and dispatches the adapter / lm callback events along the way.
@@ -61,6 +62,8 @@ private[dspy4s] final case class PredictEngine(
       */
     tools: Vector[ToolSpec] = Vector.empty
 ):
+  // The layout is immutable for the engine's lifetime, so the declared-input key set is computed once, not per call.
+  private val inputKeys: Set[String] = layout.inputFields.map(_.name).toSet
 
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
@@ -91,8 +94,7 @@ private[dspy4s] final case class PredictEngine(
     }
 
   private def buildInvocation(call: ProgramCall[DynamicValue.Record], model: LanguageModel): AdapterInvocation =
-    val inputKeys = layout.inputFields.map(_.name).toSet
-    warnOnExtraInputs(call, inputKeys)
+    warnOnExtraInputs(call)
     AdapterInvocation(
       layout = layout,
       demos = demos,
@@ -121,25 +123,17 @@ private[dspy4s] final case class PredictEngine(
   /** Mirror upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: input keys that are not declared input fields are
     * tolerated (the extras are dropped downstream, since [[AdapterInvocation]] is built with `inputKeys` restricted to
     * the layout), but their presence is surfaced as a warning naming the unexpected keys and the expected fields. The
-    * call still proceeds -- this is a diagnostic, not an error.
-    *
-    * dspy4s has no logging framework in `core`/`programs` (Python dspy uses `logger.warning`); the closest non-invasive
-    * equivalent is `System.err` via `Console.err`, which keeps the warning observable without introducing a new
-    * callback event type (that would require changing the shared `core` contracts).
-    *
-    * Design note (intentional v1, not a TODO): the [[dspy4s.core.contracts.CallbackEvent]] system is strictly
-    * scope-based -- every event is a Start/End pair correlated by `callId`, and a one-off diagnostic is not a scope, so
-    * routing this warning through callbacks would break that invariant. A dedicated diagnostics/log seam on
-    * `RuntimeContext` is the "proper depth" fix, but it is new public API for a single current caller; `Console.err` is
-    * observable (stderr) and sufficient until a second warning site justifies the seam.
+    * call still proceeds -- this is a diagnostic, not an error. One-off diagnostics are not callback events (those are
+    * strictly Start/End scope pairs), so this routes through [[RuntimeEnvironment.warn]].
     */
-  private def warnOnExtraInputs(call: ProgramCall[DynamicValue.Record], inputKeys: Set[String]): Unit =
+  private def warnOnExtraInputs(call: ProgramCall[DynamicValue.Record]): Unit =
     val extra = DynamicValues.recordKeys(call.input).filterNot(inputKeys.contains)
     if extra.nonEmpty then
       val expected = layout.inputFields.map(_.name).mkString(", ")
-      Console.err.println(
-        s"WARN [dspy4s] Predict '${layout.name}': ignoring unexpected input field(s) " +
-          s"[${extra.sorted.mkString(", ")}] not declared in the signature; expected input fields: [$expected]"
+      RuntimeEnvironment.warn(
+        s"Predict '${layout.name}'",
+        s"ignoring unexpected input field(s) [${extra.sorted.mkString(", ")}] not declared in the signature; " +
+          s"expected input fields: [$expected]"
       )
 
   private def parseOutputs(adapter: Adapter, outputs: Vector[LmOutput])(using
@@ -167,22 +161,15 @@ private[dspy4s] final case class PredictEngine(
       completions <- Completions.fromRows(parsedOutputs.map(_.values))
       first       <- RawPrediction.fromCompletions(completions)
       withUsage    = first.copy(lmUsage = response.usage)
-      prediction   = withUsage.withValue(PredictEngine.ToolCallsKey, toToolCallPayload(toolCalls))
+      prediction   =
+        if toolCalls.isEmpty then withUsage
+        else withUsage.withValue(PredictEngine.ToolCallsKey, NativeFunctionCalling.encodeToolCalls(toolCalls))
     yield prediction
 
-  private def toToolCallPayload(toolCalls: Vector[ToolCall]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(
-      toolCalls.map { call =>
-        DynamicValue.Record(Chunk(
-          "name" -> DynamicValue.Primitive(PrimitiveValue.String(call.name)),
-          "args" -> call.args
-        ))
-      }
-    ))
-
 private[dspy4s] object PredictEngine:
-  /** Name of the synthetic prediction value the engine appends to EVERY prediction (the structured tool calls, empty
-    * for a non-tool turn). Consumers that iterate a prediction's values positionally — e.g.
-    * [[dspy4s.programs.Aggregation.majority]]'s "last output field" default — must skip this key.
+  /** Name of the synthetic prediction value the engine appends when the LM returned native tool calls (upstream
+    * parity: a `tool_calls` value exists only on tool turns). Consumers that iterate a prediction's values
+    * positionally — e.g. [[dspy4s.programs.Aggregation.majority]]'s "last output field" default — must still skip
+    * this key when present.
     */
   val ToolCallsKey: String = "tool_calls"

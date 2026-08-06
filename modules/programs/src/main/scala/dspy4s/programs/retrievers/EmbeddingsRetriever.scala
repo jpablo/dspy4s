@@ -24,15 +24,15 @@ final class EmbeddingsRetriever private (
     embedder     : Embedder,
     val k        : NeighborCount,
     normalize    : Boolean,
-    corpusVectors: Vector[Vector[Float]]
+    corpusVectors: Array[Array[Float]]
 ):
   /** The top-`k` passages most similar to `query`, best first, with corpus indices and similarity scores. */
   def search(query: String)(using RuntimeContext): Either[DspyError, EmbeddingsRetriever.Result] =
     embedder.embed(Vector(query)).flatMap { rows =>
       rows.headOption.toRight(RuntimeError("embeddings_retriever", "embedder returned no rows for the query")).map {
         row =>
-          val q      = if normalize then Similarity.normalize(row) else row
-          val scored = corpusVectors.zipWithIndex.map { case (row, i) => (Similarity.dot(q, row), i) }
+          val q      = if normalize then Similarity.normalize(row.toArray) else row.toArray
+          val scored = Vector.tabulate(corpusVectors.length)(i => (Similarity.dot(q, corpusVectors(i)), i))
           val top    = scored.sortBy { case (score, i) => (-score, i) }.take(k)
           EmbeddingsRetriever.Result(
             passages = top.map { case (_, i) => corpus(i) },
@@ -56,6 +56,7 @@ object EmbeddingsRetriever:
       RuntimeContext
   ): Either[DspyError, EmbeddingsRetriever] =
     embedder.embed(corpus).map { rows =>
-      val vectors = if normalize then rows.map(Similarity.normalize) else rows
+      val matrix  = Similarity.toMatrix(rows)
+      val vectors = if normalize then matrix.map(Similarity.normalize) else matrix
       new EmbeddingsRetriever(corpus, embedder, k, normalize, vectors)
     }

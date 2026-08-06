@@ -65,11 +65,12 @@ final case class ProgramOfThought[I, O](
   private val baseLayout: SignatureLayout = baseSignature.layout
 
   import ProgramOfThought.{codeOutputField, errorField, finalGeneratedCodeField, generatedCodeField, previousCodeField}
+  import dspy4s.core.contracts.SignatureOps.*
 
   private def buildSig(extraInputs: Vector[FieldSpec], extraOutputs: Vector[FieldSpec]): SignatureLayout =
     // The generate / regenerate signatures retain the user's inputs, append the step inputs, and replace the user's
     // outputs with the step outputs.
-    baseLayout.withInputFields(baseLayout.inputFields ++ extraInputs).withOutputFields(extraOutputs)
+    extraInputs.foldLeft(baseLayout)(_.appendInput(_)).replaceOutputs(extraOutputs)
 
   /** SignatureLayout for the initial code-generation step. Inputs from the user's signature; outputs a `generated_code`
     * string.
@@ -101,7 +102,8 @@ final case class ProgramOfThought[I, O](
     * + `code_output` as inputs.
     */
   val answerSignature: SignatureLayout = baseLayout
-    .withInputFields(baseLayout.inputFields ++ Vector(finalGeneratedCodeField, codeOutputField))
+    .appendInput(finalGeneratedCodeField)
+    .appendInput(codeOutputField)
     .withInstructions(
       Some({
         val outputs = baseLayout.outputFields.map(f => s"`${f.name}`").mkString(", ")
@@ -122,8 +124,7 @@ final case class ProgramOfThought[I, O](
         inputShape = baseSignature.inputShape,
         outputShape = ProgramOfThought.codeOutShape
       ),
-      name = Some(ProgramOfThought.generatorModuleName),
-      runtime = ProgramOfThought.SignatureProgramRuntime
+      name = Some(ProgramOfThought.generatorModuleName)
     )
   )
 
@@ -143,8 +144,7 @@ final case class ProgramOfThought[I, O](
           ),
           outputShape = ProgramOfThought.codeOutShape
         ),
-        name = Some(ProgramOfThought.regeneratorModuleName),
-        runtime = ProgramOfThought.SignatureProgramRuntime
+        name = Some(ProgramOfThought.regeneratorModuleName)
       )
     )
 
@@ -175,8 +175,7 @@ final case class ProgramOfThought[I, O](
             baseSignature.name
           )
         ),
-        name = Some(ProgramOfThought.answererModuleName),
-        runtime = ProgramOfThought.SignatureProgramRuntime
+        name = Some(ProgramOfThought.answererModuleName)
       )
     )
 
@@ -291,11 +290,6 @@ object ProgramOfThought:
   private[programs] val generatorModuleName: String   = ProgramOfThoughtProtocol.generatorModuleName
   private[programs] val regeneratorModuleName: String = ProgramOfThoughtProtocol.regeneratorModuleName
   private[programs] val answererModuleName: String    = ProgramOfThoughtProtocol.answererModuleName
-
-  /** Use one stateless settings-based runtime for default inner predictors. Keeping it in the companion means a
-    * state-only `copy` rebuild retains the same execution resource.
-    */
-  private[programs] object SignatureProgramRuntime extends dspy4s.programs.runtime.SettingsProgramRuntime
 
   /** CoT-augment a step layout by prepending `reasoning`. */
   private[programs] def augmented(layout: SignatureLayout): SignatureLayout = ChainOfThought.augmentLayout(layout)

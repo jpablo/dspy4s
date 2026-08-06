@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import zio.blocks.schema.DynamicValue
+
 import scala.util.matching.Regex
 
 /** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses.
@@ -11,7 +13,9 @@ import scala.util.matching.Regex
   *   - [[prefix]] is the section header in adapter prompts (e.g. `"Question:"`); inferred from `name` by
   *     [[FieldSpec.inferPrefix]] when `None`.
   *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo example
-  *     omits this field. (Not used for live-call inputs.)
+  *     omits this field. (Not used for live-call inputs.) Carried as a `DynamicValue` — the codec spine's value type —
+  *     so adapters render it through the same path as live values; lift plain Scala values via `Schema.toDynamicValue`
+  *     (the `:=` machinery).
   *   - [[constraints]] are human-readable constraint hints (e.g. `"greater than: 0"`, `"maximum length: 10"`) surfaced
   *     after the field description in prose adapters. Build them with [[FieldConstraints]] so the text matches Python
   *     DSPy's `PYDANTIC_CONSTRAINT_MAP`. Empty by default; only emitted when non-empty.
@@ -23,12 +27,12 @@ import scala.util.matching.Regex
   */
 final case class FieldSpec(
     name        : String,
-    typeRef     : TypeRef            = TypeRef.string,
-    description : Option[String]     = None,
-    prefix      : Option[String]     = None,
-    defaultValue: Option[Any]        = None,
-    enumValues  : Vector[String]     = Vector.empty,
-    constraints : Vector[Constraint] = Vector.empty
+    typeRef     : TypeRef              = TypeRef.string,
+    description : Option[String]       = None,
+    prefix      : Option[String]       = None,
+    defaultValue: Option[DynamicValue] = None,
+    enumValues  : Vector[String]       = Vector.empty,
+    constraints : Vector[Constraint]   = Vector.empty
 ) derives CanEqual
 
 object FieldSpec:

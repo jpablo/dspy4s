@@ -69,7 +69,12 @@ object AttemptSelection:
 
     var idx = 0
     while idx < n do
-      val executed = RuntimeEnvironment.isolatedAttempt(baseContext, carriedAdapter)(runAttempt(idx))
+      // Apply the carried adapter override (if any) before isolating, so core's isolatedAttempt stays a plain
+      // "fresh delta over base" primitive with no knowledge of per-attempt service overrides.
+      val attemptContext = carriedAdapter.fold(baseContext) { adapter =>
+        baseContext.withServices(baseContext.services.copy(adapter = Some(adapter)))
+      }
+      val executed = RuntimeEnvironment.isolatedAttempt(attemptContext)(runAttempt(idx))
 
       executed.value match
         case Right(value) => reward(value) match

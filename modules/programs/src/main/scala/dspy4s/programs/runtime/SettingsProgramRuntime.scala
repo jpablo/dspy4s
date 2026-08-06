@@ -28,3 +28,10 @@ trait SettingsProgramRuntime extends ProgramRuntime:
           )
         )
       case None => Left(ConfigurationError("Missing 'adapter' in runtime context"))
+
+object SettingsProgramRuntime:
+  /** The canonical default runtime instance. Modules default to this SHARED value (rather than `new
+    * SettingsProgramRuntime {}` per constructor call) so two structurally identical predictors compare equal — the
+    * anonymous instances compare by reference and would make every default-runtime module unequal to its rebuild.
+    */
+  val default: ProgramRuntime = new SettingsProgramRuntime {}

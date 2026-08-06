@@ -11,50 +11,32 @@ import dspy4s.programs.strategies.{CodeAct, MultiChainComparison, ProgramOfThoug
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
   */
 private[optimization] trait CompositeOptimizableStructureInstances:
-  given reactOptimizableStructure[I, O]: OptimizableStructure.Of[ReAct[I, O], 2] with
-    def arity(@annotation.unused program: ReAct[I, O]): Int    = 2
-    def inspect(program: ReAct[I, O]): Vector[OptimizableView] =
-      Vector(program.reactPredict.optimizableView, program.extractorPredict.optimizableView)
+  given reactOptimizableStructure[I, O]: OptimizableStructure.Of[ReAct[I, O], 2] =
+    twoPredictStructure("ReAct", "react", "extractor")(
+      _.reactPredict,
+      _.reactPredictOverride,
+      _.extractorPredict,
+      _.extractorPredictOverride,
+      (program, nextA, nextB) => program.copy(reactPredictOverride = nextA, extractorPredictOverride = nextB)
+    )
 
-    override def inspectNamed(program: ReAct[I, O]): Vector[(String, OptimizableView)] =
-      Vector("react" -> program.reactPredict.optimizableView, "extractor" -> program.extractorPredict.optimizableView)
+  given codeActOptimizableStructure[I, O]: OptimizableStructure.Of[CodeAct[I, O], 2] =
+    twoPredictStructure("CodeAct", "codeact", "extractor")(
+      _.codeActPredict,
+      _.codeActPredictOverride,
+      _.extractorPredict,
+      _.extractorPredictOverride,
+      (program, nextA, nextB) => program.copy(codeActPredictOverride = nextA, extractorPredictOverride = nextB)
+    )
 
-    def replace(program: ReAct[I, O], updates: Vector[OptimizableParameters]): ReAct[I, O] =
-      require(updates.size == 2, s"ReAct expects exactly 2 updates (react, extractor), got ${updates.size}")
-      val nextReact     = updateOverride(program.reactPredict, program.reactPredictOverride, updates(0))
-      val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
-      program.copy(reactPredictOverride = nextReact, extractorPredictOverride = nextExtractor)
-
-  given codeActOptimizableStructure[I, O]: OptimizableStructure.Of[CodeAct[I, O], 2] with
-    def arity(@annotation.unused program: CodeAct[I, O]): Int    = 2
-    def inspect(program: CodeAct[I, O]): Vector[OptimizableView] =
-      Vector(program.codeActPredict.optimizableView, program.extractorPredict.optimizableView)
-
-    override def inspectNamed(program: CodeAct[I, O]): Vector[(String, OptimizableView)] =
-      Vector(
-        "codeact"   -> program.codeActPredict.optimizableView,
-        "extractor" -> program.extractorPredict.optimizableView
-      )
-
-    def replace(program: CodeAct[I, O], updates: Vector[OptimizableParameters]): CodeAct[I, O] =
-      require(updates.size == 2, s"CodeAct expects exactly 2 updates (codeact, extractor), got ${updates.size}")
-      val nextCodeAct   = updateOverride(program.codeActPredict, program.codeActPredictOverride, updates(0))
-      val nextExtractor = updateOverride(program.extractorPredict, program.extractorPredictOverride, updates(1))
-      program.copy(codeActPredictOverride = nextCodeAct, extractorPredictOverride = nextExtractor)
-
-  given rlmOptimizableStructure[I, O]: OptimizableStructure.Of[RLM[I, O], 2] with
-    def arity(@annotation.unused program: RLM[I, O]): Int    = 2
-    def inspect(program: RLM[I, O]): Vector[OptimizableView] =
-      Vector(program.actionPredict.optimizableView, program.extractPredict.optimizableView)
-
-    override def inspectNamed(program: RLM[I, O]): Vector[(String, OptimizableView)] =
-      Vector("action" -> program.actionPredict.optimizableView, "extract" -> program.extractPredict.optimizableView)
-
-    def replace(program: RLM[I, O], updates: Vector[OptimizableParameters]): RLM[I, O] =
-      require(updates.size == 2, s"RLM expects exactly 2 updates (action, extract), got ${updates.size}")
-      val nextAction  = updateOverride(program.actionPredict, program.actionPredictOverride, updates(0))
-      val nextExtract = updateOverride(program.extractPredict, program.extractPredictOverride, updates(1))
-      program.copy(actionPredictOverride = nextAction, extractPredictOverride = nextExtract)
+  given rlmOptimizableStructure[I, O]: OptimizableStructure.Of[RLM[I, O], 2] =
+    twoPredictStructure("RLM", "action", "extract")(
+      _.actionPredict,
+      _.actionPredictOverride,
+      _.extractPredict,
+      _.extractPredictOverride,
+      (program, nextA, nextB) => program.copy(actionPredictOverride = nextA, extractPredictOverride = nextB)
+    )
 
   given programOfThoughtOptimizableStructure[I, O]: OptimizableStructure.Of[ProgramOfThought[I, O], 3] with
     def arity(@annotation.unused program: ProgramOfThought[I, O]): Int    = 3
@@ -104,6 +86,40 @@ private[optimization] trait CompositeOptimizableStructureInstances:
       require(updates.size == 1, s"MultiChainComparison expects exactly 1 update (compare), got ${updates.size}")
       if updates.head == program.comparePredict.optimizableParameters then program
       else program.copy(comparePredictParametersOverride = Some(updates.head))
+
+  /** The shared shape of a two-predict composite instance (ReAct / CodeAct / RLM): two addressable predicts, two
+    * `copy`-reachable override fields, and a rebuild via `copy`. The no-op guard (return the SAME program when the
+    * updates equal the current parameters) is decided once here, matching the guards the arity-3 and arity-1 instances
+    * below already carry.
+    */
+  private def twoPredictStructure[P, PA: OptimizableLeaf, PB: OptimizableLeaf](
+      label: String,
+      nameA: String,
+      nameB: String
+  )(
+      predictA : P => PA,
+      overrideA: P => Option[PA],
+      predictB : P => PB,
+      overrideB: P => Option[PB],
+      rebuild  : (P, Option[PA], Option[PB]) => P
+  ): OptimizableStructure.Of[P, 2] =
+    new OptimizableStructure.Of[P, 2]:
+      def arity(@annotation.unused program: P): Int    = 2
+      def inspect(program: P): Vector[OptimizableView] =
+        Vector(predictA(program).optimizableView, predictB(program).optimizableView)
+
+      override def inspectNamed(program: P): Vector[(String, OptimizableView)] =
+        Vector(nameA -> predictA(program).optimizableView, nameB -> predictB(program).optimizableView)
+
+      def replace(program: P, updates: Vector[OptimizableParameters]): P =
+        require(updates.size == 2, s"$label expects exactly 2 updates ($nameA, $nameB), got ${updates.size}")
+        if updates == read(program) then program
+        else
+          rebuild(
+            program,
+            updateOverride(predictA(program), overrideA(program), updates(0)),
+            updateOverride(predictB(program), overrideB(program), updates(1))
+          )
 
   private def updateOverride[P](
       current : P,
