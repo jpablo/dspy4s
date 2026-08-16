@@ -17,7 +17,7 @@ import zio.blocks.schema.DynamicValue
   * packaged `Program`, decoding is likewise resolved canonically from [[RecordCodec]] at this boundary rather than
   * stored in the morphism or required by the program algebra.
   */
-trait ProgramRunner[P]:
+trait LegacyProgramRunner[P]:
   def run(program: P, call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, RawPrediction]
@@ -25,13 +25,13 @@ trait ProgramRunner[P]:
   final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, RawPrediction] =
     run(program, ProgramCall(inputs))
 
-private[programs] trait LowPriorityProgramRunner:
+private[programs] trait LowPriorityLegacyProgramRunner:
   /** Any module whose input type carries a [[RecordCodec]] (user composites without a hand-written runner). Lower
     * priority than the signature-backed instances in the companion.
     */
   given fromRecordCodec[I, O, P <: Module[I, O]](using
       codec: RecordCodec[I]
-  ): ProgramRunner[P] with
+  ): LegacyProgramRunner[P] with
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
@@ -39,10 +39,10 @@ private[programs] trait LowPriorityProgramRunner:
         program(call.mapInput(_ => decoded)).map(_.raw)
       }
 
-object ProgramRunner extends LowPriorityProgramRunner:
+object LegacyProgramRunner extends LowPriorityLegacyProgramRunner:
 
   /** Dynamic modules already inhabit the record boundary. */
-  given fromDynamicModule[P <: DynamicModule]: ProgramRunner[P] with
+  given fromDynamicModule[P <: DynamicModule]: LegacyProgramRunner[P] with
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
@@ -50,8 +50,8 @@ object ProgramRunner extends LowPriorityProgramRunner:
 
   private def signatureBacked[I, O, P <: Module[I, O]](
       inputShapeOf: P => Shape[I]
-  ): ProgramRunner[P] =
-    new ProgramRunner[P]:
+  ): LegacyProgramRunner[P] =
+    new LegacyProgramRunner[P]:
       def run(program: P, call: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
@@ -60,22 +60,22 @@ object ProgramRunner extends LowPriorityProgramRunner:
         }
 
   // ── The framework leaves and composites, decoded through their own (base) signature ──────────────────────
-  given fromPredict[I, O]: ProgramRunner[Predict[I, O]] =
+  given fromPredict[I, O]: LegacyProgramRunner[Predict[I, O]] =
     signatureBacked[I, O, Predict[I, O]](_.signature.inputShape)
 
-  given fromChainOfThought[I, O]: ProgramRunner[ChainOfThought[I, O]] =
+  given fromChainOfThought[I, O]: LegacyProgramRunner[ChainOfThought[I, O]] =
     signatureBacked[I, ChainOfThought.WithReasoning[O], ChainOfThought[I, O]](_.baseSignature.inputShape)
 
-  given fromReAct[I, O]: ProgramRunner[ReAct[I, O]] =
+  given fromReAct[I, O]: LegacyProgramRunner[ReAct[I, O]] =
     signatureBacked[I, ReAct.WithReasoning[O], ReAct[I, O]](_.baseSignature.inputShape)
 
-  given fromCodeAct[I, O]: ProgramRunner[CodeAct[I, O]] =
+  given fromCodeAct[I, O]: LegacyProgramRunner[CodeAct[I, O]] =
     signatureBacked[I, CodeAct.WithReasoning[O], CodeAct[I, O]](_.baseSignature.inputShape)
 
-  given fromProgramOfThought[I, O]: ProgramRunner[ProgramOfThought[I, O]] =
+  given fromProgramOfThought[I, O]: LegacyProgramRunner[ProgramOfThought[I, O]] =
     signatureBacked[I, ProgramOfThought.WithReasoning[O], ProgramOfThought[I, O]](_.baseSignature.inputShape)
 
-  given fromRLM[I, O]: ProgramRunner[RLM[I, O]] =
+  given fromRLM[I, O]: LegacyProgramRunner[RLM[I, O]] =
     signatureBacked[I, O, RLM[I, O]](_.baseSignature.inputShape)
 
-  def apply[P](using runner: ProgramRunner[P]): ProgramRunner[P] = runner
+  def apply[P](using runner: LegacyProgramRunner[P]): LegacyProgramRunner[P] = runner

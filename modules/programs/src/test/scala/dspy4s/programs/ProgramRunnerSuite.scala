@@ -46,7 +46,7 @@ class ProgramRunnerSuite extends FunSuite:
     given RuntimeContext = RuntimeContext()
     val program          = CapturingDynamic()
 
-    val result = ProgramRunner[CapturingDynamic].run(program, call)
+    val result = LegacyProgramRunner[CapturingDynamic].run(program, call)
 
     assertEquals(result.map(_.asString("value")), Right(Right("dynamic")))
     assertEquals(program.observed, Some(call))
@@ -56,7 +56,7 @@ class ProgramRunnerSuite extends FunSuite:
     given RuntimeContext = RuntimeContext()
     val program          = CapturingTyped()
 
-    val result = ProgramRunner[CapturingTyped].run(program, call)
+    val result = LegacyProgramRunner[CapturingTyped].run(program, call)
 
     assertEquals(result.map(_.asString("value")), Right(Right("decoded")))
     assertEquals(program.observed.map(_.input), Some(RunnerInput("decoded")))

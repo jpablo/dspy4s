@@ -20,7 +20,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.optimization.OptimizableId
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
@@ -33,7 +33,7 @@ final case class Pipeline(hinter: DynamicPredict, answerer: DynamicPredict)
 
 object Pipeline:
   /** Run hinter → feed its hint into answerer. Two Module calls → two trace entries (in this order). */
-  given ProgramRunner[Pipeline] with
+  given LegacyProgramRunner[Pipeline] with
     def run(program: Pipeline, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =

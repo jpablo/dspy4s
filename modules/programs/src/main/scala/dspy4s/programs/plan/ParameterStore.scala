@@ -94,7 +94,7 @@ final class ParameterStore private (private val bindings: Vector[ParameterBindin
   private[plan] def merge(that: ParameterStore): ParameterStore =
     that.bindings.foldLeft(this) { (current, incoming) =>
       current.binding(incoming.id) match
-        case None => ParameterStore.fromBindings(current.bindings :+ incoming)
+        case None           => ParameterStore.fromBindings(current.bindings :+ incoming)
         case Some(existing) =>
           require(
             existing == incoming,

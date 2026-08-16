@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
@@ -25,7 +25,7 @@ import zio.blocks.schema.DynamicValue
   * `P`): [[compile]] instead returns a [[KNNFewShotProgram]] — a wrapper [[DynamicModule]] with the same per-call
   * behavior.
   */
-final class KNNFewShot[P: {OptimizableStructure, ProgramRunner}](
+final class KNNFewShot[P: {OptimizableStructure, LegacyProgramRunner}](
     k              : NeighborCount,
     trainset       : NonEmptyTrainset,
     embedder       : Embedder,
@@ -38,7 +38,7 @@ final class KNNFewShot[P: {OptimizableStructure, ProgramRunner}](
 /** The compiled artifact of [[KNNFewShot]]: a module that, per call, retrieves the query's nearest trainset neighbors,
   * bootstraps them onto the student as demos, and runs the result.
   */
-final class KNNFewShotProgram[P: {OptimizableStructure, ProgramRunner}] private[optimize] (
+final class KNNFewShotProgram[P: {OptimizableStructure, LegacyProgramRunner}] private[optimize] (
     val student    : P,
     teacher        : Option[P],
     knn            : KNN,
@@ -53,5 +53,5 @@ final class KNNFewShotProgram[P: {OptimizableStructure, ProgramRunner}] private[
     for
       neighbors <- knn.retrieve(call.input)
       report    <- new BootstrapFewShot[P](bootstrapConfig).compile(student, neighbors, teacher)
-      result    <- summon[ProgramRunner[P]].run(report.bestProgram, call.input)
+      result    <- summon[LegacyProgramRunner[P]].run(report.bestProgram, call.input)
     yield result

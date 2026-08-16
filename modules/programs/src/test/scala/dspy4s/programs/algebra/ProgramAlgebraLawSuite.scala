@@ -21,7 +21,7 @@ import dspy4s.programs.DynamicSignature
 import dspy4s.programs.optimization.OptimizableLeaf
 import dspy4s.programs.optimization.OptimizableMetadata
 import dspy4s.programs.optimization.OptimizableParameters
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.RecordObject
 import dspy4s.programs.contracts.Module
@@ -188,7 +188,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assertObsEq(U.composition(f, g), 3)
   }
 
-  test("identity preserves the complete prediction envelope through ProgramRunner") {
+  test("identity preserves the complete prediction envelope through LegacyProgramRunner") {
     val f      = Program.of(step[Boxed, Wrapped]("f", "b -> s")(b => Wrapped(s"v${b.n}")))
     val direct = f(ProgramCall(Boxed(7)))
     val viaId  = (f >>> C.id[Wrapped])(ProgramCall(Boxed(7)))
@@ -196,7 +196,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assertEquals(viaId, direct)
 
     val record = DynamicValues.record("n" := 7)
-    val runner = summon[ProgramRunner[SomeProgram[Boxed, Wrapped]]]
+    val runner = summon[LegacyProgramRunner[SomeProgram[Boxed, Wrapped]]]
     assertEquals(runner.run(f >>> C.id[Wrapped], record), runner.run(f, record))
     assertEquals(runner.run(C.id[Boxed] >>> f, record), runner.run(f, record))
   }
@@ -328,7 +328,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     val boxedRecord = DynamicValues.record("n" := 5)
     assertEquals(summon[RecordCodec[Boxed]].decode(boxedRecord), Right(Boxed(5)))
     val p   = Program.of(step[Boxed, Wrapped]("p", "b -> s")(b => Wrapped(s"v${b.n}")))
-    val ran = summon[ProgramRunner[SomeProgram[Boxed, Wrapped]]].run(p, boxedRecord)
+    val ran = summon[LegacyProgramRunner[SomeProgram[Boxed, Wrapped]]].run(p, boxedRecord)
     assert(ran.isRight, s"record-boundary run failed: ${ran.left.toOption}")
   }
 
@@ -447,16 +447,16 @@ class ProgramAlgebraLawSuite extends FunSuite:
     assert(gate.nonEmpty, "the collapsed Record object must stay codec-less")
     val packaged = Program.of(ChainOfThought(recordSignature))
     assertEquals(packaged.params.size, 1)
-    val errors = compileErrors("summon[ProgramRunner[Program[DynamicValue.Record, Wrapped, 1]]]")
+    val errors = compileErrors("summon[LegacyProgramRunner[Program[DynamicValue.Record, Wrapped, 1]]]")
     assert(errors.nonEmpty, "expected record-boundary execution without a codec to fail compilation")
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
-    val _ = summon[ProgramRunner[ChainOfThought[DynamicValue.Record, Wrapped]]]
+    val _ = summon[LegacyProgramRunner[ChainOfThought[DynamicValue.Record, Wrapped]]]
   }
 
   test("identity exists at every object while record-boundary execution remains codec-gated") {
     val identity = C.id[Opaque]
     assertEquals(identity.params, Vector.empty)
-    val errors = compileErrors("summon[ProgramRunner[Program[Opaque, Opaque, 0]]]")
+    val errors = compileErrors("summon[LegacyProgramRunner[Program[Opaque, Opaque, 0]]]")
     assert(errors.nonEmpty, "expected record-boundary execution at a non-codec input to fail compilation")
     assert(errors.contains("RecordCodec"), s"expected a missing-RecordCodec error, got:\n$errors")
   }

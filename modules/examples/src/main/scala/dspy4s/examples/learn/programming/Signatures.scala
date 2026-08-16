@@ -242,7 +242,7 @@ object CustomTypesExample:
 // --8<-- [end:custom-types]
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ProgramRunner entrypoint
+// LegacyProgramRunner entrypoint
 // ═══════════════════════════════════════════════════════════════════════════
 // The example objects above only declare programs; running them needs a
 // `RuntimeContext` carrying a live LM + adapter. This wires the real OpenAI

@@ -25,8 +25,8 @@ final class ProgramEvaluateSuite extends FunSuite:
     val name: String = "exact"
 
     def score(
-        example   : Example,
-        prediction: RawPrediction,
+        example                  : Example,
+        prediction               : RawPrediction,
         @annotation.unused events: Vector[ProgramEvent]
     ): ZIO[Any, DspyError, Double] =
       ZIO.fromEither(for
@@ -59,7 +59,7 @@ final class ProgramEvaluateSuite extends FunSuite:
         ZIO.fail(RuntimeError("expected", "failure"))
     val dataset = Vector(Example(DynamicValues.record("question" := "abc", "answer" := "cba"), Set("question")))
     val options = ProgramEvaluateOptions(failureScore = -1.0, includeErrors = true)
-    val result = Unsafe.unsafe { implicit unsafe =>
+    val result  = Unsafe.unsafe { implicit unsafe =>
       Runtime.default.unsafe
         .run(ProgramEvaluate(program, dataset, exact, options).provideEnvironment(ZEnvironment(failingBackend)))
         .getOrThrowFiberFailure()

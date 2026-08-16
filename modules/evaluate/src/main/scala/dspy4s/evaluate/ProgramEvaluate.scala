@@ -22,8 +22,8 @@ object ProgramMetric:
       val name: String = metric.name
 
       def score(
-          example   : Example,
-          prediction: RawPrediction,
+          example                  : Example,
+          prediction               : RawPrediction,
           @annotation.unused events: Vector[ProgramEvent]
       ): IO[DspyError, Double] =
         ZIO
@@ -31,15 +31,17 @@ object ProgramMetric:
             given RuntimeContext = context
             metric.score(example, prediction)
           }
-          .mapError(error => RuntimeError(
-            "evaluation_metric",
-            Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
-          ))
+          .mapError(error =>
+            RuntimeError(
+              "evaluation_metric",
+              Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+            )
+          )
           .flatMap(ZIO.fromEither)
 
 final case class ProgramEvaluateOptions(
-    parallelism : Int     = 8,
-    failureScore: Double  = 0.0,
+    parallelism  : Int     = 8,
+    failureScore : Double  = 0.0,
     includeErrors: Boolean = false
 ):
   require(parallelism > 0, "ProgramEvaluate parallelism must be positive")
@@ -79,9 +81,8 @@ object ProgramEvaluate:
   ): URIO[PredictionBackend, ExampleEvaluation] =
     ProgramRunner.runRecordJournaled(program, example.inputs).flatMap { execution =>
       execution.outcome match
-        case Left(error) => ZIO.succeed(failed(example, RawPrediction.empty, error, options))
-        case Right(prediction) =>
-          metric.score(example, prediction.raw, execution.events).either.map {
+        case Left(error)       => ZIO.succeed(failed(example, RawPrediction.empty, error, options))
+        case Right(prediction) => metric.score(example, prediction.raw, execution.events).either.map {
             case Left(error)  => failed(example, prediction.raw, error, options)
             case Right(score) => ExampleEvaluation(example, prediction.raw, score)
           }
@@ -99,4 +100,3 @@ object ProgramEvaluate:
       options.failureScore,
       if options.includeErrors then Some(s"[${error.code}] ${error.message}") else None
     )
-

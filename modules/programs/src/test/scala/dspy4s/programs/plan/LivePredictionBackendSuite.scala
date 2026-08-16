@@ -2,7 +2,9 @@ package dspy4s.programs.plan
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, SignatureLayout, :=}
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
+import dspy4s.lm.contracts.{
+  LanguageModel, LmChunk, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole, StreamingLanguageModel
+}
 import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.{Runtime, Unsafe, ZEnvironment}
@@ -10,7 +12,7 @@ import zio.{Runtime, Unsafe, ZEnvironment}
 final class LivePredictionBackendSuite extends FunSuite:
 
   private final case class Question(question: String) derives CanEqual
-  private final case class Answer(answer: String)     derives CanEqual
+  private final case class Answer(answer: String) derives CanEqual
 
   private object PromptAdapter extends Adapter:
     val name: String = "prompt-adapter"
@@ -53,5 +55,56 @@ final class LivePredictionBackendSuite extends FunSuite:
 
     assertEquals(execution.outcome.map(_.output), Right(Answer("Why? [be direct]")))
     assertEquals(execution.outcome.toOption.flatMap(_.raw.lmUsage).map(_.totalTokens), Some(3L))
+
   }
 
+  test("the live backend streams chunks and assembles the final prediction") {
+    var ordinaryCalls  = 0
+    val streamingModel = new StreamingLanguageModel:
+      val id: String   = "streaming-echo"
+      val mode: LmMode = LmMode.Chat
+
+      def call(@annotation.unused request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        ordinaryCalls += 1
+        Right(LmResponse(Vector(LmOutput("ordinary"))))
+
+      def stream(@annotation.unused request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+        Iterator(
+          LmChunk(text = "hel"),
+          LmChunk(text = "lo"),
+          LmChunk(finishReason = Some("stop"), usage = Some(LmUsage(3, 2, 1)))
+        )
+
+    val signature = Signature.derived[Question, Answer]("Answer")
+    val program   = Program.predict(ParameterId("answer"), signature)
+    val backend   = new LivePredictionBackend(streamingModel, PromptAdapter, RuntimeContext())
+    val execution = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(ProgramRunner
+          .runJournaled(program, Question("Why?"))
+          .provideEnvironment(ZEnvironment(backend: PredictionBackend)))
+        .getOrThrowFiberFailure()
+    }
+
+    assertEquals(execution.outcome.map(_.output), Right(Answer("hello")))
+    assertEquals(ordinaryCalls, 0)
+    assertEquals(
+      execution.events.collect { case ProgramEvent.OutputChunk(_, _, _, chunk) => chunk },
+      Vector(
+        PredictionChunk("", "hel"),
+        PredictionChunk("", "lo", isLast = true)
+      )
+    )
+    assertEquals(execution.outcome.toOption.flatMap(_.raw.lmUsage).map(_.totalTokens), Some(3L))
+
+    val untraced = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(ProgramRunner
+          .runJournaled(program, Question("Why?"), RunOptions(traceEnabled = false))
+          .provideEnvironment(ZEnvironment(backend: PredictionBackend)))
+        .getOrThrowFiberFailure()
+    }
+    assertEquals(untraced.outcome.map(_.output), Right(Answer("ordinary")))
+    assertEquals(untraced.events, Vector.empty)
+    assertEquals(ordinaryCalls, 1)
+  }

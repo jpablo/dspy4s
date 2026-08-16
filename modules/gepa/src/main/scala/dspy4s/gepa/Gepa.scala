@@ -5,7 +5,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 /** User-facing GEPA optimizer — the dspy4s analogue of dspy's `GEPA` teleprompter. It wires the [[GepaAdapter]] +
   * [[GepaEngine]] and runs reflective prompt evolution over a student program.
@@ -24,7 +24,7 @@ final class Gepa[P](
     metric      : FeedbackMetric,
     reflectionLm: LanguageModel,
     config      : GepaConfig
-)(using OptimizableStructure[P], ProgramRunner[P]):
+)(using OptimizableStructure[P], LegacyProgramRunner[P]):
 
   val name: String = "gepa"
 

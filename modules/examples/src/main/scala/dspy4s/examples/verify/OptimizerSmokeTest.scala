@@ -45,7 +45,7 @@ import dspy4s.optimize.{
   RoundCount,
   TrialCount
 }
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableStructure
 
@@ -148,7 +148,7 @@ object OptimizerSmokeTest:
         given RuntimeContext = RuntimeEnvironment.current
 
         def scoreOf(program: DynamicPredict): Double =
-          val runner = summon[ProgramRunner[DynamicPredict]]
+          val runner = summon[LegacyProgramRunner[DynamicPredict]]
           Evaluate(devset = valset, metric = metric)()((ex: Example) => runner.run(program, ex.inputs)) match
             case Right(result) => result.score
             case Left(err)     => println(s"\n[smoke] eval failed: ${err.message}"); -1.0

@@ -21,7 +21,30 @@ get back the same program type you put in, with its predictors' demos and/or ins
  metric  ─┘        (propose → score → select)
 ```
 
-## The contract
+## Functional migration
+
+The replacement API uses `dspy4s.programs.RecordProgram[I, O]`. It keeps effects and parameter identity explicit:
+
+- `LabeledFewShot` edits immutable `ProgramParameters` through stable `ParameterId` values.
+- `ProgramBootstrapFewShot` runs the teacher through `ProgramRunner` in ZIO. It uses `ProgramMetric` for effectful
+  scoring and returns an `OptimizationReport[RecordProgram[I, O]]`.
+- `ProgramBootstrapRandomSearch` builds immutable bootstrap candidates and scores them with `ProgramEvaluate`. Candidate
+  order and early stopping are deterministic.
+- `ProgramCOPRO` accepts a typed instruction-proposal `Program`, updates the student through stable `ParameterId`
+  values, and scores each candidate with `ProgramEvaluate`. It records and skips proposal failures.
+- `ProgramMIPROv2` composes effectful demo bootstrapping with an injected typed instruction-proposal `Program`. A
+  seeded planner builds joint demo and instruction trials, and all edits use stable `ParameterId` values. Bootstrap and
+  proposal failures are report data, and score ties keep the current program.
+- `ProgramKNNFewShot` accepts a typed nearest-neighbor selector and uses `localParametersWith` to attach its labeled
+  examples for one run. Retrieval policy stays visible and injectable; the student and its static parameters do not
+  change.
+- `ProgramInferRules` composes effectful bootstrap, an injected typed rule-induction `Program`, stable-ID updates, and
+  `ProgramEvaluate`. It narrows the example set only after a typed context-window failure.
+- Bootstrap state is immutable and run-local. It does not use a thread-local runtime or mutable demo buffers.
+
+The contracts below describe the legacy optimizer path that remains during migration.
+
+## The legacy contract
 
 Every demo/instruction optimizer implements `Teleprompter[P]`:
 
@@ -49,7 +72,7 @@ program class:
   metadata plus optimizable parameters), `read` projects the `OptimizableParameters` values, and `replace` writes an edited parameter vector
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
-- **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
+- **`LegacyProgramRunner[P]`** — run a legacy `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
   consumes. This is the "spine unification": it lets the optimizers target domain-valued programs (`Predict[I, O]`,
   `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the record-valued `DynamicModule` spine, with no
   `asInstanceOf`.
@@ -120,10 +143,13 @@ compatibility policy.
 | File | Contents |
 |------|----------|
 | `contracts/OptimizeContracts.scala` | `Teleprompter`, `OptimizationReport`, `CandidateProgram` |
-| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` spine for domain- and record-valued programs |
+| `programs/ProgramRunner.scala` | the old `LegacyProgramRunner[P]` spine for domain- and record-valued programs |
 | `OptimizerSupport.scala` | shared instruction-edit, seed→rolloutId, and scoring helpers |
 | `LabeledFewShot.scala`, `BootstrapFewShot*.scala`, `KNNFewShot.scala` | demo optimizers |
-| `COPRO.scala`, `MIPROv2.scala`, `InferRules.scala` | instruction (and demo) optimizers |
+| `COPRO.scala`, `MIPROv2.scala`, `InferRules.scala` | legacy instruction (and demo) optimizers |
+| `ProgramCOPRO.scala`, `ProgramMIPROv2.scala` | effectful instruction and joint-search optimizers with injected typed proposal programs |
+| `ProgramKNNFewShot.scala` | run-local stable-ID demos from an injected typed neighbor selector |
+| `ProgramInferRules.scala` | effectful rule induction with an injected typed induction program |
 | `propose/GroundedProposer.scala` | MIPROv2's instruction proposer |
 | `Ensemble.scala` | program ensembling |
 | `ProgramPersistence.scala` | program state save / load |

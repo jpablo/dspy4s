@@ -12,7 +12,8 @@
 ## Implemented outcome
 
 The feasibility spike changed the recommendation. A passive typed syntax with separate interpreters is simpler than
-the executable `Module` composite. The first implementation is in `dspy4s.programs.plan`.
+the executable `Module` composite. The functional API is now exposed from `dspy4s.programs`; its source stays in the
+temporary `plan` package until legacy removal is complete.
 
 The implementation also rejects two parts of the original proposal:
 
@@ -26,40 +27,78 @@ The current split is:
 
 | Part | Implementation |
 |---|---|
-| Typed syntax | `plan/Program.scala` with `Identity`, `Lift`, `Predict`, composition, boundary maps, local controls, recovery, bounded iteration, and observation |
-| Execution | Stateless `plan.ProgramRunner`; ZIO effect, typed `DspyError`, run-local `Ref` journal, explicit `PredictionBackend` environment |
-| Real LM bridge | `plan.LivePredictionBackend`; the old blocking LM and adapter APIs are isolated behind one effect boundary |
+| Typed syntax | `plan/Program.scala` with environment-indexed `ProgramWithEnv[I, O, R]`, prediction alias `Program[I, O]`, composition, typed `Either` choice, sequential and bounded-parallel homogeneous traversal, boundary maps, local controls and run-local parameterization, recovery, typed evidence capture and restoration, visible `BestOfN`, and bounded iteration |
+| Execution | Stateless `plan.ProgramRunner`; ZIO effect, typed `DspyError`, run-local `Ref` journal, explicit capability services, and explicit `ProgramObserver` values |
+| Real LM bridge | `plan.LivePredictionBackend`; the old blocking LM and adapter APIs are isolated behind one effect boundary, including live `StreamingLanguageModel` chunks |
+| External effects | `Program.executeCode`, `Program.invokeTool`, and `Program.executeRepl` require separate capabilities; live bridges isolate blocking code, tool, and scoped persistent-REPL contracts |
 | Parameters | `ParameterStore`, stable `ParameterId`, `ProgramParameters[P]`, and data-only ID-keyed persistence |
 | Graph | `ProgramGraph`, interpreted from the same syntax |
 | Record input | `RecordProgram[I, O]`, which adds `Shape[I]` only for dataset and optimizer entry points |
-| Strategy | Functional `plan.ChainOfThought`, implemented as a signature transformation plus one prediction node |
-| Optimizer migration | `LabeledFewShot` now uses `ProgramParameters`; old `OptimizableStructure` values use a temporary bridge |
+| Strategy | Functional `plan.ChainOfThought`, `plan.FeedbackRetry`, `plan.Refine`, `plan.MultiChainComparison`, `plan.ProgramOfThought`, `plan.ReAct`, `plan.CodeAct`, `plan.RLM`, and `plan.Ensemble`; all are constructors over the common syntax |
+| Optimizer migration | `LabeledFewShot` uses `ProgramParameters`; `ProgramBootstrapFewShot`, `ProgramBootstrapRandomSearch`, `ProgramKNNFewShot`, `ProgramCOPRO`, `ProgramMIPROv2`, and `ProgramInferRules` use `RecordProgram`, ZIO, `ProgramMetric`, stable IDs, and immutable state |
 | Evaluation migration | `ProgramEvaluate` uses bounded ZIO parallelism over `RecordProgram`; `ProgramMetric` keeps metric effects explicit |
+| Streaming migration | `ProgramEventStream` emits interpreter events, backend-neutral prediction chunks, and the typed final prediction through `ZStream` |
 
-The program syntax is not parameterized by an effect. The execution interpreter uses ZIO 2. The backend is an
-environment service, so program values contain no model, adapter, runner, thread-local context, or executable module.
-`ProgramRunner.run` keeps failures in ZIO's typed error channel. `runJournaled` returns failures as data only when the
-caller must retain the event journal.
+The program syntax is not parameterized by an effect constructor. It is indexed by its service requirement `R`.
+Prediction nodes require `PredictionBackend`. Code nodes require `CodeExecutionBackend`. Tool nodes require
+`ToolBackend`. Composition combines service requirements with an intersection type. Pure nodes require `Any`. The
+execution interpreter uses ZIO 2, and program values contain no model, adapter, runner, thread-local context, or
+executable module. `ProgramRunner.run` keeps failures in ZIO's typed error channel. `runJournaled` returns failures as
+data only when the caller must retain the event journal.
 
 `DeepProgramPlanSuite` reruns execution and graph interpretation over 20,000 sequential nodes, and it runs 20,000
-bounded loop transitions on the ZIO continuation stack. The focused plan
-test suites also prove typed composition, stable replacement, shared IDs, parameter-state round trips, explicit record
-decoding, effectful backends, typed failure, and the live LM bridge.
+bounded loop transitions and a 20,000-member `collectAll` on the ZIO continuation stack. The focused plan test suites also prove typed composition,
+stable replacement, shared IDs, parameter-state round trips, explicit record decoding, effectful backends, typed
+failure, typed choice, visible `BestOfN`, reusable `repeatUntil`, ordered observation, and the live LM bridge. Focused
+tests also cover `FeedbackRetry`, the functional multi-chain comparison and program-of-thought orchestration, both
+effectful bootstrap optimizers, and the `ZStream` event path.
+
+`FeedbackRetry` is the functional replacement base for feedback loops. Its critic is a
+`Program[FeedbackRetry.Attempt[I, O], I]`, so feedback produces the next typed input. The task and critic remain visible
+to graph and parameter interpreters. The constructor is built from `>>>`, `&&&`, `|||`, `iterate`, and local controls.
+It does not need a `FeedbackRetry` interpreter node.
+
+Functional `Refine` does not copy the legacy adapter replacement. Legacy `Refine` inserts an untyped `hint_` field and
+routes advice by signature layout. Functional `Refine` gives its visible critic typed attempt data and receives an
+`Advice` map keyed by stable `ParameterId`. `localParametersWith` appends each valid advice value to that parameter's
+instruction for one attempt. Unknown IDs fail, `N/A` is ignored, and the static task stays unchanged. The bounded loop
+keeps the best prediction with a conservative tie rule. `Program.fromEvidence` restores that selected prediction's raw
+evidence, while the journal still records all task and critic calls.
+
+`ProgramOfThought` accepts generation, regeneration, code execution, and answer programs as typed children. Its loop is
+ordinary syntax. `Program.executeCode` is the production child, and `LiveCodeExecutionBackend` supplies the current
+interpreter. The capability returns the strategy-neutral `CodeExecutionResult`. The combined program type requires
+`PredictionBackend & CodeExecutionBackend`. Interpreter calls do not enter `Program.liftEither`, which remains the
+pure local-transform instruction.
+
+Functional `ReAct` accepts generator, tool-invoker, and extractor programs. Its model-facing control is the typed
+`Action` algebra: `Finish()` or `Invoke(ToolCallRequest)`. Finish is not a fake tool. The generic `attempt` syntax node
+converts a tool-service failure to typed trajectory data, so the next generation step can recover. The default
+production invoker is `Program.invokeTool`.
+
+Functional `CodeAct` accepts generator, executor, extractor, and parser values. Parse failures and nonzero code results
+are typed trajectory observations. Code-executor infrastructure failures remain in ZIO's typed error channel. The
+default production executor is `Program.executeCode`. Both functional agents use ordinary typed choice and bounded
+iteration; neither needs an agent-specific interpreter node.
+
+Functional `RLM` accepts action-generator, REPL-executor, and exhausted-budget extractor programs. A typed submission
+ends the loop without extraction. `RLM.replExecutor` encodes the original typed input as REPL variables and decodes a
+submitted record through the output `Shape`. `Program.executeRepl` is a neutral step capability. Its production bridge
+is supplied by `LiveReplExecutionBackend.layer`, which acquires one persistent interpreter for one ZIO scope and closes
+it after success or failure. The session lifecycle is therefore not stored in a program value or a global registry.
 
 ## Migration decision
 
-The `Module` stack remains only as migration input. New structural work should use `plan.Program`. Do not add new
+The `Module` stack remains only as migration input. New structural work should use `dspy4s.programs.Program`. Do not add new
 `forward` implementations or new structural `OptimizableStructure` instances when the behavior can be a program node,
 program constructor, or interpreter operation.
 
 The next migration units are:
 
 1. move the remaining optimizers to effectful `RecordProgram` execution;
-2. express `BestOfN` and the existing agents with the visible bounded-loop instruction;
-3. move callbacks and streaming to interpreter services;
-4. move each remaining strategy, then remove `Module`, the old `ProgramRunner`, runtime globals, and thread-local
+2. move each remaining strategy, then remove `Module`, `LegacyProgramRunner`, runtime globals, and thread-local
    propagation;
-5. promote the `plan` package to the main `programs` API after the old names are removed.
+3. promote the `plan` package to the main `programs` API after the old names are removed.
 
 ---
 

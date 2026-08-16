@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -10,7 +10,7 @@ import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.programs.optimization.OptimizableStructure
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place so
-  * the seed→rolloutId mapping and the Evaluate+ProgramRunner scoring wiring stay identical across optimizers.
+  * the seed→rolloutId mapping and the Evaluate+LegacyProgramRunner scoring wiring stay identical across optimizers.
   */
 private[optimize] object OptimizerSupport:
 
@@ -43,7 +43,7 @@ private[optimize] object OptimizerSupport:
     * that select a best candidate must not silently collapse `None` into `0.0` (MIPROv2 chooses `0.0` for a
     * non-selectable trial; COPRO keeps it as `None`).
     */
-  def evalScore[P](program: P, evalset: Vector[Example], metric: Metric, runner: ProgramRunner[P])(using
+  def evalScore[P](program: P, evalset: Vector[Example], metric: Metric, runner: LegacyProgramRunner[P])(using
       RuntimeContext
   ): Option[Double] =
     Evaluate(devset = evalset, metric = metric)()((ex: Example) => runner.run(program, ex.inputs)) match

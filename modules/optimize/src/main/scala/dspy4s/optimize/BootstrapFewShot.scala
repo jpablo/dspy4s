@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.programs.optimization.OptimizableStructure
 
@@ -28,7 +28,7 @@ final case class BootstrapFewShotConfig(
     seed                : Long                                     = 0L
 )
 
-final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
+final class BootstrapFewShot[P: {OptimizableStructure, LegacyProgramRunner}](
     config: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -74,7 +74,7 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
               val runOutcome: Either[DspyError, RawPrediction] =
                 dspy4s.core.runtime.RuntimeEnvironment.withGeneratedAsyncTask(s"bootstrap-round-$round") {
                   given RuntimeContext = dspy4s.core.runtime.RuntimeEnvironment.current
-                  summon[ProgramRunner[P]].run(teacherProgram, example.inputs)
+                  summon[LegacyProgramRunner[P]].run(teacherProgram, example.inputs)
                 }
               runOutcome match
                 case Left(_)           => ()

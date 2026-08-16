@@ -5,7 +5,20 @@ calling it returns a `ClosableIterator[StreamEvent]` that yields field-routed to
 final prediction as they happen, instead of one blocking result. Depends on `core`, `lm`, `adapters`, and
 [`programs`](../programs/README.md).
 
-## The core idea
+## Functional streaming path
+
+`ProgramEventStream` runs a `dspy4s.programs.ProgramWithEnv[I, O, R]` with the stateless ZIO interpreter. It returns a
+`ZStream` of ordered `ProgramEvent` values followed by the typed `Prediction[O]`. An explicit `ProgramObserver` sends
+events from the interpreter to the stream. The stream preserves the program's environment requirement `R`, including
+code and tool capabilities. This path does not use global callbacks or a producer thread.
+
+`PredictionBackend.generateStreaming` reports neutral `PredictionChunk` values. The interpreter converts them to
+`ProgramEvent.OutputChunk` with the active prediction call ID, parent ID, and component. `LivePredictionBackend` uses
+this path when its model implements `StreamingLanguageModel`; it routes adapter field chunks, assembles the full model
+response, and then produces the same typed final prediction. Backends that only implement `generate` remain valid and
+emit no chunk events.
+
+## The legacy core idea
 
 `streamify` runs the program on a daemon producer thread, injecting a wrapped `StreamingLanguageModel` into the
 runtime. As the underlying LM generates, the wrapper siphons each chunk through the active adapter (parsing

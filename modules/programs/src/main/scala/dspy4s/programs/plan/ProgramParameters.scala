@@ -9,7 +9,7 @@ import dspy4s.programs.optimization.{OptimizableParameters, OptimizableStructure
   * `OptimizableStructure`, so current optimizer clients can move to this capability before old module trees disappear.
   */
 trait ProgramParameters[P]:
-  def read(program: P): ParameterStore
+  def read(program   : P): ParameterStore
   def replace(program: P, values: Map[ParameterId, OptimizableParameters]): Either[DspyError, P]
 
 private[plan] trait LowPriorityProgramParameters:
@@ -26,21 +26,20 @@ private[plan] trait LowPriorityProgramParameters:
 object ProgramParameters extends LowPriorityProgramParameters:
   def apply[P](using parameters: ProgramParameters[P]): ProgramParameters[P] = parameters
 
-  given program[I, O]: ProgramParameters[Program[I, O]] with
-    def read(program: Program[I, O]): ParameterStore = program.parameters
+  given program[I, O, R]: ProgramParameters[ProgramWithEnv[I, O, R]] with
+    def read(program: ProgramWithEnv[I, O, R]): ParameterStore = program.parameters
 
     def replace(
-        program: Program[I, O],
+        program: ProgramWithEnv[I, O, R],
         values : Map[ParameterId, OptimizableParameters]
-    ): Either[DspyError, Program[I, O]] =
+    ): Either[DspyError, ProgramWithEnv[I, O, R]] =
       program.replaceParameters(values)
 
-  given recordProgram[I, O]: ProgramParameters[RecordProgram[I, O]] with
-    def read(program: RecordProgram[I, O]): ParameterStore = program.program.parameters
+  given recordProgram[I, O, R]: ProgramParameters[RecordProgramWithEnv[I, O, R]] with
+    def read(program: RecordProgramWithEnv[I, O, R]): ParameterStore = program.program.parameters
 
     def replace(
-        program: RecordProgram[I, O],
+        program: RecordProgramWithEnv[I, O, R],
         values : Map[ParameterId, OptimizableParameters]
-    ): Either[DspyError, RecordProgram[I, O]] =
+    ): Either[DspyError, RecordProgramWithEnv[I, O, R]] =
       program.program.replaceParameters(values).map(updated => program.copy(program = updated))
-

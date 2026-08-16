@@ -4,7 +4,7 @@ import dspy4s.algebra.{AnyObject, Category, Functor, Id, Lens, NatGradedCategory
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 import dspy4s.programs.RecordCodec
 import dspy4s.programs.compose.AndThen
 import dspy4s.programs.compose.Both
@@ -25,7 +25,7 @@ import scala.compiletime.ops.int.+
   *
   * `Rep` hides the concrete module representation while `N` remains visible as the natural-number grade. Construction
   * through [[Program.of]] requires complete optimizable-structure evidence for the representation. Decoding from a
-  * dynamic record is a separate boundary capability supplied by [[ProgramRunner]].
+  * dynamic record is a separate boundary capability supplied by [[LegacyProgramRunner]].
   */
 sealed trait Program[I, O, N <: Int]:
   type Rep <: Module[I, O]
@@ -129,14 +129,14 @@ object Program:
   /** Record-boundary execution for a program whose grade is known. A `Program[I, O, N]` is a `SomeProgram[I, O]`, so
     * this delegates to [[someProgramRunner]] — the decode-then-run logic lives once.
     */
-  given programRunner[I, O, N <: Int](using RecordCodec[I]): ProgramRunner[Program[I, O, N]] with
+  given programRunner[I, O, N <: Int](using RecordCodec[I]): LegacyProgramRunner[Program[I, O, N]] with
     def run(program: Program[I, O, N], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
       someProgramRunner[I, O].run(program, call)
 
   /** Record-boundary execution does not require the parameter grade. */
-  given someProgramRunner[I, O](using codec: RecordCodec[I]): ProgramRunner[SomeProgram[I, O]] with
+  given someProgramRunner[I, O](using codec: RecordCodec[I]): LegacyProgramRunner[SomeProgram[I, O]] with
     def run(program: SomeProgram[I, O], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =

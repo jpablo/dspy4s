@@ -30,8 +30,8 @@ import zio.blocks.schema.DynamicValue
   * vector against `m`, then hides it behind its own path-branded carrier before prediction.
   *
   * Status: the recommended user path for runtime-string signatures. `s.predict()` builds the program; composition,
-  * optimization (`OptimizableStructure` + `ProgramRunner` over a packaged `Program`), and cross-fiber pipelines (via
-  * [[DynamicSignature.bridge]]) all run through the same machinery as domain-valued programs.
+  * optimization (`OptimizableStructure` + `LegacyProgramRunner` over a packaged `Program`), and cross-fiber pipelines
+  * (via [[DynamicSignature.bridge]]) all run through the same machinery as domain-valued programs.
   * `Signature.fromStringDynamic` remains the substrate, and the plain data-bag surface for consumers that never enter
   * the category (optimizer helper generations, the evaluation judge).
   */

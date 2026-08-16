@@ -7,24 +7,59 @@ introspection type-class the optimizers rely on and the in-memory retrievers. De
 
 ## Target architecture
 
-The replacement API is in `dspy4s.programs.plan` while the old names are migrated. A `Program[I, O]` is pure typed
-syntax. It cannot run itself and it does not contain a language model, adapter, runner, callback registry, or mutable
-parameter object.
+The primary API is exposed from `dspy4s.programs`. Its implementation stays in the temporary `plan` source package
+while old sources are removed. `Program[I, O]` is the common prediction-program alias. `ProgramWithEnv[I, O, R]` also
+records the service requirement `R`. Program syntax cannot run itself and it does not contain a language model,
+adapter, runner, callback registry, or mutable parameter object. The old record-boundary type class is now named
+`LegacyProgramRunner`.
 
-- `Program.predict`, `identity`, `lift`, `>>>`, `&&&`, `***`, `map`, `contramap`, `local`, `recoverWith`, and bounded
-  `iterate` build one closed structural language.
-- `ProgramRunner` is a stateless ZIO interpreter. `PredictionBackend` is an explicit environment service.
+- `Program.predict`, `identity`, `lift`, `>>>`, `&&&`, `***`, `|||`, `map`, `contramap`, `local`, `localWithInput`,
+  `localParametersWith`, `recoverWith`, `attempt`, `collectAll`, `collectAllPar`, `bestOfN`, and bounded `iterate` build
+  one closed structural language.
+- `collectAll` is ordered and fail-fast. `collectAllPar` runs homogeneous visible members with bounded ZIO
+  parallelism and keeps member order in its output. Compose each member with `attempt` to retain ordered partial
+  failures as data.
+- `localParametersWith` runs a visible typed configurator and applies its result to an immutable parameter store for
+  one inner run. It supports input-dependent parameterization without mutation or a hidden dynamic program tree.
+- `withEvidence` makes a complete prediction available as typed data. `Program.fromEvidence` is its selection dual: a
+  prediction carried as output becomes the final output and raw evidence.
+- `repeatUntil` builds a reusable bounded strategy from existing nodes. It does not add a hidden execution loop.
+- `FeedbackRetry` makes the feedback critic a visible program from an attempted prediction to the next typed input.
+- Functional `Refine` scores attempts, sends typed attempt data to a visible critic, and routes its advice through
+  stable `ParameterId` values. Advice changes only the next run. Equal scores retain the earlier attempt.
+- `ProgramRunner` is a stateless ZIO interpreter. `PredictionBackend` and `ProgramObserver` are explicit services.
+  Streaming-capable prediction backends emit neutral `PredictionChunk` values through the same interpreter call.
+- `Program.executeCode` returns the neutral `CodeExecutionResult` and requires `CodeExecutionBackend`. Composition with prediction computes
+  `PredictionBackend & CodeExecutionBackend`.
+- `Program.invokeTool` requires `ToolBackend`. `LiveToolBackend` adapts current `ToolFunction` values without global
+  callbacks.
+- `Program.executeRepl` requires `ReplExecutionBackend`. `LiveReplExecutionBackend.layer` owns one persistent
+  interpreter in a ZIO scope and closes it after success or failure.
 - `ParameterStore` keeps optimizer values separate from syntax and keys them with stable `ParameterId` values.
 - `ProgramGraph` interprets the same syntax without running it.
 - `RecordProgram` adds a `Shape[I]` decoder only at the dataset and optimizer boundary.
 - `ChainOfThought` is a signature transformation plus one prediction node. It is not a wrapper class.
+- `MultiChainComparison` is a validated input transformation followed by one prediction node.
+- `ProgramOfThought` composes generator, regenerator, executor, and answerer programs around one visible bounded loop.
+- Functional `ReAct` composes a typed `Finish | Invoke` action loop, tool program, and extractor. Tool failures become
+  typed trajectory data through `attempt`; finish is not a synthetic tool.
+- Functional `CodeAct` composes generator, parser, code executor, and extractor programs. Parse and code-domain
+  failures are trajectory data; code-service failures remain in ZIO's typed error channel.
+- Functional `RLM` composes action generation, typed REPL execution, direct submission, and exhausted-budget
+  extraction. `RLM.replExecutor` adapts typed input and output shapes to the neutral REPL capability.
+- Functional `Ensemble` uses `collectAll` over homogeneous visible members and reduces their complete typed prediction
+  evidence. Execution is ordered and fail-fast.
 - `LivePredictionBackend` isolates the current blocking adapter and LM contracts behind one effect boundary.
 
 `LabeledFewShot` already consumes the new `ProgramParameters` capability. Its legacy compatibility instance lets old
-programs use the same optimizer during migration.
+programs use the same optimizer during migration. `ProgramBootstrapFewShot` runs a `RecordProgram` with explicit ZIO
+effects and writes accepted demos through stable parameter IDs.
 
-`DeepProgramPlanSuite` checks execution and graph interpretation with 20,000 sequential nodes and checks 20,000 loop
-transitions. The parameter state
+`ProgramEventStream` exposes ordered interpreter events, live prediction chunks, and the typed final prediction as a
+`ZStream`. Chunk events carry the same call and parent IDs as prediction start, completion, and failure events.
+
+`DeepProgramPlanSuite` checks execution and graph interpretation with 20,000 sequential nodes, 20,000 loop transitions,
+and 20,000 `collectAll` members. The parameter state
 codec saves only stable ID-to-value data; it does not claim that Scala functions, tools, syntax, or services are
 serializable.
 
@@ -94,7 +129,7 @@ interpreter. `DeepProgramStackSafetySuite` checks both paths with a chain of
 |------|------|
 | `Module[I, O]` | Semantic program trait: `forward` returns `Prediction[O]`; `final apply` owns the lifecycle. `DynamicModule` specializes both sides to records. |
 | `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
-| `ProgramRunner[P]` | Runs domain-valued or record-valued `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
+| `LegacyProgramRunner[P]` | Old type class that runs a `Module` from a record input. It remains only for migration. |
 | `Prediction[O]` | Domain output `O` + its `RawPrediction` evidence (completions, usage). |
 | `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
@@ -107,7 +142,7 @@ interpreter. `DeepProgramStackSafetySuite` checks both paths with a chain of
 
 ## Design notes
 
-The notes in this section describe the legacy stack unless they name `dspy4s.programs.plan`.
+The notes in this section describe the legacy stack unless they name the functional `Program` API.
 
 - **Module purity.** `forward` is side-effect-free; trace, history, and callbacks are a transparent `final`
   wrapper, so every program is observed identically with no subclass boilerplate. (The
@@ -141,7 +176,9 @@ The notes in this section describe the legacy stack unless they name `dspy4s.pro
 | `plan/Program.scala`, `plan/ProgramRunner.scala` | replacement typed syntax and stateless ZIO interpreter |
 | `plan/ParameterStore.scala`, `plan/ProgramParameters.scala` | stable optimizer identity, state, and migration capability |
 | `plan/ProgramGraph.scala`, `plan/RecordProgram.scala` | graph interpreter and explicit dataset record boundary |
-| `plan/LivePredictionBackend.scala`, `plan/ChainOfThought.scala` | blocking-service bridge and functional strategy constructor |
+| `plan/LivePredictionBackend.scala`, `plan/LiveCodeExecutionBackend.scala`, `plan/LiveToolBackend.scala`, `plan/ReplExecutionBackend.scala` | blocking-service bridges, including scoped persistent REPL ownership |
+| `plan/CodeExecutionResult.scala` | strategy-neutral code execution result at the capability boundary |
+| `plan/ChainOfThought.scala`, `plan/FeedbackRetry.scala`, `plan/MultiChainComparison.scala`, `plan/ProgramOfThought.scala`, `plan/ReAct.scala`, `plan/CodeAct.scala`, `plan/RLM.scala`, `plan/Ensemble.scala` | functional strategy constructors over the common syntax |
 | `Predict.scala`, `DynamicPredict.scala` | sibling domain-value and runtime-record predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
@@ -150,7 +187,7 @@ The notes in this section describe the legacy stack unless they name `dspy4s.pro
 | `optimization/CompositeOptimizableStructureInstances.scala`, `OptimizableStructureDerivation.scala` | built-in composite instances and strict Mirror derivation |
 | `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
 | `contracts/ToolFunction.scala`, `ToolCall.scala`, `ActionInterpreter.scala` | callable tools, action messages, and the action-execution boundary |
-| `ProgramRunner.scala` | the shared domain/record running capability |
+| `ProgramRunner.scala` | the old `LegacyProgramRunner[P]` domain/record capability |
 | `RecordCodec.scala` | sealed canonical decoding evidence for the record-to-domain input boundary |
 | `retrievers/KNN.scala`, `EmbeddingsRetriever.scala` | in-memory retrieval |
 | `runtime/AgentLoop.scala`, `TrajectoryAgent.scala`, `InterpretedTrajectoryAgent.scala` | bounded iteration, loop-then-extract, and interpreted-action templates |

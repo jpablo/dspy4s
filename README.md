@@ -11,7 +11,7 @@ the dynamic Python surface with a compile-time-checked Scala API.
 > published to Maven Central. For now, build from source.
 
 > **Architecture migration:** new program work uses the pure typed syntax and
-> ZIO interpreter in `dspy4s.programs.plan`. The current examples still use the
+> ZIO interpreter exposed from `dspy4s.programs`. Its source stays in the temporary `plan` package. Current examples still use the
 > earlier `Module` API while strategies, evaluation, and optimizers move to the
 > new design. See the [implementation record](docs/refactor/program-ast-interpreters.md).
 

@@ -87,7 +87,7 @@ uniqueness; the raw mutators that can break it are private).
 ## Algebra 2: program composition
 
 The algebra over predictive programs. The first implementation used `Module[I, O]`. The replacement implementation is
-the passive `dspy4s.programs.plan.Program[I, O]`, interpreted by a stateless ZIO `ProgramRunner`. See
+the passive `dspy4s.programs.Program[I, O]`, interpreted by a stateless ZIO `ProgramRunner`. See
 [program-ast-interpreters.md](program-ast-interpreters.md) for the 2026-08-16 reassessment and migration state.
 
 > **Now specified.** The five open forks were resolved by a design grill, and the full operation + law set,
@@ -119,9 +119,45 @@ contramapInput: (J => I) => Program[I, O] => Program[J, O]
 dimap         : (J => I, O => B) => Program[I, O] => Program[J, B]
 fanout        : (Program[I, A], Program[I, B]) => Program[I, (A, B)]   -- ordered shared-input pairing / &&&
 split         : (Program[I, A], Program[J, B]) => Program[(I,J),(A,B)] -- ordered independent inputs
+choice        : (Program[I, O], Program[J, O]) => Program[Either[I,J],O] -- visible typed branch / |||
 recover       : (RecoveryPolicy, Program[I,O]) => Program[I,O] => Program[I,O]
+attempt       : Program[I,O] => Program[I,Either[DspyError,O]] -- failure becomes typed data
+collectAll    : Vector[Program[I,O]] => Program[I,Vector[O]]    -- ordered homogeneous traversal
+collectAllPar : (Vector[Program[I,O]], parallelism) => Program[I,Vector[O]] -- concurrent, ordered result
+localParams   : (Program[I,C], (ParameterStore,C) => ParameterStore, Program[I,O]) => Program[I,O]
+withEvidence  : Program[I,O] => Program[I,Prediction[O]]
+fromEvidence  : Program[I,Prediction[O]] => Program[I,O]
 loop          : (step, env, done) => Program[I, O]              -- the agentic scheme
 ```
+
+The replacement `Program` implements `choice` as one closed syntax node. The input selects one branch at run time, but
+both branches remain visible to the graph and parameter interpreters. This gives feedback and agent constructors a
+typed conditional without a closure-based `flatMap` that could hide predictors.
+
+`attempt` is also one closed syntax node. It changes only the error observation: an inner typed failure becomes a
+typed `Left`, while success becomes `Right`. Functional ReAct uses this operation to record a tool-service failure and
+continue. CodeAct does not use it for code infrastructure failure, so that failure remains fatal by design.
+
+`collectAllPar` is an explicit concurrent operation; it does not change the ordered semantics of `&&&`, `***`, or
+`collectAll`. ZIO limits active members, output and raw-evidence reduction follow member order, and live journal events
+follow actual concurrent execution. `collectAllPar(members.map(_.attempt), n)` derives ordered partial-failure
+collection without a separate parallel error-policy API.
+
+Persistent external state uses scoped capabilities, not mutable program nodes. Functional RLM's loop remains ordinary
+`choice` and `iterate` syntax. Its `executeRepl` leaf requires a `ReplExecutionBackend`; the live ZIO layer owns and
+closes one stateful interpreter for the layer scope.
+
+Input-dependent prompt selection uses run-local parameter scope. `localParametersWith` first runs one visible typed
+configurator, then interprets the unchanged inner syntax with an immutable derived `ParameterStore`. Functional KNN
+few-shot uses this operation. It does not mutate a predictor or hide a new program behind a closure.
+
+`withEvidence` and `fromEvidence` let a program inspect and later select complete predictions. Functional Refine uses
+this pair so its loop can compare attempts as typed data and then return the selected attempt's output and raw evidence.
+The event journal remains a separate observation and retains every attempt.
+
+The replacement carrier also tracks execution capabilities. `Program[I, O]` is an alias for prediction-only work.
+`ProgramWithEnv[I, O, R]` records a general ZIO environment requirement. Composition combines two requirements with
+`R1 & R2`. This lets a program require prediction, code execution, and host tools without a universal runtime object.
 
 **Laws the known structures hand you for free:**
 

@@ -8,7 +8,7 @@ import dspy4s.programs.strategies.CodeAct
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.strategies.Predict
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 import dspy4s.programs.strategies.ProgramOfThought
 import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.contracts.DynamicModule
@@ -18,15 +18,15 @@ import zio.blocks.schema.DynamicValue
   * `Module[DynamicValue.Record, DynamicValue.Record]` values and `Module[I, O]` values with statically known I/O can be
   * streamed through the same entry point. `Streamify` requires exactly two things of a program:
   *
-  *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction` for the
-  *      final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
+  *   1. a shared [[LegacyProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction` for
+  *      the final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
   *      `StreamingLanguageModel` consulting `ActivePredictContext`, which each `PredictEngine` execution scopes for
   *      both `Predict` and `DynamicPredict` modules — independent of how the outer program is invoked. 2.
   *      [[knownSignatures]] — best-effort `(predictName, signature)` pairs used *only* for stream-listener validation
   *      (warnings). An opaque program returns empty and validation is skipped.
   */
 trait Streamable[P]:
-  protected def runner: ProgramRunner[P]
+  protected def runner: LegacyProgramRunner[P]
   def knownSignatures(program: P): Vector[(String, SignatureLayout)]
 
   final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, RawPrediction] =
@@ -35,14 +35,14 @@ trait Streamable[P]:
 object Streamable:
 
   private def from[P](known: P => Vector[(String, SignatureLayout)])(using
-      programRunner: ProgramRunner[P]
+      programRunner: LegacyProgramRunner[P]
   ): Streamable[P] =
     new Streamable[P]:
-      protected val runner: ProgramRunner[P]                             = programRunner
+      protected val runner: LegacyProgramRunner[P]                       = programRunner
       def knownSignatures(program: P): Vector[(String, SignatureLayout)] = known(program)
 
   /** Any dynamic program: invoke via a `ProgramCall`; surface a leaf `DynamicPredict`'s signature for validation. */
-  given dynamicModule[P <: DynamicModule](using ProgramRunner[P]): Streamable[P] =
+  given dynamicModule[P <: DynamicModule](using LegacyProgramRunner[P]): Streamable[P] =
     from { program =>
       program match
         case p: DynamicPredict => Vector((p.moduleName, p.layout))
@@ -50,11 +50,11 @@ object Streamable:
     }
 
   /** A `Predict` has one engine-visible signature. */
-  given predict[I, O](using ProgramRunner[Predict[I, O]]): Streamable[Predict[I, O]] =
+  given predict[I, O](using LegacyProgramRunner[Predict[I, O]]): Streamable[Predict[I, O]] =
     from(program => Vector(program.moduleName -> program.signature.layout))
 
   /** `ChainOfThought` delegates to an inner `Predict` whose runtime signature contains the reasoning field. */
-  given chainOfThought[I, O](using ProgramRunner[ChainOfThought[I, O]]): Streamable[ChainOfThought[I, O]] =
+  given chainOfThought[I, O](using LegacyProgramRunner[ChainOfThought[I, O]]): Streamable[ChainOfThought[I, O]] =
     from { program =>
       val layout = ChainOfThought.augmentLayout(program.baseSignature.layout)
       Vector("predict" -> layout)
@@ -63,7 +63,7 @@ object Streamable:
   /** `ReAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the per-step
     * react predict and the final extractor) are the stream-listener targets.
     */
-  given reAct[I, O](using ProgramRunner[ReAct[I, O]]): Streamable[ReAct[I, O]] =
+  given reAct[I, O](using LegacyProgramRunner[ReAct[I, O]]): Streamable[ReAct[I, O]] =
     from { program =>
       Vector(
         (program.reactProgramName, program.reactSignature),
@@ -76,7 +76,7 @@ object Streamable:
   /** `CodeAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the
     * per-iteration code generator and the final extractor) are the stream-listener targets.
     */
-  given codeAct[I, O](using ProgramRunner[CodeAct[I, O]]): Streamable[CodeAct[I, O]] =
+  given codeAct[I, O](using LegacyProgramRunner[CodeAct[I, O]]): Streamable[CodeAct[I, O]] =
     from { program =>
       Vector(
         (program.codeActProgramName, program.codeActSignature),
@@ -89,7 +89,7 @@ object Streamable:
   /** `ProgramOfThought`: decode the record into the input, run it, and emit the raw prediction. Its three stable inner
     * predictors are the stream-listener targets.
     */
-  given programOfThought[I, O](using ProgramRunner[ProgramOfThought[I, O]]): Streamable[ProgramOfThought[I, O]] =
+  given programOfThought[I, O](using LegacyProgramRunner[ProgramOfThought[I, O]]): Streamable[ProgramOfThought[I, O]] =
     from { program =>
       Vector(
         program.generatorPredict.moduleName   -> program.generatorPredict.signature.layout,

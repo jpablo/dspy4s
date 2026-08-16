@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
@@ -59,7 +59,7 @@ class ProgramOfThoughtRunnerSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  test("ProgramRunner decodes ProgramOfThought input, executes it, and returns the final raw prediction") {
+  test("LegacyProgramRunner decodes ProgramOfThought input, executes it, and returns the final raw prediction") {
     val interpreter = new RecordingInterpreter
     val program     = ProgramOfThought(
       baseSignature = Signature.derived[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]("PoTRunner"),
@@ -74,10 +74,11 @@ class ProgramOfThoughtRunnerSuite extends FunSuite:
       )
     ) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = summon[ProgramRunner[ProgramOfThought[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]]]
-        .run(program, inputs)
+      val result           =
+        summon[LegacyProgramRunner[ProgramOfThought[ProgramOfThoughtRunnerInput, ProgramOfThoughtRunnerOutput]]]
+          .run(program, inputs)
 
-      assert(result.isRight, result.left.toOption.map(_.message).getOrElse("ProgramRunner failed"))
+      assert(result.isRight, result.left.toOption.map(_.message).getOrElse("LegacyProgramRunner failed"))
       val raw = result.toOption.get.values
       assertEquals(DynamicValues.recordGet(raw, "answer").map(DynamicValues.renderText), Some("42"))
       assertEquals(

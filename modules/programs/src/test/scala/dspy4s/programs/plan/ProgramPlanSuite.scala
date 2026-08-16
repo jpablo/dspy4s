@@ -10,8 +10,8 @@ import zio.{Ref, Runtime, UIO, Unsafe, ZEnvironment, ZIO}
 final class ProgramPlanSuite extends FunSuite:
 
   private final case class Question(question: String) derives CanEqual
-  private final case class Draft(draft: String)       derives CanEqual
-  private final case class Answer(answer: String)     derives CanEqual
+  private final case class Draft(draft: String) derives CanEqual
+  private final case class Answer(answer: String) derives CanEqual
 
   private val draftId  = ParameterId("draft")
   private val answerId = ParameterId("answer")
@@ -69,7 +69,7 @@ final class ProgramPlanSuite extends FunSuite:
   }
 
   test("stable parameter replacement changes execution without rebuilding syntax") {
-    val pipeline = draft >>> answer
+    val pipeline     = draft >>> answer
     val updatedDraft = pipeline.parameters
       .get(draftId)
       .getOrElse(fail("missing draft parameters"))
@@ -160,9 +160,9 @@ final class ProgramPlanSuite extends FunSuite:
   }
 
   test("fanout, split, map, contramap, local options, and recovery are interpreted centrally") {
-    val doubled = Program.lift[Int, Int](_ * 2)
-    val shown   = Program.lift[Int, String](_.toString)
-    val parsed  = Program.liftEither[String, Int](value => value.toIntOption.toRight(RuntimeError("parse", value)))
+    val doubled  = Program.lift[Int, Int](_ * 2)
+    val shown    = Program.lift[Int, String](_.toString)
+    val parsed   = Program.liftEither[String, Int](value => value.toIntOption.toRight(RuntimeError("parse", value)))
     val fallback = Program.lift[String, Int](_.length)
 
     assertEquals(run(ProgramRunner.runJournaled(doubled &&& shown, 3)).outcome.map(_.output), Right(6 -> "3"))
@@ -176,7 +176,7 @@ final class ProgramPlanSuite extends FunSuite:
       Right(3)
     )
 
-    val localized = draft.local(options => options.copy(rolloutId = Some(9)))
+    val localized        = draft.local(options => options.copy(rolloutId = Some(9)))
     val capturingBackend = new PredictionBackend:
       def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
         if request.rolloutId.contains(9) then backend.generate(request)
@@ -184,8 +184,51 @@ final class ProgramPlanSuite extends FunSuite:
     assert(run(ProgramRunner.runJournaled(localized, Question("Q")), capturingBackend).outcome.isRight)
   }
 
+  test("attempt converts a typed program failure into visible output data") {
+    val failed = Program.liftEither[String, Int](value => Left(RuntimeError("attempt_test", value))).attempt
+    val result = run(ProgramRunner.runJournaled(failed, "expected"))
+
+    assert(result.outcome match
+      case Right(prediction) => prediction.output match
+          case Left(RuntimeError("attempt_test", "expected")) => true
+          case _                                              => false
+      case Left(_) => false)
+    assertEquals(ProgramGraph.from(failed).nodes.map(_.kind), Vector("attempt", "lift_either"))
+  }
+
+  test("typed choice runs one visible branch and retains both parameter sets") {
+    val left   = draft.map(_.draft)
+    val right  = answer.contramap[String](Draft.apply).map(_.answer)
+    val choice = left ||| right
+
+    assertEquals(
+      run(ProgramRunner.runJournaled(choice, Left(Question("Q")))).outcome.map(_.output),
+      Right("Q [write a draft]")
+    )
+    assertEquals(
+      run(ProgramRunner.runJournaled(choice, Right("ready"))).outcome.map(_.output),
+      Right("final: ready")
+    )
+    assertEquals(choice.parameters.all.map(_.id), Vector(draftId, answerId))
+    assertEquals(
+      ProgramGraph.from(choice).nodes.map(_.kind),
+      Vector("choice", "map", "predict", "map", "contramap", "predict")
+    )
+    assertEquals(
+      ProgramGraph.from(choice).edges.filter(_.from == 0).map(_.role),
+      Vector("left", "right")
+    )
+
+    val selected = Program.lift[String, String](identity) |||
+      Program.liftEither[Int, String](_ => Left(RuntimeError("unselected", "right branch ran")))
+    assertEquals(
+      run(ProgramRunner.runJournaled(selected, Left("left"))).outcome.map(_.output),
+      Right("left")
+    )
+  }
+
   test("complete parameter replacement validates stable IDs") {
-    val pipeline = draft >>> answer
+    val pipeline   = draft >>> answer
     val incomplete = Map(
       draftId -> OptimizableParameters(instructions = Some("only one"))
     )
@@ -198,9 +241,29 @@ final class ProgramPlanSuite extends FunSuite:
     assertEquals(ProgramGraph.from(replaced), ProgramGraph.from(pipeline))
   }
 
+  test("a visible configurator derives run-local parameters from the typed input") {
+    val configurator = Program.lift[Question, String](_.question.toUpperCase)
+    val configured   = draft.localParametersWith(configurator) { (store, instruction) =>
+      store
+        .get(draftId)
+        .toRight(RuntimeError("test", "missing draft parameters"))
+        .flatMap(value => store.updated(draftId, value.copy(instructions = Some(instruction))))
+    }
+    val execution = run(ProgramRunner.runJournaled(configured, Question("local instruction")))
+    val graph     = ProgramGraph.from(configured)
+
+    assertEquals(
+      execution.outcome.map(_.output),
+      Right(Draft("local instruction [LOCAL INSTRUCTION]"))
+    )
+    assertEquals(configured.parameters.get(draftId).flatMap(_.instructions), Some("write a draft"))
+    assertEquals(graph.nodes.map(_.kind), Vector("local_parameters", "lift", "predict"))
+    assertEquals(graph.edges.map(_.role), Vector("configurator", "inner"))
+  }
+
   test("parameter state round-trips by stable ID without serializing syntax") {
     val pipeline = draft >>> answer
-    val updated = pipeline
+    val updated  = pipeline
       .updatedParameter(
         answerId,
         pipeline.parameters.get(answerId).getOrElse(fail("missing answer")).copy(instructions = Some("concise"))
@@ -214,7 +277,7 @@ final class ProgramPlanSuite extends FunSuite:
   }
 
   test("the explicit record boundary decodes any typed composite") {
-    val pipeline = (draft >>> answer).fromRecords(draftSignature.inputShape)
+    val pipeline  = (draft >>> answer).fromRecords(draftSignature.inputShape)
     val execution = run(ProgramRunner.runRecordJournaled(
       pipeline,
       DynamicValues.record("question" := "From a record")
@@ -224,6 +287,20 @@ final class ProgramPlanSuite extends FunSuite:
       execution.outcome.map(_.output),
       Right(Answer("final: From a record [write a draft]"))
     )
+  }
+
+  test("record programs update one stable parameter without rebuilding the record boundary") {
+    val program = (draft >>> answer).fromRecords(draftSignature.inputShape)
+    val updated = program
+      .modifyParameter(draftId)(_.copy(instructions = Some("record update")))
+      .fold(error => fail(error.message), identity)
+    val execution = run(ProgramRunner.runRecordJournaled(
+      updated,
+      DynamicValues.record("question" := "Q")
+    ))
+
+    assertEquals(execution.outcome.map(_.output), Right(Answer("final: Q [record update]")))
+    assert(updated.modifyParameter(ParameterId("missing"))(identity).isLeft)
   }
 
   test("bounded iteration keeps the step program visible") {
@@ -241,10 +318,71 @@ final class ProgramPlanSuite extends FunSuite:
     assert(exhausted.outcome.isLeft)
   }
 
+  test("collectAll runs homogeneous members in order and exposes each graph child") {
+    val collected = Program.collectAll(Vector(
+      Program.lift[Int, Int](_ + 1),
+      Program.lift[Int, Int](_ * 2),
+      Program.lift[Int, Int](_ - 1)
+    ))
+    val execution = run(ProgramRunner.runJournaled(collected, 4))
+    val graph     = ProgramGraph.from(collected)
+
+    assertEquals(execution.outcome.map(_.output), Right(Vector(5, 8, 3)))
+    assertEquals(graph.nodes.map(_.kind), Vector("collect_all", "lift", "lift", "lift"))
+    assertEquals(graph.edges.map(_.role), Vector("member_0", "member_1", "member_2"))
+    assertEquals(
+      run(ProgramRunner.runJournaled(Program.collectAll[Int, Int, Any](Vector.empty), 4)).outcome.map(_.output),
+      Right(Vector.empty)
+    )
+
+    val failFast = Program.collectAll(Vector(
+      Program.liftEither[Int, Int](_ => Left(RuntimeError("first_member", "failed"))),
+      Program.liftEither[Int, Int](_ => Left(RuntimeError("second_member", "must not run")))
+    ))
+    assert(run(ProgramRunner.runJournaled(failFast, 4)).outcome match
+      case Left(RuntimeError("first_member", "failed")) => true
+      case _                                            => false)
+  }
+
+  test("bestOfN is a visible selection node with rollout IDs and early stopping") {
+    val selectingBackend = new PredictionBackend:
+      def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+        ZIO.succeed(RawPrediction(DynamicValues.record(
+          "draft" := request.rolloutId.getOrElse(-1).toString
+        )))
+    val selected = Program.bestOfN(draft, attempts = 5, threshold = Some(2.0)) { (_, prediction) =>
+      prediction.output.draft.toDoubleOption.toRight(RuntimeError("reward", "not a number"))
+    }
+    val execution = run(ProgramRunner.runJournaled(selected, Question("Q")), selectingBackend)
+
+    assertEquals(execution.outcome.map(_.output), Right(Draft("2")))
+    assertEquals(
+      execution.events.collect { case ProgramEvent.Started(_, _, component, _) => component },
+      Vector("draft_predict", "draft_predict", "draft_predict")
+    )
+    assertEquals(ProgramGraph.from(selected).nodes.map(_.kind), Vector("best_of_n", "predict"))
+    assertEquals(selected.parameters.all.map(_.id), Vector(draftId))
+  }
+
+  test("repeatUntil uses visible iteration and exposes prediction evidence") {
+    val increment = Program.lift[Int, Int](_ + 1)
+    val repeated  = Program.repeatUntil(increment, maxSteps = 4)(
+      accept = (_, prediction) => Right(prediction.output >= 3 && prediction.raw.values.fields.isEmpty),
+      nextInput = (_, prediction) => Right(prediction.output)
+    )
+    val execution  = run(ProgramRunner.runJournaled(repeated, 0))
+    val graphKinds = ProgramGraph.from(repeated).nodes.map(_.kind)
+
+    assertEquals(execution.outcome.map(_.output), Right(3))
+    assert(graphKinds.contains("iterate"))
+    assert(graphKinds.contains("with_evidence"))
+    assert(graphKinds.contains("lift_either"))
+  }
+
   test("prediction effects and typed failures remain in ZIO") {
     val (execution, calls) = runPure {
       for
-        counter <- Ref.make(0)
+        counter      <- Ref.make(0)
         effectBackend = new PredictionBackend:
                           def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
                             counter.update(_ + 1) *> backend.generate(request)
@@ -258,7 +396,7 @@ final class ProgramPlanSuite extends FunSuite:
     assert(execution.outcome.isRight)
     assertEquals(calls, 2)
 
-    val failure = RuntimeError("expected", "typed failure")
+    val failure        = RuntimeError("expected", "typed failure")
     val failingBackend = new PredictionBackend:
       def generate(@annotation.unused request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
         ZIO.fail(failure)
@@ -266,4 +404,47 @@ final class ProgramPlanSuite extends FunSuite:
       ProgramRunner.run(draft, Question("Q")).either.provideEnvironment(ZEnvironment(failingBackend))
     )
     assertEquals(outcome, Left(failure))
+  }
+
+  test("an explicit observer receives the same ordered events as the journal") {
+    val (execution, observedEvents) = runPure {
+      for
+        received <- Ref.make(Vector.empty[ProgramEvent])
+        observer  = new ProgramObserver:
+                     def onEvent(event: ProgramEvent): UIO[Unit] = received.update(_ :+ event)
+        result <- ProgramRunner
+                    .runJournaledObserved(draft >>> answer, Question("Q"), observer)
+                    .provideEnvironment(ZEnvironment(backend))
+        observed <- received.get
+      yield result -> observed
+    }
+
+    assertEquals(observedEvents, execution.events)
+    assertEquals(observedEvents.size, 4)
+  }
+
+  test("a streamed chunk remains in the journal when prediction later fails") {
+    val failure          = RuntimeError("stream_backend", "failed after output")
+    val streamingBackend = new PredictionBackend:
+      def generate(@annotation.unused request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+        ZIO.fail(failure)
+
+      override def generateStreaming(
+          request: PredictionRequest,
+          emit   : PredictionChunk => UIO[Unit]
+      ): ZIO[Any, DspyError, RawPrediction] =
+        emit(PredictionChunk("draft", "partial")) *> generate(request)
+
+    val execution = run(ProgramRunner.runJournaled(draft, Question("Q")), streamingBackend)
+
+    assertEquals(execution.outcome, Left(failure))
+    assertEquals(
+      execution.events.map {
+        case _: ProgramEvent.Started     => "started"
+        case _: ProgramEvent.OutputChunk => "chunk"
+        case _: ProgramEvent.Completed   => "completed"
+        case _: ProgramEvent.Failed      => "failed"
+      },
+      Vector("started", "chunk", "failed")
+    )
   }

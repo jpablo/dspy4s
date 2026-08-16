@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.programs.optimization.OptimizableStructure
 
@@ -32,7 +32,7 @@ final case class RandomSearchConfig(
     seed                : Long                 = 0L
 )
 
-final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRunner}](
+final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, LegacyProgramRunner}](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 
@@ -122,7 +122,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
           maxErrors = Some(config.maxErrors)
         )
         val evalResult = evaluator()((ex: Example) =>
-          summon[ProgramRunner[P]].run(program, ex.inputs)
+          summon[LegacyProgramRunner[P]].run(program, ex.inputs)
         )
         val (score, perExample) = evalResult match
           case Right(r) =>

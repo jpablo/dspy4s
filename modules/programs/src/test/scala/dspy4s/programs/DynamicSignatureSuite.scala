@@ -12,7 +12,7 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 /** The DynamicSignature bundle end-to-end: the path-dependent `predict` constructor, the optimizer surface
-  * (`OptimizableStructure` + `ProgramRunner`) over a packaged bundle program, and the cross-fiber `bridge` (eager
+  * (`OptimizableStructure` + `LegacyProgramRunner`) over a packaged bundle program, and the cross-fiber `bridge` (eager
   * compatibility failure; a bridged pipeline composing and running). The unit-law and freshness pins live in
   * `ProgramAlgebraLawSuite`; this suite is the usability story.
   */
@@ -71,7 +71,7 @@ class DynamicSignatureSuite extends FunSuite:
     assertEquals(P.read(tuned).head.instructions, Some("Be terse."))
 
     // The record-boundary run decodes through the bundle's codec, then executes the Predict.
-    val runner = summon[ProgramRunner[Program[qa.In, qa.Out, 1]]]
+    val runner = summon[LegacyProgramRunner[Program[qa.In, qa.Out, 1]]]
     val out    = underAdapter(runner.run(packaged, ProgramCall(input = DynamicValues.record("question" := "x"))))
     assertEquals(out.toOption.map(p => field(p.values, "answer")), Some(Some("7")))
     // A record missing the declared input fails at decode, before any LM call.

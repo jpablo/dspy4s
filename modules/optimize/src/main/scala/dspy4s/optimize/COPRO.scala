@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.programs.optimization.OptimizableStructure
 
@@ -79,12 +79,12 @@ final case class COPROConfig(
   *     completion (dspy4s `Predict` returns one completion per call); the effect (distinct proposals) is the same.
   *   - '''De-duplication is by instruction string''', not Python's `(instruction, prefix)` + last-field equality.
   */
-final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig) extends Teleprompter[P]:
+final class COPRO[P: {OptimizableStructure, LegacyProgramRunner}](config: COPROConfig) extends Teleprompter[P]:
 
   override val name: String = "copro"
 
-  private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
-  private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
+  private val ps: OptimizableStructure[P]    = summon[OptimizableStructure[P]]
+  private val runner: LegacyProgramRunner[P] = summon[LegacyProgramRunner[P]]
 
   override def compile(
       student : P,

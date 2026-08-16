@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.ContextWindowExceededError
@@ -70,12 +70,13 @@ final case class InferRulesConfig(
   *   - '''Context-window fallback narrows on [[ContextWindowExceededError]]''' specifically (upstream also accepts
   *     `ValueError`/`BadRequestError`), dropping the last example and retrying down to a single example.
   */
-final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRulesConfig) extends Teleprompter[P]:
+final class InferRules[P: {OptimizableStructure, LegacyProgramRunner}](config: InferRulesConfig)
+    extends Teleprompter[P]:
 
   override val name: String = "infer_rules"
 
-  private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
-  private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
+  private val ps: OptimizableStructure[P]    = summon[OptimizableStructure[P]]
+  private val runner: LegacyProgramRunner[P] = summon[LegacyProgramRunner[P]]
 
   override def compile(
       student : P,

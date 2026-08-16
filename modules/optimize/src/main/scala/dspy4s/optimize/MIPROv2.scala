@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.ProgramRunner
+import dspy4s.programs.LegacyProgramRunner
 
 import dspy4s.programs.optimization.{OptimizableParameters, OptimizableStructure}
 
@@ -62,7 +62,7 @@ final case class MIPROv2Config(
   *      predictor, one instruction-candidate index. The trial program is built with a single
   *      [[OptimizableStructure.replace]] applying each chosen instruction (`parameters.copy(instructions =
   *      Some(instr))`) AND chosen demos (`.copy(demos = ...)`). Each trial is scored on the valset (falling back to the
-  *      trainset) via [[dspy4s.evaluate.Evaluate]] + [[ProgramRunner]] + the metric. A baseline candidate (the
+  *      trainset) via [[dspy4s.evaluate.Evaluate]] + [[LegacyProgramRunner]] + the metric. A baseline candidate (the
   *      unmodified student) is always scored too. The best-scoring candidate is returned as `bestProgram`; all scored
   *      candidates (trials + baseline) are returned sorted descending.
   *
@@ -88,12 +88,12 @@ final case class MIPROv2Config(
   *   - '''`track_stats`, `log_dir`, LM-call estimation, and program persistence are omitted.''' The
   *     [[OptimizationReport]] carries the scored candidate list and summary metadata instead.
   */
-final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
+final class MIPROv2[P: {OptimizableStructure, LegacyProgramRunner}](config: MIPROv2Config) extends Teleprompter[P]:
 
   override val name: String = "mipro_v2"
 
-  private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
-  private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
+  private val ps: OptimizableStructure[P]    = summon[OptimizableStructure[P]]
+  private val runner: LegacyProgramRunner[P] = summon[LegacyProgramRunner[P]]
 
   override def compile(
       student : P,

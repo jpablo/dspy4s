@@ -18,7 +18,7 @@ final class DeepProgramPlanSuite extends FunSuite:
         .getOrThrowFiberFailure()
     }
 
-  private def chain(size: Int): Program[Int, Int] =
+  private def chain(size: Int): ProgramWithEnv[Int, Int, Any] =
     val increment = Program.lift[Int, Int](_ + 1)
     var result    = Program.identity[Int]
     var index     = 0
@@ -48,4 +48,16 @@ final class DeepProgramPlanSuite extends FunSuite:
     val loop = Program.iterate(step, maxSteps = 20_001)
 
     assertEquals(run(ProgramRunner.runJournaled(loop, 0)).outcome.map(_.output), Right(20_000))
+  }
+
+  test("20,000 collectAll members execute and graph without using the JVM call stack") {
+    val members   = Vector.fill(20_000)(Program.lift[Int, Int](_ + 1))
+    val collected = Program.collectAll(members)
+    val execution = run(ProgramRunner.runJournaled(collected, 1))
+    val graph     = ProgramGraph.from(collected)
+
+    assertEquals(execution.outcome.map(_.output.size), Right(20_000))
+    assertEquals(execution.outcome.map(_.output.headOption), Right(Some(2)))
+    assertEquals(graph.nodes.size, 20_001)
+    assertEquals(graph.edges.size, 20_000)
   }
