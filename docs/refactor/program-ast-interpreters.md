@@ -1,9 +1,72 @@
-# Proposal: separate program syntax from interpretation
+# Program syntax and interpreters
 
-**Status:** design proposal; not adopted and not an implementation plan  
-**Date:** 2026-07-22  
+**Status:** implementation in progress; the original proposal below is superseded where it differs from this outcome
+
+**Date:** 2026-07-22
+
+**Implementation reassessment:** 2026-08-16
+
 **Related:** [Program composition algebra](algebra-2-program-composition.md),
 [algebra overview](algebra.md), [composite primitives](composite-primitives.md)
+
+## Implemented outcome
+
+The feasibility spike changed the recommendation. A passive typed syntax with separate interpreters is simpler than
+the executable `Module` composite. The first implementation is in `dspy4s.programs.plan`.
+
+The implementation also rejects two parts of the original proposal:
+
+- It does not put existing `Module` values in existential `Atom` nodes. That would keep `apply`, `forward`, ambient
+  runtime state, and per-class execution inside the new representation. `Predict` is a declarative primitive instead.
+- It does not grade `Program` by parameter count. Learnable values live in an immutable `ParameterStore` and have
+  explicit `ParameterId` values. Reassociation does not change identity, and deliberate ID reuse means parameter
+  sharing.
+
+The current split is:
+
+| Part | Implementation |
+|---|---|
+| Typed syntax | `plan/Program.scala` with `Identity`, `Lift`, `Predict`, composition, boundary maps, local controls, recovery, bounded iteration, and observation |
+| Execution | Stateless `plan.ProgramRunner`; ZIO effect, typed `DspyError`, run-local `Ref` journal, explicit `PredictionBackend` environment |
+| Real LM bridge | `plan.LivePredictionBackend`; the old blocking LM and adapter APIs are isolated behind one effect boundary |
+| Parameters | `ParameterStore`, stable `ParameterId`, `ProgramParameters[P]`, and data-only ID-keyed persistence |
+| Graph | `ProgramGraph`, interpreted from the same syntax |
+| Record input | `RecordProgram[I, O]`, which adds `Shape[I]` only for dataset and optimizer entry points |
+| Strategy | Functional `plan.ChainOfThought`, implemented as a signature transformation plus one prediction node |
+| Optimizer migration | `LabeledFewShot` now uses `ProgramParameters`; old `OptimizableStructure` values use a temporary bridge |
+| Evaluation migration | `ProgramEvaluate` uses bounded ZIO parallelism over `RecordProgram`; `ProgramMetric` keeps metric effects explicit |
+
+The program syntax is not parameterized by an effect. The execution interpreter uses ZIO 2. The backend is an
+environment service, so program values contain no model, adapter, runner, thread-local context, or executable module.
+`ProgramRunner.run` keeps failures in ZIO's typed error channel. `runJournaled` returns failures as data only when the
+caller must retain the event journal.
+
+`DeepProgramPlanSuite` reruns execution and graph interpretation over 20,000 sequential nodes, and it runs 20,000
+bounded loop transitions on the ZIO continuation stack. The focused plan
+test suites also prove typed composition, stable replacement, shared IDs, parameter-state round trips, explicit record
+decoding, effectful backends, typed failure, and the live LM bridge.
+
+## Migration decision
+
+The `Module` stack remains only as migration input. New structural work should use `plan.Program`. Do not add new
+`forward` implementations or new structural `OptimizableStructure` instances when the behavior can be a program node,
+program constructor, or interpreter operation.
+
+The next migration units are:
+
+1. move the remaining optimizers to effectful `RecordProgram` execution;
+2. express `BestOfN` and the existing agents with the visible bounded-loop instruction;
+3. move callbacks and streaming to interpreter services;
+4. move each remaining strategy, then remove `Module`, the old `ProgramRunner`, runtime globals, and thread-local
+   propagation;
+5. promote the `plan` package to the main `programs` API after the old names are removed.
+
+---
+
+## Historical proposal
+
+The remainder records the earlier design. It is useful history, but its open `Module` atom, static arity grade, and
+synchronous-first migration are no longer the target.
 
 ## Summary
 
@@ -261,6 +324,12 @@ A direct recursive interpreter is sufficient for behavioral parity and is no wor
 calls. Before making the AST the only public representation, a spike should determine whether an explicit continuation
 stack can provide stack safety without unacceptable Scala GADT casts or erased frames. Unlike ZIO, ordinary dspy4s
 pipelines are shallow today, so stack safety should be measured rather than assumed to justify complexity.
+
+**Implementation outcome (2026-08-16).** The current representation now uses an explicit heap stack for sequential
+`AndThen` execution. Structural optimizer instances use `StackSafeOptimizableStructure` for arity, inspection, naming,
+and replacement. Runtime erasure is confined to these interpreters. `DeepProgramStackSafetySuite` executes, inspects,
+and replaces a chain of 20,000 programs without a JVM stack overflow. This gives the current representation stack
+safety without requiring the full AST migration described in this document.
 
 ### OptimizableLeaf inspection and replacement
 

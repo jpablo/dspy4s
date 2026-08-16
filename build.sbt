@@ -15,6 +15,7 @@ addCommandAlias("mutationOptics", ";project programs;stryker")
 lazy val munitVersion           = "1.3.4"
 lazy val munitScalacheckVersion = "1.3.0" // own line; munit-scalacheck has no 1.3.1 (patch-compatible with munit 1.3.1)
 lazy val zioBlocksVersion       = "0.0.41"
+lazy val zioVersion             = "2.1.26"
 lazy val ujsonVersion           = "4.4.3"
 lazy val dotenvVersion          = "3.2.0"
 lazy val scalaXmlVersion        = "2.4.0"
@@ -141,6 +142,7 @@ lazy val programs = (project in file("modules/programs"))
   .settings(
     libraryDependencies ++= Seq(
       "io.github.iltotore" %% "iron"  % ironVersion,
+      "dev.zio"            %% "zio"   % zioVersion,
       "org.scalameta"      %% "munit" % munitVersion % Test
     ),
     // Keep mutation testing on the generic optic and explicit-heap implementation. Mutating all program sources hits

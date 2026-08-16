@@ -80,8 +80,38 @@ This rule prevents the library from using Scala object identity as a false test 
 |---|---|
 | `Monoid[M]` | Combines values with an associative operation and an identity value. |
 | `MonoidAction[M, A]` | Applies monoid values to values of `A` and states how combined actions behave. |
-| `Lens[S, A]` | Reads and replaces one exact part `A` of a larger value `S`. It carries Get-Put, Put-Get, and Put-Put laws. |
+| `Optic[S, T, A, B, F]` | Opens an `S` into a hidden rebuild context and an `A` focus carried by `F`, then rebuilds `T` after the focus becomes `B`. |
+| `FocusFunctor[F]` | Maps an optic focus while its carrier keeps the rebuild context. |
+| `AssociativeFunctor[F, XOuter, XInner]` | Defines same-carrier optic composition and combines the two hidden contexts. |
+| `Composer[F, G]` | Moves an optic between two carriers through one declared bridge. |
+| `Lens[S, A]` | A total, single-focus `Tuple2` optic. It carries Get-Put, Put-Get, Put-Put, modify identity, modify composition, and set-modify consistency laws. |
 | `IsEq[A]` / `@Law` | Stores and labels a law statement for a test suite. |
+
+The carrier parameter lets one optic definition cover different focus shapes.
+For example, a `Lens` uses `Tuple2` for one focus. The optimizer uses a private
+`Vector`-based carrier for an ordered set of parameter foci. `Composer` bridges
+the two carriers. This removes the need for one composition overload for every
+pair of optic families.
+
+```scala
+import dspy4s.algebra.*
+import dspy4s.algebra.Optic.*
+
+final case class Address(street: String)
+final case class Person(address: Address)
+
+val address = new Lens[Person, Address]:
+  def get(person: Person): Address = person.address
+  def set(person: Person, value: Address): Person = person.copy(address = value)
+
+val street = new Lens[Address, String]:
+  def get(value: Address): String = value.street
+  def set(value: Address, street: String): Address = value.copy(street = street)
+
+val personStreet = address.andThen(street)
+val updated = personStreet.modify(Person(Address("Main")))(_.toUpperCase)
+assert(updated == Person(Address("MAIN")))
+```
 
 ### Categories and mappings
 
@@ -165,7 +195,7 @@ laws for the carrier. This makes invalid rewrites unavailable.
 | `LmUsage`, `RawPrediction`, and `RuntimeOutput` | `Monoid` instances define lawful accumulation. |
 | `RuntimeOutput` and `Prediction` | `ScalaMonad` instances define sequencing and short-circuit behavior. |
 | `ProgramCall` and `SizedVector` | `Endofunctor` instances map values without changing their structural context. |
-| `OptimizableLeaf` and `OptimizableStructure` | `Lens` laws specify safe parameter reads and replacements. |
+| `OptimizableLeaf` and `OptimizableStructure` | `Lens` laws specify safe leaf updates. Carrier-based optics assemble ordered parameter structures without family-specific composition code. |
 | `Mode` | A `Monoid` and `MonoidAction` specify how execution modes combine and apply. |
 | `Program` | A `NatGradedCategory` tracks parameter arity during composition. |
 | Program parameterization | A `GradePreservingFunctor` maps programs to their parameter structure. |
@@ -181,7 +211,8 @@ For the program-specific instances, see
 |---|---|
 | `Laws.scala` | `IsEq`, `<->`, and `@Law` |
 | `Monoid.scala`, `MonoidAction.scala` | value combination and monoid actions |
-| `Lens.scala` | lawful read and replace optics |
+| `Optic.scala` | existential optics, focus mapping, same-carrier composition, and carrier bridges |
+| `Lens.scala` | lawful total, single-focus optics |
 | `Category.scala`, `Opposite.scala`, `Isomorphism.scala` | category base types and constructors |
 | `Functor.scala`, `NaturalTransformation.scala`, `Profunctor.scala` | mappings between categorical structures |
 | `Monad.scala`, `Kleisli.scala` | categorical and Scala monads, plus effectful composition |
@@ -200,3 +231,5 @@ sbt algebra/test
 `AlgebraConstructionSuite` checks `Either` as a `ScalaMonad` and checks the Kleisli category laws.
 `CopyDiscardCategorySuite` checks all structural, monoidal, symmetric, copy-discard, and cartesian laws for Scala
 functions.
+`OpticSuite` checks hidden-context reconstruction, same-carrier composition, `Lens` compatibility, and the three
+modify laws.

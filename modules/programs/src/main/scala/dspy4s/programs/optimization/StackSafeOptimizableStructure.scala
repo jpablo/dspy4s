@@ -6,8 +6,8 @@ import scala.compiletime.ops.int.+
 /** Explicit-heap interpreter for structural optimizer trees.
   *
   * Composite instances describe only their immediate children and rebuild operation. This interpreter performs arity,
-  * inspection, and replacement without recursive calls between composite instances. Runtime erasure is confined to
-  * this file. Each erased structure witness stays paired with the value whose static type produced that witness.
+  * inspection, and replacement without recursive calls between composite instances. Runtime erasure is confined to this
+  * file. Each erased structure witness stays paired with the value whose static type produced that witness.
   */
 private[dspy4s] object StackSafeOptimizableStructure:
 
@@ -19,7 +19,7 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
   private trait Branch:
     def children(value: Any): Vector[Child]
-    def rebuild(value: Any, children: Vector[Any]): Any
+    def rebuild(value : Any, children: Vector[Any]): Any
 
   private final class Unary[P, A, N <: Int](
       label       : String,
@@ -48,13 +48,13 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
   private final class Pair[P, A, B, N <: Int](
       label      : String,
-      leftName  : Option[String],
-      rightName : Option[String],
-      getLeft   : P => A,
-      getRight  : P => B,
+      leftName   : Option[String],
+      rightName  : Option[String],
+      getLeft    : P => A,
+      getRight   : P => B,
       replacePair: (P, A, B) => P,
-      left      : OptimizableStructure[A],
-      right     : OptimizableStructure[B]
+      left       : OptimizableStructure[A],
+      right      : OptimizableStructure[B]
   ) extends OptimizableStructure.Of[P, N]
       with Branch:
     def arity(program: P): Int = arityFrom(program, this)
@@ -86,7 +86,7 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
     def qualify(path: Option[NamePath], name: String): String =
       path match
-        case None => name
+        case None    => name
         case Some(_) =>
           val parts   = ArrayDeque.empty[String]
           var current = path
@@ -101,7 +101,7 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
   private sealed trait ReplaceWork
   private final case class ReplaceVisit(value: Any, structure: OptimizableStructure[Any]) extends ReplaceWork
-  private final case class Rebuild(branch: Branch, value: Any, childCount: Int)          extends ReplaceWork
+  private final case class Rebuild(branch: Branch, value: Any, childCount: Int)           extends ReplaceWork
 
   private def erase[P](structure: OptimizableStructure[P]): OptimizableStructure[Any] =
     structure.asInstanceOf[OptimizableStructure[Any]]
@@ -135,8 +135,7 @@ private[dspy4s] object StackSafeOptimizableStructure:
           children.reverseIterator.foreach { child =>
             pending.prepend(Visit(child.value, child.structure, NamePath.append(visit.path, child.segment)))
           }
-        case leaf =>
-          leaf.inspectNamed(visit.value).foreach { case (name, view) =>
+        case leaf => leaf.inspectNamed(visit.value).foreach { case (name, view) =>
             result.addOne(NamePath.qualify(visit.path, name) -> view)
           }
 
@@ -157,8 +156,7 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
     while pending.nonEmpty do
       pending.removeHead() match
-        case ReplaceVisit(currentValue, currentStructure) =>
-          currentStructure match
+        case ReplaceVisit(currentValue, currentStructure) => currentStructure match
             case branch: Branch =>
               val children = branch.children(currentValue)
               pending.prepend(Rebuild(branch, currentValue, children.size))
@@ -189,12 +187,12 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
   def pair[P, A, B, NA <: Int, NB <: Int](
       label      : String,
-      leftName  : Option[String],
-      rightName : Option[String],
-      getLeft   : P => A,
-      getRight  : P => B,
+      leftName   : Option[String],
+      rightName  : Option[String],
+      getLeft    : P => A,
+      getRight   : P => B,
       replacePair: (P, A, B) => P,
-      left      : OptimizableStructure.WithArity[A, NA],
-      right     : OptimizableStructure.WithArity[B, NB]
+      left       : OptimizableStructure.WithArity[A, NA],
+      right      : OptimizableStructure.WithArity[B, NB]
   ): OptimizableStructure.Of[P, NA + NB] =
     new Pair[P, A, B, NA + NB](label, leftName, rightName, getLeft, getRight, replacePair, left, right)

@@ -5,8 +5,14 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
+import dspy4s.programs.plan.{ParameterId, Program as Plan}
 import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.blocks.schema.Schema
+
+private final case class LfsQuestion(question: String) derives Schema
+private final case class LfsAnswer(answer: String) derives Schema
 
 class LabeledFewShotSuite extends FunSuite:
 
@@ -86,4 +92,21 @@ class LabeledFewShotSuite extends FunSuite:
     assert(compiled.layout.equalsByStructure(signature), "signature should be preserved")
     assertEquals(compiled.demos.size, 1)
     assertEquals(lookupString(compiled.demos.head.values, "question"), "q1")
+  }
+
+  test("LabeledFewShot updates stable parameter slots in a new typed program") {
+    val typedSignature = Signature.derived[LfsQuestion, LfsAnswer]("Answer")
+    val first          = Plan.predict(ParameterId("first"), typedSignature)
+    val second         = Plan.predict(ParameterId("second"), typedSignature)
+    val student        = first &&& second
+    val trainset       = Vector(Example(rec("question" := "q1", "answer" := "a1")))
+    val optimizer      = LabeledFewShot[Plan[LfsQuestion, (LfsAnswer, LfsAnswer)]](
+      LabeledFewShotConfig(k = DemoCount(1), sample = false)
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
+
+    assertEquals(compiled.parameters.all.map(_.id), Vector(ParameterId("first"), ParameterId("second")))
+    assertEquals(compiled.parameters.all.map(_.value.demos), Vector(trainset, trainset))
   }

@@ -84,9 +84,11 @@ uniqueness; the raw mutators that can break it are private).
 
 ---
 
-## Algebra 2: program composition (step-6 frontier)
+## Algebra 2: program composition
 
-The algebra over predictive programs (`Module[I, O]`, or a `Program[I, O]`). This is the design target for step 6.
+The algebra over predictive programs. The first implementation used `Module[I, O]`. The replacement implementation is
+the passive `dspy4s.programs.plan.Program[I, O]`, interpreted by a stateless ZIO `ProgramRunner`. See
+[program-ast-interpreters.md](program-ast-interpreters.md) for the 2026-08-16 reassessment and migration state.
 
 > **Now specified.** The five open forks were resolved by a design grill, and the full operation + law set,
 > the per-module reduction recipes (acceptance criteria), and the implementation sequencing live in
@@ -315,11 +317,17 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     commuting endomorphism submonoids are also explicit `Monoid` instances now (commit `1f837a8`:
     `InputTransform` / `OutputTransform` over layout endomorphisms + the `submonoidsCommute` cross-law) — so
     every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
-    `core.algebra.Lens[S, A]` states get-put / put-get / put-put on the trait, and `OptimizableLeaf[P] extends
-    Lens[P, OptimizableParameters]` inherits them, adding only the `frame` law (writing parameters never changes the
-    read-only `OptimizableMetadata`). The focus had to be carved down to exactly the writable triple
-    (instructions / demos / config) before these laws could hold; `OptimizableParametersSuite` executes all four
-    statements per leaf instance (`DynamicPredict`, `Predict`, `ChainOfThought`).
+    `dspy4s.algebra.Lens[S, A]` states get-put / put-get / put-put plus modify identity, modify composition, and
+    set-modify consistency on the trait. `OptimizableLeaf[P] extends Lens[P, OptimizableParameters]` and adds only the
+    `frame` law (writing parameters never changes the read-only `OptimizableMetadata`). The focus had to be carved down
+    to exactly the writable triple (instructions / demos / config) before these laws could hold;
+    `OptimizableParametersSuite` executes all seven statements per leaf instance (`DynamicPredict`, `Predict`,
+    `ChainOfThought`). Deliberately invalid fixtures in `UnlawfulOpticFixturesSuite` confirm that the added equations
+    reject lenses with hidden or inconsistent writes.
+    The algebra module also has the existential `Optic[S, T, A, B, F]` kernel adapted from cats-eo. `F` describes the
+    focus carrier, `AssociativeFunctor` composes optics that use the same carrier, and `Composer[F, G]` supplies one
+    bridge between carrier families. The optimizer specializes this kernel with an ordered `Vector` carrier and keeps
+    the stable public `OptimizableStructure` API.
     The same placement rule now distinguishes `RoundTripShape[A]`, which carries `decodeEncode` on the abstract trait,
     from the more general `Shape[A]`: `MapShape` is a deliberate counterexample because its unrestricted record carrier
     can omit required fields. Effectful trajectory guarantees are instead documented on their final template traits

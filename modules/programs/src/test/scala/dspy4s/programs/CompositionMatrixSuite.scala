@@ -18,14 +18,24 @@ object CompositionMatrixFixtures:
 final class CompositionMatrixSuite extends FunSuite:
 
   test("module composition matrix accepts only connected input and output types") {
-    assert(typeChecks("import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString >>> stringToInt"))
-    assert(!typeChecks("import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString >>> boolToLong"))
+    assert(typeChecks(
+      "import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString >>> stringToInt"
+    ))
+    assert(!typeChecks(
+      "import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString >>> boolToLong"
+    ))
   }
 
   test("fanout requires a shared input, while tensor accepts independent inputs") {
-    assert(typeChecks("import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString &&& intToString"))
-    assert(!typeChecks("import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString &&& boolToLong"))
-    assert(typeChecks("import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString *** boolToLong"))
+    assert(typeChecks(
+      "import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString &&& intToString"
+    ))
+    assert(!typeChecks(
+      "import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString &&& boolToLong"
+    ))
+    assert(typeChecks(
+      "import dspy4s.programs.*; import dspy4s.programs.CompositionMatrixFixtures.*; intToString *** boolToLong"
+    ))
   }
 
   test("packaged composition retains its exact grade without an expected result type") {
@@ -41,7 +51,7 @@ final class CompositionMatrixSuite extends FunSuite:
   }
 
   test("erased packaged composition remains available when the grade is hidden") {
-    val first : SomeProgram[Int, String] = CompositionMatrixFixtures.packagedIntToString
+    val first: SomeProgram[Int, String]  = CompositionMatrixFixtures.packagedIntToString
     val second: SomeProgram[String, Int] = CompositionMatrixFixtures.packagedStringToInt
     val category                         = Program.erasedCategory
     import category.*

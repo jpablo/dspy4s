@@ -5,7 +5,33 @@ The program (module) layer — the inference patterns you actually compose: `Pre
 introspection type-class the optimizers rely on and the in-memory retrievers. Depends on `core`, `lm`,
 `adapters`, and [`signatures`](../signatures/README.md).
 
-## The core idea
+## Target architecture
+
+The replacement API is in `dspy4s.programs.plan` while the old names are migrated. A `Program[I, O]` is pure typed
+syntax. It cannot run itself and it does not contain a language model, adapter, runner, callback registry, or mutable
+parameter object.
+
+- `Program.predict`, `identity`, `lift`, `>>>`, `&&&`, `***`, `map`, `contramap`, `local`, `recoverWith`, and bounded
+  `iterate` build one closed structural language.
+- `ProgramRunner` is a stateless ZIO interpreter. `PredictionBackend` is an explicit environment service.
+- `ParameterStore` keeps optimizer values separate from syntax and keys them with stable `ParameterId` values.
+- `ProgramGraph` interprets the same syntax without running it.
+- `RecordProgram` adds a `Shape[I]` decoder only at the dataset and optimizer boundary.
+- `ChainOfThought` is a signature transformation plus one prediction node. It is not a wrapper class.
+- `LivePredictionBackend` isolates the current blocking adapter and LM contracts behind one effect boundary.
+
+`LabeledFewShot` already consumes the new `ProgramParameters` capability. Its legacy compatibility instance lets old
+programs use the same optimizer during migration.
+
+`DeepProgramPlanSuite` checks execution and graph interpretation with 20,000 sequential nodes and checks 20,000 loop
+transitions. The parameter state
+codec saves only stable ID-to-value data; it does not claim that Scala functions, tools, syntax, or services are
+serializable.
+
+See [the implementation record](../../docs/refactor/program-ast-interpreters.md) for the design verdict and migration
+order.
+
+## Legacy architecture
 
 Every program is a `Module[I, O]`: its semantic computation is wrapped uniformly as
 `ProgramCall[I] => Either[DspyError, Prediction[O]]`. A `final apply` adds the universal lifecycle (callbacks, tracing,
@@ -57,6 +83,11 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 - `split` pairs two programs over independent tuple inputs, left-to-right.
 - `recoverWith(policy)(fallback)` makes error selection explicit and retains both branches for optimization.
 
+Deep sequential chains do not use the JVM call stack. Execution uses an explicit
+heap stack, and optimizer inspection and replacement use a stack-safe structural
+interpreter. `DeepProgramStackSafetySuite` checks both paths with a chain of
+20,000 programs.
+
 ### Contracts & introspection
 
 | Type | Role |
@@ -75,6 +106,8 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `KNN` / `EmbeddingsRetriever` | Brute-force in-memory retrievers (no FAISS): nearest trainset examples by dot product, top-k passages by cosine. |
 
 ## Design notes
+
+The notes in this section describe the legacy stack unless they name `dspy4s.programs.plan`.
 
 - **Module purity.** `forward` is side-effect-free; trace, history, and callbacks are a transparent `final`
   wrapper, so every program is observed identically with no subclass boilerplate. (The
@@ -105,10 +138,15 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 
 | Path | Contents |
 |------|----------|
+| `plan/Program.scala`, `plan/ProgramRunner.scala` | replacement typed syntax and stateless ZIO interpreter |
+| `plan/ParameterStore.scala`, `plan/ProgramParameters.scala` | stable optimizer identity, state, and migration capability |
+| `plan/ProgramGraph.scala`, `plan/RecordProgram.scala` | graph interpreter and explicit dataset record boundary |
+| `plan/LivePredictionBackend.scala`, `plan/ChainOfThought.scala` | blocking-service bridge and functional strategy constructor |
 | `Predict.scala`, `DynamicPredict.scala` | sibling domain-value and runtime-record predictors over the shared engine |
 | `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
 | `optimization/OptimizableLeaf.scala`, `OptimizableStructure.scala` | leaf lens and composite optimizer-structure typeclasses |
+| `optimization/ParameterOptic.scala`, `StackSafeOptimizableStructure.scala` | carrier-based parameter composition and stack-safe structural traversal |
 | `optimization/CompositeOptimizableStructureInstances.scala`, `OptimizableStructureDerivation.scala` | built-in composite instances and strict Mirror derivation |
 | `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
 | `contracts/ToolFunction.scala`, `ToolCall.scala`, `ActionInterpreter.scala` | callable tools, action messages, and the action-execution boundary |

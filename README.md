@@ -10,6 +10,14 @@ the dynamic Python surface with a compile-time-checked Scala API.
 > **Status:** pre-release. The API is still moving and the artifacts are not yet
 > published to Maven Central. For now, build from source.
 
+> **Architecture migration:** new program work uses the pure typed syntax and
+> ZIO interpreter in `dspy4s.programs.plan`. The current examples still use the
+> earlier `Module` API while strategies, evaluation, and optimizers move to the
+> new design. See the [implementation record](docs/refactor/program-ast-interpreters.md).
+
+The new path also includes `ProgramEvaluate`, which evaluates a `RecordProgram`
+with bounded ZIO parallelism and explicit effectful metrics.
+
 ## What it looks like
 
 A *signature* declares inputs and outputs. A *program* (here `Predict`)
@@ -87,6 +95,25 @@ Run the test suite:
 ```bash
 sbt test
 ```
+
+Run a short local benchmark sample, or the longer benchmark set:
+
+```bash
+sbt benchQuick
+sbt bench
+```
+
+Generate the optional coverage and focused mutation reports:
+
+```bash
+sbt coverageAll
+sbt mutationOptics
+```
+
+The benchmark project is outside the root aggregate, so a normal `compile` or
+`test` does not generate JMH sources. See the
+[benchmark comparison guide](.github/bench/README.md) for the pull-request
+comparison process.
 
 Format all Scala and sbt sources, or check formatting without changing files:
 

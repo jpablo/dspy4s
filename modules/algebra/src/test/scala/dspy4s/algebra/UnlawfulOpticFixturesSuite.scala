@@ -8,7 +8,7 @@ final class UnlawfulOpticFixturesSuite extends FunSuite:
   private final case class Versioned(value: Int, version: Int)
 
   private val versionChangingLens = new Lens[Versioned, Int]:
-    def get(source: Versioned): Int = source.value
+    def get(source: Versioned): Int                   = source.value
     def set(source: Versioned, value: Int): Versioned = source.copy(value = value, version = source.version + 1)
 
   test("modify identity rejects a setter that changes data outside its focus") {
@@ -22,7 +22,7 @@ final class UnlawfulOpticFixturesSuite extends FunSuite:
   }
 
   test("set-modify consistency rejects an effectful getter") {
-    var reads = 0
+    var reads     = 0
     val effectful = new Lens[Versioned, Int]:
       def get(source: Versioned): Int =
         reads += 1

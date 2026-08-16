@@ -1,13 +1,12 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableStructure
-
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
+import dspy4s.programs.plan.ProgramParameters
 
 final case class LabeledFewShotConfig(
     k     : DemoCount = DemoCount(16),
@@ -15,7 +14,7 @@ final case class LabeledFewShotConfig(
     seed  : Long      = 0L
 )
 
-final class LabeledFewShot[P: OptimizableStructure](
+final class LabeledFewShot[P: ProgramParameters](
     config: LabeledFewShotConfig = LabeledFewShotConfig()
 ) extends Teleprompter[P]:
 
@@ -27,7 +26,7 @@ final class LabeledFewShot[P: OptimizableStructure](
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps = summon[OptimizableStructure[P]]
+    val parameters = ProgramParameters[P]
 
     val demos: Vector[Example] =
       if trainset.isEmpty then Vector.empty
@@ -36,8 +35,10 @@ final class LabeledFewShot[P: OptimizableStructure](
         val rng = new scala.util.Random(config.seed)
         Vector.from(rng.shuffle(trainset).take(config.k))
 
-    val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
-    Right(
+    val updated = parameters.read(student).all.map { binding =>
+      binding.id -> binding.value.copy(demos = demos)
+    }.toMap
+    parameters.replace(student, updated).map { compiled =>
       OptimizationReport(
         bestProgram = compiled,
         candidates = Vector(
@@ -57,4 +58,4 @@ final class LabeledFewShot[P: OptimizableStructure](
           "seed"   -> config.seed
         )
       )
-    )
+    }
