@@ -2,8 +2,8 @@ package dspy4s.algebra
 
 /** A value-level existential optic.
   *
-  * The carrier `F` describes the shape of the focus. The hidden `X` retains the context that is required to rebuild
-  * `T` after an `A` focus is replaced with a `B` focus.
+  * The carrier `F` describes the shape of the focus. The hidden `X` retains the context that is required to rebuild `T`
+  * after an `A` focus is replaced with a `B` focus.
   *
   * This encoding and its carrier composition follow the design of cats-eo's `Optic` and `AssociativeFunctor`, adapted
   * here as a small dependency-free kernel. cats-eo is licensed under Apache-2.0.
@@ -51,8 +51,8 @@ trait AssociativeFunctor[F[_, _], XOuter, XInner]:
 
   def composeTo[S, T, A, B, C, D](
       source: S,
-      outer: Optic[S, T, A, B, F] { type X = XOuter },
-      inner: Optic[A, B, C, D, F] { type X = XInner }
+      outer : Optic[S, T, A, B, F] { type X = XOuter },
+      inner : Optic[A, B, C, D, F] { type X = XInner }
   ): F[Z, C]
 
   def composeFrom[S, T, A, B, C, D](
@@ -68,8 +68,8 @@ object AssociativeFunctor:
 
     def composeTo[S, T, A, B, C, D](
         source: S,
-        outer: Optic[S, T, A, B, Tuple2] { type X = XOuter },
-        inner: Optic[A, B, C, D, Tuple2] { type X = XInner }
+        outer : Optic[S, T, A, B, Tuple2] { type X = XOuter },
+        inner : Optic[A, B, C, D, Tuple2] { type X = XInner }
     ): (Z, C) =
       val (outerContext, value) = outer.to(source)
       val (innerContext, focus) = inner.to(value)

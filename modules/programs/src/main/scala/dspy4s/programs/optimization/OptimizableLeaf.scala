@@ -6,11 +6,11 @@ import dspy4s.signatures.OutputAugmentation.PrependField
 
 /** A program that is one independently optimizable leaf of the introspection tree.
   *
-  * This is a lawful [[dspy4s.algebra.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: the Get-Put /
-  * Put-Get / Put-Put statements are inherited from the `Lens` trait, and the [[frame]] law added here pins what makes
-  * the focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which excludes
-  * signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all
-  * four statements per instance.
+  * This is a lawful [[dspy4s.algebra.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: six get, put,
+  * and modify statements are inherited from the `Lens` trait, and the [[frame]] law added here pins what makes the
+  * focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which excludes signature
+  * structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all seven
+  * statements per instance.
   */
 trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
   def metadata(program: P): OptimizableMetadata

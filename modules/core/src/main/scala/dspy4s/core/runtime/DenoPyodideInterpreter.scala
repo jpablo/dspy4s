@@ -110,8 +110,7 @@ final class DenoPyodideInterpreter(
   private def injectionPrelude(variables: Map[String, DynamicValue]): Either[DspyError, String] =
     cachedPrelude match
       case Some((cached, prelude)) if cached eq variables => Right(prelude)
-      case _ =>
-        DenoPyodideVariables.prelude(variables).map { prelude =>
+      case _                                              => DenoPyodideVariables.prelude(variables).map { prelude =>
           cachedPrelude = Some((variables, prelude))
           prelude
         }

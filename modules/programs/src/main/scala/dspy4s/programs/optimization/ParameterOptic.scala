@@ -30,8 +30,8 @@ private[dspy4s] object ParameterCarrier:
 
     def composeTo[Source, Target, A, B, C, D](
         source: Source,
-        outer: Optic[Source, Target, A, B, ParameterCarrier] { type X = XOuter },
-        inner: Optic[A, B, C, D, ParameterCarrier] { type X = XInner }
+        outer : Optic[Source, Target, A, B, ParameterCarrier] { type X = XOuter },
+        inner : Optic[A, B, C, D, ParameterCarrier] { type X = XInner }
     ): ParameterCarrier[Z, C] =
       val openedOuter = outer.to(source)
       val openedInner = openedOuter.values.map(inner.to)
@@ -44,7 +44,7 @@ private[dspy4s] object ParameterCarrier:
         outer: Optic[Source, Target, A, B, ParameterCarrier] { type X = XOuter }
     ): Target =
       val (outerContext, innerContexts) = focus.context
-      val rebuilt                      = Vector.newBuilder[B]
+      val rebuilt                       = Vector.newBuilder[B]
       rebuilt.sizeHint(innerContexts.size)
       var cursor = 0
 
@@ -98,14 +98,14 @@ private[dspy4s] object ParameterOptic:
 
   private def withArity[P, N <: Int, Context](
       measure: P => Int,
-      open : P => ParameterCarrier[Context, NamedOptimizableView],
-      close: ParameterCarrier[Context, OptimizableParameters] => P
+      open   : P => ParameterCarrier[Context, NamedOptimizableView],
+      close  : ParameterCarrier[Context, OptimizableParameters] => P
   ): ParameterOptic[P, N] =
     new ParameterOptic[P, N]:
       type X = Context
-      def arity(program: P): Int = measure(program)
-      def to(source: P): ParameterCarrier[X, NamedOptimizableView] = open(source)
-      def from(focus: ParameterCarrier[X, OptimizableParameters]): P = close(focus)
+      def arity(program: P): Int                                        = measure(program)
+      def to(source    : P): ParameterCarrier[X, NamedOptimizableView]  = open(source)
+      def from(focus   : ParameterCarrier[X, OptimizableParameters]): P = close(focus)
 
   /** Treat an existing structure as an optic. This adapter permits incremental migration of third-party instances. */
   def fromStructure[P, N <: Int](structure: OptimizableStructure.WithArity[P, N]): ParameterOptic[P, N] =
@@ -122,7 +122,8 @@ private[dspy4s] object ParameterOptic:
           named.map(_._2) == views,
           "OptimizableStructure.inspectNamed must preserve the views and order returned by inspect"
         )
-        ParameterCarrier(program, named.map { case (name, view) => NamedOptimizableView(name, view) }),
+        ParameterCarrier(program, named.map { case (name, view) => NamedOptimizableView(name, view) })
+      ,
       focus => structure.replace(focus.context, focus.values)
     )
 
@@ -172,7 +173,10 @@ private[dspy4s] object ParameterOptic:
   /** Compose a structural Lens with an inner multi-focus parameter optic. The Lens carrier crosses into
     * [[ParameterCarrier]] through its single declared [[Composer]] bridge.
     */
-  def through[Whole, Part, N <: Int](lens: Lens[Whole, Part], inner: ParameterOptic[Part, N]): ParameterOptic[Whole, N] =
+  def through[Whole, Part, N <: Int](
+      lens : Lens[Whole, Part],
+      inner: ParameterOptic[Part, N]
+  ): ParameterOptic[Whole, N] =
     val outer    = summon[Composer[Tuple2, ParameterCarrier]].to(lens)
     val composed = outer.andThen(inner)
     withArity[Whole, N, composed.X](whole => inner.arity(lens.get(whole)), composed.to, composed.from)
@@ -184,11 +188,7 @@ private[dspy4s] object ParameterOptic:
       replaceInner: (Whole, Part) => Whole,
       inner       : OptimizableStructure.WithArity[Part, N]
   ): OptimizableStructure.Of[Whole, N] =
-    val lens = new Lens[Whole, Part]:
-      def get(whole: Whole): Part                       = select(whole)
-      def set(whole: Whole, replacement: Part): Whole   = replaceInner(whole, replacement)
-
-    toStructure(label, through(lens, fromStructure(inner)))
+    StackSafeOptimizableStructure.unary(label, select, replaceInner, inner)
 
   /** Combine two heterogeneous parameter optics over the corresponding pair. */
   def pair[A, B, NA <: Int, NB <: Int](
@@ -211,7 +211,8 @@ private[dspy4s] object ParameterOptic:
           (openedLeft.context, openedRight.context, openedLeft.values.size),
           openedLeft.values.map(focus => focus.copy(displayName = prefix(focus.displayName, leftPrefix))) ++
             openedRight.values.map(focus => focus.copy(displayName = prefix(focus.displayName, rightPrefix)))
-        ),
+        )
+      ,
       focus =>
         val (leftContext, rightContext, splitAt) = focus.context
         require(splitAt <= focus.values.size, s"Parameter pair split $splitAt exceeds ${focus.values.size} updates")
@@ -232,21 +233,22 @@ private[dspy4s] object ParameterOptic:
 
   /** Public-API adapter for a wrapper that has two structural children. */
   def pairStructure[Whole, A, B, NA <: Int, NB <: Int](
-      label       : String,
-      getLeft     : Whole => A,
-      getRight    : Whole => B,
-      replacePair : (Whole, A, B) => Whole,
-      left        : OptimizableStructure.WithArity[A, NA],
-      right       : OptimizableStructure.WithArity[B, NB],
-      leftPrefix  : Option[String],
-      rightPrefix : Option[String]
+      label      : String,
+      getLeft    : Whole => A,
+      getRight   : Whole => B,
+      replacePair: (Whole, A, B) => Whole,
+      left       : OptimizableStructure.WithArity[A, NA],
+      right      : OptimizableStructure.WithArity[B, NB],
+      leftPrefix : Option[String],
+      rightPrefix: Option[String]
   ): OptimizableStructure.Of[Whole, NA + NB] =
-    val lens = new Lens[Whole, (A, B)]:
-      def get(whole: Whole): (A, B) = getLeft(whole) -> getRight(whole)
-      def set(whole: Whole, replacement: (A, B)): Whole =
-        replacePair(whole, replacement._1, replacement._2)
-
-    toStructure(
+    StackSafeOptimizableStructure.pair(
       label,
-      pairThrough(lens, fromStructure(left), fromStructure(right), leftPrefix, rightPrefix)
+      leftPrefix,
+      rightPrefix,
+      getLeft,
+      getRight,
+      replacePair,
+      left,
+      right
     )

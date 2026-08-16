@@ -4,6 +4,13 @@ ThisBuild / scalaVersion := "3.8.4"
 
 addCommandAlias("fmt", ";scalafmtAll;scalafmtSbt")
 addCommandAlias("fmtCheck", ";scalafmtCheckAll;scalafmtSbtCheck")
+addCommandAlias("bench", "benchmarks/Jmh/run -i 5 -wi 3 -f 2 -t 1")
+addCommandAlias("benchQuick", "benchmarks/Jmh/run -i 2 -wi 1 -f 1 -t 1")
+addCommandAlias(
+  "coverageAll",
+  ";clean;coverage;core/Compile/copyResources;test;coverageReport;coverageAggregate"
+)
+addCommandAlias("mutationOptics", ";project programs;stryker")
 
 lazy val munitVersion           = "1.3.4"
 lazy val munitScalacheckVersion = "1.3.0" // own line; munit-scalacheck has no 1.3.1 (patch-compatible with munit 1.3.1)
@@ -32,6 +39,10 @@ lazy val commonSettings = Seq(
     "-explain"
   )
 )
+
+ThisBuild / strykerReporters         := Seq("console", "html", "json")
+ThisBuild / strykerThresholdsBreak   := 0
+ThisBuild / strykerExcludedMutations := Seq("StringLiteral")
 
 lazy val root = (project in file("."))
   .aggregate(
@@ -131,6 +142,13 @@ lazy val programs = (project in file("modules/programs"))
     libraryDependencies ++= Seq(
       "io.github.iltotore" %% "iron"  % ironVersion,
       "org.scalameta"      %% "munit" % munitVersion % Test
+    ),
+    // Keep mutation testing on the generic optic and explicit-heap implementation. Mutating all program sources hits
+    // a current stryker4s Scala 3 parser defect on top-level extension methods before any mutant can run.
+    strykerMutate := Seq(
+      "src/main/scala/dspy4s/programs/compose/AndThen.scala",
+      "src/main/scala/dspy4s/programs/optimization/ParameterOptic.scala",
+      "src/main/scala/dspy4s/programs/optimization/StackSafeOptimizableStructure.scala"
     )
   )
 
@@ -192,5 +210,15 @@ lazy val examples = (project in file("modules/examples"))
   .settings(commonSettings)
   .settings(name := "dspy4s-examples")
   .settings(
+    publish / skip := true
+  )
+
+// JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.
+lazy val benchmarks = (project in file("benchmarks"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(algebra, programs)
+  .settings(commonSettings)
+  .settings(
+    name           := "dspy4s-benchmarks",
     publish / skip := true
   )

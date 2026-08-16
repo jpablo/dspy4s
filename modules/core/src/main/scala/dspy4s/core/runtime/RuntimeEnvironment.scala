@@ -180,8 +180,8 @@ object RuntimeEnvironment:
       contextRef.set(base.withHistory(nextHistory))
 
   /** Run `body` under a fresh [[RuntimeDelta]] derived from `base`, returning the body's result and accumulated output
-    * as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate each attempt (applying any per-attempt
-    * service overrides to `base` first) then propagate only the winner's observability via [[propagate]].
+    * as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate each attempt (applying any
+    * per-attempt service overrides to `base` first) then propagate only the winner's observability via [[propagate]].
     */
   def isolatedAttempt[A](base: RuntimeContext)(
       body: RuntimeContext ?=> A
@@ -223,7 +223,8 @@ object RuntimeEnvironment:
 
   /** Emit a one-off framework diagnostic to stderr under the shared `WARN [dspy4s]` convention. Diagnostics are not
     * callback events (those are strictly Start/End scope pairs -- see [[dspy4s.core.contracts.CallbackEvent]]); this is
-    * the single seam warning sites route through, so the convention -- and any future redirection -- lives in one place.
+    * the single seam warning sites route through, so the convention -- and any future redirection -- lives in one
+    * place.
     */
   def warn(component: String, message: String): Unit =
     Console.err.println(s"WARN [dspy4s] $component: $message")

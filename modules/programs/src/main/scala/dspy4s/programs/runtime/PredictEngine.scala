@@ -167,9 +167,8 @@ private[dspy4s] final case class PredictEngine(
     yield prediction
 
 private[dspy4s] object PredictEngine:
-  /** Name of the synthetic prediction value the engine appends when the LM returned native tool calls (upstream
-    * parity: a `tool_calls` value exists only on tool turns). Consumers that iterate a prediction's values
-    * positionally — e.g. [[dspy4s.programs.Aggregation.majority]]'s "last output field" default — must still skip
-    * this key when present.
+  /** Name of the synthetic prediction value the engine appends when the LM returned native tool calls (upstream parity:
+    * a `tool_calls` value exists only on tool turns). Consumers that iterate a prediction's values positionally — e.g.
+    * [[dspy4s.programs.Aggregation.majority]]'s "last output field" default — must still skip this key when present.
     */
   val ToolCallsKey: String = "tool_calls"

@@ -46,8 +46,8 @@ final class OptimizableParametersSuite extends FunSuite:
   private def holds[A](law: String, eq: IsEq[A]): Unit =
     assert(eq.lhs.equals(eq.rhs), s"$law: ${eq.lhs} != ${eq.rhs}")
 
-  /** Runs the four `@Law` statements the [[OptimizableLeaf]] lens carries (Get-Put / Put-Get / Put-Put inherited from
-    * `Lens`, plus the metadata frame), then the view/extension-syntax invariants.
+  /** Runs the seven `@Law` statements the [[OptimizableLeaf]] lens carries (six inherited from `Lens`, plus the
+    * metadata frame), then the view/extension-syntax invariants.
     */
   private def assertLeafLaws[P](program: P, first: OptimizableParameters, second: OptimizableParameters)(using
       leaf: OptimizableLeaf[P]
@@ -62,6 +62,9 @@ final class OptimizableParametersSuite extends FunSuite:
     holds("get-put", leaf.getPut(program))
     holds("put-get", leaf.putGet(program, first))
     holds("put-put", leaf.putPut(program, first, second))
+    holds("modify identity", leaf.modifyIdentity(program))
+    holds("modify composition", leaf.modifyComposition(program, _ => first, _ => second))
+    holds("set-modify consistency", leaf.consistentSetModify(program, first))
     holds("frame", leaf.frame(program, first))
 
     val view = leaf.inspect(program)

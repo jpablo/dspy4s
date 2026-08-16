@@ -1,0 +1,102 @@
+name: benchmark comparison
+
+on:
+  pull_request:
+    paths:
+      - "modules/algebra/**"
+      - "modules/core/**"
+      - "modules/lm/**"
+      - "modules/adapters/**"
+      - "modules/signatures/**"
+      - "modules/programs/**"
+      - "benchmarks/**"
+      - "build.sbt"
+      - "project/**"
+      - ".github/bench/**"
+      - ".github/workflows/bench-pr.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Verify benchmark tools
+        run: |
+          python3 -m unittest discover .github/bench -v
+          python3 .github/bench/bench_tools.py validate-mapping
+
+      - name: Select affected benchmarks
+        id: plan
+        shell: bash
+        run: |
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA=$(git merge-base HEAD "${{ github.event.pull_request.base.sha }}")
+          else
+            BASE_SHA=$(git rev-parse HEAD^)
+          fi
+          REGEX=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | python3 .github/bench/bench_tools.py affected)
+          if [ "$REGEX" = "FULL" ]; then REGEX='dspy4s\.bench\..*'; fi
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "regex=$REGEX" >> "$GITHUB_OUTPUT"
+          if [ -z "$REGEX" ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+          if git cat-file -e "$BASE_SHA:benchmarks/src/main/scala/dspy4s/bench/OpticBench.scala" 2>/dev/null; then
+            echo "bootstrap=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "bootstrap=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Benchmark merge base
+        if: steps.plan.outputs.skip == 'false' && steps.plan.outputs.bootstrap == 'false'
+        run: |
+          git checkout --detach "${{ steps.plan.outputs.base }}"
+          sbt -batch "benchmarks/Jmh/run -wi 1 -i 2 -f 1 -t 1 -prof gc -rf json -rff benchmarks/base.json ${{ steps.plan.outputs.regex }}"
+
+      - name: Benchmark pull-request head
+        if: steps.plan.outputs.skip == 'false'
+        run: |
+          git checkout --detach "${{ steps.plan.outputs.head }}"
+          sbt -batch "benchmarks/Jmh/run -wi 1 -i 2 -f 1 -t 1 -prof gc -rf json -rff benchmarks/head.json ${{ steps.plan.outputs.regex }}"
+
+      - name: Report comparison
+        if: steps.plan.outputs.skip == 'false' && steps.plan.outputs.bootstrap == 'false'
+        run: |
+          python3 .github/bench/bench_tools.py diff benchmarks/base.json benchmarks/head.json -o benchmarks/deltas.json
+          python3 .github/bench/bench_tools.py markdown benchmarks/deltas.json | tee benchmarks/comparison.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report first benchmark baseline
+        if: steps.plan.outputs.skip == 'false' && steps.plan.outputs.bootstrap == 'true'
+        run: echo "Benchmark project is new. The head result is the first baseline." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark data
+        if: always() && steps.plan.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-comparison-${{ github.run_id }}
+          path: |
+            benchmarks/base.json
+            benchmarks/head.json
+            benchmarks/deltas.json
+            benchmarks/comparison.md
+          if-no-files-found: warn
+          retention-days: 30

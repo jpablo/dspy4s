@@ -1,8 +1,11 @@
 package dspy4s.algebra
 
-/** A lawful lens: a focused `get`/`set` pair from a whole `S` onto a part `A`, carrying the three classic optic laws ON
-  * the trait as `@Law`/[[IsEq]] statements (the same shape as [[Monoid]]; see `Laws.scala`). Concrete types provide
-  * `given` instances; the law suites execute the statements under the equality honest for each carrier.
+import dspy4s.algebra.Optic.*
+
+/** A lawful lens: a focused `get`/`set` pair from a whole `S` onto a part `A`, carrying the three classic laws and
+  * three modify laws on the trait as `@Law`/[[IsEq]] statements (the same shape as [[Monoid]]; see `Laws.scala`).
+  * Concrete types provide `given` instances; the law suites execute the statements under the equality honest for each
+  * carrier.
   *
   * An instance is only lawful when `A` is exactly the writable part of `S`: a focus smaller than what `set` touches
   * breaks Put-Get, one larger than what `set` accepts breaks Get-Put. The prime example is
@@ -33,6 +36,18 @@ trait Lens[S, A] extends Optic[S, S, A, A, Tuple2]:
   @Law("put-put: the last write wins")
   def putPut(s: S, a1: A, a2: A): IsEq[S] =
     set(set(s, a1), a2) <-> set(s, a2)
+
+  @Law("modify identity: modifying with identity changes nothing")
+  def modifyIdentity(s: S): IsEq[S] =
+    this.modify(s)(identity) <-> s
+
+  @Law("modify composition: sequential modifications compose")
+  def modifyComposition(s: S, f: A => A, g: A => A): IsEq[S] =
+    this.modify(this.modify(s)(f))(g) <-> this.modify(s)(f.andThen(g))
+
+  @Law("set-modify consistency: setting a value equals a constant modification")
+  def consistentSetModify(s: S, a: A): IsEq[S] =
+    set(s, a) <-> this.modify(s)(_ => a)
 
 object Lens:
   /** Summon the instance focusing `S` onto `A`. */
