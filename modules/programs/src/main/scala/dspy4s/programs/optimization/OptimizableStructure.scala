@@ -100,14 +100,15 @@ object OptimizableStructure extends CompositeOptimizableStructureInstances with 
     * its case-class fields by structural derivation.
     */
   given fromOptimizableLeaf[P](using leaf: OptimizableLeaf[P]): OptimizableStructure.Of[P, 1] with
-    def arity(@annotation.unused program: P): Int                      = 1
-    def inspect(program                 : P): Vector[OptimizableView]  = Vector(leaf.inspect(program))
-    def replace(program: P, updates: Vector[OptimizableParameters]): P =
-      require(updates.size == 1, s"OptimizableLeaf expects exactly 1 update, got ${updates.size}")
-      leaf.set(program, updates.head)
-    // A leaf contributes "self" to the name path (the dspy convention for a standalone predict); a composite
-    // collapses "self" into just its field label (see DerivedOptimizableStructure.inspectNamed).
-    override def inspectNamed(program: P): Vector[(String, OptimizableView)] = Vector("self" -> leaf.inspect(program))
+    private val delegate = ParameterOptic.toStructure(
+      "OptimizableLeaf",
+      ParameterOptic.leaf("self", leaf.inspect, leaf.set)
+    )
+
+    def arity(program                : P): Int                                       = delegate.arity(program)
+    def inspect(program              : P): Vector[OptimizableView]                   = delegate.inspect(program)
+    def replace(program              : P, updates: Vector[OptimizableParameters]): P = delegate.replace(program, updates)
+    override def inspectNamed(program: P): Vector[(String, OptimizableView)]         = delegate.inspectNamed(program)
 
   /** Identity instance for types intentionally known to contain no optimizable leaves.
     *
@@ -116,12 +117,7 @@ object OptimizableStructure extends CompositeOptimizableStructureInstances with 
     * instance a compile error instead of silently hiding a potentially learnable subtree.
     */
   def empty[P]: OptimizableStructure.WithArity[P, 0] =
-    new OptimizableStructure.Of[P, 0]:
-      def arity(@annotation.unused program: P): Int                      = 0
-      def inspect(program                 : P): Vector[OptimizableView]  = Vector.empty
-      def replace(program: P, updates: Vector[OptimizableParameters]): P =
-        require(updates.isEmpty, s"Parameter-free program expects 0 updates, got ${updates.size}")
-        program
+    ParameterOptic.toStructure("Parameter-free program", ParameterOptic.empty[P])
 
   /** Named (non-inline) carrier of the derived behaviour. Keeping it a named class — rather than an anonymous class
     * inside `derived` — avoids `-Werror` rejecting an inline-duplicated anonymous class definition at each use site.

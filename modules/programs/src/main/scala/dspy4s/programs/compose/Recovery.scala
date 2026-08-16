@@ -66,25 +66,18 @@ object RecoverWith:
   ](using
       primary: OptimizableStructure.WithArity[P, NP],
       fallback: OptimizableStructure.WithArity[F, NF]
-  ): OptimizableStructure.Of[RecoverWith[I, O, P, F], NP + NF] with
-    def arity(program: RecoverWith[I, O, P, F]): Int =
-      primary.arity(program.primary) + fallback.arity(program.fallback)
-    def inspect(program: RecoverWith[I, O, P, F]): Vector[OptimizableView] =
-      primary.inspect(program.primary) ++ fallback.inspect(program.fallback)
-
-    def replace(program: RecoverWith[I, O, P, F], updates: Vector[OptimizableParameters]): RecoverWith[I, O, P, F] =
-      val (primaryUpdates, fallbackUpdates) = updates.splitAt(primary.read(program.primary).size)
-      program.copy(
-        primary = primary.replace(program.primary, primaryUpdates),
-        fallback = fallback.replace(program.fallback, fallbackUpdates)
-      )
-
-    override def inspectNamed(program: RecoverWith[I, O, P, F]): Vector[(String, OptimizableView)] =
-      primary.inspectNamed(program.primary).map { case (sub, view) =>
-        (if sub == "self" then "primary" else s"primary.$sub") -> view
-      } ++ fallback.inspectNamed(program.fallback).map { case (sub, view) =>
-        (if sub == "self" then "fallback" else s"fallback.$sub") -> view
-      }
+  ): OptimizableStructure.Of[RecoverWith[I, O, P, F], NP + NF] =
+    PairOptimizableStructure.structure[RecoverWith[I, O, P, F], P, F, NP, NF](
+      "RecoverWith",
+      "primary",
+      "fallback",
+      _.primary,
+      _.fallback,
+      (program, nextPrimary, nextFallback) =>
+        program.copy(primary = nextPrimary, fallback = nextFallback),
+      primary,
+      fallback
+    )
 
 extension [I, O, P <: Module[I, O]](self: P)
   /** Add a fixed, optimizer-addressable fallback under an explicit failure-selection policy. */

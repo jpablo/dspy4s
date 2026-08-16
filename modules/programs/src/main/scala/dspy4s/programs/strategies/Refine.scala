@@ -17,6 +17,7 @@ import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.updated
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.algebra.Lens
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -127,27 +128,34 @@ object Refine:
     */
   given refineOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
-  ): OptimizableStructure.Of[Refine[P, I, O], N + 1] with
-    def arity(program: Refine[P, I, O]): Int                       = inner.arity(program.module) + 1
-    def inspect(program: Refine[P, I, O]): Vector[OptimizableView] =
-      inner.inspect(program.module) :+ program.criticPredict.optimizableView
+  ): OptimizableStructure.Of[Refine[P, I, O], N + 1] =
+    type Critic = Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]
 
-    def replace(program: Refine[P, I, O], updates: Vector[OptimizableParameters]): Refine[P, I, O] =
-      val innerArity = inner.read(program.module).size
-      require(
-        updates.size == innerArity + 1,
-        s"Refine expects ${innerArity + 1} updates (inner predicts ++ critic), got ${updates.size}"
-      )
-      val nextCritic =
-        if updates(innerArity) == program.criticPredict.optimizableParameters then program.criticPredictOverride
-        else Some(program.criticPredict.withOptimizableParameters(updates(innerArity)))
-      program.copy(
-        module = inner.replace(program.module, updates.take(innerArity)),
-        criticPredictOverride = nextCritic
-      )
+    val children = new Lens[Refine[P, I, O], (P, Critic)]:
+      def get(program: Refine[P, I, O]): (P, Critic) = program.module -> program.criticPredict
 
-    override def inspectNamed(program: Refine[P, I, O]): Vector[(String, OptimizableView)] =
-      inner.inspectNamed(program.module) :+ ("critic" -> program.criticPredict.optimizableView)
+      def set(program: Refine[P, I, O], replacement: (P, Critic)): Refine[P, I, O] =
+        val nextCriticOverride =
+          if replacement._2.equals(program.criticPredict) then program.criticPredictOverride
+          else Some(replacement._2)
+        program.copy(module = replacement._1, criticPredictOverride = nextCriticOverride)
+
+    val critic = ParameterOptic.leaf[Critic](
+      "self",
+      _.optimizableView,
+      (current, updated) => current.withOptimizableParameters(updated)
+    )
+
+    ParameterOptic.toStructure(
+      "Refine",
+      ParameterOptic.pairThrough(
+        children,
+        ParameterOptic.fromStructure(inner),
+        critic,
+        None,
+        Some("critic")
+      )
+    )
 
   /** Resolve the base adapter from the ambient context, narrowing the `AdapterRef` to a concrete [[Adapter]]; falls
     * back to a default [[ChatAdapter]] when none is configured (mirrors Python's `dspy.settings.adapter or

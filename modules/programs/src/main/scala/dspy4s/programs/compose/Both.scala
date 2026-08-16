@@ -46,15 +46,14 @@ object Both:
       using
       pa: OptimizableStructure.WithArity[A, NA],
       pb: OptimizableStructure.WithArity[B, NB]
-  ): OptimizableStructure.Of[Both[I, OA, OB, A, B], NA + NB] with
-    def arity(program: Both[I, OA, OB, A, B]): Int                       = pa.arity(program.first) + pb.arity(program.second)
-    def inspect(program: Both[I, OA, OB, A, B]): Vector[OptimizableView] =
-      PairOptimizableStructure.inspect(pa, pb)(program.first, program.second)
-
-    def replace(program: Both[I, OA, OB, A, B], updates: Vector[OptimizableParameters]): Both[I, OA, OB, A, B] =
-      PairOptimizableStructure.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
-        program.copy(first = a, second = b)
-      )
-
-    override def inspectNamed(program: Both[I, OA, OB, A, B]): Vector[(String, OptimizableView)] =
-      PairOptimizableStructure.inspectNamed(pa, pb)(program.first, program.second)
+  ): OptimizableStructure.Of[Both[I, OA, OB, A, B], NA + NB] =
+    PairOptimizableStructure.structure[Both[I, OA, OB, A, B], A, B, NA, NB](
+      "Both",
+      "first",
+      "second",
+      _.first,
+      _.second,
+      (program, first, second) => program.copy(first = first, second = second),
+      pa,
+      pb
+    )

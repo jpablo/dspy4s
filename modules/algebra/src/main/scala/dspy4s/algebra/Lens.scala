@@ -9,12 +9,18 @@ package dspy4s.algebra
   * `dspy4s.programs.optimization.OptimizableLeaf`, whose focus `dspy4s.programs.optimization.OptimizableParameters` was
   * carved out of the executable predictor precisely so these laws hold.
   */
-trait Lens[S, A]:
+trait Lens[S, A] extends Optic[S, S, A, A, Tuple2]:
+  final type X = S
+
   /** Read the focused part. */
   def get(s: S): A
 
   /** Replace the focused part, leaving the rest of `S` unchanged. */
   def set(s: S, a: A): S
+
+  final def to(s: S): (S, A) = s -> get(s)
+
+  final def from(focus: (S, A)): S = set(focus._1, focus._2)
 
   @Law("get-put: writing back the value just read changes nothing")
   def getPut(s: S): IsEq[S] =

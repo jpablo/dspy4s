@@ -97,10 +97,10 @@ object Moded:
   /** `mode` is non-learnable, so addressability passes straight through to the wrapped program (fork 4). */
   given modedOptimizableStructure[I, O, P <: Module[I, O], N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
-  ): OptimizableStructure.Of[Moded[I, O, P], N] with
-    def arity(program  : Moded[I, O, P]): Int                                                    = inner.arity(program.program)
-    def inspect(program: Moded[I, O, P]): Vector[OptimizableView]                                = inner.inspect(program.program)
-    def replace(program: Moded[I, O, P], updates: Vector[OptimizableParameters]): Moded[I, O, P] =
-      program.copy(program = inner.replace(program.program, updates))
-    override def inspectNamed(program: Moded[I, O, P]): Vector[(String, OptimizableView)] =
-      inner.inspectNamed(program.program)
+  ): OptimizableStructure.Of[Moded[I, O, P], N] =
+    ParameterOptic.throughStructure(
+      "Moded",
+      _.program,
+      (wrapper, updated) => wrapper.copy(program = updated),
+      inner
+    )

@@ -32,12 +32,7 @@ private[compose] object UnaryOptimizableStructure:
   def passthrough[W, P, N <: Int](get: W => P)(replaceInner: (W, P) => W)(using
       inner: OptimizableStructure.WithArity[P, N]
   ): OptimizableStructure.Of[W, N] =
-    new OptimizableStructure.Of[W, N]:
-      def arity(program  : W): Int                                       = inner.arity(get(program))
-      def inspect(program: W): Vector[OptimizableView]                   = inner.inspect(get(program))
-      def replace(program: W, updates: Vector[OptimizableParameters]): W =
-        replaceInner(program, inner.replace(get(program), updates))
-      override def inspectNamed(program: W): Vector[(String, OptimizableView)] = inner.inspectNamed(get(program))
+    ParameterOptic.throughStructure("Transparent wrapper", get, replaceInner, inner)
 
 /** Lift a total Scala function into a parameter-free, lifecycle-transparent program. */
 final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:

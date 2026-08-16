@@ -52,13 +52,10 @@ object BestOfN:
     */
   given bestOfNOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
-  ): OptimizableStructure.Of[BestOfN[P, I, O], N] with
-    def arity(program: BestOfN[P, I, O]): Int                       = inner.arity(program.module)
-    def inspect(program: BestOfN[P, I, O]): Vector[OptimizableView] =
-      inner.inspect(program.module)
-
-    def replace(program: BestOfN[P, I, O], updates: Vector[OptimizableParameters]): BestOfN[P, I, O] =
-      program.copy(module = inner.replace(program.module, updates))
-
-    override def inspectNamed(program: BestOfN[P, I, O]): Vector[(String, OptimizableView)] =
-      inner.inspectNamed(program.module)
+  ): OptimizableStructure.Of[BestOfN[P, I, O], N] =
+    ParameterOptic.throughStructure(
+      "BestOfN",
+      _.module,
+      (wrapper, updated) => wrapper.copy(module = updated),
+      inner
+    )

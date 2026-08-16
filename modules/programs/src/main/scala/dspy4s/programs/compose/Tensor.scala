@@ -58,18 +58,14 @@ object Tensor:
       using
       pa: OptimizableStructure.WithArity[FA, NA],
       pb: OptimizableStructure.WithArity[FB, NB]
-  ): OptimizableStructure.Of[Tensor[I, J, A, B, FA, FB], NA + NB] with
-    def arity(program: Tensor[I, J, A, B, FA, FB]): Int                       = pa.arity(program.first) + pb.arity(program.second)
-    def inspect(program: Tensor[I, J, A, B, FA, FB]): Vector[OptimizableView] =
-      PairOptimizableStructure.inspect(pa, pb)(program.first, program.second)
-
-    def replace(
-        program: Tensor[I, J, A, B, FA, FB],
-        updates: Vector[OptimizableParameters]
-    ): Tensor[I, J, A, B, FA, FB] =
-      PairOptimizableStructure.replace(pa, pb)(program.first, program.second, updates)((a, b) =>
-        program.copy(first = a, second = b)
-      )
-
-    override def inspectNamed(program: Tensor[I, J, A, B, FA, FB]): Vector[(String, OptimizableView)] =
-      PairOptimizableStructure.inspectNamed(pa, pb)(program.first, program.second)
+  ): OptimizableStructure.Of[Tensor[I, J, A, B, FA, FB], NA + NB] =
+    PairOptimizableStructure.structure[Tensor[I, J, A, B, FA, FB], FA, FB, NA, NB](
+      "Tensor",
+      "first",
+      "second",
+      _.first,
+      _.second,
+      (program, first, second) => program.copy(first = first, second = second),
+      pa,
+      pb
+    )
