@@ -2,7 +2,7 @@ package dspy4s.streaming
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.programs.contracts.Prediction
-import dspy4s.programs.plan.{ProgramEvent, ProgramObserver, ProgramRunner, ProgramWithEnv, RunOptions}
+import dspy4s.programs.{ProgramEvent, ProgramObserver, ProgramRunner, ProgramWithEnv, RunOptions}
 import zio.stream.{Take, ZStream}
 import zio.{Queue, ZIO}
 
@@ -20,7 +20,7 @@ object ProgramEventStream:
   ): ZStream[R, DspyError, ProgramStreamItem[O]] =
     ZStream.unwrapScoped {
       for
-        queue <- Queue.unbounded[Take[DspyError, ProgramStreamItem[O]]]
+        queue   <- Queue.unbounded[Take[DspyError, ProgramStreamItem[O]]]
         observer = new ProgramObserver:
                      def onEvent(event: ProgramEvent): ZIO[Any, Nothing, Unit] =
                        queue.offer(Take.single(ProgramStreamItem.Event(event))).unit

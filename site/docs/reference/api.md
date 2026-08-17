@@ -1,27 +1,11 @@
-# API reference
+# API map
 
-The full type-level API is documented by Scaladoc generated from the source.
+- Programs: `dspy4s.programs`
+- Signatures: `dspy4s.signatures`
+- Evaluation: `dspy4s.evaluate`
+- Metrics: `dspy4s.evaluate.metrics`
+- Optimization: `dspy4s.optimize`
+- GEPA: `dspy4s.gepa`
+- Streaming: `dspy4s.streaming`
 
-A hosted Scaladoc site is not published yet. To browse the API locally, generate
-it from the repository:
-
-```bash
-sbt doc
-```
-
-Each module produces its own Scaladoc under
-`modules/<module>/target/scala-3.x/api/`. Open the `index.html` in a browser.
-
-The modules, in dependency order:
-
-| Module | Artifact | Covers |
-|---|---|---|
-| core | `dspy4s-core` | `Example`, `DynamicValue`, `RuntimeContext`. |
-| signatures | `dspy4s-signatures` | `Signature`, `Spec`, `InputField`, `OutputField`. |
-| lm | `dspy4s-lm` | `LanguageModel`, `OpenAiLanguageModel`, caching, usage. |
-| adapters | `dspy4s-adapters` | `ChatAdapter`, `JSONAdapter`. |
-| programs | `dspy4s-programs` | `Predict`, `ChainOfThought`, `ReAct`, `BestOfN`, `Refine`. |
-| evaluate | `dspy4s-evaluate` | `Evaluate`, `Metric`, `FunctionMetric`, `SemanticF1`. |
-| optimize | `dspy4s-optimize` | `BootstrapFewShot`, `COPRO`, `MIPROv2`, `ProgramPersistence`. |
-| gepa | `dspy4s-gepa` | `GEPA`. |
-| streaming | `dspy4s-streaming` | `Streamify`, `StreamListener`, `StreamEvent`. |
+The source code and module README files are the detailed API reference while the library is pre-release.

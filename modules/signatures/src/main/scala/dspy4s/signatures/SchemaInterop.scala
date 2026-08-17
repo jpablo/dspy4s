@@ -4,8 +4,8 @@ import dspy4s.core.contracts.{DspyError, TypeRef, ValidationError}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** The narrow public seam onto the otherwise-`private[signatures]` [[ZioSchemaCodec]] bridge, for callers outside the
-  * signatures module that need to move a single value with a `Schema` across the `DynamicValue` spine (notably
-  * `ToolFunction.fromMethod`, which decodes one tool argument at a time and reports its wire type).
+  * signatures module that need to move a single value with a `Schema` across the `DynamicValue` spine (notably tool
+  * adapters, which decode arguments and report their wire types).
   *
   * It exposes exactly the two operations such callers need — decode-one-value and type-of-one-value — keeping the rest
   * of the codec (record-shaped encode/decode, `Shape` derivation, field-spec derivation) internal.

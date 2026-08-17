@@ -1,119 +1,100 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableStructure
-
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout}
-import dspy4s.core.data.Example
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.core.contracts.{ContextWindowExceededError, DspyError, DynamicValues, :=}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.evaluate.Metric
+import dspy4s.programs.*
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.{Runtime, Unsafe, ZEnvironment, ZIO}
 
-/** Offline InferRules suite. One scripted LM serves two sub-tasks through the ambient model:
-  *
-  *   1. Rule induction. The induction `DynamicPredict` asks for `natural_language_rules`; the LM hands back a rule
-  *      block carrying [[RuleToken]].
-  *   2. The actual task. The task `DynamicPredict` answers a `question`. The instruction-aware adapter renders the
-  *      ACTIVE instruction into the prompt, so the LM returns the gold answer ONLY once InferRules has appended the
-  *      induced rules (the instruction then carries [[RuleToken]]); otherwise it returns a wrong answer.
-  */
-class InferRulesSuite extends FunSuite:
+import scala.collection.mutable.ArrayBuffer
 
-  private val RuleToken                 = "RULE_TOKEN"
-  private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3", "q4" -> "a4")
+final class InferRulesSuite extends FunSuite:
 
-  /** Renders the active instruction + input fields into one message, tagged with the requested output field so the LM
-    * can tell rule-induction (`natural_language_rules`) from task (`answer`).
-    */
-  private object InstructionAwareAdapter extends Adapter:
-    override val name: String                                                                                    = "instruction-aware"
-    override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-      val instr  = invocation.layout.instructions.getOrElse("")
-      val out    = invocation.layout.outputFields.map(_.name).mkString(",")
-      val inputs = invocation.layout.inputFields
-        .map(f =>
-          s"${f.name}=[${DynamicValues.recordGet(invocation.inputs.values, f.name).map(DynamicValues.renderText).getOrElse("")}]"
-        )
-        .mkString(" ")
-      Right(FormattedPrompt(messages =
-        Vector(Message(role = MessageRole.User, text = Some(s"OUT=[$out] INSTRUCTION=[$instr] $inputs")))
-      ))
+  private final case class Question(question: String)
+  private final case class Answer(answer: String)
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
-        RuntimeContext
-    ): Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
-      Right(ParsedOutput(values = DynamicValues.record(outField := output.text)))
-
-  private final class ScriptedLm extends LanguageModel:
-    override val id: String                                                                    = "scripted-infer-rules"
-    override val mode: LmMode                                                                  = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
-      val out  =
-        if text.contains("natural_language_rules") then s"Always answer with the gold label. $RuleToken"
-        else
-          val q = extractBetween(text, "question=[", "]")
-          if text.contains(RuleToken) then gold.getOrElse(q, "unknown") else "WRONG"
-      Right(LmResponse(outputs = Vector(LmOutput(text = out))))
-
-  private def extractBetween(s: String, start: String, end: String): String =
-    val i = s.indexOf(start)
-    if i < 0 then ""
-    else
-      val from = i + start.length; val j = s.indexOf(end, from); if j < 0 then "" else s.substring(from, j)
-
-  private def settings: RuntimeContext =
-    RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
-
-  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
-
-  private val taskLayout: SignatureLayout = SignatureLayout.of(
-    name = "QA",
-    inputFields = Vector(FieldSpec("question")),
-    outputFields = Vector(FieldSpec("answer")),
-    instructions = Some("BASELINE: answer the question.")
+  private val RuleToken = "RULE_TOKEN"
+  private val answerId  = ParameterId("answer")
+  private val signature = Signature.derived[Question, Answer]("Answer", instructions = "base instruction")
+  private val student   = Program.predict(answerId, signature).fromRecords(signature.inputShape)
+  private val dataset   = Vector(
+    Example(DynamicValues.record("question" := "abc", "answer" := "cba"), Set("question")),
+    Example(DynamicValues.record("question" := "xyz", "answer" := "zyx"), Set("question"))
   )
 
-  private def ex(q: String): Example =
-    Example(DynamicValues.record("question" := q, "answer" := gold(q)), inputKeys = Set("question"))
-  private val metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
+  private val metric = new Metric:
+    val name: String = "exact"
 
-  private def instructionOf(report: dspy4s.optimize.contracts.OptimizationReport[DynamicPredict]): String =
-    summon[OptimizableStructure[DynamicPredict]].read(report.bestProgram).head.instructions.getOrElse("")
+    def score(
+        example                  : Example,
+        prediction               : RawPrediction,
+        @annotation.unused events: Vector[ProgramEvent]
+    ): ZIO[Any, DspyError, Double] =
+      ZIO.fromEither(for
+        expected <- DynamicValues.requireString(example.values, "answer", "expected")
+        actual   <- DynamicValues.requireString(prediction.values, "answer", "actual")
+      yield if actual == expected then 1.0 else 0.0)
 
-  test("InferRules induces rules, appends them to the instruction, and the rule-augmented program wins") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new InferRules[DynamicPredict](
-      InferRulesConfig(metric = metric, numCandidates = CandidateCount(2), numRules = RuleCount(5))
-    )
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result           =
-        optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2")), valset = Some(Vector(ex("q3"), ex("q4"))))
-      assert(result.isRight, s"compile failed: ${result.left.toOption}")
-      val report = result.toOption.get
+  private val backend = new PredictionBackend:
+    def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+      ZIO.fromEither(DynamicValues.requireString(request.inputs, "question", "infer rules test")).map { question =>
+        val answer = if request.layout.instructions.exists(_.contains(RuleToken)) then question.reverse else "wrong"
+        RawPrediction(DynamicValues.record("answer" := answer))
+      }
 
-      val instr = instructionOf(report)
-      assert(instr.contains(RuleToken), s"the winning instruction must carry the induced rules; got: $instr")
-      assert(instr.contains("Please adhere to the following rules"), instr)
-      assert(instr.startsWith("BASELINE: answer the question."), "rules are appended to the ORIGINAL instruction")
-      assertEquals(report.metadata.get("best_score"), Some(100.0)) // gold on every val example once rules apply
+  private def run(
+      inducer: ProgramWithEnv[InferRules.RuleInput, InferRules.Rules, Any]
+  ) =
+    Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(
+          InferRules(
+            student,
+            dataset,
+            inducer,
+            valset = Some(dataset),
+            config = InferRulesConfig(
+              metric = metric,
+              numCandidates = CandidateCount(1),
+              numRules = RuleCount(3),
+              bootstrap = BootstrapFewShotConfig(maxLabeledDemos = DemoCount(0))
+            )
+          ).provideEnvironment(ZEnvironment(backend))
+        )
+        .getOrThrowFiberFailure()
     }
+
+  test("program InferRules appends induced rules and selects the improved record program") {
+    val inputs  = ArrayBuffer.empty[InferRules.RuleInput]
+    val inducer = Program.lift[InferRules.RuleInput, InferRules.Rules] { input =>
+      inputs += input
+      InferRules.Rules(s"Always use the evidence. $RuleToken")
+    }
+    val report = run(inducer)
+
+    val instruction = report.bestProgram.program.parameters.get(answerId).flatMap(_.instructions).getOrElse("")
+    assert(instruction.startsWith("base instruction"))
+    assert(instruction.contains("Please adhere to the following rules"))
+    assert(instruction.contains(RuleToken))
+    assertEquals(report.metadata("best_score"), 100.0)
+    assertEquals(report.metadata("num_candidates"), 2)
+    assertEquals(report.metadata("num_induction_failures"), 0)
+    assertEquals(inputs.map(_.parameterId).toVector, Vector("answer"))
+    assertEquals(inputs.map(_.numRules).toVector, Vector(3))
   }
 
-  test("InferRules splits the trainset 50/50 when no valset is given") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new InferRules[DynamicPredict](
-      InferRulesConfig(metric = metric, numCandidates = CandidateCount(1), numRules = RuleCount(3))
-    )
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result           = optimizer.compile(student, trainset = Vector(ex("q1"), ex("q2"), ex("q3"), ex("q4")))
-      assert(result.isRight, s"compile failed: ${result.left.toOption}")
-      assert(instructionOf(result.toOption.get).contains(RuleToken))
+  test("program InferRules narrows examples after a context-window failure") {
+    val sizes   = ArrayBuffer.empty[Int]
+    val inducer = Program.liftEither[InferRules.RuleInput, InferRules.Rules] { input =>
+      sizes += input.examples.size
+      if input.examples.size > 1 then Left(ContextWindowExceededError())
+      else Right(InferRules.Rules(s"Use one example. $RuleToken"))
     }
+    val report = run(inducer)
+
+    assertEquals(sizes.toVector, Vector(2, 1))
+    assertEquals(report.metadata("best_score"), 100.0)
+    assertEquals(report.metadata("num_induction_failures"), 0)
   }

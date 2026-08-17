@@ -1,5 +1,8 @@
 # Refactor plan: composite primitives (steps 1–5)
 
+> Historical design record. The executable `Module` and ambient-runtime design on this page has been removed from the
+> program layer. See [Program syntax and interpreters](program-ast-interpreters.md).
+
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 and all of step 6 implemented on the branch (full `sbt test` green): 6.1 (`bestOf`),
 6.2 (`id`/`>>>`/`fanout`), 6.3 (`AgentLoop`/`TrajectoryAgent`, with `InterpretedTrajectoryAgent` for

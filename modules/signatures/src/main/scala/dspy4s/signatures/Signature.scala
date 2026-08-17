@@ -4,9 +4,9 @@ import dspy4s.core.contracts.{DspyError, SignatureLayout, TypeRef}
 import zio.blocks.schema.DynamicValue
 
 /** A signature with compile-time knowledge of its input (`I`) and output (`O`) shapes. Wraps a runtime
-  * `SignatureLayout` for compatibility with the existing `DynamicPredict` / adapter / runtime stack — adapters still
-  * see the runtime `fields` vector and consume it as today; this wrapper additionally carries `Shape[I]` / `Shape[O]`
-  * for input encoding and output decoding.
+  * `SignatureLayout` for compatibility with the low-level adapter stack — adapters still see the runtime `fields`
+  * vector and consume it as today; this wrapper additionally carries `Shape[I]` / `Shape[O]` for input encoding and
+  * output decoding.
   *
   * Phase 2 supports `I <: Product` / `O <: Product` (case classes). Phase 3 adds the builder API.
   */
@@ -155,8 +155,8 @@ object Signature:
     * runtime `SignatureLayout` reflects the trait's `InputField` / `OutputField` members.
     *
     * The precise input and output types are named tuples. That lets users construct inputs with named-tuple syntax and
-    * read outputs with direct dot access while the runtime still flows through the same `Shape` / `DynamicPredict` /
-    * adapter pipeline as case-class signatures.
+    * read outputs with direct dot access while execution still flows through the same `Shape` and adapter pipeline as
+    * case-class signatures.
     */
   transparent inline def of[T <: Spec] =
     ${ internal.SpecMacro.ofImpl[T]('{ "" }, '{ "" }) }

@@ -2,7 +2,7 @@ package dspy4s.streaming
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, :=}
 import dspy4s.core.data.RawPrediction
-import dspy4s.programs.plan.*
+import dspy4s.programs.*
 import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.{Runtime, Unsafe, ZEnvironment, ZIO}
@@ -73,12 +73,12 @@ final class ProgramEventStreamSuite extends FunSuite:
       Vector("started", "chunk", "chunk", "completed")
     )
     assertEquals(
-      events.collect { case ProgramEvent.OutputChunk(callId, parent, component, chunk) =>
-        (callId, parent, component, chunk)
+      events.collect { case ProgramEvent.OutputChunk(callId, parent, component, chunk, parameterId) =>
+        (callId, parent, component, chunk, parameterId)
       },
       Vector(
-        (0, None, "predict", PredictionChunk("answer", "c")),
-        (0, None, "predict", PredictionChunk("answer", "ba", isLast = true))
+        (0, None, "predict", PredictionChunk("answer", "c"), Some(ParameterId("answer"))),
+        (0, None, "predict", PredictionChunk("answer", "ba", isLast = true), Some(ParameterId("answer")))
       )
     )
   }

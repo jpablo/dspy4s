@@ -1,208 +1,111 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableStructure
-
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, LmUsage, RuntimeContext, SignatureLayout}
-import dspy4s.core.data.Example
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeError, :=}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.evaluate.Metric
+import dspy4s.programs.*
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.{Runtime, Unsafe, ZEnvironment, ZIO}
 
-/** Offline COPRO suite.
-  *
-  * The scripted LM serves two distinct sub-tasks through the single ambient model:
-  *
-  *   1. Instruction generation. The COPRO instruction-generation `DynamicPredict` asks for a `proposed_instruction`.
-  *      The scripted LM hands back a different candidate per call by keying on the `rolloutId` COPRO threads through
-  *      (so candidates are distinct, mirroring upstream's `n=breadth`).
-  *   2. The actual task. The task `DynamicPredict` answers a `question`. The scripted LM returns the GOLD answer only
-  *      when the WINNING instruction is the one currently in effect (the test adapter renders the active
-  *      `layout.instructions` into the prompt, so the LM can see which candidate is applied); otherwise it returns a
-  *      wrong answer. This forces exactly one instruction to score perfectly.
-  */
-class COPROSuite extends FunSuite:
+import scala.collection.mutable.ArrayBuffer
 
-  // ── Fixtures ──────────────────────────────────────────────────────────────
+final class COPROSuite extends FunSuite:
 
-  /** The instruction COPRO must discover as the winner. */
-  private val winningInstruction = "INSTR_C: answer precisely"
+  private final case class Question(question: String)
+  private final case class Answer(answer: String)
 
-  /** Candidate instruction pool the scripted LM proposes; selected by `rolloutId % size` so ANY rolloutId COPRO threads
-    * through maps into this pool (and the winner is always reachable).
-    */
-  private val proposalPool: Vector[String] = Vector(
-    "INSTR_A: be brief",
-    "INSTR_B: be verbose",
-    winningInstruction,
-    "INSTR_D: be formal",
-    "INSTR_E: be casual"
+  private val answerId  = ParameterId("answer")
+  private val signature = Signature.derived[Question, Answer]("Answer", instructions = "bad instruction")
+  private val student   = Program.predict(answerId, signature).fromRecords(signature.inputShape)
+  private val dataset   = Vector(
+    Example(DynamicValues.record("question" := "abc", "answer" := "cba"), Set("question")),
+    Example(DynamicValues.record("question" := "xyz", "answer" := "zyx"), Set("question"))
   )
 
-  /** Marker the instruction-generation layout carries so the scripted LM can tell the two sub-tasks apart. */
-  private val instrGenMarker = "OPTIMIZE_THE_INSTRUCTION"
+  private val metric = new Metric:
+    val name: String = "exact"
 
-  private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
+    def score(
+        example                  : Example,
+        prediction               : RawPrediction,
+        @annotation.unused events: Vector[ProgramEvent]
+    ): ZIO[Any, DspyError, Double] =
+      ZIO.fromEither(for
+        expected <- DynamicValues.requireString(example.values, "answer", "expected")
+        actual   <- DynamicValues.requireString(prediction.values, "answer", "actual")
+      yield if actual == expected then 1.0 else 0.0)
 
-  /** Test adapter that renders the ACTIVE instruction into the prompt so the scripted LM can branch on it. */
-  private object InstructionAwareAdapter extends Adapter:
-    override val name: String = "instruction-aware"
-    override def format(invocation: AdapterInvocation)(using
-        RuntimeContext
-    )
-        : Either[DspyError, FormattedPrompt] =
-      val instr = invocation.layout.instructions.getOrElse("")
-      val q     = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
-      val bi    = DynamicValues.recordGet(invocation.inputs.values, "basic_instruction").map(DynamicValues.renderText)
-        .getOrElse("")
-      // Single user message carrying instruction + inputs; the scripted LM keys on its contents.
-      val body = s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]"
-      Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
-
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
-        RuntimeContext
-    )
-        : Either[DspyError, ParsedOutput] =
-      // Route the LM text into whichever output field the layout declares (task: answer, instr-gen: proposed_instruction).
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
-      Right(ParsedOutput(values = rec(outField := output.text)))
-
-  private final class ScriptedLm extends LanguageModel:
-    override val id: String                                                                    = "scripted-copro-lm"
-    override val mode: LmMode                                                                  = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
-      val out  =
-        if text.contains(instrGenMarker) then
-          // Instruction-generation call: pick a candidate by rolloutId (distinct per call).
-          val r = request.rolloutId.getOrElse(0)
-          proposalPool(math.floorMod(r, proposalPool.size))
-        else
-          // Task call: answer correctly ONLY when the winning instruction is in effect.
-          val q = extractBetween(text, "QUESTION=[", "]")
-          if text.contains(winningInstruction) then gold.getOrElse(q, "unknown")
-          else "WRONG"
-      Right(LmResponse(
-        outputs = Vector(LmOutput(text = out)),
-        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
-      ))
-
-  private def extractBetween(s: String, start: String, end: String): String =
-    val i = s.indexOf(start)
-    if i < 0 then ""
-    else
-      val from = i + start.length
-      val j    = s.indexOf(end, from)
-      if j < 0 then "" else s.substring(from, j)
-
-  private def settings: RuntimeContext =
-    RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
-
-  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
-
-  private val taskLayout: SignatureLayout = SignatureLayout.of(
-    name = "QA",
-    inputFields = Vector(FieldSpec(name = "question")),
-    outputFields = Vector(FieldSpec(name = "answer")),
-    instructions = Some("INSTR_INITIAL: default")
-  )
-
-  private val trainset = Vector(
-    Example(rec("question" := "q1", "answer" := "a1"), inputKeys = Set("question")),
-    Example(rec("question" := "q2", "answer" := "a2"), inputKeys = Set("question")),
-    Example(rec("question" := "q3", "answer" := "a3"), inputKeys = Set("question"))
-  )
-
-  private def metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
-
-  private def config(
-      breadth: CoproBreadth = CoproBreadth(5),
-      depth  : RoundCount   = RoundCount(1),
-      seed   : Long         = 0L
-  ): COPROConfig =
-    COPROConfig(metric = metric, breadth = breadth, depth = depth, seed = seed, instructionMarker = instrGenMarker)
-
-  // ── 1. Happy path: single-Predict student, COPRO selects the winner ───────
-
-  test("COPRO selects the winning instruction for a single-predictor student") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new COPRO[DynamicPredict](config())
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result           = optimizer.compile(student, trainset)
-      assert(result.isRight, s"compile failed: ${result.left.toOption}")
-      val report  = result.toOption.get
-      val best    = report.bestProgram
-      val applied = summon[OptimizableStructure[DynamicPredict]].read(best).head.instructions
-      assertEquals(applied, Some(winningInstruction))
-      // The winner scored 100% (gold on every example).
-      assertEquals(report.metadata.get("best_score"), Some(100.0))
-    }
-  }
-
-  // ── 2. Determinism: same seed -> same chosen instruction ──────────────────
-
-  test("COPRO is deterministic for a fixed seed") {
-    val student               = DynamicPredict(layout = taskLayout)
-    def run(): Option[String] =
-      val optimizer = new COPRO[DynamicPredict](config(seed = 42L))
-      RuntimeEnvironment.withSettings(settings) {
-        given RuntimeContext = RuntimeEnvironment.current
-        optimizer.compile(student, trainset).toOption
-          .flatMap(r => summon[OptimizableStructure[DynamicPredict]].read(r.bestProgram).headOption)
-          .flatMap(_.instructions)
+  private val backend = new PredictionBackend:
+    def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+      ZIO.fromEither(DynamicValues.requireString(request.inputs, "question", "copro test")).map { question =>
+        val answer =
+          if request.layout.instructions.exists(_.contains("good instruction")) then question.reverse
+          else "wrong"
+        RawPrediction(DynamicValues.record("answer" := answer))
       }
-    val a = run()
-    val b = run()
-    assertEquals(a, b)
-    assertEquals(a, Some(winningInstruction))
-  }
 
-  // ── 3. Depth>1 refinement still converges and keeps best ──────────────────
-
-  test("COPRO with depth>1 refines via past attempts and keeps the best") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new COPRO[DynamicPredict](config(breadth = CoproBreadth(5), depth = RoundCount(3)))
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result           = optimizer.compile(student, trainset)
-      assert(result.isRight, s"compile failed: ${result.left.toOption}")
-      val best    = result.toOption.get.bestProgram
-      val applied = summon[OptimizableStructure[DynamicPredict]].read(best).head.instructions
-      assertEquals(applied, Some(winningInstruction))
+  private def run(
+      proposer: ProgramWithEnv[COPRO.ProposalInput, COPRO.Proposal, Any]
+  ) =
+    Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(
+          COPRO(
+            student,
+            dataset,
+            proposer,
+            config = COPROConfig(metric = metric, breadth = CoproBreadth(2), depth = RoundCount(1), seed = 9L)
+          ).provideEnvironment(ZEnvironment(backend))
+        )
+        .getOrThrowFiberFailure()
     }
-  }
 
-  // ── 4. Report structure ───────────────────────────────────────────────────
-
-  test("COPRO report exposes scored candidates sorted best-first") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val optimizer = new COPRO[DynamicPredict](config())
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val report           = optimizer.compile(student, trainset).toOption.get
-      assert(report.candidates.nonEmpty, "report should track candidates")
-      // Candidates are sorted descending by score.
-      val scores = report.candidates.map(_.score)
-      assertEquals(scores, scores.sorted(using Ordering[Double].reverse))
-      // The metric is genuinely discriminating: the winner scores 100, losers score below it.
-      assertEquals(scores.head, 100.0)
-      assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
-      // The top candidate carries the winning instruction.
-      val topInstr = summon[OptimizableStructure[DynamicPredict]].read(report.candidates.head.program).head.instructions
-      assertEquals(topInstr, Some(winningInstruction))
-      // Metadata is populated.
-      assert(report.metadata.contains("best_score"))
-      assert(report.metadata.contains("num_candidates"))
+  test("program COPRO proposes, scores, and selects instructions by stable parameter ID") {
+    val inputs   = ArrayBuffer.empty[COPRO.ProposalInput]
+    val proposer = Program.lift[COPRO.ProposalInput, COPRO.Proposal] { input =>
+      inputs += input
+      COPRO.Proposal("good instruction")
     }
+    val report = run(proposer)
+
+    assertEquals(
+      report.bestProgram.program.parameters.get(answerId).flatMap(_.instructions),
+      Some("good instruction")
+    )
+    assertEquals(report.metadata("best_score"), 100.0)
+    assertEquals(report.metadata("num_candidates"), 2)
+    assertEquals(report.metadata("num_proposal_failures"), 0)
+    assertEquals(report.candidates.map(_.score), Vector(100.0, 0.0))
+    assert(report.candidates.forall(_.evaluation.nonEmpty))
+    assertEquals(inputs.map(_.parameterId).toVector, Vector("answer"))
+    assertEquals(inputs.map(_.round).toVector, Vector(0))
   }
 
-  // ── 5. breadth <= 1 is rejected ───────────────────────────────────────────
+  test("program COPRO records a proposal failure and retains the scored baseline") {
+    val proposer = Program.liftEither[COPRO.ProposalInput, COPRO.Proposal](_ =>
+      Left(RuntimeError("proposal", "unavailable"))
+    )
+    val report = run(proposer)
 
-  test("CoproBreadth requires more than one candidate") {
-    assert(compileErrors("dspy4s.optimize.CoproBreadth(1)").nonEmpty)
-    assert(CoproBreadth.either(1).isLeft)
+    assertEquals(
+      report.bestProgram.program.parameters.get(answerId).flatMap(_.instructions),
+      Some("bad instruction")
+    )
+    assertEquals(report.metadata("num_proposal_failures"), 1)
+    assertEquals(report.metadata("num_candidates"), 1)
+    assertEquals(report.candidates.head.metadata("parameter_id"), "answer")
+  }
+
+  test("program COPRO retains the current instruction when a proposal has an equal score") {
+    val proposer = Program.lift[COPRO.ProposalInput, COPRO.Proposal](_ =>
+      COPRO.Proposal("equally bad")
+    )
+    val report = run(proposer)
+
+    assertEquals(
+      report.bestProgram.program.parameters.get(answerId).flatMap(_.instructions),
+      Some("bad instruction")
+    )
+    assertEquals(report.candidates.map(_.score), Vector(0.0, 0.0))
   }

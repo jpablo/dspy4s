@@ -1,13 +1,5 @@
 package dspy4s.gepa
 
-import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.ParseError
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.lm.contracts.LanguageModel
-import dspy4s.lm.contracts.LmRequest
-import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.MessageRole
-
 /** GEPA's reflective mutation operator for a single component: prompt the reflection LM with the component's CURRENT
   * instruction plus its reflective dataset (the failures/feedback), and extract the rewritten instruction. A faithful
   * port of gepa's `InstructionProposalSignature` default proposer (the prompt template + ``` extraction). See PORT_GAPS
@@ -15,23 +7,11 @@ import dspy4s.lm.contracts.MessageRole
   */
 object InstructionProposer:
 
-  /** Propose a new instruction. `Left` only if the reflection LM call itself fails; the extracted text (even if the
-    * model omitted the ``` fences) is returned as-is.
-    */
-  def propose(
-      currentInstruction: String,
-      records           : Vector[ReflectiveRecord],
-      reflectionLm      : LanguageModel
-  )(using RuntimeContext): Either[DspyError, String] =
-    val request = LmRequest(
-      model = reflectionLm.id,
-      messages = Vector(Message(role = MessageRole.User, text = Some(buildPrompt(currentInstruction, records))))
-    )
-    reflectionLm.call(request).flatMap { response =>
-      response.outputs.headOption.map(o => extractInstruction(o.text)) match
-        case Some(instruction) => Right(instruction)
-        case None              => Left(ParseError("gepa", "Reflection LM returned no output"))
-    }
+  /** Typed input for the reflection program supplied to [[Gepa]]. */
+  final case class Input(currentInstruction: String, records: Vector[ReflectiveRecord])
+
+  /** Typed output from the reflection program. */
+  final case class Output(instruction: String)
 
   /** The reflection prompt (paraphrase of gepa's default `InstructionProposalSignature` template). */
   private[gepa] def buildPrompt(currentInstruction: String, records: Vector[ReflectiveRecord]): String =

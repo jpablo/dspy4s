@@ -5,9 +5,9 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.NotFoundError
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.TraceEntry
-import dspy4s.evaluate.contracts.Metric
+import dspy4s.evaluate.Metric
+import dspy4s.programs.{PredictionBackend, ProgramEvent}
+import zio.ZIO
 import zio.blocks.schema.DynamicValue
 
 object MetricHelpers:
@@ -53,37 +53,43 @@ object MetricHelpers:
 class ExactMatch(answerField: String = "answer") extends Metric:
   val name: String = "exact_match"
 
-  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
-      RuntimeContext
-  ): Either[DspyError, Double] =
-    MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
+  override def score(
+      example                  : Example,
+      prediction               : RawPrediction,
+      @annotation.unused events: Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double] =
+    ZIO.fromEither(MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
       val refsNorm = refTexts.map(NormalizeText(_))
       if refsNorm.exists(_ == predNorm) then 1.0 else 0.0
-    }
+    })
 
 class ContainsMatch(answerField: String = "answer") extends Metric:
   val name: String = "contains"
 
-  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
-      RuntimeContext
-  ): Either[DspyError, Double] =
-    MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
+  override def score(
+      example                  : Example,
+      prediction               : RawPrediction,
+      @annotation.unused events: Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double] =
+    ZIO.fromEither(MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
       val refsNorm = refTexts.map(NormalizeText(_))
       if refsNorm.exists(ref => predNorm.contains(ref)) then 1.0 else 0.0
-    }
+    })
 
 class F1Score(answerField: String = "answer") extends Metric:
   val name: String = "f1"
 
-  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
-      RuntimeContext
-  ): Either[DspyError, Double] =
-    MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
+  override def score(
+      example                  : Example,
+      prediction               : RawPrediction,
+      @annotation.unused events: Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double] =
+    ZIO.fromEither(MetricHelpers.extractString(example, prediction, answerField).map { case (predText, refTexts) =>
       val predNorm = NormalizeText(predText)
       refTexts.map(r => f1Score(predNorm, NormalizeText(r))).max
-    }
+    })
 
   private def f1Score(pred: String, truth: String): Double =
     val predTokens  = pred.split("\\s+").filter(_.nonEmpty)
@@ -103,18 +109,22 @@ class AnswerMatch(frac: Double = 1.0, answerField: String = "answer") extends Me
   private val emMetric = new ExactMatch(answerField)
   private val f1Metric = new F1Score(answerField)
 
-  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
-      RuntimeContext
-  ): Either[DspyError, Double] =
-    if frac >= 1.0 then emMetric.score(example, prediction, trace)
-    else f1Metric.score(example, prediction, trace).map(f1 => if f1 >= frac then 1.0 else 0.0)
+  override def score(
+      example   : Example,
+      prediction: RawPrediction,
+      events    : Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double] =
+    if frac >= 1.0 then emMetric.score(example, prediction, events)
+    else f1Metric.score(example, prediction, events).map(f1 => if f1 >= frac then 1.0 else 0.0)
 
 class PassageMatch(contextField: String = "context", answerField: String = "answer") extends Metric:
   val name: String = "answer_passage_match"
 
-  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
-      RuntimeContext
-  ): Either[DspyError, Double] =
+  override def score(
+      example                  : Example,
+      prediction               : RawPrediction,
+      @annotation.unused events: Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double] =
     val contexts = prediction.get(contextField).map(DynamicValues.toAny) match
       case Some(texts: Iterable[?]) => Right(texts.collect { case s: String => s }.toVector)
       case Some(text: String)       => Right(Vector(text))
@@ -127,22 +137,22 @@ class PassageMatch(contextField: String = "context", answerField: String = "answ
       case Some(other)              => Right(Vector(other.toString))
       case None                     => Left(NotFoundError(answerField, s"Example is missing field '$answerField'"))
 
-    for
+    ZIO.fromEither(for
       ctx <- contexts
       ans <- answers
     yield
       val passages    = ctx.map(NormalizeText.dpr)
       val answersNorm = ans.map(NormalizeText.dpr)
-      if passages.exists(p => answersNorm.exists(a => p.contains(a))) then 1.0 else 0.0
+      if passages.exists(p => answersNorm.exists(a => p.contains(a))) then 1.0 else 0.0)
 
-class FunctionMetric(val name: String, fn: (Example, RawPrediction, Vector[TraceEntry]) => Either[DspyError, Double])
+class FunctionMetric(val name: String, fn: (Example, RawPrediction, Vector[ProgramEvent]) => Either[DspyError, Double])
     extends Metric:
-  // The wrapped `fn` stays PURE (no RuntimeContext) — function metrics are plain `(example, prediction, trace)`
-  // callables; the ambient context is accepted to satisfy the trait and ignored here.
-  override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
-      RuntimeContext
-  ): Either[DspyError, Double] =
-    fn(example, prediction, trace)
+  override def score(
+      example   : Example,
+      prediction: RawPrediction,
+      events    : Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double] =
+    ZIO.fromEither(fn(example, prediction, events))
 
 object FunctionMetric:
   def apply(name: String)(fn: (Example, RawPrediction) => Either[DspyError, Double]): FunctionMetric =

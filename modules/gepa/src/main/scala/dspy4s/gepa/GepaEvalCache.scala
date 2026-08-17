@@ -1,7 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.RuntimeContext
+import zio.ZIO
 
 import scala.collection.mutable
 
@@ -13,7 +13,7 @@ import scala.collection.mutable
   * traces aren't memoized. `scores` returns the batch's scores plus the number of ACTUAL (uncached) evaluations — the
   * engine charges only those against the metric-call budget, matching gepa's `total_num_evals += actual`.
   */
-final class GepaEvalCache[P](adapter: GepaAdapter[P]):
+final class GepaEvalCache[I, O, R](adapter: GepaAdapter[I, O, R]):
   private val cache = mutable.HashMap.empty[(Candidate, Example), Double]
 
   /** Number of structurally distinct candidate/example pairs not yet cached. */
@@ -46,13 +46,17 @@ final class GepaEvalCache[P](adapter: GepaAdapter[P]):
   /** The batch's per-example scores (aligned with `batch`) plus the count of examples that had to be actually evaluated
     * (cache misses). Cache hits are free.
     */
-  def scores(candidate: Candidate, batch: Vector[Example])(using RuntimeContext): (Vector[Double], Int) =
+  def scores(candidate: Candidate, batch: Vector[Example]): ZIO[R, Nothing, (Vector[Double], Int)] =
     val missing = batch.distinct.filterNot(example => cache.contains((candidate, example)))
-    if missing.nonEmpty then
-      val evaluated = adapter.evaluate(missing, candidate, captureTraces = false).scores
-      require(
-        evaluated.size == missing.size,
-        s"GEPA adapter returned ${evaluated.size} scores for ${missing.size} examples"
-      )
-      missing.zip(evaluated).foreach { case (example, score) => cache((candidate, example)) = score }
-    (batch.map(example => cache((candidate, example))), missing.size)
+    val fill    =
+      if missing.isEmpty then ZIO.unit
+      else
+        adapter.evaluate(missing, candidate, captureEvents = false).map { batchEvaluation =>
+          val evaluated = batchEvaluation.scores
+          require(
+            evaluated.size == missing.size,
+            s"GEPA adapter returned ${evaluated.size} scores for ${missing.size} examples"
+          )
+          missing.zip(evaluated).foreach { case (example, score) => cache((candidate, example)) = score }
+        }
+    fill.as(batch.map(example => cache((candidate, example))) -> missing.size)

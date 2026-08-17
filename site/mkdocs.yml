@@ -68,11 +68,7 @@ markdown_extensions:
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
-  # The heart of the compiler-verified-snippet pipeline: pull labeled regions
-  # straight out of the strict-compiled examples module, never copy-paste.
-  #   --8<-- "learn/programming/Signatures.scala:toxicity"
-  # check_paths makes the build FAIL if a file or region is renamed/removed,
-  # so docs can't silently drift from the code.
+  # Snippets can include compiler-checked examples when a guide needs a large sample.
   - pymdownx.snippets:
       base_path:
         - ..
@@ -80,9 +76,7 @@ markdown_extensions:
       check_paths: true
       dedent_subsections: true
 
-# The nav follows the library's dependency layering, presented in learning order.
-# It grows as pages land; sections appear once their pages exist (mkdocs --strict
-# rejects nav entries pointing at missing files).
+# The nav follows the functional API in learning order.
 nav:
   - Home: index.md
   - Get Started:
@@ -91,39 +85,10 @@ nav:
       - How it fits together: get-started/overview.md
   - Programs:
       - Signatures: programs/signatures.md
-      - Modules: programs/modules.md
-      - Tools & ReAct: programs/tools-and-react.md
       - Composing programs: programs/composing.md
-  - Language models:
-      - Configuring an LM: language-models/configuring.md
-      - Adapters: language-models/adapters.md
-      - Caching & usage: language-models/caching-and-usage.md
-  - Evaluation:
-      - Examples & data: evaluation/examples-and-data.md
-      - Metrics: evaluation/metrics.md
-      - Running evaluations: evaluation/running-evaluations.md
-  - Optimization:
-      - optimization/index.md
-      - Few-shot demonstrations: optimization/few-shot.md
-      - Instruction optimization: optimization/instructions.md
-  - Runtime:
-      - Runtime context: runtime/runtime-context.md
-      - Observability: runtime/observability.md
-      - Saving & loading: runtime/saving-and-loading.md
-      - Streaming: runtime/streaming.md
-  - Tutorials:
-      - Email extraction: tutorials/email-extraction.md
-      - Code generation: tutorials/code-generation.md
-      - llms.txt generation: tutorials/llms-txt-generation.md
-      - Finance ReAct agent: tutorials/finance-react-agent.md
-      - AI text game: tutorials/ai-text-game.md
-      - ReAct vs RLM: tutorials/react-vs-rlm.md
-      - Output refinement: tutorials/output-refinement.md
-      - Optimizer tracking: tutorials/optimizer-tracking.md
-      - Saving workflow: tutorials/saving-workflow.md
-      - Async execution: tutorials/async.md
-      - Talk to your data: tutorials/talk-to-your-data.md
+      - Strategies and tools: programs/strategies.md
+  - Evaluation: evaluation/index.md
+  - Optimization: optimization/index.md
+  - Effects and events: runtime/effects-and-events.md
   - Coming from DSPy: coming-from-dspy.md
-  - Reference:
-      - Cheatsheet: reference/cheatsheet.md
-      - API: reference/api.md
+  - API map: reference/api.md

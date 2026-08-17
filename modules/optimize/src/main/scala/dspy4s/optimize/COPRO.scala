@@ -1,246 +1,193 @@
 package dspy4s.optimize
 
-import dspy4s.programs.LegacyProgramRunner
-
-import dspy4s.programs.optimization.OptimizableStructure
-
-import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.{DspyError, DynamicValues, :=}
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
-import dspy4s.evaluate.contracts.Metric
-import dspy4s.optimize.contracts.CandidateProgram
-import dspy4s.optimize.contracts.OptimizationReport
-import dspy4s.optimize.contracts.Teleprompter
-import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.contracts.ProgramCall
+import dspy4s.evaluate.{Evaluate, EvaluateOptions, Metric}
+import dspy4s.optimize.contracts.{CandidateProgram, OptimizationReport}
+import dspy4s.programs.*
+import zio.ZIO
 
-import scala.collection.mutable
-
-/** Knobs for [[COPRO]], mirroring upstream's `COPRO(metric, breadth, depth, init_temperature)`.
-  *
-  * @param metric
-  *   task metric used to score whole-program candidates
-  * @param breadth
-  *   number of candidate instructions generated per predictor per round (must be > 1)
-  * @param depth
-  *   number of refinement rounds (round 0 seeds from the current instruction; rounds `1..depth-1` refine using past
-  *   `(instruction, score)` attempts)
-  * @param initTemperature
-  *   sampling temperature for instruction generation (forwarded to the LM option bag)
-  * @param seed
-  *   RNG seed; deterministic for a fixed seed
-  * @param instructionMarker
-  *   a stable sentinel woven into the instruction-generation signature's instructions so a generation prompt is
-  *   distinguishable from a task prompt (also lets offline scripted LMs branch). Defaults to the human-readable
-  *   upstream-style preamble.
-  */
 final case class COPROConfig(
-    metric           : Metric,
-    breadth          : CoproBreadth = CoproBreadth(10),
-    depth            : RoundCount   = RoundCount(3),
-    initTemperature  : Double       = 1.4,
-    seed             : Long         = 0L,
-    instructionMarker: String       =
-      "You are an instruction optimizer for large language models. Propose an improved instruction."
+    metric         : Metric,
+    breadth        : CoproBreadth    = CoproBreadth(10),
+    depth          : RoundCount      = RoundCount(3),
+    initTemperature: Double          = 1.4,
+    evaluation     : EvaluateOptions = EvaluateOptions(),
+    seed           : Long            = 0L
 )
 
-/** COPRO — Coordinate-ascent Prompt Optimizer. A v1 port of DSPy's `dspy.teleprompt.COPRO`
-  * (`dspy/teleprompt/copro_optimizer.py`).
-  *
-  * '''Algorithm.''' For each learnable predictor exposed by [[OptimizableStructure.read]]:
-  *   1. Seed `breadth - 1` candidate instructions with an instruction-generation [[DynamicPredict]] (the
-  *      `BasicGenerateInstruction` analogue: `basic_instruction -> proposed_instruction`), seeded with the predictor's
-  *      current instruction and its signature's field names. Distinct candidates are sampled by varying the call's
-  *      `rolloutId` (and temperature in `config`), mirroring upstream's `n = breadth`. The predictor's own current
-  *      instruction is added as the `breadth`-th candidate (matches upstream). 2. Evaluate the WHOLE program with each
-  *      candidate instruction applied to THIS predictor (via [[OptimizableStructure.replace]]) on the valset (falling
-  *      back to the trainset) using [[dspy4s.evaluate.Evaluate]] + the metric. 3. Keep the best-scoring instruction for
-  *      this predictor, then run `depth - 1` further rounds that refine using the accumulated `(instruction, score)`
-  *      attempts (the `GenerateInstructionGivenAttempts` analogue). 4. Lock in the predictor's best instruction before
-  *      moving to the next predictor (greedy coordinate ascent).
-  *
-  * '''Deltas from Python.'''
-  *   - '''Multi-predictor strategy is greedy/sequential, not joint.''' Python re-evaluates every predictor's candidates
-  *     against the current best of the others within each depth round (an interleaved joint search). This v1 fully
-  *     optimizes one predictor's instruction (all depth rounds) with the others fixed, then moves on. Single-predictor
-  *     programs — the primary tested path — are unaffected; multi-predictor results may be a local optimum of the joint
-  *     search.
-  *   - '''Prefix optimization is dropped.''' Python's signatures also emit `proposed_prefix_for_output_field` and
-  *     mutate the last output field's prefix. dspy4s applies only the instruction; the output-field prefix is left
-  *     untouched. (`SignatureLayout` supports per-field prefixes, but instruction-only keeps v1 tractable and is the
-  *     dominant lever.)
-  *   - '''`track_stats` is omitted.''' No per-depth min/max/avg/std bookkeeping; the [[OptimizationReport]] carries the
-  *     scored candidate list and summary metadata instead.
-  *   - '''Candidate sampling uses one `rolloutId`-varied call per candidate''' rather than a single `n=breadth` batch
-  *     completion (dspy4s `Predict` returns one completion per call); the effect (distinct proposals) is the same.
-  *   - '''De-duplication is by instruction string''', not Python's `(instruction, prefix)` + last-field equality.
-  */
-final class COPRO[P: {OptimizableStructure, LegacyProgramRunner}](config: COPROConfig) extends Teleprompter[P]:
+/** Effectful coordinate-ascent prompt optimization for `RecordProgram`. */
+object COPRO:
 
-  override val name: String = "copro"
+  final case class InstructionAttempt(instruction: Option[String], score: Double)
 
-  private val ps: OptimizableStructure[P]    = summon[OptimizableStructure[P]]
-  private val runner: LegacyProgramRunner[P] = summon[LegacyProgramRunner[P]]
+  final case class ProposalInput(
+      parameterId       : String,
+      component         : String,
+      fieldNames        : Vector[String],
+      currentInstruction: Option[String],
+      attempts          : Vector[InstructionAttempt],
+      round             : Int,
+      candidate         : Int
+  )
 
-  override def compile(
-      student : P,
+  final case class Proposal(instruction: String)
+
+  private final case class SearchState[I, O](
+      program         : RecordProgram[I, O],
+      candidates      : Vector[CandidateProgram[RecordProgram[I, O]]],
+      proposalFailures: Int
+  )
+
+  private final case class LeafState[I, O](
+      attempts        : Vector[InstructionAttempt],
+      candidates      : Vector[CandidateProgram[RecordProgram[I, O]]],
+      proposalFailures: Int
+  )
+
+  def apply[I, O, RP](
+      student : RecordProgram[I, O],
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val evalset: Vector[Example] = valset.getOrElse(trainset)
-    val leafCount                = ps.read(student).size
+      proposer: ProgramWithEnv[ProposalInput, Proposal, RP],
+      valset  : Option[Vector[Example]] = None,
+      config  : COPROConfig
+  ): ZIO[PredictionBackend & RP, DspyError, OptimizationReport[RecordProgram[I, O]]] =
+    val bindings = student.program.parameters.all
+    val evalset  = valset.getOrElse(trainset)
 
-    if leafCount == 0 then
-      Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    if bindings.isEmpty then ZIO.succeed(emptyReport(student))
     else
-      // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
-      var current       = student
-      val allCandidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+      ZIO
+        .foldLeft(bindings.zipWithIndex)(SearchState(student, Vector.empty, 0)) {
+          case (state, (binding, leafIndex)) =>
+            optimizeLeaf(state.program, binding, leafIndex, evalset, proposer, config).flatMap { optimized =>
+              val bestInstruction = optimized.attempts
+                .foldLeft(Option.empty[InstructionAttempt]) {
+                  case (None, attempt)                                     => Some(attempt)
+                  case (Some(best), attempt) if attempt.score > best.score => Some(attempt)
+                  case (best, _)                                           => best
+                }
+                .map(_.instruction)
+                .getOrElse(binding.value.instructions)
+              ZIO.fromEither(setInstruction(state.program, binding.id, bestInstruction)).map { updated =>
+                SearchState(
+                  updated,
+                  state.candidates ++ optimized.candidates,
+                  state.proposalFailures + optimized.proposalFailures
+                )
+              }
+            }
+        }
+        .flatMap { state =>
+          Evaluate(state.program, evalset, config.metric, config.evaluation).map { finalEvaluation =>
+            OptimizationReport(
+              bestProgram = state.program,
+              candidates = state.candidates.sortBy(candidate => -candidate.score),
+              metadata = Map(
+                "optimizer"             -> "copro",
+                "num_candidates"        -> state.candidates.size,
+                "num_proposal_failures" -> state.proposalFailures,
+                "best_score"            -> finalEvaluation.score,
+                "optimizable_leaves"    -> bindings.size
+              )
+            )
+          }
+        }
 
-      (0 until leafCount).foreach { idx =>
-        val (updated, candidates) = optimizeLeaf(current, idx, evalset)
-        current = updated
-        allCandidates ++= candidates
+  private def optimizeLeaf[I, O, RP](
+      program  : RecordProgram[I, O],
+      binding  : ParameterBinding,
+      leafIndex: Int,
+      evalset  : Vector[Example],
+      proposer : ProgramWithEnv[ProposalInput, Proposal, RP],
+      config   : COPROConfig
+  ): ZIO[PredictionBackend & RP, DspyError, LeafState[I, O]] =
+    ZIO.foldLeft(0 until config.depth)(LeafState[I, O](Vector.empty, Vector.empty, 0)) { (state, round) =>
+      val proposalCount = if round == 0 then config.breadth - 1 else config.breadth
+      propose(
+        proposer,
+        binding,
+        leafIndex,
+        state.attempts.sortBy(_.score),
+        round,
+        proposalCount,
+        config
+      ).flatMap { case (proposals, failures) =>
+        val baseline     = Option.when(round == 0)(binding.value.instructions).toVector
+        val seen         = state.attempts.map(_.instruction).toSet
+        val instructions = (baseline ++ proposals.map(value => Some(value))).distinct.filterNot(seen)
+
+        ZIO.foldLeft(instructions)(state.copy(proposalFailures = state.proposalFailures + failures)) {
+          (current, instruction) =>
+            ZIO.fromEither(setInstruction(program, binding.id, instruction)).flatMap { candidate =>
+              Evaluate(candidate, evalset, config.metric, config.evaluation).map { evaluation =>
+                current.copy(
+                  attempts = current.attempts :+ InstructionAttempt(instruction, evaluation.score),
+                  candidates = current.candidates :+ CandidateProgram(
+                    program = candidate,
+                    score = evaluation.score,
+                    evaluation = Some(evaluation),
+                    metadata = Map(
+                      "parameter_id" -> binding.id.value,
+                      "instruction"  -> instruction,
+                      "round"        -> round
+                    )
+                  )
+                )
+              }
+            }
+        }
       }
-
-      // Score the final program (all leaves at their best) so the report's best reflects the applied state.
-      // A failed final eval reports as 0.0 in metadata (it's a summary number, not a selection input).
-      val finalScore = scoreProgram(current, evalset).getOrElse(0.0)
-      val sorted     = allCandidates.toVector.sortBy(-_.score)
-      Right(
-        OptimizationReport(
-          bestProgram = current,
-          candidates = sorted,
-          metadata = Map(
-            "num_candidates"     -> sorted.size,
-            "best_score"         -> finalScore,
-            "optimizable_leaves" -> leafCount
-          )
-        )
-      )
-
-  /** Optimize a single leaf's instruction (all depth rounds) with the rest of the program held fixed. Returns the
-    * program with that leaf's best instruction applied, plus every whole-program candidate scored along the way.
-    */
-  private def optimizeLeaf(program: P, idx: Int, evalset: Vector[Example])(using
-      RuntimeContext
-  ): (P, Vector[CandidateProgram[P]]) =
-    val leaf            = ps.inspect(program)(idx)
-    val baseInstruction = leaf.layout.instructions.getOrElse("")
-    val fieldNames      = leaf.layout.fields.map(_.name)
-
-    // (instruction -> best score) seen for this leaf, plus the whole-program candidates emitted.
-    val evaluated  = mutable.LinkedHashMap.empty[String, Double]
-    val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
-
-    def scoreCandidate(instruction: String): P =
-      val applied = OptimizerSupport.applyInstruction(program, idx, instruction)
-      // A whole-eval failure (timeout / maxErrors) yields None — skip it entirely rather than recording a
-      // real 0.0 that would corrupt selection (a genuinely-0-scoring instruction could then look "as good").
-      scoreProgram(applied, evalset).foreach { score =>
-        if evaluated.get(instruction).forall(score > _) then evaluated.update(instruction, score)
-        candidates += CandidateProgram(
-          program = applied,
-          score = score,
-          metadata = Map("optimizable_leaf" -> idx, "instruction" -> instruction)
-        )
-      }
-      applied
-
-    // ── Round 0: seed breadth-1 fresh candidates + the leaf's own current instruction ──
-    val seedProposals =
-      generateInstructions(idx, baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty, round = 0)
-    val round0 = (seedProposals :+ baseInstruction).filter(_.nonEmpty).distinct
-    round0.foreach(scoreCandidate)
-
-    // ── Rounds 1..depth-1: refine using past (instruction, score) attempts ──
-    (1 until config.depth).foreach { round =>
-      val attempts = evaluated.toVector.sortBy(_._2) // ascending score, as upstream presents them
-      val refined  = generateInstructions(idx, baseInstruction, fieldNames, config.breadth, attempts, round = round)
-      refined.filter(_.nonEmpty).distinct.foreach(scoreCandidate)
     }
 
-    // Lock in the best instruction for this leaf.
-    val bestInstruction =
-      if evaluated.isEmpty then baseInstruction
-      else evaluated.maxBy(_._2)._1
-    val updated = OptimizerSupport.applyInstruction(program, idx, bestInstruction)
-    (updated, candidates.toVector)
-
-  /** Run the whole program on the evalset and return the aggregate metric score (0..100), or `None` when the whole
-    * evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call sites that select
-    * the best candidate — a failed eval is "unknown", not "scored zero".
-    */
-  private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Option[Double] =
-    OptimizerSupport.evalScore(program, evalset, config.metric, runner)
-
-  // ── Instruction generation sub-program ──────────────────────────────────
-
-  /** The instruction-generation signature. Round 0 (`BasicGenerateInstruction`): `basic_instruction ->
-    * proposed_instruction`. Refinement rounds (`GenerateInstructionGivenAttempts`): add an `attempted_instructions`
-    * input. `instructionMarker` is set as the signature instructions so generation prompts are distinguishable from
-    * task prompts.
-    */
-  private def instructionGenLayout(withAttempts: Boolean): SignatureLayout =
-    val inputs = Vector(FieldSpec(name = "basic_instruction")) ++
-      (if withAttempts then Vector(FieldSpec(name = "attempted_instructions"))
-       else Vector.empty)
-    SignatureLayout.of(
-      name = "GenerateInstruction",
-      inputFields = inputs,
-      outputFields = Vector(FieldSpec(name = "proposed_instruction")),
-      instructions = Some(config.instructionMarker)
-    )
-
-  /** Generate up to `count` distinct candidate instructions by running the generation [[DynamicPredict]] once per
-    * candidate, varying `rolloutId` (and seeding temperature into the option bag) so the LM yields distinct proposals.
-    * `attempts` (ascending by score) seed the refinement variant when non-empty.
-    */
-  private def generateInstructions(
-      leafIdx        : Int,
-      baseInstruction: String,
-      fieldNames     : Vector[String],
-      count          : Int,
-      attempts       : Vector[(String, Double)],
-      round          : Int
-  )(using RuntimeContext): Vector[String] =
-    if count <= 0 then Vector.empty
-    else
-      val withAttempts = attempts.nonEmpty
-      val gen          = DynamicPredict(layout = instructionGenLayout(withAttempts), name = Some("copro_instruct"))
-      val attemptsText = attempts.zipWithIndex
-        .map { case ((instr, score), i) => s"Instruction #${i + 1}: $instr\nResulting Score #${i + 1}: $score" }
-        .mkString("\n")
-      val fieldsHint                                                   = fieldNames.mkString(", ")
-      val baseInputs: Vector[(String, zio.blocks.schema.DynamicValue)] =
-        Vector("basic_instruction" := s"$baseInstruction (fields: $fieldsHint)") ++
-          (if withAttempts then Vector("attempted_instructions" := attemptsText) else Vector.empty)
-
-      // Deterministic, contiguous rolloutId stream so candidate sampling is reproducible AND spans a
-      // predictable window (a scripted/temperature-driven LM yields a distinct proposal per rolloutId). The
-      // per-round salt gives EACH round (seed = round 0, plus every refinement round) its own non-overlapping
-      // window of `count` ids, so successive refinement rounds don't re-draw the same window (which would yield
-      // byte-identical generations via the LM cache); the per-leaf offset likewise keeps HOMOGENEOUS
-      // leaves (identical baseInstruction/fields) from drawing the SAME window.
-      val roundSalt = round * config.breadth
-      val base      = OptimizerSupport.seedBase(config.seed) + leafIdx * 10000 + roundSalt
-      val results   = (0 until count).iterator.flatMap { i =>
-        val rolloutId = base + i
-        val call      = ProgramCall(
-          input = DynamicValues.recordFromEntries(baseInputs),
-          config = DynamicValues.recordFromEntries(Vector("temperature" := config.initTemperature)),
-          rolloutId = Some(rolloutId)
-        )
-        gen(call) match
-          case Right(pred) => DynamicValues.recordGet(pred.output, "proposed_instruction")
-              .map(DynamicValues.renderText)
-              .map(_.trim)
-              .filter(_.nonEmpty)
-          case Left(_) => None
+  private def propose[RP](
+      proposer : ProgramWithEnv[ProposalInput, Proposal, RP],
+      binding  : ParameterBinding,
+      leafIndex: Int,
+      attempts : Vector[InstructionAttempt],
+      round    : Int,
+      count    : Int,
+      config   : COPROConfig
+  ): ZIO[RP, Nothing, (Vector[String], Int)] =
+    ZIO.foldLeft(0 until count)(Vector.empty[String] -> 0) { case ((proposals, failures), candidate) =>
+      val input = ProposalInput(
+        parameterId = binding.id.value,
+        component = binding.metadata.moduleName,
+        fieldNames = binding.metadata.structure.fields.map(_.name),
+        currentInstruction = binding.value.instructions,
+        attempts = attempts,
+        round = round,
+        candidate = candidate
+      )
+      val rolloutId = OptimizerSupport.seedBase(config.seed) + leafIndex * 10000 + round * config.breadth + candidate
+      val options   = RunOptions(
+        config = DynamicValues.record("temperature" := config.initTemperature),
+        rolloutId = Some(rolloutId)
+      )
+      ProgramRunner.run(proposer, input, options).either.map {
+        case Right(prediction) =>
+          val instruction = prediction.output.instruction.trim
+          if instruction.nonEmpty && !proposals.contains(instruction) then (proposals :+ instruction) -> failures
+          else proposals                                                                              -> failures
+        case Left(_) => proposals -> (failures + 1)
       }
-      results.toVector.distinct
+    }
+
+  private def setInstruction[I, O](
+      program    : RecordProgram[I, O],
+      parameterId: ParameterId,
+      instruction: Option[String]
+  ): Either[DspyError, RecordProgram[I, O]] =
+    program.modifyParameter(parameterId)(_.copy(instructions = instruction))
+
+  private def emptyReport[I, O](student: RecordProgram[I, O]): OptimizationReport[RecordProgram[I, O]] =
+    OptimizationReport(
+      bestProgram = student,
+      candidates = Vector.empty,
+      metadata = Map(
+        "optimizer"          -> "copro",
+        "num_candidates"     -> 0,
+        "best_score"         -> 0.0,
+        "optimizable_leaves" -> 0
+      )
+    )

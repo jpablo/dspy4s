@@ -7,11 +7,10 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The complete optimizer-writable parameters of one optimizable leaf.
   *
-  * This value is deliberately smaller than [[DynamicPredict]]. A leaf's signature shape, module name, runtime, output
-  * schema, bound language model, and tools describe or execute the leaf; they are not prompt parameters and must not be
-  * replaceable by an optimizer. Keeping only the three fields every supported predictor can write makes
-  * [[OptimizableLeaf]] a lawful lens and gives [[OptimizableStructure]] and the graded program algebra one homogeneous
-  * parameter carrier.
+  * This value is deliberately smaller than a prediction node. A leaf's signature shape, component name, output schema,
+  * bound language model, and tools describe or execute the leaf; they are not prompt parameters and must not be
+  * replaceable by an optimizer. The three common writable fields form one homogeneous parameter carrier for the
+  * program's immutable [[dspy4s.programs.ParameterStore]].
   *
   * @param instructions
   *   signature-level prompt instructions

@@ -15,8 +15,8 @@ import scala.deriving.Mirror
   * unsupported `O` is one with no static fields (e.g. `DynamicValue.Record` from `Signature.fromStringDynamic`),
   * handled by the low-priority [[PrependField.fallback]] returning `None`.
   *
-  * Used by [[dspy4s.programs.strategies.ChainOfThought]] (`reasoning: String`) and available to any other program that
-  * adds an output field (e.g. a future `MultiChainComparison` with `rationale: String`).
+  * Used by [[dspy4s.programs.ChainOfThought]] (`reasoning: String`) and available to any other program that adds an
+  * output field (e.g. a future `MultiChainComparison` with `rationale: String`).
   */
 object OutputAugmentation:
 

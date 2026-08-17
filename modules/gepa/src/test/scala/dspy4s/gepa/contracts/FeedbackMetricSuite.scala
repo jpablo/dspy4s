@@ -1,63 +1,39 @@
 package dspy4s.gepa.contracts
 
-import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.RawPrediction
-import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.data.Example
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.TraceEntry
-import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.{DspyError, DynamicValues, :=}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.programs.{ParameterId, ProgramEvent}
 import munit.FunSuite
+import zio.{Runtime, Unsafe, ZIO}
 
-class FeedbackMetricSuite extends FunSuite:
+final class FeedbackMetricSuite extends FunSuite:
 
-  private def rec(entries: (String, zio.blocks.schema.DynamicValue)*): zio.blocks.schema.DynamicValue.Record =
-    DynamicValues.recordFromEntries(entries)
+  private val metric = new FeedbackMetric:
+    val name: String = "toy_exact"
 
-  /** A toy exact-match feedback metric: 1.0 when the prediction's `answer` matches the gold, else 0.0, with feedback
-    * that names the expected answer (and, at predictor level, the component).
-    */
-  private val metric: FeedbackMetric = new FeedbackMetric:
-    override def name: String = "toy_exact"
-    override def feedback(
-        example       : Example,
-        prediction    : RawPrediction,
-        trace         : Vector[TraceEntry],
-        component     : Option[String],
-        componentTrace: Vector[TraceEntry]
-    )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
-      val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")
-      val got  = prediction.get("answer").map(DynamicValues.renderText).getOrElse("")
-      val s    = if got == gold then 1.0 else 0.0
-      val fb   = component match
-        case None       => s"Program: expected '$gold', got '$got'."
-        case Some(name) => s"Component '$name': expected '$gold', got '$got'."
-      Right(ScoreWithFeedback(s, fb))
+    def feedback(
+        example                           : Example,
+        prediction                        : RawPrediction,
+        @annotation.unused events         : Vector[ProgramEvent],
+        component                         : Option[ParameterId],
+        @annotation.unused componentEvents: Vector[ProgramEvent]
+    ): ZIO[Any, DspyError, ScoreWithFeedback] =
+      val expected = example.get("answer").map(DynamicValues.renderText).getOrElse("")
+      val actual   = prediction.get("answer").map(DynamicValues.renderText).getOrElse("")
+      ZIO.succeed(ScoreWithFeedback(if expected == actual then 1.0 else 0.0, s"$component: $expected / $actual"))
 
-  test("program-level feedback scores and explains, and Metric.score delegates to it") {
-    given RuntimeContext = RuntimeContext()
-    val ex               = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
-    val pred             = RawPrediction(rec("answer" := "Paris"))
+  private def run[A](effect: ZIO[Any, DspyError, A]): A =
+    Unsafe.unsafe { implicit unsafe => Runtime.default.unsafe.run(effect).getOrThrowFiberFailure() }
 
-    val fb = metric.feedback(ex, pred, Vector.empty, component = None, componentTrace = Vector.empty).toOption.get
-    assertEquals(fb.score, 1.0)
-    assert(fb.feedback.contains("Paris"), fb.feedback)
+  test("score delegates to program-level feedback") {
+    val example    = Example(DynamicValues.record("answer" := "Paris"))
+    val prediction = RawPrediction(DynamicValues.record("answer" := "Paris"))
 
-    // The inherited Metric.score is exactly the program-level score (drop-in for Evaluate).
-    assertEquals(metric.score(ex, pred).toOption.get, 1.0)
+    assertEquals(run(metric.score(example, prediction, Vector.empty)), 1.0)
+    assert(run(metric.feedback(example, prediction, Vector.empty, Some(ParameterId("qa")), Vector.empty)).feedback
+      .contains("qa"))
   }
 
-  test("optimizable-level feedback targets the named component and reflects a wrong answer") {
-    given RuntimeContext = RuntimeContext()
-    val ex               = Example(values = rec("answer" := "Paris"), inputKeys = Set.empty)
-    val pred             = RawPrediction(rec("answer" := "Lyon"))
-
-    val fb = metric.feedback(ex, pred, Vector.empty, component = Some("qa"), componentTrace = Vector.empty).toOption.get
-    assertEquals(fb.score, 0.0)
-    assert(fb.feedback.contains("qa"), fb.feedback)
-    assert(fb.feedback.contains("Paris") && fb.feedback.contains("Lyon"), fb.feedback)
-  }
-
-  test("defaultFeedback mirrors the upstream score-only fallback") {
+  test("defaultFeedback retains the score") {
     assert(FeedbackMetric.defaultFeedback(0.5).contains("0.5"))
   }

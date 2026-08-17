@@ -1,8 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.RuntimeContext
-
+import zio.ZIO
 import scala.collection.mutable
 import scala.util.Random
 
@@ -25,11 +24,11 @@ final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accep
   * ([[onReflectiveAccepted]]) and attempts one when [[shouldAttempt]]; accepted merges are consumed via
   * [[onMergeAccepted]]. `performed*` track already-attempted triplets so the same merge is not retried.
   */
-final class MergeProposer[P](
+final class MergeProposer[I, O, R](
     valset             : Vector[Example],
     maxMergeInvocations: MergeInvocationLimit,
     rng                : Random,
-    cache              : GepaEvalCache[P],
+    cache              : GepaEvalCache[I, O, R],
     maxAttempts        : MergeInvocationLimit = MergeInvocationLimit(10),
     subsampleSize      : MergeSubsampleSize   = MergeSubsampleSize(5)
 ):
@@ -59,39 +58,40 @@ final class MergeProposer[P](
   /** Attempt a merge over the current state's Pareto dominators. Returns the subsample-gated proposal, or `None` when
     * no mergeable triplet is found (the engine then falls through to reflective mutation).
     */
-  def propose(state: GepaState)(using RuntimeContext): Option[MergeProposal] =
+  def propose(state: GepaState): ZIO[R, Nothing, Option[MergeProposal]] =
     val dominators = state.paretoFrontier.values.flatten.toSet.toVector.sorted
-    if dominators.size < 2 || state.candidates.size < 3 then return None
+    if dominators.size < 2 || state.candidates.size < 3 then ZIO.none
+    else
+      findTriplet(state, dominators) match
+        case None                       => ZIO.none
+        case Some((id1, id2, ancestor)) =>
+          val (merged, desc) = crossover(
+            state.candidates(ancestor),
+            id1,
+            state.candidates(id1),
+            id2,
+            state.candidates(id2),
+            state.aggregateScore,
+            rng
+          )
+          if performedDescs.contains((id1, id2, desc)) then ZIO.none
+          else
+            performedTriplets += ((id1, id2, ancestor))
+            performedDescs += ((id1, id2, desc))
 
-    findTriplet(state, dominators).flatMap { case (id1, id2, ancestor) =>
-      val (merged, desc) = crossover(
-        state.candidates(ancestor),
-        id1,
-        state.candidates(id1),
-        id2,
-        state.candidates(id2),
-        state.aggregateScore,
-        rng
-      )
-      if performedDescs.contains((id1, id2, desc)) then None // this exact merge was already produced
-      else
-        performedTriplets += ((id1, id2, ancestor))
-        performedDescs += ((id1, id2, desc))
-
-        val subIdx = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), subsampleSize, rng)
-        if subIdx.isEmpty then None
-        else
-          val before1            = subIdx.iterator.map(state.valSubscores(id1)).sum
-          val before2            = subIdx.iterator.map(state.valSubscores(id2)).sum
-          val (mergedScores, ev) =
-            cache.scores(merged, subIdx.map(valset)) // cached so the later full-eval reuses these
-          Some(MergeProposal(
-            merged,
-            Vector(id1, id2),
-            accepted = mergedScores.sum >= math.max(before1, before2),
-            metricCalls = ev
-          ))
-    }
+            val subIdx = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), subsampleSize, rng)
+            if subIdx.isEmpty then ZIO.none
+            else
+              val before1 = subIdx.iterator.map(state.valSubscores(id1)).sum
+              val before2 = subIdx.iterator.map(state.valSubscores(id2)).sum
+              cache.scores(merged, subIdx.map(valset)).map { case (mergedScores, evaluations) =>
+                Some(MergeProposal(
+                  merged,
+                  Vector(id1, id2),
+                  accepted = mergedScores.sum >= math.max(before1, before2),
+                  metricCalls = evaluations
+                ))
+              }
 
   /** Up to `maxAttempts` times: sample two distinct dominators (neither an ancestor of the other) and look for a common
     * ancestor that is (a) not already merged for this pair, (b) outperformed by both descendants, and (c) "desirable"
@@ -143,7 +143,7 @@ object MergeProposer:
       aggregateScore: Int => Double,
       rng           : Random
   ): (Candidate, Vector[Int]) =
-    val components = ancestor.keys.toVector.sorted
+    val components = ancestor.keys.toVector.sortBy(_.value)
     val chosen     = components.map { component =>
       val (anc, v1, v2) = (ancestor(component), cand1(component), cand2(component))
       val src           =

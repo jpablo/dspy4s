@@ -1,197 +1,171 @@
 package dspy4s.optimize
 
-import dspy4s.programs.LegacyProgramRunner
-
-import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.ContextWindowExceededError
-import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.{ContextWindowExceededError, DspyError, DynamicValues, :=}
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
-import dspy4s.evaluate.contracts.Metric
-import dspy4s.optimize.contracts.CandidateProgram
-import dspy4s.optimize.contracts.OptimizationReport
-import dspy4s.optimize.contracts.Teleprompter
-import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableView
-import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.contracts.ProgramCall
+import dspy4s.evaluate.{Evaluate, EvaluateOptions, Metric}
+import dspy4s.optimize.contracts.{CandidateProgram, OptimizationReport}
+import dspy4s.programs.*
+import zio.ZIO
 
-import scala.collection.mutable
-
-/** Knobs for [[InferRules]], mirroring upstream's `InferRules(num_candidates, num_rules, metric, ...)`.
-  *
-  * @param metric
-  *   task metric used to score whole-program candidates
-  * @param numCandidates
-  *   number of rule-augmented candidate programs to generate and score (best wins)
-  * @param numRules
-  *   how many rules the induction prompt asks the LM to extract
-  * @param initTemperature
-  *   sampling temperature for rule induction (so each candidate gets DIFFERENT rules)
-  * @param bootstrap
-  *   few-shot demos are bootstrapped first (InferRules extends BootstrapFewShot upstream); this config is forwarded to
-  *   a composed [[BootstrapFewShot]] run. Its metric defaults to `metric` when unset.
-  * @param seed
-  *   RNG seed; deterministic for a fixed seed
-  * @param inductionMarker
-  *   stable preamble for the rule-induction signature so an induction prompt is distinguishable from a task prompt (and
-  *   offline scripted LMs can branch)
-  */
 final case class InferRulesConfig(
     metric         : Metric,
     numCandidates  : CandidateCount         = CandidateCount(10),
     numRules       : RuleCount              = RuleCount(10),
     initTemperature: Double                 = 1.0,
     bootstrap      : BootstrapFewShotConfig = BootstrapFewShotConfig(),
-    seed           : Long                   = 0L,
-    inductionMarker: String                 = "You are inducing natural-language rules from labeled examples."
+    evaluation     : EvaluateOptions        = EvaluateOptions(),
+    seed           : Long                   = 0L
 )
 
-/** InferRules — induce explicit natural-language RULES from the trainset and append them to each predictor's
-  * instructions. A v1 port of DSPy's `dspy.teleprompt.InferRules` (`dspy/teleprompt/infer_rules.py`).
-  *
-  * '''Algorithm.'''
-  *   1. If no valset is given, split the trainset 50/50 into train/val (matching upstream). 2. Bootstrap few-shot demos
-  *      via a composed [[BootstrapFewShot]] (upstream INHERITS it; dspy4s composes), and take its best program as the
-  *      base. 3. Snapshot each predictor's original instruction. 4. For each of `numCandidates` candidates: for every
-  *      predictor, induce rules from the trainset (via a rule- induction [[DynamicPredict]] run at `initTemperature`
-  *      with a per-candidate `rolloutId`, so candidates get different rules) and append them to that predictor's
-  *      ORIGINAL instruction; then score the whole candidate program on the valset. 5. Return the highest-scoring
-  *      candidate.
-  *
-  * '''Deltas from Python.'''
-  *   - '''Composes [[BootstrapFewShot]] instead of inheriting it''' (dspy4s teleprompters are not a class hierarchy).
-  *   - '''Rule induction uses a [[DynamicPredict]], not `ChainOfThought`.''' Upstream's `RulesInductionProgram` wraps
-  *     the induction signature in CoT (a `reasoning` field); dspy4s applies only the induced rules. The reasoning field
-  *     is a quality lever, not structural, and is omitted for v1 (consistent with COPRO).
-  *   - '''Context-window fallback narrows on [[ContextWindowExceededError]]''' specifically (upstream also accepts
-  *     `ValueError`/`BadRequestError`), dropping the last example and retrying down to a single example.
-  */
-final class InferRules[P: {OptimizableStructure, LegacyProgramRunner}](config: InferRulesConfig)
-    extends Teleprompter[P]:
+/** Effectful natural-language rule induction for `RecordProgram`. */
+object InferRules:
 
-  override val name: String = "infer_rules"
+  final case class RuleInput(
+      parameterId       : String,
+      component         : String,
+      fieldNames        : Vector[String],
+      currentInstruction: Option[String],
+      examples          : Vector[Example],
+      numRules          : Int,
+      candidate         : Int,
+      leaf              : Int
+  )
 
-  private val ps: OptimizableStructure[P]    = summon[OptimizableStructure[P]]
-  private val runner: LegacyProgramRunner[P] = summon[LegacyProgramRunner[P]]
+  final case class Rules(value: String)
 
-  override def compile(
-      student : P,
+  private final case class Built[I, O](program: RecordProgram[I, O], inductionFailures: Int)
+
+  def apply[I, O, RR](
+      student : RecordProgram[I, O],
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    // 1) Split if no valset (upstream's 50/50 holdout).
-    val (effTrain, effVal) = valset match
-      case Some(v) => (trainset, v)
-      case None    =>
-        val k = trainset.size / 2
-        (trainset.take(k), trainset.drop(k))
+      inducer : ProgramWithEnv[RuleInput, Rules, RR],
+      teacher : Option[RecordProgram[I, O]] = None,
+      valset  : Option[Vector[Example]]     = None,
+      config  : InferRulesConfig
+  ): ZIO[PredictionBackend & RR, DspyError, OptimizationReport[RecordProgram[I, O]]] =
+    val (effectiveTrain, effectiveVal) = valset match
+      case Some(values) => trainset -> values
+      case None         =>
+        val split = trainset.size / 2
+        trainset.take(split) -> trainset.drop(split)
 
-    if ps.read(student).isEmpty then
-      Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    if student.program.parameters.size == 0 then ZIO.succeed(emptyReport(student))
     else
-      // 2) Bootstrap few-shot demos first; the rule-augmented search starts from that program.
-      val bootstrapConfig =
-        if config.bootstrap.metric.isDefined then config.bootstrap
-        else config.bootstrap.copy(metric = Some(config.metric))
-      new BootstrapFewShot[P](bootstrapConfig).compile(student, effTrain, teacher).map { bootstrapReport =>
+      BootstrapFewShot(
+        student,
+        effectiveTrain,
+        teacher,
+        config.bootstrap.copy(metric = Some(config.metric), seed = config.seed)
+      ).flatMap { bootstrapReport =>
         val base = bootstrapReport.bestProgram
-
-        // 3) Snapshot each leaf's original instruction (rules are appended to THIS, not cumulatively).
-        val originalInstructions = ps.read(base).map(_.instructions.getOrElse(""))
-
-        // 4) Generate + score `numCandidates` rule-augmented candidates.
-        val candidates                = mutable.ArrayBuffer.empty[CandidateProgram[P]]
-        var best: Option[(P, Double)] = None
-
-        (0 until config.numCandidates).foreach { candIdx =>
-          val candidate = ps.read(base).indices.foldLeft(base) { (prog, leafIdx) =>
-            induceRules(ps.inspect(base)(leafIdx), effTrain, candIdx, leafIdx) match
-              case Some(rules) =>
-                val augmented = s"${originalInstructions(leafIdx)}\n\n" +
-                  s"Please adhere to the following rules when making your prediction:\n$rules"
-                OptimizerSupport.applyInstruction(prog, leafIdx, augmented)
-              case None => prog // induction failed for this leaf; leave its instruction unchanged
-          }
-          OptimizerSupport.evalScore(candidate, effVal, config.metric, runner).foreach { score =>
-            candidates += CandidateProgram(candidate, score, metadata = Map("candidate" -> candIdx))
-            if best.forall(score > _._2) then best = Some((candidate, score))
-          }
-        }
-
-        val bestProgram = best.map(_._1).getOrElse(base)
-        OptimizationReport(
-          bestProgram = bestProgram,
-          candidates = candidates.toVector.sortBy(-_.score),
-          metadata = Map(
-            "optimizer"          -> name,
-            "num_candidates"     -> candidates.size,
-            "best_score"         -> best.map(_._2).getOrElse(0.0),
-            "optimizable_leaves" -> ps.read(base).size
+        Evaluate(base, effectiveVal, config.metric, config.evaluation).flatMap { baselineEvaluation =>
+          val baseline = CandidateProgram(
+            program = base,
+            score = baselineEvaluation.score,
+            evaluation = Some(baselineEvaluation),
+            metadata = Map("candidate" -> -1, "baseline" -> true)
           )
-        )
+          ZIO
+            .foldLeft(0 until config.numCandidates)(Vector(baseline) -> 0) {
+              case ((candidates, failures), candidateIndex) =>
+                buildCandidate(base, effectiveTrain, inducer, candidateIndex, config).flatMap { built =>
+                  Evaluate(built.program, effectiveVal, config.metric, config.evaluation).map { evaluation =>
+                    val candidate = CandidateProgram(
+                      program = built.program,
+                      score = evaluation.score,
+                      evaluation = Some(evaluation),
+                      metadata = Map("candidate" -> candidateIndex, "baseline" -> false)
+                    )
+                    (candidates :+ candidate) -> (failures + built.inductionFailures)
+                  }
+                }
+            }
+            .map { case (candidates, failures) =>
+              val best = candidates.tail.foldLeft(candidates.head) { (current, candidate) =>
+                if candidate.score > current.score then candidate else current
+              }
+              OptimizationReport(
+                bestProgram = best.program,
+                candidates = candidates.sortBy(candidate => -candidate.score),
+                metadata = Map(
+                  "optimizer"              -> "infer_rules",
+                  "num_candidates"         -> candidates.size,
+                  "num_induction_failures" -> failures,
+                  "best_score"             -> best.score,
+                  "optimizable_leaves"     -> base.program.parameters.size
+                )
+              )
+            }
+        }
       }
 
-  /** Induce rules for one leaf from the trainset, narrowing the example set on a context-window overflow. Returns the
-    * induced rules text, or `None` if even a single example can't produce rules.
-    */
-  private def induceRules(leaf: OptimizableView, trainset: Vector[Example], candIdx: Int, leafIdx: Int)(using
-      RuntimeContext
-  ): Option[String] =
-    val gen = DynamicPredict(layout = ruleInductionLayout, name = Some("infer_rules_induction"))
-    // Deterministic, non-overlapping rolloutId per (candidate, leaf) so each candidate draws different rules.
-    val rolloutId = OptimizerSupport.seedBase(config.seed) + candIdx * 10000 + leafIdx * 100
+  private def buildCandidate[I, O, RR](
+      base          : RecordProgram[I, O],
+      examples      : Vector[Example],
+      inducer       : ProgramWithEnv[RuleInput, Rules, RR],
+      candidateIndex: Int,
+      config        : InferRulesConfig
+  ): ZIO[RR, DspyError, Built[I, O]] =
+    ZIO.foldLeft(base.program.parameters.all.zipWithIndex)(Built(base, 0)) {
+      case (built, (binding, leafIndex)) =>
+        induce(binding, examples, inducer, candidateIndex, leafIndex, config).flatMap {
+          case None        => ZIO.succeed(built.copy(inductionFailures = built.inductionFailures + 1))
+          case Some(rules) =>
+            val instruction = appendRules(binding.value.instructions, rules)
+            ZIO.fromEither(built.program.modifyParameter(binding.id)(_.copy(instructions = instruction))).map(updated =>
+              built.copy(program = updated)
+            )
+        }
+    }
 
-    @annotation.tailrec
-    def attempt(demos: Vector[Example]): Option[String] =
-      if demos.isEmpty then None
+  private def induce[RR](
+      binding       : ParameterBinding,
+      examples      : Vector[Example],
+      inducer       : ProgramWithEnv[RuleInput, Rules, RR],
+      candidateIndex: Int,
+      leafIndex     : Int,
+      config        : InferRulesConfig
+  ): ZIO[RR, Nothing, Option[String]] =
+    def loop(current: Vector[Example]): ZIO[RR, Nothing, Option[String]] =
+      if current.isEmpty then ZIO.none
       else
-        val call = ProgramCall(
-          input = DynamicValues.record("examples_text" := formatExamples(demos, leaf)),
+        val input = RuleInput(
+          parameterId = binding.id.value,
+          component = binding.metadata.moduleName,
+          fieldNames = binding.metadata.structure.fields.map(_.name),
+          currentInstruction = binding.value.instructions,
+          examples = current,
+          numRules = config.numRules,
+          candidate = candidateIndex,
+          leaf = leafIndex
+        )
+        val rolloutId = OptimizerSupport.seedBase(config.seed) + candidateIndex * 10000 + leafIndex * 100
+        val options   = RunOptions(
           config = DynamicValues.record("temperature" := config.initTemperature),
           rolloutId = Some(rolloutId)
         )
-        gen(call) match
-          case Right(pred) =>
-            DynamicValues.recordGet(pred.output, "natural_language_rules").map(DynamicValues.renderText).map(_.trim)
-              .filter(_.nonEmpty)
-          case Left(_: ContextWindowExceededError) if demos.size > 1 => attempt(demos.dropRight(1))
-          case Left(_)                                               => None
+        ProgramRunner.run(inducer, input, options).either.flatMap {
+          case Right(prediction) =>
+            val rules = prediction.output.value.trim
+            ZIO.succeed(Option.when(rules.nonEmpty)(rules))
+          case Left(_: ContextWindowExceededError) if current.size > 1 => ZIO.suspendSucceed(loop(current.dropRight(1)))
+          case Left(_)                                                 => ZIO.none
+        }
 
-    attempt(trainset)
+    loop(examples)
 
-  /** Render demos as upstream's `format_examples` text, projecting each example to the leaf's own input/output fields.
-    */
-  private def formatExamples(demos: Vector[Example], leaf: OptimizableView): String =
-    def render(fields: Vector[FieldSpec], ex: Example): String =
-      fields.flatMap(f =>
-        DynamicValues.recordGet(ex.values, f.name).map(v => s"${f.name}: ${DynamicValues.renderText(v)}")
-      ).mkString("\n")
-    demos.map { ex =>
-      s"Input Fields:\n${render(leaf.layout.inputFields, ex)}\n\n=========\n" +
-        s"Output Fields:\n${render(leaf.layout.outputFields, ex)}\n"
-    }.mkString("\n")
+  private def appendRules(base: Option[String], rules: String): Option[String] =
+    val preamble = "Please adhere to the following rules when making your prediction:"
+    Some(Vector(base.getOrElse("").trim, s"$preamble\n$rules").filter(_.nonEmpty).mkString("\n\n"))
 
-  /** The rule-induction signature: `examples_text -> natural_language_rules`, instructed to extract `numRules` concise,
-    * non-redundant, actionable rules (a paraphrase of upstream's `CustomRulesInduction` docstring).
-    */
-  private val ruleInductionLayout: SignatureLayout = SignatureLayout.of(
-    name = "RulesInduction",
-    inputFields = Vector(
-      FieldSpec(name = "examples_text", description = Some("Text containing examples"))
-    ),
-    outputFields = Vector(
-      FieldSpec(
-        name = "natural_language_rules",
-        description = Some("Induced natural language rules")
+  private def emptyReport[I, O](student: RecordProgram[I, O]): OptimizationReport[RecordProgram[I, O]] =
+    OptimizationReport(
+      bestProgram = student,
+      candidates = Vector.empty,
+      metadata = Map(
+        "optimizer"          -> "infer_rules",
+        "num_candidates"     -> 0,
+        "best_score"         -> 0.0,
+        "optimizable_leaves" -> 0
       )
-    ),
-    instructions = Some(
-      s"${config.inductionMarker} Given a set of examples, extract a list of ${config.numRules} concise and " +
-        "non-redundant natural language rules that provide clear, actionable guidance for performing the task."
     )
-  )

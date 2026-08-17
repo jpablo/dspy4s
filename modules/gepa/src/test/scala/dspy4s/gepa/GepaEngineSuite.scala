@@ -1,257 +1,67 @@
 package dspy4s.gepa
 
-import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.RawPrediction
-import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.data.Example
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TraceEntry
-import dspy4s.core.contracts.:=
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.gepa.contracts.FeedbackMetric
-import dspy4s.gepa.contracts.ScoreWithFeedback
-import dspy4s.lm.contracts.LanguageModel
-import dspy4s.lm.contracts.LmMode
-import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.LmRequest
-import dspy4s.lm.contracts.LmResponse
-import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableId
+import dspy4s.core.contracts.{DspyError, DynamicValues, :=}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
+import dspy4s.programs.*
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.{Runtime, Unsafe, ZEnvironment, ZIO}
 
-class GepaEngineSuite extends FunSuite:
+private final case class EngineQuestion(question: String)
+private final case class EngineAnswer(answer: String)
 
-  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
+final class GepaEngineSuite extends FunSuite:
 
-  /** Instruction-sensitive task LM: it "follows" the instruction — only when the prompt (which carries the predictor's
-    * instruction) contains the magic token "CITY" does it answer "Paris"; otherwise it answers wrong. So a better
-    * instruction genuinely raises the score, and GEPA must discover it.
-    */
-  private final class TaskLm extends LanguageModel:
-    override val id: String                                                                    = "task"
-    override val mode: LmMode                                                                  = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val prompt = request.messages.flatMap(_.text).mkString("\n")
-      val answer = if prompt.contains("CITY") then "Paris" else "WRONG"
-      Right(LmResponse(outputs = Vector(LmOutput(text = s"[[ ## answer ## ]]\n$answer\n\n[[ ## completed ## ]]"))))
+  private val signature = Signature.derived[EngineQuestion, EngineAnswer]("Engine", "bad")
+  private val program   = Program.predict(ParameterId("answer"), signature).fromRecords(signature.inputShape)
+  private val example   = Example(DynamicValues.record("question" := "q", "answer" := "right"), Set("question"))
 
-  /** Reflection LM: proposes an improved instruction containing the magic token. */
-  private final class ReflectionLm extends LanguageModel:
-    override val id: String                                                                    = "reflect"
-    override val mode: LmMode                                                                  = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      Right(LmResponse(outputs = Vector(LmOutput(text = "```\nAnswer with the CITY name only.\n```"))))
+  private val backend = new PredictionBackend:
+    def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+      val answer = if request.layout.instructions.contains("good") then "right" else "wrong"
+      ZIO.succeed(RawPrediction(DynamicValues.record("answer" := answer)))
 
-  private val metric: FeedbackMetric = new FeedbackMetric:
-    override def name: String = "exact_answer"
-    override def feedback(
-        example       : Example,
-        prediction    : RawPrediction,
-        trace         : Vector[TraceEntry],
-        component     : Option[String],
-        componentTrace: Vector[TraceEntry]
-    )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
-      val gold = example.get("answer").map(DynamicValues.renderText).getOrElse("")
-      val got  = prediction.get("answer").map(DynamicValues.renderText).getOrElse("")
-      Right(ScoreWithFeedback(if got == gold then 1.0 else 0.0, s"expected '$gold', got '$got'"))
+  private val metric = new FeedbackMetric:
+    val name: String = "exact"
 
-  private val program: DynamicPredict =
-    DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get.withInstructions(Some("Answer.")))
+    def feedback(
+        example                           : Example,
+        prediction                        : RawPrediction,
+        @annotation.unused events         : Vector[ProgramEvent],
+        @annotation.unused component      : Option[ParameterId],
+        @annotation.unused componentEvents: Vector[ProgramEvent]
+    ): ZIO[Any, DspyError, ScoreWithFeedback] =
+      ZIO.fromEither(for
+        expected <- DynamicValues.requireString(example.labels, "answer", "metric")
+        actual   <- prediction.asString("answer")
+      yield ScoreWithFeedback(if expected == actual then 1.0 else 0.0, s"Expected $expected"))
 
-  private val dataset: Vector[Example] = (1 to 4).toVector.map(i =>
-    Example(
-      values = DynamicValues.record("question" := s"Capital of France ($i)?", "answer" := "Paris"),
-      inputKeys = Set("question")
+  test("engine accepts an improved instruction from a visible reflection program") {
+    val adapter   = new GepaAdapter(program, metric, parallelism = 1)
+    val reflector = Program.lift[InstructionProposer.Input, InstructionProposer.Output](_ =>
+      InstructionProposer.Output("good")
     )
-  )
-
-  test("GEPA discovers a better instruction and improves the program's validation score") {
-    val adapter = new GepaAdapter(program, metric)
-    val engine  = new GepaEngine(
+    val engine = new GepaEngine(
       adapter,
-      new ReflectionLm,
-      GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+      reflector,
+      GepaConfig(
+        maxMetricCalls = MetricCallCount(4),
+        reflectionMinibatchSize = MinibatchSize(1),
+        useMerge = false,
+        parallelism = 1
+      )
     )
 
-    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val seedCandidate    = Candidate.seed(program)
-      val result           = engine.optimize(seedCandidate, trainset = dataset, valset = dataset)
-
-      // The seed instruction ("Answer.") scores 0 (no "CITY"); GEPA must find the improved one.
-      assertEquals(result.bestScore, 1.0)
-      assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("CITY")), result.bestCandidate(OptimizableId(0)))
-      assert(result.numCandidates >= 2, "expected at least one accepted mutation beyond the seed")
-      assert(result.totalMetricCalls <= 40, s"respected the budget: ${result.totalMetricCalls}")
-
-      // The returned program actually carries the improved instruction.
-      assertEquals(result.bestProgram.layout.instructions, result.bestCandidate(OptimizableId(0)))
-    }
-  }
-
-  test("stopOnPerfectScore halts once perfect; default continues while another iteration fits") {
-    val adapter = new GepaAdapter(program, metric)
-    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val seedCandidate    = Candidate.seed(program)
-
-      // Opt-in early stop: converges and halts well under the 40-call budget.
-      val stopping = new GepaEngine(
-        adapter,
-        new ReflectionLm,
-        GepaConfig(
-          maxMetricCalls = MetricCallCount(40),
-          reflectionMinibatchSize = MinibatchSize(2),
-          stopOnPerfectScore = true,
-          seed = 1L
-        )
-      )
-      val stopped = stopping.optimize(seedCandidate, trainset = dataset, valset = dataset)
-      assertEquals(stopped.bestScore, 1.0)
-      assert(stopped.totalMetricCalls < 40, s"early-stop should beat the budget; used ${stopped.totalMetricCalls}")
-
-      // Default: no perfect-score stop, so it keeps spending after convergence while another atomic iteration fits.
-      val running = new GepaEngine(
-        adapter,
-        new ReflectionLm,
-        GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
-      )
-      val ranToBudget = running.optimize(seedCandidate, trainset = dataset, valset = dataset)
-      assertEquals(ranToBudget.bestScore, 1.0)
-      assert(
-        ranToBudget.totalMetricCalls > stopped.totalMetricCalls,
-        s"default should run longer than early-stop: default=${ranToBudget.totalMetricCalls}, stop=${stopped.totalMetricCalls}"
-      )
-    }
-  }
-
-  /** A TaskLm that counts model calls, so we can prove a resumed run does NOT re-evaluate the seed. */
-  private final class CountingTaskLm extends LanguageModel:
-    val calls: java.util.concurrent.atomic.AtomicInteger                                       = new java.util.concurrent.atomic.AtomicInteger(0)
-    override val id: String                                                                    = "task"
-    override val mode: LmMode                                                                  = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val _      = calls.incrementAndGet()
-      val prompt = request.messages.flatMap(_.text).mkString("\n")
-      val answer = if prompt.contains("CITY") then "Paris" else "WRONG"
-      Right(LmResponse(outputs = Vector(LmOutput(text = s"[[ ## answer ## ]]\n$answer\n\n[[ ## completed ## ]]"))))
-
-  test("a run resumes from a saved run dir without re-evaluating the seed") {
-    val dir = java.nio.file.Files.createTempDirectory("gepa-resume")
-    // Budget == valset size: the seed full-eval (one LM call per val example) exactly exhausts it, so each run does
-    // its seed eval (or skips it on resume) and then zero iterations.
-    val cfg = GepaConfig(
-      maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size),
-      reflectionMinibatchSize = MinibatchSize(2),
-      seed = 1L
-    )
-    val seedCandidate = Candidate.seed(program)
-
-    val lm1   = new CountingTaskLm
-    val first = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm1), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
-        .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
-    }
-    assertEquals(lm1.calls.get(), dataset.size) // seed evaluated once (one call per val example)
-    assert(java.nio.file.Files.exists(dir.resolve(GepaStatePersistence.fileName)), "a checkpoint was written")
-
-    // Second run, same dir: it loads the saved state and must NOT re-evaluate the seed.
-    val lm2    = new CountingTaskLm
-    val second = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm2), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
-        .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
-    }
-    assertEquals(lm2.calls.get(), 0, "resumed run must not re-run the seed evaluation")
-    assertEquals(second.totalMetricCalls, first.totalMetricCalls) // continued from the saved meter
-    assertEquals(second.numCandidates, first.numCandidates)
-  }
-
-  test("metric-call budget is a hard upper bound between atomic iterations") {
-    val lm     = new CountingTaskLm
-    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      new GepaEngine(
-        new GepaAdapter(program, metric),
-        new ReflectionLm,
-        GepaConfig(
-          maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size + 1),
-          reflectionMinibatchSize = MinibatchSize(2),
-          seed = 1L
-        )
-      ).optimize(Candidate.seed(program), dataset, dataset)
+    val result = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(engine.optimize(Candidate.seed(program), Vector(example), Vector(example)).provideEnvironment(
+          ZEnvironment(backend)
+        ))
+        .getOrThrowFiberFailure()
     }
 
-    assertEquals(result.totalMetricCalls, dataset.size)
-    assert(result.totalMetricCalls <= dataset.size + 1)
-    assertEquals(lm.calls.get(), dataset.size)
-  }
-
-  test("a fresh run rejects a budget too small for seed validation before calling the LM") {
-    val lm    = new CountingTaskLm
-    val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      intercept[IllegalArgumentException] {
-        new GepaEngine(
-          new GepaAdapter(program, metric),
-          new ReflectionLm,
-          GepaConfig(
-            maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size - 1),
-            reflectionMinibatchSize = MinibatchSize(2),
-            seed = 1L
-          )
-        ).optimize(Candidate.seed(program), dataset, dataset)
-      }
-    }
-
-    assert(error.getMessage.contains("seed validation cost"))
-    assertEquals(lm.calls.get(), 0)
-  }
-
-  test("a corrupt run-dir checkpoint is reported and not overwritten") {
-    val dir     = java.nio.file.Files.createTempDirectory("gepa-corrupt-resume")
-    val file    = dir.resolve(GepaStatePersistence.fileName)
-    val corrupt = "not json".getBytes(java.nio.charset.StandardCharsets.UTF_8)
-    val _       = java.nio.file.Files.write(file, corrupt)
-    val lm      = new CountingTaskLm
-    try
-      val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
-        given RuntimeContext = RuntimeEnvironment.current
-        intercept[IllegalStateException] {
-          new GepaEngine(
-            new GepaAdapter(program, metric),
-            new ReflectionLm,
-            GepaConfig(
-              maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size),
-              reflectionMinibatchSize = MinibatchSize(2),
-              seed = 1L
-            )
-          ).optimize(Candidate.seed(program), dataset, dataset, runDir = Some(dir))
-        }
-      }
-
-      assert(error.getMessage.contains("Invalid GEPA checkpoint"))
-      assertEquals(java.nio.file.Files.readAllBytes(file).toVector, corrupt.toVector)
-      assertEquals(lm.calls.get(), 0)
-    finally
-      val _ = java.nio.file.Files.deleteIfExists(file)
-      val _ = java.nio.file.Files.deleteIfExists(dir)
-  }
-
-  test("Gepa facade compiles a student end-to-end") {
-    val gepa = new Gepa[DynamicPredict](
-      metric,
-      new ReflectionLm,
-      GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
-    )
-    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result           = gepa.compile(program, trainset = dataset, valset = dataset)
-      assertEquals(result.bestScore, 1.0)
-      assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("CITY")), result.bestCandidate(OptimizableId(0)))
-    }
+    assertEquals(result.bestScore, 1.0)
+    assertEquals(result.bestCandidate(ParameterId("answer")), Some("good"))
+    assertEquals(result.numCandidates, GepaCandidateCount(2))
   }

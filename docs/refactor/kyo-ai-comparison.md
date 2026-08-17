@@ -1,5 +1,8 @@
 # dspy4s vs kyo-ai: feature comparison
 
+> Historical comparison. The dspy4s column describes the design before the functional program cutover. See
+> [Program syntax and interpreters](program-ast-interpreters.md) for the current API.
+
 **Status:** reference (not a plan)
 **Date:** 2026-06-26
 **Subjects:**

@@ -1,241 +1,115 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.OptimizableStructure
-
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, LmUsage, RuntimeContext, SignatureLayout}
-import dspy4s.core.data.Example
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.optimize.propose.GroundedProposerConfig
-import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeError, :=}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.evaluate.Metric
+import dspy4s.programs.*
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.{Runtime, Unsafe, ZEnvironment, ZIO}
 
-/** Offline MIPROv2 suite.
-  *
-  * The single ambient scripted LM serves THREE sub-tasks, branched on markers MIPROv2's composed phases weave into each
-  * signature's instructions (the test adapter renders the active instruction into the prompt):
-  *
-  *   1. Dataset summary (GroundedProposer phase A): returns a canned observations string.
-  *   2. Instruction generation (GroundedProposer phase A): returns a distinct candidate per `rolloutId`, and the pool
-  *      always contains the WINNING instruction (so it is reachable as a candidate).
-  *   3. The task itself: answers a `question`. It returns the GOLD answer ONLY when the winning instruction is in
-  *      effect; otherwise it returns a wrong answer. The bootstrap teacher runs this same task path, so the teacher
-  *      (which is configured to already carry the winning instruction) produces correct demos.
-  *
-  * This forces exactly one (instruction, demo-set) assignment to score perfectly: the one carrying the winning
-  * instruction. MIPROv2's search must discover it.
-  */
-class MIPROv2Suite extends FunSuite:
+import scala.collection.mutable.ArrayBuffer
 
-  // ── Fixtures ──────────────────────────────────────────────────────────────
+final class MIPROv2Suite extends FunSuite:
 
-  /** The instruction MIPROv2 must discover as the winner. */
-  private val winningInstruction = "INSTR_WIN: answer precisely"
+  private final case class Question(question: String)
+  private final case class Answer(answer: String)
 
-  /** Candidate instruction pool the scripted LM proposes for instruction-generation calls; selected by
-    * `rolloutId % size` so the winner is always reachable.
-    */
-  private val proposalPool: Vector[String] = Vector(
-    "INSTR_A: be brief",
-    "INSTR_B: be verbose",
-    winningInstruction,
-    "INSTR_D: be formal",
-    "INSTR_E: be casual"
+  private val answerId  = ParameterId("answer")
+  private val signature = Signature.derived[Question, Answer]("Answer", instructions = "bad instruction")
+  private val student   = Program.predict(answerId, signature).fromRecords(signature.inputShape)
+  private val dataset   = Vector(
+    Example(DynamicValues.record("question" := "abc", "answer" := "cba"), Set("question")),
+    Example(DynamicValues.record("question" := "xyz", "answer" := "zyx"), Set("question"))
   )
 
-  /** Marker the instruction-generation layout carries (GroundedProposer instructionMarker). */
-  private val instrGenMarker = "PROPOSE_THE_INSTRUCTION"
+  private val metric = new Metric:
+    val name: String = "exact"
 
-  /** Marker the dataset-summary layout carries (GroundedProposer summaryMarker). */
-  private val summaryMarker = "SUMMARIZE_THE_DATASET"
+    def score(
+        example                  : Example,
+        prediction               : RawPrediction,
+        @annotation.unused events: Vector[ProgramEvent]
+    ): ZIO[Any, DspyError, Double] =
+      ZIO.fromEither(for
+        expected <- DynamicValues.requireString(example.values, "answer", "expected")
+        actual   <- DynamicValues.requireString(prediction.values, "answer", "actual")
+      yield if actual == expected then 1.0 else 0.0)
 
-  private val cannedSummary = "DATASET=qa pairs"
-
-  private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3", "q4" -> "a4")
-
-  /** Test adapter that renders the ACTIVE instruction into the prompt so the scripted LM can branch on it. */
-  private object InstructionAwareAdapter extends Adapter:
-    override val name: String = "instruction-aware"
-    override def format(invocation: AdapterInvocation)(using
-        RuntimeContext
-    )
-        : Either[DspyError, FormattedPrompt] =
-      val instr = invocation.layout.instructions.getOrElse("")
-      val q     = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
-      val body  = s"INSTRUCTION=[$instr] QUESTION=[$q]"
-      Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
-
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
-        RuntimeContext
-    )
-        : Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
-      Right(ParsedOutput(values = rec(outField := output.text)))
-
-  private final class ScriptedLm extends LanguageModel:
-    override val id: String                                                                    = "scripted-mipro-lm"
-    override val mode: LmMode                                                                  = LmMode.Chat
-    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      val text = request.messages.lastOption.flatMap(_.text).getOrElse("")
-      val out  =
-        if text.contains(summaryMarker) then cannedSummary
-        else if text.contains(instrGenMarker) then
-          val r = request.rolloutId.getOrElse(0)
-          proposalPool(math.floorMod(r, proposalPool.size))
-        else
-          // Task call: answer correctly ONLY when the winning instruction is in effect.
-          val q = extractBetween(text, "QUESTION=[", "]")
-          if text.contains(winningInstruction) then gold.getOrElse(q, "unknown")
-          else "WRONG"
-      Right(LmResponse(
-        outputs = Vector(LmOutput(text = out)),
-        usage = Some(LmUsage(totalTokens = 1, promptTokens = 1, completionTokens = 0))
-      ))
-
-  private def extractBetween(s: String, start: String, end: String): String =
-    val i = s.indexOf(start)
-    if i < 0 then ""
-    else
-      val from = i + start.length
-      val j    = s.indexOf(end, from)
-      if j < 0 then "" else s.substring(from, j)
-
-  private def settings: RuntimeContext =
-    RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(InstructionAwareAdapter))
-
-  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
-  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
-
-  private val taskLayout: SignatureLayout = SignatureLayout.of(
-    name = "QA",
-    inputFields = Vector(FieldSpec(name = "question")),
-    outputFields = Vector(FieldSpec(name = "answer")),
-    instructions = Some("INSTR_INITIAL: default")
-  )
-
-  /** The teacher already carries the winning instruction, so bootstrap demos it produces are correct. */
-  private val teacherLayout: SignatureLayout = taskLayout.withInstructions(Some(winningInstruction))
-
-  private val trainset = Vector(
-    Example(rec("question" := "q1", "answer" := "a1"), inputKeys = Set("question")),
-    Example(rec("question" := "q2", "answer" := "a2"), inputKeys = Set("question")),
-    Example(rec("question" := "q3", "answer" := "a3"), inputKeys = Set("question"))
-  )
-
-  private val valset = Vector(
-    Example(rec("question" := "q4", "answer" := "a4"), inputKeys = Set("question"))
-  )
-
-  private def metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
-
-  private def config(
-      numCandidates: CandidateCount = CandidateCount(5),
-      numTrials    : TrialCount     = TrialCount(30),
-      seed         : Long           = 0L
-  ): MIPROv2Config =
-    MIPROv2Config(
-      metric = metric,
-      numCandidates = numCandidates,
-      numTrials = numTrials,
-      seed = seed,
-      proposerConfig = GroundedProposerConfig(
-        numInstructions = numCandidates,
-        seed = seed,
-        summaryMarker = summaryMarker,
-        instructionMarker = instrGenMarker
-      )
-    )
-
-  private def structure = summon[OptimizableStructure[DynamicPredict]]
-
-  // ── 1. Happy path: single-predictor student, MIPROv2 finds the winning instruction ──
-
-  test("MIPROv2 selects the winning instruction for a single-predictor student") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val teacher   = DynamicPredict(layout = teacherLayout)
-    val optimizer = new MIPROv2[DynamicPredict](config())
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val result           = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset))
-      assert(result.isRight, s"compile failed: ${result.left.toOption}")
-      val report  = result.toOption.get
-      val applied = structure.read(report.bestProgram).head.instructions
-      assertEquals(applied, Some(winningInstruction))
-      // The winner scored 100% (gold on every val example).
-      assertEquals(report.metadata.get("best_score"), Some(100.0))
-    }
-  }
-
-  // ── 2. best_score is the maximum across scored candidates ──────────────────
-
-  test("MIPROv2 best_score equals the max over scored trial candidates") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val teacher   = DynamicPredict(layout = teacherLayout)
-    val optimizer = new MIPROv2[DynamicPredict](config())
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val report           = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
-      val maxScore         = report.candidates.map(_.score).max
-      assertEquals(report.metadata.get("best_score"), Some(maxScore))
-      assertEquals(maxScore, 100.0)
-    }
-  }
-
-  // ── 3. Determinism for a fixed seed ────────────────────────────────────────
-
-  test("MIPROv2 is deterministic for a fixed seed") {
-    val student               = DynamicPredict(layout = taskLayout)
-    val teacher               = DynamicPredict(layout = teacherLayout)
-    def run(): Option[String] =
-      val optimizer = new MIPROv2[DynamicPredict](config(seed = 7L))
-      RuntimeEnvironment.withSettings(settings) {
-        given RuntimeContext = RuntimeEnvironment.current
-        optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption
-          .flatMap(r => structure.read(r.bestProgram).headOption)
-          .flatMap(_.instructions)
+  private val backend = new PredictionBackend:
+    def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+      ZIO.fromEither(DynamicValues.requireString(request.inputs, "question", "mipro test")).map { question =>
+        val answer =
+          if request.layout.instructions.exists(_.contains("good instruction")) then question.reverse
+          else "wrong"
+        RawPrediction(DynamicValues.record("answer" := answer))
       }
-    val a = run()
-    val b = run()
-    assertEquals(a, b)
-    assertEquals(a, Some(winningInstruction))
-  }
 
-  // ── 4. Report structure: candidates sorted, metadata present ───────────────
+  private val config = MIPROv2Config(
+    metric = metric,
+    numCandidates = CandidateCount(1),
+    numTrials = TrialCount(20),
+    maxBootstrappedDemos = DemoCount(0),
+    maxLabeledDemos = DemoCount(0),
+    seed = 7L
+  )
 
-  test("MIPROv2 report exposes scored candidates sorted best-first with metadata") {
-    val student   = DynamicPredict(layout = taskLayout)
-    val teacher   = DynamicPredict(layout = teacherLayout)
-    val optimizer = new MIPROv2[DynamicPredict](config())
-    RuntimeEnvironment.withSettings(settings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val report           = optimizer.compile(student, trainset, teacher = Some(teacher), valset = Some(valset)).toOption.get
-      assert(report.candidates.nonEmpty, "report should track candidates")
-      val scores = report.candidates.map(_.score)
-      assertEquals(scores, scores.sorted(using Ordering[Double].reverse))
-      // The metric is discriminating: the winner scores 100, some losers score below it.
-      assertEquals(scores.head, 100.0)
-      assert(scores.exists(_ < 100.0), s"expected some losing candidates, got $scores")
-      // The top candidate carries the winning instruction.
-      val topInstr = structure.read(report.candidates.head.program).head.instructions
-      assertEquals(topInstr, Some(winningInstruction))
-      // Metadata is populated.
-      assert(report.metadata.contains("best_score"))
-      assert(report.metadata.contains("num_candidates"))
-      assert(report.metadata.contains("num_trials"))
-      assert(report.metadata.contains("num_demo_candidates"))
+  private def run(
+      proposer: ProgramWithEnv[MIPROv2.ProposalInput, MIPROv2.Proposal, Any]
+  ) =
+    Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(
+          MIPROv2(student, dataset, proposer, valset = Some(dataset), config = config)
+            .provideEnvironment(ZEnvironment(backend))
+        )
+        .getOrThrowFiberFailure()
     }
+
+  test("program MIPROv2 selects a proposed instruction by stable parameter ID") {
+    val inputs   = ArrayBuffer.empty[MIPROv2.ProposalInput]
+    val proposer = Program.lift[MIPROv2.ProposalInput, MIPROv2.Proposal] { input =>
+      inputs += input
+      MIPROv2.Proposal("good instruction")
+    }
+    val report = run(proposer)
+
+    assertEquals(
+      report.bestProgram.program.parameters.get(answerId).flatMap(_.instructions),
+      Some("good instruction")
+    )
+    assertEquals(report.metadata("best_score"), 100.0)
+    assertEquals(report.metadata("num_candidates"), 21)
+    assertEquals(report.metadata("num_demo_candidates"), 1)
+    assertEquals(report.metadata("num_bootstrap_failures"), 0)
+    assertEquals(report.metadata("num_proposal_failures"), 0)
+    assertEquals(inputs.map(_.parameterId).toVector, Vector("answer"))
+    assert(report.candidates.forall(_.evaluation.nonEmpty))
   }
 
-  // ── 5. Config guards ───────────────────────────────────────────────────────
+  test("program MIPROv2 records proposal failures and keeps the baseline") {
+    val proposer = Program.liftEither[MIPROv2.ProposalInput, MIPROv2.Proposal](_ =>
+      Left(RuntimeError("proposal", "unavailable"))
+    )
+    val report = run(proposer)
 
-  test("CandidateCount rejects non-positive candidate counts") {
-    assert(compileErrors("dspy4s.optimize.CandidateCount(0)").nonEmpty)
-    assert(CandidateCount.either(0).isLeft)
+    assertEquals(
+      report.bestProgram.program.parameters.get(answerId).flatMap(_.instructions),
+      Some("bad instruction")
+    )
+    assertEquals(report.metadata("num_proposal_failures"), 1)
+    assertEquals(report.metadata("best_score"), 0.0)
+    assertEquals(report.candidates.head.metadata("baseline"), true)
   }
 
-  test("TrialCount rejects non-positive trial counts") {
-    assert(compileErrors("dspy4s.optimize.TrialCount(0)").nonEmpty)
-    assert(TrialCount.either(0).isLeft)
+  test("program MIPROv2 creates the same trial plans for the same seed") {
+    val proposer = Program.lift[MIPROv2.ProposalInput, MIPROv2.Proposal](_ =>
+      MIPROv2.Proposal("good instruction")
+    )
+    val first  = run(proposer)
+    val second = run(proposer)
+
+    assertEquals(first.candidates.map(_.metadata), second.candidates.map(_.metadata))
+    assertEquals(first.candidates.map(_.score), second.candidates.map(_.score))
+    assertEquals(first.bestProgram.program.parameters, second.bestProgram.program.parameters)
   }

@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.ParameterId
 import munit.FunSuite
 
 class GepaLimitsSuite extends FunSuite:
@@ -22,7 +22,7 @@ class GepaLimitsSuite extends FunSuite:
     assert(MergeSubsampleSize.either(0).isLeft)
     assert(GepaCandidateCount.either(0).isLeft)
     assert(CandidatePool.either(Vector.empty).isLeft)
-    val candidate = Map(OptimizableId(0) -> Some("instruction"))
+    val candidate = Map(ParameterId("p0") -> Some("instruction"))
     assertEquals(CandidatePool.either(Vector(candidate)).map(_.toVector), Right(Vector(candidate)))
   }
 

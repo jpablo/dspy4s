@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.ParameterId
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
@@ -29,7 +29,7 @@ object GepaStatePersistence:
   val fileName: String = "gepa_state.json"
 
   def toJson(state: GepaState): String =
-    val candidates = state.candidates.map(_.iterator.map { case (id, instruction) => id.render -> instruction }.toMap)
+    val candidates = state.candidates.map(_.iterator.map { case (id, instruction) => id.value -> instruction }.toMap)
     new String(
       codec.encode(Snapshot(candidates, state.valSubscores, state.parents, state.totalMetricCalls)),
       StandardCharsets.UTF_8
@@ -45,7 +45,7 @@ object GepaStatePersistence:
           candidate <- raw.foldLeft[Either[String, Candidate]](Right(Map.empty)) { case (candidateAcc, (key, value)) =>
                          for
                            candidate <- candidateAcc
-                           id        <- OptimizableId.parse(key)
+                           id        <- ParameterId.either(key).left.map(_.message)
                          yield candidate.updated(id, value)
                        }
         yield parsed :+ candidate

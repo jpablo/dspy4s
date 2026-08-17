@@ -2,11 +2,9 @@ package dspy4s.optimize
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.optimize.contracts.CandidateProgram
-import dspy4s.optimize.contracts.OptimizationReport
-import dspy4s.optimize.contracts.Teleprompter
-import dspy4s.programs.plan.ProgramParameters
+import dspy4s.optimize.contracts.{CandidateProgram, OptimizationReport}
+import dspy4s.programs.RecordProgramWithEnv
+import zio.{IO, ZIO}
 
 final case class LabeledFewShotConfig(
     k     : DemoCount = DemoCount(16),
@@ -14,44 +12,37 @@ final case class LabeledFewShotConfig(
     seed  : Long      = 0L
 )
 
-final class LabeledFewShot[P: ProgramParameters](
-    config: LabeledFewShotConfig = LabeledFewShotConfig()
-) extends Teleprompter[P]:
+/** Add labeled demonstrations to every parameter slot without running the program. */
+object LabeledFewShot:
 
-  override val name: String = "labeled_few_shot"
-
-  override def compile(
-      student : P,
+  def apply[I, O, R](
+      student : RecordProgramWithEnv[I, O, R],
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val parameters = ProgramParameters[P]
-
-    val demos: Vector[Example] =
+      config  : LabeledFewShotConfig = LabeledFewShotConfig()
+  ): IO[DspyError, OptimizationReport[RecordProgramWithEnv[I, O, R]]] =
+    val demos =
       if trainset.isEmpty then Vector.empty
       else if !config.sample then Vector.from(trainset.take(config.k))
       else
-        val rng = new scala.util.Random(config.seed)
-        Vector.from(rng.shuffle(trainset).take(config.k))
+        val random = new scala.util.Random(config.seed)
+        Vector.from(random.shuffle(trainset).take(config.k))
 
-    val updated = parameters.read(student).all.map { binding =>
+    val replacements = student.program.parameters.all.map { binding =>
       binding.id -> binding.value.copy(demos = demos)
     }.toMap
-    parameters.replace(student, updated).map { compiled =>
+
+    ZIO.fromEither(student.replaceParameters(replacements)).map { compiled =>
       OptimizationReport(
         bestProgram = compiled,
-        candidates = Vector(
-          CandidateProgram(
-            program = compiled,
-            score = 0.0,
-            metadata = Map(
-              "optimizer"     -> name,
-              "num_demos"     -> demos.size,
-              "trainset_size" -> trainset.size
-            )
+        candidates = Vector(CandidateProgram(
+          program = compiled,
+          score = 0.0,
+          metadata = Map(
+            "optimizer"     -> "labeled_few_shot",
+            "num_demos"     -> demos.size,
+            "trainset_size" -> trainset.size
           )
-        ),
+        )),
         metadata = Map(
           "k"      -> config.k,
           "sample" -> config.sample,

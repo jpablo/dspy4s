@@ -1,210 +1,78 @@
 package dspy4s.evaluate
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.ErrorLimit
-import dspy4s.core.data.Example
-import dspy4s.core.data.RawPrediction
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.ThreadCount
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.evaluate.contracts.EvaluationResult
-import dspy4s.evaluate.contracts.Evaluator
-import dspy4s.evaluate.contracts.ExampleEvaluation
-import dspy4s.evaluate.contracts.Metric
-import dspy4s.programs.runtime.ParallelExecutor
-import zio.blocks.schema.DynamicValue
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.evaluate.contracts.{EvaluationResult, ExampleEvaluation}
+import dspy4s.programs.{PredictionBackend, ProgramEvent, ProgramRunner, RecordProgramWithEnv}
+import zio.{URIO, ZIO}
 
-import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.duration.DurationInt
+/** Effectful metric over a prediction and its explicit interpreter events. */
+trait Metric:
+  def name: String
+  def score(
+      example   : Example,
+      prediction: RawPrediction,
+      events    : Vector[ProgramEvent]
+  ): ZIO[PredictionBackend, DspyError, Double]
 
-final case class EvaluateConfig(
-    devset          : Vector[Example],
-    metric          : Metric,
-    numThreads      : Option[ThreadCount]  = None,
-    maxErrors       : Option[ErrorLimit]   = None,
-    failureScore    : Double               = 0.0,
-    displayProgress : Boolean              = false,
-    displayTable    : Either[Boolean, Int] = Left(false),
-    saveAsCsv       : Option[String]       = None,
-    saveAsJson      : Option[String]       = None,
-    provideTraceback: Boolean              = false,
-    timeout         : FiniteDuration       = 120.seconds,
-    /** Metadata carried into the evaluation scope's [[RuntimeContext.callbackMetadata]], so callbacks firing during the
-      * run can read it (Python's `Evaluate(callback_metadata=…)`). Empty default → scope unchanged.
-      */
-    callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
-)
+final case class EvaluateOptions(
+    parallelism  : Int     = 8,
+    failureScore : Double  = 0.0,
+    includeErrors: Boolean = false
+):
+  require(parallelism > 0, "Evaluate parallelism must be positive")
 
-final class Evaluate(config: EvaluateConfig) extends Evaluator:
-
-  def apply(
-      metric          : Option[Metric]              = None,
-      devset          : Option[Vector[Example]]     = None,
-      numThreads      : Option[ThreadCount]         = None,
-      maxErrors       : Option[ErrorLimit]          = None,
-      failureScore    : Option[Double]              = None,
-      saveAsCsv       : Option[String]              = None,
-      saveAsJson      : Option[String]              = None,
-      callbackMetadata: Option[DynamicValue.Record] = None
-  )(program: Example => Either[DspyError, RawPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
-    val mergedConfig = EvaluateConfig(
-      devset = devset.getOrElse(config.devset),
-      metric = metric.getOrElse(config.metric),
-      numThreads = numThreads.orElse(config.numThreads),
-      maxErrors = maxErrors.orElse(config.maxErrors),
-      failureScore = failureScore.getOrElse(config.failureScore),
-      displayProgress = config.displayProgress,
-      displayTable = config.displayTable,
-      saveAsCsv = saveAsCsv.orElse(config.saveAsCsv),
-      saveAsJson = saveAsJson.orElse(config.saveAsJson),
-      provideTraceback = config.provideTraceback,
-      timeout = config.timeout,
-      callbackMetadata = callbackMetadata.getOrElse(config.callbackMetadata)
-    )
-    applyInternal(program, mergedConfig)
-
-  private def applyInternal(
-      fn : Example => Either[DspyError, RawPrediction],
-      cfg: EvaluateConfig
-  )(using RuntimeContext): Either[DspyError, EvaluationResult] =
-    val dataset = cfg.devset
-    val metric  = cfg.metric
-
-    if dataset.isEmpty then
-      return Right(
-        EvaluationResult(score = 0.0, results = Vector.empty, metricName = metric.name)
-      )
-
-    // Carry the configured callbackMetadata into the evaluation scope so callbacks firing during the run can read
-    // it (Python's `Evaluate(callback_metadata=…)`). Empty metadata leaves the ambient context untouched.
-    val baseCtx = summon[RuntimeContext]
-    val evalCtx =
-      if cfg.callbackMetadata.fields.isEmpty then baseCtx
-      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
-
-    val execResultE = RuntimeEnvironment.withContext(evalCtx) {
-      val executor = buildExecutor(cfg)(using evalCtx)
-      executor.executeEither[Example, (RawPrediction, Double)](
-        task = (ex: Example) =>
-          // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
-          // there, so `RuntimeEnvironment.current` is the right `RuntimeContext` to hand the metric (so
-          // LM-judged metrics can reach the LM).
-          given RuntimeContext = RuntimeEnvironment.current
-          fn(ex).flatMap { prediction =>
-            metric.score(ex, prediction).map(score => (prediction, score))
-          }
-        ,
-        data = dataset
-      )
-    }
-
-    execResultE.flatMap { execResult =>
-      val evaluations = dataset.indices.map { idx =>
-        execResult.results(idx) match
-          case Some((prediction, score)) => ExampleEvaluation(dataset(idx), prediction, score)
-          case None                      =>
-            val capturedError =
-              if cfg.provideTraceback then
-                execResult.errors.get(idx).map(err => s"[${err.code}] ${err.message}")
-              else None
-            ExampleEvaluation(dataset(idx), RawPrediction.empty, cfg.failureScore, error = capturedError)
-      }.toVector
-
-      val totalScore = evaluations.map(_.score).sum
-      val aggregate  = if evaluations.nonEmpty then (totalScore / evaluations.size) * 100.0 else 0.0
-      val result     = EvaluationResult(
-        score = aggregate,
-        results = evaluations,
-        metricName = metric.name,
-        metadata = Map(
-          "num_threads" -> cfg.numThreads.getOrElse("default"),
-          "max_errors"  -> cfg.maxErrors.getOrElse("default"),
-          "devset_size" -> dataset.size
-        )
-      )
-
-      def persistenceError(kind: String, message: String): DspyError =
-        RuntimeError("evaluation_persistence", s"Failed to save $kind results: $message")
-
-      val persisted = cfg.saveAsJson
-        .fold[Either[DspyError, Unit]](Right(()))(path =>
-          EvaluationResultPersistence.saveAsJson(result, path).left.map(persistenceError("JSON", _))
-        )
-        .flatMap { _ =>
-          cfg.saveAsCsv.fold[Either[DspyError, Unit]](Right(()))(path =>
-            EvaluationResultPersistence.saveAsCsv(result, path).left.map(persistenceError("CSV", _))
-          )
-        }
-
-      persisted.map { _ =>
-        if cfg.displayProgress then
-          println(f"[Evaluate] score=${aggregate}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")
-
-        tableLimit(cfg.displayTable).foreach(limit => println(result.renderTable(limit)))
-
-        result
-      }
-    }
-
-  override def evaluate(
-      predict: Example => Either[DspyError, RawPrediction],
-      dataset: Vector[Example],
-      metric : Metric
-  )(using RuntimeContext): Either[DspyError, EvaluationResult] =
-    applyInternal(
-      predict,
-      config.copy(devset = dataset, metric = metric)
-    )
-
-  /** Resolves the `displayTable` config into an optional row limit to pass to `renderTable`.
-    *   - `Left(false)` -> `None` (no table)
-    *   - `Left(true)` -> `Some(None)` (render all rows)
-    *   - `Right(n)` -> `Some(Some(n))` (render at most n rows)
-    */
-  private def tableLimit(spec: Either[Boolean, Int]): Option[Option[Int]] =
-    spec match
-      case Left(false) => None
-      case Left(true)  => Some(None)
-      case Right(n)    => Some(Some(n))
-
-  private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
-    val ctx                = summon[RuntimeContext]
-    val resolvedNumThreads = cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8)))
-    val resolvedMaxErrors  = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10)))
-    ParallelExecutor(
-      numThreads = resolvedNumThreads,
-      maxErrors = resolvedMaxErrors,
-      timeout = cfg.timeout
-    )
-
+/** Stateless evaluator for a functional record program. Program and metric failures become per-example results. */
 object Evaluate:
-  def apply(
-      devset          : Vector[Example],
-      metric          : Metric,
-      numThreads      : Option[ThreadCount] = None,
-      maxErrors       : Option[ErrorLimit]  = None,
-      failureScore    : Double              = 0.0,
-      displayProgress : Boolean             = false,
-      displayTable    : Int                 = 0,
-      saveAsCsv       : Option[String]      = None,
-      saveAsJson      : Option[String]      = None,
-      timeout         : FiniteDuration      = 120.seconds,
-      callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
-  ): Evaluate =
-    val displaySpec: Either[Boolean, Int] = if displayTable > 0 then Right(displayTable) else Left(false)
-    new Evaluate(
-      EvaluateConfig(
-        devset = devset,
-        metric = metric,
-        numThreads = numThreads,
-        maxErrors = maxErrors,
-        failureScore = failureScore,
-        displayProgress = displayProgress,
-        displayTable = displaySpec,
-        saveAsCsv = saveAsCsv,
-        saveAsJson = saveAsJson,
-        timeout = timeout,
-        callbackMetadata = callbackMetadata
-      )
+
+  def apply[I, O, R](
+      program: RecordProgramWithEnv[I, O, R],
+      dataset: Vector[Example],
+      metric : Metric,
+      options: EvaluateOptions = EvaluateOptions()
+  ): URIO[R & PredictionBackend, EvaluationResult] =
+    ZIO
+      .foreachPar(dataset)(example => evaluateOne(program, example, metric, options))
+      .withParallelism(options.parallelism)
+      .map { evaluations =>
+        val aggregate =
+          if evaluations.isEmpty then 0.0
+          else evaluations.iterator.map(_.score).sum / evaluations.size * 100.0
+        EvaluationResult(
+          score = aggregate,
+          results = evaluations,
+          metricName = metric.name,
+          metadata = Map(
+            "parallelism" -> options.parallelism,
+            "devset_size" -> dataset.size
+          )
+        )
+      }
+
+  private def evaluateOne[I, O, R](
+      program: RecordProgramWithEnv[I, O, R],
+      example: Example,
+      metric : Metric,
+      options: EvaluateOptions
+  ): URIO[R & PredictionBackend, ExampleEvaluation] =
+    ProgramRunner.runRecordJournaled(program, example.inputs).flatMap { execution =>
+      execution.outcome match
+        case Left(error)       => ZIO.succeed(failed(example, RawPrediction.empty, error, options))
+        case Right(prediction) => metric.score(example, prediction.raw, execution.events).either.map {
+            case Left(error)  => failed(example, prediction.raw, error, options)
+            case Right(score) => ExampleEvaluation(example, prediction.raw, score)
+          }
+    }
+
+  private def failed(
+      example   : Example,
+      prediction: RawPrediction,
+      error     : DspyError,
+      options   : EvaluateOptions
+  ): ExampleEvaluation =
+    ExampleEvaluation(
+      example,
+      prediction,
+      options.failureScore,
+      if options.includeErrors then Some(s"[${error.code}] ${error.message}") else None
     )

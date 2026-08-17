@@ -1,5 +1,8 @@
 # dspy4s algebras (algebra-driven design notes)
 
+> Historical record. Sections that describe `Module`, `OptimizableStructure`, or ambient runtime state predate the
+> functional cutover. See [Program syntax and interpreters](program-ast-interpreters.md) for the current design.
+
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
 algebra 2 (program composition) is specified and fully implemented (steps 6.1–6.5 landed: `bestOf`, the
 `id`/`>>>`/`fanout` combinators, the `AgentLoop` / `TrajectoryAgent` / `InterpretedTrajectoryAgent` iteration

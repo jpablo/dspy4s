@@ -1,26 +1,8 @@
 package dspy4s.evaluate.contracts
 
-import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.data.RawPrediction
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.TraceEntry
-
-object Evaluator:
-  type PredictFn = Example => Either[DspyError, RawPrediction]
-
-trait Metric:
-  def name: String
-
-  /** Score a single prediction against its example. `trace` is the program's per-call trace (empty during evaluation;
-    * non-empty during bootstrapping, mirroring Python's `trace is None` branch). The ambient [[RuntimeContext]] lets
-    * LM-judged metrics (e.g. `SemanticF1`) invoke a language model during scoring; builtin string-comparison metrics
-    * ignore it.
-    */
-  def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry] = Vector.empty)(using
-      RuntimeContext
-  ): Either[DspyError, Double]
 
 /** A single per-example evaluation outcome. `error` carries the captured failure message when the program (or metric)
   * failed on this example and traceback capture was enabled; it is `None` on success or when traceback capture is
@@ -81,10 +63,3 @@ final case class EvaluationResult(
 
     val lines = renderRow(headers) +: separator +: dataRows.map(renderRow)
     lines.mkString("", "\n", "\n")
-
-trait Evaluator:
-  def evaluate(
-      predict: Evaluator.PredictFn,
-      dataset: Vector[Example],
-      metric : Metric
-  )(using RuntimeContext): Either[DspyError, EvaluationResult]

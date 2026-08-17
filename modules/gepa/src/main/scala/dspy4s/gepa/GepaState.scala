@@ -1,6 +1,6 @@
 package dspy4s.gepa
 
-import dspy4s.programs.optimization.OptimizableId
+import dspy4s.programs.ParameterId
 
 import scala.util.Random
 
@@ -107,14 +107,14 @@ object CandidateSelector:
   * update and the next pointer.
   */
 trait ComponentSelector:
-  def select(components: Vector[OptimizableId], pointer: Int): (Vector[OptimizableId], Int)
+  def select(components: Vector[ParameterId], pointer: Int): (Vector[ParameterId], Int)
 
 object ComponentSelector:
   /** Update ONE component per iteration, cycling through them (gepa's default). Cheaper in reflection-LM calls and lets
     * each component's instruction settle independently; needs components that improve independently.
     */
   object RoundRobin extends ComponentSelector:
-    def select(components: Vector[OptimizableId], pointer: Int): (Vector[OptimizableId], Int) =
+    def select(components: Vector[ParameterId], pointer: Int): (Vector[ParameterId], Int) =
       if components.isEmpty then (Vector.empty, pointer)
       else
         val i = pointer % components.size
@@ -124,4 +124,4 @@ object ComponentSelector:
     * accepted mutation (where round-robin would stall).
     */
   object All extends ComponentSelector:
-    def select(components: Vector[OptimizableId], pointer: Int): (Vector[OptimizableId], Int) = (components, pointer)
+    def select(components: Vector[ParameterId], pointer: Int): (Vector[ParameterId], Int) = (components, pointer)

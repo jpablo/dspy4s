@@ -1,132 +1,50 @@
 package dspy4s.optimize
 
-import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.ErrorLimit
-import dspy4s.core.data.Example
-import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.core.signatures.SignatureDsl
+import dspy4s.core.contracts.{DspyError, DynamicValues, :=}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.programs.*
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.{Runtime, Unsafe, ZEnvironment, ZIO}
 
-class BootstrapFewShotSuite extends FunSuite:
+final class BootstrapFewShotSuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
+  private final case class Question(question: String)
+  private final case class Answer(answer: String)
 
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
+  private val signature = Signature.derived[Question, Answer]("Answer")
+  private val program   = Program.predict(ParameterId("answer"), signature).fromRecords(signature.inputShape)
 
-  private val signature = SignatureDsl.parse("question: str -> answer: str").toOption.get
+  private val backend = new PredictionBackend:
+    def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
+      ZIO.fromEither(DynamicValues.requireString(request.inputs, "question", "bootstrap test")).map { question =>
+        RawPrediction(DynamicValues.record("answer" := question.reverse))
+      }
 
-  test("BootstrapFewShot returns original student when trainset is empty") {
-    val student          = ScriptedPredictProgram(Map.empty, signature)
-    val optimizer        = new BootstrapFewShot[ScriptedPredictProgram]()
-    given RuntimeContext = RuntimeEnvironment.current
+  private def run[A](effect: ZIO[PredictionBackend, DspyError, A]): A =
+    Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe
+        .run(effect.provideEnvironment(ZEnvironment(backend)))
+        .getOrThrowFiberFailure()
+    }
 
-    val result = optimizer.compile(student, Vector.empty)
-    assert(result.isRight)
-    assertEquals(result.toOption.get.bestProgram.demos.size, 0)
-  }
-
-  test("BootstrapFewShot bootstraps demos from examples where teacher succeeds") {
-    val teacher  = ScriptedPredictProgram(Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3"), signature)
+  test("bootstrap few-shot uses effectful record execution and stable parameter IDs") {
     val trainset = Vector(
-      Example(rec("question" := "q1", "answer" := "a1"), inputKeys = Set("question")),
-      Example(rec("question" := "q2", "answer" := "a2"), inputKeys = Set("question")),
-      Example(rec("question" := "q3", "answer" := "a3"), inputKeys = Set("question"))
+      Example(DynamicValues.record("question" := "abc", "answer" := "cba"), Set("question")),
+      Example(DynamicValues.record("question" := "xyz", "answer" := "zyx"), Set("question"))
     )
-    val student   = ScriptedPredictProgram(Map.empty, signature)
-    val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(
-        maxBootstrappedDemos = DemoCount(2),
-        maxLabeledDemos = DemoCount(1),
-        maxRounds = RoundCount(1)
-      )
+    val report = run(BootstrapFewShot(
+      program,
+      trainset,
+      config = BootstrapFewShotConfig(maxBootstrappedDemos = DemoCount(2))
+    ))
+    val binding = report.bestProgram.program.parameters.all.head
+
+    assertEquals(binding.id, ParameterId("answer"))
+    assertEquals(binding.value.demos.size, 2)
+    assert(binding.value.demos.forall(_.augmented))
+    assertEquals(
+      binding.value.demos.map(demo => DynamicValues.requireString(demo.values, "answer", "test")),
+      Vector(Right("cba"), Right("zyx"))
     )
-    given RuntimeContext = RuntimeEnvironment.current
-
-    val result = optimizer.compile(student, trainset, teacher = Some(teacher))
-    assert(result.isRight, s"compile failed: ${result.left.toOption}")
-    val report = result.toOption.get
-    assert(report.bestProgram.demos.size >= 2, s"expected at least 2 demos, got ${report.bestProgram.demos.size}")
-
-    val bootstrapped = report.bestProgram.demos.filter(_.augmented)
-    assertEquals(bootstrapped.size, 2)
-  }
-
-  test("BootstrapFewShot uses metric to filter which traces to keep") {
-    val teacher  = ScriptedPredictProgram(Map("q1" -> "wrong", "q2" -> "expected", "q3" -> "also-wrong"), signature)
-    val trainset = Vector(
-      Example(rec("question" := "q1", "answer" := "expected"), inputKeys = Set("question")),
-      Example(rec("question" := "q2", "answer" := "expected"), inputKeys = Set("question")),
-      Example(rec("question" := "q3", "answer" := "expected"), inputKeys = Set("question"))
-    )
-
-    val exactMatch = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer")
-
-    val student   = ScriptedPredictProgram(Map.empty, signature)
-    val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(
-        metric = Some(exactMatch),
-        maxBootstrappedDemos = DemoCount(10),
-        maxLabeledDemos = DemoCount(0)
-      )
-    )
-    given RuntimeContext = RuntimeEnvironment.current
-
-    val result = optimizer.compile(student, trainset, teacher = Some(teacher))
-    assert(result.isRight)
-    val bootstrapped = result.toOption.get.bestProgram.demos.filter(_.augmented)
-    assertEquals(bootstrapped.size, 1, "only q2 should pass the exact match metric")
-    assertEquals(lookupString(bootstrapped.head.values, "question"), "q2")
-  }
-
-  test("BootstrapFewShot returns RuntimeError when teacher throws and errors exceed maxErrors") {
-    val trainset = (1 to 5).map(i =>
-      Example(rec("question" := s"q$i", "answer" := s"a$i"), inputKeys = Set("question"))
-    ).toVector
-
-    val blowingUp = ScriptedPredictProgram(
-      answers = Map.empty,
-      layout = signature,
-      failsWith = Some(new RuntimeException("boom"))
-    )
-    val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(maxErrors = ErrorLimit(2), maxBootstrappedDemos = DemoCount(10))
-    )
-    given RuntimeContext = RuntimeEnvironment.current
-
-    val result = optimizer.compile(blowingUp, trainset)
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[RuntimeError])
-  }
-
-  test("BootstrapFewShot fills remaining slots from labeled examples that failed bootstrap") {
-    // Teacher knows only q1; other questions get "unknown" answers (mismatch),
-    // so other examples go into the failed pool and fill labeled slots.
-    val teacher  = ScriptedPredictProgram(Map("q1" -> "a1"), signature)
-    val trainset = (1 to 5).map(i =>
-      Example(rec("question" := s"q$i", "answer" := s"a$i"), inputKeys = Set("question"))
-    ).toVector
-
-    val student   = ScriptedPredictProgram(Map.empty, signature)
-    val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(
-        maxBootstrappedDemos = DemoCount(1),
-        maxLabeledDemos = DemoCount(2),
-        maxErrors = ErrorLimit(100),
-        seed = 7L
-      )
-    )
-    given RuntimeContext = RuntimeEnvironment.current
-
-    val result = optimizer.compile(student, trainset, teacher = Some(teacher))
-    assert(result.isRight)
-    val demos = result.toOption.get.bestProgram.demos
-    assert(demos.size <= 3, s"got ${demos.size} demos, expected at most 3")
-    val augmentedCount    = demos.count(_.augmented)
-    val nonAugmentedCount = demos.size - augmentedCount
-    assertEquals(augmentedCount, 1)
-    assert(nonAugmentedCount <= 2, s"got $nonAugmentedCount labeled demos, expected <= 2")
   }

@@ -1,23 +1,17 @@
 package dspy4s.gepa
 
-import dspy4s.core.data.RawPrediction
-import dspy4s.core.data.Example
-import dspy4s.core.contracts.TraceEntry
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.programs.ProgramEvent
 
-/** One example's captured trajectory — the unit GEPA reflects on: the program's per-predictor [[TraceEntry]] trace
-  * (including failure entries via G-12 P-a) plus the score it earned. The reflective-dataset builder reads these.
-  */
+/** One example execution retained for reflective feedback. */
 final case class Trajectory(
     example   : Example,
     prediction: RawPrediction,
-    trace     : Vector[TraceEntry],
+    events    : Vector[ProgramEvent],
     score     : Double
 )
 
-/** Result of evaluating a candidate over a batch (the analogue of gepa's `EvaluationBatch`). `trajectories` is `Some`
-  * iff traces were captured (the reflective path) and `None` on the scores-only fast path. `outputs`, `scores`, and
-  * (when present) `trajectories` are all aligned with the input batch order.
-  */
+/** Candidate evaluation results aligned with the input batch. */
 final case class EvaluationBatch(
     outputs     : Vector[RawPrediction],
     scores      : Vector[Double],

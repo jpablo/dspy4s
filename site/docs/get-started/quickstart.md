@@ -1,50 +1,22 @@
 # Quickstart
 
-This walks through declaring a signature, building a program, and running it
-end to end. Every Scala block below is pulled directly from
-[`Signatures.scala`](https://github.com/jpablo/dspy4s/blob/main/modules/examples/src/main/scala/dspy4s/examples/learn/programming/Signatures.scala)
-in the examples module, so it compiles under the project's strict flags.
-
-## 1. Declare a signature and a program
-
-A **signature** declares inputs and outputs. A **program** (here
-`Predict`) runs it against a language model. This one classifies sentiment:
+Declare ordinary Scala input and output types, derive a signature, and build a program value:
 
 ```scala
---8<-- "learn/programming/Signatures.scala:sentiment"
+import dspy4s.programs.{ParameterId, Program, ProgramRunner}
+import dspy4s.signatures.Signature
+
+final case class Question(question: String)
+final case class Answer(answer: String)
+
+val signature = Signature.derived[Question, Answer]("Answer", "Answer briefly.")
+val answer     = Program.predict(ParameterId("answer"), signature)
+val text       = answer >>> Program.lift[Answer, String](_.answer)
+
+val effect = ProgramRunner.run(text, Question("What is a typed program?"))
 ```
 
-Because the input and output are named tuples, `sentence` and `sentiment` are
-real fields. A typo is a compile error, and `_.output.sentiment` is a
-`Boolean`, not a string lookup.
+`effect` requires a `PredictionBackend`. Provide a live backend or a test backend through ZIO. The program does not
+look up a global model.
 
-## 2. Wire up a runtime and run it
-
-A program needs a `RuntimeContext` carrying a live LM and an adapter. This is a
-complete, runnable program (it reads `OPENAI_API_KEY` from the environment):
-
-```scala
---8<-- "learn/programming/Signatures.scala:run"
-```
-
-Run it with:
-
-```bash
-OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.main"
-```
-
-## 3. Add reasoning with ChainOfThought
-
-Swapping `Predict` for `ChainOfThought` prepends `reasoning: String` to
-the output, with no signature changes required:
-
-```scala
---8<-- "learn/programming/Signatures.scala:summarize"
-```
-
-## Where to next
-
-- [Signatures](../programs/signatures.md): the full set of ways to declare
-  inputs and outputs (inline, traits, enums, custom types).
-- [How it fits together](overview.md): the mental model behind signatures,
-  modules, programs, and optimizers.
+See the runnable offline [FunctionalQuickstart.scala](https://github.com/jpablo/dspy4s/blob/main/modules/examples/src/main/scala/dspy4s/examples/FunctionalQuickstart.scala).

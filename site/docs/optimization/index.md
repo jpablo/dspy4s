@@ -1,43 +1,8 @@
 # Optimization
 
-Optimization improves a program without changing its code. You give an optimizer
-a program, a set of [`Example`s](../evaluation/examples-and-data.md), and a
-[metric](../evaluation/metrics.md), and it searches for better few-shot
-demonstrations and instructions, then hands back a new program with the same
-type.
+Optimizers return new program values. They edit `OptimizableParameters` through stable `ParameterId` keys.
 
-## The common shape
+The module includes labeled few-shot, bootstrap few-shot, bootstrap random search, KNN few-shot, COPRO, MIPROv2, and
+InferRules. GEPA is in its own module and uses a feedback metric plus a visible reflection program.
 
-Every optimizer follows the same pattern: construct it with its configuration,
-then call `compile`. The result is an `OptimizationReport` whose `bestProgram`
-is the improved program:
-
-```scala
---8<-- "learn/optimization/Optimizers.scala:optimize-bootstrap"
-```
-
-Optimizers are generic over the program type. `OptimizableStructure[P]` exposes each leaf's
-writable `OptimizableParameters`, while `ProgramRunner[P]` executes either domain-valued programs or
-the record-valued `DynamicModule` spine. The returned program can be
-[saved and loaded](../runtime/saving-and-loading.md), so optimization runs once
-and the result ships with your application.
-
-## The optimizers
-
-dspy4s groups them by what they tune:
-
-| Optimizer | Tunes | Page |
-|---|---|---|
-| `LabeledFewShot` | Demonstrations (no model calls) | [Few-shot](few-shot.md) |
-| `BootstrapFewShot` | Demonstrations (self-generated) | [Few-shot](few-shot.md) |
-| `BootstrapFewShotWithRandomSearch` | Demonstrations (searched) | [Few-shot](few-shot.md) |
-| `KNNFewShot` | Demonstrations (nearest-neighbor) | [Few-shot](few-shot.md) |
-| `COPRO` | Instructions | [Instructions](instructions.md) |
-| `MIPROv2` | Instructions and demonstrations | [Instructions](instructions.md) |
-| `GEPA` | Instructions (reflective) | [Instructions](instructions.md) |
-| `Ensemble` | Combines several programs | below |
-
-`Ensemble` is the odd one out: instead of tuning one program, it combines
-several into one by majority vote or a custom reduce function.
-
-Next: [Few-shot demonstrations](few-shot.md).
+`ProgramPersistence` stores only ID-keyed optimizer state. It does not serialize executable syntax or services.
