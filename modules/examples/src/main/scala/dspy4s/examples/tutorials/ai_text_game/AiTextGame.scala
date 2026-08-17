@@ -15,7 +15,7 @@ package dspy4s.examples.tutorials.ai_text_game
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend}
+import dspy4s.programs.{ChainOfThought, PredictionBackend}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 2 — the three generation signatures (top-level traits for Mirror derivation) ──
@@ -85,9 +85,9 @@ object AiTextGame:
   // |     self.action_resolver = dspy.ChainOfThought(ActionResolver)
   final class GameAI:
     // --8<-- [start:module]
-    private val storyGen       = ChainOfThought(ParameterId("game/story"), Signature.of[StoryGenerator])
-    private val dialogueGen    = ChainOfThought(ParameterId("game/dialogue"), Signature.of[DialogueGenerator])
-    private val actionResolver = ChainOfThought(ParameterId("game/action"), Signature.of[ActionResolver])
+    private val storyGen       = ChainOfThought(Signature.of[StoryGenerator])
+    private val dialogueGen    = ChainOfThought(Signature.of[DialogueGenerator])
+    private val actionResolver = ChainOfThought(Signature.of[ActionResolver])
     // --8<-- [end:module]
 
     /** NPC personality lookup Python builds inline in `handle_dialogue`. */

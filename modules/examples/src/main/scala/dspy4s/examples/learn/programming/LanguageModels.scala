@@ -10,8 +10,8 @@
   * `copy`, since dspy4s has no program persistence).
   *
   * Key shape differences:
-  *   - `dspy.configure(lm=…)` → construct a `LivePredictionBackend`; `dspy.context(lm=…)` → provide another backend
-  *     for one `ProgramRunner` effect.
+  *   - `dspy.configure(lm=…)` → construct a `LivePredictionBackend`; `dspy.context(lm=…)` → provide another backend for
+  *     one `ProgramRunner` effect.
   *   - dspy4s never throws on LM failure: `lm.call` / a program returns `Either[DspyError, …]`.
   *   - There is no global `lm.history`; per-call usage is on `LmResponse.usage`, and aggregate usage is via
   *     `ManagedLanguageModel` + `UsageTracking` (see tutorials/cache/Cache.scala).
@@ -24,7 +24,7 @@ import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
 import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
-import dspy4s.programs.{ChainOfThought, LivePredictionBackend, ParameterId, PredictionBackend, RunOptions}
+import dspy4s.programs.{ChainOfThought, LivePredictionBackend, PredictionBackend, RunOptions}
 import dspy4s.signatures.Signature
 
 object LanguageModels:
@@ -92,7 +92,6 @@ object LanguageModels:
   // | response = qa(question="How many floors are in the castle David Gregory inherited?")
   // | print(response.answer)
   private val qa = ChainOfThought(
-    ParameterId("language-models/qa"),
     Signature.fromString("question -> answer")
   )
 
@@ -109,11 +108,11 @@ object LanguageModels:
       backend: PredictionBackend
   ): Either[DspyError, (String, String)] =
     for
-      base   <- ask(question) // current/global LM
-      other  <- OpenAiLanguageModel.fromEnv(overrideModel)
-      context = RuntimeContext(lm = Some(other), adapter = Some(ChatAdapter()))
+      base         <- ask(question) // current/global LM
+      other        <- OpenAiLanguageModel.fromEnv(overrideModel)
+      context       = RuntimeContext(lm = Some(other), adapter = Some(ChatAdapter()))
       scopedBackend = new LivePredictionBackend(other, ChatAdapter(), context)
-      scoped <- Demo.run(qa, (question = question))(using scopedBackend).map(_.output.answer)
+      scoped       <- Demo.run(qa, (question = question))(using scopedBackend).map(_.output.answer)
     yield (base, scoped)
   // --8<-- [end:scoped-override]
 
@@ -137,8 +136,8 @@ object LanguageModels:
       qa,
       (question = question),
       RunOptions(
-      config = DynamicValues.record("temperature" := temperature),
-      rolloutId = Some(rolloutId)
+        config = DynamicValues.record("temperature" := temperature),
+        rolloutId = Some(rolloutId)
       )
     ).map(_.output.answer)
   // --8<-- [end:lm-config]

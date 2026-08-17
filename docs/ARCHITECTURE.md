@@ -42,16 +42,24 @@ as a constructor value. Global low-level configuration does not enter the progra
 
 ## Parameters and optimization
 
-Every prediction node declares a stable `ParameterId`. `ParameterStore` maps those IDs to `OptimizableParameters`.
-Structural position is not identity. Program reassociation does not change an ID, and deliberate ID reuse shares one
-slot.
+Every prediction node has a private declaration key. `ParameterStore` elaborates these keys into public
+`ParameterId` values and maps them to `OptimizableParameters`.
+
+- `Program.predict(signature)` creates an anonymous declaration. It receives a deterministic ordinal ID from program
+  declaration order. Reusing the same program value shares its slot. Two separate declarations remain independent.
+- `Program.namespace("email").declare("classify", signature)` creates a stable semantic declaration and returns a
+  first-class `PredictionDef`. It can address the slot without repeated string lookup.
+
+Anonymous state can load into the same program shape. Use a named declaration when identity must not depend on
+declaration order or another operation must target one prediction directly. Complete state loading still requires the
+same set of parameter IDs.
 
 Evaluation and optimization operate on `RecordProgramWithEnv`:
 
 - `Evaluate` runs examples with bounded ZIO parallelism.
 - `Metric` receives a prediction and explicit program events.
 - Optimizers return new program values.
-- `ProgramPersistence` stores only ID-keyed optimizer state.
+- `ProgramPersistence` stores only parameter state. Keys are structural ordinals or explicit semantic names.
 - GEPA groups reflection evidence by event `ParameterId`.
 
 ## Module graph

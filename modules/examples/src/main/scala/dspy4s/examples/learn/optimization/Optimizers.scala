@@ -5,7 +5,7 @@
   * (BootstrapFewShotWithRandomSearch.compile, snippet 1; save/load, snippets 2/3).
   *
   * The functional API optimizes a `RecordProgram`. The program syntax stays immutable. The optimizer returns a new
-  * value with updated parameters addressed by stable `ParameterId` values.
+  * value with updated immutable parameters.
   */
 package dspy4s.examples.learn.optimization
 
@@ -14,8 +14,10 @@ import dspy4s.core.data.Example
 import dspy4s.evaluate.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
-import dspy4s.optimize.{BootstrapRandomSearch, BootstrapRandomSearchConfig, DemoCount, ProgramPersistence, SearchCandidateCount}
-import dspy4s.programs.{ParameterId, PredictionBackend, Program, RecordProgram}
+import dspy4s.optimize.{
+  BootstrapRandomSearch, BootstrapRandomSearchConfig, DemoCount, ProgramPersistence, SearchCandidateCount
+}
+import dspy4s.programs.{PredictionBackend, Program, RecordProgram}
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
@@ -24,14 +26,13 @@ final case class OptimizerAnswer(answer: String) derives Schema
 
 object Optimizers:
 
-  val answerId = ParameterId("optimizers/answer")
   val signature = Signature.derived[OptimizerQuestion, OptimizerAnswer](
     "OptimizerQA",
     "Answer the question briefly."
   )
 
   def student(): RecordProgram[OptimizerQuestion, OptimizerAnswer] =
-    Program.predict(answerId, signature).fromRecords(signature.inputShape)
+    Program.predict(signature).fromRecords(signature.inputShape)
 
   // ── Snippet 1 (lines 95–104) ────────────────────
   // | config = dict(max_bootstrapped_demos=4, max_labeled_demos=4, num_candidate_programs=10, num_threads=4)

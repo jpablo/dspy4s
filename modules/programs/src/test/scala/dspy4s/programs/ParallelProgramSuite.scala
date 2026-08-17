@@ -20,14 +20,14 @@ final class ParallelProgramSuite extends FunSuite:
             maxActive  <- Ref.make(0)
             allStarted <- Promise.make[Nothing, Unit]
             backend     = new CodeExecutionBackend:
-                            def execute(code: String): ZIO[Any, DspyError, CodeExecutionResult] =
-                              for
-                                current <- active.updateAndGet(_ + 1)
-                                _       <- maxActive.update(value => math.max(value, current))
-                                _       <- ZIO.when(current == 3)(allStarted.succeed(()))
-                                _       <- allStarted.await
-                                _       <- active.update(_ - 1)
-                              yield CodeExecutionResult.Succeeded(code)
+                        def execute(code: String): ZIO[Any, DspyError, CodeExecutionResult] =
+                          for
+                            current <- active.updateAndGet(_ + 1)
+                            _       <- maxActive.update(value => math.max(value, current))
+                            _       <- ZIO.when(current == 3)(allStarted.succeed(()))
+                            _       <- allStarted.await
+                            _       <- active.update(_ - 1)
+                          yield CodeExecutionResult.Succeeded(code)
             prediction <- ProgramRunner
                             .run(program, ())
                             .provideEnvironment(ZEnvironment(backend))

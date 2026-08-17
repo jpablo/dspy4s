@@ -31,9 +31,10 @@ object Cheatsheet:
   val signature: Signature[CheatQuestion, CheatAnswer] =
     Signature.derived[CheatQuestion, CheatAnswer]("BasicQA", "Answer with a short factoid answer.")
 
+  val predictDef = Program.namespace("cheatsheet").declare("predict", signature)
+
   // Python: dspy.Predict("question -> answer")
-  val predict: Program[CheatQuestion, CheatAnswer] =
-    Program.predict(ParameterId("cheatsheet/predict"), signature)
+  val predict: Program[CheatQuestion, CheatAnswer] = predictDef.program
 
   // Python: predict(question="1+1", config={"rollout_id": 1, "temperature": 1.0})
   def predictWithConfig(question: String)(using PredictionBackend): Either[DspyError, String] =
@@ -46,8 +47,7 @@ object Cheatsheet:
       .map(_.output.answer)
 
   // Python: dspy.ChainOfThought(BasicQA)
-  val chainOfThought: Program[CheatQuestion, ChainOfThought.WithReasoning[CheatAnswer]] =
-    ChainOfThought(ParameterId("cheatsheet/cot"), signature)
+  val chainOfThought: Program[CheatQuestion, ChainOfThought.WithReasoning[CheatAnswer]] = ChainOfThought(signature)
 
   /** Python: dspy.ProgramOfThought(BasicQA).
     *
@@ -56,13 +56,11 @@ object Cheatsheet:
   val programOfThought: ProgramWithEnv[CheatQuestion, CheatAnswer, PredictionBackend & CodeExecutionBackend] =
     val generate = Program
       .predict(
-        ParameterId("cheatsheet/pot-generate"),
         Signature.derived[CheatQuestion, CheatCode]("GeneratePython", "Write Python code that computes the answer.")
       )
       .map(value => ProgramOfThought.GeneratedCode(value.code))
     val retry = Program
       .predict(
-        ParameterId("cheatsheet/pot-retry"),
         Signature.derived[CheatRetry, CheatCode]("RepairPython", "Repair the Python code after the reported error.")
       )
       .contramap[ProgramOfThought.RetryInput[CheatQuestion]](input =>
@@ -71,7 +69,6 @@ object Cheatsheet:
       .map(value => ProgramOfThought.GeneratedCode(value.code))
     val answer = Program
       .predict(
-        ParameterId("cheatsheet/pot-answer"),
         Signature.derived[CheatCodeAnswer, CheatAnswer]("AnswerFromCode", "Answer from the executed code output.")
       )
       .contramap[ProgramOfThought.AnswerInput[CheatQuestion]](input =>
@@ -94,7 +91,6 @@ object Cheatsheet:
   val codeAct: ProgramWithEnv[CheatQuestion, CheatAnswer, PredictionBackend & CodeExecutionBackend] =
     val generator = Program
       .predict(
-        ParameterId("cheatsheet/code-act-generate"),
         Signature.derived[CheatQuestion, CheatCode]("CodeActStep", "Write executable Python code.")
       )
       .contramap[CodeAct.StepInput[CheatQuestion]](_.input)
@@ -134,7 +130,7 @@ object Cheatsheet:
     Evaluate(program, devset, metric, EvaluateOptions(parallelism = 4))
 
   def student: RecordProgram[CheatQuestion, CheatAnswer] =
-    Program.predict(ParameterId("cheatsheet/student"), signature).fromRecords(signature.inputShape)
+    Program.predict(signature).fromRecords(signature.inputShape)
 
   // Python: LabeledFewShot(k=8).compile(student, trainset)
   def labeledFewShot(trainset: Vector[Example]): IO[DspyError, RecordProgram[CheatQuestion, CheatAnswer]] =
@@ -233,7 +229,7 @@ object Cheatsheet:
   // Python: Refine(module=qa, N=3, reward_fn=one_word_answer, threshold=1.0)
   val refine: Program[CheatQuestion, CheatAnswer] =
     val critic = Program.lift[Refine.Attempt[CheatQuestion, CheatAnswer], Refine.Advice](_ =>
-      Refine.Advice(Map(ParameterId("cheatsheet/predict") -> "Return one word only."))
+      Refine.Advice(predictDef -> "Return one word only.")
     )
     Refine(predict, critic, maxAttempts = 3, threshold = 1.0) { (_, prediction) =>
       Right(if prediction.output.answer.trim.split("\\s+").length == 1 then 1.0 else 0.0)

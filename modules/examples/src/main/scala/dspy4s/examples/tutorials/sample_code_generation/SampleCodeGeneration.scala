@@ -16,7 +16,7 @@ package dspy4s.examples.tutorials.sample_code_generation
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend}
+import dspy4s.programs.{ChainOfThought, PredictionBackend}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 1 — the two analysis/generation signatures (top-level traits for Mirror derivation) ──
@@ -78,9 +78,9 @@ object SampleCodeGeneration:
   // |     self.refine_code = dspy.ChainOfThought("code, feedback -> improved_code: str, changes_made: list[str]")
   // --8<-- [start:agent-predictors]
   final class DocumentationLearningAgent:
-    private val analyzeDocs  = ChainOfThought(ParameterId("code-generation/analyze"), Signature.of[LibraryAnalyzer])
-    private val generateCode = ChainOfThought(ParameterId("code-generation/generate"), Signature.of[CodeGenerator])
-    private val refineCode   = ChainOfThought(ParameterId("code-generation/refine"), Signature.of[RefineCode])
+    private val analyzeDocs  = ChainOfThought(Signature.of[LibraryAnalyzer])
+    private val generateCode = ChainOfThought(Signature.of[CodeGenerator])
+    private val refineCode   = ChainOfThought(Signature.of[RefineCode])
     // --8<-- [end:agent-predictors]
 
     /** Python's `learn_from_urls`, minus the fetching: analyze already-combined documentation text. */

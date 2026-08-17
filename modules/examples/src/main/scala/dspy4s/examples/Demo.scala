@@ -21,7 +21,7 @@ object Demo:
     OpenAiLanguageModel.fromEnv(model) match
       case Left(err) => sys.error(s"Could not initialize LM (is OPENAI_API_KEY set?): $err")
       case Right(lm) =>
-        given context: RuntimeContext = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
+        given context: RuntimeContext    = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
         given backend: PredictionBackend = new LivePredictionBackend(lm, ChatAdapter(), context)
         body
 

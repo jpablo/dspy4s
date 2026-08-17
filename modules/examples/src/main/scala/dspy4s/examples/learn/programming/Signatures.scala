@@ -12,7 +12,7 @@
   *
   * Both surfaces produce a `Signature[I, O]` where `I` / `O` are named tuples, so call sites get direct dot access:
   *
-  * Demo.run(Program.predict(id, sig), (field = "...")).map(_.output.field)
+  * Demo.run(Program.predict(sig), (field = "...")).map(_.output.field)
   *
   * `ChainOfThought` augments the output named tuple with `reasoning: String` and delegates through `Predict`. Snippets
   * 3, 4, and 6 use it directly.
@@ -26,7 +26,7 @@ package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{ChainOfThought, PredictionBackend, Program}
 import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
 
@@ -49,7 +49,7 @@ object ToxicityExample:
     instructions = "Mark as 'toxic' if the comment includes insults, harassment, or sarcastic derogatory remarks."
   )
 
-  val toxicity = Program.predict(ParameterId("signatures/toxicity"), signature)
+  val toxicity = Program.predict(signature)
 
   def call(comment: String)(using PredictionBackend): Either[DspyError, Boolean] =
     Demo.run(toxicity, (comment = comment)).map(_.output.toxic)
@@ -67,7 +67,6 @@ object ToxicityExample:
 // --8<-- [start:sentiment]
 object SentimentExample:
   val classify = Program.predict(
-    ParameterId("signatures/sentiment"),
     Signature.fromType[(sentence: String) => (sentiment: Boolean)]
   )
 
@@ -97,7 +96,6 @@ object SentimentExample:
 // --8<-- [start:summarize]
 object SummarizeExample:
   val program = ChainOfThought(
-    ParameterId("signatures/summarize"),
     Signature.fromType[(document: String) => (summary: String)]
   )
 
@@ -142,7 +140,6 @@ trait EmotionSpec extends Spec:
 
 object EmotionExample:
   val classify = Program.predict(
-    ParameterId("signatures/emotion"),
     Signature.of[EmotionSpec](instructions = "Classify emotion.")
   )
 
@@ -176,7 +173,7 @@ object FaithfulnessExample:
     instructions = "Verify that the text is based on the provided context."
   )
 
-  val program = ChainOfThought(ParameterId("signatures/faithfulness"), signature)
+  val program = ChainOfThought(signature)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Snippet 7 (lines 159–167) — Example E: multi-modal image
@@ -205,7 +202,7 @@ object DogPictureExample:
     instructions = "Output the dog breed of the dog in the image."
   )
 
-  val program = Program.predict(ParameterId("signatures/dog-picture"), signature)
+  val program = Program.predict(signature)
 
   def call(imageUrl: String)(using PredictionBackend): Either[DspyError, String] =
     Demo.run(program, (image_1 = Image(imageUrl))).map(_.output.answer)

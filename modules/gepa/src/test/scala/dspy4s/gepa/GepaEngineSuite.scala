@@ -14,7 +14,7 @@ private final case class EngineAnswer(answer: String)
 final class GepaEngineSuite extends FunSuite:
 
   private val signature = Signature.derived[EngineQuestion, EngineAnswer]("Engine", "bad")
-  private val program   = Program.predict(ParameterId("answer"), signature).fromRecords(signature.inputShape)
+  private val program   = Program.predictStable(ParameterId("answer"), signature).fromRecords(signature.inputShape)
   private val example   = Example(DynamicValues.record("question" := "q", "answer" := "right"), Set("question"))
 
   private val backend = new PredictionBackend:

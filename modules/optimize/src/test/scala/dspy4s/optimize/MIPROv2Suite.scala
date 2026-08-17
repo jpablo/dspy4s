@@ -17,7 +17,7 @@ final class MIPROv2Suite extends FunSuite:
 
   private val answerId  = ParameterId("answer")
   private val signature = Signature.derived[Question, Answer]("Answer", instructions = "bad instruction")
-  private val student   = Program.predict(answerId, signature).fromRecords(signature.inputShape)
+  private val student   = Program.predictStable(answerId, signature).fromRecords(signature.inputShape)
   private val dataset   = Vector(
     Example(DynamicValues.record("question" := "abc", "answer" := "cba"), Set("question")),
     Example(DynamicValues.record("question" := "xyz", "answer" := "zyx"), Set("question"))

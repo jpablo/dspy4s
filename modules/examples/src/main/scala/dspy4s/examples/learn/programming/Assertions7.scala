@@ -22,24 +22,24 @@ final case class BaleenResult(context: List[String], answer: String) derives Sch
 
 object Assertions7:
 
-  private val queryId = ParameterId("assertions/search-query")
-
-  private val queryGenerator = ChainOfThought(
-    queryId,
+  private val queryDef = ChainOfThought.declare(
+    Program.namespace("assertions"),
+    "search-query",
     Signature.derived[SearchInput, SearchQuery](
       "GenerateSearchQuery",
       "Write a concise search query that adds information not covered by earlier queries."
     )
-  ).map(output => SearchQuery(output.query))
+  )
+  private val queryGenerator = queryDef.program.map(output => SearchQuery(output.query))
 
   private def valid(input: SearchInput, query: String): Boolean =
     val normalized = query.trim.toLowerCase
     normalized.length <= 100 && !input.previousQueries.exists(_.trim.equalsIgnoreCase(normalized))
 
-  /** Python `Suggest` messages become stable-ID advice for a visible `Refine` critic. */
+  /** Python `Suggest` messages become named-prediction advice for a visible `Refine` critic. */
   private val queryCritic = Program.lift[Refine.Attempt[SearchInput, SearchQuery], Refine.Advice] { attempt =>
     val previous = attempt.input.previousQueries.mkString("; ")
-    Refine.Advice(Map(queryId -> s"Use fewer than 100 characters and differ from these queries: $previous"))
+    Refine.Advice(queryDef -> s"Use fewer than 100 characters and differ from these queries: $previous")
   }
 
   val constrainedQuery = Refine(queryGenerator, queryCritic, maxAttempts = 3, threshold = 1.0) {
@@ -47,7 +47,6 @@ object Assertions7:
   }
 
   private val answerGenerator = ChainOfThought(
-    ParameterId("assertions/answer"),
     Signature.derived[AnswerInput, GeneratedAnswer](
       "GenerateAnswer",
       "Answer from the collected passages. Do not add unsupported facts."
@@ -93,7 +92,10 @@ object Assertions7:
 
   /** A fixture retriever keeps this example runnable without a bundled retrieval service. */
   val fixtureRetriever: ProgramWithEnv[RetrieveInput, Retrieved, Any] = Program.lift(input =>
-    Retrieved(List(s"Fixture passage for '${input.query}'", "Gary Zukav's first book received the U.S. National Book Award."))
+    Retrieved(List(
+      s"Fixture passage for '${input.query}'",
+      "Gary Zukav's first book received the U.S. National Book Award."
+    ))
   )
 
   extension [I, A, O, R1, R2](next: ProgramWithEnv[A, O, R2])

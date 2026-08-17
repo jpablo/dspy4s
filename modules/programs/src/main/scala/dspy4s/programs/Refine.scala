@@ -3,11 +3,16 @@ package dspy4s.programs
 import dspy4s.core.contracts.{DspyError, ValidationError}
 import dspy4s.programs.contracts.Prediction
 
-/** Bounded typed refinement with stable-ID advice and conservative best-attempt selection. */
+/** Bounded typed refinement with prediction-specific advice and conservative best-attempt selection. */
 object Refine:
 
   /** Advice for specific learnable slots. Unknown IDs fail when the next attempt starts. */
   final case class Advice(values: Map[ParameterId, String])
+
+  object Advice:
+    /** Build advice from first-class named prediction references. */
+    def apply(entries: (ParameterRef, String)*): Advice =
+      new Advice(entries.iterator.map { case (ref, text) => ref.id -> text }.toMap)
 
   /** Complete critic input after one sub-threshold attempt. */
   final case class Attempt[I, O](

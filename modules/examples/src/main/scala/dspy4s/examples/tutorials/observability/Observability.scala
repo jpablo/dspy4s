@@ -43,7 +43,6 @@ object Observability:
 
   private val extractor = Program
     .predict(
-      ParameterId("observability/answer"),
       Signature.derived[ObservableExtractInput, ObservableAnswer](
         "ObservableAnswer",
         "Answer the question from the trajectory."
@@ -67,8 +66,8 @@ object Observability:
   // --8<-- [start:callback-run]
   def runWithLogging(question: String)(using predictionBackend: PredictionBackend): Either[DspyError, String] =
     val toolBackend: ToolBackend = new LiveToolBackend(Vector(retrieve))
-    val environment = ZEnvironment[PredictionBackend](predictionBackend) ++ ZEnvironment[ToolBackend](toolBackend)
-    val effect = ProgramRunner.runObserved(agent, ObservableQuestion(question), new AgentLoggingObserver)
+    val environment              = ZEnvironment[PredictionBackend](predictionBackend) ++ ZEnvironment[ToolBackend](toolBackend)
+    val effect                   = ProgramRunner.runObserved(agent, ObservableQuestion(question), new AgentLoggingObserver)
       .provideEnvironment(environment)
       .map(_.output.answer)
       .either

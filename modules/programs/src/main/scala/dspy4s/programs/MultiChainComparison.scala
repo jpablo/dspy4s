@@ -17,6 +17,33 @@ object MultiChainComparison:
   private inline val rationaleName: RationaleName = scala.compiletime.constValue[RationaleName]
 
   def apply[I, O](
+      baseSignature       : Signature[I, O],
+      m                   : Int                 = 3,
+      temperature         : Double              = 0.7,
+      rationalePrefix     : String              = "Accurate Reasoning: Thank you everyone. Let's now holistically",
+      rationaleDescription: String              = "${corrected reasoning}",
+      attemptDescription  : String              = "${reasoning attempt}",
+      answerFieldOverride : Option[String]      = None,
+      demos               : Vector[Example]     = Vector.empty,
+      config              : DynamicValue.Record = DynamicValue.Record.empty,
+      name                : String              = "multi_chain_comparison"
+  )(using prepend: PrependField.Of[RationaleName, String, O]): Program[Input[I], WithRationale[O]] =
+    build(
+      None,
+      baseSignature,
+      m,
+      temperature,
+      rationalePrefix,
+      rationaleDescription,
+      attemptDescription,
+      answerFieldOverride,
+      demos,
+      config,
+      name
+    )
+
+  /** Build a comparison prediction with an explicit stable parameter ID. */
+  def stable[I, O](
       id                  : ParameterId,
       baseSignature       : Signature[I, O],
       m                   : Int                 = 3,
@@ -28,6 +55,33 @@ object MultiChainComparison:
       demos               : Vector[Example]     = Vector.empty,
       config              : DynamicValue.Record = DynamicValue.Record.empty,
       name                : String              = "multi_chain_comparison"
+  )(using prepend: PrependField.Of[RationaleName, String, O]): Program[Input[I], WithRationale[O]] =
+    build(
+      Some(id),
+      baseSignature,
+      m,
+      temperature,
+      rationalePrefix,
+      rationaleDescription,
+      attemptDescription,
+      answerFieldOverride,
+      demos,
+      config,
+      name
+    )
+
+  private def build[I, O](
+      id                  : Option[ParameterId],
+      baseSignature       : Signature[I, O],
+      m                   : Int,
+      temperature         : Double,
+      rationalePrefix     : String,
+      rationaleDescription: String,
+      attemptDescription  : String,
+      answerFieldOverride : Option[String],
+      demos               : Vector[Example],
+      config              : DynamicValue.Record,
+      name                : String
   )(using prepend: PrependField.Of[RationaleName, String, O]): Program[Input[I], WithRationale[O]] =
     require(m > 0, "MultiChainComparison m must be positive")
 
@@ -79,13 +133,10 @@ object MultiChainComparison:
       )
     )
     val defaultConfig = DynamicValues.record("temperature" := temperature)
-    val compare       = Program.predict(
-      id,
-      signature,
-      demos,
-      DynamicValues.mergeRecords(defaultConfig, config),
-      name
-    )
+    val mergedConfig  = DynamicValues.mergeRecords(defaultConfig, config)
+    val compare       = id match
+      case Some(parameterId) => Program.predictStable(parameterId, signature, demos, mergedConfig, name)
+      case None              => Program.predict(signature, demos, mergedConfig, name)
 
     prepare >>> compare
 

@@ -31,7 +31,7 @@ object AutoEvaluation:
       inputShape = Shape.MapShape(layout.inputFields),
       outputShape = Shape.MapShape(layout.outputFields)
     )
-    Program.predict(id, signature, name = "judge")
+    Program.predictStable(id, signature, name = "judge")
 
   private[metrics] def runJudge(
       predictor : Program[DynamicValue.Record, DynamicValue.Record],

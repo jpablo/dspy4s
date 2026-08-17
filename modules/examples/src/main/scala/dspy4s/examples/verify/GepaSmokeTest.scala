@@ -25,7 +25,7 @@ object GepaSmokeTest:
   final case class ReflectionInput(currentInstruction: String, records: String) derives Schema
   final case class ReflectionOutput(instruction: String) derives Schema
 
-  val taskId: ParameterId = ParameterId("gepa-smoke/classifier")
+  val taskId: ParameterId              = ParameterId("gepa-smoke/classifier")
   val vagueBaselineInstruction: String = "Answer the question."
 
   private def example(text: String, label: String): Example =
@@ -60,7 +60,7 @@ object GepaSmokeTest:
   def student: RecordProgram[TextInput, LabelOutput] =
     val signature = Signature.derived[TextInput, LabelOutput]("DigitClassifier", vagueBaselineInstruction)
     Program
-      .predict(taskId, signature, config = DynamicValues.record("temperature" := 0.0))
+      .predictStable(taskId, signature, config = DynamicValues.record("temperature" := 0.0))
       .fromRecords(signature.inputShape)
 
   val metric: FeedbackMetric = new FeedbackMetric:
@@ -73,10 +73,10 @@ object GepaSmokeTest:
         component      : Option[ParameterId],
         componentEvents: Vector[ProgramEvent]
     ): IO[DspyError, ScoreWithFeedback] =
-      val text    = example.get("text").map(DynamicValues.renderText).getOrElse("")
-      val gold    = example.get("label").map(DynamicValues.renderText).getOrElse("")
-      val actual  = prediction.get("label").map(DynamicValues.renderText).getOrElse("")
-      val correct = actual.trim.equalsIgnoreCase(gold.trim)
+      val text     = example.get("text").map(DynamicValues.renderText).getOrElse("")
+      val gold     = example.get("label").map(DynamicValues.renderText).getOrElse("")
+      val actual   = prediction.get("label").map(DynamicValues.renderText).getOrElse("")
+      val correct  = actual.trim.equalsIgnoreCase(gold.trim)
       val feedback =
         if correct then s"Correct: $actual"
         else
@@ -86,7 +86,6 @@ object GepaSmokeTest:
 
   val reflector: Program[InstructionProposer.Input, InstructionProposer.Output] = Program
     .predict(
-      ParameterId("gepa-smoke/reflector"),
       Signature.derived[ReflectionInput, ReflectionOutput](
         "InstructionReflector",
         "Rewrite the instruction from the current instruction and scored failure records."
@@ -98,8 +97,8 @@ object GepaSmokeTest:
     .map(output => InstructionProposer.Output(output.instruction))
 
   final class CountingBackend(delegate: PredictionBackend) extends PredictionBackend:
-    private val counter = new AtomicInteger(0)
-    def count: Int = counter.get()
+    private val counter                      = new AtomicInteger(0)
+    def count: Int                           = counter.get()
     def generate(request: PredictionRequest) =
       val _ = counter.incrementAndGet()
       delegate.generate(request)
@@ -118,11 +117,10 @@ object GepaSmokeTest:
   val minibatchSize = envInt("GEPA_MINIBATCH", 3)
 
   OpenAiLanguageModel.fromEnv(model) match
-    case Left(error) =>
-      println(s"[gepa-smoke] Skipping because no live LM is available: ${error.message}")
-    case Right(lm) =>
-      given context: RuntimeContext = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
-      val live                    = new LivePredictionBackend(lm, ChatAdapter(), context)
+    case Left(error) => println(s"[gepa-smoke] Skipping because no live LM is available: ${error.message}")
+    case Right(lm)   =>
+      given context: RuntimeContext  = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
+      val live                       = new LivePredictionBackend(lm, ChatAdapter(), context)
       given backend: CountingBackend = new CountingBackend(live)
 
       val effect = Gepa(
@@ -141,7 +139,7 @@ object GepaSmokeTest:
 
       println(s"[gepa-smoke] model=$model, budget=$metricCalls, minibatch=$minibatchSize")
       Demo.runEffect(effect) match
-        case Left(error) => println(s"[gepa-smoke] failed: ${error.message}")
+        case Left(error)   => println(s"[gepa-smoke] failed: ${error.message}")
         case Right(result) =>
           val instruction = result.bestProgram.program.parameters
             .get(taskId)

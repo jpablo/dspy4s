@@ -8,7 +8,7 @@ package dspy4s.examples.tutorials.conversation_history
 import dspy4s.core.contracts.{DspyError, DynamicValues, :=}
 import dspy4s.core.data.Example
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{PredictionBackend, Program}
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
@@ -33,7 +33,7 @@ object ConversationHistory:
     inputKeys = Set("question", "history")
   )
 
-  val program = Program.predict(ParameterId("conversation/answer"), signature, demos = Vector(demo))
+  val program = Program.predict(signature, demos = Vector(demo))
 
   final case class Conversation(turns: Vector[Turn] = Vector.empty):
     def ask(question: String)(using PredictionBackend): Either[DspyError, (Conversation, String)] =
@@ -45,7 +45,7 @@ object ConversationHistory:
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain ...conversationHistoryMain"
 @main def conversationHistoryMain(): Unit =
   Demo.withLm {
-    val first = ConversationHistory.Conversation().ask("My name is Ada. What is a fun fact about that name?")
+    val first  = ConversationHistory.Conversation().ask("My name is Ada. What is a fun fact about that name?")
     val second = first.flatMap((conversation, _) => conversation.ask("What name did I tell you?"))
     println(second.map(_._2))
   }

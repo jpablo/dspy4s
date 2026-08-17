@@ -10,7 +10,7 @@ package dspy4s.examples.tutorials.async
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend, Program, ProgramRunner}
+import dspy4s.programs.{ChainOfThought, PredictionBackend, Program, ProgramRunner}
 import dspy4s.signatures.Signature
 import zio.{Runtime, Unsafe, ZEnvironment}
 
@@ -20,7 +20,6 @@ import scala.concurrent.duration.DurationInt
 object Async:
 
   private val answer = Program.predict(
-    ParameterId("async/answer"),
     Signature.fromString("question -> answer")
   )
 
@@ -50,11 +49,9 @@ object Async:
   // --8<-- [start:simplifier-module]
   final class SimplifierProgram:
     private val predict1 = ChainOfThought(
-      ParameterId("async/draft"),
       Signature.fromString("question -> answer")
     )
     private val predict2 = ChainOfThought(
-      ParameterId("async/simplified"),
       Signature.fromString("answer -> simplified_answer")
     )
     val program = (predict1.map(result => (answer = result.answer)) >>> predict2)

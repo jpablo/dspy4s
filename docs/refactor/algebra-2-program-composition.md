@@ -1,7 +1,8 @@
 # Algebra 2: program composition (step-6 spec)
 
 > Historical design record. The current implementation uses passive `Program` syntax, a separate `ProgramRunner`, and
-> stable `ParameterId` values. See [Program syntax and interpreters](program-ast-interpreters.md).
+> anonymous prediction declarations, and optional stable named declarations. See
+> [Program syntax and interpreters](program-ast-interpreters.md).
 
 **Status:** implemented contract. Operations and laws were hardened by a design grill (the five forks below are
 resolved), then refined against code truth. The current implementation adds the `InterpretedTrajectoryAgent`

@@ -12,7 +12,7 @@ import zio.blocks.schema.Schema
 import dspy4s.core.contracts.{DspyError, :=}
 import dspy4s.core.data.RawPrediction
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{PredictionBackend, Program}
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.Signature
 
@@ -30,7 +30,7 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
 /** Build a `Signature` from two case classes — one for inputs, one for outputs. The resulting signature is
   * compiler-checked at the program boundary:
   *
-  *   - encode: `Program.predict(id, signature)` accepts `EmotionInput`; the interpreter encodes it into a record.
+  *   - encode: `Program.predict(signature)` accepts `EmotionInput`; the interpreter encodes it into a record.
   *   - decode: `Prediction.output` is an `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no runtime
   *     cast.
   *   - enum constraints reach the LM via `Shape.jsonSchemaString` (rendered from the backing `Schema[O]`); the
@@ -46,7 +46,7 @@ object CaseClassExample:
   // --8<-- [end:derived-sig]
 
   /** A prediction is passive syntax. `Demo.run` supplies the explicit backend to `ProgramRunner`. */
-  val classifyProgram = Program.predict(ParameterId("emotion"), signature)
+  val classifyProgram = Program.predict(signature)
 
   def classify(sentence: String)(using PredictionBackend): Either[DspyError, Emotion] =
     Demo.run(classifyProgram, EmotionInput(sentence)).map(_.output.sentiment)

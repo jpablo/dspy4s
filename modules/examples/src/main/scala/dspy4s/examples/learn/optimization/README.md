@@ -10,8 +10,9 @@ alongside the dev set you used for exploration. For prompt/demo optimizers, a fe
 already help; aim higher when you can. DSPy suggests an unusual split for prompt optimizers — roughly 20%
 train / 80% validation — because they overfit small training sets.
 
-In dspy4s, optimizers operate on a typed `RecordProgram`. Parameter slots have stable `ParameterId` values.
-An optimizer effect returns an `OptimizationReport` whose `bestProgram` is a new immutable value.
+In dspy4s, optimizers operate on a typed `RecordProgram`. Ordinary parameter slots receive deterministic ordinal IDs.
+A named prediction declaration supplies a stable semantic ID when it is necessary. An optimizer effect returns an
+`OptimizationReport` whose `bestProgram` is a new immutable value.
 
 ### Runnable example in this folder
 

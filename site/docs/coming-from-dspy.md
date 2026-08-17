@@ -7,7 +7,7 @@ dspy4s uses DSPy concepts but not its object model.
 | Subclass `Module` and implement `forward` | Build `Program` syntax with constructors and combinators |
 | Call a module directly | Run syntax with `ProgramRunner` |
 | Mutable predictor fields | Immutable `ParameterStore` values |
-| Predictor position or object identity | Stable `ParameterId` |
+| Predictor field or object identity | Private declaration key, with optional stable semantic name |
 | Global LM configuration | Explicit backend service |
 | Trace in ambient context | Explicit `ProgramEvent` journal |
 | Optimizer mutates or copies modules | Optimizer returns a new `RecordProgramWithEnv` |

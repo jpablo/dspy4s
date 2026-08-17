@@ -55,8 +55,7 @@ object Optimize:
       val gold     = example.get("answer").map(DynamicValues.renderText).getOrElse("")
       val goldPlan = example.get("goldplan").map(DynamicValues.renderText).getOrElse("")
       ZIO.succeed(plannerOutputShape.decode(prediction.values) match
-        case Left(error) =>
-          ScoreWithFeedback(
+        case Left(error) => ScoreWithFeedback(
             0.0,
             s"The plan for '$question' was not valid: ${error.message}. Output every QueryPlan field."
           )
@@ -71,25 +70,26 @@ object Optimize:
             ))
 
   private val evaluationMetric: Metric = new Metric:
-    val name: String = metric.name
+    val name: String                                                                     = metric.name
     def score(example: Example, prediction: RawPrediction, events: Vector[ProgramEvent]) =
       metric.score(example, prediction, events)
 
   def planner(instructions: String): RecordProgram[Question, QueryPlan] =
     val signature = Agent.plannerSignature(instructions)
     Program
-      .predict(plannerId, signature, config = DynamicValues.record("temperature" := 0.0))
+      .predictStable(plannerId, signature, config = DynamicValues.record("temperature" := 0.0))
       .fromRecords(signature.inputShape)
 
   private val reflector = Program
     .predict(
-      ParameterId("talk-data/reflector"),
       Signature.derived[ReflectionPrompt, ReflectionAnswer](
         "PlannerReflection",
         "Write an improved instruction from the current instruction and failure records. Return only the instruction."
       )
     )
-    .contramap[InstructionProposer.Input](input => ReflectionPrompt(input.currentInstruction, input.records.mkString("\n\n")))
+    .contramap[InstructionProposer.Input](input =>
+      ReflectionPrompt(input.currentInstruction, input.records.mkString("\n\n"))
+    )
     .map(value => InstructionProposer.Output(value.instruction))
 
   def accuracy(
@@ -107,30 +107,31 @@ object Optimize:
 
   def run(budget: Int, minibatch: Int)(using PredictionBackend): Either[DspyError, OptimizationReport] =
     val baseline = planner(Agent.plannerInstructionsBaseline)
-    val effect = for
-      baselineScore <- accuracy(baseline, valset)
-      result <- Gepa(
-                  student = baseline,
-                  trainset = trainset,
-                  valset = valset,
-                  metric = metric,
-                  reflector = reflector,
-                  config = GepaConfig(
-                    maxMetricCalls = MetricCallCount.applyUnsafe(budget),
-                    reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatch),
-                    stopOnPerfectScore = true,
-                    seed = 0L
+    val effect   =
+      for
+        baselineScore <- accuracy(baseline, valset)
+        result        <- Gepa(
+                    student = baseline,
+                    trainset = trainset,
+                    valset = valset,
+                    metric = metric,
+                    reflector = reflector,
+                    config = GepaConfig(
+                      maxMetricCalls = MetricCallCount.applyUnsafe(budget),
+                      reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatch),
+                      stopOnPerfectScore = true,
+                      seed = 0L
+                    )
                   )
-                )
-      optimizedScore <- accuracy(result.bestProgram, valset)
-      instruction = result.bestProgram.program.parameters
-                      .get(plannerId)
-                      .flatMap(_.instructions)
-                      .getOrElse(Agent.plannerInstructionsBaseline)
-    yield OptimizationReport(
-      baselineScore,
-      optimizedScore,
-      instruction,
-      result.numCandidates.toInt
-    )
+        optimizedScore <- accuracy(result.bestProgram, valset)
+        instruction     = result.bestProgram.program.parameters
+                        .get(plannerId)
+                        .flatMap(_.instructions)
+                        .getOrElse(Agent.plannerInstructionsBaseline)
+      yield OptimizationReport(
+        baselineScore,
+        optimizedScore,
+        instruction,
+        result.numCandidates.toInt
+      )
     Demo.runEffect(effect)

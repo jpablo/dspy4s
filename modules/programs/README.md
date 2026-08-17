@@ -5,7 +5,8 @@ required service environment. The common `Program[I, O]` alias requires `Predict
 
 ## Construction
 
-- `Program.predict` declares one typed prediction and one stable parameter slot.
+- `Program.predict(signature)` declares one typed prediction with an anonymous parameter slot.
+- `Program.namespace(...).declare(...)` declares a stable named prediction and returns its first-class reference.
 - `identity`, `lift`, and `liftEither` add pure local work.
 - `>>>`, `&&&`, `***`, and `|||` compose typed programs.
 - `map`, `contramap`, `recoverWith`, and `attempt` adapt boundaries and failures.
@@ -18,7 +19,7 @@ constructors over this common syntax. They are not self-executing module classes
 ## Interpretation
 
 `ProgramRunner` is the ZIO interpreter. It returns `Prediction[O]` and can record `ProgramEvent` values. Prediction
-events contain a `ParameterId`, so evaluators and optimizers can connect evidence to a stable parameter slot.
+events contain the elaborated `ParameterId`, so evaluators and optimizers can connect evidence to its parameter slot.
 
 `ProgramEventStream` in the streaming module exposes the same event path as a `ZStream`. There is no second streaming
 runtime.
@@ -28,11 +29,14 @@ runtime.
 Syntax and optimizer state are separate:
 
 - `ParameterStore` holds `OptimizableParameters`.
-- `ParameterId` gives each slot a stable identity.
+- Private declaration keys preserve slot identity and deliberate sharing inside a program value.
+- Anonymous declarations receive deterministic ordinal IDs. Named `PredictionDef` values retain semantic IDs.
 - `ProgramParameters[P]` provides generic read and replacement operations.
 - `RecordProgramWithEnv` adds only the input decoder needed by datasets and optimizers.
 
-State persistence stores ID-to-value data. It does not serialize Scala functions, syntax, tools, or services.
+State persistence stores ID-to-value data plus a deterministic declaration-shape fingerprint. Anonymous state requires
+the same declaration shape. Named state uses stable semantic keys. Persistence does not serialize Scala functions,
+syntax, tools, or services.
 
 ## Stack safety
 

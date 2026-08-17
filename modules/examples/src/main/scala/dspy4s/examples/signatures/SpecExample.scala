@@ -14,7 +14,7 @@ package dspy4s.examples.signatures
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{PredictionBackend, Program}
 import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
 
@@ -54,7 +54,7 @@ object SpecExample:
   val citedQa = Signature.of[CitedQASpec]
 
   /** Run the spec-derived signature against a named-tuple input and read the output with dot syntax. */
-  val emotionProgram = Program.predict(ParameterId("spec_emotion"), emotion)
+  val emotionProgram = Program.predict(emotion)
 
   def callEmotion(sentence: String)(using PredictionBackend): Either[DspyError, Emotion] =
     Demo.run(emotionProgram, (sentence = sentence)).map(_.output.sentiment)

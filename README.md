@@ -9,14 +9,14 @@ services. Programs do not contain a model, a runner, callbacks, or mutable param
 ## Program model
 
 ```scala
-import dspy4s.programs.{ParameterId, Program, ProgramRunner}
+import dspy4s.programs.{Program, ProgramRunner}
 import dspy4s.signatures.Signature
 
 final case class Question(question: String)
 final case class Answer(answer: String)
 
 val signature = Signature.derived[Question, Answer]("Answer", "Answer briefly.")
-val answer     = Program.predict(ParameterId("answer"), signature)
+val answer     = Program.predict(signature)
 val text       = answer >>> Program.lift[Answer, String](_.answer)
 
 // The result type requires PredictionBackend. The program value stays pure.
@@ -27,7 +27,8 @@ The main properties are:
 
 - Typed inputs, outputs, errors, and service requirements.
 - Composition with `>>>`, `&&&`, `***`, `|||`, `map`, and `contramap`.
-- Stable `ParameterId` values and a separate immutable `ParameterStore`.
+- Anonymous prediction slots by default, with optional stable named declarations.
+- A separate immutable `ParameterStore` for optimizer-writable values.
 - One interpreter for execution, events, streaming, and stack safety.
 - Effectful evaluation and optimization over `RecordProgram` values.
 - Explicit backends for prediction, code, tools, and persistent REPL sessions.

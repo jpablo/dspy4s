@@ -13,7 +13,7 @@ package dspy4s.examples.tutorials.llms_txt_generation
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{PredictionBackend, Program}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 
 // ── Snippet 1 (lines 23–57) — the three analysis signatures (top-level for Mirror) ──
@@ -71,13 +71,12 @@ object LlmsTxtGeneration:
   // |     def forward(self, repo_url, file_tree, readme_content, package_files): ...
   // --8<-- [start:analyzer]
   object RepositoryAnalyzer:
-    private val analyzeRepo      = Program.predict(ParameterId("llms-txt/repository"), Signature.of[AnalyzeRepository])
-    private val analyzeStructure = Program.predict(ParameterId("llms-txt/structure"), Signature.of[AnalyzeCodeStructure])
+    private val analyzeRepo      = Program.predict(Signature.of[AnalyzeRepository])
+    private val analyzeStructure = Program.predict(Signature.of[AnalyzeCodeStructure])
     private val generateExamples = Program.predict(
-      ParameterId("llms-txt/examples"),
       Signature.fromString("repo_info -> usage_examples")
     )
-    private val generateLlmsTxt = Program.predict(ParameterId("llms-txt/render"), Signature.of[GenerateLLMsTxt])
+    private val generateLlmsTxt = Program.predict(Signature.of[GenerateLLMsTxt])
 
     private val repositoryInfo = (
       Program.identity[RepositoryInput] &&& analyzeRepo.contramap[RepositoryInput](input =>

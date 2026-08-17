@@ -14,7 +14,7 @@ import dspy4s.evaluate.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
 import dspy4s.optimize.{CandidateCount, DemoCount, MIPROv2, MIPROv2Config, ProgramPersistence, TrialCount}
-import dspy4s.programs.{ParameterId, PredictionBackend, PredictionChunk, PredictionRequest, Program, RecordProgram}
+import dspy4s.programs.{PredictionBackend, PredictionChunk, PredictionRequest, Program, RecordProgram}
 import dspy4s.signatures.Signature
 import zio.{IO, UIO}
 import zio.blocks.schema.Schema
@@ -32,7 +32,7 @@ object OptimizerTracking:
   // --8<-- [start:tracking-callback]
   final class CountingBackend(delegate: PredictionBackend) extends PredictionBackend:
     private val count = new AtomicInteger(0)
-    def calls: Int     = count.get()
+    def calls: Int    = count.get()
 
     def generate(request: PredictionRequest): IO[DspyError, RawPrediction] =
       val _ = count.incrementAndGet()
@@ -46,8 +46,7 @@ object OptimizerTracking:
       delegate.generateStreaming(request, emit)
   // --8<-- [end:tracking-callback]
 
-  val answerId = ParameterId("optimizer-tracking/answer")
-  val signature = Signature.derived[TrackingQuestion, TrackingAnswer]("TrackingQA", "Answer the math question.")
+  val signature      = Signature.derived[TrackingQuestion, TrackingAnswer]("TrackingQA", "Answer the math question.")
   val metric: Metric = new ExactMatch("answer")
 
   def example(question: String, answer: String): Example =
@@ -61,7 +60,7 @@ object OptimizerTracking:
   )
 
   def student(): RecordProgram[TrackingQuestion, TrackingAnswer] =
-    Program.predict(answerId, signature).fromRecords(signature.inputShape)
+    Program.predict(signature).fromRecords(signature.inputShape)
 
   // ── Snippet 2 — run MIPROv2 with tracking ──
   // | program = dspy.ChainOfThought("question -> answer")
@@ -71,7 +70,7 @@ object OptimizerTracking:
   def optimizeWithTracking(program: RecordProgram[TrackingQuestion, TrackingAnswer])(using
       backend: PredictionBackend
   ): Either[DspyError, (RecordProgram[TrackingQuestion, TrackingAnswer], Int)] =
-    val tracked = new CountingBackend(backend)
+    val tracked  = new CountingBackend(backend)
     val proposer = Program.lift[MIPROv2.ProposalInput, MIPROv2.Proposal] { input =>
       val current = input.currentInstruction.getOrElse("Answer the question.")
       MIPROv2.Proposal(s"$current Be concise and verify arithmetic.")

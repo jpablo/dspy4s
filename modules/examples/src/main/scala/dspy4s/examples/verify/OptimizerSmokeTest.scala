@@ -39,7 +39,7 @@ object OptimizerSmokeTest:
       candidate         : Int
   ) derives Schema
 
-  val taskId: ParameterId = ParameterId("optimizer-smoke/classifier")
+  val taskId: ParameterId              = ParameterId("optimizer-smoke/classifier")
   val vagueBaselineInstruction: String = "Answer the question."
 
   private def example(text: String, label: String): Example =
@@ -83,11 +83,11 @@ object OptimizerSmokeTest:
   def student: RecordProgram[TextInput, LabelOutput] =
     val signature = Signature.derived[TextInput, LabelOutput]("DigitClassifier", vagueBaselineInstruction)
     Program
-      .predict(taskId, signature, config = DynamicValues.record("temperature" := 0.0))
+      .predictStable(taskId, signature, config = DynamicValues.record("temperature" := 0.0))
       .fromRecords(signature.inputShape)
 
   val metric: Metric = new Metric:
-    val name: String = "exact_label"
+    val name: String                                                                     = "exact_label"
     def score(example: Example, prediction: RawPrediction, events: Vector[ProgramEvent]) =
       ZIO.fromEither(for
         expected <- DynamicValues.requireString(example.values, "label", "optimizer smoke expected label")
@@ -96,7 +96,6 @@ object OptimizerSmokeTest:
 
   val coproProposer: Program[COPRO.ProposalInput, COPRO.Proposal] = Program
     .predict(
-      ParameterId("optimizer-smoke/copro-proposer"),
       Signature.derived[CoproPrompt, InstructionOutput](
         "CoproInstructionProposal",
         "Propose one precise task instruction. Use the required label names exactly."
@@ -116,7 +115,6 @@ object OptimizerSmokeTest:
 
   val miproProposer: Program[MIPROv2.ProposalInput, MIPROv2.Proposal] = Program
     .predict(
-      ParameterId("optimizer-smoke/mipro-proposer"),
       Signature.derived[MiproPrompt, InstructionOutput](
         "MiproInstructionProposal",
         "Infer and state the classification rule from the examples. Use the required label names exactly."
@@ -134,8 +132,8 @@ object OptimizerSmokeTest:
     .map(output => MIPROv2.Proposal(output.instruction))
 
   final class CountingBackend(delegate: PredictionBackend) extends PredictionBackend:
-    private val counter = new AtomicInteger(0)
-    def count: Int = counter.get()
+    private val counter                      = new AtomicInteger(0)
+    def count: Int                           = counter.get()
     def generate(request: PredictionRequest) =
       val _ = counter.incrementAndGet()
       delegate.generate(request)
@@ -161,12 +159,12 @@ object OptimizerSmokeTest:
 
   OpenAiLanguageModel.fromEnv(model) match
     case Left(error) => println(s"[optimizer-smoke] Skipping because no live LM is available: ${error.message}")
-    case Right(lm) =>
-      given context: RuntimeContext = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
-      val live                    = new LivePredictionBackend(lm, ChatAdapter(), context)
+    case Right(lm)   =>
+      given context: RuntimeContext  = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
+      val live                       = new LivePredictionBackend(lm, ChatAdapter(), context)
       given backend: CountingBackend = new CountingBackend(live)
-      val baseline               = student
-      val baselineScore          = scoreOf(baseline)
+      val baseline                   = student
+      val baselineScore              = scoreOf(baseline)
 
       println(s"[optimizer-smoke] model=$model, breadth=$breadth, trials=$trials")
       println(f"[optimizer-smoke] baseline score: $baselineScore%.1f%%")
@@ -179,7 +177,7 @@ object OptimizerSmokeTest:
         config = COPROConfig(metric = metric, breadth = CoproBreadth.applyUnsafe(breadth), depth = RoundCount(1))
       )
       Demo.runEffect(coproEffect) match
-        case Left(error) => println(s"[optimizer-smoke] COPRO failed: ${error.message}")
+        case Left(error)   => println(s"[optimizer-smoke] COPRO failed: ${error.message}")
         case Right(report) =>
           println(f"[optimizer-smoke] COPRO score: ${scoreOf(report.bestProgram)}%.1f%%")
           println(s"[optimizer-smoke] COPRO instruction: ${instructionOf(report.bestProgram)}")
@@ -199,7 +197,7 @@ object OptimizerSmokeTest:
         )
       )
       Demo.runEffect(miproEffect) match
-        case Left(error) => println(s"[optimizer-smoke] MIPROv2 failed: ${error.message}")
+        case Left(error)   => println(s"[optimizer-smoke] MIPROv2 failed: ${error.message}")
         case Right(report) =>
           println(f"[optimizer-smoke] MIPROv2 score: ${scoreOf(report.bestProgram)}%.1f%%")
           println(s"[optimizer-smoke] MIPROv2 instruction: ${instructionOf(report.bestProgram)}")

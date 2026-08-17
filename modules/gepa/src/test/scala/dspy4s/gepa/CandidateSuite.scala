@@ -10,7 +10,7 @@ private final case class CandidateAnswer(answer: String)
 final class CandidateSuite extends FunSuite:
 
   private val signature = Signature.derived[CandidateQuestion, CandidateAnswer]("Candidate", "Original")
-  private val program   = Program.predict(ParameterId("answer"), signature)
+  private val program   = Program.predictStable(ParameterId("answer"), signature)
 
   test("seed reads instructions from stable parameter IDs") {
     assertEquals(Candidate.seed(program), Map(ParameterId("answer") -> Some("Original")))
@@ -24,7 +24,7 @@ final class CandidateSuite extends FunSuite:
   }
 
   test("applyTo preserves unspecified slots") {
-    val composed = program &&& Program.predict(ParameterId("second"), signature)
+    val composed = program &&& Program.predictStable(ParameterId("second"), signature)
     val updated  = Candidate.applyTo(composed, Map(ParameterId("answer") -> None)).toOption.get
 
     assertEquals(updated.parameters.get(ParameterId("answer")).flatMap(_.instructions), None)

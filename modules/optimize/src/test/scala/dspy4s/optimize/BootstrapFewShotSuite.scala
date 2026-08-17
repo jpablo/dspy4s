@@ -13,7 +13,7 @@ final class BootstrapFewShotSuite extends FunSuite:
   private final case class Answer(answer: String)
 
   private val signature = Signature.derived[Question, Answer]("Answer")
-  private val program   = Program.predict(ParameterId("answer"), signature).fromRecords(signature.inputShape)
+  private val program   = Program.predictStable(ParameterId("answer"), signature).fromRecords(signature.inputShape)
 
   private val backend = new PredictionBackend:
     def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =

@@ -20,13 +20,46 @@ object ChainOfThought:
   ))
 
   def apply[I, O](
+      signature: Signature[I, O],
+      demos    : Vector[Example]     = Vector.empty,
+      config   : DynamicValue.Record = DynamicValue.Record.empty,
+      name     : String              = "chain_of_thought"
+  )(using prepend: PrependField.Of[ReasoningName, String, O]): Program[I, WithReasoning[O]] =
+    build(signature)(Program.predict(_, demos, config, name))
+
+  /** Build a chain-of-thought prediction with an explicit stable parameter ID. */
+  def stable[I, O](
       id       : ParameterId,
       signature: Signature[I, O],
       demos    : Vector[Example]     = Vector.empty,
       config   : DynamicValue.Record = DynamicValue.Record.empty,
       name     : String              = "chain_of_thought"
   )(using prepend: PrependField.Of[ReasoningName, String, O]): Program[I, WithReasoning[O]] =
-    val augmented = Signature[I, WithReasoning[O]](
+    build(signature)(Program.predictStable(id, _, demos, config, name))
+
+  /** Declare a named chain-of-thought prediction and retain its first-class parameter reference. */
+  def declare[I, O](
+      namespace: ParameterNamespace,
+      localName: String,
+      signature: Signature[I, O],
+      demos    : Vector[Example]     = Vector.empty,
+      config   : DynamicValue.Record = DynamicValue.Record.empty,
+      name     : String              = "chain_of_thought"
+  )(using prepend: PrependField.Of[ReasoningName, String, O]): PredictionDef[I, WithReasoning[O]] =
+    val augmented = augment(signature)
+    namespace.declare(localName, augmented, demos, config, name)
+
+  private def build[I, O](
+      signature: Signature[I, O]
+  )(
+      declare: Signature[I, WithReasoning[O]] => Program[I, WithReasoning[O]]
+  )(using prepend: PrependField.Of[ReasoningName, String, O]): Program[I, WithReasoning[O]] =
+    declare(augment(signature))
+
+  private def augment[I, O](
+      signature: Signature[I, O]
+  )(using prepend: PrependField.Of[ReasoningName, String, O]): Signature[I, WithReasoning[O]] =
+    Signature[I, WithReasoning[O]](
       name = signature.name,
       layout = signature.layout.prependOutput(reasoningField),
       inputShape = signature.inputShape,
@@ -38,4 +71,3 @@ object ChainOfThought:
         signature.name
       )
     )
-    Program.predict(id, augmented, demos, config, name)

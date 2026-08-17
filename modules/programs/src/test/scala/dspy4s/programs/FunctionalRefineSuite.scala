@@ -14,9 +14,9 @@ final class FunctionalRefineSuite extends FunSuite:
   private final case class Question(question: String)
   private final case class Answer(answer: String)
 
-  private val answerId  = ParameterId("answer")
   private val signature = Signature.derived[Question, Answer]("Answer", instructions = "answer the question")
-  private val task      = Program.predict(answerId, signature)
+  private val answerDef = Program.namespace("refine").declare("answer", signature)
+  private val task      = answerDef.program
 
   private def run(program: Program[Question, Answer], backend: PredictionBackend) =
     Unsafe.unsafe { implicit unsafe =>
@@ -28,7 +28,7 @@ final class FunctionalRefineSuite extends FunSuite:
   private val reward = (input: Question, prediction: Prediction[Answer]) =>
     Right(if prediction.output.answer == input.question.reverse then 1.0 else 0.0)
 
-  test("functional Refine applies typed stable-ID advice and returns the accepted attempt evidence") {
+  test("functional Refine applies first-class prediction advice and returns the accepted attempt evidence") {
     val requests = ArrayBuffer.empty[PredictionRequest]
     val backend  = new PredictionBackend:
       def generate(request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
@@ -39,7 +39,7 @@ final class FunctionalRefineSuite extends FunSuite:
     val critic = Program.lift[Refine.Attempt[Question, Answer], Refine.Advice] { attempt =>
       assertEquals(attempt.number, 1)
       assertEquals(attempt.score, 0.0)
-      Refine.Advice(Map(answerId -> "Reverse the input text."))
+      Refine.Advice(answerDef -> "Reverse the input text.")
     }
     val refined = Refine(task, critic, maxAttempts = 3, threshold = 1.0)(reward)
     val result  = run(refined, backend)
@@ -49,7 +49,7 @@ final class FunctionalRefineSuite extends FunSuite:
     assertEquals(requests.size, 2)
     assert(!requests.head.layout.instructions.exists(_.contains("Feedback for this attempt")))
     assert(requests(1).layout.instructions.exists(_.contains("Reverse the input text.")))
-    assertEquals(task.parameters.get(answerId).flatMap(_.instructions), Some("answer the question"))
+    assertEquals(task.parameters.get(answerDef).flatMap(_.instructions), Some("answer the question"))
     val kinds = ProgramGraph.from(refined).nodes.map(_.kind)
     assert(kinds.contains("from_evidence"))
     assert(kinds.contains("local_parameters"))

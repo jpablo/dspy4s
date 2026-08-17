@@ -1,7 +1,7 @@
 /** Airline customer service with MCP-shaped remote tools.
   *
-  * The upstream tutorial starts a Python FastMCP server and connects through stdio. This port keeps the same domain
-  * and tool catalog, but uses the transport-neutral `McpSession` boundary from the programming example. Replace
+  * The upstream tutorial starts a Python FastMCP server and connects through stdio. This port keeps the same domain and
+  * tool catalog, but uses the transport-neutral `McpSession` boundary from the programming example. Replace
   * `AirlineSession` with an HTTP or stdio MCP implementation to use a real server.
   */
 package dspy4s.examples.tutorials.mcp
@@ -18,19 +18,19 @@ import scala.collection.concurrent.TrieMap
 final case class Date(year: Int, month: Int, day: Int, hour: Int) derives Schema
 final case class UserProfile(userId: String, name: String, email: String) derives Schema
 final case class Flight(
-    flightId  : String,
-    dateTime  : Date,
-    origin    : String,
+    flightId   : String,
+    dateTime   : Date,
+    origin     : String,
     destination: String,
-    duration  : Double,
-    price     : Double
+    duration   : Double,
+    price      : Double
 ) derives Schema
 final case class Itinerary(confirmationNumber: String, userProfile: UserProfile, flight: Flight) derives Schema
 final case class Ticket(userRequest: String, userProfile: UserProfile) derives Schema
 
 final class AirlineSession extends McpSession:
   private val sequence = new AtomicInteger(1000)
-  private val users = Map(
+  private val users    = Map(
     "Adam"    -> UserProfile("1", "Adam", "adam@gmail.com"),
     "Bob"     -> UserProfile("2", "Bob", "bob@gmail.com"),
     "Chelsie" -> UserProfile("3", "Chelsie", "chelsie@gmail.com"),
@@ -76,48 +76,52 @@ final class AirlineSession extends McpSession:
 
   def listTools: IO[DspyError, Vector[RemoteToolDescriptor]] = ZIO.succeed(descriptors)
 
-  def callTool(name: String, arguments: DynamicValue.Record): IO[DspyError, DynamicValue] = name match
-    case "fetch_flight_info" =>
-      for
-        date        <- required(arguments, "date", name)
-        origin      <- required(arguments, "origin", name)
-        destination <- required(arguments, "destination", name)
-      yield DynamicValues.fromAny(flights.filter(flight =>
-        date.startsWith(f"${flight.dateTime.year}%04d-${flight.dateTime.month}%02d-${flight.dateTime.day}%02d") &&
-          flight.origin.equalsIgnoreCase(origin) && flight.destination.equalsIgnoreCase(destination)
-      ))
-    case "get_user_info" =>
-      required(arguments, "name", name).flatMap(userName =>
-        ZIO.fromOption(users.get(userName)).orElseFail(NotFoundError("airline_user", userName)).map(DynamicValues.fromAny)
-      )
-    case "book_itinerary" =>
-      for
-        flightId <- required(arguments, "flight_id", name)
-        userName <- required(arguments, "name", name)
-        flight   <- ZIO.fromOption(flights.find(_.flightId == flightId)).orElseFail(NotFoundError("flight", flightId))
-        user     <- ZIO.fromOption(users.get(userName)).orElseFail(NotFoundError("airline_user", userName))
-        confirmation = s"DSPY${sequence.incrementAndGet()}"
-        itinerary    = Itinerary(confirmation, user, flight)
-        _ = itineraries.put(confirmation, itinerary)
-      yield DynamicValues.fromAny(itinerary)
-    case "fetch_itinerary" =>
-      required(arguments, "confirmation_number", name).flatMap(number =>
-        ZIO.fromOption(itineraries.get(number)).orElseFail(NotFoundError("itinerary", number)).map(DynamicValues.fromAny)
-      )
-    case "cancel_itinerary" =>
-      required(arguments, "confirmation_number", name).flatMap(number =>
-        ZIO.fromOption(itineraries.remove(number)).orElseFail(NotFoundError("itinerary", number))
-          .as(DynamicValues.fromAny(s"Cancelled $number"))
-      )
-    case "file_ticket" =>
-      for
-        request  <- required(arguments, "user_request", name)
-        userName <- required(arguments, "name", name)
-        user     <- ZIO.fromOption(users.get(userName)).orElseFail(NotFoundError("airline_user", userName))
-        ticketId  = s"T${sequence.incrementAndGet()}"
-        _         = tickets.put(ticketId, Ticket(request, user))
-      yield DynamicValues.fromAny(ticketId)
-    case other => ZIO.fail(NotFoundError("mcp_tool", other))
+  def callTool(name: String, arguments: DynamicValue.Record): IO[DspyError, DynamicValue] =
+    name match
+      case "fetch_flight_info" =>
+        for
+          date        <- required(arguments, "date", name)
+          origin      <- required(arguments, "origin", name)
+          destination <- required(arguments, "destination", name)
+        yield DynamicValues.fromAny(flights.filter(flight =>
+          date.startsWith(f"${flight.dateTime.year}%04d-${flight.dateTime.month}%02d-${flight.dateTime.day}%02d") &&
+            flight.origin.equalsIgnoreCase(origin) && flight.destination.equalsIgnoreCase(destination)
+        ))
+      case "get_user_info" => required(arguments, "name", name).flatMap(userName =>
+          ZIO.fromOption(users.get(userName)).orElseFail(NotFoundError(
+            "airline_user",
+            userName
+          )).map(DynamicValues.fromAny)
+        )
+      case "book_itinerary" =>
+        for
+          flightId    <- required(arguments, "flight_id", name)
+          userName    <- required(arguments, "name", name)
+          flight      <- ZIO.fromOption(flights.find(_.flightId == flightId)).orElseFail(NotFoundError("flight", flightId))
+          user        <- ZIO.fromOption(users.get(userName)).orElseFail(NotFoundError("airline_user", userName))
+          confirmation = s"DSPY${sequence.incrementAndGet()}"
+          itinerary    = Itinerary(confirmation, user, flight)
+          _            = itineraries.put(confirmation, itinerary)
+        yield DynamicValues.fromAny(itinerary)
+      case "fetch_itinerary" => required(arguments, "confirmation_number", name).flatMap(number =>
+          ZIO.fromOption(itineraries.get(number)).orElseFail(NotFoundError(
+            "itinerary",
+            number
+          )).map(DynamicValues.fromAny)
+        )
+      case "cancel_itinerary" => required(arguments, "confirmation_number", name).flatMap(number =>
+          ZIO.fromOption(itineraries.remove(number)).orElseFail(NotFoundError("itinerary", number))
+            .as(DynamicValues.fromAny(s"Cancelled $number"))
+        )
+      case "file_ticket" =>
+        for
+          request  <- required(arguments, "user_request", name)
+          userName <- required(arguments, "name", name)
+          user     <- ZIO.fromOption(users.get(userName)).orElseFail(NotFoundError("airline_user", userName))
+          ticketId  = s"T${sequence.incrementAndGet()}"
+          _         = tickets.put(ticketId, Ticket(request, user))
+        yield DynamicValues.fromAny(ticketId)
+      case other => ZIO.fail(NotFoundError("mcp_tool", other))
 
   private def required(arguments: DynamicValue.Record, field: String, component: String): IO[DspyError, String] =
     ZIO.fromEither(DynamicValues.requireString(arguments, field, component))

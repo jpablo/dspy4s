@@ -3,8 +3,8 @@
   * Source: docs/docs/learn/programming/adapters.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/adapters.md Status: translated (snippets
   * 1–6, incl. `inspect_history`). The functional interpreter returns an explicit `ProgramEvent` journal instead of a
-  * global history buffer. Everything else (the Predict calls, the explicit
-  * ChatAdapter/JSONAdapter selection, the `adapter.format(...)` / system-message inspection) ports directly.
+  * global history buffer. Everything else (the Predict calls, the explicit ChatAdapter/JSONAdapter selection, the
+  * `adapter.format(...)` / system-message inspection) ports directly.
   *
   * Python's `adapter.format(signature, demos, inputs)` becomes `adapter.format(AdapterInvocation(layout, demos, inputs,
   * request))`, which returns a `FormattedPrompt`; the "system message" is just its first message. The adapter is
@@ -19,7 +19,7 @@ import dspy4s.core.contracts.{ConfigurationError, DspyError, DynamicValues, Runt
 import dspy4s.core.data.Example
 import dspy4s.examples.Demo
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}
-import dspy4s.programs.{LivePredictionBackend, ParameterId, PredictionBackend, Program, ProgramRunner}
+import dspy4s.programs.{LivePredictionBackend, PredictionBackend, Program, ProgramRunner}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -40,7 +40,6 @@ object Adapters:
     DynamicValues.recordFromEntries(entries)
 
   private val askProgram = Program.predict(
-    ParameterId("adapters/ask"),
     Signature.fromString("question -> answer")
   )
 
@@ -78,7 +77,7 @@ object Adapters:
 
   // ── Snippets 5 & 6 — a structured-output Predict under ChatAdapter, then JSONAdapter ──
   // | predict = dspy.Predict(NewsQA); predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
-  private val newsProgram = Program.predict(ParameterId("adapters/news"), Signature.of[NewsQA])
+  private val newsProgram = Program.predict(Signature.of[NewsQA])
 
   private def runNews(adapter: Adapter)(using ctx: RuntimeContext): Either[DspyError, List[ScienceNews]] =
     ctx.lm match

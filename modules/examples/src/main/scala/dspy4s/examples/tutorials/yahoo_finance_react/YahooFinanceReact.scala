@@ -61,7 +61,7 @@ object YahooFinanceReact:
     else
       val query   = input.input.financialQuery
       val compare = query.toLowerCase.contains("compare")
-      val args = DynamicValues.recordFromEntries(Seq(
+      val args    = DynamicValues.recordFromEntries(Seq(
         (if compare then "tickers" else "ticker") -> DynamicValues.fromAny(
           if compare then "AAPL,GOOGL,MSFT" else if query.toUpperCase.contains("TSLA") then "TSLA" else "AAPL"
         )
@@ -72,7 +72,6 @@ object YahooFinanceReact:
 
   private val extractor = Program
     .predict(
-      ParameterId("finance/analysis"),
       Signature.derived[FinancialExtractInput, FinancialAnswer](
         "FinancialAnalysis",
         "Answer the financial query from the tool trajectory. State that fixture prices are illustrative."
@@ -86,7 +85,7 @@ object YahooFinanceReact:
 
   def run(financialQuery: String)(using backend: PredictionBackend): Either[DspyError, String] =
     val tools: ToolBackend = new LiveToolBackend(Vector(FinanceTools.getStockPrice, FinanceTools.compareStocks))
-    val environment = ZEnvironment[PredictionBackend](backend) ++ ZEnvironment[ToolBackend](tools)
+    val environment        = ZEnvironment[PredictionBackend](backend) ++ ZEnvironment[ToolBackend](tools)
     Demo.runWith(agent, FinancialQuery(financialQuery), environment).map(_.output.analysisResponse)
   // --8<-- [end:react-agent]
 

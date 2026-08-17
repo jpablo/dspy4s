@@ -8,7 +8,7 @@ package dspy4s.examples.tutorials.deployment
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
 import dspy4s.optimize.ProgramPersistence
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend, ProgramRunner}
+import dspy4s.programs.{ChainOfThought, PredictionBackend, ProgramRunner}
 import dspy4s.signatures.Signature
 import zio.ZIO
 import zio.blocks.schema.Schema
@@ -25,7 +25,7 @@ object Deployment:
   )
 
   // Python: dspy_program = dspy.ChainOfThought("question -> answer")
-  val program = ChainOfThought(ParameterId("deployment/answer"), signature)
+  val program = ChainOfThought(signature)
 
   /** Use this effect in an http4s, Tapir, ZIO HTTP, or Pekko HTTP route. */
   def endpoint(request: DeploymentRequest): ZIO[PredictionBackend, DspyError, DeploymentResponse] =

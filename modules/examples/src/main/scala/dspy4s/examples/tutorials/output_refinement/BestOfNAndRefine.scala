@@ -11,7 +11,7 @@ package dspy4s.examples.tutorials.output_refinement
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend, Program, Refine}
+import dspy4s.programs.{ChainOfThought, PredictionBackend, Program, Refine}
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
@@ -23,11 +23,12 @@ object BestOfNAndRefine:
   private type QaInput  = (question: String)
   private type QaOutput = ChainOfThought.WithReasoning[(answer: String)]
 
-  private val answerId = ParameterId("refinement/answer")
-  private val qa = ChainOfThought(
-    answerId,
+  private val qaDef = ChainOfThought.declare(
+    Program.namespace("refinement"),
+    "answer",
     Signature.fromString("question -> answer")
   )
+  private val qa = qaDef.program
 
   private def oneWord(answer: String): Double =
     if answer.trim.split("\\s+").count(_.nonEmpty) == 1 then 1.0 else 0.0
@@ -60,7 +61,7 @@ object BestOfNAndRefine:
   // |                      reward_fn=one_word_answer, threshold=1.0[, fail_count=1])
   object OneWordRefine:
     private val critic = Program.lift[Refine.Attempt[QaInput, QaOutput], Refine.Advice] { _ =>
-      Refine.Advice(Map(answerId -> "Return only one word."))
+      Refine.Advice(qaDef -> "Return only one word.")
     }
 
     val refine = Refine(qa, critic, maxAttempts = 3, threshold = 1.0) { (_, prediction) =>
@@ -74,11 +75,10 @@ object BestOfNAndRefine:
   // | factuality_judge = dspy.ChainOfThought(FactualityJudge)
   // | refined_qa = dspy.Refine(module=qa, N=3, reward_fn=factuality_reward, threshold=1.0)
   // The current functional `Refine` accepts an effectful critic program and a pure score. The critic can therefore be
-  // an LM program. This example asks it for stable-ID advice after each rejected answer.
+  // an LM program. This example asks it for advice through the named prediction declaration after each rejection.
   object FactualityRefine:
     private val critic = Program
       .predict(
-        ParameterId("refinement/factuality-critic"),
         Signature.derived[FactualityCritiqueInput, FactualityCritique](
           "FactualityCritic",
           "Give concise factual correction advice for the answer."
@@ -87,7 +87,7 @@ object BestOfNAndRefine:
       .contramap[Refine.Attempt[QaInput, QaOutput]](attempt =>
         FactualityCritiqueInput(attempt.prediction.output.answer, attempt.number)
       )
-      .map(result => Refine.Advice(Map(answerId -> result.advice)))
+      .map(result => Refine.Advice(qaDef -> result.advice))
 
     val program = Refine(qa, critic, maxAttempts = 3, threshold = 1.0) { (_, prediction) =>
       Right(if prediction.output.answer.toLowerCase.contains("brussels") then 1.0 else 0.0)
@@ -102,7 +102,6 @@ object BestOfNAndRefine:
   // |                                     reward_fn=ideal_length_reward, threshold=0.9)
   object IdealLengthSummarizer:
     private val summarizer = ChainOfThought(
-      ParameterId("refinement/summary"),
       Signature.fromString("text -> summary")
     )
 

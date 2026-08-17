@@ -77,40 +77,42 @@ object TalkToYourData:
       println("""    sbt "examples/runMain dspy4s.examples.tutorials.talk_to_your_data.tytdSelfCheckMain"""")
 
     case Right(lm) =>
-        given context: RuntimeContext       = RuntimeContext(lm = Some(lm), adapter = Some(JSONAdapter()))
-        given backend: PredictionBackend    = new LivePredictionBackend(lm, JSONAdapter(), context)
+      given context: RuntimeContext    = RuntimeContext(lm = Some(lm), adapter = Some(JSONAdapter()))
+      given backend: PredictionBackend = new LivePredictionBackend(lm, JSONAdapter(), context)
 
-        println(s"Dataset: ${Dataset.orders.size} synthetic e-commerce orders (${Dataset.csv.length} chars of CSV).")
-        println(
-          s"Model: $model.  Gold questions: ${Dataset.goldset.size} (train ${Optimize.trainset.size} / val ${Optimize.valset.size}).\n"
-        )
+      println(s"Dataset: ${Dataset.orders.size} synthetic e-commerce orders (${Dataset.csv.length} chars of CSV).")
+      println(
+        s"Model: $model.  Gold questions: ${Dataset.goldset.size} (train ${Optimize.trainset.size} / val ${Optimize.valset.size}).\n"
+      )
 
-        // Part 1: GEPA evolves the planner instruction (LM only; metric is the Scala engine).
-        println("== Optimizing the planner with GEPA (grounded metric: planned query vs. gold answer) ==")
-        Optimize.run(budget = budget, minibatch = minibatch) match
-          case Left(error) => println(s"[talk-to-your-data] GEPA failed: ${error.message}")
-          case Right(report) =>
-            println(f"  baseline planner accuracy:  ${report.baselineAccuracy * 100}%5.1f%%  (held-out val split)")
-            println(
-              f"  optimized planner accuracy: ${report.optimizedAccuracy * 100}%5.1f%%  (${report.numCandidates} candidates explored)"
-            )
-            val instruction = report.optimizedInstruction
-            val shown       = if instruction.length > 700 then instruction.take(700) + " …" else instruction
-            println(s"  discovered instruction:\n${shown.linesIterator.map("    " + _).mkString("\n")}\n")
+      // Part 1: GEPA evolves the planner instruction (LM only; metric is the Scala engine).
+      println("== Optimizing the planner with GEPA (grounded metric: planned query vs. gold answer) ==")
+      Optimize.run(budget = budget, minibatch = minibatch) match
+        case Left(error)   => println(s"[talk-to-your-data] GEPA failed: ${error.message}")
+        case Right(report) =>
+          println(f"  baseline planner accuracy:  ${report.baselineAccuracy * 100}%5.1f%%  (held-out val split)")
+          println(
+            f"  optimized planner accuracy: ${report.optimizedAccuracy * 100}%5.1f%%  (${report.numCandidates} candidates explored)"
+          )
+          val instruction = report.optimizedInstruction
+          val shown       = if instruction.length > 700 then instruction.take(700) + " …" else instruction
+          println(s"  discovered instruction:\n${shown.linesIterator.map("    " + _).mkString("\n")}\n")
 
-            // Part 2: the full agent answers questions with the optimized planner (needs Deno).
-            if denoAvailable then
-              val interpreter = new DenoPyodideInterpreter(outputFields = Vector(
+          // Part 2: the full agent answers questions with the optimized planner (needs Deno).
+          if denoAvailable then
+            val interpreter = new DenoPyodideInterpreter(outputFields =
+              Vector(
                 DenoPyodideInterpreter.OutputField("answer"),
                 DenoPyodideInterpreter.OutputField("value"),
                 DenoPyodideInterpreter.OutputField("caveats"),
                 DenoPyodideInterpreter.OutputField("method")
-              ))
-              given ReplExecutionBackend = new LiveReplExecutionBackend(interpreter)
-              try
-                println("== The agent: plan -> act (RLM writes Python over the CSV) -> verify (JVM re-computes) ==")
-                demoQuestions.foreach(runAndPrint(_, instruction))
-              finally interpreter.close()
-            else
-              println("== Agent demo SKIPPED: the RLM act stage needs Deno on the PATH (https://deno.com) ==")
-              println("   (The GEPA optimization above ran without it, since its metric is the Scala engine.)")
+              )
+            )
+            given ReplExecutionBackend = new LiveReplExecutionBackend(interpreter)
+            try
+              println("== The agent: plan -> act (RLM writes Python over the CSV) -> verify (JVM re-computes) ==")
+              demoQuestions.foreach(runAndPrint(_, instruction))
+            finally interpreter.close()
+          else
+            println("== Agent demo SKIPPED: the RLM act stage needs Deno on the PATH (https://deno.com) ==")
+            println("   (The GEPA optimization above ran without it, since its metric is the Scala engine.)")

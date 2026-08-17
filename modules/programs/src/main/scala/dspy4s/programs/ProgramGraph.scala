@@ -42,7 +42,7 @@ object ProgramGraph:
         case _: Node.LiftEither[?, ?] => nodes += ProgramGraphNode(id, "lift_either", "fallible function")
 
         case predict: Node.Predict[?, ?] => nodes +=
-            ProgramGraphNode(id, "predict", predict.spec.name, Some(predict.spec.parameterId))
+            ProgramGraphNode(id, "predict", predict.spec.name, program.parameters.idOf(predict.spec.parameterKey))
 
         case _: Node.ExecuteCode => nodes += ProgramGraphNode(id, "execute_code", "execute generated code")
 

@@ -4,12 +4,13 @@
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/evaluation/metrics.md Status: translated (function
   * metrics + Evaluate, snippets 1/3/4/5; LLM-as-judge, snippet 6). Context-aware metrics (2) and
   * trace-over-retrieval-hops (7) remain noted (dspy4s has no retriever). The LLM-as-judge metric (6) is now runnable —
-  * `Metric.score` returns a ZIO effect that requires `PredictionBackend`, so a metric can run a judge over an LM; the ported
-  * `SemanticF1` / `CompleteAndGrounded` (`dspy4s.evaluate.metrics`) are concrete examples, exercised by
+  * `Metric.score` returns a ZIO effect that requires `PredictionBackend`, so a metric can run a judge over an LM; the
+  * ported `SemanticF1` / `CompleteAndGrounded` (`dspy4s.evaluate.metrics`) are concrete examples, exercised by
   * `metricsJudgeMain` below.
   *
-  * dspy4s metrics implement `Metric` (`score(example, prediction, events) => ZIO[PredictionBackend, DspyError, Double]`).
-  * `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain function.
+  * dspy4s metrics implement `Metric` (`score(example, prediction, events) => ZIO[PredictionBackend, DspyError,
+  * Double]`). `FunctionMetric(name) { (example, pred) => … }` / `FunctionMetric.bool(name) { … }` wrap a plain
+  * function.
   */
 package dspy4s.examples.learn.evaluation
 
@@ -85,7 +86,7 @@ object Metrics:
   // | evaluator(YOUR_PROGRAM, metric=YOUR_METRIC)
   // --8<-- [start:metric-evaluate]
   def evaluator[I, O](
-      devset: Vector[Example],
+      devset : Vector[Example],
       metric : Metric,
       program: RecordProgram[I, O]
   ): ZIO[PredictionBackend, Nothing, EvaluationResult] =
@@ -113,8 +114,8 @@ object Metrics:
 
 // Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.learn.evaluation.metricsMain"
 @main def metricsMain(): Unit =
-  given PredictionBackend = Metrics.offlineBackend
-  val ex                  = Metrics.example("What is the capital of France?", "Paris")
+  given PredictionBackend                 = Metrics.offlineBackend
+  val ex                                  = Metrics.example("What is the capital of France?", "Paris")
   def pred(answer: String): RawPrediction =
     RawPrediction(values = DynamicValues.recordFromEntries(Seq("answer" -> DynamicValues.fromAny(answer))))
   println("validate_answer('paris'): " + Demo.runEffect(Metrics.validateAnswer.score(ex, pred("paris"), Vector.empty)))

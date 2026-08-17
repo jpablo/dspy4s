@@ -14,7 +14,7 @@ final class BootstrapRandomSearchSuite extends FunSuite:
   private final case class Answer(answer: String)
 
   private val signature = Signature.derived[Question, Answer]("Answer")
-  private val program   = Program.predict(ParameterId("answer"), signature).fromRecords(signature.inputShape)
+  private val program   = Program.predictStable(ParameterId("answer"), signature).fromRecords(signature.inputShape)
 
   private val metric = new Metric:
     val name: String = "exact"

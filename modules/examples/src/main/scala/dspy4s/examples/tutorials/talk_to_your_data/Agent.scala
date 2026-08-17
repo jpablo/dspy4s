@@ -76,7 +76,6 @@ object Agent:
 
   private val actionGenerator = Program
     .predict(
-      ParameterId("talk-data/action"),
       Signature.derived[ActStepPrompt, ActStepResponse]("AnalystAction", actInstructions)
     )
     .contramap[RLM.ActionInput[ActInput]](input =>
@@ -94,7 +93,6 @@ object Agent:
 
   private val fallbackExtractor = Program
     .predict(
-      ParameterId("talk-data/extract"),
       Signature.derived[ActExtractPrompt, AnalysisResult](
         "AnalystExtract",
         "Extract the best supported answer from the complete code-execution trajectory."
@@ -124,7 +122,7 @@ object Agent:
 
   // --8<-- [start:plan-act]
   def planner(instructions: String): Program[Question, QueryPlan] =
-    Program.predict(ParameterId("talk-data/planner"), plannerSignature(instructions))
+    Program.predict(plannerSignature(instructions))
 
   def plan(question: String, instructions: String)(using PredictionBackend): Either[DspyError, QueryPlan] =
     Demo.run(planner(instructions), Question(question, Dataset.schemaDescription)).map(_.output)
@@ -133,7 +131,8 @@ object Agent:
       predictionBackend: PredictionBackend,
       replBackend      : ReplExecutionBackend
   ): Either[DspyError, AnalysisResult] =
-    val environment = ZEnvironment[PredictionBackend](predictionBackend) ++ ZEnvironment[ReplExecutionBackend](replBackend)
+    val environment = ZEnvironment[PredictionBackend](predictionBackend) ++
+      ZEnvironment[ReplExecutionBackend](replBackend)
     Demo
       .runWith(executor, ActInput(Dataset.csv, describePlan(plan), question, feedback), environment)
       .map(_.output)

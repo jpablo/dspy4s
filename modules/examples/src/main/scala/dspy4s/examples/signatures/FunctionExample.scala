@@ -12,7 +12,7 @@ package dspy4s.examples.signatures
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{PredictionBackend, Program}
 import dspy4s.signatures.Signature
 
 object FunctionExample:
@@ -30,7 +30,7 @@ object FunctionExample:
     */
   val anonymous = Signature.fromType[String => Emotion]
 
-  val classifyProgram = Program.predict(ParameterId("function_emotion"), emotion)
+  val classifyProgram = Program.predict(emotion)
 
   def classify(sentence: String)(using PredictionBackend): Either[DspyError, Emotion] =
     Demo.run(classifyProgram, (sentence = sentence)).map(_.output.sentiment)

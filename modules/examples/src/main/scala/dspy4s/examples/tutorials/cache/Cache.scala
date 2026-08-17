@@ -18,7 +18,7 @@ import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.{LanguageModel, LmCache, LmRequest, LmResponse}
 import dspy4s.lm.runtime.{DiskLmCache, InMemoryLmCache, ManagedLanguageModel, NoopLmCache, RequestHash, UsageTracking}
-import dspy4s.programs.{LivePredictionBackend, ParameterId, Program}
+import dspy4s.programs.{LivePredictionBackend, Program}
 import dspy4s.signatures.Signature
 
 import java.nio.file.Path
@@ -27,7 +27,6 @@ import scala.collection.concurrent.TrieMap
 object Cache:
 
   private val qa = Program.predict(
-    ParameterId("cache/answer"),
     Signature.fromString("question -> answer")
   )
 

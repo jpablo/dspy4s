@@ -443,17 +443,17 @@ object ProgramRunner:
       nextId      : Ref[Int]
   ): ZIO[PredictionBackend, DspyError, Prediction[Any]] =
     for
-      binding <- ZIO.fromOption(store.binding(spec.parameterId)).orElseFail(
-                   NotFoundError("program_parameter", s"Missing parameters for '${spec.parameterId.value}'")
+      binding <- ZIO.fromOption(store.binding(spec.parameterKey)).orElseFail(
+                   NotFoundError("program_parameter", "Missing parameters for a prediction declaration")
                  )
       encoded <- attempt("program_predict_encode")(spec.signature.inputShape.encode(input))
       _       <- validateInputs(spec, encoded)
       result  <-
         if options.traceEnabled then
           freshId(nextId).flatMap(callId =>
-            executePredict(spec, binding.value, encoded, options, parentCallId, Some(callId), journal)
+            executePredict(spec, binding.id, binding.value, encoded, options, parentCallId, Some(callId), journal)
           )
-        else executePredict(spec, binding.value, encoded, options, parentCallId, None, journal)
+        else executePredict(spec, binding.id, binding.value, encoded, options, parentCallId, None, journal)
     yield result
 
   private def validateInputs(
@@ -472,6 +472,7 @@ object ProgramRunner:
 
   private def executePredict(
       spec        : PredictSpec[Any, Any],
+      parameterId : ParameterId,
       parameters  : OptimizableParameters,
       encodedInput: DynamicValue.Record,
       options     : RunOptions,
@@ -481,7 +482,7 @@ object ProgramRunner:
   ): ZIO[PredictionBackend, DspyError, Prediction[Any]] =
     val effectiveSignature = spec.signature.withInstructions(parameters.instructions)
     val request            = PredictionRequest(
-      parameterId = spec.parameterId,
+      parameterId = parameterId,
       component = spec.name,
       layout = effectiveSignature.layout,
       demos = parameters.demos,
@@ -493,11 +494,11 @@ object ProgramRunner:
     )
 
     val start = callId.fold[UIO[Unit]](ZIO.unit)(id =>
-      append(journal, ProgramEvent.Started(id, parentCallId, spec.name, encodedInput, Some(spec.parameterId)))
+      append(journal, ProgramEvent.Started(id, parentCallId, spec.name, encodedInput, Some(parameterId)))
     )
     val emit = (chunk: PredictionChunk) =>
       callId.fold[UIO[Unit]](ZIO.unit)(id =>
-        append(journal, ProgramEvent.OutputChunk(id, parentCallId, spec.name, chunk, Some(spec.parameterId)))
+        append(journal, ProgramEvent.OutputChunk(id, parentCallId, spec.name, chunk, Some(parameterId)))
       )
     start *>
       ZIO
@@ -509,13 +510,13 @@ object ProgramRunner:
         .tapBoth(
           error =>
             callId.fold[UIO[Unit]](ZIO.unit)(id =>
-              append(journal, ProgramEvent.Failed(id, parentCallId, spec.name, error, Some(spec.parameterId)))
+              append(journal, ProgramEvent.Failed(id, parentCallId, spec.name, error, Some(parameterId)))
             ),
           prediction =>
             callId.fold[UIO[Unit]](ZIO.unit)(id =>
               append(
                 journal,
-                ProgramEvent.Completed(id, parentCallId, spec.name, prediction.raw.values, Some(spec.parameterId))
+                ProgramEvent.Completed(id, parentCallId, spec.name, prediction.raw.values, Some(parameterId))
               )
             )
         )

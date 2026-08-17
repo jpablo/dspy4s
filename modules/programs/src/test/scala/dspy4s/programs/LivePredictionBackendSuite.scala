@@ -42,7 +42,7 @@ final class LivePredictionBackendSuite extends FunSuite:
 
   test("the live backend runs the existing adapter and model through the effect boundary") {
     val signature = Signature.derived[Question, Answer]("Answer", instructions = "be direct")
-    val program   = Program.predict(ParameterId("answer"), signature)
+    val program   = Program.predictStable(ParameterId("answer"), signature)
     val backend   = new LivePredictionBackend(EchoModel, PromptAdapter, RuntimeContext())
 
     val execution = Unsafe.unsafe { implicit unsafe =>
@@ -76,7 +76,7 @@ final class LivePredictionBackendSuite extends FunSuite:
         )
 
     val signature = Signature.derived[Question, Answer]("Answer")
-    val program   = Program.predict(ParameterId("answer"), signature)
+    val program   = Program.predictStable(ParameterId("answer"), signature)
     val backend   = new LivePredictionBackend(streamingModel, PromptAdapter, RuntimeContext())
     val execution = Unsafe.unsafe { implicit unsafe =>
       Runtime.default.unsafe

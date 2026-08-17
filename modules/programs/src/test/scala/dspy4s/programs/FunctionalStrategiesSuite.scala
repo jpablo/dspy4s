@@ -79,12 +79,12 @@ final class FunctionalStrategiesSuite extends FunSuite:
   private def feedbackRetry(maxAttempts: Int)(
       accept: FeedbackRetry.Attempt[RetryInput, RetryAnswer] => Either[DspyError, Boolean]
   ): Program[RetryInput, RetryAnswer] =
-    val task = Program.predict(
+    val task = Program.predictStable(
       taskId,
       Signature.derived[RetryInput, RetryAnswer]("RetryTask"),
       name = "retry_task"
     )
-    val critic = Program.predict(
+    val critic = Program.predictStable(
       feedbackId,
       Signature.derived[CritiqueInput, Advice]("RetryFeedback"),
       name = "retry_feedback"
@@ -102,17 +102,17 @@ final class FunctionalStrategiesSuite extends FunSuite:
       executor   : ProgramWithEnv[String, CodeExecutionResult, R],
       maxAttempts: Int = 2
   ): ProgramWithEnv[PotQuestion, PotAnswer, PredictionBackend & R] =
-    val generator = Program.predict(
+    val generator = Program.predictStable(
       generatorId,
       Signature.derived[PotQuestion, ProgramOfThought.GeneratedCode]("GenerateCode"),
       name = "pot_generator"
     )
-    val regenerator = Program.predict(
+    val regenerator = Program.predictStable(
       regeneratorId,
       Signature.derived[ProgramOfThought.RetryInput[PotQuestion], ProgramOfThought.GeneratedCode]("RegenerateCode"),
       name = "pot_regenerator"
     )
-    val answerer = Program.predict(
+    val answerer = Program.predictStable(
       answererId,
       Signature.derived[ProgramOfThought.AnswerInput[PotQuestion], PotAnswer]("AnswerCode"),
       name = "pot_answerer"
@@ -121,7 +121,7 @@ final class FunctionalStrategiesSuite extends FunSuite:
 
   test("chain of thought is one signature transformation and one prediction node") {
     val base    = Signature.derived[Question, Answer]("Answer", instructions = "reason first")
-    val program = ChainOfThought(ParameterId("answer"), base)
+    val program = ChainOfThought.stable(ParameterId("answer"), base)
     val backend = new PredictionBackend:
       def generate(@annotation.unused request: PredictionRequest): ZIO[Any, DspyError, RawPrediction] =
         ZIO.succeed(RawPrediction(DynamicValues.record(
@@ -179,7 +179,7 @@ final class FunctionalStrategiesSuite extends FunSuite:
 
   test("multi-chain comparison is input preparation followed by one visible prediction") {
     val base    = Signature.derived[Question, Answer]("CompareAnswer")
-    val program = MultiChainComparison(compareId, base, m = 2)
+    val program = MultiChainComparison.stable(compareId, base, m = 2)
     val input   = MultiChainComparison.Input(
       Question("What color is the sky?"),
       Vector(
@@ -509,7 +509,7 @@ final class FunctionalStrategiesSuite extends FunSuite:
 
   test("ensemble reduces typed member evidence and keeps all predictors visible") {
     val ids      = Vector(ParameterId("vote-1"), ParameterId("vote-2"), ParameterId("vote-3"))
-    val members  = ids.map(id => Program.predict(id, Signature.derived[Question, Answer](s"Vote-${id.value}")))
+    val members  = ids.map(id => Program.predictStable(id, Signature.derived[Question, Answer](s"Vote-${id.value}")))
     val evidence = ArrayBuffer.empty[String]
     val program  = Ensemble(members) { predictions =>
       evidence ++= predictions.flatMap(_.raw.asString("answer").toOption)

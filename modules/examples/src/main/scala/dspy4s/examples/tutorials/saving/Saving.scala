@@ -13,7 +13,7 @@ import dspy4s.core.data.Example
 import dspy4s.evaluate.Metric
 import dspy4s.examples.Demo
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence, RoundCount}
-import dspy4s.programs.{ParameterId, PredictionBackend, Program, RecordProgram}
+import dspy4s.programs.{PredictionBackend, Program, RecordProgram}
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
@@ -24,12 +24,12 @@ final case class SavingAnswer(answer: String) derives Schema
 
 object Saving:
 
-  val answerId = ParameterId("saving/answer")
   val signature = Signature.derived[SavingQuestion, SavingAnswer]("SavingQA", "Answer the question.")
+  val answer    = Program.namespace("saving").declare("answer", signature)
 
   // --8<-- [start:program]
   def program(): RecordProgram[SavingQuestion, SavingAnswer] =
-    Program.predict(answerId, signature).fromRecords(signature.inputShape)
+    answer.program.fromRecords(signature.inputShape)
   // --8<-- [end:program]
 
   // ── Snippet 1 — compile a program with BootstrapFewShot ──
@@ -84,20 +84,21 @@ object Saving:
     Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question")),
     Example("question" := "What is 2+2?", "answer" := "4").withInputs(Set("question"))
   )
-  val compiled = Saving.program().modifyParameter(Saving.answerId)(_.copy(demos = demos))
+  val compiled = Saving.program().modifyParameter(Saving.answer)(_.copy(demos = demos))
     .fold(error => sys.error(error.message), identity)
 
-  val path = Files.createTempFile("dspy4s_program", ".json").toString
-  val roundTrip = for
-    _      <- Saving.save(compiled, path)
-    loaded <- Saving.load(Saving.program(), path)
-  yield loaded
+  val path      = Files.createTempFile("dspy4s_program", ".json").toString
+  val roundTrip =
+    for
+      _      <- Saving.save(compiled, path)
+      loaded <- Saving.load(Saving.program(), path)
+    yield loaded
 
   roundTrip match
-    case Left(error) => sys.error(s"save/load failed: ${error.message}")
+    case Left(error)   => sys.error(s"save/load failed: ${error.message}")
     case Right(loaded) =>
-      val before = compiled.program.parameters.get(Saving.answerId).fold(0)(_.demos.size)
-      val after  = loaded.program.parameters.get(Saving.answerId).fold(0)(_.demos.size)
+      val before = compiled.program.parameters.get(Saving.answer).fold(0)(_.demos.size)
+      val after  = loaded.program.parameters.get(Saving.answer).fold(0)(_.demos.size)
       assert(before == after, "demo count must round-trip")
       println(s"saved program state to: $path")
       println(s"demos before save: $before, after load: $after")

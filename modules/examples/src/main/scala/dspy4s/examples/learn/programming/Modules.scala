@@ -12,7 +12,7 @@ package dspy4s.examples.learn.programming
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ChainOfThought, ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{ChainOfThought, PredictionBackend, Program}
 import dspy4s.signatures.Signature
 
 object Modules:
@@ -30,7 +30,6 @@ object Modules:
   // | print(response.sentiment)
   object SentimentExample:
     val classify = Program.predict(
-      ParameterId("modules/sentiment"),
       Signature.fromString("sentence -> sentiment: bool")
     )
 
@@ -58,7 +57,6 @@ object Modules:
   // --8<-- [start:chain-of-thought]
   object QaReasoningExample:
     val classify = ChainOfThought(
-      ParameterId("modules/qa"),
       Signature.fromString("question -> answer")
     )
 

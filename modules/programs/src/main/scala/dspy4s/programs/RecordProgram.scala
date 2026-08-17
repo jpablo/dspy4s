@@ -20,10 +20,21 @@ final case class RecordProgramWithEnv[I, O, R](program: ProgramWithEnv[I, O, R],
   ): Either[DspyError, RecordProgramWithEnv[I, O, R]] =
     program.updatedParameter(id, value).map(updated => copy(program = updated))
 
+  def updatedParameter(
+      ref  : ParameterRef,
+      value: OptimizableParameters
+  ): Either[DspyError, RecordProgramWithEnv[I, O, R]] =
+    program.updatedParameter(ref, value).map(updated => copy(program = updated))
+
   def modifyParameter(id: ParameterId)(
       update: OptimizableParameters => OptimizableParameters
   ): Either[DspyError, RecordProgramWithEnv[I, O, R]] =
     program.modifyParameter(id)(update).map(updated => copy(program = updated))
+
+  def modifyParameter(ref: ParameterRef)(
+      update: OptimizableParameters => OptimizableParameters
+  ): Either[DspyError, RecordProgramWithEnv[I, O, R]] =
+    program.modifyParameter(ref)(update).map(updated => copy(program = updated))
 
   def replaceParameters(
       values: Map[ParameterId, OptimizableParameters]

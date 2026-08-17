@@ -8,7 +8,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 /** An effectful host tool. The value contains metadata and one explicit execution function. */
 final case class Tool(
     name       : String,
-    description: String = "",
+    description: String                    = "",
     argSchema  : Vector[(String, TypeRef)] = Vector.empty,
     invoke     : DynamicValue.Record => IO[DspyError, DynamicValue]
 )
@@ -17,7 +17,7 @@ object Tool:
 
   def fromEither(
       name       : String,
-      description: String = "",
+      description: String                    = "",
       argSchema  : Vector[(String, TypeRef)] = Vector.empty
   )(
       invoke: DynamicValue.Record => Either[DspyError, DynamicValue]
@@ -26,7 +26,7 @@ object Tool:
 
   def succeed[A: Schema](
       name       : String,
-      description: String = "",
+      description: String                    = "",
       argSchema  : Vector[(String, TypeRef)] = Vector.empty
   )(
       invoke: DynamicValue.Record => A

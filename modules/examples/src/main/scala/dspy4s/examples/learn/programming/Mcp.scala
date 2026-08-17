@@ -52,7 +52,6 @@ object Mcp:
     ).mkString("\n")
     val generator = Program
       .predict(
-        ParameterId("mcp/decision"),
         Signature.derived[McpDecisionPrompt, McpDecision](
           "McpToolDecision",
           "Choose one discovered tool call, or finish after the result is available."
@@ -71,7 +70,6 @@ object Mcp:
       }
     val extractor = Program
       .predict(
-        ParameterId("mcp/result"),
         Signature.derived[McpExtractPrompt, McpResult]("McpTaskResult", "Answer from the remote tool trajectory.")
       )
       .contramap[ReAct.ExtractInput[McpTask]](input =>
@@ -80,21 +78,22 @@ object Mcp:
     ReAct(generator, Program.invokeTool, extractor, maxIterations = 5)
 
   def run(task: String, session: McpSession)(using backend: PredictionBackend): Either[DspyError, String] =
-    val effect = for
-      descriptors <- session.listTools
-      tools        <- discover(session)
-      prediction   <- ProgramRunner
+    val effect =
+      for
+        descriptors <- session.listTools
+        tools       <- discover(session)
+        prediction  <- ProgramRunner
                         .run(agent(descriptors), McpTask(task))
                         .provideSomeEnvironment[PredictionBackend](environment =>
                           environment ++ ZEnvironment[ToolBackend](new LiveToolBackend(tools))
                         )
-    yield prediction.output.result
+      yield prediction.output.result
     Demo.runEffect(effect)
 
   /** A fixture session proves the conversion without an MCP client dependency. */
   val fixtureSession: McpSession = new McpSession:
-    val weather = RemoteToolDescriptor("weather", "Get fixture weather for one city.", Vector("city" -> TypeRef.string))
-    def listTools = ZIO.succeed(Vector(weather))
+    val weather                                                = RemoteToolDescriptor("weather", "Get fixture weather for one city.", Vector("city" -> TypeRef.string))
+    def listTools                                              = ZIO.succeed(Vector(weather))
     def callTool(name: String, arguments: DynamicValue.Record) =
       ZIO.fromEither(DynamicValues.requireString(arguments, "city", name))
         .map(city => DynamicValues.fromAny(s"$city: sunny, 24 C"))

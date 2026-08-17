@@ -1,8 +1,9 @@
 # dspy4s examples
 
 This module keeps Scala ports next to the DSPy examples that inspired them. Comments in each source file show the
-corresponding Python construction. The Scala code uses immutable `Program` values, stable `ParameterId` values, typed
-composition, and explicit execution backends.
+corresponding Python construction. The Scala code uses immutable `Program` values, anonymous prediction declarations
+by default, named declarations where stable addressing is necessary, typed composition, and explicit execution
+backends.
 
 Compile every example with:
 

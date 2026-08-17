@@ -12,12 +12,12 @@
   *   - `RLM` — inputs become variables in a sandboxed Python REPL; the model writes code that calls the SAME tools in a
   *     loop and `SUBMIT`s the result. Tools are exposed to the sandbox verbatim.
   *
-  * Both agents share one base signature and one set of host-tool implementations. The task instruction is deliberately NEUTRAL
-  * about strategy (it asks for a thorough report, not "check every pair"), so each approach picks its own method. We
-  * measure two things per run: COVERAGE (a [[CallRecorder]] over every tool call) and EFFORT (LM round-trips + wall
-  * time). The durable, model-independent result is the EFFORT gap: even when a capable model lets ReAct reach full
-  * coverage too, RLM gets there in a handful of LM calls (one code-gen step writes a loop that does all the checks)
-  * versus ReAct's one-LM-call-per-tool-call, trajectory-re-reading turns.
+  * Both agents share one base signature and one set of host-tool implementations. The task instruction is deliberately
+  * NEUTRAL about strategy (it asks for a thorough report, not "check every pair"), so each approach picks its own
+  * method. We measure two things per run: COVERAGE (a [[CallRecorder]] over every tool call) and EFFORT (LM round-trips
+  * + wall time). The durable, model-independent result is the EFFORT gap: even when a capable model lets ReAct reach
+  * full coverage too, RLM gets there in a handful of LM calls (one code-gen step writes a loop that does all the
+  * checks) versus ReAct's one-LM-call-per-tool-call, trajectory-re-reading turns.
   *
   * Observed in a sample run: ReAct covered 5/21 pairs + 5/14 contraindications in 12 LM round-trips (90s), while RLM
   * covered 21/21 + 14/14 in 3 round-trips (33s) — ReAct even reported "no issue identified" for drugs it never checked.
@@ -151,12 +151,13 @@ object DrugSafetyTools:
       parameters : Vector[(String, TypeRef)],
       run        : DynamicValue.Record => String
   ):
-    def host: Tool = Tool.fromEither(name, description, parameters)(args => Right(DynamicValues.fromAny(run(args))))
-    def sandbox: SandboxTool = SandboxTool(
-      name,
-      parameters.map((parameter, _) => SandboxTool.Param(parameter, Some("str"))),
-      args => Right(DynamicValues.fromAny(run(args)))
-    )
+    def host: Tool           = Tool.fromEither(name, description, parameters)(args => Right(DynamicValues.fromAny(run(args))))
+    def sandbox: SandboxTool =
+      SandboxTool(
+        name,
+        parameters.map((parameter, _) => SandboxTool.Param(parameter, Some("str"))),
+        args => Right(DynamicValues.fromAny(run(args)))
+      )
 
   def build(recorder: CallRecorder): Built =
     val definitions = Vector(
@@ -198,9 +199,9 @@ object DrugSafetyTools:
 final case class MedicationInput(medications: String, conditions: String) derives Schema
 final case class RiskReport(riskReport: String) derives Schema
 final case class ReactDecisionPrompt(
-    medications : String,
-    conditions  : String,
-    trajectory  : String,
+    medications   : String,
+    conditions    : String,
+    trajectory    : String,
     availableTools: String
 ) derives Schema
 final case class ReactDecision(
@@ -214,11 +215,11 @@ final case class ReactDecision(
 ) derives Schema
 final case class ExtractPrompt(medications: String, conditions: String, trajectory: String) derives Schema
 final case class RlmDecisionPrompt(
-    medications : String,
-    conditions  : String,
-    trajectory  : String,
-    iteration   : Int,
-    maxIterations: Int,
+    medications   : String,
+    conditions    : String,
+    trajectory    : String,
+    iteration     : Int,
+    maxIterations : Int,
     availableTools: String
 ) derives Schema
 final case class RlmDecision(reasoning: String, code: String) derives Schema
@@ -246,14 +247,12 @@ object ReactVsRlm:
     */
   val ReActMaxIterations: Int = 40
 
-  private val availableTools =
-    """check_drug_interaction(drug_a, drug_b)
+  private val availableTools = """check_drug_interaction(drug_a, drug_b)
       |check_contraindication(drug, condition)
       |get_drug_class(drug)""".stripMargin
 
   private val reactGenerator = Program
     .predict(
-      ParameterId("react-vs-rlm/react-step"),
       Signature.derived[ReactDecisionPrompt, ReactDecision](
         "DrugSafetyReActStep",
         taskInstructions + "\nChoose one tool call, or finish when the report can be written."
@@ -288,7 +287,6 @@ object ReactVsRlm:
 
   private val reactExtractor = Program
     .predict(
-      ParameterId("react-vs-rlm/react-extract"),
       Signature.derived[ExtractPrompt, RiskReport]("DrugSafetyReport", taskInstructions)
     )
     .contramap[ReAct.ExtractInput[MedicationInput]](input =>
@@ -297,7 +295,6 @@ object ReactVsRlm:
 
   private val rlmGenerator = Program
     .predict(
-      ParameterId("react-vs-rlm/rlm-step"),
       Signature.derived[RlmDecisionPrompt, RlmDecision](
         "DrugSafetyRlmStep",
         taskInstructions +
@@ -318,7 +315,6 @@ object ReactVsRlm:
 
   private val rlmExtractor = Program
     .predict(
-      ParameterId("react-vs-rlm/rlm-extract"),
       Signature.derived[ExtractPrompt, RiskReport]("DrugSafetyRlmReport", taskInstructions)
     )
     .contramap[RLM.ExtractInput[MedicationInput]](input =>
@@ -345,16 +341,16 @@ object ReactVsRlm:
       input      : I,
       environment: ZEnvironment[R]
   ): (Either[DspyError, Prediction[O]], Int, Long) =
-    val started = System.nanoTime()
+    val started   = System.nanoTime()
     val execution = Unsafe.unsafe { implicit unsafe =>
       Runtime.default.unsafe
         .run(ProgramRunner.runJournaled(program, input).provideEnvironment(environment))
         .getOrThrowFiberFailure()
     }
     val elapsedMs = (System.nanoTime() - started) / 1_000_000L
-    val lmCalls = execution.events.count {
+    val lmCalls   = execution.events.count {
       case ProgramEvent.Started(_, _, _, _, Some(_)) => true
-      case _                                          => false
+      case _                                         => false
     }
     (execution.outcome, lmCalls, elapsedMs)
 
@@ -364,10 +360,10 @@ object ReactVsRlm:
     // --8<-- [start:react-agent]
     val agent = ReAct(reactGenerator, Program.invokeTool, reactExtractor, maxIterations = ReActMaxIterations)
     // --8<-- [end:react-agent]
-    val toolBackend: ToolBackend = new LiveToolBackend(tools.host)
-    val environment = ZEnvironment[PredictionBackend](predictionBackend) ++ ZEnvironment[ToolBackend](toolBackend)
+    val toolBackend: ToolBackend  = new LiveToolBackend(tools.host)
+    val environment               = ZEnvironment[PredictionBackend](predictionBackend) ++ ZEnvironment[ToolBackend](toolBackend)
     val (prediction, lmCalls, ms) = measured(agent, MedicationInput(medications, conditions), environment)
-    val report = prediction.map(_.output.riskReport).fold(error => s"[error] ${error.message}", identity)
+    val report                    = prediction.map(_.output.riskReport).fold(error => s"[error] ${error.message}", identity)
     RunResult("ReAct", report, recorder, lmCalls, ms, trajectory = None)
 
   def runRlm(medications: String, conditions: String)(using predictionBackend: PredictionBackend): RunResult =
@@ -386,11 +382,11 @@ object ReactVsRlm:
       outputFields = Vector(DenoPyodideInterpreter.OutputField("riskReport"))
     )
     val replBackend: ReplExecutionBackend = new LiveReplExecutionBackend(interpreter)
-    val environment = ZEnvironment[PredictionBackend](predictionBackend) ++
+    val environment                       = ZEnvironment[PredictionBackend](predictionBackend) ++
       ZEnvironment[ReplExecutionBackend](replBackend)
     try
       val (prediction, lmCalls, ms) = measured(agent, MedicationInput(medications, conditions), environment)
-      val report = prediction.map(_.output.riskReport).fold(error => s"[error] ${error.message}", identity)
+      val report                    = prediction.map(_.output.riskReport).fold(error => s"[error] ${error.message}", identity)
       RunResult("RLM (direct)", report, recorder, lmCalls, ms, trajectory = None)
     finally interpreter.close()
 

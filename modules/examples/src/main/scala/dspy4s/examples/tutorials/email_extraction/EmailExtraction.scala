@@ -16,7 +16,7 @@ package dspy4s.examples.tutorials.email_extraction
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program}
+import dspy4s.programs.{PredictionBackend, Program}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.Schema
 
@@ -93,7 +93,12 @@ case class EmailAnalysis(
 )
 
 case class EmailRequest(subject: String, body: String, sender: String)
-private case class ClassifiedEmail(request: EmailRequest, emailType: EmailType, urgency: UrgencyLevel, reasoning: String)
+private case class ClassifiedEmail(
+    request  : EmailRequest,
+    emailType: EmailType,
+    urgency  : UrgencyLevel,
+    reasoning: String
+)
 private case class EnrichedEmail(
     classified     : ClassifiedEmail,
     entities       : List[ExtractedEntity],
@@ -115,13 +120,13 @@ object EmailExtraction:
   // |     def forward(self, email_subject, email_body, sender=""): ...
   // --8<-- [start:processor]
   object EmailProcessor:
-    private val classifier = Program.predict(ParameterId("email/classify"), Signature.of[ClassifyEmail])
+    private val classifier = Program.predict(Signature.of[ClassifyEmail])
       .contramap[EmailRequest](request =>
         (email_subject = request.subject, email_body = request.body, sender = request.sender)
       )
-    private val entityExtractor = Program.predict(ParameterId("email/entities"), Signature.of[ExtractEntities])
-    private val actionGenerator = Program.predict(ParameterId("email/actions"), Signature.of[GenerateActionItems])
-    private val summarizer      = Program.predict(ParameterId("email/summary"), Signature.of[SummarizeEmail])
+    private val entityExtractor = Program.predict(Signature.of[ExtractEntities])
+    private val actionGenerator = Program.predict(Signature.of[GenerateActionItems])
+    private val summarizer      = Program.predict(Signature.of[SummarizeEmail])
 
     private val classified = (Program.identity[EmailRequest] &&& classifier).map { case (request, result) =>
       ClassifiedEmail(request, result.email_type, result.urgency, result.reasoning)
@@ -130,7 +135,8 @@ object EmailExtraction:
     private val enriched = classified >>> (
       Program.identity[ClassifiedEmail] &&& entityExtractor.contramap[ClassifiedEmail](value =>
         (
-          email_content = s"Subject: ${value.request.subject}\n\nFrom: ${value.request.sender}\n\n${value.request.body}",
+          email_content =
+            s"Subject: ${value.request.subject}\n\nFrom: ${value.request.sender}\n\n${value.request.body}",
           email_type = value.emailType
         )
       )

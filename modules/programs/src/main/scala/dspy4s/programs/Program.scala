@@ -80,6 +80,9 @@ final class ProgramWithEnv[I, O, R] private[programs] (
   def updatedParameter(id: ParameterId, value: OptimizableParameters): Either[DspyError, ProgramWithEnv[I, O, R]] =
     parameters.updated(id, value).map(store => Program.apply[I, O, R](root, store))
 
+  def updatedParameter(ref: ParameterRef, value: OptimizableParameters): Either[DspyError, ProgramWithEnv[I, O, R]] =
+    updatedParameter(ref.id, value)
+
   def modifyParameter(id: ParameterId)(
       update: OptimizableParameters => OptimizableParameters
   ): Either[DspyError, ProgramWithEnv[I, O, R]] =
@@ -87,6 +90,11 @@ final class ProgramWithEnv[I, O, R] private[programs] (
       .get(id)
       .toRight(dspy4s.core.contracts.NotFoundError("program_parameter", s"Unknown parameter id '${id.value}'"))
       .flatMap(value => updatedParameter(id, update(value)))
+
+  def modifyParameter(ref: ParameterRef)(
+      update: OptimizableParameters => OptimizableParameters
+  ): Either[DspyError, ProgramWithEnv[I, O, R]] =
+    modifyParameter(ref.id)(update)
 
   def replaceParameters(values: Map[ParameterId, OptimizableParameters])
       : Either[DspyError, ProgramWithEnv[I, O, R]] =
@@ -99,6 +107,9 @@ final class ProgramWithEnv[I, O, R] private[programs] (
   def fromRecords(inputShape: Shape[I]): RecordProgramWithEnv[I, O, R] = RecordProgramWithEnv(this, inputShape)
 
 object Program:
+
+  /** Start a namespace for stable prediction declarations. */
+  def namespace(value: String): ParameterNamespace = ParameterNamespace(value)
 
   def identity[A]: ProgramWithEnv[A, A, Any] = apply[A, A, Any](Node.Identity[A](), ParameterStore.empty)
 
@@ -173,8 +184,22 @@ object Program:
     }
     iterate(attempt >>> decide, maxSteps)
 
-  /** Declare one typed LM prediction and its stable optimizer slot. */
+  /** Declare one typed LM prediction with an anonymous optimizer slot.
+    *
+    * Anonymous slots receive deterministic ordinal IDs in declaration order. Reuse the returned program value to share
+    * one slot. Use [[namespace]] and [[ParameterNamespace.declare]] when state needs a stable semantic name.
+    */
   def predict[I, O](
+      signature: Signature[I, O],
+      demos    : Vector[Example]     = Vector.empty,
+      config   : DynamicValue.Record = DynamicValue.Record.empty,
+      name     : String              = "predict",
+      tools    : Vector[ToolSpec]    = Vector.empty
+  ): ProgramWithEnv[I, O, PredictionBackend] =
+    predictWithKey(ParameterKey.anonymous(), signature, demos, config, name, tools)
+
+  /** Declare one typed LM prediction with an explicit stable optimizer slot. */
+  def predictStable[I, O](
       id       : ParameterId,
       signature: Signature[I, O],
       demos    : Vector[Example]     = Vector.empty,
@@ -182,22 +207,32 @@ object Program:
       name     : String              = "predict",
       tools    : Vector[ToolSpec]    = Vector.empty
   ): ProgramWithEnv[I, O, PredictionBackend] =
+    predictWithKey(ParameterKey.stable(id), signature, demos, config, name, tools)
+
+  private def predictWithKey[I, O](
+      key      : ParameterKey,
+      signature: Signature[I, O],
+      demos    : Vector[Example],
+      config   : DynamicValue.Record,
+      name     : String,
+      tools    : Vector[ToolSpec]
+  ): ProgramWithEnv[I, O, PredictionBackend] =
     val staticSignature = signature.withInstructions(None)
     val metadata        = OptimizableMetadata.from(staticSignature.layout, name)
     val parameters      = OptimizableParameters(signature.instructions, demos, config)
     apply[I, O, PredictionBackend](
-      Node.Predict(PredictSpec(id, staticSignature, name, tools)),
-      ParameterStore.single(ParameterBinding(id, metadata, parameters))
+      Node.Predict(PredictSpec(key, staticSignature, name, tools)),
+      ParameterStore.single(key, metadata, parameters)
     )
 
   private[programs] def apply[I, O, R](node: Node[I, O], parameters: ParameterStore): ProgramWithEnv[I, O, R] =
     new ProgramWithEnv(node, parameters)
 
   private[programs] final case class PredictSpec[I, O](
-      parameterId: ParameterId,
-      signature  : Signature[I, O],
-      name       : String,
-      tools      : Vector[ToolSpec]
+      parameterKey: ParameterKey,
+      signature   : Signature[I, O],
+      name        : String,
+      tools       : Vector[ToolSpec]
   )
 
   private[programs] sealed trait Node[I, O]

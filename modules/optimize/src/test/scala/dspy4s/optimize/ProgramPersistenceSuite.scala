@@ -17,7 +17,7 @@ final class ProgramPersistenceSuite extends FunSuite:
 
   private val signature = Signature.derived[PersistenceQuestion, PersistenceAnswer]("Answer")
 
-  private def predict(id: String) = Program.predict(ParameterId(id), signature)
+  private def predict(id: String) = Program.predictStable(ParameterId(id), signature)
 
   private val demo = Example(DynamicValues.record("question" := "q", "answer" := "a"))
 
@@ -28,6 +28,25 @@ final class ProgramPersistenceSuite extends FunSuite:
     val loaded  = ProgramPersistence.loadJson(fresh, json).toOption.get
 
     assertEquals(loaded.parameters, trained.parameters)
+  }
+
+  test("JSON round-trip restores anonymous values into the same program shape") {
+    val fresh     = Program.predict(signature)
+    val parameter = fresh.parameters.all.head.id
+    val trained   = fresh.modifyParameter(parameter)(_.copy(demos = Vector(demo))).toOption.get
+    val loaded    = ProgramPersistence.loadJson(Program.predict(signature), ProgramPersistence.dumpJson(trained))
+      .toOption.get
+
+    assertEquals(loaded.parameters, trained.parameters)
+    assert(loaded.parameters.all.head.id.isAnonymous)
+  }
+
+  test("named declarations update and persist through their first-class reference") {
+    val answer  = Program.namespace("persistence").declare("answer", signature)
+    val trained = answer.program.modifyParameter(answer)(_.copy(instructions = Some("Be exact"))).toOption.get
+    val loaded  = ProgramPersistence.loadJson(answer.program, ProgramPersistence.dumpJson(trained)).toOption.get
+
+    assertEquals(loaded.parameters.get(answer).flatMap(_.instructions), Some("Be exact"))
   }
 
   test("file round-trip restores a record program") {
@@ -48,13 +67,14 @@ final class ProgramPersistenceSuite extends FunSuite:
     val program = predict("first") &&& predict("second")
     val state   = ProgramPersistence.dumpState(program)
 
-    assertEquals(state.fields.map(_._1).toVector, Vector("first", "second"))
+    assertEquals(state.fields.map(_._1).toVector.drop(1), Vector("first", "second"))
   }
 
   test("loading rejects missing and unknown parameter IDs") {
     val program = predict("first") &&& predict("second")
     val one     = program.parameters.get(ParameterId("first")).get.dumpState
-    val state   = DynamicValue.Record(Chunk("first" -> one, "unknown" -> one))
+    val shape   = program.parameters.dumpState.fields.head
+    val state   = DynamicValue.Record(Chunk(shape, "first" -> one, "unknown" -> one))
     val result  = ProgramPersistence.loadState(program, state)
 
     assert(result.isLeft)
@@ -66,4 +86,15 @@ final class ProgramPersistenceSuite extends FunSuite:
     val result = ProgramPersistence.loadJson(predict("answer"), "[]")
 
     assert(result.isLeft)
+  }
+
+  test("loading rejects anonymous state for a different prediction declaration") {
+    val source     = Program.predict(signature)
+    val other      = Program.predict(Signature.derived[PersistenceQuestion, PersistenceAnswer]("OtherAnswer"))
+    val serialized = ProgramPersistence.dumpJson(source)
+
+    val result = ProgramPersistence.loadJson(other, serialized)
+
+    assert(result.isLeft)
+    assert(result.left.toOption.get.message.contains("does not match"))
   }

@@ -9,7 +9,7 @@
 package dspy4s.examples.tutorials.streaming
 
 import dspy4s.examples.Demo
-import dspy4s.programs.{ParameterId, PredictionBackend, Program, ProgramEvent, RunOptions}
+import dspy4s.programs.{PredictionBackend, Program, ProgramEvent, RunOptions}
 import dspy4s.signatures.Signature
 import dspy4s.streaming.{ProgramEventStream, ProgramStreamItem}
 import zio.{Runtime, Unsafe, ZEnvironment}
@@ -21,7 +21,6 @@ final case class StreamingAnswer(answer: String) derives Schema
 object Streaming:
 
   val program = Program.predict(
-    ParameterId("streaming/answer"),
     Signature.derived[StreamingQuestion, StreamingAnswer](
       "StreamingAnswer",
       "Answer the question in a short paragraph."
@@ -44,11 +43,12 @@ object Streaming:
   // ── Snippets 4–7 — field listeners and status messages ──
   // Python listener callbacks become ordinary pattern matches over `ProgramEvent.OutputChunk`, `Started`, `Completed`,
   // and `Failed`. They can be transformed with the normal ZStream operators.
-  def render(item: ProgramStreamItem[StreamingAnswer]): String = item match
-    case ProgramStreamItem.Event(ProgramEvent.OutputChunk(_, _, component, chunk, parameterId)) =>
-      s"chunk component=$component parameter=$parameterId field=${chunk.fieldName} text=${chunk.text}"
-    case ProgramStreamItem.Event(event) => s"event $event"
-    case ProgramStreamItem.Result(prediction) => s"result ${prediction.output.answer}"
+  def render(item: ProgramStreamItem[StreamingAnswer]): String =
+    item match
+      case ProgramStreamItem.Event(ProgramEvent.OutputChunk(_, _, component, chunk, parameterId)) =>
+        s"chunk component=$component parameter=$parameterId field=${chunk.fieldName} text=${chunk.text}"
+      case ProgramStreamItem.Event(event)       => s"event $event"
+      case ProgramStreamItem.Result(prediction) => s"result ${prediction.output.answer}"
 
   // ── Snippets 8/9 — cancellation and errors ──
   // ZStream owns resource cleanup and interruption. Stream failures use the typed `DspyError` channel.

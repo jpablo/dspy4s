@@ -13,7 +13,7 @@ private final case class LfsAnswer(answer: String)
 final class LabeledFewShotSuite extends FunSuite:
 
   private val signature = Signature.derived[LfsQuestion, LfsAnswer]("Answer")
-  private val student   = Program.predict(ParameterId("answer"), signature).fromRecords(signature.inputShape)
+  private val student   = Program.predictStable(ParameterId("answer"), signature).fromRecords(signature.inputShape)
 
   private def example(index: Int): Example =
     Example(DynamicValues.record("question" := s"q$index", "answer" := s"a$index"))
@@ -64,8 +64,8 @@ final class LabeledFewShotSuite extends FunSuite:
   }
 
   test("LabeledFewShot updates all stable parameter slots") {
-    val first    = Program.predict(ParameterId("first"), signature)
-    val second   = Program.predict(ParameterId("second"), signature)
+    val first    = Program.predictStable(ParameterId("first"), signature)
+    val second   = Program.predictStable(ParameterId("second"), signature)
     val composed = (first &&& second).fromRecords(signature.inputShape)
     val trainset = Vector(example(1))
 

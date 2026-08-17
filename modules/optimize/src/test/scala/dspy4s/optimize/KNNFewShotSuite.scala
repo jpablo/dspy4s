@@ -16,7 +16,7 @@ final class KNNFewShotSuite extends FunSuite:
 
   private val answerId  = ParameterId("answer")
   private val signature = Signature.derived[Question, Answer]("Answer")
-  private val student   = Program.predict(answerId, signature).fromRecords(signature.inputShape)
+  private val student   = Program.predictStable(answerId, signature).fromRecords(signature.inputShape)
 
   private def example(question: String, answer: String): Example =
     Example(DynamicValues.record("question" := question, "answer" := answer), Set("question"))

@@ -40,8 +40,8 @@ final class ProgramSuite extends FunSuite:
         else Left(RuntimeError("test_backend", s"Unknown parameter id '${request.parameterId.value}'"))
       }
 
-  private val draft  = Program.predict(draftId, draftSignature, name = "draft_predict")
-  private val answer = Program.predict(answerId, answerSignature, name = "answer_predict")
+  private val draft  = Program.predictStable(draftId, draftSignature, name = "draft_predict")
+  private val answer = Program.predictStable(answerId, answerSignature, name = "answer_predict")
 
   private def run[A](effect: ZIO[PredictionBackend, Nothing, A], service: PredictionBackend = backend): A =
     Unsafe.unsafe { implicit unsafe =>
@@ -95,8 +95,32 @@ final class ProgramSuite extends FunSuite:
     )
   }
 
+  test("anonymous predictions receive deterministic ordinal IDs and preserve declaration identity") {
+    val first    = Program.predict(draftSignature)
+    val second   = Program.predict(draftSignature)
+    val separate = first &&& second
+    val shared   = first &&& first
+
+    assertEquals(separate.parameters.size, 2)
+    assert(separate.parameters.all.forall(_.id.isAnonymous))
+    assertEquals(separate.parameters.all.map(_.id.value).distinct.size, 2)
+    assertEquals(shared.parameters.size, 1)
+    assertEquals(first.parameters.all.map(_.id.value), Program.predict(draftSignature).parameters.all.map(_.id.value))
+  }
+
+  test("a named prediction declaration is a stable and type-safe parameter reference") {
+    val declaration = Program.namespace("email").declare("draft", draftSignature)
+    val updated     = declaration.program
+      .modifyParameter(declaration)(_.copy(instructions = Some("use the named declaration")))
+      .fold(error => fail(error.message), identity)
+
+    assertEquals(declaration.id.value, "email/draft")
+    assertEquals(updated.parameters.get(declaration).flatMap(_.instructions), Some("use the named declaration"))
+    assertEquals(updated.parameters.all.map(_.id), Vector(declaration.id))
+  }
+
   test("a conflicting use of one parameter ID is rejected at construction") {
-    val conflicting = Program.predict(
+    val conflicting = Program.predictStable(
       draftId,
       draftSignature.withInstructions("different"),
       name = "draft_predict"

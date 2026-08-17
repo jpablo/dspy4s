@@ -20,7 +20,7 @@ intersection types. Prediction, code, tool, and REPL effects use separate capabi
 | Execution | Stateless ZIO `ProgramRunner` |
 | Effects | Explicit backend services in environment `R` |
 | Parameters | Separate immutable `ParameterStore` |
-| Identity | Explicit stable `ParameterId` |
+| Identity | Private declaration keys; anonymous ordinals or optional stable names |
 | Dataset boundary | `RecordProgramWithEnv` plus `Shape[I]` |
 | Evidence | `Prediction[O]` and `Vector[ProgramEvent]` |
 | Graph view | `ProgramGraph` interpreter over the same syntax |
@@ -36,8 +36,10 @@ wrapper classes. Each structural form also needed separate optimizer traversal a
 same tree structure to appear in execution, parameter inspection, persistence, and composition code.
 
 The new design represents structure once. Interpreters consume that structure. Optimizers use one stable parameter
-store instead of an `OptimizableStructure` instance for each composite. Strategy constructors reuse generic nodes and
-bounded loops.
+store instead of an `OptimizableStructure` instance for each composite. Ordinary prediction declarations do not need a
+public ID. A private declaration token preserves sharing, and the store assigns optimizer-facing ordinal IDs. Named
+`PredictionDef` values provide stable semantic identity only when it is necessary. Strategy constructors reuse generic
+nodes and bounded loops.
 
 The existential optic work was useful, but it solved a symptom. Generic optics reduced repeated traversal code in the
 old representation. A separate parameter store removes that traversal from the main program design. The generic optic

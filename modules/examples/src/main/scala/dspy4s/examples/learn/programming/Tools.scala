@@ -3,8 +3,8 @@
   * Source: docs/docs/learn/programming/tools.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/tools.md Status: translated (ReAct +
   * tools, snippets 1/2/9; native-function-calling toggle, snippet 6). The manual-tool-call path (snippets 3/5) and
-  * async tools (7/8) aren't part of dspy4s's surface — dspy4s's ReAct selects tools via output fields and
-  * tools are explicit `Tool` values and `ReAct` receives separate generator, invocation, and extractor programs.
+  * async tools (7/8) aren't part of dspy4s's surface — dspy4s's ReAct selects tools via output fields and tools are
+  * explicit `Tool` values and `ReAct` receives separate generator, invocation, and extractor programs.
   */
 package dspy4s.examples.learn.programming
 
@@ -13,7 +13,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeError, TypeRef}
 import dspy4s.examples.Demo
 import dspy4s.programs.contracts.{Tool, ToolCallRequest}
-import dspy4s.programs.{LiveToolBackend, ParameterId, PredictionBackend, Program, ReAct, ToolBackend}
+import dspy4s.programs.{LiveToolBackend, PredictionBackend, Program, ReAct, ToolBackend}
 import dspy4s.signatures.Signature
 import zio.ZEnvironment
 import zio.blocks.schema.Schema
@@ -66,7 +66,6 @@ object Tools:
     // --8<-- [start:react-agent]
     private val generator = Program
       .predict(
-        ParameterId("tools/react-step"),
         Signature.derived[WeatherGeneratorInput, WeatherDecision](
           "WeatherReActStep",
           "Select get_weather or search_web. Set finished=true when the trajectory contains enough information."
@@ -89,7 +88,6 @@ object Tools:
 
     private val extractor = Program
       .predict(
-        ParameterId("tools/react-answer"),
         Signature.derived[WeatherExtractorInput, WeatherAnswer](
           "WeatherReActAnswer",
           "Answer the question from the tool trajectory."
@@ -108,7 +106,7 @@ object Tools:
 
     def call(question: String)(using backend: PredictionBackend): Either[DspyError, String] =
       val toolBackend: ToolBackend = new LiveToolBackend(Vector(getWeather, searchWeb))
-      val environment = ZEnvironment[PredictionBackend](backend) ++ ZEnvironment[ToolBackend](toolBackend)
+      val environment              = ZEnvironment[PredictionBackend](backend) ++ ZEnvironment[ToolBackend](toolBackend)
       Demo.runWith(reactAgent, WeatherQuestion(question), environment).map(_.output.answer)
     // --8<-- [end:react-agent]
 
