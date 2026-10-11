@@ -5,11 +5,12 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.algebra.{Program, SomeProgram}
 import dspy4s.programs.compose.Compose
-import dspy4s.programs.contracts.{Prediction, ProgramCall}
+import dspy4s.programs.contracts.{Module, Prediction, ProgramCall}
 import dspy4s.programs.optimization.OptimizableView
 import org.openjdk.jmh.annotations.{Benchmark, BenchmarkMode, Level, Mode, OutputTimeUnit, Param, Scope, Setup, State}
 
 import java.util.concurrent.TimeUnit
+import scala.compiletime.uninitialized
 
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -18,7 +19,7 @@ class DeepProgramBench:
   @Param(Array("10", "1000"))
   var size: Int = 0
 
-  private var program: SomeProgram[Int, Int] = null.asInstanceOf[SomeProgram[Int, Int]]
+  private var program: SomeProgram[Int, Int] = uninitialized
   private given RuntimeContext               = RuntimeEnvironment.current
 
   @Setup(Level.Trial)
@@ -40,3 +41,7 @@ class DeepProgramBench:
   @Benchmark def inspect(): Vector[OptimizableView] =
     val current = program
     current.optimizableParameters.inspect(current.program)
+
+  @Benchmark def replace(): Module[Int, Int] =
+    val current = program
+    current.optimizableParameters.replace(current.program, Vector.empty)

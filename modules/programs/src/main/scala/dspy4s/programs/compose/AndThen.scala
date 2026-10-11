@@ -9,8 +9,8 @@ import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.optimization.*
 import dspy4s.programs.contracts.Prediction
 
+import scala.annotation.tailrec
 import scala.compiletime.ops.int.+
-import scala.collection.mutable.ArrayDeque
 
 /** `a >>> b` — sequential (dependent) composition: run `a`, thread its output value into `b`. The Category operation.
   */
@@ -21,41 +21,38 @@ final case class AndThen[I, X, O, A <: Module[I, X], B <: Module[X, O]](
   override val moduleName: String = "and_then"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    AndThen.run(this, call)
+    AndThen.run(call, unfoldOnto(AndThen.Pending.Done()), RawPrediction.empty)
+
+  /** Put the two children before the modules that remain. The intermediate type `X` is in scope here, so the compiler
+    * checks that the output of `first` is the input of `second`.
+    */
+  private def unfoldOnto[Z](rest: AndThen.Pending[O, Z]): AndThen.Pending[I, Z] =
+    AndThen.Pending.Step(first, AndThen.Pending.Step(second, rest))
 
 object AndThen:
+  /** The modules that remain, as a type-aligned heap stack: the output of each step is the input of the next step. */
+  private enum Pending[A, Z]:
+    case Done[A]()                                              extends Pending[A, A]
+    case Step[A, X, Z](head: Module[A, X], rest: Pending[X, Z]) extends Pending[A, Z]
+
   /** Execute a sequential syntax tree with an explicit heap stack.
     *
-    * Runtime type erasure hides each intermediate type, but construction proves that every node's output is the next
-    * node's input. The casts below only remove and restore those already-checked intermediate types. Leaf modules still
-    * run through [[Module.apply]], so their callbacks, trace, history, and error behavior do not change.
+    * [[Pending]] keeps each intermediate type, so the interpreter needs no cast. Leaf modules still run through
+    * [[Module.apply]], so their callbacks, trace, history, and error behavior do not change.
     */
-  private def run[I, O](root: AndThen[I, ?, O, ?, ?], call: ProgramCall[I])(using
+  @tailrec
+  private def run[A, Z](call: ProgramCall[A], pending: Pending[A, Z], raw: RawPrediction)(using
       RuntimeContext
-  ): Either[DspyError, Prediction[O]] =
-    val pending = ArrayDeque.empty[Module[Any, Any]]
-
-    def push(module: Module[?, ?]): Unit =
-      pending.prepend(module.asInstanceOf[Module[Any, Any]])
-
-    push(root)
-    var output: Any                   = call.input
-    var currentCall: ProgramCall[Any] = call.asInstanceOf[ProgramCall[Any]]
-    var accumulated: RawPrediction    = RawPrediction.empty
-
-    while pending.nonEmpty do
-      pending.removeHead() match
-        case sequential: AndThen[?, ?, ?, ?, ?] =>
-          push(sequential.second)
-          push(sequential.first)
-        case leaf => leaf(currentCall) match
-            case Left(error)       => return Left(error)
-            case Right(prediction) =>
-              output = prediction.output
-              currentCall = call.mapInput(_ => output)
-              accumulated = accumulated.followedBy(prediction.raw)
-
-    Right(Prediction(output.asInstanceOf[O], accumulated))
+  ): Either[DspyError, Prediction[Z]] =
+    pending match
+      case Pending.Done()              => Right(Prediction(call.input, raw))
+      case step: Pending.Step[A, x, Z] => step.head match
+          case sequential: AndThen[A, ?, `x`, ?, ?] => run(call, sequential.unfoldOnto(step.rest), raw)
+          case leaf                                 => leaf(call) match
+              case Left(error)       => Left(error)
+              case Right(prediction) =>
+                // The outer call's controls pass through unchanged; combine the evidence envelopes in execution order.
+                run(call.mapInput(_ => prediction.output), step.rest, raw.followedBy(prediction.raw))
 
   /** Structural `read(a) ++ read(b)`; `replace` slices the updates by `first`'s read-arity. */
   given andThenOptimizableStructure[
