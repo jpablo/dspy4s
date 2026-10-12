@@ -1609,7 +1609,7 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2). Open: round-robin pointer, resume, budget warning, merge depth. · **Verification:** C (first two items), R (others)
+**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2). Open: round-robin pointer, resume, budget, merge depth. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1622,8 +1622,11 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   frontier. Upstream removes dominated programs first (`gepa/gepa_utils.py:37-75,90-117`).
   `GepaState.nonDominatedFrontier` now holds that routine for the two callers. A comparison with the pinned `gepa`
   0.1.4 on 4,000 random frontiers gave no difference. Tests: `GepaStateSuite`, `MergeProposerSuite`.
-- **Round-robin pointer.** A new candidate starts at 0 (`modules/gepa/.../GepaEngine.scala:176-177`). Upstream
-  inherits the largest parent pointer (`gepa/core/state.py:539-543`).
+- **Round-robin pointer.** The pointers are a local map of `search`, and a new candidate has no entry, so it starts
+  at 0 (`modules/gepa/.../GepaEngine.scala:120,207`). Upstream gives a new candidate the largest pointer of its
+  parents (`gepa/core/state.py:539-543`). dspy4s also moves the pointer when a perfect minibatch skips the iteration;
+  upstream runs the component selector after the skip checks
+  (`gepa/proposer/reflective_mutation/reflective_mutation.py:379-417`).
 - **Empty reflective data (resolved).** dspy4s asked the reflection LM with zero examples and evaluated an unchanged
   candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
   reflection LM call, and an iteration with no new text makes no acceptance evaluation. The minibatch calls stay
@@ -1634,31 +1637,68 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   `GepaFailureFeedbackSuite`.
 - **API change.** `Gepa.compile` and `GepaEngine.optimize` now return `Either[DspyError, GepaResult[P]]`, because two
   leaves with the same key and a leaf type with no key are errors (decision D2).
-- **Resume.** The iteration index and the pointers start again (`GepaEngine.scala:100-101`), and `Gepa.compile` does
-  not pass `runDir` (`modules/gepa/.../Gepa.scala:34-36`).
-- **Budget.** A budget of less than approximately twice the validation set gives zero iterations with no warning
-  (`GepaEngine.scala:106,137`).
-- **Merge depth.** One pass of 10 (`MergeProposer.scala:76,100-119`) against 10 × 10 attempts
-  (`gepa/proposer/merge.py:133-146`).
+- **Resume.** The iteration index, the pointers, and the random sources start again
+  (`GepaEngine.scala:94-95,120-121`), and `Gepa.compile` does not pass `runDir` (`modules/gepa/.../Gepa.scala:40-44`).
+  A checkpoint that is not valid throws. Upstream continues the iteration index and the pointers, and restores the
+  random state of the adapter; it also loses the merge schedule and the engine random source.
+- **Budget.** dspy4s runs an iteration only when its worst-case cost fits: `2 × minibatch + |distinct valset|`
+  (`GepaEngine.scala:128,159`). A budget below `2 × |distinct valset| + 2 × minibatch` gives zero iterations, and the
+  result does not say why. Upstream checks the budget only at the start of an iteration, so a run can go above it
+  (`gepa/core/engine.py:731`). The hard limit of dspy4s is deliberate; the missing stop reason is the gap.
+- **Merge depth.** One loop of 10 pair draws (`MergeProposer.scala:33,101-120`) against 10 attempts of 10 pair
+  draws (`gepa/proposer/merge.py:87,126-141`). A merge description that was already made ends the search
+  (`MergeProposer.scala:77`); upstream continues with the next attempt (`merge.py:195-197`). Upstream also makes no
+  merge when the two candidates share fewer than 5 validation examples (`merge.py:199-201,231`).
+- **Evaluation cache.** dspy4s always uses it. Upstream has it off by default, so an accepted merge costs 5 plus
+  the validation size upstream and the validation size at most in dspy4s. This difference is deliberate.
 
 ---
 
 ## G-45 — GEPA surface added upstream since 3.2.1
 
-**Status:** Open · **Verification:** R · **Upgrade items:** O3, O4, O5
+**Status:** Open · **Verification:** C (a second read of the two sides, 2026-10-11) · **Upgrade items:** O3, O4, O5
 
-- **`InstructionProposer`** is now the default (`dspy/teleprompt/gepa/instruction_proposal.py:189,270`; b6c8aaf1e).
-  It is a `Predict` with a JSON adapter, with `skills`, `additional_instructions`, `base_instructions`, `max_chars`
-  with one compression retry, and `truncate_history_outputs`. dspy4s uses a singleton with a raw LM call and a fence
-  parser (`modules/gepa/.../InstructionProposer.scala:16-77`).
-- **Objective-aware frontiers** (`gepa_utils.py:70-79,301-310`; 638e155cf). The G-12 note excludes them because the
-  dspy surface did not use them. That reason no longer holds.
-- **Multiple proposals in one iteration**, evaluated in parallel (`gepa_utils.py:312-332`; aa9d2d053, 822f39319).
-  dspy4s makes one proposal with strict acceptance (`GepaEngine.scala:171-202`). Immutable candidates make the
-  parallel step safe.
-- **Facade.** `auto` budgets, `max_full_evals`, the trainset as the default validation set, and `track_stats` with
-  all candidates and their lineage (`dspy/teleprompt/gepa/gepa.py:26-30,72,513,581,594`). dspy4s returns the best
-  candidate only and requires a validation set.
+The second read corrected the first report in two points: objective frontiers and more than one proposal are options
+upstream, and their defaults agree with dspy4s. Only the instruction proposer changes default behavior.
+
+- **`InstructionProposer` is the default proposer** (`dspy/teleprompt/gepa/instruction_proposal.py:189-213,314-437`;
+  b6c8aaf1e). It is a `Predict` over the signature `ProposeInstruction`, with a JSON adapter. The response is a JSON
+  object with `new_instruction`; no fence rule applies. The options are `skills`, `additional_instructions`,
+  `base_instructions`, `max_chars`, `truncate_history_outputs`, and `adapter`.
+  - The reflective records hold values, not text: `Inputs` and `Generated Outputs` are records, and a `History`
+    input moves to the key `Context` (`gepa_utils.py:398-432`).
+  - An empty `new_instruction` is an error. The engine calls a failed task one more time, and a second failure gives
+    no proposal (`gepa/proposer/reflective_mutation/reflective_mutation.py:203-225`).
+  - With `max_chars`, a draft that is too long gets one `CompressInstruction` call. A result that is still too long
+    is an error; nothing is cut. The count is in code points.
+  - dspy4s: `InstructionProposer` is an object with one raw LM call, a paraphrase of the old engine template, text
+    records, and a fence parser (`modules/gepa/.../InstructionProposer.scala`). An empty response gives a child with
+    an empty instruction, and a failed call is not repeated.
+- **Objective-aware frontiers are an option** (`gepa_utils.py:70-79,301-310`; 638e155cf; engine `frontier_type` with
+  the default `"instance"`). The metric can return `objective_scores`, and the engine can select candidates by
+  `objective`, `hybrid`, or `cartesian` fronts (`gepa/core/state.py:157-236,474-601`). Acceptance and the best
+  candidate use the scalar score only. dspy4s has the instance front only; `ScoreWithFeedback` has no objective
+  field. The G-12 reason for the exclusion ("the dspy surface does not use them") no longer holds.
+- **More than one proposal in one iteration is an option** (aa9d2d053, 822f39319; engine `sampling_strategy` with the
+  default `SingleMutationSampling`, and `AllImprovements` selection). Upstream evaluates the parents, the children,
+  and the selected candidates in batches on threads (`gepa_utils.py:312-332`). dspy4s makes one proposal with strict
+  acceptance, which is the upstream default.
+- **Facade.** `auto` budgets (`light` 6, `medium` 12, `heavy` 18 candidates through `auto_budget`), `max_full_evals`,
+  the trainset as the default validation set, and `track_stats` with all candidates and their lineage
+  (`dspy/teleprompt/gepa/gepa.py:26-30,448-453,513-594,690-692`). dspy4s requires `maxMetricCalls` and a validation
+  set, and returns the best candidate only.
+
+**Direction.** The proposer first (the only change of a default). Then the frontiers, then the proposals, because
+the proposals need the final shape of an evaluation batch. The facade and resume (G-44) come after the state shape
+is final, so that the snapshot format changes one time.
+
+**Decisions that the work needs.**
+
+- The dspy4s `JSONAdapter` does not make the upstream prompt (no field descriptions, and a sequence is not written
+  as JSON). The proposer can write the JSON text of the records itself, so that the content agrees.
+- The scope of `skills` (the loader has path rules and YAML frontmatter) and of `truncate_history_outputs` (the
+  ReAct trajectory of dspy4s is a string that is already rendered).
+- What an iteration with n proposals does when its worst-case cost does not fit in the budget.
 
 ---
 
