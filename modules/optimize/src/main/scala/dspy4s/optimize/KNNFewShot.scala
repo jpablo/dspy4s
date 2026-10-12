@@ -31,9 +31,14 @@ final class KNNFewShot[P: {OptimizableStructure, ProgramRunner}](
     embedder       : Embedder,
     bootstrapConfig: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ):
-  /** Embed the trainset (eager, like upstream's `KNN.__init__`) and wrap the student. */
+  /** Embed the trainset (eager, like upstream's `KNN.__init__`) and wrap the student. Two leaves with the same
+    * predictor key are a configuration error (decision D2), and `compile` returns it before it embeds the trainset.
+    */
   def compile(student: P, teacher: Option[P] = None)(using RuntimeContext): Either[DspyError, KNNFewShotProgram[P]] =
-    KNN.create(k, trainset, embedder).map(knn => new KNNFewShotProgram(student, teacher, knn, bootstrapConfig))
+    for
+      _   <- OptimizerSupport.requireDistinctKeys(student, teacher)
+      knn <- KNN.create(k, trainset, embedder)
+    yield new KNNFewShotProgram(student, teacher, knn, bootstrapConfig)
 
 /** The compiled artifact of [[KNNFewShot]]: a module that, per call, retrieves the query's nearest trainset neighbors,
   * bootstraps them onto the student as demos, and runs the result.

@@ -144,11 +144,14 @@ object GepaSmokeTest:
         println(s"""[gepa-smoke] task: HAS_NUM/NO_NUM   baseline instruction: "$vagueBaselineInstruction"""")
         println(s"[gepa-smoke] train=${trainset.size}, val=${valset.size}   (one '.' per LM call)\n")
 
-        val result = gepa.compile(student, trainset = trainset, valset = valset)
-
-        println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
-        println(f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)")
-        val discovered = result.bestCandidate.get(OptimizableId(0)).flatten.getOrElse("(none)")
-        println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
-        println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
+        gepa.compile(student, trainset = trainset, valset = valset) match
+          case Left(error)   => println(s"\n\n[gepa-smoke] GEPA stopped with an error: ${error.message}")
+          case Right(result) =>
+            println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
+            println(
+              f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)"
+            )
+            val discovered = result.bestCandidate.get(OptimizableId(0)).flatten.getOrElse("(none)")
+            println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
+            println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
       }

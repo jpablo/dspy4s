@@ -79,7 +79,9 @@ class GepaEngineSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val seedCandidate    = Candidate.seed(program)
-      val result           = engine.optimize(seedCandidate, trainset = dataset, valset = dataset)
+      val result           = engine
+        .optimize(seedCandidate, trainset = dataset, valset = dataset)
+        .fold(error => fail(error.message), identity)
 
       // The seed instruction ("Answer.") scores 0 (no "CITY"); GEPA must find the improved one.
       assertEquals(result.bestScore, 1.0)
@@ -109,7 +111,9 @@ class GepaEngineSuite extends FunSuite:
           seed = 1L
         )
       )
-      val stopped = stopping.optimize(seedCandidate, trainset = dataset, valset = dataset)
+      val stopped = stopping
+        .optimize(seedCandidate, trainset = dataset, valset = dataset)
+        .fold(error => fail(error.message), identity)
       assertEquals(stopped.bestScore, 1.0)
       assert(stopped.totalMetricCalls < 40, s"early-stop should beat the budget; used ${stopped.totalMetricCalls}")
 
@@ -119,7 +123,9 @@ class GepaEngineSuite extends FunSuite:
         new ReflectionLm,
         GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
       )
-      val ranToBudget = running.optimize(seedCandidate, trainset = dataset, valset = dataset)
+      val ranToBudget = running
+        .optimize(seedCandidate, trainset = dataset, valset = dataset)
+        .fold(error => fail(error.message), identity)
       assertEquals(ranToBudget.bestScore, 1.0)
       assert(
         ranToBudget.totalMetricCalls > stopped.totalMetricCalls,
@@ -155,6 +161,7 @@ class GepaEngineSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
         .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
+        .fold(error => fail(error.message), identity)
     }
     assertEquals(lm1.calls.get(), dataset.size) // seed evaluated once (one call per val example)
     assert(java.nio.file.Files.exists(dir.resolve(GepaStatePersistence.fileName)), "a checkpoint was written")
@@ -165,6 +172,7 @@ class GepaEngineSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
         .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
+        .fold(error => fail(error.message), identity)
     }
     assertEquals(lm2.calls.get(), 0, "resumed run must not re-run the seed evaluation")
     assertEquals(second.totalMetricCalls, first.totalMetricCalls) // continued from the saved meter
@@ -183,7 +191,7 @@ class GepaEngineSuite extends FunSuite:
           reflectionMinibatchSize = MinibatchSize(2),
           seed = 1L
         )
-      ).optimize(Candidate.seed(program), dataset, dataset)
+      ).optimize(Candidate.seed(program), dataset, dataset).fold(error => fail(error.message), identity)
     }
 
     assertEquals(result.totalMetricCalls, dataset.size)
@@ -250,7 +258,8 @@ class GepaEngineSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = gepa.compile(program, trainset = dataset, valset = dataset)
+      val result           =
+        gepa.compile(program, trainset = dataset, valset = dataset).fold(error => fail(error.message), identity)
       assertEquals(result.bestScore, 1.0)
       assert(result.bestCandidate(OptimizableId(0)).exists(_.contains("CITY")), result.bestCandidate(OptimizableId(0)))
     }

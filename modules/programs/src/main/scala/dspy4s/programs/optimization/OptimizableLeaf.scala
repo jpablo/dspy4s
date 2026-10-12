@@ -11,6 +11,12 @@ import dspy4s.signatures.OutputAugmentation.PrependField
   * focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which excludes signature
   * structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all seven
   * statements per instance.
+  *
+  * '''Trace key.''' An optimizer finds the calls of a leaf by the key of its metadata ([[OptimizableMetadata.key]]).
+  * The module of a leaf type must record that key in its trace entries: give it the lifecycle
+  * `ModuleLifecycle.predictor(shape, key)`, or `ModuleLifecycle.dynamicPredictor(key)` for a dynamic module. `Predict`,
+  * `ChainOfThought`, and `DynamicPredict` do this. An optimizer returns an error for a leaf type that records no key,
+  * and for a program in which two leaves have the same key (see [[PredictorTraces]]).
   */
 trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
   def metadata(program: P): OptimizableMetadata

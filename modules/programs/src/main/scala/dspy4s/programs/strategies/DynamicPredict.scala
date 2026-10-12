@@ -1,6 +1,7 @@
 package dspy4s.programs.strategies
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -10,6 +11,7 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.contracts.DynamicModule
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
@@ -78,6 +80,10 @@ final case class DynamicPredict(
 ) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
+
+  // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+    ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
 
   private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools)
 

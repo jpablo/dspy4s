@@ -7,9 +7,11 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.data.RawPrediction
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.programs.contracts.DynamicModule
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 
@@ -27,6 +29,9 @@ final case class ScriptedPredictProgram(
     config   : DynamicValue.Record      = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
+  // An optimizer finds the trace entries of this leaf by the key of its `OptimizableMetadata`.
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+    ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, RawPrediction] =
@@ -43,6 +48,9 @@ final case class DemoAwarePredictProgram(
     config : DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
+  // An optimizer finds the trace entries of this leaf by the key of its `OptimizableMetadata`.
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+    ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
   ): Either[DspyError, RawPrediction] =

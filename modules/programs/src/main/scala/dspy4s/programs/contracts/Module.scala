@@ -59,14 +59,26 @@ trait Module[I, O]:
       case ModuleLifecycle.Transparent()         => forward(call)
       case ModuleLifecycle.Observed(observation) =>
         val inputBag = observation.inputs(call)
+        // The outermost predictor on the call path owns the key. A module that runs inside a predictor (the `Predict`
+        // inside `ChainOfThought`) records no key, so one predictor call gives exactly one entry with a key.
+        val nested       = RuntimeEnvironment.withinPredictor
+        val predictorKey = observation.predictor.filterNot(_ => nested)
         CallbackDispatcher.withModule(moduleName, inputBag) {
-          val result = forward(call)
+          val result = predictorKey match
+            case Some(_) => RuntimeEnvironment.withinPredictor(forward(call))
+            case None    => forward(call)
           if observation.traceEnabled(call) then
             result match
               case Right(output) =>
                 val outputs = observation.outputs(output)
                 RuntimeEnvironment.appendTrace(
-                  TraceEntry(component = moduleName, inputs = inputBag, outputs = outputs)
+                  TraceEntry(
+                    component = moduleName,
+                    inputs = inputBag,
+                    outputs = outputs,
+                    predictor = predictorKey,
+                    withinPredictor = nested
+                  )
                 )
                 RuntimeEnvironment.appendHistory(
                   HistoryEntry(
@@ -87,7 +99,9 @@ trait Module[I, O]:
                       component = moduleName,
                       inputs = inputBag,
                       outputs = rawOutputs,
-                      failure = Some(error.message)
+                      failure = Some(error.message),
+                      predictor = predictorKey,
+                      withinPredictor = nested
                     )
                   )
           result
@@ -135,6 +149,7 @@ private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   * over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */
 trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
+  // A dynamic module that is an optimizable leaf overrides this with `ModuleLifecycle.dynamicPredictor(key)`.
   override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] = ModuleLifecycle.dynamic
 
   protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using

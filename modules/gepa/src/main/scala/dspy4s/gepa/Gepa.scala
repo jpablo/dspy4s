@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.gepa.contracts.FeedbackMetric
@@ -30,7 +31,14 @@ final class Gepa[P](
 
   /** Optimize `student`'s predictor instructions over `trainset` (reflective minibatches) and `valset` (Pareto frontier
     * scoring), returning the best candidate and the program it yields.
+    *
+    * `Left` when GEPA cannot find the trace entries of each predictor (UPGRADE-3.2.1-to-3.4.0, decision D2):
+    *   - Two predictors have the same module name and the same signature structure. The check runs before any LM call.
+    *     Give each predictor a name.
+    *   - A predictor type records no predictor key in its trace entries.
     */
-  def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using RuntimeContext): GepaResult[P] =
-    val adapter = new GepaAdapter(student, metric, config.failureScore)
+  def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using
+      RuntimeContext
+  ): Either[DspyError, GepaResult[P]] =
+    val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback, config.seed)
     new GepaEngine(adapter, reflectionLm, config).optimize(Candidate.seed(student), trainset, valset)

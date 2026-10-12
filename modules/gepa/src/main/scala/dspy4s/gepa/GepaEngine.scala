@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LanguageModel
@@ -30,6 +31,11 @@ final case class GepaConfig(
     skipPerfectScore   : Boolean              = true,
     perfectScore       : Double               = 1.0,
     failureScore       : Double               = 0.0,
+    /** Whether a predictor call that failed gives the reflection LM a record: the raw response of the model and the
+      * output structure to follow (dspy's `add_format_failure_as_feedback`). OFF by default, as upstream: a run that
+      * failed then gives no reflective record. [[Gepa.compile]] passes this value to the [[GepaAdapter]].
+      */
+    addFormatFailureAsFeedback: Boolean = false,
     /** Opt-in efficiency stop: halt once the best candidate is perfect (mean validation score >= `perfectScore`), since
       * nothing further can improve it. OFF by default to match upstream gepa, which has no perfect-score stopper and
       * runs to the metric-call budget (its `perfect_score` only drives the per-minibatch `skipPerfectScore` skip). The
@@ -63,6 +69,10 @@ final class GepaEngine[P](
     config      : GepaConfig
 ):
 
+  /** Run the search. `Left` when the adapter cannot find the trace entries of each leaf (UPGRADE-3.2.1-to-3.4.0,
+    * decision D2): two leaves have the same predictor key (found before any run), or a leaf ran but its module recorded
+    * no key (found when a reflective iteration reads the traces). The `Left` stops the search.
+    */
   def optimize(
       seedCandidate: Candidate,
       trainset     : Vector[Example],
@@ -70,7 +80,17 @@ final class GepaEngine[P](
       runDir       : Option[Path] = None
   )(using
       RuntimeContext
-  ): GepaResult[P] =
+  ): Either[DspyError, GepaResult[P]] =
+    adapter.distinctKeys.flatMap(_ => search(seedCandidate, trainset, valset, runDir))
+
+  private def search(
+      seedCandidate: Candidate,
+      trainset     : Vector[Example],
+      valset       : Vector[Example],
+      runDir       : Option[Path]
+  )(using
+      RuntimeContext
+  ): Either[DspyError, GepaResult[P]] =
     val rng     = new Random(config.seed)
     val sampler = MinibatchSampler.of(config.batchSampler, config.reflectionMinibatchSize, config.seed)
     val cache   = new GepaEvalCache(adapter)
@@ -100,6 +120,8 @@ final class GepaEngine[P](
     var pointers    = Map.empty[Int, Int]
     var i           = 0 // iteration index, drives the epoch-shuffled batch sampler
     var canContinue = true
+    // The error of an iteration that the adapter rejected. It stops the loop and becomes the result.
+    var failure = Option.empty[DspyError]
 
     // A reflective iteration evaluates the parent and proposal on one minibatch, then may validate every distinct
     // example for a newly accepted candidate. Reserving this atomic worst case keeps maxMetricCalls a hard bound.
@@ -137,26 +159,35 @@ final class GepaEngine[P](
         if remaining < reflectiveIterationCost then canContinue = false
         else
           merger.foreach(_.lastIterFoundNewProgram = false)
-          val (nextState, nextPointers, accepted) = iterate(state, pointers, trainset, valset, rng, sampler, cache, i)
-          state = nextState
-          pointers = nextPointers
-          if accepted then merger.foreach(_.onReflectiveAccepted())
+          iterate(state, pointers, trainset, valset, rng, sampler, cache, i) match
+            case Right((nextState, nextPointers, accepted)) =>
+              state = nextState
+              pointers = nextPointers
+              if accepted then merger.foreach(_.onReflectiveAccepted())
+            case Left(error) =>
+              failure = Some(error)
+              canContinue = false
       if canContinue then
         i += 1
         runDir.foreach(GepaStatePersistence.save(_, state)) // checkpoint after each iteration for resume
 
-    val best = state.bestIndex
-    GepaResult(
-      bestCandidate = state.candidates(best),
-      bestProgram = adapter.applyCandidate(state.candidates(best)),
-      bestScore = state.aggregateScore(best),
-      numCandidates = GepaCandidateCount.assume(state.candidates.size),
-      totalMetricCalls = state.totalMetricCalls
-    )
+    failure.toLeft {
+      val best = state.bestIndex
+      GepaResult(
+        bestCandidate = state.candidates(best),
+        bestProgram = adapter.applyCandidate(state.candidates(best)),
+        bestScore = state.aggregateScore(best),
+        numCandidates = GepaCandidateCount.assume(state.candidates.size),
+        totalMetricCalls = state.totalMetricCalls
+      )
+    }
 
   /** One reflective-mutation iteration: returns the new state (with the iteration's metric calls accrued, and the
     * accepted candidate appended on success), the updated round-robin pointers, and whether a new candidate was
-    * accepted (which schedules a merge).
+    * accepted (which schedules a merge). A `Left` is an error from the reflective dataset of the adapter.
+    *
+    * The iteration makes no proposal when the selected components have no reflective record, or when the reflection LM
+    * gives no new text. It then costs the minibatch evaluation only.
     */
   private def iterate(
       state    : GepaState,
@@ -167,7 +198,7 @@ final class GepaEngine[P](
       sampler  : MinibatchSampler,
       cache    : GepaEvalCache[P],
       iteration: Int
-  )(using RuntimeContext): (GepaState, Map[Int, Int], Boolean) =
+  )(using RuntimeContext): Either[DspyError, (GepaState, Map[Int, Int], Boolean)] =
     val parentIdx = config.candidateSelector.select(state, rng)
     val parent    = state.candidates(parentIdx)
 
@@ -180,19 +211,34 @@ final class GepaEngine[P](
     val parentEval = adapter.evaluate(minibatch, parent, captureTraces = true)
     var calls      = minibatch.size
 
+    // An iteration that makes no proposal still pays for its minibatch evaluation (gepa counts the parent evaluation
+    // before it decides to skip). The sampler gives one example at least, so each iteration decreases the budget and
+    // the loop of `search` ends.
+    def withoutProposal: Either[DspyError, (GepaState, Map[Int, Int], Boolean)] =
+      Right((state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, calls)), newPointers, false))
+
     // Nothing to learn from a perfect minibatch.
     if config.skipPerfectScore && parentEval.scores.nonEmpty && parentEval.scores.forall(_ >= config.perfectScore) then
-      return (state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, calls)), newPointers, false)
+      return withoutProposal
 
-    val reflective   = adapter.makeReflectiveDataset(parent, parentEval, components)
-    val newCandidate = components.foldLeft(parent) { (cand, component) =>
-      InstructionProposer.propose(
-        parent.getOrElse(component, None).getOrElse(""),
-        reflective.getOrElse(component, Vector.empty),
-        reflectionLm
-      ) match
-        case Right(text) => cand.updated(component, Some(text))
-        case Left(_)     => cand // reflection failed for this component — keep its instruction
+    val reflective = adapter.makeReflectiveDataset(parent, parentEval, components) match
+      case Right(records) => records
+      case Left(error)    => return Left(error)
+    // A component with no reflective record gets no reflection LM call and no new text (gepa leaves it out of the
+    // reflective dataset). A reflection call that fails gives no new text for its component.
+    val newTexts = components.flatMap { component =>
+      reflective.get(component).filter(_.nonEmpty).flatMap { records =>
+        InstructionProposer
+          .propose(parent.getOrElse(component, None).getOrElse(""), records, reflectionLm)
+          .toOption
+          .map(component -> _)
+      }
+    }
+    // No new text: the candidate would be equal to its parent, so there is no proposal and no acceptance evaluation
+    // (gepa: "Reflection returned no text updates; skipping proposal").
+    if newTexts.isEmpty then return withoutProposal
+    val newCandidate = newTexts.foldLeft(parent) { case (cand, (component, text)) =>
+      cand.updated(component, Some(text))
     }
 
     // Re-evaluate on the SAME minibatch; accept only on strict minibatch improvement.
@@ -207,7 +253,7 @@ final class GepaEngine[P](
         state.add(newCandidate, newSubscores, parents = Vector(parentIdx), metricCalls = calls)
       else
         state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, calls))
-    (nextState, newPointers, accepted)
+    Right((nextState, newPointers, accepted))
 
   /** Full validation scores for a candidate, via the shared eval cache: returns the per-instance scores and the number
     * of ACTUAL (uncached) evaluations to charge against the budget.

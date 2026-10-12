@@ -6,12 +6,15 @@ import dspy4s.core.contracts.TraceEntry
 
 /** One example's captured trajectory — the unit GEPA reflects on: the program's per-predictor [[TraceEntry]] trace
   * (including failure entries via G-12 P-a) plus the score it earned. The reflective-dataset builder reads these.
+  * `failed` is `true` when the run of the program returned an error (gepa's `FailedPrediction`). The `prediction` is
+  * then empty.
   */
 final case class Trajectory(
     example   : Example,
     prediction: RawPrediction,
     trace     : Vector[TraceEntry],
-    score     : Double
+    score     : Double,
+    failed    : Boolean = false
 )
 
 /** Result of evaluating a candidate over a batch (the analogue of gepa's `EvaluationBatch`). `trajectories` is `Some`

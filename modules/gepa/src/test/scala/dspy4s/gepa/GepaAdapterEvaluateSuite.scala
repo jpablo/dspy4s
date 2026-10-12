@@ -128,7 +128,9 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val evalBatch        = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
-      val dataset          = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(OptimizableId(0)))
+      val dataset          = adapter
+        .makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(OptimizableId(0)))
+        .fold(error => fail(error.message), identity)
 
       assertEquals(dataset.keySet, Set(OptimizableId(0)))
       val records = dataset(OptimizableId(0))

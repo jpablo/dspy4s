@@ -38,10 +38,13 @@ val gepa = new Gepa[DynamicPredict](
   reflectionLm = lm,       // the model that rewrites instructions
   GepaConfig(maxMetricCalls = 60, reflectionMinibatchSize = 3, seed = 0L)
 )
-val result = gepa.compile(student, trainset = trainset, valset = valset)
-// result.bestProgram     — the program with the evolved instructions
-// result.bestCandidate   — Map[OptimizableId, Option[String]]
-// result.bestScore       — mean validation score
+// Either[DspyError, GepaResult[DynamicPredict]]. A Left is a program in which GEPA cannot find the calls of each
+// predictor: two predictors with the same name and signature, or a predictor type that records no trace key.
+gepa.compile(student, trainset = trainset, valset = valset).map { result =>
+  // result.bestProgram     — the program with the evolved instructions
+  // result.bestCandidate   — Map[OptimizableId, Option[String]]
+  // result.bestScore       — mean validation score
+}
 ```
 
 ## Runnable end-to-end example

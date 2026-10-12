@@ -26,9 +26,12 @@ val gepa = new Gepa[MyProgram](
   config = GepaConfig(maxMetricCalls = 200)
 )
 
-val result = gepa.compile(student, trainset, valset)  // GepaResult[MyProgram]
-result.bestProgram   // the evolved program
-result.bestScore     // its mean validation score
+gepa.compile(student, trainset, valset) match  // Either[DspyError, GepaResult[MyProgram]]
+  case Right(result) =>
+    result.bestProgram   // the evolved program
+    result.bestScore     // its mean validation score
+  case Left(error) =>
+    error.message        // GEPA cannot find the calls of each predictor (see "Reflective records")
 ```
 
 GEPA evolves **instructions only** — one per predictor (component). The program's structure (fields, demos,
@@ -50,8 +53,8 @@ Feedback is requested at two granularities:
 
 - **Program level** (`component = None`) — overall score + program-wide feedback for one example. Drives
   candidate scoring and acceptance.
-- **OptimizableLeaf level** (`component = Some(name)`, with that predictor's trace slice) — feedback aimed at one
-  named predictor. The reflection loop assembles each component's reflective dataset from these.
+- **OptimizableLeaf level** (`component = Some(name)`, with the one call of that predictor that GEPA selected) —
+  feedback aimed at one named predictor. The reflection loop assembles each component's reflective dataset from these.
 
 It `extends Metric` (its `score` is the program-level feedback's score) so a single instance is both the
 scoring metric the adapter feeds to `Evaluate` and the source of reflection feedback. A wrong prediction is a
@@ -68,8 +71,28 @@ modes:
 
 - **Scores-only** (acceptance / full-eval fast path) — runs through `Evaluate` for scores.
 - **With traces** (the reflective path) — each example runs in an *isolated* context with a fresh trace and
-  failure-trace capture on, so its trajectory is exactly its own and a parse failure becomes reflection signal
+  failure-trace capture on, so its trajectory is exactly its own and a parse failure stays in the trace
   (the raw, unparseable response is captured).
+
+### Reflective records
+
+`makeReflectiveDataset` gives each component one record for each trajectory at most. It is a port of the
+selection in upstream `make_reflective_dataset`:
+
+1. It takes the calls of the component from the trace. A predictor writes its key (its module name and its
+   signature structure) into each trace entry that it records, so the position of an entry is not important. A
+   predictor that runs in a loop (ReAct, CodeAct, RLM) gets its own calls.
+2. With `addFormatFailureAsFeedback = false` (the default, as upstream), the calls that failed do not count.
+3. If a call failed, the first such call gives the record: the raw response of the model and the output
+   structure to follow. The user metric gets no call for it.
+4. Otherwise, a run that failed gives no record. A run that passed gives the record of one call, selected at
+   random with the seed. The metric gets that call as `componentTrace`.
+
+`compile` returns a `Left(ValidationError)` for a program in which GEPA cannot find the calls of each predictor:
+
+- Two predictors have the same module name and the same signature structure. `compile` rejects them before any
+  LM call. Give each predictor a name, for example `Predict(signature, name = Some("second_pass"))`.
+- A predictor type records no key in its trace entries. Its module must use `ModuleLifecycle.predictor`.
 
 ### The search loop (`GepaEngine`)
 
@@ -82,6 +105,10 @@ metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
    (`ReflectiveRecord`s: inputs / generated outputs / feedback) is built; `InstructionProposer` asks the
    reflection LM for a rewritten instruction; the new candidate is accepted if it improves on the minibatch and
    then full-evaluated on the valset and added to the pool.
+
+   A component with no reflective record gets no reflection LM call. If no component gets a new instruction, the
+   iteration makes no proposal and no acceptance evaluation, as upstream. The metric calls of the minibatch
+   evaluation stay counted, so the budget decreases and the loop ends.
 
 2. **A merge (crossover).** When enabled and one is scheduled, `MergeProposer` combines two Pareto-frontier
    descendants of a common ancestor: for each component it takes the version from whichever descendant
@@ -117,6 +144,7 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 | `useMerge` / `maxMergeInvocations` | enable crossover (default on) and cap accepted merges |
 | `skipPerfectScore` / `perfectScore` | skip reflecting on already-perfect minibatches |
 | `stopOnPerfectScore` | opt-in early stop when the best candidate is perfect (off, for gepa parity) |
+| `addFormatFailureAsFeedback` | a predictor call that failed gives the reflection LM a record (off, as upstream) |
 | `seed` | deterministic for a fixed seed |
 
 ## Source layout
@@ -140,7 +168,8 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 
 GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and execution spines also used by
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
-`FeedbackMetric` and a reflection LM and returns a `GepaResult[P]` rather than an `OptimizationReport[P]`.
+`FeedbackMetric` and a reflection LM and returns an `Either[DspyError, GepaResult[P]]` rather than an
+`OptimizationReport[P]`.
 Deferred relative to upstream: multi-objective frontiers and run-dir resume beyond the single-objective
 instance frontier (PORT_GAPS G-12). Per the [module-purity principle](../../README.md), the program stays an
 immutable pure function — its instructions are the only thing the search rewrites, always into fresh copies.

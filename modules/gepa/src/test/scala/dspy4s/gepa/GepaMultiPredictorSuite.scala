@@ -124,7 +124,8 @@ class GepaMultiPredictorSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = gepa.compile(pipeline, trainset = dataset, valset = dataset)
+      val result           =
+        gepa.compile(pipeline, trainset = dataset, valset = dataset).fold(error => fail(error.message), identity)
 
       assertEquals(result.bestScore, 1.0)
       // Both components were evolved to carry their required token (per-component reflection + association worked).

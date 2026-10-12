@@ -1,7 +1,7 @@
 package dspy4s.programs.strategies
 
 import dspy4s.adapters.contracts.ToolSpec
-import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, PredictorKey, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
@@ -93,7 +93,9 @@ final case class Predict[I, O](
       tools = tools
     )
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typed(signature.inputShape)
+  // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.
+  override protected val lifecycle: ModuleLifecycle[I, O] =
+    ModuleLifecycle.predictor(signature.inputShape, PredictorKey.from(moduleName, signature.layout))
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputRecord = call.encodedInput(signature.inputShape)

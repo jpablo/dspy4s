@@ -142,6 +142,20 @@ object RuntimeEnvironment:
       val restoredScope = after.scope.copy(callStack = previous.callStack)
       contextRef.set(after.withScope(restoredScope))
 
+  /** `true` while a predictor that owns a [[dspy4s.core.contracts.PredictorKey]] runs on this thread. */
+  def withinPredictor: Boolean = current.scope.withinPredictor
+
+  /** Mark the extent of `thunk` as the body of a predictor, then restore the previous mark. Like [[withActiveCall]],
+    * this keeps the trace and the history that `thunk` accumulates.
+    */
+  def withinPredictor[A](thunk: => A): A =
+    val previous = localContext
+    contextRef.set(previous.withScope(previous.scope.copy(withinPredictor = true)))
+    try thunk
+    finally
+      val after = localContext
+      contextRef.set(after.withScope(after.scope.copy(withinPredictor = previous.scope.withinPredictor)))
+
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay on
     * exit. The low-level primitive the other `with*` helpers build on. Because the restore is wholesale, any state
     * accumulated on the overlay inside the thunk (trace / history) does not outlive the scope.

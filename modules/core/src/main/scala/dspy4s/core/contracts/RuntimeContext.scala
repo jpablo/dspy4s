@@ -43,7 +43,11 @@ final case class RuntimeConfig(
   */
 final case class RuntimeScope(
     asyncTaskId: Option[String] = None,
-    callStack  : Vector[String] = Vector.empty
+    callStack  : Vector[String] = Vector.empty,
+    /** `true` while a predictor that owns a [[PredictorKey]] runs. A module that starts inside that extent records no
+      * key in its trace entries.
+      */
+    withinPredictor: Boolean = false
 ) derives CanEqual:
   /** The innermost open call scope's id -- always the top of [[callStack]]. */
   def activeCallId: Option[String] = callStack.lastOption
@@ -51,7 +55,8 @@ final case class RuntimeScope(
   def fillFrom(defaults: RuntimeScope): RuntimeScope =
     RuntimeScope(
       asyncTaskId = asyncTaskId.orElse(defaults.asyncTaskId),
-      callStack = if callStack.nonEmpty then callStack else defaults.callStack
+      callStack = if callStack.nonEmpty then callStack else defaults.callStack,
+      withinPredictor = withinPredictor || defaults.withinPredictor
     )
 
 /** The unit of execution context, partitioned into services, configuration, dynamic scope, and accumulated delta. It is

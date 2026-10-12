@@ -82,20 +82,22 @@ object TalkToYourData:
 
         // Part 1: GEPA evolves the planner instruction (LM only; metric is the Scala engine).
         println("== Optimizing the planner with GEPA (grounded metric: planned query vs. gold answer) ==")
-        val report = Optimize.run(reflectionLm = lm, budget = budget, minibatch = minibatch)
-        println(f"  baseline planner accuracy:  ${report.baselineAccuracy * 100}%5.1f%%  (held-out val split)")
-        println(
-          f"  optimized planner accuracy: ${report.optimizedAccuracy * 100}%5.1f%%  (${report.numCandidates} candidates explored)"
-        )
-        val instr = report.optimizedInstruction
-        println(s"  discovered instruction:\n${(if instr.length > 700 then instr.take(700) + " …"
-                                                else instr).linesIterator.map("    " + _).mkString("\n")}\n")
+        Optimize.run(reflectionLm = lm, budget = budget, minibatch = minibatch) match
+          case Left(err)     => println(s"  [error] GEPA stopped: ${err.message}")
+          case Right(report) =>
+            println(f"  baseline planner accuracy:  ${report.baselineAccuracy * 100}%5.1f%%  (held-out val split)")
+            println(
+              f"  optimized planner accuracy: ${report.optimizedAccuracy * 100}%5.1f%%  (${report.numCandidates} candidates explored)"
+            )
+            val instr = report.optimizedInstruction
+            println(s"  discovered instruction:\n${(if instr.length > 700 then instr.take(700) + " …"
+                                                    else instr).linesIterator.map("    " + _).mkString("\n")}\n")
 
-        // Part 2: the full agent answers questions with the optimized planner (needs Deno).
-        if denoAvailable then
-          println("== The agent: plan -> act (RLM writes Python over the CSV) -> verify (JVM re-computes) ==")
-          demoQuestions.foreach(runAndPrint(_, report.optimizedInstruction))
-        else
-          println("== Agent demo SKIPPED: the RLM act stage needs Deno on the PATH (https://deno.com) ==")
-          println("   (The GEPA optimization above ran without it, since its metric is the Scala engine.)")
+            // Part 2: the full agent answers questions with the optimized planner (needs Deno).
+            if denoAvailable then
+              println("== The agent: plan -> act (RLM writes Python over the CSV) -> verify (JVM re-computes) ==")
+              demoQuestions.foreach(runAndPrint(_, report.optimizedInstruction))
+            else
+              println("== Agent demo SKIPPED: the RLM act stage needs Deno on the PATH (https://deno.com) ==")
+              println("   (The GEPA optimization above ran without it, since its metric is the Scala engine.)")
       }

@@ -98,7 +98,12 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
       val bootstrapConfig =
         if config.bootstrap.metric.isDefined then config.bootstrap
         else config.bootstrap.copy(metric = Some(config.metric))
-      new BootstrapFewShot[P](bootstrapConfig).compile(student, effTrain, teacher).map { bootstrapReport =>
+      // Two leaves with the same predictor key are a configuration error (decision D2). The bootstrap makes no such
+      // check for an empty trainset, so make the check here. Each `Left` of the bootstrap stops the compile.
+      val bootstrapped = OptimizerSupport.requireDistinctKeys(student, teacher).flatMap { _ =>
+        new BootstrapFewShot[P](bootstrapConfig).compile(student, effTrain, teacher)
+      }
+      bootstrapped.map { bootstrapReport =>
         val base = bootstrapReport.bestProgram
 
         // 3) Snapshot each leaf's original instruction (rules are appended to THIS, not cumulatively).

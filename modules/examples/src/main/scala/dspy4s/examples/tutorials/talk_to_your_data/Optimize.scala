@@ -104,9 +104,11 @@ object Optimize:
   )
 
   /** Measure the baseline planner, evolve a better instruction with GEPA, measure again, all on the held-out val split,
-    * with the grounded metric.
+    * with the grounded metric. A `Left` is an error from GEPA.
     */
-  def run(reflectionLm: LanguageModel, budget: Int, minibatch: Int)(using RuntimeContext): OptimizationReport =
+  def run(reflectionLm: LanguageModel, budget: Int, minibatch: Int)(using
+      RuntimeContext
+  ): Either[DspyError, OptimizationReport] =
     val baseline = accuracy(Agent.plannerInstructionsBaseline, valset)
     val gepa     = new Gepa[DynamicPredict](
       metric,
@@ -118,9 +120,10 @@ object Optimize:
         seed = 0L
       )
     )
-    val result   = gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset)
-    val optInstr = result.bestCandidate
-      .get(OptimizableId(0))
-      .flatten
-      .getOrElse(Agent.plannerInstructionsBaseline)
-    OptimizationReport(baseline, accuracy(optInstr, valset), optInstr, result.numCandidates)
+    gepa.compile(planner(Agent.plannerInstructionsBaseline), trainset = trainset, valset = valset).map { result =>
+      val optInstr = result.bestCandidate
+        .get(OptimizableId(0))
+        .flatten
+        .getOrElse(Agent.plannerInstructionsBaseline)
+      OptimizationReport(baseline, accuracy(optInstr, valset), optInstr, result.numCandidates)
+    }

@@ -23,9 +23,10 @@ final case class ScoreWithFeedback(score: Double, feedback: String)
   *
   *   - '''Program level''' (`component = None`, `componentTrace` empty): the overall score plus program-wide feedback
   *     for one example. Drives candidate scoring / acceptance.
-  *   - '''OptimizableLeaf level''' (`component = Some(name)`, `componentTrace` = the slice of `trace` produced by that
-  *     predictor): feedback aimed at a single named predictor. The reflection loop assembles each component's
-  *     reflective dataset from these, then asks the reflection LM for a better instruction.
+  *   - '''OptimizableLeaf level''' (`component = Some(name)`, `componentTrace` = the one call of that predictor that
+  *     GEPA selected from `trace`): feedback aimed at a single named predictor. The reflection loop assembles each
+  *     component's reflective dataset from these, then asks the reflection LM for a better instruction. GEPA asks for
+  *     this feedback only when the run passed, so `prediction` is the prediction of the program.
   *
   * Extends [[Metric]] so ONE instance serves both roles: it is a drop-in `Metric` for the [[dspy4s.evaluate.Evaluate]]
   * machinery the GEPA adapter reuses for scoring ([[score]] = the program-level feedback's score), AND the source of

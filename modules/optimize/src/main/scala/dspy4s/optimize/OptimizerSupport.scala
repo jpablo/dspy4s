@@ -10,11 +10,33 @@ import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.programs.optimization.OptimizableStructure
+import dspy4s.programs.optimization.PredictorTraces
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place so
   * the seed→rolloutId mapping and the Evaluate+ProgramRunner scoring wiring stay identical across optimizers.
   */
 private[optimize] object OptimizerSupport:
+
+  /** Reject a student or a teacher in which two leaves have the same predictor key (UPGRADE-3.2.1-to-3.4.0, decision
+    * D2). [[BootstrapFewShot]] and each optimizer that calls it make this check before they run a program.
+    */
+  def requireDistinctKeys[P](student: P, teacher: Option[P])(using
+      ps: OptimizableStructure[P]
+  ): Either[DspyError, Unit] = (student +: teacher.toVector).foldLeft[Either[DspyError, Unit]](Right(())) {
+    (checked, program) =>
+      checked.flatMap(_ => PredictorTraces.requireDistinctKeys(ps.readIdentified(program)))
+  }
+
+  /** The program of one bootstrap candidate, for an optimizer that makes more than one candidate. A `ValidationError`
+    * from [[BootstrapFewShot]] is a configuration error: two leaves with the same key, a leaf type that records no key,
+    * or a teacher that does not agree with the student. The optimizer must return that error. Each other failure gives
+    * no candidate (`None`), and the optimizer continues.
+    */
+  def bootstrapCandidate[P](result: Either[DspyError, OptimizationReport[P]]): Either[DspyError, Option[P]] =
+    result match
+      case Right(report)                => Right(Some(report.bestProgram))
+      case Left(error: ValidationError) => Left(error)
+      case Left(_)                      => Right(None)
 
   /** The common successful result when a program exposes no optimizable leaves. */
   def noOptimizableLeavesReport[P](student: P): OptimizationReport[P] =

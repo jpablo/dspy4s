@@ -1,6 +1,6 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldSpec, PredictorKey, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
@@ -51,7 +51,12 @@ final case class ChainOfThought[I, O](
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
-  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
+  // The key uses the augmented layout, as this leaf's `OptimizableMetadata` does. The inner `Predict` runs inside
+  // this predictor, so it records no key of its own.
+  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.predictor(
+    baseSignature.inputShape,
+    PredictorKey.from(moduleName, ChainOfThought.augmentLayout(baseSignature.layout))
+  )
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predict(call)
