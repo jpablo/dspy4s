@@ -80,7 +80,9 @@ import scala.util.control.NonFatal
   * @param enableNetworkAccess
   *   domains/IPs the sandbox may reach
   * @param syncFiles
-  *   sync write-path changes back to the host after each successful execute
+  *   sync write-path changes back to the host after each successful execute. The client sends the sync as a
+  *   notification and does not wait for it, as upstream. A host file is complete after [[close]] returns; a read before
+  *   that can see the file while the sandbox writes it.
   * @param denoCommand
   *   full launch command override (replaces the computed `deno run --allow-… runner.js`)
   */

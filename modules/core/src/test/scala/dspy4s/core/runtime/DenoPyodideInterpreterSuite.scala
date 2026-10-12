@@ -254,12 +254,14 @@ class DenoPyodideInterpreterSuite extends FunSuite:
     val file   = Files.createTempDirectory("dspy4s-write").resolve("out.txt")
     val code   = "with open('/sandbox/out.txt', 'w') as out:\n    out.write('from the sandbox')\nprint('written')"
     val interp = new DenoPyodideInterpreter(enableWritePaths = Vector(file.toString))
-    try
-      assertEquals(interp.execute(code).map(_.stdout.trim), Right("written"))
-      // The runner copies the file to the host before it reads the next request.
-      assertEquals(interp.execute("print('synced')").map(_.stdout.trim), Right("synced"))
-      assertEquals(new String(Files.readAllBytes(file), StandardCharsets.UTF_8), "from the sandbox")
-    finally interp.close()
+    val result =
+      try interp.execute(code).map(_.stdout.trim)
+      finally interp.close()
+    assertEquals(result, Right("written"))
+    // The client sends the file sync as a notification after each call and does not wait for it. The runner handles
+    // its messages in order, and `close` returns after the runner stopped. Thus the file is complete only after
+    // `close`: a read before that can see the file while the runner writes it.
+    assertEquals(new String(Files.readAllBytes(file), StandardCharsets.UTF_8), "from the sandbox")
   }
 
   test("a Deno process that stops ends the session, and no new process starts") {
