@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.LmError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -14,9 +15,11 @@ import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
+import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
+import dspy4s.lm.providers.DynamicJson
 import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
@@ -169,16 +172,21 @@ final case class ManagedLanguageModel(
     *     streamed calls (same as calling the provider's `stream` directly).
     *   - Non-streaming delegate: falls back to one terminal chunk assembled from the managed [[call]] (which keeps
     *     cache / retries / history / usage), or a reified `finishReason = "error"` chunk on failure — the same error
-    *     convention providers use.
+    *     convention providers use. The chunk carries the text and the tool calls of the first output. Each tool call is
+    *     one complete delta, so `ToolCallAssembler.assemble` gives the call back with its id.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match
       case streaming: StreamingLanguageModel => streaming.stream(request)
       case _                                 => call(request) match
-          case Right(response) => Iterator.single(LmChunk(
-              text = response.outputs.headOption.map(_.text).getOrElse(""),
+          case Right(response) =>
+            val output    = response.outputs.headOption
+            val toolCalls = output.map(_.toolCalls).getOrElse(Vector.empty)
+            Iterator.single(LmChunk(
+              text = output.map(_.text).getOrElse(""),
               finishReason = Some("stop"),
-              usage = response.usage
+              usage = response.usage,
+              toolCalls = toolCalls.zipWithIndex.map(ManagedLanguageModel.toolCallDelta)
             ))
           case Left(error) => Iterator.single(LmChunk.failure(error))
 
@@ -262,3 +270,12 @@ final case class ManagedLanguageModel(
 object ManagedLanguageModel:
   private def defaultSleep(millis: Long): Unit =
     Thread.sleep(millis)
+
+  /** One complete tool call as a stream delta: the id, the name, and the JSON text of the arguments. */
+  private def toolCallDelta(call: ToolCall, index: Int): LmToolCallDelta =
+    LmToolCallDelta(
+      index = index,
+      id = call.id,
+      name = Some(call.name),
+      argumentsFragment = Some(DynamicJson.encodeExact(call.args))
+    )

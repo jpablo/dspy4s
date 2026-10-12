@@ -63,3 +63,33 @@ class ToolCallAssemblerSuite extends FunSuite:
     val calls  = ToolCallAssembler.assemble(deltas)
     assertEquals(argsMap(calls.head), Map.empty[String, Any])
   }
+
+  test("an empty id counts as no id") {
+    val deltas = Vector(LmToolCallDelta(index = 0, id = Some(""), name = Some("ping"), argumentsFragment = Some("{}")))
+    assertEquals(ToolCallAssembler.assemble(deltas).map(call => call.name -> call.id), Vector("ping" -> None))
+  }
+
+  test("a later delta with an empty id stays in its call") {
+    val deltas = Vector(
+      LmToolCallDelta(
+        index = 0,
+        id = Some("call_1"),
+        name = Some("get_weather"),
+        argumentsFragment = Some("""{"loc""")
+      ),
+      LmToolCallDelta(index = 0, id = Some(""), argumentsFragment = Some("""ation":"Paris"}"""))
+    )
+    val calls = ToolCallAssembler.assemble(deltas)
+    assertEquals(calls.map(_.id), Vector(Some("call_1")))
+    assertEquals(argsMap(calls.head), Map[String, Any]("location" -> "Paris"))
+  }
+
+  test("a delta with a different id at the same index starts a new call, and each call keeps its id") {
+    val deltas = Vector(
+      LmToolCallDelta(index = 0, id = Some("call_1"), name = Some("alpha"), argumentsFragment = Some("""{"x":1}""")),
+      LmToolCallDelta(index = 0, id = Some("call_2"), name = Some("alpha"), argumentsFragment = Some("""{"x":2}"""))
+    )
+    val calls = ToolCallAssembler.assemble(deltas)
+    assertEquals(calls.map(_.id), Vector(Some("call_1"), Some("call_2")))
+    assertEquals(calls.map(argsMap), Vector(Map[String, Any]("x" -> 1L), Map[String, Any]("x" -> 2L)))
+  }

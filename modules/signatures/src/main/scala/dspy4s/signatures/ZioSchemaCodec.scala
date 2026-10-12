@@ -1,8 +1,31 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError, TypeRef, ValidationError}
+import dspy4s.core.contracts.{
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  History,
+  NotFoundError,
+  ToolCall,
+  TypeRef,
+  ValidationError
+}
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, Schema}
+import zio.blocks.docs.Doc
+import zio.blocks.schema.binding.{Binding, BindingType}
+import zio.blocks.schema.{
+  DynamicOptic,
+  DynamicValue,
+  Lazy,
+  Modifier,
+  PrimitiveType,
+  PrimitiveValue,
+  Reflect,
+  ReflectTransformer,
+  Schema,
+  Term
+}
+import zio.blocks.typeid.TypeId
 
 /** Bridge between zio-blocks `Schema[A]` and dspy4s's `Shape[A]`.
   *
@@ -12,6 +35,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, 
   *   - [[fieldSpecsFromReflect]] -- derive `FieldSpec` list from a `Reflect.Record`.
   *   - [[normalize]] -- DynamicValue → DynamicValue coercion guided by a target `Reflect`. Public for the rare caller
   *     that needs to pre-coerce a record before decoding.
+  *   - [[jsonSchemaForModel]] -- the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`.
   *
   * No `Map[String, Any]` round-trip: the spine is `DynamicValue.Record` end-to-end.
   */
@@ -27,9 +51,14 @@ private[signatures] object ZioSchemaCodec:
     * Records are walked recursively against the target's field list (fields not present in the target are dropped);
     * sequences are walked element-wise. Everything else (and values whose target shape doesn't match the dispatch
     * above) passes through unchanged.
+    *
+    * A record gets `None` for each `Option` field of the target that it lacks, at each level of nesting. A required
+    * field that is absent stays absent, so the decode fails.
     */
   def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue =
     (dv, target) match
+      // zio-blocks defers the reflect of some nested fields. The coercion needs the reflect behind it.
+      case (value, deferred: Reflect.Deferred[?, ?])                      => normalize(value, deferred.value)
       case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) => coercePrimitive(prim, p.primitiveType)
       // Option-shaped variant: wrap bare/Null/string values into Some/None before the generic rules below.
       case (value, variant: Reflect.Variant[?, ?]) if optionSomeValueReflect(variant).isDefined =>
@@ -57,7 +86,6 @@ private[signatures] object ZioSchemaCodec:
     * and inherits the usual LM-shaped coercion (e.g. `"2399.0"` string → Double).
     */
   private def normalizeOption(value: DynamicValue, valueReflect: Reflect[?, ?]): DynamicValue =
-    def none: DynamicValue                  = DynamicValue.Variant("None", DynamicValue.Record.empty)
     def some(v: DynamicValue): DynamicValue =
       DynamicValue.Variant("Some", DynamicValue.Record(Chunk.single("value" -> normalize(v, valueReflect))))
     value match
@@ -70,6 +98,9 @@ private[signatures] object ZioSchemaCodec:
             || s.trim.equalsIgnoreCase("n/a") => none
       case other => some(other)
 
+  /** The `None` case of an `Option`, in the Variant shape that zio-blocks expects. */
+  private def none: DynamicValue = DynamicValue.Variant("None", DynamicValue.Record.empty)
+
   private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[?, ?]): DynamicValue.Record =
     val targetByName = target.fields.iterator.map(t => t.name -> t.value).toMap
     val out          = rec.fields.iterator.map { (name, value) =>
@@ -77,7 +108,14 @@ private[signatures] object ZioSchemaCodec:
         case Some(fieldReflect) => name -> normalize(value, fieldReflect)
         case None               => name -> value
     }.toSeq
-    DynamicValue.Record(Chunk.from(out))
+    // An Option field is not required on the wire: a record that omits the key means None, the same as an
+    // explicit null/"none".
+    val present         = rec.fields.iterator.map(_._1).toSet
+    val absentOptionals = target.fields.iterator
+      .filter(term => !present.contains(term.name) && optionSomeValueReflect(term.value).isDefined)
+      .map(_.name -> none)
+      .toSeq
+    DynamicValue.Record(Chunk.from(out ++ absentOptionals))
 
   private def coercePrimitive(dv: DynamicValue, prim: PrimitiveType[?]): DynamicValue =
     dv match
@@ -153,7 +191,8 @@ private[signatures] object ZioSchemaCodec:
     */
   private def optionSomeValueReflect(reflect: Reflect[?, ?]): Option[Reflect[?, ?]] =
     reflect match
-      case variant: Reflect.Variant[?, ?] =>
+      case deferred: Reflect.Deferred[?, ?] => optionSomeValueReflect(deferred.value)
+      case variant: Reflect.Variant[?, ?]   =>
         val cases = variant.cases.toVector
         if cases.size != 2 then None
         else
@@ -180,12 +219,51 @@ private[signatures] object ZioSchemaCodec:
 
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
     reflect match
-      case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
-      case _: Reflect.Variant[?, ?]      => TypeRef.string
-      case _: Reflect.Record[?, ?]       => TypeRef.json
-      case _: Reflect.Sequence[?, ?, ?]  => TypeRef.list
-      case _: Reflect.Map[?, ?, ?, ?]    => TypeRef.json
-      case _                             => TypeRef.json
+      case prim: Reflect.Primitive[?, ?]                                  => primitiveTypeRef(prim.primitiveType)
+      case _: Reflect.Variant[?, ?]                                       => TypeRef.string
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, historyTypeId) => TypeRef.history
+      case _: Reflect.Record[?, ?]                                        => TypeRef.json
+      case _: Reflect.Sequence[?, ?, ?]                                   => TypeRef.list
+      case _: Reflect.Map[?, ?, ?, ?]                                     => TypeRef.json
+      case _                                                              => TypeRef.json
+
+  // The framework types that the derivation knows by their identity (the type name of the record reflect), not by
+  // their structure.
+  private val historyTypeId: TypeId[History]   = summon[Schema[History]].reflect.typeId
+  private val toolCallTypeId: TypeId[ToolCall] = summon[Schema[ToolCall]].reflect.typeId
+
+  private def isType(typeId: TypeId[?], known: TypeId[?]): Boolean = typeId.fullName == known.fullName
+
+  /** Marks the `id` field of each [[ToolCall]] record as transient, so the JSON schema does not show that field. Each
+    * other part of the reflect stays as it is.
+    */
+  private object HideToolCallId extends ReflectTransformer.OnlyMetadata[Binding, Binding]:
+    override def transformMetadata[K, A](f: Binding[K, A]): Lazy[Binding[K, A]] = Lazy(f)
+
+    override def transformRecord[A](
+        path              : DynamicOptic,
+        fields            : IndexedSeq[Term[Binding, A, ?]],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Record, A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Record[Binding, A]] =
+      val shown =
+        if !isType(typeId, toolCallTypeId) then fields
+        else
+          fields.map { term =>
+            if term.name == "id" then term.copy(modifiers = term.modifiers :+ Modifier.transient()) else term
+          }
+      super.transformRecord(path, shown, typeId, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+  /** The JSON schema of `schema` as a model sees it. The schema does not ask for the `id` of a [[ToolCall]] (upstream
+    * removes `id` from the JSON schema of `ToolCalls.ToolCall`): the id comes from the provider, and a model that
+    * writes a tool call as text does not supply it.
+    */
+  def jsonSchemaForModel[A](schema: Schema[A]): String =
+    Schema(schema.reflect.transform(DynamicOptic.root, HideToolCallId).force).toJsonSchema.toJson.toString
 
   private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef =
     prim match
@@ -218,7 +296,7 @@ private[signatures] object ZioSchemaCodec:
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
-      override lazy val jsonSchemaString: Option[String] = Some(schema.toJsonSchema.toJson.toString)
+      override lazy val jsonSchemaString: Option[String] = Some(jsonSchemaForModel(schema))
 
       override def encode(value: A): DynamicValue.Record =
         schema.toDynamicValue(value) match
@@ -240,14 +318,6 @@ private[signatures] object ZioSchemaCodec:
             message = s"Missing required fields: ${missing.mkString(", ")}"
           ))
         else
-          // Fill absent optional fields with Null so normalize's Option handling maps them to None.
-          val absentOptionals = fieldSpecs.iterator
-            .map(_.name)
-            .filter(name => optionalFieldNames.contains(name) && !present.contains(name))
-            .toSeq
-          val filled =
-            if absentOptionals.isEmpty then raw
-            else
-              DynamicValue.Record(raw.fields ++ Chunk.from(absentOptionals.map(_ -> (DynamicValue.Null: DynamicValue))))
-          val normalized = normalize(filled, rootReflect)
+          // `normalize` gives None to each absent optional field, at each level of nesting.
+          val normalized = normalize(raw, rootReflect)
           schema.fromDynamicValue(normalized).left.map(err => ValidationError(err.toString))

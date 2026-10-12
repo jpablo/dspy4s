@@ -21,7 +21,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   */
 private[adapters] object AdapterTextSupport:
 
-  /** Standard system → demonstration pairs → live input message sequence used by structured text adapters. */
+  /** Standard system → demonstration pairs → live input message sequence. `TwoStepAdapter` uses it. The Chat, JSON, and
+    * XML adapters use [[ConversationHistory.messages]], which also replays a conversation history.
+    */
   def fewShotMessages(
       invocation: AdapterInvocation,
       systemText: String

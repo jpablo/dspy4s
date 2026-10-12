@@ -20,6 +20,10 @@ All three also understand **native function-calling**: when enabled and the LM s
 output field is filled directly from the provider's structured tool response instead of being requested as
 text. This is handled uniformly at the adapter level, independent of any ReAct-style reasoning flow.
 
+All three also replay a **conversation history**. A signature takes the history as one input field of type
+`History` (wire type `TypeRef.history`). The adapter does not show that field as a value. It replays each message as
+earlier turns, between the demos and the current request.
+
 ## Key types
 
 | Type | Role |
@@ -33,7 +37,7 @@ text. This is handled uniformly at the adapter level, independent of any ReAct-s
 | `FormattedPrompt` | An adapter's output: messages + metadata + `requestOptions` (the seam where structured-output and native-tool options are injected). |
 | `ParsedOutput` | A parser's result: the `values` record, the `rawText`, and a metadata bag. |
 | `FieldChunk` / `AdapterStreamingState` | A field-routed text fragment with an `isLast` boundary, and the per-call state machine (`receive(delta)`, `finish()`) that emits them. |
-| `NativeFunctionCalling` | Shared helpers that gate native tool-calling and inject `tools` / `parallel_tool_calls` / `tool_choice` into request options. |
+| `NativeFunctionCalling` | Shared helpers that gate native tool-calling and inject `tools` / `parallel_tool_calls` / `tool_choice` into request options. `encodeToolCalls` writes the value of a `tool_calls` field: one `{name, args}` record for each `ToolCall`, with the provider `id` when the call has one. |
 | `ToolSpec` / `ToolParameterSpec` / `ToolChoice` / `ToolSchemaBridge` | Tool definitions and the bridge that renders them to OpenAI function schemas. |
 | `AdapterConstraints` | Renders field-constraint prose blocks (inline per-field for chat, consolidated for JSON/XML). |
 
@@ -49,6 +53,25 @@ text. This is handled uniformly at the adapter level, independent of any ReAct-s
   excluded from the rendered text prompt and filled post-parse from the structured response; missing text fields
   on a tool turn default to `Null` rather than erroring (matching dspy's lenient `setdefault`). ReAct keeps its
   text protocol unchanged.
+- **Conversation history replay.** `internal/ConversationHistory` builds the message sequence for the Chat, JSON,
+  and XML adapters: system, demos, history turns, current request. Each adapter supplies only its text for a user
+  turn and for an assistant turn (`TurnText`).
+    - The system message is built from the full signature, so it names the history field. The JSON and XML
+      adapters do not list input fields, so they add one note that names the field. The current request and each
+      replayed turn use the signature without the history field.
+    - The input fields of a message make a user turn, with the output reminder of a current request. The output
+      fields make an assistant turn in the form of a demo. A turn shows only the fields that its message has. A
+      message with no input field gets no user turn, and a message with no output field gets no assistant turn.
+      A key that is not a field of the signature is ignored.
+    - A message can hold tool calls in the `tool_calls` field of the signature, and their results under
+      `History.ToolCallResultsKey` (`ToolCallResult` records). With native function-calling on and a model that
+      supports it, the turn is one assistant message with `toolCalls`, then one `MessageRole.Tool` message for each
+      result. This needs an `id` on each call and the same `callId`s on the results, in the same order. If they do
+      not match, the results are dropped and only the assistant text stays. In each other case the calls stay text:
+      the assistant turn shows them as a field value with no ids, and one more user turn shows the results as the
+      field `tool_call_results`.
+    - A demo that has a history value shows it as a field. The history of a demo is not replayed.
+      `TwoStepAdapter` does not replay a history. It shows the value as a field.
 - **Two JSON modes, one lenient.** Without schema support, JSONAdapter gives prose key-guidance; with it, it
   injects `response_format: {type: "json_schema", …, strict: false}`. The schema is embedded leniently because
   dspy4s schemas may not satisfy OpenAI strict mode. (See the [two-codec note](../../README.md): the
@@ -76,6 +99,7 @@ text. This is handled uniformly at the adapter level, independent of any ReAct-s
 | `contracts/ToolContracts.scala` | `ToolSpec`, `ToolParameterSpec`, `ToolSchemaBridge` |
 | `contracts/AdapterConstraints.scala` | constraint-prose rendering |
 | `internal/JsonDynamic.scala` | shared `ujson.Value` ↔ `DynamicValue` conversion |
+| `internal/ConversationHistory.scala` | the message sequence of a request and the replay of a `History` input field (`TurnText`) |
 
 ## Relation to dspy
 

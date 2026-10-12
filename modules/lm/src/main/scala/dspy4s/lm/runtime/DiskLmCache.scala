@@ -11,13 +11,22 @@ import java.nio.file.{Files, Path, StandardCopyOption, StandardOpenOption}
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
+/** The classes that `DiskLmCache` writes with Java serialization.
+  *
+  * Each class has a fixed `serialVersionUID`. The value is the one that the JVM computed for the class before
+  * `PersistedToolCall.id` existed, so an entry that an older version wrote stays readable. With a fixed value, Java
+  * serialization accepts a new field: an old entry gives the field its default (`null`). Thus a new field must have a
+  * correct meaning when it is `null`. Do not rename a field and do not change the type of a field.
+  */
 private object DiskCacheModel:
+  @SerialVersionUID(-8046790753251875400L)
   final case class PersistedResponse(
       outputs  : Array[PersistedOutput],
       usage    : PersistedUsage | Null,
       modelName: String | Null
   ) extends Serializable
 
+  @SerialVersionUID(-6858508434379838130L)
   final case class PersistedOutput(
       text        : String,
       toolCalls   : Array[PersistedToolCall],
@@ -26,9 +35,12 @@ private object DiskCacheModel:
 
   // Tool-call args and output metadata are `DynamicValue.Record`s; persist them as their natural JSON (via
   // zio-blocks' DynamicValue JSON codec), faithfully -- not the old lossy String-flattening.
+  // `id` is null for a call with no id, and for an entry that a version without this field wrote.
+  @SerialVersionUID(3838258375993650620L)
   final case class PersistedToolCall(
       name    : String,
-      argsJson: String
+      argsJson: String,
+      id      : String | Null
   ) extends Serializable
 
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
@@ -43,6 +55,7 @@ private object DiskCacheModel:
           case _                               => DynamicValue.Record.empty
       case None => DynamicValue.Record.empty
 
+  @SerialVersionUID(-3539090977201704575L)
   final case class PersistedUsage(
       totalTokens     : Long,
       promptTokens    : Long,
@@ -146,7 +159,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
   private def toPersisted(response: LmResponse): PersistedResponse =
     val outputs = response.outputs.map { output =>
       val toolCalls = output.toolCalls.map { call =>
-        PersistedToolCall(call.name, encodeRecord(call.args))
+        PersistedToolCall(call.name, encodeRecord(call.args), call.id.orNull)
       }.toArray
       PersistedOutput(
         text = output.text,
@@ -167,7 +180,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
   private def fromPersisted(response: PersistedResponse): LmResponse =
     val outputs = Option(response.outputs).getOrElse(Array.empty[PersistedOutput]).toVector.map { output =>
       val toolCalls = Option(output.toolCalls).getOrElse(Array.empty[PersistedToolCall]).toVector.map { call =>
-        ToolCall(name = call.name, args = decodeRecord(call.argsJson))
+        ToolCall(name = call.name, args = decodeRecord(call.argsJson), id = Option(call.id))
       }
       LmOutput(
         text = Option(output.text).getOrElse(""),

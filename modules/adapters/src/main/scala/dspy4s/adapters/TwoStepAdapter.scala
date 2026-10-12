@@ -27,6 +27,9 @@ import dspy4s.lm.contracts.LmRequest
   *
   * Delta from Python (carried over): the extractor signature is built fresh with no demos, so the extraction step
   * cannot be optimized/learned (upstream notes the same limitation).
+  *
+  * This adapter does not replay a conversation history. As upstream, it shows a `History` input as one field value of
+  * the user message.
   */
 final case class TwoStepAdapter(
     extractionModel: LanguageModel,

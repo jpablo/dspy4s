@@ -18,6 +18,12 @@ private[lm] object DynamicJson:
   def encode(value: DynamicValue): String =
     new String(codec.encode(stripNull(value)), StandardCharsets.UTF_8)
 
+  /** Render a `DynamicValue` to a JSON string and keep each `Null` field. Use it for a value that must keep its exact
+    * content, for example the arguments of a tool call.
+    */
+  def encodeExact(value: DynamicValue): String =
+    new String(codec.encode(value), StandardCharsets.UTF_8)
+
   /** Parse a JSON string. Text that is not JSON gives a `ParseError`. The codec is recursive, so a value that is nested
     * too deep for the stack of the thread gives a `ParseError` too: a body from the network must not stop the caller
     * with a `StackOverflowError`.

@@ -1,5 +1,6 @@
 package dspy4s.lm.runtime
 
+import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.contracts.{ContentPart, LmRequest, Message}
 import zio.blocks.schema.DynamicValue
 
@@ -20,10 +21,27 @@ object RequestHash:
       )},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
 
   private def encodeMessage(message: Message): String =
-    val parts = message.parts.map(encodePart).mkString("[", ",", "]")
+    val parts      = message.parts.map(encodePart).mkString("[", ",", "]")
+    val toolFields = encodeToolFields(message)
     s"""{"role":${quote(message.role.toString)},"text":${message.text.map(
         quote
-      ).getOrElse("null")},"parts":$parts,"metadata":${normalizeStringMap(message.metadata)}}"""
+      ).getOrElse("null")},"parts":$parts,"metadata":${normalizeStringMap(message.metadata)}$toolFields}"""
+
+  /** The tool fields of a message for the hashed text: the tool calls, the tool call id, and the name. A field is in
+    * the text only when the message has it. Thus a message with no tool field keeps the key that it had before these
+    * fields existed, and each entry of a disk cache stays valid.
+    */
+  private def encodeToolFields(message: Message): String =
+    val toolCalls = Option.when(message.toolCalls.nonEmpty)(
+      s""","tool_calls":${message.toolCalls.map(encodeToolCall).mkString("[", ",", "]")}"""
+    )
+    val toolCallId = message.toolCallId.map(callId => s""","tool_call_id":${quote(callId)}""")
+    val name       = message.name.map(toolName => s""","name":${quote(toolName)}""")
+    Vector(toolCalls, toolCallId, name).flatten.mkString
+
+  private def encodeToolCall(call: ToolCall): String =
+    val id = call.id.map(quote).getOrElse("null")
+    s"""{"id":$id,"name":${quote(call.name)},"args":${normalizeDynamic(call.args)}}"""
 
   private def encodePart(part: ContentPart): String =
     s"""{"kind":${quote(part.kind)},"payload":${quote(part.payload)},"metadata":${normalizeStringMap(part.metadata)}}"""

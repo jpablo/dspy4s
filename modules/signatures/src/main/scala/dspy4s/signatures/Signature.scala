@@ -39,7 +39,7 @@ final case class Signature[I, O](
     * given name. See PORT_GAPS G-7b.
     *
     * Needed because signature derivation maps field types structurally (a `Vector[ToolCall]` becomes `TypeRef.list`)
-    * and `zio-blocks` `Reflect` does not expose a type name to auto-detect the tool-calls type.
+    * and does not detect the tool-calls type.
     */
   def markToolCalls(fieldName: String): Signature[I, O] =
     copy(layout = layout.withOutputFields(layout.outputFields.map { field =>
@@ -92,11 +92,12 @@ object Signature:
     * at compile time. The string is parsed during macro expansion (reusing [[SignatureLayout.parse]]) and each field
     * becomes a named-tuple element: fields without an annotation default to `String`; `int` / `float` / `bool` map to
     * the matching scalar. So `Signature.fromString("question -> answer: bool")` is a
-    * `Signature[(question: String), (answer: Boolean)]` with direct dot access on predictions.
+    * `Signature[(question: String), (answer: Boolean)]` with direct dot access on predictions. An input field with the
+    * type `History` (`"question, history: History -> answer"`) is a `dspy4s.core.contracts.History` element.
     *
     * The DSL must be a compile-time literal and is validated at compile time (an invalid string, or a field type
-    * outside `str` / `int` / `float` / `bool`, is a compile error). For a signature built from a **runtime** string (no
-    * static types, `DynamicValue.Record` I/O), use [[fromStringDynamic]].
+    * outside `str` / `int` / `float` / `bool` and `History` for an input field, is a compile error). For a signature
+    * built from a **runtime** string (no static types, `DynamicValue.Record` I/O), use [[fromStringDynamic]].
     */
   transparent inline def fromString(inline dsl: String, inline instructions: String = "") =
     ${ internal.FunctionMacro.fromStringImpl('dsl, 'instructions) }

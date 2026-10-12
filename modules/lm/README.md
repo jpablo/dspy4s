@@ -29,7 +29,7 @@ changing the domain types.
 | `StreamingLanguageModel` | Adds `stream(request): Iterator[LmChunk]` over server-sent events. |
 | `LmRequest` | model + `LmMode` + `Vector[Message]` + provider `options` (schema-free record) + optional `rolloutId`. |
 | `LmResponse` | outputs + optional `LmUsage` + model name + cache-hit flag. |
-| `Message` / `MessageRole` / `ContentPart` | A chat message (System/User/Assistant) with `text` or multimodal `parts`. |
+| `Message` / `MessageRole` / `ContentPart` | A chat message (System/User/Assistant/Tool) with `text` or multimodal `parts`. An assistant message can carry tool calls, and a tool message names the call that it answers. |
 | `LmOutput` | One response item: text, `Vector[ToolCall]`, metadata. |
 | `LmMode` | `Chat` / `Text` / `Responses` — selects the wire shape. |
 | `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a `TokenCategory`-keyed map of extras (cached, reasoning, audio, …). |
@@ -69,6 +69,11 @@ changing the domain types.
 - **Streaming closes cleanly.** `stream` returns a lazy `Iterator[LmChunk]`; a setup error is reified as a
   terminal error chunk rather than thrown, so consumers always see a closed stream. Tool-call deltas are
   reassembled by `ToolCallAssembler`, with a JSON-parse fallback that wraps an unparseable fragment.
+- **A tool call keeps its id.** The response parser and `ToolCallAssembler` copy the id of the provider into
+  `ToolCall.id`: `call_id` when the entry has one, else `id`. `ProviderRequestNormalizer` sends the tool calls of
+  an assistant message as `tool_calls`, and a tool message with `tool_call_id` and `name`, so a request can
+  replay a tool turn. The prompt of `LmMode.Text` takes the text of each message only. The cache key covers the
+  tool fields only when a message has them, and `DiskLmCache` reads the entries that an older version wrote.
 - **Failures are typed.** A failure of a provider call is an `LmError` from `core` (`LmRateLimitError`,
   `LmAuthError`, `ContextWindowExceededError`, and others). `OpenAiErrors` gives each HTTP error response its
   class from the provider code and the status. The `details` of the error hold the status, the request id, and

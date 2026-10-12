@@ -1,5 +1,6 @@
 package dspy4s.lm.contracts
 
+import dspy4s.core.contracts.ToolCall
 import zio.blocks.schema.DynamicValue
 
 enum LmMode derives CanEqual:
@@ -12,13 +13,29 @@ enum MessageRole derives CanEqual:
   case User
   case Assistant
 
+  /** The result of one tool call. The message answers the call that [[Message.toolCallId]] names. */
+  case Tool
+
 final case class ContentPart(kind: String, payload: String, metadata: Map[String, String] = Map.empty)
 
+/** One message of a request.
+  *
+  * @param toolCalls
+  *   for an assistant message: the tool calls of that turn. Each call must have an id, because the provider matches a
+  *   tool message with its call by the id.
+  * @param toolCallId
+  *   for a tool message: the id of the call that this message answers
+  * @param name
+  *   for a tool message: the name of the tool
+  */
 final case class Message(
-    role    : MessageRole,
-    text    : Option[String]      = None,
-    parts   : Vector[ContentPart] = Vector.empty,
-    metadata: Map[String, String] = Map.empty
+    role      : MessageRole,
+    text      : Option[String]      = None,
+    parts     : Vector[ContentPart] = Vector.empty,
+    metadata  : Map[String, String] = Map.empty,
+    toolCalls : Vector[ToolCall]    = Vector.empty,
+    toolCallId: Option[String]      = None,
+    name      : Option[String]      = None
 )
 
 final case class LmRequest(

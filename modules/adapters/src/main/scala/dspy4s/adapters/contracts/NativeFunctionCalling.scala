@@ -76,12 +76,8 @@ object NativeFunctionCalling:
   private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
   /** Encode native tool calls as the value of a `tool_calls` output field: a sequence of `{name, args}` records,
-    * matching the shape `PredictEngine` attaches to predictions.
+    * matching the shape `PredictEngine` attaches to predictions. A record also has the `id` of the provider when the
+    * call has one, so the typed output and the raw prediction keep that id.
     */
   def encodeToolCalls(calls: Vector[ToolCall]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(calls.map { call =>
-      DynamicValue.Record(Chunk(
-        "name" -> DynamicValue.Primitive(PrimitiveValue.String(call.name)),
-        "args" -> call.args
-      ))
-    }))
+    DynamicValue.Sequence(Chunk.from(calls.map(_.toRecord)))

@@ -82,6 +82,33 @@ shape and nested encode/decode:
 --8<-- "learn/programming/Signatures.scala:custom-types"
 ```
 
+## Conversation history
+
+A program does not keep the earlier turns of a conversation. To give them to
+the model, add an input field of type `History` to the signature:
+
+```scala
+--8<-- "tutorials/conversation_history/ConversationHistory.scala:signature"
+```
+
+A `History` holds messages. Each message is a record whose keys are field names
+of the same signature. The adapter does not show the field as a value. It
+replays each message before the current request: the input fields make an
+earlier user turn, and the output fields make the assistant turn that answered
+it.
+
+The caller adds each turn to the history and gives the history to the next
+call:
+
+```scala
+--8<-- "tutorials/conversation_history/ConversationHistory.scala:conversation"
+```
+
+A message can also hold the tool calls of a turn and the results of those calls
+(`History.withToolCallResults`). With
+[native function calling](tools-and-react.md#native-function-calling), the
+adapter sends them to the model as tool messages.
+
 ## Summary
 
 | Form | Declared with | Use when |

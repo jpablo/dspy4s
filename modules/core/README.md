@@ -40,7 +40,7 @@ Four abstractions anchor the framework:
 |------|------|
 | `SignatureLayout` | The runtime layout: name, optional instructions, and separate ordered input/output `FieldSpec` cohorts. Built via `create` (validating), `parse` (DSL), or `Signature` derivation. |
 | `FieldSpec` | Role-free per-field metadata: name, wire type, description, prefix, default, constraints. `normalize` fills defaults so adapters see a uniform surface. |
-| `TypeRef` | The wire-format type tag the LM sees (`string`, `bool`, `json`, …); unknown tokens pass through opaque. |
+| `TypeRef` | The wire-format type tag the LM sees (`string`, `bool`, `json`, …); unknown tokens pass through opaque. Two tags give a field a role: `tool_calls` (the output field that gets native tool calls) and `history` (the input field that holds the conversation history). |
 | `Constraint` | Constraint algebra mirroring Python's `PYDANTIC_CONSTRAINT_MAP` (prose hint + JSON-Schema keyword). |
 
 ### Runtime & observability
@@ -52,8 +52,10 @@ Four abstractions anchor the framework:
 | `RuntimeEnvironment` | Process-wide manager: the global default context, thread-local overlays, monotonic call/async-task ids, and callback dispatch. `configure` sets the global; `with*` scopes overrides. |
 | `CallbackEvent` / `CallbackHandler` | The eight lifecycle events (module/LM/adapter/tool × start/end), correlated by `callId`/`parentCallId`, and the handler interface that consumes them. |
 | `TraceEntry` / `HistoryEntry` | Recorded module calls (inputs/outputs/failure) and LM calls; appended to the context when enabled, capped by `maxHistorySize`. `HistoryRenderer` produces dspy-style inspection output. |
-| `DspyError` | Sealed error hierarchy: `ConfigurationError`, `ValidationError`, `NotFoundError`, `ParseError`, `RuntimeError`, `ContextWindowExceededError`, each with a `code` + message, propagated through `Either`. |
-| `ToolCall` | A model-requested tool invocation (`name` + args record), carried as structured data through wire → adapter → domain decode. |
+| `DspyError` | Sealed error hierarchy: `ConfigurationError`, `ValidationError`, `NotFoundError`, `ParseError`, `RuntimeError`, and the `LmError` family for a failure of a language model call (`LmRateLimitError`, `LmAuthError`, `ContextWindowExceededError`, and others, with `LmErrorDetails`). Each has a `code` + message, propagated through `Either`. |
+| `ToolCall` | A model-requested tool invocation (`name` + args record, and the `id` of the provider when it has one), carried as structured data through wire → adapter → domain decode. `toRecord`, `fromRecord`, and `fromDynamic` give its record form. |
+| `ToolCallResult` | The result of one tool call: `name`, `value`, `callId`, `isError`. `ToolCallResult.forCalls` pairs results with calls. |
+| `History` | The conversation history of a signature: a list of message records whose keys are field names of the signature. An adapter replays the messages as earlier turns. A message holds the results of its tool calls under `History.ToolCallResultsKey`. |
 | `CodeInterpreter` / `ReplCodeInterpreter` | The code-execution sandbox interface used by `RLM`; the Deno/Pyodide and subprocess-Python implementations live here. |
 | `ReplInterpreterFactory` / `SandboxOutputField` | The factory that builds one REPL interpreter for one program call, from the host tools and the output fields of `SUBMIT`. `RuntimeServices.interpreterFactory` holds the factory of the runtime context. |
 
@@ -86,7 +88,7 @@ Four abstractions anchor the framework:
 | `contracts/SignatureLayoutStateCodec.scala` | `DynamicValue.Record` and JSON persistence for `SignatureLayout` |
 | `contracts/SignatureOps.scala` | idempotent layout-surgery extensions (prepend/append/replace) |
 | `contracts/Callbacks.scala` | `CallbackEvent` events + `CallbackHandler` |
-| `contracts/ToolCall.scala`, `CodeInterpreter.scala`, `ClosableIterator.scala`, `HistoryRenderer.scala` | tool calls, code-exec primitives, streaming iterator, history rendering |
+| `contracts/ToolCall.scala`, `History.scala`, `CodeInterpreter.scala`, `ClosableIterator.scala`, `HistoryRenderer.scala` | tool calls and tool call results, the conversation history, code-exec primitives, streaming iterator, history rendering |
 | `signatures/` | the `in -> out` DSL parser and `create` helpers |
 | `runtime/` | `RuntimeEnvironment`, `CallbackDispatcher`, context propagation, the Deno/Pyodide and subprocess interpreters |
 

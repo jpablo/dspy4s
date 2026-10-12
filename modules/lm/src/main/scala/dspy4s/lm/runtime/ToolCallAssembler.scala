@@ -15,6 +15,9 @@ import scala.collection.mutable
   * `arguments` JSON string in fragments across subsequent deltas. We accumulate by `index`, preserving the order in
   * which indices first appeared, and JSON-decode the concatenated arguments into a `DynamicValue.Record`. Falls back to
   * `{input: raw}` when the arguments string is not valid JSON — matches the non-streaming `parseArgs`.
+  *
+  * Each call keeps its `id`, because a tool result must name it. An empty id counts as no id, as in
+  * `ProviderResponseParser`.
   */
 object ToolCallAssembler:
 
@@ -24,7 +27,7 @@ object ToolCallAssembler:
     val arguments: StringBuilder = new StringBuilder
 
     def merge(delta: LmToolCallDelta): Unit =
-      if id.isEmpty then id = delta.id
+      if id.isEmpty then id = idOf(delta)
       if name.isEmpty then name = delta.name
       delta.argumentsFragment.foreach(arguments.append)
 
@@ -43,7 +46,7 @@ object ToolCallAssembler:
     }
     ordered.iterator.flatMap { acc =>
       acc.name.map { name =>
-        ToolCall(name = name, args = parseArguments(acc.arguments.toString))
+        ToolCall(name = name, args = parseArguments(acc.arguments.toString), id = acc.id)
       }
     }.toVector
 
@@ -53,8 +56,13 @@ object ToolCallAssembler:
     * id/name keep attaching to the index's most recent call.
     */
   private def startsNewCall(current: Accumulator, delta: LmToolCallDelta): Boolean =
-    delta.id.exists(id => current.id.exists(_ != id)) ||
+    idOf(delta).exists(id => current.id.exists(_ != id)) ||
       delta.name.exists(name => current.name.exists(_ != name))
+
+  /** The id of a delta. An empty id counts as no id: it does not set the id of a call, and it does not conflict with
+    * the id of the current call.
+    */
+  private def idOf(delta: LmToolCallDelta): Option[String] = delta.id.filter(_.nonEmpty)
 
   /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `{input: raw}` when it is not valid JSON,
     * `{value: json}` when it parses to a non-object. Shared with the non-streaming `ProviderResponseParser.parseArgs`

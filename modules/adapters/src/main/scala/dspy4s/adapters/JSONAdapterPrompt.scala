@@ -7,13 +7,14 @@ import dspy4s.adapters.contracts.{
   NativeFunctionCalling,
   ToolChoice
 }
-import dspy4s.adapters.internal.{AdapterTextSupport, JsonDynamic}
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, updated}
+import dspy4s.adapters.internal.{AdapterTextSupport, ConversationHistory, JsonDynamic, TurnText}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, SignatureLayout, updated}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** Builds JSONAdapter's JSON instructions, demonstrations, and provider response-schema options. */
+/** Builds JSONAdapter's JSON instructions, demonstrations, conversation history, and provider response-schema options.
+  */
 private[adapters] object JSONAdapterPrompt:
   def format(
       invocation              : AdapterInvocation,
@@ -21,7 +22,8 @@ private[adapters] object JSONAdapterPrompt:
       parallelToolCalls       : Option[Boolean],
       toolChoice              : Option[ToolChoice]
   )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val textOutputFields = invocation.layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
+    val layout           = invocation.layout
+    val textOutputFields = layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
     val fieldList        = textOutputFields.map(_.name).mkString(", ")
     val jsonInstruction  = invocation.outputJsonSchema match
       case Some(schema) =>
@@ -29,21 +31,21 @@ private[adapters] object JSONAdapterPrompt:
            |
            |$schema""".stripMargin
       case None => s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
-    val baseSystemText = invocation.layout.instructions match
+    val baseSystemText = layout.instructions match
       case Some(instructions) => s"$instructions\n\n$jsonInstruction"
       case None               => jsonInstruction
-    val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
+    val systemText = AdapterConstraints.appendTo(
+      ConversationHistory.appendNoteTo(baseSystemText, layout),
+      layout.outputFields
+    )
 
-    val messages = AdapterTextSupport.fewShotMessages(invocation, systemText) { demoValues =>
-      val assistantJson = ujson
-        .Obj
-        .from(
-          textOutputFields.flatMap(field =>
-            DynamicValues.recordGet(demoValues, field.name).map(value => field.name -> JsonDynamic.toUjson(value))
-          )
-        )
-      ujson.write(assistantJson)
-    }
+    val messages = ConversationHistory.messages(
+      invocation,
+      renderLayout = layout.withOutputFields(textOutputFields),
+      systemText,
+      useNativeFunctionCalling,
+      Turns
+    )
 
     Right(
       FormattedPrompt(
@@ -60,6 +62,25 @@ private[adapters] object JSONAdapterPrompt:
         )
       )
     )
+
+  /** The text of a turn: `prefix value` lines for a user turn, and one JSON object for an assistant turn. A user turn
+    * has no output reminder.
+    */
+  private object Turns extends TurnText:
+    override def user(layout: SignatureLayout, values: DynamicValue.Record, mainRequest: Boolean): String =
+      AdapterTextSupport.renderFields(layout.inputFields, values)
+
+    override def assistant(layout: SignatureLayout, values: DynamicValue.Record): String =
+      val assistantJson = ujson
+        .Obj
+        .from(
+          layout.outputFields.flatMap(field =>
+            DynamicValues.recordGet(values, field.name).map(value => field.name -> JsonDynamic.toUjson(value))
+          )
+        )
+      ujson.write(assistantJson)
+
+    override val assistantWritesJson: Boolean = true
 
   /** Emit an OpenAI-compatible response schema when the resolved model supports it. */
   private def responseFormatOptions(invocation: AdapterInvocation)(using ctx: RuntimeContext): DynamicValue.Record =

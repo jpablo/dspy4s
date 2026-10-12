@@ -14,13 +14,14 @@ final case class TypeRef(repr: String) derives CanEqual:
   /** Python/DSPy-facing name for well-known wire types. `None` means there is no safe direct Python equivalent. */
   def pythonTypeName: Option[String] =
     repr match
-      case "string" => Some("str")
-      case "int"    => Some("int")
-      case "double" => Some("float")
-      case "bool"   => Some("bool")
-      case "list"   => Some("list")
-      case "json"   => Some("dict")
-      case _        => None
+      case "string"  => Some("str")
+      case "int"     => Some("int")
+      case "double"  => Some("float")
+      case "bool"    => Some("bool")
+      case "list"    => Some("list")
+      case "json"    => Some("dict")
+      case "history" => Some("History")
+      case _         => None
 
 object TypeRef:
   val string: TypeRef = TypeRef("string")
@@ -36,6 +37,12 @@ object TypeRef:
     */
   val toolCalls: TypeRef = TypeRef("tool_calls")
 
+  /** The type of the input field that holds the conversation history (the analogue of Python dspy's `History` input
+    * annotation). An adapter replays the messages of that field as earlier turns and does not show the field as a
+    * value. See [[History]].
+    */
+  val history: TypeRef = TypeRef("history")
+
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
     * case-insensitive. Unknown tokens become opaque `TypeRef(other)`. An empty / missing token defaults to
@@ -49,4 +56,5 @@ object TypeRef:
       case "bool" | "boolean"            => bool
       case "json" | "dict" | "map"       => json
       case "tool_calls" | "toolcalls"    => toolCalls
+      case "history"                     => history
       case other                         => TypeRef(other)

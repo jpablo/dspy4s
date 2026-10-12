@@ -8,6 +8,8 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
+import dspy4s.adapters.internal.ConversationHistory
+import dspy4s.adapters.internal.TurnText
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
@@ -33,12 +35,20 @@ final case class XMLAdapter(
     val baseSystemText = invocation.layout.instructions match
       case Some(instructions) => s"$instructions\n\n$xmlInstruction"
       case None               => xmlInstruction
-    val systemText = AdapterConstraints.appendTo(baseSystemText, invocation.layout.outputFields)
+    val systemText = AdapterConstraints.appendTo(
+      ConversationHistory.appendNoteTo(baseSystemText, invocation.layout),
+      invocation.layout.outputFields
+    )
 
+    // This adapter has no native function calling: a turn of the history with tool calls stays text.
     Right(
       FormattedPrompt(
-        messages = AdapterTextSupport.fewShotMessages(invocation, systemText)(values =>
-          buildOutputXml(invocation.layout, values)
+        messages = ConversationHistory.messages(
+          invocation,
+          renderLayout = invocation.layout,
+          systemText,
+          useNativeFunctionCalling = false,
+          Turns
         )
       )
     )
@@ -64,6 +74,18 @@ final case class XMLAdapter(
         coerced <- AdapterTextSupport.coerceText(field.typeRef, raw)
       yield coerced
     }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
+
+  /** The text of a turn: `prefix value` lines for a user turn, and one `<outputs>` document for an assistant turn. A
+    * user turn has no output reminder.
+    */
+  private object Turns extends TurnText:
+    override def user(layout: SignatureLayout, values: DynamicValue.Record, mainRequest: Boolean): String =
+      AdapterTextSupport.renderFields(layout.inputFields, values)
+
+    override def assistant(layout: SignatureLayout, values: DynamicValue.Record): String =
+      buildOutputXml(layout, values)
+
+    override val assistantWritesJson: Boolean = false
 
   private def buildOutputXml(layout: SignatureLayout, values: DynamicValue.Record): String =
     val body = layout.outputFields.flatMap { field =>

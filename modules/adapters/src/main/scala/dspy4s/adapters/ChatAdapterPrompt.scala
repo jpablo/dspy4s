@@ -1,11 +1,11 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
+import dspy4s.adapters.internal.{ConversationHistory, TurnText}
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout}
-import dspy4s.lm.contracts.{Message, MessageRole}
 import zio.blocks.schema.DynamicValue
 
-/** Builds ChatAdapter's marker-framed system, demonstration, and input messages. */
+/** Builds ChatAdapter's marker-framed system, demonstration, conversation history, and input messages. */
 private[adapters] object ChatAdapterPrompt:
   def format(
       invocation              : AdapterInvocation,
@@ -16,33 +16,15 @@ private[adapters] object ChatAdapterPrompt:
     val layout       = invocation.layout
     val renderLayout = layout.withOutputFields(layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField))
 
-    val systemMessage = Message(
-      role = MessageRole.System,
-      text = Some(buildSystemPrompt(renderLayout, invocation.outputJsonSchema))
-    )
-
-    val demoMessages = invocation
-      .demos
-      .flatMap { demo =>
-        val userText      = renderInputs(renderLayout.inputFields, demo.values)
-        val assistantText = renderOutputs(renderLayout.outputFields, demo.values) + "\n\n" +
-          ChatAdapter.CompletedMarker + "\n"
-        Vector(
-          Message(role = MessageRole.User, text = Some(userText)),
-          Message(role = MessageRole.Assistant, text = Some(assistantText))
-        )
-      }
-
-    val inputMessage = Message(
-      role = MessageRole.User,
-      text = Some(
-        renderInputs(renderLayout.inputFields, invocation.inputs.values) + "\n\n" + outputRequirements(renderLayout)
-      )
-    )
-
     Right(
       FormattedPrompt(
-        messages = Vector(systemMessage) ++ demoMessages ++ Vector(inputMessage),
+        messages = ConversationHistory.messages(
+          invocation,
+          renderLayout,
+          systemText = buildSystemPrompt(renderLayout, invocation.outputJsonSchema),
+          useNativeFunctionCalling,
+          Turns
+        ),
         requestOptions = NativeFunctionCalling.toolOptions(
           layout,
           invocation.tools,
@@ -52,6 +34,19 @@ private[adapters] object ChatAdapterPrompt:
         )
       )
     )
+
+  /** The marker-framed text of a turn. A user turn of a current request ends with the output reminder. An assistant
+    * turn ends with the completed marker.
+    */
+  private object Turns extends TurnText:
+    override def user(layout: SignatureLayout, values: DynamicValue.Record, mainRequest: Boolean): String =
+      val inputs = renderInputs(layout.inputFields, values)
+      if mainRequest then inputs + "\n\n" + outputRequirements(layout) else inputs
+
+    override def assistant(layout: SignatureLayout, values: DynamicValue.Record): String =
+      renderOutputs(layout.outputFields, values) + "\n\n" + ChatAdapter.CompletedMarker + "\n"
+
+    override val assistantWritesJson: Boolean = false
 
   private def buildSystemPrompt(layout: SignatureLayout, outputJsonSchema: Option[String]): String =
     val inputBlock  = fieldDescriptionBlock(layout.inputFields, role = "input")

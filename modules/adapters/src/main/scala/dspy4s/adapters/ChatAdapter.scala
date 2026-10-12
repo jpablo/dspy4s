@@ -28,6 +28,10 @@ final case class ChatAdapter(
       * specs are supplied AND the resolved LM advertises `supportsFunctionCalling`, the `tools` are injected into the
       * request option bag and the tool-calls field is filled from the provider's structured `tool_calls` instead of
       * being requested as text. Off by default (mirrors dspy's `use_native_function_calling`).
+      *
+      * The flag also sets how the adapter replays a turn of a conversation history that has tool calls. When on AND the
+      * resolved LM advertises `supportsFunctionCalling`, the turn is an assistant message with tool calls and one tool
+      * message for each result. In each other case the turn stays text.
       */
     useNativeFunctionCalling: Boolean = false,
     /** When native function-calling is active, request provider-side parallel tool-call generation. `None` leaves the

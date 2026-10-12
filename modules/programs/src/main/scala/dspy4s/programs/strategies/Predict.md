@@ -173,9 +173,33 @@ If the model returns several candidates, only the first becomes `output: O`; the
 They remain in `raw.completions` for evaluation or custom selection logic. (`BestOfN` performs a related kind of
 selection by making several distinct program calls rather than consuming these candidates directly.)
 
-The engine also adds a synthetic `tool_calls` value to every raw prediction. It is empty for ordinary calls and
-contains provider-native calls when the adapter and model produce them. `Predict` exposes tool schemas but does not
+The engine also adds a synthetic `tool_calls` value to the raw prediction when the adapter and model produce
+provider-native calls. Each call keeps the `id` of the provider. `Predict` exposes tool schemas but does not
 execute tools itself; execution belongs to a caller or a higher-level program.
+
+## Conversation history
+
+`Predict` keeps no state between calls. To give the model the earlier turns, the signature takes one input field of
+type `History`, and the caller supplies the value:
+
+```scala
+final case class Turn(question: String, history: History) derives Schema
+final case class Reply(answer: String) derives Schema
+
+val chat = Predict(Signature.derived[Turn, Reply]("Chat"))
+
+val first   = chat(Turn("What is 1+1?", History.empty))
+val history = History.empty :+ DynamicValues.record("question" := "What is 1+1?", "answer" := "2")
+val second  = chat(Turn("Double that?", history))
+```
+
+Each message of a `History` is a record whose keys are field names of the signature. `Shape[I]` encodes the value
+as part of the input record, and the adapter replays the messages as earlier turns before the current request. The
+field does not appear in the current request.
+
+A message can also hold the tool calls of a turn (in the `tool_calls` output field of the signature) and the results
+of those calls (`History.withToolCallResults`, with `ToolCallResult.forCalls`). An adapter with native
+function-calling sends them as an assistant message with tool calls and one tool message for each result.
 
 ## Per-call controls and precedence
 

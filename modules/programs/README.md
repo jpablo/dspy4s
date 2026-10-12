@@ -87,6 +87,11 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 - **Config layering and bound LMs.** Module-level and per-call `config` merge with per-call winning;
   `rolloutId` is a first-class cache-busting field, not part of the provider bag. A predictor can bind its own
   `LanguageModel`, overriding the ambient context.
+- **A conversation history is an input.** A program does not keep earlier turns. A signature takes them as one
+  input field of type `History`, and `Predict`, `ChainOfThought`, and `DynamicPredict` give that value to the adapter
+  with no change. The adapter replays the messages as earlier turns (see [`adapters`](../adapters/README.md)). A
+  native tool call keeps its provider `id` in the typed output (`Vector[ToolCall]`) and in the raw prediction, so the
+  caller can put the call and its `ToolCallResult` into the history of the next call.
 - **ReAct stays on the text protocol.** Tools are selected via output fields, not provider-native
   function-calling; tool failures become trajectory observations, and context-window overflow triggers
   trajectory truncation and retry. The native function-calling path is adapter-level and deliberately not

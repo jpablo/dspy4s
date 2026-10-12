@@ -64,6 +64,15 @@ this dynamic counterexample.
 - **LM-shaped coercion before decode.** `ZioSchemaCodec.normalize` walks the `DynamicValue` and coerces
   primitives the way LM output tends to arrive — `"true"` → `Boolean`, `"42"` → `Int`, trimmed numerics,
   Option/Variant wrapping — so a loosely formatted model reply still decodes into the target Scala value.
+- **A `History` field is the conversation history.** A field of type `History` (see
+  [`core`](../core/README.md)) gets `TypeRef.history` from each entry point: `derived`, `of`, `from`, `fromType`,
+  `fromString` (`"question, history: History -> answer"`), and the builder. `typeRefFor` knows the type by the type
+  name of its record `Reflect`, not by its structure. An adapter replays the messages of that field as earlier turns.
+- **An absent `Option` field is `None`.** `ZioSchemaCodec.normalize` gives `None` to each `Option` field that a
+  record lacks, at each level of nesting. So a tool call that a model writes as `{name, args}` decodes into a
+  `ToolCall` with no `id`. A required field that is absent is a decode failure.
+- **The JSON schema does not ask for `ToolCall.id`.** `Shape.jsonSchemaString` removes the `id` of each `ToolCall`
+  from the schema that a model sees. The id comes from the provider, not from the text of the model.
 - **Direction-neutral shapes.** `Shape[A]` derives role-free field metadata. `Signature.derived` assigns the input
   and output shapes' fields to the corresponding `SignatureLayout` cohorts.
 - **Law claims follow the carrier.** Schema-derived shapes return `RoundTripShape[A]`; validating raw-record shapes
@@ -77,7 +86,7 @@ this dynamic counterexample.
 |------|----------|
 | `Signature.scala` | `Signature[I, O]` and its four entry points |
 | `Shape.scala` | `Shape[A]`, lawful `RoundTripShape[A]`, `SchemaTupleShape`, `MapShape`, derivation factories |
-| `ZioSchemaCodec.scala` | the Schema↔Shape bridge, `normalize`, `typeRefFor`, field-spec derivation |
+| `ZioSchemaCodec.scala` | the Schema↔Shape bridge, `normalize`, `typeRefFor`, field-spec derivation, the JSON schema for a model |
 | `SignatureBuilder.scala` | the fluent, macro-free builder |
 | `Spec.scala` | the `Spec` trait + `InputField`/`OutputField` markers |
 | `OutputAugmentation.scala` | type-level field prepending (`WithField`, `PrependField`) |

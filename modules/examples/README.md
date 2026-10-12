@@ -79,6 +79,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 
 | Example | Run (`…tutorials.<pkg>.<main>`) | Coverage / notes |
 |---|---|---|
+| **conversation_history** | `conversation_history.conversationHistoryMain` 🔑 | 2/2. A `History` input field; an adapter replays its messages as earlier turns. `predict.demos.append` → `copy(demos = …)`. `inspect_history` out of scope (the LM history holds no prompt, G-27). |
 | **email_extraction** | `email_extraction.emailExtractionMain` 🔑 | Enums/case classes/`Option`/`List` via `derives Schema`; four composed `ChainOfThought`s. MLflow autolog out of scope. |
 | **output_refinement** | `output_refinement.bestOfNAndRefineMain` 🔑 | 6/6. `BestOfN[I,O]` / `Refine[I,O]` with reward functions over `Prediction[O]`. |
 | **streaming** | `streaming.streamingMain` 🔑 | 1–9. Synchronous `streamify` → `ClosableIterator[StreamEvent]`; per-field & per-predict listeners; status provider. |
@@ -145,7 +146,6 @@ alternative where one exists.
 | `deep_dive/data_handling/BuiltInDatasets` | built-in dataset loaders (`dspy.datasets`, HotPotQA/GSM8K) | `LoadingCustomData` (build `Example`s yourself) |
 | `learn/programming/Assertions7` | `dspy.Assert` / `dspy.Suggest` backtracking | `output_refinement` (`Refine` / `BestOfN`) |
 | `learn/programming/Mcp` & `tutorials/mcp` | MCP client/tool bridge | plain `ToolFunction`s (`learn/programming/Tools`) |
-| `tutorials/conversation_history` | `dspy.History` input type + mutable `predict.demos` (`inspect_history` is now ported — see Adapters) | — |
 | `tutorials/deployment` | model serving (FastAPI app / MLflow serving) | wrap a program in your own HTTP layer |
 | `tutorials/mem0_react_agent` | mem0 long-term memory store | ReAct itself is portable (`Tools`) |
 
@@ -153,11 +153,11 @@ alternative where one exists.
 
 ## At a glance
 
-- **23** ported doc examples (✅) + **4** signature demos (🔧) = **28** runnable `@main`s (the Metrics
+- **24** ported doc examples (✅) + **4** signature demos (🔧) = **29** runnable `@main`s (the Metrics
   example carries two: `metricsMain` + `metricsJudgeMain`).
 - **7** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
-  `loadingCustomDataMain`, `savingMain`. The other 21 need `OPENAI_API_KEY` (🔑).
-- **14** adapted prose docs (📄, now `README.md` per section) and **7** blocked files (🚫) — shown as 6 rows above (the two MCP pages share one).
+  `loadingCustomDataMain`, `savingMain`. The other 22 need `OPENAI_API_KEY` (🔑).
+- **14** adapted prose docs (📄, now `README.md` per section) and **6** blocked files (🚫) — shown as 5 rows above (the two MCP pages share one).
 - **35** Scala source files (27 runnable + 7 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
 
 When a feature lands in dspy4s (datasets, MCP, the `dspy.History` input type, …), the corresponding 🚫 file is

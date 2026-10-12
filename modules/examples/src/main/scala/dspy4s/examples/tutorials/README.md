@@ -9,7 +9,7 @@ dspy4s ports the *code-bearing* DSPy tutorials. The status legend and full inven
 [examples module README](../../../../../../README.md). Grouped index:
 
 ### Build AI programs
-- [Managing Conversation History](./conversation_history/) — 🚫 blocked (needs `dspy.History`, mutable demos).
+- [Managing Conversation History](./conversation_history/ConversationHistory.scala) — ✅ `History` input field.
 - [Classification](./classification/README.md) — external tutorial; see notes and enum examples.
 - [Privacy-Conscious Delegation (PAPILLON)](./papillon/README.md) — external notebook; see notes.
 

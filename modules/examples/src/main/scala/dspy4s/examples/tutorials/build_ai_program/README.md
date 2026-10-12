@@ -10,7 +10,7 @@ they rely on (signatures, `ChainOfThought`, `ReAct`) are all available.
 
 | DSPy tutorial | dspy4s status |
 |---|---|
-| Managing Conversation History | 🚫 blocked — needs `dspy.History` + mutable demos ([dir](../conversation_history/)). |
+| Managing Conversation History | see [`tutorials/conversation_history`](../conversation_history/ConversationHistory.scala) (a `History` input field). |
 | Building AI Agents | use `ReAct` + `ToolFunction` ([`learn/programming/Tools.scala`](../../learn/programming/Tools.scala)). |
 | Customizing DSPy Modules | compose `Module[I, O]` values (see the tutorial examples that build multi-step pipelines). |
 | Retrieval-Augmented Generation / Multi-Hop / RAG-as-agent | not ported — dspy4s has no retriever; wire your own retrieval into a `ToolFunction`. |

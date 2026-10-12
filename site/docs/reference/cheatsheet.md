@@ -11,6 +11,7 @@ in the examples module.
 |---|---|---|
 | Declare inputs and outputs | `Signature.fromType` / `Signature.fromString` | [Signatures](../programs/signatures.md) |
 | Use named fields, enums, custom types | `Spec` trait + `Signature.of[T]` | [Signatures](../programs/signatures.md) |
+| Give a program the earlier turns | `History` input field | [Signatures](../programs/signatures.md#conversation-history) |
 
 ## Run a task
 

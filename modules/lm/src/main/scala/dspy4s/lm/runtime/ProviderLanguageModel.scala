@@ -34,6 +34,9 @@ final case class ProviderLanguageModel(
 object ProviderRequestNormalizer:
   private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
+  /** The `type` value of a tool call on the wire. Each tool call is a function call. */
+  private val functionCallType = "function"
+
   /** The option bag that the provider sends: `defaultOptions` overlaid by the options of the request. [[normalize]] and
     * the cache key of `ManagedLanguageModel` share this merge, so the key covers the options on the wire.
     */
@@ -58,12 +61,42 @@ object ProviderRequestNormalizer:
         val prompt = request.messages.map(messageText).mkString("\n").trim
         rec.updated(WireKeys.prompt, str(prompt))
 
+  /** The wire form of one message. A message with no tool calls, no tool call id, and no name has the keys `role` and
+    * `content` only. The other keys follow the OpenAI chat format (upstream `format_conversation_history` in
+    * `dspy/adapters/base.py`):
+    *
+    *   - `tool_calls`, when the message has tool calls. When such a message has no text and no parts, `content` is JSON
+    *     null, not an empty string.
+    *   - `tool_call_id` and `name`, when the message has them. A tool message names the call that it answers with them.
+    */
   private def encodeMessage(message: Message): DynamicValue =
     val role                  = message.role.toString.toLowerCase
     val content: DynamicValue =
       if message.parts.nonEmpty then DynamicValue.Sequence(Chunk.from(message.parts.map(encodePart)))
+      else if message.toolCalls.nonEmpty && !message.text.exists(_.nonEmpty) then DynamicValue.Null
       else str(message.text.getOrElse(""))
-    DynamicValue.Record(Chunk(WireKeys.role -> str(role), WireKeys.content -> content))
+    val toolCalls = Option.when(message.toolCalls.nonEmpty)(
+      WireKeys.toolCalls -> DynamicValue.Sequence(Chunk.from(message.toolCalls.map(encodeToolCall)))
+    )
+    val toolCallId = message.toolCallId.map(callId => WireKeys.toolCallId -> str(callId))
+    val name       = message.name.map(toolName => WireKeys.name -> str(toolName))
+    DynamicValue.Record(
+      Chunk.from(Vector(WireKeys.role -> str(role), WireKeys.content -> content) ++ toolCalls ++ toolCallId ++ name)
+    )
+
+  /** A tool call in the provider form: `{"id", "type": "function", "function": {"name", "arguments"}}` (upstream
+    * `_tool_call_as_openai_message_tool_call`). `arguments` is the JSON text of the arguments. A call with no id has no
+    * `id` key.
+    */
+  private def encodeToolCall(call: ToolCall): DynamicValue =
+    val function = DynamicValue.Record(Chunk(
+      WireKeys.name      -> str(call.name),
+      WireKeys.arguments -> str(DynamicJson.encodeExact(call.args))
+    ))
+    DynamicValue.Record(Chunk.from(
+      call.id.map(callId => WireKeys.id -> str(callId)).toVector ++
+        Vector(WireKeys.`type` -> str(functionCallType), WireKeys.function -> function)
+    ))
 
   private def encodePart(part: ContentPart): DynamicValue =
     val base   = Vector(WireKeys.`type` -> str(part.kind), WireKeys.text -> str(part.payload))
@@ -76,6 +109,13 @@ object ProviderRequestNormalizer:
       else base
     DynamicValue.Record(Chunk.from(fields))
 
+  /** The text of one message for the prompt of `LmMode.Text`: the text of the message, or the payloads of its parts.
+    *
+    * A completion endpoint has no tool protocol, so the prompt has no form for the tool fields. A tool message gives
+    * its text (the result of the tool), as each other message does. The tool calls of an assistant message, the tool
+    * call id, and the tool name do not go into the prompt. Upstream joins the contents of the messages in the same way
+    * (`litellm_text_completion` in `dspy/clients/lm.py`).
+    */
   private def messageText(message: Message): String =
     message.text.getOrElse(message.parts.map(_.payload).mkString("\n"))
 
@@ -148,11 +188,19 @@ object ProviderResponseParser:
           asRecord(call).flatMap { rec =>
             val functionRec = field(rec, WireKeys.function).flatMap(asRecord).getOrElse(rec)
             field(functionRec, WireKeys.name).flatMap(asString).map { name =>
-              ToolCall(name = name, args = parseArgs(field(functionRec, WireKeys.arguments)))
+              ToolCall(name = name, args = parseArgs(field(functionRec, WireKeys.arguments)), id = toolCallId(rec))
             }
           }
         }
       case Left(_) => Vector.empty
+
+  /** The id of a provider tool call: `call_id` when the entry has one, else `id` (upstream
+    * `_provider_tool_call_to_tool_call_dict`). An item of the Responses API has an item `id` and the `call_id` that a
+    * tool result must name. An entry with no id, or with an empty id, gives `None`.
+    */
+  private def toolCallId(call: DynamicValue.Record): Option[String] =
+    def text(key: String): Option[String] = field(call, key).flatMap(asString).filter(_.nonEmpty)
+    text(WireKeys.callId).orElse(text(WireKeys.id))
 
   private def parseArgs(raw: Option[DynamicValue]): DynamicValue.Record =
     raw.flatMap(asRecord) match
