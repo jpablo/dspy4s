@@ -43,7 +43,7 @@ changing the domain types.
 |------|------|
 | `OpenAiLanguageModel` | Concrete `StreamingLanguageModel` for OpenAI-compatible chat completions; factories `apply`, `fromEnv`, `local`. |
 | `OpenAiEmbedder` | Concrete `Embedder` over the embeddings endpoint, batching by a configurable size. |
-| `OpenAiClient` / `HttpTransport` | The HTTP client (chat + SSE streaming, context-window error detection) and the pluggable transport (`HttpTransport.jdk()`). |
+| `OpenAiClient` / `HttpTransport` | The HTTP client (chat + SSE streaming, typed LM errors) and the pluggable transport (`HttpTransport.jdk()`). |
 | `ProviderLanguageModel` | A generic wrapper over `invoke: DynamicValue => Either[DspyError, DynamicValue]`, normalized by `ProviderRequestNormalizer` and parsed by `ProviderResponseParser`. |
 | `OpenAiUsage` / `OpenAiStreamChunk` / `ToolCallAssembler` | Leniently decoded wire DTOs and the assembler that merges streaming tool-call deltas into complete `ToolCall`s. |
 
@@ -52,7 +52,7 @@ changing the domain types.
 | Type | Role |
 |------|------|
 | `ManagedLanguageModel` | Wraps a `LanguageModel` with caching + retry + usage logging: cache hit returns; miss invokes with retries, then caches and tracks usage. |
-| `RetryPolicies` | Pre-built policies: `never`, `maxRetries`, `exponentialBackoff` (with jitter). |
+| `RetryPolicies` | Pre-built policies: `never`, `maxRetries`, `maxRetriesOnCodes`, `exponentialBackoff` (with jitter). By default they retry transient LM errors only, and they obey the `Retry-After` hint. |
 | `UsageTracker` / `UsageTracking` | Thread-local, nestable token accumulation by model name. |
 | `InMemoryLmCache` / `DiskLmCache` / `CompositeLmCache` / `LmCacheRegistry` | A bounded LRU cache, a file-backed cache, a memory-then-disk stack, and the global cache singleton. |
 
@@ -69,6 +69,12 @@ changing the domain types.
 - **Streaming closes cleanly.** `stream` returns a lazy `Iterator[LmChunk]`; a setup error is reified as a
   terminal error chunk rather than thrown, so consumers always see a closed stream. Tool-call deltas are
   reassembled by `ToolCallAssembler`, with a JSON-parse fallback that wraps an unparseable fragment.
+- **Failures are typed.** A failure of a provider call is an `LmError` from `core` (`LmRateLimitError`,
+  `LmAuthError`, `ContextWindowExceededError`, and others). `OpenAiErrors` gives each HTTP error response its
+  class from the provider code and the status. The `details` of the error hold the status, the request id, and
+  the `Retry-After` hint. The default retry predicate accepts the transient classes only (rate limit, timeout,
+  server failure, transport failure), and the delay before the next attempt is the hint of the provider when
+  one exists.
 - **No global LM registry.** Callers construct models explicitly (`OpenAiLanguageModel.fromEnv(...)`, then
   optionally `ManagedLanguageModel(...)`); the ambient `RuntimeContext` from `core` is how programs resolve the
   active model.
@@ -81,6 +87,7 @@ changing the domain types.
 | `contracts/LanguageModel.scala`, `LmCache.scala`, `RetryPolicy.scala` | model, cache, and retry interfaces |
 | `contracts/Embedder.scala`, `LmStreaming.scala` | embeddings and streaming chunk types |
 | `providers/OpenAiLanguageModel.scala`, `OpenAiEmbedder.scala`, `OpenAiClient.scala` | the OpenAI-compatible model, embedder, and HTTP client |
+| `providers/OpenAiErrors.scala` | the map from an HTTP error response to an LM error class |
 | `providers/OpenAiUsage.scala`, `OpenAiStreamChunk.scala`, `DynamicJson.scala`, `WireKeys.scala` | wire DTOs, JSON helpers, wire-field constants |
 | `providers/HttpTransport.scala`, `JdkHttpTransport.scala` | transport interface + JDK implementation |
 | `runtime/ProviderLanguageModel.scala` | generic provider wrapper + request normalizer / response parser |

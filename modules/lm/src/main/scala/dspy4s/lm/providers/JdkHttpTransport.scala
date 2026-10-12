@@ -2,7 +2,9 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.LmTimeoutError
+import dspy4s.core.contracts.LmTransportError
+import dspy4s.core.contracts.LmUnexpectedError
 
 import java.net.URI
 import java.net.http.HttpClient
@@ -72,13 +74,20 @@ final class JdkHttpTransport(timeoutMillis: Long) extends HttpTransport:
       entry.getKey.toLowerCase -> entry.getValue.asScala.mkString(", ")
     }.toMap
 
+  /** Gives a failure without a response its LM error class. A timeout (this includes the connect timeout) is
+    * `LmTimeoutError`. A refused connection and each other IO failure is `LmTransportError`. Each other failure is
+    * `LmUnexpectedError`. The transport is generic, so the details are empty: the caller adds the model and the
+    * provider.
+    */
   private def runWithErrorMap[A](thunk: => A): Either[DspyError, A] =
     try Right(thunk)
     catch
-      case error: java.net.http.HttpTimeoutException =>
-        Left(RuntimeError("openai_http", s"HTTP timeout: ${error.getMessage}"))
-      case error: java.net.ConnectException =>
-        Left(RuntimeError("openai_http", s"Connection failed: ${error.getMessage}"))
-      case error: java.io.IOException => Left(RuntimeError("openai_http", s"IO error: ${error.getMessage}"))
-      case error: RuntimeException    =>
-        Left(RuntimeError("openai_http", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+      case error: java.net.http.HttpTimeoutException => Left(LmTimeoutError(s"HTTP timeout: ${describe(error)}"))
+      case error: java.net.ConnectException          => Left(LmTransportError(s"Connection failed: ${describe(error)}"))
+      case error: java.io.IOException                => Left(LmTransportError(s"IO error: ${describe(error)}"))
+      case error: RuntimeException                   => Left(LmUnexpectedError(describe(error)))
+
+  /** The message of the exception. The JDK client gives some exceptions no message, so the class name is the default.
+    */
+  private def describe(error: Exception): String =
+    Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)

@@ -3,6 +3,7 @@ package dspy4s.lm.runtime
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
+import dspy4s.core.contracts.LmError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ContextPropagation
@@ -22,24 +23,52 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 import java.util.concurrent.ThreadLocalRandom
 
+/** The retry policies of [[ManagedLanguageModel]].
+  *
+  * Two rules apply to each policy that retries:
+  *
+  *   - The default of the `retryOn` parameter is [[dspy4s.core.contracts.LmError.isRetryable]]: only a transient LM
+  *     error (a rate limit, a timeout, a server failure, a transport failure) gets a new attempt. An authentication
+  *     failure, a billing failure, a context-window failure, and each error that is not an LM error stop the call
+  *     immediately. A caller can pass a different predicate.
+  *   - When the error carries the retry hint of the provider (`details.retryAfter`, from the `Retry-After` header), the
+  *     delay before the next attempt is that hint. Upstream `_delay` (`dspy/clients/execution.py`) does the same. No
+  *     policy limits the hint, so a large hint makes the caller wait for that time.
+  */
 object RetryPolicies:
   val never: RetryPolicy = new RetryPolicy:
     override def shouldRetry(attempt: Int, error: DspyError): Boolean = false
 
-  def maxRetries(maxRetries: RetryCount, retryOn: DspyError => Boolean = _ => true): RetryPolicy =
+  /** Retries a failure that `retryOn` accepts, `maxRetries` times at most. The delay is the retry hint of the provider
+    * when the error carries one. Without a hint, the next attempt starts immediately.
+    */
+  def maxRetries(maxRetries: RetryCount, retryOn: DspyError => Boolean = LmError.isRetryable): RetryPolicy =
     new RetryPolicy:
       override def shouldRetry(attempt: Int, error: DspyError): Boolean =
         attempt < maxRetries && retryOn(error)
 
+      override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
+        retryHintMillis(error).getOrElse(0L)
+
+  /** Like [[maxRetries]], and retries only an error whose `code` is in `retryableCodes`. The codes of the LM errors are
+    * the upstream codes, for example `rate_limit`, `timeout`, `server`, and `transport`.
+    */
   def maxRetriesOnCodes(maxRetries: RetryCount, retryableCodes: Set[String]): RetryPolicy =
     this.maxRetries(maxRetries, error => retryableCodes.contains(error.code))
 
+  /** Retries a failure that `retryOn` accepts, `maxRetries` times at most, with a delay that grows.
+    *
+    * When the error carries the retry hint of the provider, the delay is the hint, exactly: the hint gets no jitter,
+    * and `maxDelayMillis` does not limit it. Without a hint, the delay is `baseDelayMillis * 2^attempt`, limited to
+    * `maxDelayMillis`, plus a random part of `jitterFactor` of that delay at most. The jitter does not move the delay
+    * above `maxDelayMillis`.
+    */
   def exponentialBackoff(
       maxRetries     : RetryCount,
       baseDelayMillis: RetryDelayMillis     = RetryDelayMillis(200L),
       maxDelayMillis : RetryDelayMillis     = RetryDelayMillis(4000L),
       jitterFactor   : JitterFactor         = JitterFactor(0.0),
-      retryOn        : DspyError => Boolean = _ => true
+      retryOn        : DspyError => Boolean = LmError.isRetryable
   ): RetryPolicy =
     require(maxDelayMillis >= baseDelayMillis, "maxDelayMillis must be >= baseDelayMillis")
 
@@ -48,6 +77,9 @@ object RetryPolicies:
         attempt < maxRetries && retryOn(error)
 
       override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
+        retryHintMillis(error).getOrElse(computedDelayMillis(attempt))
+
+      private def computedDelayMillis(attempt: Int): Long =
         val exponent = if attempt <= 0 then 0 else attempt
         val factor   = 1L << math.min(exponent, 20)
         val bounded  =
@@ -60,6 +92,10 @@ object RetryPolicies:
           val maxJitter = math.min(math.max((bounded.toDouble * jitterFactor).toLong, 0L), headroom)
           val jitter    = if maxJitter == 0L then 0L else ThreadLocalRandom.current().nextLong(maxJitter + 1L)
           bounded + jitter
+
+  /** The retry hint of the provider in milliseconds, if `error` carries one. */
+  private def retryHintMillis(error: DspyError): Option[Long] =
+    LmError.retryAfter(error).map(_.toMillis)
 
 final class UsageTracker:
   private val data = mutable.Map.empty[String, Vector[LmUsage]]

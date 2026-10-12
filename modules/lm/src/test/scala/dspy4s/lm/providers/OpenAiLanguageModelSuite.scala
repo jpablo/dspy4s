@@ -3,6 +3,8 @@ package dspy4s.lm.providers
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.LmAuthError
+import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
@@ -126,9 +128,9 @@ class OpenAiLanguageModelSuite extends FunSuite:
     val lm     = OpenAiLanguageModel(model = "gpt-4o-mini", client = client)
 
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = lm.call(LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("x")))))
-    assert(result.isLeft)
-    assertEquals(result.left.toOption.get.asInstanceOf[RuntimeError].component, "openai_auth")
+    lm.call(LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("x"))))) match
+      case Left(error: LmAuthError) => assertEquals(error.details.status, Some(401))
+      case other                    => fail(s"expected LmAuthError, got $other")
   }
 
   test("OpenAiLanguageModel.stream reports an HTTP error as one chunk that carries the typed error") {
@@ -147,8 +149,8 @@ class OpenAiLanguageModelSuite extends FunSuite:
     val chunk = chunks.head
     // The typed error is new. The finish reason and the `raw` message stay for existing consumers.
     chunk.error match
-      case Some(RuntimeError(component, _)) => assertEquals(component, "openai_rate_limit")
-      case other                            => fail(s"expected the provider RuntimeError, got $other")
+      case Some(error: LmRateLimitError) => assertEquals(error.details.status, Some(429))
+      case other                         => fail(s"expected LmRateLimitError, got $other")
     assertEquals(chunk.finishReason, Some("error"))
     assertEquals(chunk.raw, Some(Map("error" -> chunk.error.map(_.message).getOrElse(""))))
   }

@@ -19,7 +19,15 @@
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.contracts.{
+  ContextWindowExceededError,
+  DspyError,
+  DynamicValues,
+  LmError,
+  LmRateLimitError,
+  RuntimeContext,
+  :=
+}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
@@ -156,15 +164,26 @@ object LanguageModels:
 
   // ── Handling LM errors (lines 253–269) ──
   // | try: answer = qa(question="…")
-  // | except dspy.ContextWindowExceededError / dspy.LMRateLimitError / dspy.LMError as e: …
-  // dspy4s never throws for an LM failure — every call returns `Either[DspyError, …]`, and `DspyError` carries a
-  // stable `code` + `message`. (There are no dedicated rate-limit / context-window subclasses yet; provider
-  // failures surface as `RuntimeError`.) Handle by matching the `Left`:
+  // | except dspy.ContextWindowExceededError: raise  # reduce the prompt size, the passages, or the demos
+  // | except dspy.LMRateLimitError as e: print(f"Rate limited by {e.provider}; retry after {e.retry_after} seconds")
+  // | except dspy.LMError as e: print(f"LM failed: code={e.code}, model={e.model}, request_id={e.request_id}")
+  // dspy4s does not throw for an LM failure. Each call returns `Either[DspyError, …]`. An LM failure is an `LmError`:
+  // its class tells the kind of the failure, and `details` holds the model, the provider, the HTTP status, the
+  // request id, and the retry hint. Match the `Left`:
   // --8<-- [start:lm-errors]
   def askHandlingErrors(question: String)(using RuntimeContext): String =
     ask(question) match
-      case Right(answer) => answer
-      case Left(err)     => s"LM failed: code=${err.code}, message=${err.message}"
+      case Right(answer)                       => answer
+      case Left(_: ContextWindowExceededError) => "Reduce the prompt, the retrieved passages, or the demos."
+      case Left(e: LmRateLimitError)           =>
+        val provider = e.details.provider.getOrElse("the provider")
+        val delay    = e.details.retryAfter.fold("an unknown delay")(_.toString)
+        s"Rate limited by $provider; retry after $delay"
+      case Left(e: LmError) =>
+        val model     = e.details.model.getOrElse("unknown")
+        val requestId = e.details.requestId.getOrElse("unknown")
+        s"LM failed: code=${e.code}, model=$model, request_id=$requestId"
+      case Left(err) => s"Failed: code=${err.code}, message=${err.message}"
   // --8<-- [end:lm-errors]
 
   // ── Responses API (lines 271–298) / Advanced custom LMs (lines 301–345) ──

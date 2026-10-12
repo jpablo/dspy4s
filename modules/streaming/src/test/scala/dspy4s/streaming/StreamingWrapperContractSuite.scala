@@ -5,6 +5,8 @@ import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.LmErrorDetails
+import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
@@ -151,7 +153,7 @@ class StreamingWrapperContractSuite extends FunSuite:
       case other                               => fail(s"expected a ContextWindowExceededError, got $other")
   }
 
-  test("another failure of a streamed call keeps its component") {
+  test("another failure of a streamed call keeps its class") {
     val lm = OpenAiLanguageModel(
       model = "gpt-test",
       client = OpenAiClient(apiKey = "test-key", transport = rejectingTransport(429, """{"error":"rate limit"}"""))
@@ -160,8 +162,8 @@ class StreamingWrapperContractSuite extends FunSuite:
 
     given RuntimeContext = RuntimeEnvironment.current
     wrapper.call(request) match
-      case Left(RuntimeError(component, _)) => assertEquals(component, "openai_rate_limit")
-      case other                            => fail(s"expected the provider RuntimeError, got $other")
+      case Left(error: LmRateLimitError) => assertEquals(error.details.status, Some(429))
+      case other                         => fail(s"expected LmRateLimitError, got $other")
   }
 
   test("the stream wrapper forwards the default options of its delegate") {
@@ -190,11 +192,14 @@ class StreamingWrapperContractSuite extends FunSuite:
       override val mode: LmMode = LmMode.Chat
 
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-        Left(ContextWindowExceededError(model = Some("gpt-test")))
+        Left(ContextWindowExceededError(details = LmErrorDetails(model = Some("gpt-test"))))
 
     // `ManagedLanguageModel.stream` reports the failure of the `call` fallback as a chunk.
     val wrapper = StreamingLanguageModelWrapper(ManagedLanguageModel(delegate = failing), StreamingQueue[StreamEvent]())
 
     given RuntimeContext = RuntimeEnvironment.current
-    assertEquals(wrapper.call(request), Left(ContextWindowExceededError(model = Some("gpt-test"))))
+    assertEquals(
+      wrapper.call(request),
+      Left(ContextWindowExceededError(details = LmErrorDetails(model = Some("gpt-test"))))
+    )
   }

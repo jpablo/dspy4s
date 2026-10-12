@@ -18,10 +18,16 @@ private[lm] object DynamicJson:
   def encode(value: DynamicValue): String =
     new String(codec.encode(stripNull(value)), StandardCharsets.UTF_8)
 
+  /** Parse a JSON string. Text that is not JSON gives a `ParseError`. The codec is recursive, so a value that is nested
+    * too deep for the stack of the thread gives a `ParseError` too: a body from the network must not stop the caller
+    * with a `StackOverflowError`.
+    */
   def decode(json: String): Either[DspyError, DynamicValue] =
-    codec.decode(json.getBytes(StandardCharsets.UTF_8)) match
-      case Right(dv) => Right(dv)
-      case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
+    try
+      codec.decode(json.getBytes(StandardCharsets.UTF_8)) match
+        case Right(dv) => Right(dv)
+        case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
+    catch case _: StackOverflowError => Left(ParseError("json", "Invalid JSON: the value is nested too deep"))
 
   /** Recursively drop record fields whose value is `Null`. */
   def stripNull(value: DynamicValue): DynamicValue =

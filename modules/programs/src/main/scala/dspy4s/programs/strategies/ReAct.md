@@ -42,7 +42,7 @@ Conceptually, the class has this shape:
 final case class ReAct[I, O](
     baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
-    maxIterations: IterationLimit = IterationLimit(5)
+    maxIterations: IterationLimit = IterationLimit(20)
 ) extends Module[I, ReAct.WithReasoning[O]]
 ```
 

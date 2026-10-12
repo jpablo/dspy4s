@@ -314,7 +314,7 @@ class CodeActSuite extends FunSuite:
         idx.getAndIncrement() match
           case 0 => Right(LmResponse(outputs = Vector(LmOutput(text = "```python\nprint('one')\n```||false"))))
           case 1 => Right(LmResponse(outputs = Vector(LmOutput(text = "```python\nprint('two')\n```||true"))))
-          case 2 => Left(dspy4s.core.contracts.ContextWindowExceededError(model = Some("cw-lm")))
+          case 2 => Left(dspy4s.core.contracts.ContextWindowExceededError())
           case _ => Right(LmResponse(outputs = Vector(LmOutput(text = "final"))))
 
     val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
@@ -391,7 +391,7 @@ class CodeActSuite extends FunSuite:
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         calls.getAndIncrement() match
           case 0 => Right(LmResponse(outputs = Vector(LmOutput(text = "```python\nprint('ok')\n```||true"))))
-          case 1 => Left(dspy4s.core.contracts.ContextWindowExceededError(model = Some("overflow-lm")))
+          case 1 => Left(dspy4s.core.contracts.ContextWindowExceededError())
           case _ => Right(LmResponse(outputs = Vector(LmOutput(text = "answer with no evidence"))))
 
     val lm      = new OverflowLm

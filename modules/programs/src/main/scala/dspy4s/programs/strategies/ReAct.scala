@@ -42,7 +42,7 @@ import zio.blocks.schema.DynamicValue
 final case class ReAct[I, O](
     baseSignature             : Signature[I, O],
     tools                     : Vector[ToolFunction],
-    override val maxIterations: IterationLimit = IterationLimit(5),
+    override val maxIterations: IterationLimit = IterationLimit(20),
     reactProgramName          : String         = ReActKeys.reactModule,
     extractorProgramName      : String         = ReActKeys.extractModule,
     /** Optional override for the per-iteration react predict — a `Predict` over the base input plus the rendered

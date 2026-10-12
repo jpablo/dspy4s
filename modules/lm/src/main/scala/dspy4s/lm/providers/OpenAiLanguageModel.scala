@@ -90,9 +90,8 @@ object OpenAiLanguageModel:
       client = OpenAiClient(apiKey = apiKey, baseUrl = baseUrl, transport = transport)
     )
 
-  /** Construct a provider by reading the API key from the environment. Returns a
-    * `Left(RuntimeError("openai_config", ...))` when `envVar` is unset or empty, so callers fail fast with a clear
-    * message instead of a 401 at first call.
+  /** Construct a provider by reading the API key from the environment. Returns a `Left(LmNotConfiguredError(...))` when
+    * `envVar` is unset or empty, so callers fail fast with a clear message instead of a 401 at first call.
     *
     * `baseUrl` points the provider at any OpenAI-compatible server (Azure, Ollama, vLLM, LM Studio, OpenRouter, …); the
     * default is the real OpenAI API. For local servers that don't check credentials the env var still must be set to

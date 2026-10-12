@@ -101,6 +101,21 @@ class ReActSuite extends FunSuite:
     }
   }
 
+  test("the default iteration limit is 20, as upstream max_iters") {
+    val search = new SearchTool
+    // 20 steps that never select `finish`, then the reply for the extractor.
+    val lm    = new ScriptedLm(Vector.fill(20)("I must look again||search||query=capital of Belgium") :+ "Brussels")
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search))
+
+    assertEquals(react.maxIterations, IterationLimit(20))
+    withReact(lm) {
+      val result = react((question = "What is the capital of Belgium?"))
+      assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
+      assertEquals(search.calls.get(), 20)
+      assertEquals(result.toOption.get.output.answer, "Brussels")
+    }
+  }
+
   test("react can finish on the first step without calling any tool") {
     val search = new SearchTool
     val lm     = new ScriptedLm(Vector("I already know||finish||", "42"))
@@ -201,7 +216,7 @@ class ReActSuite extends FunSuite:
     ): Either[DspyError, ParsedOutput] =
       ScriptedAdapter.parse(layout, output)
 
-  private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError(model = Some("either-react-lm"))
+  private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError()
 
   private def withLmAndAdapter[A](lm: LanguageModel, adapter: Adapter)(body: RuntimeContext ?=> A): A =
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {

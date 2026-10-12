@@ -1,10 +1,8 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.ClosableIterator
-import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmChunk
@@ -29,17 +27,25 @@ final case class OpenAiClient(
       case other                    => other
     DynamicJson.encode(filtered)
 
+  /** POST the payload and decode the JSON body. A response with a status outside 200 to 299 becomes the LM error that
+    * `OpenAiErrors.fromResponse` gives. A failure of the transport keeps its class and gets the model and the provider.
+    */
   def invoke(payload: DynamicValue): Either[DspyError, DynamicValue] =
-    val url = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
-    transport.sendJson(url, defaultHeaders, outgoingJson(payload)).flatMap { response =>
-      if response.status < 200 || response.status >= 300 then
-        Left(statusError(response.status, response.body, modelOf(payload)))
-      else
-        DynamicJson.decode(response.body)
-    }
+    val url   = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
+    val model = modelOf(payload)
+    transport.sendJson(url, defaultHeaders, outgoingJson(payload))
+      .left.map(OpenAiErrors.withRequestDetails(_, model))
+      .flatMap { response =>
+        if response.status < 200 || response.status >= 300 then
+          Left(OpenAiErrors.fromResponse(response.status, response.headers, response.body, model))
+        else
+          DynamicJson.decode(response.body)
+      }
 
+  /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]]. */
   def stream(payload: DynamicValue): Either[DspyError, ClosableIterator[LmChunk]] =
     val url           = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
+    val model         = modelOf(payload)
     val withStreaming = payload match
       case rec: DynamicValue.Record =>
         val streamOptions = DynamicValues.recordFromEntries(Seq(WireKeys.includeUsage := true))
@@ -47,17 +53,19 @@ final case class OpenAiClient(
           .updated(WireKeys.stream, DynamicValues.fromAny(true))
           .updated(WireKeys.streamOptions, streamOptions)
       case other => other
-    transport.streamSse(url, defaultHeaders, outgoingJson(withStreaming)).flatMap { response =>
-      if response.status < 200 || response.status >= 300 then
-        val buffered = new StringBuilder
-        val draining = response.dataLines
-        try while draining.hasNext do
-            val _ = buffered.append(draining.next()).append('\n')
-        finally draining.close()
-        Left(statusError(response.status, buffered.toString, modelOf(payload)))
-      else
-        Right(parseSse(response.dataLines))
-    }
+    transport.streamSse(url, defaultHeaders, outgoingJson(withStreaming))
+      .left.map(OpenAiErrors.withRequestDetails(_, model))
+      .flatMap { response =>
+        if response.status < 200 || response.status >= 300 then
+          val buffered = new StringBuilder
+          val draining = response.dataLines
+          try while draining.hasNext do
+              val _ = buffered.append(draining.next()).append('\n')
+          finally draining.close()
+          Left(OpenAiErrors.fromResponse(response.status, response.headers, buffered.toString, model))
+        else
+          Right(parseSse(response.dataLines))
+      }
 
   private def parseSse(lines: ClosableIterator[String]): ClosableIterator[LmChunk] =
     new ClosableIterator[LmChunk]:
@@ -108,30 +116,12 @@ final case class OpenAiClient(
   private def modelOf(payload: DynamicValue): Option[String] =
     DynamicJson.field(payload, WireKeys.model).flatMap(DynamicJson.asString)
 
-  private def statusError(status: Int, body: String, model: Option[String]): DspyError =
-    if status == 400 && OpenAiClient.isContextWindowError(body) then ContextWindowExceededError(model = model)
-    else
-      val code = status match
-        case 401 | 403     => "openai_auth"
-        case 404           => "openai_not_found"
-        case 429           => "openai_rate_limit"
-        case s if s >= 500 => "openai_server"
-        case _             => "openai_http"
-      RuntimeError(code, s"OpenAI HTTP $status: ${body.take(400)}")
-
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"
 
-  /** Context-window overflow markers, mirroring upstream dspy `clients/lm.py` (`is_litellm_context_window_error`).
-    * Matched case-insensitively against the HTTP 400 response body.
+  /** Build a client with the API key from the environment. An `envVar` that is absent or empty gives
+    * [[dspy4s.core.contracts.LmNotConfiguredError]].
     */
-  private val contextWindowMarkers: Seq[String] =
-    Seq("context_length_exceeded", "maximum context length", "context window", "reduce the length")
-
-  private[providers] def isContextWindowError(body: String): Boolean =
-    val lowered = body.toLowerCase
-    contextWindowMarkers.exists(lowered.contains)
-
   def fromEnv(
       base     : String        = defaultBaseUrl,
       transport: HttpTransport = HttpTransport.jdk(),
@@ -139,4 +129,4 @@ object OpenAiClient:
   ): Either[DspyError, OpenAiClient] =
     sys.env.get(envVar) match
       case Some(value) if value.nonEmpty => Right(OpenAiClient(apiKey = value, baseUrl = base, transport = transport))
-      case _                             => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
+      case _                             => Left(OpenAiErrors.notConfigured(envVar))
