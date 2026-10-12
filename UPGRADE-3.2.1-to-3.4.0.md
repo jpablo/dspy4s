@@ -97,6 +97,26 @@ The full suite passes: 1,197 tests, 0 failures, 6 live tests skipped. The sandbo
 - **Not in this batch.** The runtime description of an interpreter (I7) waits for decision D3, because it changes the
   RLM prompt.
 
+### Batch 5 (2026-10-11): tool call ids, the conversation history, and two GEPA engine rules
+
+The full suite passes: 1,357 tests, 0 failures, 6 live tests skipped.
+
+- **G-28** a tool call keeps its provider id, a request can carry tool calls and tool results, and a signature takes
+  the conversation history as an input field of type `History`. The Chat, JSON, and XML adapters replay it as
+  earlier turns (A3, A4).
+- **G-44** a new GEPA candidate takes the largest round-robin pointer of its parents, a skipped iteration does not
+  move the pointer, and the merge search makes 10 attempts of 10 pair draws with the overlap floor of 5.
+- **G-45** a second read of the upstream GEPA code corrected the ledger: objective frontiers (O4) and more than one
+  proposal (O5) are options upstream, and their defaults agree with dspy4s. Only the instruction proposer (O3)
+  changes default behavior.
+- **API changes.** `ToolCall` has a third field, `id`. `Message` has `toolCalls`, `toolCallId`, and `name`.
+  `GepaConfig` has `mergeValOverlapFloor`.
+- **Changes in behavior.** The typed decode gives `None` for an optional field that a record lacks. A GEPA run with a
+  validation set of fewer than 5 examples makes no merge by default. The results of a GEPA run with more than one
+  component change, because the pointer rule changed.
+- **Not in this batch.** The instruction proposer (O3), the objective frontiers (O4), more than one proposal (O5),
+  resume, the stop reason of a run, and the facade.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -167,8 +187,8 @@ Open points from batch 1, for the owner:
 - [ ] **A1. Optional and default output fields** (ba8a64958): a missing optional output takes its default. → G-29 (C)
 - [ ] **A2. Fallback from ChatAdapter to JSONAdapter after a parse error only** (2cda3872d), and never after
       visible stream output. → G-29 (R)
-- [ ] **A3. Tool call ids, `ToolCallResults`, and native tool history** (2ec31b3aa, a0fcc1e37). → G-28 (R)
-- [ ] **A4. `dspy.History` with output-format reminders in replay** (f207d35cf). → G-28 (R)
+- [x] **A3. Tool call ids, `ToolCallResults`, and native tool history** (2ec31b3aa, a0fcc1e37). → G-28 (R)
+- [x] **A4. `dspy.History` with output-format reminders in replay** (f207d35cf). → G-28 (R)
 - [ ] **A5. Boundary whitespace in ChatAdapter stream chunks** (f4a428853). → G-31 (R)
 - [ ] **A6. Nested XML output** (33aaa19e0). → G-32 (R)
 - [ ] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)

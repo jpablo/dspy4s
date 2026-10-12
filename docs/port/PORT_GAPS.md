@@ -1192,7 +1192,7 @@ note for `inspect_history` covers the function, not this content. There is no co
 
 ## G-28 — No tool call ids, no tool message role, no `dspy.History`
 
-**Status:** Open · **Verification:** R · **Upgrade items:** A3, A4
+**Status:** Resolved (2026-10-11, batch 5) · **Verification:** C · **Upgrade items:** A3, A4
 
 **Upstream.** `ToolCalls` keeps the provider id (`dspy/adapters/types/tool.py:284`, `dspy/adapters/base.py:626-644`).
 `ToolCallResults` exists (`tool.py:440`). Adapters send `assistant.tool_calls` and `role: tool` messages again
@@ -1205,8 +1205,61 @@ since f207d35cf an earlier user turn keeps the output reminder, and an output-on
 (`modules/lm/.../contracts/LmRequest.scala:10-13`). There is no `History` type; the `ConversationHistory` example is
 blocked.
 
-**Direction.** Add the id and the tool role first. G-19 (ReActV2) and `History` both need them. Port the current
-`History` behavior directly.
+**Resolution.** The text above describes the code before the correction.
+
+- **Types.** `ToolCall` has an optional `id` and a record form (`toRecord`, `fromRecord`, `fromDynamic`).
+  `ToolCallResult` and `History` are new (`modules/core/.../contracts/ToolCall.scala`, `History.scala`).
+  `MessageRole.Tool` is new, and `Message` has `toolCalls`, `toolCallId`, and `name`.
+- **Wire.** The response parser and the stream assembler keep the id (`call_id` before `id`, upstream
+  `_provider_tool_call_to_tool_call_dict`). The request normalizer writes `tool_calls`, `tool_call_id`, and `name`
+  in the provider form. The cache key covers the tool fields only when a message has them, so the keys of current
+  requests do not change. The disk cache keeps the id and still reads the entries of the old format.
+- **Signatures.** A field of type `History` gets `TypeRef.history` from its type, for a derived signature, a spec
+  trait, the builder, and the string DSL. No mark call is necessary.
+- **Adapters.** `ChatAdapter`, `JSONAdapter`, and `XMLAdapter` share one replay
+  (`modules/adapters/.../internal/ConversationHistory.scala`), with the upstream rules of `format` and
+  `format_conversation_history`: the order system, demos, history, current request; the output reminder in a
+  replayed user turn (f207d35cf); no user turn for a message with output fields only; an assistant message with
+  tool calls and one tool message for each result when the ids agree (2ec31b3aa); text in each other case.
+- **Example.** `ConversationHistory.scala` is translated.
+
+Tests: `ToolCallHistorySuite`, `ToolCallWireSuite`, `ToolCallIdSuite`, `HistorySignatureSuite`,
+`HistoryFieldSurfacesSuite`, `ConversationHistorySuite`, `ConversationHistoryRulesSuite`, `PredictHistorySuite`,
+`ProgramHistorySuite`.
+
+Changes in behavior to know:
+
+- `ToolCall` has a third field. A pattern `ToolCall(name, args)` must name the id too.
+- The typed decode gives `None` for an optional field that a record lacks, at each level. Before, it failed. A
+  model that writes a tool call as text gives no id, so this rule is necessary.
+- The JSON schema of an output type does not show the id of a tool call (upstream removes it too).
+
+Deliberate differences from upstream:
+
+- A history message holds the results of its tool calls under the key `tool_call_results` of the message
+  (`History.ToolCallResultsKey`). Upstream holds them in the `ToolCalls` value. dspy4s has no wrapper type for tool
+  calls: the field is a `Vector[ToolCall]`.
+- Tool messages are replayed only when the adapter flag is on and the model supports function calling. Upstream
+  checks the flag only, so a model without function calling gets messages that it rejects.
+- A message with no output field gives no assistant turn. Upstream writes `None` values there.
+- The JSON and XML system messages of dspy4s list no input field, so they get one sentence that names the history
+  field.
+
+Open:
+
+- `TwoStepAdapter` does not replay a history; it shows the value as a field. Upstream does the same.
+- A real `function_call` item of the Responses API gives no tool call, and a Responses request uses the chat
+  message form (G-26, L7).
+- `DynamicValues.renderText` writes a nested value with strings that have no quotes, so the history field of a
+  demo is not valid JSON.
+- An `Option[History]` field is not replayed.
+- `markToolCalls` is still necessary for a `Vector[ToolCall]` field, although the derivation can now find the type
+  by its name.
+- `PredictEngine` writes the raw calls under the fixed key `tool_calls`. A signature field with a different name
+  gives two keys in the raw prediction.
+- No test covers a `History` input of `ReAct`, `RLM`, `Refine`, or `BestOfN`.
+- `ToolCallResults.from_tool_calls_and_values` has the dspy4s form `ToolCallResult.forCalls`. The `execute` method
+  of an upstream tool call is not ported.
 
 ---
 
@@ -1609,7 +1662,7 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2). Open: round-robin pointer, resume, budget, merge depth. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
+**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5). Open: resume, budget. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1622,11 +1675,14 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   frontier. Upstream removes dominated programs first (`gepa/gepa_utils.py:37-75,90-117`).
   `GepaState.nonDominatedFrontier` now holds that routine for the two callers. A comparison with the pinned `gepa`
   0.1.4 on 4,000 random frontiers gave no difference. Tests: `GepaStateSuite`, `MergeProposerSuite`.
-- **Round-robin pointer.** The pointers are a local map of `search`, and a new candidate has no entry, so it starts
-  at 0 (`modules/gepa/.../GepaEngine.scala:120,207`). Upstream gives a new candidate the largest pointer of its
-  parents (`gepa/core/state.py:539-543`). dspy4s also moves the pointer when a perfect minibatch skips the iteration;
+- **Round-robin pointer (resolved).** The pointers were a local map of `search`, and a new candidate had no entry,
+  so it started at 0. Upstream gives a new candidate the largest pointer of its parents
+  (`gepa/core/state.py:539-543`). dspy4s also moved the pointer when a perfect minibatch skipped the iteration;
   upstream runs the component selector after the skip checks
-  (`gepa/proposer/reflective_mutation/reflective_mutation.py:379-417`).
+  (`gepa/proposer/reflective_mutation/reflective_mutation.py:379-417`). The pointers are now in the state
+  (`GepaState.nextComponent`), `GepaState.add` applies the inheritance rule, the selector runs after the
+  perfect-score check, and a saved state keeps the pointers. Tests: `GepaPointerMergeSuite`, `GepaStateSuite`,
+  `GepaStatePersistenceSuite`.
 - **Empty reflective data (resolved).** dspy4s asked the reflection LM with zero examples and evaluated an unchanged
   candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
   reflection LM call, and an iteration with no new text makes no acceptance evaluation. The minibatch calls stay
@@ -1637,18 +1693,23 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   `GepaFailureFeedbackSuite`.
 - **API change.** `Gepa.compile` and `GepaEngine.optimize` now return `Either[DspyError, GepaResult[P]]`, because two
   leaves with the same key and a leaf type with no key are errors (decision D2).
-- **Resume.** The iteration index, the pointers, and the random sources start again
-  (`GepaEngine.scala:94-95,120-121`), and `Gepa.compile` does not pass `runDir` (`modules/gepa/.../Gepa.scala:40-44`).
+- **Resume.** The iteration index and the random sources start again, and `Gepa.compile` does not pass `runDir`
+  (`modules/gepa/.../GepaEngine.scala`, `Gepa.scala`). The pointers continue since batch 5, because they are in the
+  saved state.
   A checkpoint that is not valid throws. Upstream continues the iteration index and the pointers, and restores the
   random state of the adapter; it also loses the merge schedule and the engine random source.
 - **Budget.** dspy4s runs an iteration only when its worst-case cost fits: `2 × minibatch + |distinct valset|`
   (`GepaEngine.scala:128,159`). A budget below `2 × |distinct valset| + 2 × minibatch` gives zero iterations, and the
   result does not say why. Upstream checks the budget only at the start of an iteration, so a run can go above it
   (`gepa/core/engine.py:731`). The hard limit of dspy4s is deliberate; the missing stop reason is the gap.
-- **Merge depth.** One loop of 10 pair draws (`MergeProposer.scala:33,101-120`) against 10 attempts of 10 pair
-  draws (`gepa/proposer/merge.py:87,126-141`). A merge description that was already made ends the search
-  (`MergeProposer.scala:77`); upstream continues with the next attempt (`merge.py:195-197`). Upstream also makes no
-  merge when the two candidates share fewer than 5 validation examples (`merge.py:199-201,231`).
+- **Merge depth (resolved).** dspy4s made one loop of 10 pair draws against 10 attempts of 10 pair draws
+  (`gepa/proposer/merge.py:87,126-141`). A merge description that was already made ended the search; upstream
+  continues with the next attempt (`merge.py:195-197`). Upstream also makes no merge when the two candidates share
+  fewer than 5 validation examples (`merge.py:199-201,231`). `MergeProposer.findMerge` now has the outer loop with
+  the two rules, and `GepaConfig.mergeValOverlapFloor` (default 5) is the floor. Tests: `GepaPointerMergeSuite`,
+  `MergeProposerSuite`. Change in behavior: a validation set with fewer than 5 examples gets no merge unless the
+  floor is lower. Deliberate difference: dspy4s accepts a floor of 0 (no floor), and it keeps the uniform choice of
+  an ancestor when each weight is zero, where upstream raises.
 - **Evaluation cache.** dspy4s always uses it. Upstream has it off by default, so an accepted merge costs 5 plus
   the validation size upstream and the validation size at most in dspy4s. This difference is deliberate.
 
