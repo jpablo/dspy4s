@@ -27,8 +27,8 @@ Every optimizer-addressable leaf exposes the same writable `OptimizableParameter
 
 This contract is shared by `Predict`, `ChainOfThought`, and
 `DynamicPredict`. Framework composites expose the same parameters for each stable
-leaf—for example, `ProgramOfThought` exposes its generator, regenerator, and
-answerer. The executable predictor is not used as a parameter carrier.
+leaf—for example, `ReAct` exposes its react predictor and its
+extractor. The executable predictor is not used as a parameter carrier.
 
 `OptimizableLeaf[P]` is a lens onto these parameters. Its instances obey:
 

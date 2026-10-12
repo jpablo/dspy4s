@@ -58,16 +58,12 @@ Both take a reward function `(input, prediction) => Double`:
 
 ## Other modules
 
-A few more modules cover specific strategies:
+`RLM` answers by writing Python code and running it in a sandbox. The inputs
+are variables in that sandbox, so the model can explore a context that is too
+large for one prompt. The sandbox runs on Deno. See
+[ReAct vs RLM](../tutorials/react-vs-rlm.md).
 
-- `CodeAct` and `ProgramOfThought` answer by generating and running code through
-  a `CodeInterpreter`, so the computation happens in a sandbox rather than in the
-  model's head.
-- `Parallel` runs several program calls concurrently.
-
-```scala
---8<-- "Cheatsheet.scala:code-act"
-```
+`Parallel` runs several program calls concurrently.
 
 ## Choosing a module
 
@@ -76,8 +72,8 @@ A few more modules cover specific strategies:
 | `Predict` | One call, direct answer. | The task maps inputs to outputs. |
 | `ChainOfThought` | Reason, then answer. | The task benefits from step-by-step thinking. |
 | `ReAct` | Call tools in a loop. | The model needs external information or actions. |
+| `RLM` | Write and run code in a sandbox. | The answer needs real computation, or the context is too large for one prompt. |
 | `BestOfN` / `Refine` | Sample and rank against a reward. | You can score outputs and want the best. |
-| `CodeAct` / `ProgramOfThought` | Generate and run code. | The answer needs real computation. |
 | `Parallel` | Run calls concurrently. | You have many independent calls. |
 
 Modules are ordinary Scala values, so you can also compose them into larger

@@ -147,7 +147,7 @@ object DrugSafetyTools:
     DynamicValues.recordGet(args, name).map(DynamicValues.renderText).getOrElse("")
 
   /** Hand-built so we control the recording side effect AND populate `argSchema` (which drives the Python parameter
-    * names in RLM's sandbox and the tool docs in ReAct's prompt — see `CodeAct.sandboxTools`).
+    * names in RLM's sandbox and the tool docs in ReAct's prompt — see the `tools` parameter of `RLM`).
     */
   private def tool(toolName: String, desc: String, params: (String, TypeRef)*)(
       body: DynamicValue.Record => String

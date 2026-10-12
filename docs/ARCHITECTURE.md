@@ -119,8 +119,8 @@ graph TD
    - `ChainOfThought[I, O]` — `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
    - All other programs are `Module[I, …]` too:
-     `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
-     data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
+     `ReAct[I,O]` (runs its loop/extractor over the
+     data-bag layer internally, decodes to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
      (output-preserving best-of-n over an inner program). Output-augmenting programs share the
@@ -162,7 +162,7 @@ SignatureLayout ──→ ProgramCall[Record] ──→ DynamicPredict ──→
 `SignatureLayout` carries a name, optional instructions, and separate ordered input and output
 `Vector[FieldSpec]` cohorts (each spec has a `TypeRef` and metadata).
 Adapters consume `SignatureLayout` directly; composite programs (e.g.
-`ChainOfThought`, `CodeAct`, `MultiChainComparison`) augment a
+`ChainOfThought`, `MultiChainComparison`) augment a
 base layout with extra fields before handing it to a `DynamicPredict`.
 
 The cohort mutation helpers on `SignatureLayout` (`withInputFields` and `withOutputFields`) are
@@ -282,8 +282,8 @@ code:
 - **New composite program** — extend `Module` and implement `forward` (the
   `final apply` gives you the callback + trace wrapping), augment a base `SignatureLayout` with
   extra fields via the `private[dspy4s]` mutation helpers, internally
-  construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
-  `MultiChainComparison` are the templates.
+  construct `DynamicPredict`.
+  `MultiChainComparison` is the template.
 - **New optimizer** — use `OptimizableStructure[P].inspect` for layout/name metadata,
   `read` / `replace` for writable `OptimizableParameters`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.

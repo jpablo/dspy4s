@@ -30,8 +30,8 @@ import zio.blocks.schema.DynamicValue
   * They are siblings rather than wrappers: each configures its own shared [[PredictEngine]]. The dynamic surface is
   * needed wherever there is no static `I`/`O` to carry, including:
   *
-  *   - composite programs whose internal generations have runtime-built signatures, such as [[CodeAct]],
-  *     [[ProgramOfThought]], [[MultiChainComparison]], and the internal passes in [[ReAct]];
+  *   - composite programs whose internal generations have runtime-built signatures, such as [[MultiChainComparison]]
+  *     and the internal passes in [[ReAct]];
   *   - optimizer helper generations whose proposed signature exists only as a [[SignatureLayout]].
   *
   * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it mints

@@ -1,8 +1,6 @@
 package dspy4s.programs
 
 import dspy4s.programs.optimization.*
-import dspy4s.core.contracts.CodeInterpreter
-import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -27,11 +25,6 @@ final case class RlmOut(answer: String) derives Schema
   */
 class CompositeOptimizableStructureSuite extends FunSuite:
 
-  private object Interpreter extends CodeInterpreter:
-    def execute(code: String): Either[DspyError, CodeResult] =
-      Right(CodeResult(stdout = "", stderr = "", exitCode = 0))
-    def close(): Unit = ()
-
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get)
 
@@ -53,17 +46,12 @@ class CompositeOptimizableStructureSuite extends FunSuite:
   test("hand-written composite structures expose logical parameter names") {
     val signature  = Signature.derived[RlmIn, RlmOut]("CompositeNames")
     val react      = ReAct(baseSignature = signature, tools = Vector.empty)
-    val codeAct    = CodeAct(baseSignature = signature, interpreter = Interpreter)
     val rlm        = RLM(baseSignature = signature)
     val comparison = MultiChainComparison(baseSignature = signature)
 
     assertEquals(
       summon[OptimizableStructure[ReAct[RlmIn, RlmOut]]].inspectNamed(react).map(_._1),
       Vector("react", "extractor")
-    )
-    assertEquals(
-      summon[OptimizableStructure[CodeAct[RlmIn, RlmOut]]].inspectNamed(codeAct).map(_._1),
-      Vector("codeact", "extractor")
     )
     assertEquals(
       summon[OptimizableStructure[RLM[RlmIn, RlmOut]]].inspectNamed(rlm).map(_._1),

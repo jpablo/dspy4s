@@ -1,12 +1,9 @@
 package dspy4s.gepa
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.CodeInterpreter
-import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
 import dspy4s.core.data.Example
@@ -21,7 +18,6 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.optimization.OptimizableId
-import dspy4s.programs.strategies.CodeAct
 import dspy4s.programs.strategies.ReAct
 import dspy4s.programs.strategies.RLM
 import dspy4s.signatures.Signature
@@ -31,8 +27,8 @@ import zio.blocks.schema.DynamicValue
 import scala.collection.mutable.ArrayBuffer
 
 /** GEPA on a `ReAct` program. The first leaf (the react step) runs in a loop before the second leaf (the extractor)
-  * runs, so the position of a trace entry does not tell the leaf (PORT_GAPS G-44, item "trace association"). `CodeAct`
-  * and `RLM` have the same structure of two leaves.
+  * runs, so the position of a trace entry does not tell the leaf (PORT_GAPS G-44, item "trace association"). `RLM` has
+  * the same structure of two leaves.
   */
 class GepaReActTraceSuite extends FunSuite:
 
@@ -124,16 +120,9 @@ class GepaReActTraceSuite extends FunSuite:
     assertEquals(byName("extractor").flatMap(_.predictor).map(_.moduleName), Vector("react_extract"))
   }
 
-  /** An interpreter that the test does not run. */
-  private object NoInterpreter extends CodeInterpreter:
-    override def execute(code: String): Either[DspyError, CodeResult] =
-      Left(RuntimeError("no_interpreter", "the test does not run code"))
-    override def close(): Unit = ()
-
-  test("the two leaves of ReAct, of CodeAct, and of RLM have different keys, so GEPA does not reject these programs") {
+  test("the two leaves of ReAct and of RLM have different keys, so GEPA does not reject these programs") {
     val signature = Signature.fromString("question -> answer")
     val metric    = new RecordingMetric
     assertEquals(new GepaAdapter(react, metric).distinctKeys, Right(()))
-    assertEquals(new GepaAdapter(CodeAct(signature, NoInterpreter), metric).distinctKeys, Right(()))
     assertEquals(new GepaAdapter(RLM(signature), metric).distinctKeys, Right(()))
   }

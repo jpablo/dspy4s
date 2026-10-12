@@ -122,8 +122,8 @@ flowchart TD
 ```
 
 The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala), while
-[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct and CodeAct
-also share [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
+[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct
+also uses [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
 is:
 
 ```text

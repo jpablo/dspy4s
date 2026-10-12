@@ -5,8 +5,8 @@ import dspy4s.core.contracts.{ContextWindowExceededError, DspyError}
 import scala.annotation.tailrec
 
 /** The shared "render the view, run it, and on a context-window overflow drop the OLDEST entry and retry" loop, used by
-  * ReAct's react/extract steps and CodeAct's extract step (Python's `_call_with_potential_trajectory_truncation`).
-  * Generic over the trajectory entry type `S` and the run result `A`. The loop keeps at least one entry.
+  * ReAct's react/extract steps (Python's `_call_with_potential_trajectory_truncation`). Generic over the trajectory
+  * entry type `S` and the run result `A`. The loop keeps at least one entry.
   */
 object TrajectoryTruncation:
 

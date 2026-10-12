@@ -4,8 +4,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, ValidationErr
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** INPUT augmentation: the input-side dual of [[OutputAugmentation]], for the composite programs' loop signatures that
-  * extend a base input `I` with one hand-declared `String` field (`trajectory`, `previous_code`, `error`,
-  * `final_generated_code`, ...).
+  * extend a base input `I` with one hand-declared `String` field (`trajectory`, ...).
   *
   * The augmented carrier is the plain pair `(I, String)` rather than a named-tuple surgery on `I`: the pair delegates
   * the base encoding to the base [[Shape]] UNCHANGED (schema-aware — no re-derivation, no `fromAny` round-trip for

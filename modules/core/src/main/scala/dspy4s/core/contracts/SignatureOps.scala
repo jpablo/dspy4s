@@ -6,7 +6,7 @@ import dspy4s.algebra.{IsEq, Law, Monoid, <->}
   *
   * The low-level `withInputFields` / `withOutputFields` mutators on [[SignatureLayout]] stay `private[dspy4s]`; this
   * object names the augmentations composite programs actually perform, guarantees their idempotence, and gives them
-  * laws, so `ChainOfThought` / `ReAct` / `CodeAct` / `MultiChainComparison` stop hand-rolling layout surgery. Kept
+  * laws, so `ChainOfThought` / `ReAct` / `MultiChainComparison` stop hand-rolling layout surgery. Kept
   * `private[dspy4s]` for the same reason as the mutators: user code shapes I/O through the `Signature` API, not by
   * editing a layout.
   */
@@ -33,8 +33,8 @@ private[dspy4s] object SignatureOps:
       if layout.fields.exists(_.name == field.name) then layout
       else layout.withInputFields(layout.inputFields :+ field)
 
-    /** Keep the inputs, replace every output field with `fields`. The loop-step signatures of `ReAct` and `CodeAct` use
-      * this to drop the base outputs (which their extractor produces) in favor of the per-iteration control outputs.
+    /** Keep the inputs, replace every output field with `fields`. The loop-step signature of `ReAct` uses this to drop
+      * the base outputs (which its extractor produces) in favor of the per-iteration control outputs.
       *
       * Output role is established by the target cohort.
       */

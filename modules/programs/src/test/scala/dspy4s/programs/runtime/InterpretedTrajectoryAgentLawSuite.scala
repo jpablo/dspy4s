@@ -11,8 +11,8 @@ import munit.FunSuite
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
-/** Executes the branch laws documented on [[InterpretedTrajectoryAgent]] against a synthetic action language. ReAct and
-  * CodeAct only supply the protected generation/lowering/recording operations; the tested transition is final.
+/** Executes the branch laws documented on [[InterpretedTrajectoryAgent]] against a synthetic action language. ReAct
+  * only supplies the protected generation/lowering/recording operations; the tested transition is final.
   */
 final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
 

@@ -54,7 +54,7 @@ Four abstractions anchor the framework:
 | `TraceEntry` / `HistoryEntry` | Recorded module calls (inputs/outputs/failure) and LM calls; appended to the context when enabled, capped by `maxHistorySize`. `HistoryRenderer` produces dspy-style inspection output. |
 | `DspyError` | Sealed error hierarchy: `ConfigurationError`, `ValidationError`, `NotFoundError`, `ParseError`, `RuntimeError`, `ContextWindowExceededError`, each with a `code` + message, propagated through `Either`. |
 | `ToolCall` | A model-requested tool invocation (`name` + args record), carried as structured data through wire → adapter → domain decode. |
-| `CodeInterpreter` / `ReplCodeInterpreter` | The code-execution sandbox interface used by `CodeAct` / `RLM`; the Deno/Pyodide and subprocess-Python implementations live here. |
+| `CodeInterpreter` / `ReplCodeInterpreter` | The code-execution sandbox interface used by `RLM`; the Deno/Pyodide and subprocess-Python implementations live here. |
 
 ## Design notes
 

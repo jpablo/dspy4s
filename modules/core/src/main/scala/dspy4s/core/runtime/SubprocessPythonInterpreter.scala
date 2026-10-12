@@ -24,9 +24,8 @@ import scala.util.control.NonFatal
   * 1:1) or supply your own sandboxed [[CodeInterpreter]] implementation.
   *
   * '''No REPL state across calls.''' Each `execute` is independent — variables defined in one call vanish before the
-  * next. [[dspy4s.programs.strategies.CodeAct]] accumulates code across iterations on its side so this limitation is
-  * transparent at the program level. [[DenoPyodideInterpreter]] provides a stateful alternative without a long-lived
-  * unrestricted `python3 -i` subprocess.
+  * next. [[DenoPyodideInterpreter]] provides a stateful alternative without a long-lived unrestricted `python3 -i`
+  * subprocess.
   *
   * @param pythonCommand
   *   the executable to invoke (default `"python3"`; override for `python`, `python3.11`, virtualenv paths, etc.)

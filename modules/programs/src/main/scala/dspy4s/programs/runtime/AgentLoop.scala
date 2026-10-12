@@ -4,10 +4,10 @@ import dspy4s.core.contracts.DspyError
 
 import scala.annotation.tailrec
 
-/** The bounded agentic-iteration primitive shared by `ReAct` / `CodeAct` / `RLM` / `ProgramOfThought` (the `agentLoop`
-  * / `retryUntil` core of Algebra 2; see `docs/refactor/algebra-2-program-composition.md`).
+/** The bounded agentic-iteration primitive shared by `ReAct` / `RLM` (the `agentLoop` core of Algebra 2; see
+  * `docs/refactor/algebra-2-program-composition.md`).
   *
-  * It captures only the control flow the four agents genuinely share: iterate up to `maxIterations`, carrying a state
+  * It captures only the control flow the two agents genuinely share: iterate up to `maxIterations`, carrying a state
   * `St`; each step either continues with a new state or finishes with a terminal result `R`; if the budget is
   * exhausted, a terminal `onExhausted` produces `R`. It deliberately does NOT impose a common
   * action/observation/classify vocabulary — code-truth shows the per-step semantics (tool dispatch vs interpreter vs
@@ -15,9 +15,9 @@ import scala.annotation.tailrec
   * closure. The two carriers used in practice:
   *
   *   - `St = Vector[entry]`, `R = Vector[entry]`, `onExhausted = Right(_)` — a trajectory the loop returns for a
-  *     downstream extractor (ReAct / CodeAct, via [[TrajectoryAgent]]).
-  *   - `R = Prediction[O]` with the result produced inside the loop (RLM's SUBMIT; PoT's first success), and an
-  *     `onExhausted` that runs a fallback (RLM extract) or surfaces the last error (PoT).
+  *     downstream extractor (ReAct, via [[TrajectoryAgent]]).
+  *   - `R = Prediction[O]` with the result produced inside the loop (RLM's SUBMIT), and an `onExhausted` that runs a
+  *     fallback (RLM extract).
   */
 object AgentLoop:
 

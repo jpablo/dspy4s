@@ -6,7 +6,7 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, Actio
 
 /** A trajectory agent whose iterations interpret actions produced by a model.
   *
-  * This is the shared inner loop behind `ReAct` and `CodeAct`:
+  * This is the inner loop behind `ReAct`:
   *
   * `generate step -> prepare action -> interpret action -> record outcome -> decide whether to continue or stop`
   *
@@ -48,8 +48,8 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
 
   /** Choose the next control-flow branch after a ready action has been interpreted and its outcome recorded. Receiving
     * both the model step and the interpreted outcome supports languages whose terminal condition is expressed before
-    * execution (`ReAct.finish`, `CodeAct.finished`) as well as languages whose terminal condition depends on execution
-    * success. Rejected preparations always continue and do not invoke this hook.
+    * execution (`ReAct.finish`) as well as languages whose terminal condition depends on execution success. Rejected
+    * preparations always continue and do not invoke this hook.
     */
   protected def decide(
       step   : ModelStep,

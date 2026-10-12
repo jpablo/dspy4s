@@ -6,7 +6,8 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{
-  CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SignatureLayout
+  CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SandboxTool,
+  SignatureLayout, TypeRef
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -214,6 +215,44 @@ class RLMSuite extends FunSuite:
     intercept[IllegalArgumentException] {
       val _ = RLM(baseSignature = qaSignature, tools = Vector(bad))
     }
+  }
+
+  // The bridge from `ToolFunction` to `SandboxTool` (G-20: tools-inside-code).
+
+  test("user tools reach the interpreter factory as SandboxTools (name, Python parameter declarations, context)") {
+    val tool = new dspy4s.programs.contracts.ToolFunction:
+      override val name: String                         = "get_weather"
+      override val description: String                  = "weather lookup"
+      override def argSchema: Vector[(String, TypeRef)] =
+        Vector("city" -> TypeRef.string, "days" -> TypeRef.int)
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
+        val city = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("?")
+        Right(DynamicValues.fromAny(s"sunny in $city"))
+
+    val repl    = new ScriptedRepl(Vector(Right(CodeResult("", "", 0, finalOutput = Some("""{"answer": "42"}""")))))
+    val bridged = ArrayBuffer.empty[SandboxTool]
+    val program = RLM(
+      baseSignature = qaSignature,
+      tools = Vector(tool),
+      interpreterFactory = (sandboxTools, _) =>
+        bridged ++= sandboxTools
+        repl
+    )
+
+    withRlm(new ScriptedLm(Vector("solved it||```python\nSUBMIT(answer='42')\n```")), new ProbeAdapter) {
+      assert(program((context = "c", query = "q")).isRight)
+    }
+
+    // The built-in `llm_query` tools come first. The user tools come after them.
+    assertEquals(bridged.map(_.name).toVector, Vector("llm_query", "llm_query_batched", "get_weather"))
+    val weather = bridged.last
+    // Wire types map to Python type hints: string -> str, int -> int.
+    assertEquals(
+      weather.parameters,
+      Vector(SandboxTool.Param("city", Some("str")), SandboxTool.Param("days", Some("int")))
+    )
+    // The call works outside a dspy4s call stack, because the bridge captured the context of the run.
+    assertEquals(weather.invoke(rec("city" := "Paris")).map(DynamicValues.renderText), Right("sunny in Paris"))
   }
 
   test("ReplVariable.fromValue renders metadata with a head+tail preview, not the full value") {

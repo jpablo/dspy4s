@@ -3,8 +3,8 @@ package dspy4s.programs
 import dspy4s.core.contracts.{ContextWindowExceededError, DspyError, RuntimeError}
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 
-/** Laws for the shared overflow loop. The migrated ReAct/CodeAct truncation paths are covered by their own suites; this
-  * pins drop-oldest order, exhaustion, the empty-view guard, and the non-overflow short-circuit.
+/** Laws for the shared overflow loop. The migrated ReAct truncation paths are covered by the ReAct suite; this pins
+  * drop-oldest order, exhaustion, the empty-view guard, and the non-overflow short-circuit.
   */
 class TruncateOnOverflowSuite extends munit.FunSuite:
 

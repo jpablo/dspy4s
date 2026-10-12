@@ -20,10 +20,10 @@ import zio.blocks.schema.DynamicValue
   * closed by construction (see Invariants) rather than relying on a runtime precondition.
   *
   * '''Field mutation.''' The `withInputFields` / `withOutputFields` methods are `private[dspy4s]`. They exist because
-  * composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base
-  * layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User
-  * code should use the `Signature` API (a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather
-  * than reaching into the layout directly.
+  * composite programs (`ChainOfThought`, `MultiChainComparison`) need to augment a base layout with auxiliary fields
+  * (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User code should use the `Signature`
+  * API (a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather than reaching into the layout
+  * directly.
   *
   * '''Invariants.''' A field's role is represented exactly once by cohort membership. Name uniqueness across both
   * cohorts is maintained by construction, not by a precondition: the primary constructor is `private`, so every layout
@@ -59,8 +59,8 @@ final case class SignatureLayout private (
     if text.isEmpty then this else withInstructions(Some(text))
 
   // ── Field-mutation helpers ──────────────────────────────────────────
-  // Narrowed to `private[dspy4s]`: composite programs (CodeAct,
-  // MultiChainComparison, ProgramOfThought, ChainOfThought)
+  // Narrowed to `private[dspy4s]`: composite programs
+  // (MultiChainComparison, ChainOfThought)
   // augment a base layout by appending / prepending / inserting fields
   // before handing it to a `DynamicPredict`. User code should use the
   // `Signature` API (`derived`, `fromType`, `of[Spec]`,

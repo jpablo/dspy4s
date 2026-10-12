@@ -23,9 +23,9 @@ import java.util.UUID
   *   ModuleEnd  ("predict", callId=m1, parent=None)
   * }}}
   *
-  * Tool invocations inside `ReAct` / `CodeAct` produce nested `ToolStart` / `ToolEnd` pairs under their enclosing
-  * module. Every scope attempts exactly one start and one matching end emission. Non-fatal observer failures are
-  * reported and isolated: they neither abort the work nor prevent delivery to later observers.
+  * Tool invocations inside `ReAct` produce nested `ToolStart` / `ToolEnd` pairs under their enclosing module. Every
+  * scope attempts exactly one start and one matching end emission. Non-fatal observer failures are reported and
+  * isolated: they neither abort the work nor prevent delivery to later observers.
   *
   * '''Producer.''' [[dspy4s.core.runtime.CallbackDispatcher]] is the sole producer; its `withModule` / `withLm` /
   * `withAdapter` / `withTool` scopes open a call id, push it as the active id for the thread, emit the start event, run
@@ -119,8 +119,8 @@ final case class AdapterEndEvent(
     timestamp   : Instant        = Instant.now()
 ) extends CallbackEvent
 
-/** Opens a tool-invocation scope. Emitted by `ReAct`, `CodeAct`, and other composite programs when they dispatch a
-  * `ToolFunction`. Paired with [[ToolEndEvent]].
+/** Opens a tool-invocation scope. Emitted by `ReAct` and other composite programs when they dispatch a `ToolFunction`.
+  * Paired with [[ToolEndEvent]].
   */
 final case class ToolStartEvent(
     toolName    : String,

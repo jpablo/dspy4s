@@ -70,8 +70,8 @@ final case class RLM[I, O](
     interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
     actionProgramName : String                 = "rlm_action",
     extractProgramName: String                 = "rlm_extract",
-    /** Optional override for the per-iteration action predict (tunable; see ReAct/CodeAct's same pattern) — a `Predict`
-      * over the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
+    /** Optional override for the per-iteration action predict (tunable; see ReAct's same pattern) — a `Predict` over
+      * the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
       */
     actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
     /** Optional override for the max-iterations extract-fallback predict — a `Predict` over the two declared meta

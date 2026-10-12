@@ -38,7 +38,7 @@ Module[I, O]                            # ONE semantic base (port of dspy.Module
   └─ domain-valued branch = Module[I, O]
        ├─ Predict[I, O]                 # forward = encode -> PredictEngine -> decode (sibling of DynamicPredict)
        ├─ ChainOfThought[I, O]          # forward delegates to an inner Predict[I, Out]
-       ├─ ReAct[I,O] / CodeAct[I,O] / ProgramOfThought[I,O]   # run loop/extractor internally; decode -> WithField[O,"reasoning",String]
+       ├─ ReAct[I, O]                   # runs loop/extractor internally; decode -> WithField[O,"reasoning",String]
        ├─ MultiChainComparison[I, O]    # Module[MultiChainInput[I], …]; decode -> WithField[O,"rationale",String]
        └─ BestOfN[I, O] / Refine[I, O]  # best-of-n over an inner program (output-preserving)
 ```
@@ -47,7 +47,7 @@ dspy4s has **one semantic base `Module[I, O]`** — the port of `dspy.Module` �
 `ProgramCall[I] => Either[DspyError, Prediction[O]]`. Its `apply` is `final` (the lifecycle wrapping) over an abstract
 `forward`. The dynamic spine chooses `DynamicValue.Record` for both semantic parameters; **`DynamicModule`** adds a
 raw `forwardDynamic: ... => RawPrediction` hook and lifts it with `Prediction.dynamic`. Domain-valued programs
-use their domain types directly — `Predict` / `ChainOfThought` / `ReAct` / `CodeAct` / `ProgramOfThought` /
+use their domain types directly — `Predict` / `ChainOfThought` / `ReAct` /
 `MultiChainComparison` / `BestOfN` / `Refine`. **`DynamicPredict`** is the data-bag executable for runtime-built
 signatures; `Predict` is its sibling over `PredictEngine`, and
 `ChainOfThought` composes an inner `Predict`. `ProgramCall[I]` is the uniform boundary envelope at both layers:
@@ -57,7 +57,7 @@ layer internally and decode the result back to the output. `MultiChainComparison
 `MultiChainInput[I]`—base input plus candidate completions—as its semantic `I`, mirroring Python's
 `forward(completions, **kwargs)` without introducing a second invocation envelope.
 
-Output-augmenting programs (`ChainOfThought`, `ReAct`, `CodeAct`, `ProgramOfThought`, `MultiChainComparison`)
+Output-augmenting programs (`ChainOfThought`, `ReAct`, `MultiChainComparison`)
 prepend a field to the output via the shared
 [`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala) helper
 (`WithField[O, Name, T]` + the `PrependField` typeclass — idempotent, cast-free, always a named tuple). Every
@@ -97,8 +97,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | *(dynamic predict)* | — *(Predict is the leaf)* | — | `DynamicPredict` ◂ `DynamicModule` | inherited `apply` → `forwardDynamic` → `Prediction.dynamic` |
 | **ChainOfThought** | `Module` | `forward` → `self.predict(**kwargs)` | `ChainOfThought[I,O]` ◂ `Module[I,WithReasoning[O]]` | inherited `apply` → `forward` delegates to inner `Predict` |
 | **ReAct** | `Module` | `forward`/`aforward`; `self.react` + `self.extract` | `ReAct[I,O]` ◂ `Module[I,WithReasoning[O]]` | inherited `apply` → `forward`: run loop+extractor internally → decode |
-| **CodeAct** | `Module` | `forward` | `CodeAct[I,O]` ◂ `Module[I,WithReasoning[O]]` | inherited `apply` → `forward`: run loop+extractor → decode |
-| **ProgramOfThought** | `Module` | `forward` | `ProgramOfThought[I,O]` ◂ `Module[I,WithReasoning[O]]` | inherited `apply` → `forward`: generate/regenerate/answer → decode |
+| **CodeAct** / **ProgramOfThought** | `Module` | `forward` | — *(removed at the 3.4.0 target; upstream deprecated them in 3.4, and `RLM` is the replacement)* | — |
 | **MultiChainComparison** | `Module` | `forward(completions, **kwargs)` | `MultiChainComparison[I,O]` ◂ `Module[MultiChainInput[I],WithField[O,"rationale",String]]` | inherited `apply` → `forward` (the semantic input carries the completions) |
 | **BestOfN / Refine** | `Module` | `forward` | `BestOfN[I,O]` / `Refine[I,O]` ◂ `Module[I,O]` | inherited `apply` → `forward`: best-of-n over inner program *(output-preserving)* |
 
@@ -144,13 +143,13 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    — that was [G-2](PORT_GAPS.md), resolved by merging into one `Module` base; re-genericizing `Module` for the
    layer kept `apply` `final`, so it stays resolved.)
 
-7. **The agents have no dynamic twin and stream via a typeclass.** `ReAct` / `CodeAct` / `ProgramOfThought` are
-   `Module[I, …]` with no record-valued `Dynamic*` twin. They were the one place that *seemed* to need a
+7. **The agents have no dynamic twin and stream via a typeclass.** `ReAct` is a
+   `Module[I, …]` with no record-valued `Dynamic*` twin. It was the one place that *seemed* to need a
    record-valued form: `Streamify` only accepted a `DynamicModule`. Rather than keep record-valued twins, `Streamify` was
    generalized to take **any** program through a
    [`Streamable[P]`](../../modules/streaming/src/main/scala/dspy4s/streaming/Streamable.scala) typeclass that
    captures its two real requirements — *run from a record → `RawPrediction`* and *best-effort sub-signatures
-   for listener validation*. Each agent provides a `Streamable` instance (decode the record → input →
+   for listener validation*. `ReAct` provides a `Streamable` instance (decode the record → input →
    run → `.raw`), so it streams with no `DynamicModule` form and emits a single module event (no
    wrapper-over-record double event). Only `DynamicPredict` keeps the `dynamicModule` `Streamable` instance.
 

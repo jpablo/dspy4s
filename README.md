@@ -40,8 +40,8 @@ the output, with no signature changes.
   intermediate (from `zio-blocks-schema`) shared by adapters, programs,
   evaluation, and the program API. Decode failures surface at the call
   boundary as `Either[DspyError, _]`, not via lazy field access.
-- **Composable programs.** `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`,
-  `ProgramOfThought`, `BestOfN`, and `Refine` are plain values you compose like
+- **Composable programs.** `Predict`, `ChainOfThought`, `ReAct`,
+  `BestOfN`, and `Refine` are plain values you compose like
   any other Scala code. `RLM` (Recursive Language Model) is an experimental
   program for reasoning over long contexts without placing them in the prompt:
   inputs become variables in a sandboxed REPL that the model explores with

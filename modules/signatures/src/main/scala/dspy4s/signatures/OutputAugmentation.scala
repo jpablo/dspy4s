@@ -119,8 +119,7 @@ object OutputAugmentation:
     yield augmented
 
   /** The shared decode for an opening-`String` output augmentation: the `T = String`, identity-hook instance of
-    * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `CodeAct` /
-    * `MultiChainComparison` / `ProgramOfThought`.
+    * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `MultiChainComparison`.
     */
   def decodePrepended[O, Name <: String & Singleton, Out](
       raw          : DynamicValue.Record,
@@ -139,12 +138,11 @@ object OutputAugmentation:
     )
 
   /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands its
-    * inner `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
-    * `ProgramOfThought`'s CoT-augmented steps). `field` is prepended to `base`'s specs idempotently by name (matching
-    * the type-level [[WithField]] and the layout's `prependOutput` — an unconditional prepend would desync `encode`'s
-    * `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base JSON schema passes through so structured
-    * base-field shapes still reach the adapter (the prepended field is a plain `String` already covered by the
-    * adapter's field markers).
+    * inner `Predict` (`ChainOfThought`'s `reasoning` and the extractor pass of `ReAct`). `field` is prepended to
+    * `base`'s specs idempotently by name (matching the type-level [[WithField]] and the layout's `prependOutput` — an
+    * unconditional prepend would desync `encode`'s `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base
+    * JSON schema passes through so structured base-field shapes still reach the adapter (the prepended field is a plain
+    * `String` already covered by the adapter's field markers).
     */
   def prependedStringShape[Name <: String & Singleton, O, Out](
       base         : Shape[O],

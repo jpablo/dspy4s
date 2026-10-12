@@ -81,7 +81,7 @@ selection in upstream `make_reflective_dataset`:
 
 1. It takes the calls of the component from the trace. A predictor writes its key (its module name and its
    signature structure) into each trace entry that it records, so the position of an entry is not important. A
-   predictor that runs in a loop (ReAct, CodeAct, RLM) gets its own calls.
+   predictor that runs in a loop (ReAct, RLM) gets its own calls.
 2. With `addFormatFailureAsFeedback = false` (the default, as upstream), the calls that failed do not count.
 3. If a call failed, the first such call gives the record: the raw response of the model and the output
    structure to follow. The user metric gets no call for it.

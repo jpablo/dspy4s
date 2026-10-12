@@ -53,8 +53,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
   shared `PredictEngine`
 - `ChainOfThought`
 - `ReAct`, `Parallel`, `BestOfN`, `Refine`, `Aggregation.majority`
-- `MultiChainComparison`, `ProgramOfThought`, `CodeAct` (scaffolded — see
-  PORT_MAP §2a for interpreter parity caveats)
+- `MultiChainComparison`
 
 5. Evaluation
 - `Evaluate`, `EvaluationResult`
@@ -83,7 +82,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 - ~~`RLM` and the sandboxed Deno + Pyodide interpreter~~ **Shipped** (G-20
   resolved): `DenoPyodideInterpreter` (Pyodide-in-Deno sandbox, stateful REPL,
   variable injection, host tools, SUBMIT) + the `RLM[I, O]` driver, both
-  live-validated; `ProgramOfThought`/`CodeAct` wired onto the sandbox
+  live-validated
 - `datasets` module (G-21); the Anthropic LM provider (G-22 — the
   OpenAI-compatible/Ollama route shipped as G-22 part 1)
 - `AvatarOptimizer` + `Avatar`: **Won't fix (by design)** (G-14 — not in
@@ -94,6 +93,8 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 ## Non-Goals
 - Reproducing Python metaclass/frame-introspection internals exactly.
 - Preserving Python-specific mutation semantics when Scala-safe alternatives are cleaner.
+- `CodeAct` and `ProgramOfThought`. dspy4s removed them at the 3.4.0 target. Upstream deprecated them in 3.4 and
+  removes them in 3.5. `RLM` is the replacement.
 
 ## v1 Exit Criteria
 1. API

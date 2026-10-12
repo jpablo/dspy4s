@@ -1,7 +1,7 @@
 # The interpreted trajectory state machine
 
-[`InterpretedTrajectoryAgent`](InterpretedTrajectoryAgent.scala) is the shared one-iteration machine behind
-[`ReAct`](../ReAct.scala) and [`CodeAct`](../CodeAct.scala). It describes agents whose model output is lowered into an
+[`InterpretedTrajectoryAgent`](InterpretedTrajectoryAgent.scala) is the one-iteration machine behind
+[`ReAct`](../ReAct.scala). It describes agents whose model output is lowered into an
 action, interpreted by an environment, recorded in a trajectory, and then classified as either continuing or complete.
 
 The central idea is:
@@ -16,8 +16,8 @@ state carries the values required by its outgoing transition.
 
 ## Class hierarchy
 
-The hollow-triangle arrows below mean “extends” and point toward the supertype. `ReAct` and `CodeAct` are the two
-production programs that specialize the shared state machine.
+The hollow-triangle arrows below mean “extends” and point toward the supertype. `ReAct` is the
+production program that specializes the state machine.
 
 ```mermaid
 classDiagram
@@ -57,25 +57,16 @@ classDiagram
             ToolCallRequest Action
             String Observation
         }
-
-        class CodeAct {
-            <<final>>
-            CodeStep ModelStep
-            String Action
-            String Observation
-        }
     }
 
     Module <|-- TrajectoryAgent
     TrajectoryAgent <|-- InterpretedTrajectoryAgent
     InterpretedTrajectoryAgent <|-- ReAct
-    InterpretedTrajectoryAgent <|-- CodeAct
 ```
 
-In full, the specializations are:
+In full, the specialization is:
 
 - `ReAct[I, O] extends InterpretedTrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]`.
-- `CodeAct[I, O] extends InterpretedTrajectoryAgent[I, CodeAct.WithReasoning[O], CodeAct.TrajectoryEntry]`.
 
 `TrajectoryAgent` supplies the final `Module.forward` implementation. `InterpretedTrajectoryAgent` supplies its final
 `trajectoryStep` implementation, leaving the concrete programs to define their action language through `ModelStep`,
@@ -170,15 +161,14 @@ They answer three different questions:
 | `Observation` | What value does the action environment return to the agent? |
 | `Entry` | What durable domain record is appended to the trajectory? |
 
-The distinction prevents a universal action envelope with optional, protocol-specific fields. ReAct and CodeAct share the machine while
-retaining different languages:
+The distinction prevents a universal action envelope with optional, protocol-specific fields. ReAct uses the machine
+with this language:
 
 | Agent | `ModelStep` | `Action` | `Observation` | Stop rule |
 |---|---|---|---|---|
 | ReAct | `ReactStep` | `ToolCallRequest` | `String` | Prepared tool name is `finish` or empty |
-| CodeAct | `CodeStep` | Python source as `String` | `String` | `CodeStep.finished` is true |
 
-For the full concrete protocols, see [`ReAct.md`](../ReAct.md) and [`CodeAct.md`](../CodeAct.md).
+For the full concrete protocol, see [`ReAct.md`](../ReAct.md).
 
 ## What each state knows
 
@@ -298,11 +288,11 @@ protected def decide(
 This supports terminal signals from different parts of an action protocol:
 
 - ReAct decides from the prepared tool-call name.
-- CodeAct decides from the model's `finished` field.
-- Another language could decide from whether interpretation succeeded or from the returned observation.
+- Another language could decide from a field of the model step, from whether interpretation succeeded, or from the
+  returned observation.
 
-Recording first preserves the final evidence. A ReAct `finish` call, a CodeAct snippet marked `finished`, and even a
-recoverably failed terminal action all remain visible to the final extractor.
+Recording first preserves the final evidence. A ReAct `finish` call and even a
+recoverably failed terminal action remain visible to the final extractor.
 
 ## Implementing a concrete language
 
@@ -385,4 +375,4 @@ The outer-loop and extraction laws are tested separately by `AgentLoopLawSuite` 
 3. Read the `transition*` methods to see how hooks are translated into state changes.
 4. Read `runStateMachine` to see the complete one-iteration interpreter.
 5. Read `trajectoryStep` to see terminal states adapted back to `Either[DspyError, AgentLoop.Step]`.
-6. Compare the concrete mappings in [`ReAct.scala`](../ReAct.scala) and [`CodeAct.scala`](../CodeAct.scala).
+6. Read the concrete mapping in [`ReAct.scala`](../ReAct.scala).

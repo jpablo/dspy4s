@@ -1,7 +1,7 @@
 # dspy4s `programs`
 
 The program (module) layer — the inference patterns you actually compose: `Predict`, `ChainOfThought`,
-`ReAct`, `CodeAct`, `ProgramOfThought`, `MultiChainComparison`, `BestOfN`, `Refine`, `RLM`, plus the
+`ReAct`, `MultiChainComparison`, `BestOfN`, `Refine`, `RLM`, plus the
 introspection type-class the optimizers rely on and the in-memory retrievers. Depends on `core`, `lm`,
 `adapters`, and [`signatures`](../signatures/README.md).
 
@@ -37,8 +37,6 @@ an arity-matched parameter vector back through `replace`. This is what the [`opt
 | `OptimizableView` | A non-executable snapshot pairing `OptimizableParameters` with read-only signature structure and module name. |
 | `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
 | `ReAct[I, O]` | Reasoning-and-acting agent: iterates over a tool set using a text protocol (`next_thought` / `next_tool_name` / `next_tool_args`), then a CoT-augmented extractor produces `O`. Learnable: `reactPredict`, `extractorPredict`. |
-| `CodeAct[I, O]` | Generates and executes Python via a `CodeInterpreter` in a loop, then extracts outputs. Supports user tools bridged into the sandbox. |
-| `ProgramOfThought[I, O]` | Three-pass code reasoning: generate → regenerate on error → answer. Its three stable predictors are optimizer-addressable. |
 | `MultiChainComparison[I, O]` | Compares `m` candidate reasoning chains and synthesizes a corrected `rationale`. |
 | `BestOfN[I, O]` | Runs an inner program up to `n` times (varied by `rolloutId`), keeps the highest-reward result; short-circuits at a threshold. |
 | `Refine[P]` | Iterative feedback loop: runs, generates advice from the trace + reward, injects per-predictor hints into the next attempt. |
@@ -68,9 +66,9 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. The module of a leaf type records a `PredictorKey` in its trace entries (`ModuleLifecycle.predictor`); an optimizer uses the key to find the calls of the leaf. |
 | `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
 | `ActionInterpreter[Action, Observation]` | Executes an agent action and distinguishes success, recoverable failure, and fatal `Left`. |
-| `AgentLoop` | The bounded `Continue` / `Done` / exhaustion state-machine kernel shared by ReAct, CodeAct, RLM, and ProgramOfThought. |
-| `TrajectoryAgent[I, O, S]` | Final loop-then-extract template used by ReAct and CodeAct; owns extraction count, failure short-circuiting, envelope preservation, and complete-trajectory attachment. |
-| `InterpretedTrajectoryAgent[I, O, Entry]` | Explicit state machine for the final generate → prepare → interpret → record → decide transition shared by ReAct and CodeAct. |
+| `AgentLoop` | The bounded `Continue` / `Done` / exhaustion state-machine kernel shared by ReAct and RLM. |
+| `TrajectoryAgent[I, O, S]` | Final loop-then-extract template used by ReAct; owns extraction count, failure short-circuiting, envelope preservation, and complete-trajectory attachment. |
+| `InterpretedTrajectoryAgent[I, O, Entry]` | Explicit state machine for the final generate → prepare → interpret → record → decide transition of ReAct. |
 | `Aggregation.majority` | Picks the most-common field value across candidate completions (ties to first). |
 | `KNN` / `EmbeddingsRetriever` | Brute-force in-memory retrievers (no FAISS): nearest trainset examples by dot product, top-k passages by cosine. |
 
@@ -106,7 +104,7 @@ their callbacks, trace, history, and optimizer-addressable predictors.
 | Path | Contents |
 |------|----------|
 | `Predict.scala`, `DynamicPredict.scala` | sibling domain-value and runtime-record predictors over the shared engine |
-| `ChainOfThought.scala`, `ReAct.scala`, `CodeAct.scala`, `RLM.scala`, `ProgramOfThought.scala`, `MultiChainComparison.scala` | the composite programs |
+| `ChainOfThought.scala`, `ReAct.scala`, `RLM.scala`, `MultiChainComparison.scala` | the composite programs |
 | `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
 | `optimization/OptimizableLeaf.scala`, `OptimizableStructure.scala` | leaf lens and composite optimizer-structure typeclasses |
 | `optimization/CompositeOptimizableStructureInstances.scala`, `OptimizableStructureDerivation.scala` | built-in composite instances and strict Mirror derivation |

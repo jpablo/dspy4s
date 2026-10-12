@@ -51,7 +51,7 @@ program class:
   optimize both a standalone predictor and an arbitrary composite.
 - **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
   consumes. This is the "spine unification": it lets the optimizers target domain-valued programs (`Predict[I, O]`,
-  `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the record-valued `DynamicModule` spine, with no
+  `ChainOfThought[I, O]`, `ReAct[I, O]`, …) as well as the record-valued `DynamicModule` spine, with no
   `asInstanceOf`.
 
 Scoring across the family goes through `Evaluate` + the metric via shared helpers in `OptimizerSupport` (the

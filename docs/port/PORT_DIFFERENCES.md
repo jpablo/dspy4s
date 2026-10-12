@@ -329,8 +329,8 @@ underlying call flow; the engine is the single home for the
 adapter/LM/callback dance that Python has spread across
 `Predict.__call__` and its helpers.
 
-**Every program now carries its domain and codomain.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
-`ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
+**Every program now carries its domain and codomain.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `RLM`),
+`MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
 `DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
@@ -338,8 +338,8 @@ programs do not delegate through a universal `DynamicPredict` substrate. Three p
   output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
 - **`Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
   `NamedTuple` I/O, so the string DSL is compiler-checked; `fromStringDynamic` is the runtime (`Record`) version.
-- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so the
-  agents stream without needing a record-valued `DynamicModule` twin.
+- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so
+  `ReAct` streams without needing a record-valued `DynamicModule` twin.
 
 The cohort mutation helpers on `SignatureLayout` (`withInputFields` and
 `withOutputFields`) are `private[dspy4s]`. Composite programs use them
@@ -371,6 +371,18 @@ What genuinely remains:
 The non-architectural gaps live in [PORT_BACKLOG.md](PORT_BACKLOG.md);
 the streaming-specific ones in [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md);
 the per-symbol deltas in [PORT_MAP.md](PORT_MAP.md).
+
+## 15. `CodeAct` and `ProgramOfThought`: removed
+
+**Convention.**
+
+Python DSPy 3.4 still has `dspy.CodeAct` and `dspy.ProgramOfThought`.
+Upstream deprecated the two modules in 3.4 and removes them in 3.5.
+Upstream names `dspy.RLM` as the replacement.
+
+dspy4s removed `CodeAct` and `ProgramOfThought` at the 3.4.0 target, so
+that no more work goes into them. Use `RLM` for a program that
+generates code and runs it.
 
 ## What this means in practice
 

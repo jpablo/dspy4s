@@ -83,7 +83,7 @@ Its fields have distinct responsibilities:
 | `actionPredictOverride` | Immutable replacement for the default action predictor |
 | `extractPredictOverride` | Immutable replacement for the default fallback predictor |
 
-The outer module name is always `rlm`. Unlike `ChainOfThought`, `ReAct`, and `CodeAct`, RLM does not add a reasoning
+The outer module name is always `rlm`. Unlike `ChainOfThought` and `ReAct`, RLM does not add a reasoning
 field to `O`. It returns the base output type directly. The final action reasoning and rendered trajectory are kept in
 `Prediction.raw` instead.
 
@@ -405,7 +405,7 @@ User `ToolFunction` values take two paths:
 flowchart LR
     tools["Vector[ToolFunction]"]
     tools --> instructions["Rendered in action instructions"]
-    tools --> bridge["CodeAct.sandboxTools"]
+    tools --> bridge["SandboxToolBridge.fromToolFunctions"]
     bridge --> repl["Callable by name inside Python"]
 ```
 
@@ -538,7 +538,7 @@ The inner predictors are stable members, so callbacks and tracing can observe ev
 inputs and in the final trajectory.
 
 The current [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) defines
-dedicated instances for `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`, and `ProgramOfThought`, but not for `RLM`.
+dedicated instances for `Predict`, `ChainOfThought`, and `ReAct`, but not for `RLM`.
 Consequently, RLM does not yet have the same `Streamify` entry point and listener-signature validation as those
 programs.
 
@@ -547,14 +547,11 @@ programs.
 | Program | What the action model receives | Action language | State/evidence | Final output |
 |---|---|---|---|---|
 | `ReAct` | Input + tool trajectory | Named tool call | Rendered trajectory | Extractor always: reasoning + `O` |
-| `CodeAct` | Input + code trajectory | Python snippet | Trajectory + interpreter-specific state | Extractor always: reasoning + `O` |
 | `RLM` | Metadata + REPL history | Python over injected variables | Stateful REPL + history | `SUBMIT` → `O`; extractor on exhaustion |
-| `ProgramOfThought` | Task + program feedback | Complete program | Retry history | Answerer after successful code |
 
 RLM is most useful when the data itself is the object being explored: a large document, dataset, collection, or nested
 value that code can inspect selectively. ReAct is clearer when the domain is naturally a small vocabulary of explicit
-actions. CodeAct is a better fit when code execution gathers evidence but the final answer should always be
-synthesized by a separate predictor.
+actions.
 
 ## Reading the implementation
 

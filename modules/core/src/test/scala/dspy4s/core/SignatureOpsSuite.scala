@@ -4,8 +4,8 @@ import dspy4s.core.contracts.{FieldSpec, SignatureLayout}
 import dspy4s.core.contracts.SignatureOps.*
 
 /** Laws for the value-level signature algebra (`prependOutput` / `appendInput` / `replaceOutputs`). The composite
-  * suites (ChainOfThought / ReAct / CodeAct / MultiChainComparison) cover the migrated call sites; this pins the
-  * primitive itself.
+  * suites (ChainOfThought / ReAct / MultiChainComparison) cover the migrated call sites; this pins the primitive
+  * itself.
   */
 class SignatureOpsSuite extends munit.FunSuite:
 
