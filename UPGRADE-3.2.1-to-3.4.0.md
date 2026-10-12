@@ -80,6 +80,23 @@ two programs.
 - **Format.** Four files of batch 2 had format defects, and they are corrected. `sbt fmtCheck` stops at two old
   failures and hides new ones. Use the scalafmt command-line tool with `--list` as the check.
 
+### Batch 4 (2026-10-11): the sandbox runner, the session rules, and the interpreter factory
+
+The full suite passes: 1,197 tests, 0 failures, 6 live tests skipped. The sandbox tests ran against Deno 2.7.4.
+
+- **G-34** `runner.js` is the upstream file of f1260ff14, with three comment lines of dspy4s. The launch command has
+  the isolation flags, the Deno version check, and the cache directory argument (I1, I5).
+- **G-33** each request has a random id, one `execute` runs at a time, a session does not start again after a failure
+  or after `close`, and mount names cannot collide (I3, I4).
+- **G-35** the runtime context has an interpreter factory, and `RLM` selects its factory for each call (P2).
+- **API changes.** `RLM.interpreterFactory` is `Option[RLM.InterpreterFactory]`. `DenoPyodideInterpreter.OutputField`
+  is now `SandboxOutputField` in `core.contracts`.
+- **Change in behavior.** The sandbox runs Pyodide 0.29.4, and sandboxed code cannot read the Deno cache directory.
+- **A defect of batch 2, corrected.** The flat `RuntimeContext.copy` lost `scope.withinPredictor`. No library code
+  used that path. A test failed first.
+- **Not in this batch.** The runtime description of an interpreter (I7) waits for decision D3, because it changes the
+  RLM prompt.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -160,8 +177,8 @@ Open points from batch 1, for the owner:
 ## Phase 3: programs
 
 - [x] **P1. Interpreter failure is terminal** (89696e0cc). → G-35 (C)
-- [ ] **P2. One interpreter for each invocation, from a factory** (623360078, 6fb74fcf4, 430af8d87). `RLM` has a
-      factory. The default factory in the runtime services is open. → G-35 (R)
+- [x] **P2. One interpreter for each invocation, from a factory** (623360078, 6fb74fcf4, 430af8d87). `RLM` selects
+      the factory of the program, then of the runtime context, then the Deno sandbox. → G-35 (C)
 - [x] **P3. ReAct truncation with one tool call** (7eb5acce2). → G-37 (C)
 - [-] **P4. Echo for a single-line assignment in `_parse_code`** (fe75476cd). The parser belonged to
       `ProgramOfThought`, which is removed (D1). → G-39 (C)
@@ -175,12 +192,12 @@ Open points from batch 1, for the owner:
 
 ## Phase 4: interpreters / runtime
 
-- [ ] **I1. Vendor the current `runner.js`** (80b118e52, ab8a7658d, 07a0f7aa6): Pyodide version pin, frozen
+- [x] **I1. Vendor the current `runner.js`** (80b118e52, ab8a7658d, 07a0f7aa6): Pyodide version pin, frozen
       globals, a private control exception, and no read access to the Deno cache. → G-34 (C)
 - [x] **I2. Unsolicited sandbox error** (6334c2ba5). → G-33 (C)
-- [ ] **I3. Request ids and recursion guard** (80b118e52). → G-33 (R)
-- [ ] **I4. Mount collisions** (072c72164). → G-33 (R)
-- [ ] **I5. Launch flags, Deno version check, probe timeout** (07a0f7aa6). → G-34 (R)
+- [x] **I3. Request ids and recursion guard** (80b118e52). → G-33 (R)
+- [x] **I4. Mount collisions** (072c72164). → G-33 (R)
+- [x] **I5. Launch flags, Deno version check, probe timeout** (07a0f7aa6). → G-34 (R)
 - [ ] **I6. Persistent local Python REPL** (d58c3007e, 453823209). → G-36 (R)
 - [ ] **I7. `execution_instructions`** (0b93fb148, 750017192). → G-35 (R)
 - [ ] **I8. `SandboxSerializable`** (ed4d479a1). → G-38 (R)

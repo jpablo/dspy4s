@@ -1296,7 +1296,7 @@ next delta is emitted. `XmlStreamingState.scala:57` does not trim.
 
 ## G-33 — Sandbox protocol robustness
 
-**Status:** In progress. The first two items are resolved (2026-10-11, batch 1). · **Verification:** C (first two items), R (others) · **Upgrade items:** I2, I3, I4
+**Status:** Resolved (2026-10-11: the first two items in batch 1, the others in batch 4) · **Verification:** C · **Upgrade items:** I2, I3, I4
 
 - **Unsolicited error.** The runner can send an error with a null id. `readLoop` accepts any error without an id
   check and returns (`modules/core/.../runtime/DenoPyodideInterpreter.scala:264-275`). The real response stays in the
@@ -1315,15 +1315,47 @@ notification and an error without an id, stops on a protocol error code without 
 a different id. `handleToolCall` catches a tool exception and replies with an error. Tests: `SandboxProtocolSuite`
 (a scripted sandbox process) and two live tests in `DenoPyodideInterpreterSuite`.
 
-**Still open in those two items.** The setup read skips a response with a different id; upstream stops there. A
-tool that throws `InterruptedException` still leaves `execute`. Upstream also stops the process after a terminal
-error.
+**Resolution (batch 4).**
+
+- **Request ids.** Each request has a new random id of 32 hexadecimal characters (`DenoPyodideProtocol.newRequestId`,
+  upstream `secrets.token_hex(16)`). Sandboxed code cannot guess the id of a response.
+- **One call at a time.** A tool that calls `execute` on its interpreter gets a `Left`, and the outer call continues.
+  A call from a different thread while a call is in progress gets a `Left` too.
+- **Id mismatch.** A response with a different id is a protocol breakdown for `execute` and for the setup requests.
+- **The end of a session.** A failure of the process or of the protocol ends the session and stops the process
+  (upstream `_raise_terminal_error`). Each later call returns "The DenoPyodideInterpreter session has ended". `close`
+  ends the session too. Before, the client started a new process and lost the REPL state without a message.
+- **Error codes.** An error response with a code from -32099 to -32000 is a user-code error. Each other code ends the
+  session.
+- **Mount collisions.** Two mounts with one file name and different host files are an error before the process
+  starts (`DenoPyodideLaunch.checkMounts`).
+- **Component name.** The spawn failure of `SubprocessPythonInterpreter` uses `CodeInterpreterErrors.Interpreter`.
+
+Tests: `SandboxSessionSuite`, `SandboxProtocolSuite`, `DenoPyodideInterpreterSuite`, `SubprocessPythonInterpreterSuite`.
+
+Changes in behavior to know:
+
+- An interpreter does not start again after `close` or after a failure. Create a new interpreter.
+- An error response to a mount or to a registration ends the session.
+- A file sync that fails is a `Left`. Before, the client ignored it.
+
+Deliberate difference from upstream: upstream binds an interpreter to the thread of its first call until
+`shutdown`. dspy4s permits calls from different threads when they do not overlap.
+
+Open:
+
+- A tool that throws `InterruptedException` still leaves `execute`.
+- The read of a response has no deadline, as upstream. Code such as `while True: pass` blocks the call.
+- The client does not read the standard error of the sandbox during a session. A sandbox that fills that pipe blocks.
+- `mountOne` throws when the parent directory of a write path does not exist.
+- The client sends the file sync after a user-code error too. Upstream sends it after a success only.
+- `ProtocolErrorCodes` has five codes. Upstream has three.
 
 ---
 
 ## G-34 — The vendored sandbox runner is the 3.2.1 file
 
-**Status:** Open · **Verification:** C · **Upgrade items:** I1, I5
+**Status:** Resolved (2026-10-11, batch 4) · **Verification:** C · **Upgrade items:** I1, I5
 
 **Upstream.** `dspy/primitives/runner.js` pins Pyodide, freezes `JSON` and `console`, uses a private control
 exception, and revokes read access to the Deno cache (`runner.js:3,6,23,118,145-146`). The launcher passes
@@ -1334,14 +1366,39 @@ exception, and revokes read access to the Deno cache (`runner.js:3,6,23,118,145-
 comment lines only, and from the current file in 41 lines. `DenoPyodideLaunch.scala:20-29,49-51` has none of the
 launch changes.
 
-**Direction.** Vendor the current file. The client then needs three changes: always pass the environment
-argument, pass `--dspy-deno-dir=`, and skip notifications in `readLoop`.
+**Resolution.** The text above describes the code before the correction.
+
+- **Runner.** `runner.js` is the upstream file of f1260ff14. Three comment lines keep the dspy4s wording; a `diff`
+  with the upstream file shows only those lines. The file fixes Pyodide at 0.29.4, uses the private control exception
+  `_DSPyFinalOutput`, reports an unhandled promise rejection as a notification, freezes `JSON` and `console`, and
+  revokes the read permission for the Deno cache directory after it loaded Pyodide.
+- **Launch.** `DenoPyodideLaunch.command` passes `--no-config`, `--no-lock`, and `--node-modules-dir=false`. After the
+  runner path it always passes the list of environment variables, and then `--dspy-deno-dir=`. The process gets
+  `DENO_NO_PACKAGE_JSON=1`.
+- **Version check.** The default launch command needs Deno `>=2.0.0,<3.0.0`. The probes (`deno --version` and
+  `deno info --json`) have a time limit of 10 seconds.
+- **Write paths.** A write path cannot overlap the runner file or the Deno cache directory.
+- **Canonical paths.** `canonical` resolves the symbolic links of the part of a path that exists, as
+  `os.path.realpath` does. Before, a write path that did not exist in a directory behind a symbolic link failed at the
+  mount.
+
+Tests: `DenoPyodideLaunchSuite` and four live tests in `DenoPyodideInterpreterSuite`. Two of the live tests showed
+real faults of the old runner: sandboxed code could read the Deno cache directory through `js.Deno`, and a user
+exception with the name `FinalOutput` looked like a `SUBMIT` call.
+
+Changes in behavior to know:
+
+- The sandbox runs Pyodide 0.29.4. Before, Deno selected the newest version that it found.
+- A Deno version outside 2.x is an error for the default launch command.
+- A successful probe serves the JVM. A failed probe runs again on the next call; upstream caches the failure too.
+
+Not ported: upstream first looks for the Deno binary of the `deno` Python package. dspy4s uses `deno` from PATH.
 
 ---
 
 ## G-35 — Interpreter lifecycle in the code programs
 
-**Status:** In progress. The failure handling is resolved (2026-10-11, batch 1). The shared interpreter instance ended with the removal of `CodeAct` and `ProgramOfThought` (batch 3, G-39). · **Verification:** C (failure handling), R (others) · **Upgrade items:** P1, P2, I7
+**Status:** In progress. The failure handling is resolved (2026-10-11, batch 1). The shared interpreter instance ended with the removal of `CodeAct` and `ProgramOfThought` (batch 3, G-39). The factory and the silent restart are resolved (batch 4). The runtime description (I7) is open. · **Verification:** C (failure handling, factory), R (others) · **Upgrade items:** P1, P2, I7
 
 **Upstream.** An interpreter failure ends the run (`dspy/predict/rlm.py:775-778`, 89696e0cc). Each `forward` gets
 its own interpreter from a factory, and `dspy.settings.interpreter_factory` sets the default
@@ -1367,9 +1424,26 @@ and the LM gets no more calls. A user-code error stays an observation. One effec
 **After the removal (batch 3).** `CodeAct` and `ProgramOfThought` are removed (G-39), so the points about them no
 longer apply. `RLM` is the one code program, and it gets one interpreter for each call from its factory.
 
-**Direction (open).** Add a default interpreter factory to the runtime services, and make the factory type of `RLM`
-independent of `DenoPyodideInterpreter`. Add a deadline to the REPL read. Stop the silent restart after a process
-death.
+**Resolution (factory, batch 4).**
+
+- `ReplInterpreterFactory` and `SandboxOutputField` are in `core.contracts`. The factory type of `RLM` no longer names
+  `DenoPyodideInterpreter`.
+- `RuntimeServices.interpreterFactory` is the factory of the runtime context (upstream
+  `dspy.settings.interpreter_factory`). `RuntimeEnvironment.withSettings` sets it for a scope, which also covers the
+  upstream factory at call time (430af8d87).
+- `RLM.interpreterFactory` is `Option[...]` with the default `None`. `RLM.resolveInterpreterFactory` selects the
+  factory for each forward: the factory of the program, then the factory of the context, then the Deno sandbox
+  (upstream `resolve_interpreter_factory`).
+- The silent restart after a process death is resolved in G-33: a session does not start again.
+
+Tests: `RLMSuite`, `RuntimeEnvironmentSuite`.
+
+Deliberate difference from upstream: the dspy4s factory gets the tools and the output fields as arguments. The
+upstream factory has no arguments, and RLM changes the `tools` dictionary of the interpreter after the creation.
+
+**Direction (open).** Let an interpreter describe its runtime (`execution_instructions`, I7) and put that text in the
+RLM prompt. This changes the prompt, so it waits for decision D3. Add a deadline to the REPL read; upstream has none
+for this interpreter.
 
 ---
 
