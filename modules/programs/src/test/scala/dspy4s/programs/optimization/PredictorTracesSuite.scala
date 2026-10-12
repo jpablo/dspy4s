@@ -94,8 +94,9 @@ class PredictorTracesSuite extends FunSuite:
 
   test("an entry with a key that no leaf has is ignored") {
     val stranger = PredictorKey.from("other", qa)
-    val trace    = Vector(entry("other", Some(stranger), mark = "x"), entry("predict", Some(first.metadata.key), mark = "a"))
-    val groups   = PredictorTraces.byLeaf(Vector(first), trace).toOption.get
+    val trace    =
+      Vector(entry("other", Some(stranger), mark = "x"), entry("predict", Some(first.metadata.key), mark = "a"))
+    val groups = PredictorTraces.byLeaf(Vector(first), trace).toOption.get
     assertEquals(groups.map(marks), Vector(Vector("a")))
   }
 

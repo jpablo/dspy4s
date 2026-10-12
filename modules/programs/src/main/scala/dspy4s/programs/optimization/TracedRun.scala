@@ -24,9 +24,9 @@ private[dspy4s] object TracedRun:
   ): (Either[DspyError, RawPrediction], Vector[TraceEntry]) =
     runWith(program, call, captureFailures)((result, trace) => (result, trace))
 
-  /** Like [[run]], but `use` gets the result and the trace while the isolated context is still active. Score the run
-    * in `use`: a metric that calls a language model then records its trace and its history in the isolated context,
-    * and nothing reaches the caller's context. The trace that `use` gets holds the entries of the program only.
+  /** Like [[run]], but `use` gets the result and the trace while the isolated context is still active. Score the run in
+    * `use`: a metric that calls a language model then records its trace and its history in the isolated context, and
+    * nothing reaches the caller's context. The trace that `use` gets holds the entries of the program only.
     */
   def runWith[P, A](program: P, call: ProgramCall[DynamicValue.Record], captureFailures: Boolean = false)(
       use: (Either[DspyError, RawPrediction], Vector[TraceEntry]) => RuntimeContext ?=> A

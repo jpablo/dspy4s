@@ -342,7 +342,7 @@ class BootstrapFewShotPerPredictorSuite extends FunSuite:
 
   test("the trace entries of the metric do not reach the context of the caller") {
     val leakyMetric: Metric = new Metric:
-      override def name: String                                                                       = "leaky"
+      override def name: String = "leaky"
       override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
           RuntimeContext
       ): Either[DspyError, Double] =

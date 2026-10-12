@@ -11,8 +11,8 @@ import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** Each predictor writes the key of its leaf metadata into its trace entries (UPGRADE-3.2.1-to-3.4.0, decision D2).
-  * An optimizer depends on that equality to find the calls of a leaf.
+/** Each predictor writes the key of its leaf metadata into its trace entries (UPGRADE-3.2.1-to-3.4.0, decision D2). An
+  * optimizer depends on that equality to find the calls of a leaf.
   */
 class PredictorTraceKeySuite extends FunSuite:
 
@@ -41,7 +41,8 @@ class PredictorTraceKeySuite extends FunSuite:
       failParse      : Boolean = false,
       captureFailures: Boolean = false
   ): (Either[DspyError, ?], Vector[TraceEntry]) =
-    val settings = RuntimeContext(lm = Some(new ScriptedLm(Vector.fill(16)("v"))), adapter = Some(FillAdapter(failParse)))
+    val settings =
+      RuntimeContext(lm = Some(new ScriptedLm(Vector.fill(16)("v"))), adapter = Some(FillAdapter(failParse)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
       TracedRun.run(program, ProgramCall(inputs), captureFailures)
@@ -106,8 +107,14 @@ class PredictorTraceKeySuite extends FunSuite:
 
     assertEquals(PredictorTraces.requireDistinctKeys(leaves), Right(()))
     val groups = PredictorTraces.byLeaf(leaves, trace).toOption.get
-    assertEquals(groups.map(_.map(_.predictor)), Vector(Vector(Some(first.optimizableView.metadata.key)), Vector(Some(second.optimizableView.metadata.key))))
-    assertEquals(groups.map(_.map(e => DynamicValues.recordKeys(e.outputs))), Vector(Vector(Vector("answer")), Vector(Vector("summary"))))
+    assertEquals(
+      groups.map(_.map(_.predictor)),
+      Vector(Vector(Some(first.optimizableView.metadata.key)), Vector(Some(second.optimizableView.metadata.key)))
+    )
+    assertEquals(
+      groups.map(_.map(e => DynamicValues.recordKeys(e.outputs))),
+      Vector(Vector(Vector("answer")), Vector(Vector("summary")))
+    )
   }
 
   test("the same predictor two times in one program fails the distinct-key check") {
