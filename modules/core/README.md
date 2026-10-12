@@ -55,6 +55,7 @@ Four abstractions anchor the framework:
 | `DspyError` | Sealed error hierarchy: `ConfigurationError`, `ValidationError`, `NotFoundError`, `ParseError`, `RuntimeError`, `ContextWindowExceededError`, each with a `code` + message, propagated through `Either`. |
 | `ToolCall` | A model-requested tool invocation (`name` + args record), carried as structured data through wire → adapter → domain decode. |
 | `CodeInterpreter` / `ReplCodeInterpreter` | The code-execution sandbox interface used by `RLM`; the Deno/Pyodide and subprocess-Python implementations live here. |
+| `ReplInterpreterFactory` / `SandboxOutputField` | The factory that builds one REPL interpreter for one program call, from the host tools and the output fields of `SUBMIT`. `RuntimeServices.interpreterFactory` holds the factory of the runtime context. |
 
 ## Design notes
 

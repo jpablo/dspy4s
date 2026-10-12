@@ -176,3 +176,22 @@ class RuntimeEnvironmentSuite extends FunSuite:
       assertEquals(RuntimeEnvironment.current.history, Vector.empty)
     }
   }
+
+  test("the flat copy keeps the predictor extent of the scope") {
+    val context = RuntimeContext().withScope(dspy4s.core.contracts.RuntimeScope(withinPredictor = true))
+    assert(context.copy(disableHistory = Some(true)).scope.withinPredictor, "copy lost scope.withinPredictor")
+  }
+
+  test("the interpreter factory is a service: a scope fills it from the defaults, and copy keeps it") {
+    val factory: dspy4s.core.contracts.ReplInterpreterFactory =
+      (_, _) => throw new IllegalStateException("the factory is not called in this test")
+    val defaults = RuntimeContext(interpreterFactory = Some(factory))
+
+    assertEquals(RuntimeContext().interpreterFactory, None)
+    assert(RuntimeContext().fillFrom(defaults).interpreterFactory.exists(_ eq factory))
+    assert(defaults.copy(disableHistory = Some(true)).interpreterFactory.exists(_ eq factory))
+    RuntimeEnvironment.withSettings(defaults) {
+      assert(RuntimeEnvironment.current.interpreterFactory.exists(_ eq factory))
+    }
+    assertEquals(RuntimeEnvironment.current.interpreterFactory, None)
+  }

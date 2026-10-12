@@ -33,7 +33,8 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
     val outputFields = baseLayout.outputFields.map { field =>
       SandboxOutputField(field.name, field.typeRef.pythonTypeName)
     }
-    val interpreter       = rlm.interpreterFactory(sandboxTools, outputFields)
+    val factory           = RLM.resolveInterpreterFactory(rlm.interpreterFactory)
+    val interpreter       = factory(sandboxTools, outputFields)
     val actionInterpreter = replActionInterpreter(interpreter, inputVars)
     try iterate(call, actionInterpreter, variablesInfo)
     finally interpreter.close()

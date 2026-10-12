@@ -6,13 +6,18 @@ import zio.blocks.schema.DynamicValue
 final case class RuntimeServices(
     lm       : Option[LanguageModelRef] = None,
     adapter  : Option[AdapterRef]       = None,
-    callbacks: Vector[CallbackHandler]  = Vector.empty
+    callbacks: Vector[CallbackHandler]  = Vector.empty,
+    /** The factory that builds the REPL interpreter of a code program such as `RLM`, when the program has no factory of
+      * its own (Python DSPy's `dspy.settings.interpreter_factory`). `None` selects the default of the program.
+      */
+    interpreterFactory: Option[ReplInterpreterFactory] = None
 ) derives CanEqual:
   def fillFrom(defaults: RuntimeServices): RuntimeServices =
     RuntimeServices(
       lm = lm.orElse(defaults.lm),
       adapter = adapter.orElse(defaults.adapter),
-      callbacks = if callbacks.nonEmpty then callbacks else defaults.callbacks
+      callbacks = if callbacks.nonEmpty then callbacks else defaults.callbacks,
+      interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory)
     )
 
 /** Immutable runtime policy and tuning values. Unlike [[RuntimeServices]], these fields contain no executable
@@ -72,21 +77,22 @@ final class RuntimeContext private (
     val delta   : RuntimeDelta
 ) derives CanEqual:
 
-  def lm: Option[LanguageModelRef]          = services.lm
-  def adapter: Option[AdapterRef]           = services.adapter
-  def callbacks: Vector[CallbackHandler]    = services.callbacks
-  def numThreads: Option[ThreadCount]       = config.numThreads
-  def maxErrors: Option[ErrorLimit]         = config.maxErrors
-  def maxHistorySize: Option[HistoryLimit]  = config.maxHistorySize
-  def disableHistory: Option[Boolean]       = config.disableHistory
-  def trackUsage: Option[Boolean]           = config.trackUsage
-  def callbackMetadata: DynamicValue.Record = config.callbackMetadata
-  def captureFailureTraces: Boolean         = config.captureFailureTraces
-  def asyncTaskId: Option[String]           = scope.asyncTaskId
-  def activeCallId: Option[String]          = scope.activeCallId
-  def callStack: Vector[String]             = scope.callStack
-  def trace: Vector[TraceEntry]             = delta.trace
-  def history: Vector[HistoryEntry]         = delta.history
+  def lm: Option[LanguageModelRef]                       = services.lm
+  def adapter: Option[AdapterRef]                        = services.adapter
+  def callbacks: Vector[CallbackHandler]                 = services.callbacks
+  def interpreterFactory: Option[ReplInterpreterFactory] = services.interpreterFactory
+  def numThreads: Option[ThreadCount]                    = config.numThreads
+  def maxErrors: Option[ErrorLimit]                      = config.maxErrors
+  def maxHistorySize: Option[HistoryLimit]               = config.maxHistorySize
+  def disableHistory: Option[Boolean]                    = config.disableHistory
+  def trackUsage: Option[Boolean]                        = config.trackUsage
+  def callbackMetadata: DynamicValue.Record              = config.callbackMetadata
+  def captureFailureTraces: Boolean                      = config.captureFailureTraces
+  def asyncTaskId: Option[String]                        = scope.asyncTaskId
+  def activeCallId: Option[String]                       = scope.activeCallId
+  def callStack: Vector[String]                          = scope.callStack
+  def trace: Vector[TraceEntry]                          = delta.trace
+  def history: Vector[HistoryEntry]                      = delta.history
 
   def withServices(updated: RuntimeServices): RuntimeContext = RuntimeContext.fromParts(updated, config, scope, delta)
   def withConfig(updated  : RuntimeConfig): RuntimeContext   = RuntimeContext.fromParts(services, updated, scope, delta)
@@ -101,36 +107,36 @@ final class RuntimeContext private (
 
   /** Compatibility copy over the former flat case-class surface. */
   def copy(
-      lm                  : Option[LanguageModelRef] = this.lm,
-      adapter             : Option[AdapterRef]       = this.adapter,
-      callbacks           : Vector[CallbackHandler]  = this.callbacks,
-      numThreads          : Option[ThreadCount]      = this.numThreads,
-      maxErrors           : Option[ErrorLimit]       = this.maxErrors,
-      maxHistorySize      : Option[HistoryLimit]     = this.maxHistorySize,
-      disableHistory      : Option[Boolean]          = this.disableHistory,
-      trackUsage          : Option[Boolean]          = this.trackUsage,
-      callbackMetadata    : DynamicValue.Record      = this.callbackMetadata,
-      captureFailureTraces: Boolean                  = this.captureFailureTraces,
-      asyncTaskId         : Option[String]           = this.asyncTaskId,
-      callStack           : Vector[String]           = this.callStack,
-      trace               : Vector[TraceEntry]       = this.trace,
-      history             : Vector[HistoryEntry]     = this.history
+      lm                  : Option[LanguageModelRef]       = this.lm,
+      adapter             : Option[AdapterRef]             = this.adapter,
+      callbacks           : Vector[CallbackHandler]        = this.callbacks,
+      numThreads          : Option[ThreadCount]            = this.numThreads,
+      maxErrors           : Option[ErrorLimit]             = this.maxErrors,
+      maxHistorySize      : Option[HistoryLimit]           = this.maxHistorySize,
+      disableHistory      : Option[Boolean]                = this.disableHistory,
+      trackUsage          : Option[Boolean]                = this.trackUsage,
+      callbackMetadata    : DynamicValue.Record            = this.callbackMetadata,
+      captureFailureTraces: Boolean                        = this.captureFailureTraces,
+      asyncTaskId         : Option[String]                 = this.asyncTaskId,
+      callStack           : Vector[String]                 = this.callStack,
+      trace               : Vector[TraceEntry]             = this.trace,
+      history             : Vector[HistoryEntry]           = this.history,
+      interpreterFactory  : Option[ReplInterpreterFactory] = this.interpreterFactory
   ): RuntimeContext =
-    RuntimeContext(
-      lm = lm,
-      adapter = adapter,
-      callbacks = callbacks,
-      numThreads = numThreads,
-      maxErrors = maxErrors,
-      maxHistorySize = maxHistorySize,
-      disableHistory = disableHistory,
-      trackUsage = trackUsage,
-      callbackMetadata = callbackMetadata,
-      captureFailureTraces = captureFailureTraces,
-      asyncTaskId = asyncTaskId,
-      callStack = callStack,
-      trace = trace,
-      history = history
+    // The scope is copied, not built again: it has fields that this flat surface does not show.
+    RuntimeContext.fromParts(
+      RuntimeServices(lm, adapter, callbacks, interpreterFactory),
+      RuntimeConfig(
+        numThreads,
+        maxErrors,
+        maxHistorySize,
+        disableHistory,
+        trackUsage,
+        callbackMetadata,
+        captureFailureTraces
+      ),
+      scope.copy(asyncTaskId = asyncTaskId, callStack = callStack),
+      RuntimeDelta(trace, history)
     )
 
   /** Fill unset services/config/scope fields from `defaults`. The accumulated delta is intentionally never inherited:
@@ -157,23 +163,24 @@ final class RuntimeContext private (
 object RuntimeContext:
   /** Flat compatibility constructor. */
   def apply(
-      lm                  : Option[LanguageModelRef] = None,
-      adapter             : Option[AdapterRef]       = None,
-      callbacks           : Vector[CallbackHandler]  = Vector.empty,
-      numThreads          : Option[ThreadCount]      = None,
-      maxErrors           : Option[ErrorLimit]       = None,
-      maxHistorySize      : Option[HistoryLimit]     = None,
-      disableHistory      : Option[Boolean]          = None,
-      trackUsage          : Option[Boolean]          = None,
-      callbackMetadata    : DynamicValue.Record      = DynamicValue.Record.empty,
-      captureFailureTraces: Boolean                  = false,
-      asyncTaskId         : Option[String]           = None,
-      callStack           : Vector[String]           = Vector.empty,
-      trace               : Vector[TraceEntry]       = Vector.empty,
-      history             : Vector[HistoryEntry]     = Vector.empty
+      lm                  : Option[LanguageModelRef]       = None,
+      adapter             : Option[AdapterRef]             = None,
+      callbacks           : Vector[CallbackHandler]        = Vector.empty,
+      numThreads          : Option[ThreadCount]            = None,
+      maxErrors           : Option[ErrorLimit]             = None,
+      maxHistorySize      : Option[HistoryLimit]           = None,
+      disableHistory      : Option[Boolean]                = None,
+      trackUsage          : Option[Boolean]                = None,
+      callbackMetadata    : DynamicValue.Record            = DynamicValue.Record.empty,
+      captureFailureTraces: Boolean                        = false,
+      asyncTaskId         : Option[String]                 = None,
+      callStack           : Vector[String]                 = Vector.empty,
+      trace               : Vector[TraceEntry]             = Vector.empty,
+      history             : Vector[HistoryEntry]           = Vector.empty,
+      interpreterFactory  : Option[ReplInterpreterFactory] = None
   ): RuntimeContext =
     fromParts(
-      RuntimeServices(lm, adapter, callbacks),
+      RuntimeServices(lm, adapter, callbacks, interpreterFactory),
       RuntimeConfig(
         numThreads,
         maxErrors,

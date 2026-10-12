@@ -58,7 +58,7 @@ final case class RLM[I, O](
     verbose: Boolean = false,
     tools: Vector[ToolFunction] = Vector.empty,
     subLm: Option[LanguageModel] = None,
-    interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
+    interpreterFactory: Option[RLM.InterpreterFactory] = None,
     actionProgramName: String = "rlm_action",
     extractProgramName: String = "rlm_extract",
     actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
@@ -77,7 +77,7 @@ Its fields have distinct responsibilities:
 | `verbose` | Logs each action and ordinary step output to stderr |
 | `tools` | Extra `ToolFunction` values callable from generated Python |
 | `subLm` | Optional LM used by the in-REPL `llm_query` tools |
-| `interpreterFactory` | Creates the stateful REPL owned by one forward call |
+| `interpreterFactory` | Creates the stateful REPL owned by one forward call. `None` selects the factory of the runtime context, then the Deno sandbox |
 | `actionProgramName` | Module name of the per-iteration predictor |
 | `extractProgramName` | Module name of the fallback predictor |
 | `actionPredictOverride` | Immutable replacement for the default action predictor |
@@ -447,6 +447,22 @@ features RLM depends on:
 RLM owns the interpreter returned by `interpreterFactory` and always closes it. A custom factory should therefore
 create a fresh interpreter or otherwise transfer ownership to the call; it should not return a shared interpreter that
 must remain alive afterward.
+
+RLM selects the factory for each forward call in this order:
+
+1. the `interpreterFactory` of the program, when it is set;
+2. the `interpreterFactory` of the runtime context, when it is set;
+3. `RLM.defaultInterpreterFactory`, which creates a `DenoPyodideInterpreter`.
+
+A factory in the runtime context applies to each RLM in its scope that has no factory of its own:
+
+```scala
+val factory: ReplInterpreterFactory = (tools, outputFields) => myInterpreter(tools, outputFields)
+
+RuntimeEnvironment.withSettings(RuntimeContext(interpreterFactory = Some(factory))) {
+  rlm(input) // uses `factory`
+}
+```
 
 The default interpreter runs Python through Pyodide under Deno rather than as an unrestricted host `python3` process.
 If a custom `ReplCodeInterpreter` is supplied, its isolation, persistence, timeout, and tool-bridge guarantees become

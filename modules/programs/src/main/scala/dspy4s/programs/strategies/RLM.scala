@@ -56,20 +56,21 @@ import zio.blocks.schema.DynamicValue
   * @param subLm
   *   LM for `llm_query` — defaults to the ambient context's LM (pass a cheaper model here)
   * @param interpreterFactory
-  *   builds the per-forward REPL from (tools, output fields); defaults to a fresh [[DenoPyodideInterpreter]]. RLM
-  *   closes what it builds after each forward.
+  *   builds the per-forward REPL from (tools, output fields). `None` selects the factory of the runtime context
+  *   (`RuntimeContext.interpreterFactory`), and a fresh [[DenoPyodideInterpreter]] when the context has none. RLM
+  *   closes what the factory builds after each forward.
   */
 final case class RLM[I, O](
     baseSignature     : Signature[I, O],
-    maxIterations     : IterationLimit         = IterationLimit(20),
-    maxLlmCalls       : LlmCallLimit           = LlmCallLimit(50),
-    maxOutputChars    : OutputCharLimit        = OutputCharLimit(10_000),
-    verbose           : Boolean                = false,
-    tools             : Vector[ToolFunction]   = Vector.empty,
-    subLm             : Option[LanguageModel]  = None,
-    interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
-    actionProgramName : String                 = "rlm_action",
-    extractProgramName: String                 = "rlm_extract",
+    maxIterations     : IterationLimit                 = IterationLimit(20),
+    maxLlmCalls       : LlmCallLimit                   = LlmCallLimit(50),
+    maxOutputChars    : OutputCharLimit                = OutputCharLimit(10_000),
+    verbose           : Boolean                        = false,
+    tools             : Vector[ToolFunction]           = Vector.empty,
+    subLm             : Option[LanguageModel]          = None,
+    interpreterFactory: Option[RLM.InterpreterFactory] = None,
+    actionProgramName : String                         = "rlm_action",
+    extractProgramName: String                         = "rlm_extract",
     /** Optional override for the per-iteration action predict (tunable; see ReAct's same pattern) — a `Predict` over
       * the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
       */
@@ -222,6 +223,13 @@ object RLM:
   /** Fresh sandboxed [[DenoPyodideInterpreter]] per forward (closed by RLM afterwards) — upstream's default. */
   val defaultInterpreterFactory: InterpreterFactory =
     (tools, outputs) => new DenoPyodideInterpreter(tools = tools, outputFields = outputs)
+
+  /** The factory for the next interpreter (upstream `resolve_interpreter_factory`): the factory of the program, then
+    * the factory of the runtime context, then [[defaultInterpreterFactory]]. `RLMExecution` calls this for each
+    * forward, so a factory that `RuntimeEnvironment.withSettings` installs applies to the calls in its scope.
+    */
+  def resolveInterpreterFactory(own: Option[InterpreterFactory])(using ctx: RuntimeContext): InterpreterFactory =
+    own.orElse(ctx.interpreterFactory).getOrElse(defaultInterpreterFactory)
 
   /** Names of built-in sandbox functions user tools must not shadow (upstream `_RESERVED_TOOL_NAMES`). */
   val ReservedToolNames: Set[String] = Set("llm_query", "llm_query_batched", "SUBMIT", "print")

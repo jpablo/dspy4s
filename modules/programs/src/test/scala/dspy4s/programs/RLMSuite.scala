@@ -71,7 +71,7 @@ class RLMSuite extends FunSuite:
       repl         : ScriptedRepl,
       maxIterations: IterationLimit = IterationLimit(5)
   ): RLM[(context: String, query: String), (answer: String)] =
-    RLM(baseSignature = qaSignature, maxIterations = maxIterations, interpreterFactory = (_, _) => repl)
+    RLM(baseSignature = qaSignature, maxIterations = maxIterations, interpreterFactory = Some((_, _) => repl))
 
   test("SUBMIT terminates the loop: outputs decode, trajectory + final_reasoning ride on .raw, repl is closed") {
     val repl = new ScriptedRepl(Vector(
@@ -234,9 +234,10 @@ class RLMSuite extends FunSuite:
     val program = RLM(
       baseSignature = qaSignature,
       tools = Vector(tool),
-      interpreterFactory = (sandboxTools, _) =>
+      interpreterFactory = Some { (sandboxTools, _) =>
         bridged ++= sandboxTools
         repl
+      }
     )
 
     withRlm(new ScriptedLm(Vector("solved it||```python\nSUBMIT(answer='42')\n```")), new ProbeAdapter) {
@@ -313,7 +314,7 @@ class RLMSuite extends FunSuite:
       baseSignature = qaSignature,
       maxIterations = IterationLimit(5),
       verbose = true,
-      interpreterFactory = (_, _) => repl
+      interpreterFactory = Some((_, _) => repl)
     )
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
@@ -383,4 +384,97 @@ class RLMSuite extends FunSuite:
       assertEquals(lm.calls.get(), 2)
       assert(probe.actionHistories.lastOption.exists(_.contains("NameError")), probe.actionHistories.toString)
     }
+  }
+
+  // The tests below are for the interpreter factory of the runtime context (PORT_GAPS G-35; upstream
+  // `dspy.settings.interpreter_factory` and `resolve_interpreter_factory`).
+
+  private def submitRepl(answer: String): ScriptedRepl =
+    new ScriptedRepl(Vector(Right(CodeResult("", "", 0, finalOutput = Some(s"""{"answer": "$answer"}""")))))
+
+  private def submitLm: ScriptedLm = new ScriptedLm(Vector("solved it||```python\nSUBMIT(answer='x')\n```"))
+
+  test("an RLM without a factory uses the factory of the runtime context") {
+    val repl    = submitRepl("from context")
+    val seen    = ArrayBuffer.empty[(Vector[String], Vector[String])]
+    val program = RLM(baseSignature = qaSignature)
+    val context = RuntimeContext(
+      lm = Some(submitLm),
+      adapter = Some(new ProbeAdapter),
+      interpreterFactory = Some { (tools, outputs) =>
+        seen += ((tools.map(_.name), outputs.map(_.name)))
+        repl
+      }
+    )
+
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("from context"))
+    }
+    // The factory gets the sandbox tools and the output fields of SUBMIT, and RLM closes the interpreter.
+    assertEquals(seen.toVector, Vector((Vector("llm_query", "llm_query_batched"), Vector("answer"))))
+    assert(repl.closed, "RLM must close the interpreter that the context factory built")
+  }
+
+  test("the factory of the RLM wins over the factory of the runtime context") {
+    val own     = submitRepl("from program")
+    val ambient = submitRepl("from context")
+    val program = RLM(baseSignature = qaSignature, interpreterFactory = Some((_, _) => own))
+    val context = RuntimeContext(
+      lm = Some(submitLm),
+      adapter = Some(new ProbeAdapter),
+      interpreterFactory = Some((_, _) => ambient)
+    )
+
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("from program"))
+    }
+    assertEquals(ambient.executed.size, 0)
+  }
+
+  test("the context factory builds one interpreter for each call") {
+    val built   = ArrayBuffer.empty[ScriptedRepl]
+    val program = RLM(baseSignature = qaSignature)
+    val context = RuntimeContext(
+      lm = Some(new ScriptedLm(Vector.fill(2)("solved it||```python\nSUBMIT(answer='x')\n```"))),
+      adapter = Some(new ProbeAdapter),
+      interpreterFactory = Some { (_, _) =>
+        val repl = submitRepl(s"call ${built.size + 1}")
+        built += repl
+        repl
+      }
+    )
+
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("call 1"))
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("call 2"))
+    }
+    assertEquals(built.size, 2)
+    assert(built.forall(_.closed), "RLM must close each interpreter")
+  }
+
+  test("a factory in a nested scope replaces the factory of the outer scope for that scope only") {
+    val outer                                  = ArrayBuffer.empty[String]
+    val program                                = RLM(baseSignature = qaSignature)
+    def context(label: String): RuntimeContext =
+      RuntimeContext(
+        lm = Some(submitLm),
+        adapter = Some(new ProbeAdapter),
+        interpreterFactory = Some { (_, _) =>
+          outer += label
+          submitRepl(label)
+        }
+      )
+
+    RuntimeEnvironment.withSettings(context("outer")) {
+      RuntimeEnvironment.withSettings(context("inner")) {
+        given RuntimeContext = RuntimeEnvironment.current
+        assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("inner"))
+      }
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("outer"))
+    }
+    assertEquals(outer.toVector, Vector("inner", "outer"))
   }
