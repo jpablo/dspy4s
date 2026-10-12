@@ -43,6 +43,10 @@ A metric can also give scores for named objectives
 on one objective: `Objective`, `Hybrid`, or `Cartesian`. The default is
 `Instance`, which uses the score of each validation example only.
 
+An iteration makes one proposal by default. `GepaConfig.proposalSampling`
+gives it more: for example `SameParent(4)` proposes four children of one
+parent, each from its own minibatch, and evaluates them in parallel.
+
 ## Choosing one
 
 | Optimizer | Strategy | Use when |

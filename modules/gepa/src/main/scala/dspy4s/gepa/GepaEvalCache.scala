@@ -74,21 +74,50 @@ final class GepaEvalCache[P](adapter: GepaAdapter[P]):
     * for (cache misses). A cache hit gives the score and the objective scores of the first evaluation of that pair.
     */
   def scored(candidate: Candidate, batch: Vector[Example])(using RuntimeContext): ScoredBatch =
-    val missing = batch.distinct.filterNot(example => cache.contains((candidate, example)))
-    if missing.nonEmpty then
-      val evaluated  = adapter.evaluate(missing, candidate, captureTraces = false)
-      val objectives = evaluated.objectiveScores.getOrElse(missing.map(_ => Map.empty[String, Double]))
-      require(
-        evaluated.scores.size == missing.size,
-        s"GEPA adapter returned ${evaluated.scores.size} scores for ${missing.size} examples"
+    scoredAll(Vector(candidate), batch).head
+
+  /** [[scored]] for each of `candidates`, in order, with one [[GepaAdapter.batchEvaluate]] call for the examples that
+    * are not in the cache. The engine thread reads and writes the cache; only the evaluations run in parallel. Equal
+    * candidates in `candidates` are evaluated one time.
+    *
+    * [[ScoredBatch.evaluated]] of the first of some equal candidates is the count of its cache misses. For each later
+    * one it is 0, so the sum over the result is the number of examples that an evaluation ran for.
+    */
+  def scoredAll(candidates: Vector[Candidate], batch: Vector[Example])(using RuntimeContext): Vector[ScoredBatch] =
+    val examples = batch.distinct
+    // The examples of each distinct candidate that are not in the cache. A candidate with no such example is not here.
+    val missing = candidates.distinct
+      .map(candidate => candidate -> examples.filterNot(example => cache.contains((candidate, example))))
+      .filter((_, misses) => misses.nonEmpty)
+    val evaluated = adapter.batchEvaluate(missing, captureTraces = false)
+    require(
+      evaluated.size == missing.size,
+      s"GEPA adapter returned ${evaluated.size} evaluations for ${missing.size} candidates"
+    )
+    missing.zip(evaluated).foreach { case ((candidate, misses), evaluation) => store(candidate, misses, evaluation) }
+    val missCount  = missing.iterator.map((candidate, misses) => candidate -> misses.size).toMap
+    val firstIndex = candidates.zipWithIndex.distinctBy((candidate, _) => candidate).toMap
+    candidates.zipWithIndex.map { (candidate, index) =>
+      val entries = batch.map(example => cache((candidate, example)))
+      ScoredBatch(
+        entries.map(_.score),
+        entries.map(_.objectiveScores),
+        evaluated = if firstIndex(candidate) == index then missCount.getOrElse(candidate, 0) else 0
       )
-      require(
-        objectives.size == missing.size,
-        s"GEPA adapter returned ${objectives.size} objective score maps for ${missing.size} examples"
-      )
-      missing.indices.foreach(i => cache((candidate, missing(i))) = Entry(evaluated.scores(i), objectives(i)))
-    val entries = batch.map(example => cache((candidate, example)))
-    ScoredBatch(entries.map(_.score), entries.map(_.objectiveScores), missing.size)
+    }
+
+  /** Write the result of one evaluation of `candidate` on `examples` to the cache. */
+  private def store(candidate: Candidate, examples: Vector[Example], evaluation: EvaluationBatch): Unit =
+    val objectives = evaluation.objectiveScores.getOrElse(examples.map(_ => Map.empty[String, Double]))
+    require(
+      evaluation.scores.size == examples.size,
+      s"GEPA adapter returned ${evaluation.scores.size} scores for ${examples.size} examples"
+    )
+    require(
+      objectives.size == examples.size,
+      s"GEPA adapter returned ${objectives.size} objective score maps for ${examples.size} examples"
+    )
+    examples.indices.foreach(i => cache((candidate, examples(i))) = Entry(evaluation.scores(i), objectives(i)))
 
   /** The batch's per-example scores (aligned with `batch`) plus the count of examples that had to be actually evaluated
     * (cache misses). Cache hits are free. The scores of [[scored]], with no objective scores.

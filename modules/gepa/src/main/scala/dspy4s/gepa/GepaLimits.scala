@@ -39,6 +39,11 @@ type InstructionCharLimit = InstructionCharLimit.T
 
 object InstructionCharLimit extends RefinedSubtype[Int, Positive]
 
+/** A strictly positive number of proposals, parents, or mutations of one reflective iteration. */
+type ProposalCount = ProposalCount.T
+
+object ProposalCount extends RefinedSubtype[Int, Positive]
+
 /** A candidate pool containing at least the seed candidate. */
 type CandidatePool = CandidatePool.T
 

@@ -24,7 +24,7 @@ final case class ParallelExecutionResult[+A](
 )
 
 final class ParallelExecutor(
-    numThreads: ThreadCount    = ThreadCount(8),
+    numThreads: ThreadCount    = ParallelExecutor.DefaultNumThreads,
     maxErrors : ErrorLimit     = ErrorLimit(10),
     timeout   : FiniteDuration = 120.seconds
 ):
@@ -142,6 +142,9 @@ final class ParallelExecutor(
       val _ = pool.shutdownNow()
 
 object ParallelExecutor:
+  /** The number of threads of an executor when the caller and the context give none. */
+  val DefaultNumThreads: ThreadCount = ThreadCount(8)
+
   /** Build an executor from the ambient context's `numThreads` / `maxErrors`, falling back to the defaults. Explicit
     * `numThreads` / `maxErrors` arguments win over the context (the resolution chain [[dspy4s.programs.Parallel]]
     * uses); the fallback constants live only here.
@@ -153,7 +156,7 @@ object ParallelExecutor:
   )(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
-      numThreads = numThreads.orElse(ctx.numThreads).getOrElse(ThreadCount(8)),
+      numThreads = numThreads.orElse(ctx.numThreads).getOrElse(DefaultNumThreads),
       maxErrors = maxErrors.orElse(ctx.maxErrors).getOrElse(ErrorLimit(10)),
       timeout = timeout
     )

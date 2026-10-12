@@ -175,6 +175,54 @@ metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
 
 The **budget** counts metric (evaluation) calls only — reflection-LM calls are free, matching gepa.
 
+### More than one proposal in an iteration
+
+By default an iteration makes one proposal: one parent, one minibatch, one child. `GepaConfig.proposalSampling`
+gives an iteration more than one task. Each task has a parent and a minibatch, and it can give one proposal.
+
+| `proposalSampling` | Tasks of one iteration |
+|--------------------|------------------------|
+| `Single` (default) | one parent, one minibatch |
+| `SameParent(n)` | one parent, `n` minibatches |
+| `Independent(n)` | `n` parent draws, each with its own minibatch |
+| `PxN(p, n)` | `p` parent draws, `n` minibatches for each |
+
+An iteration then has these stages, as upstream:
+
+1. The engine samples the tasks in order. A later task of an iteration takes the next window of the minibatch
+   sampler.
+2. It evaluates the parents with traces in one batch. Tasks with the same parent and the same minibatch share one
+   evaluation.
+3. For each task in order, it applies the perfect-score check, selects the components, and builds the reflective
+   records. Each task moves the round-robin pointer of its parent. Two tasks of one parent thus change two
+   different components.
+4. The proposer writes the new texts for each task, in task order.
+5. The engine evaluates the children in one batch, each on the minibatch of its task.
+6. `acceptance` and `proposalSelection` select the proposals that continue.
+7. The engine removes a selected child that is equal to an earlier one, validates the others in one batch, and
+   adds them to the pool in order. Each added candidate schedules one merge.
+
+| `acceptance` | A proposal passes when |
+|--------------|------------------------|
+| `StrictImprovement` (default) | the minibatch sum of the child is larger than that of the parent |
+| `ImprovementOrEqual` | it is larger or equal |
+
+| `proposalSelection` | Selected proposals |
+|---------------------|--------------------|
+| `AllImprovements` (default) | each proposal that passes, in task order |
+| `BestImprovement` | the one with the largest gain; the first one wins a tie |
+| `TopK(k)` | the `k` with the largest gains, largest first |
+
+`GepaAdapter.batchEvaluate` runs the evaluations of one batch in parallel. It divides the threads of the context
+between the candidates: 8 threads and 3 candidates give 3, 3, and 2 threads. The reflection calls run one after
+the other, in task order, so a run stays repeatable for a seed.
+
+The budget stays a hard limit. An iteration starts only when its largest possible cost fits in the budget that
+remains: the minibatch evaluations of each parent and each child, and one validation for each proposal that the
+selection can take. For `n` tasks, a minibatch of `m`, and a validation set of `V`, that cost is
+`2 × n × m + limit × V`, where `limit` is `n` for `AllImprovements`, 1 for `BestImprovement`, and at most `k` for
+`TopK(k)`. Upstream checks the budget only at the start of an iteration, so it can go above the budget.
+
 ### The instruction proposer
 
 An `InstructionProposer` writes the new instruction text of an iteration. `Gepa` and `GepaEngine` use
@@ -250,6 +298,8 @@ The upstream options `skills` and `truncate_history_outputs` are not ported.
 | `candidateSelector` / `componentSelector` | parent selection (Pareto) and component selection (round-robin) |
 | `batchSampler` | `EpochShuffled` (default) or `RandomDraw` |
 | `frontierType` | the Pareto fronts for selection and merge: `Instance` (default), `Objective`, `Hybrid`, or `Cartesian` |
+| `proposalSampling` | the tasks of one iteration: `Single` (default), `SameParent(n)`, `Independent(n)`, or `PxN(p, n)` |
+| `proposalSelection` / `acceptance` | which evaluated proposals go to the pool (all strict improvements by default) |
 | `useMerge` / `maxMergeInvocations` | enable crossover (default on) and cap accepted merges |
 | `mergeValOverlapFloor` | the smallest number of validation examples that the two candidates of a merge share (default 5, as upstream) |
 | `skipPerfectScore` / `perfectScore` | skip reflecting on already-perfect minibatches |
@@ -268,6 +318,7 @@ The upstream options `skills` and `truncate_history_outputs` are not ported.
 | `GepaState.scala` | candidate pool, subscores, objective scores, lineage, Pareto fronts (`FrontierType`, `FrontierKey`) |
 | `Candidate.scala` | the genome (component → optional instruction) + seed/apply |
 | `InstructionProposer.scala` | the `InstructionProposer` trait and `DefaultInstructionProposer` (reflective mutation) |
+| `GepaProposals.scala` | `ProposalSampling`, `ProposalSelection`, `ProposalAcceptance`, `Proposal` |
 | `MergeProposer.scala` | crossover over common ancestors |
 | `MinibatchSampler.scala` | minibatch sampling strategies |
 | `ReflectiveRecord.scala`, `EvaluationBatch.scala` | reflective dataset record + batch/trajectory results |
@@ -280,6 +331,6 @@ GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and 
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns an `Either[DspyError, GepaResult[P]]` rather than an
 `OptimizationReport[P]`.
-Not ported from upstream: more than one proposal in an iteration, and the full resume of a run (PORT_GAPS G-44,
-G-45). Per the [module-purity principle](../../README.md), the program stays an
+Not ported from upstream: the full resume of a run, the stop reason of a run, and the `auto` budgets of the
+facade (PORT_GAPS G-44, G-45). Per the [module-purity principle](../../README.md), the program stays an
 immutable pure function — its instructions are the only thing the search rewrites, always into fresh copies.

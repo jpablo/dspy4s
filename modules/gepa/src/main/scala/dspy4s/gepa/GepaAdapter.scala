@@ -8,8 +8,10 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LmRequest
@@ -24,6 +26,9 @@ import dspy4s.programs.ProgramRunner
 
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import scala.util.Random
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the search
@@ -114,6 +119,56 @@ final class GepaAdapter[P](
       // gepa_utils `_make_evaluation_batch`: `objective_scores if any(objective_scores) else None`.
       objectiveScores = Option.when(runs.exists(_.objectiveScores.nonEmpty))(runs.map(_.objectiveScores))
     )
+
+  /** Evaluate each `(candidate, batch)` pair of `items` with [[evaluate]], with the pairs in parallel (dspy's
+    * `batch_evaluate`). The results are in the order of `items`.
+    *
+    * The threads of the context ([[RuntimeContext.numThreads]], or the default of the [[ParallelExecutor]]) are divided
+    * between the pairs ([[GepaAdapter.threadShares]]). Each pair runs in a copy of the context of the caller with its
+    * share as the number of threads, so the language model and the callbacks of the caller stay visible. The pairs have
+    * no time limit and no error limit of their own: the limits of [[evaluate]] apply to the examples of each pair.
+    *
+    * The number of workers is the smaller of the number of pairs and the number of threads. With two workers or more,
+    * each worker is a thread that gets the context of the caller. With one worker, the thread of the caller evaluates
+    * the pairs in order, and no thread starts. An exception from [[evaluate]] goes to the caller.
+    *
+    * The engine uses this for the parents, the children, and the selected candidates of one iteration.
+    */
+  def batchEvaluate(
+      items        : Vector[(Candidate, Vector[Example])],
+      captureTraces: Boolean
+  )(using ctx: RuntimeContext): Vector[EvaluationBatch] =
+    val total   = ctx.numThreads.getOrElse(ParallelExecutor.DefaultNumThreads)
+    val shares  = GepaAdapter.threadShares(total, items.size)
+    val workers = math.min(items.size, total)
+
+    // The context that `evaluate` gets and `RuntimeEnvironment.current` are the same in the call.
+    def evaluatePair(index: Int): EvaluationBatch =
+      val (candidate, batch) = items(index)
+      val share              = ThreadCount.applyUnsafe(shares(index))
+      RuntimeEnvironment.withSetting(context => context.withConfig(context.config.copy(numThreads = Some(share)))) {
+        evaluate(batch, candidate, captureTraces)(using RuntimeEnvironment.current)
+      }
+
+    // One worker evaluates the pairs in order, so the thread of the caller does that work. With no pair, no work
+    // starts.
+    if workers <= 1 then items.indices.toVector.map(evaluatePair)
+    else
+      // The context of the caller goes to each worker thread, as it does in the `ParallelExecutor`.
+      val captured                                    = ContextPropagation.captureAll
+      def task(index: Int): Callable[EvaluationBatch] =
+        () =>
+          captured.run(RuntimeEnvironment.withGeneratedAsyncTask("gepa-batch-evaluate")(evaluatePair(index)))
+      val pool = Executors.newFixedThreadPool(workers)
+      try
+        val pending = items.indices.toVector.map(index => pool.submit(task(index)))
+        // `get` has no time limit. An exception of a pair goes to the caller, as it does with one worker.
+        pending.map { result =>
+          try result.get()
+          catch case error: ExecutionException => throw Option(error.getCause).getOrElse(error)
+        }
+      finally
+        val _ = pool.shutdownNow()
 
   /** The program with the instructions of `candidate`. The engine uses it to make the final result. */
   def applyCandidate(candidate: Candidate): P = Candidate.applyTo(program, candidate)
@@ -278,6 +333,18 @@ final class GepaAdapter[P](
     Trajectory(example, RawPrediction.empty, Vector.empty, failureScore, failed = true)
 
 object GepaAdapter:
+
+  /** The number of threads of each of `items` evaluations that share `total` threads (dspy's `batch_evaluate`). At most
+    * `total` evaluations run at the same time. With `workers = min(items, total)`, each evaluation gets `total /
+    * workers` threads, and the first `total % workers` evaluations get one more. Examples: 8 threads and 3 items give
+    * 3, 3, 2; 4 and 2 give 2, 2; 2 and 3 give 1, 1, 1. `total` must be positive.
+    */
+  def threadShares(total: Int, items: Int): Vector[Int] =
+    require(total > 0, s"total must be positive: $total")
+    if items <= 0 then Vector.empty
+    else
+      val workers = math.min(items, total)
+      Vector.tabulate(items)(index => total / workers + (if index < total % workers then 1 else 0))
 
   /** The SplitMix64 output for `seed`. It changes about half of the 64 bits when one bit of `seed` changes, so near
     * seeds give unrelated random sequences. The result is the same for the same seed.
