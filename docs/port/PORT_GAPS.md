@@ -610,7 +610,7 @@ full-eval and the merge subsample). **Run-dir resume done** (`GepaStatePersisten
 state after each iteration; `optimize(..., runDir)` loads-or-seeds, so a resumed run keeps every discovered
 candidate and re-spends no budget). **Multi-objective frontiers: deliberately NOT ported** — dspy's GEPA metric is
 a scalar `ScoreWithFeedback` (`score: float`) and its adapter never passes objective vectors, so multi-objective is
-a gepa-library-only path unused by the dspy surface dspy4s mirrors. With that, GEPA is algorithmically complete for
+a gepa-library-only path unused by the dspy surface dspy4s mirrors. (Update 2026-10-11: upstream now passes objective scores from the metric; see G-45.) With that, GEPA is algorithmically complete for
 dspy parity; the remaining gap items are G-10/G-11 (unrelated tracks).
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
@@ -861,6 +861,10 @@ predictor) as the `DescribeProgram` analogue; add the summary-refinement rounds.
 
 **Status:** Open
 
+**Update (2026-10-11).** ReActV2 is still `@experimental` at upstream `f1260ff14`. New since the first version:
+the reserved outputs `history` and `termination_reason`, an error when the forced submit gives no outputs, and an
+async path. The RLM prompt now recommends it. The dspy4s prerequisite is G-28 (tool call ids and the tool role).
+
 **Summary.** Upstream added `dspy.ReActV2` (marked `@experimental`): a ReAct variant built on native
 function calling (`Tool`/`ToolCalls` adapter types) instead of the text protocol.
 
@@ -966,6 +970,9 @@ benchmark wrappers that parse the standard distribution files. Tier 3.
 
 **Status:** Open — **(1) the OpenAI-compatible route is done**; (2) the Anthropic provider remains.
 
+**Update (2026-10-11).** Upstream now has a native Anthropic adapter in
+`dspy/_vendor/lm15/providers/anthropic.py`. Use it as the reference in place of the LiteLLM route.
+
 **Resolution (part 1).** The `baseUrl` route for OpenAI-compatible servers is now first-class and
 documented: `OpenAiLanguageModel.fromEnv` takes a `baseUrl` (env-keyed compatible servers — Azure,
 OpenRouter); `OpenAiLanguageModel.local` / `OpenAiEmbedder.local` are the no-environment, no-key
@@ -990,6 +997,571 @@ Anthropic models are unreachable except through OpenAI-compatible proxies.
 
 Add an `AnthropicLanguageModel` on the existing `HttpTransport`/`LanguageModel` seams (Messages API,
 tool-use mapping). A LiteLLM-style universal router is a non-goal. Tier 2.
+
+---
+
+## Entries from the 3.4.0 analysis (2026-10-11)
+
+G-23 to G-50 come from the comparison with dspy 3.4.0 plus 25 commits (`f1260ff14`). The upstream change list is
+[UPGRADE-3.2.1-to-3.4.0.md](../../UPGRADE-3.2.1-to-3.4.0.md); the `L`, `A`, `P`, `I`, and `O` ids below refer to it.
+
+These entries use a short form. **Verification** tells how sure the entry is:
+
+- **C**: a second read of the dspy4s code confirmed it.
+- **R**: one review pass reported it after a read of the two sides.
+- **I**: the review pass inferred it from one side.
+
+No test reproduced any of these items. Write a failing test before each fix.
+
+---
+
+## G-23 — All provider failures are one `RuntimeError`, so retry cannot classify them
+
+**Status:** Open · **Verification:** C · **Upgrade item:** L1
+
+**Upstream.** Errors carry `status`, `provider_code`, `request_id`, and `retry_after`
+(`dspy/utils/exceptions.py:9-45,190-278`), mapped by one table (`dspy/clients/errors.py:34-104`). Retries use
+transient classes only and obey the `Retry-After` hint (`dspy/clients/execution.py:397-399,570-571`).
+
+**dspy4s.**
+- `RuntimeError(component, message)` is the only provider failure (`modules/core/.../contracts/Errors.scala:19-20`,
+  `modules/lm/.../providers/OpenAiClient.scala:111-120`).
+- `RetryPolicies.maxRetriesOnCodes` reads `error.code`, which is always `"runtime_error"`
+  (`modules/lm/.../runtime/ManagedLanguageModel.scala:33-34`).
+- The default predicate `_ => true` retries authentication and context-window errors (`:28,41`).
+- The component string separates `openai_auth`, `openai_rate_limit`, and `openai_server`
+  (`OpenAiClient.scala:111-120`), but no retry policy reads the component.
+- Timeouts and other HTTP 4xx share the component `"openai_http"` (`modules/lm/.../providers/JdkHttpTransport.scala:78-84`).
+- The `Retry-After` header is dropped (`OpenAiClient.scala:36`).
+
+**Direction.** Add a sealed LM error branch to `DspyError` with status, provider code, request id, and retry hint.
+Make the default retry predicate accept transient classes only. The adapter fallback (G-29) needs the same
+taxonomy.
+
+---
+
+## G-24 — LM cache: the key ignores model default options; the disk format is Java serialization
+
+**Status:** In progress. The cache key is resolved (2026-10-11, batch 1); the disk format is open. · **Verification:** C (key), R (disk) · **Upgrade item:** L9
+
+**Upstream.** The key uses the merged request options (`dspy/clients/execution.py:58-70,145,166`). The disk
+record is versioned plain data (`dspy/clients/call_result.py:11,126-138`).
+
+**dspy4s.**
+- `ManagedLanguageModel.call` hashes the `LmRequest` only (`modules/lm/.../runtime/ManagedLanguageModel.scala:148,162`,
+  `modules/lm/.../runtime/RequestHash.scala:13-20`). The provider merges `defaultOptions` later
+  (`modules/lm/.../providers/OpenAiLanguageModel.scala:55`). Two models with one id and different `temperature` or
+  `max_tokens` share entries when they share a cache. A disk cache also returns old entries after a change of the
+  defaults.
+- `DiskLmCache` reads with an unfiltered `ObjectInputStream` (`modules/lm/.../runtime/DiskLmCache.scala:125-130`).
+  Each `put` lists and sorts the directory (`:89,139-144`), with a limit of 200,000 entries.
+
+**Resolution (key).** `LanguageModel.defaultOptions` exposes the defaults, and each wrapper forwards it.
+`ProviderRequestNormalizer.effectiveOptions` holds the merge for the wire payload and for the cache key, so the
+two cannot differ. Tests: `LmCacheKeySuite`. A disk cache entry of a model that has defaults misses one time,
+because its key changed.
+
+**Direction (disk).** Replace Java serialization with a versioned JSON record.
+
+---
+
+## G-25 — Streamed LM calls skip the managed path
+
+**Status:** In progress. The capability flags and the typed errors are resolved (2026-10-11, batch 1). · **Verification:** C (flags, typed error), R (others) · **Upgrade items:** L2, L3
+
+**Upstream.** One call path applies cache, retry before the first token, usage, and history to streams
+(`dspy/clients/execution.py:574-646`). A stream without an end event is an error, and the typed error survives
+(`dspy/clients/engines/stream_guard.py:18-51`).
+
+**dspy4s.**
+- `StreamingLanguageModelWrapper` overrides only `id` and `mode`
+  (`modules/streaming/.../StreamingLanguageModelWrapper.scala:55-56`). The capability flags fall back to `false`, so
+  `response_format` and native tools go off under `streamify`. `ManagedLanguageModel` forwards the flags correctly.
+- Errors travel as a chunk with `raw: Option[Any]` (`modules/lm/.../contracts/LmStreaming.scala:15-21`). The wrapper
+  rebuilds each one as `RuntimeError("streaming_lm", …)` (`StreamingLanguageModelWrapper.scala:78`). A
+  `ContextWindowExceededError` is lost, so `TrajectoryTruncation` cannot start.
+- Bad chunks are dropped (`modules/lm/.../providers/OpenAiClient.scala:85`). End of input without `[DONE]` is
+  accepted (`:86-87`). A mid-stream `{"error": …}` decodes to an empty chunk
+  (`modules/lm/.../providers/OpenAiStreamChunk.scala:19-22`).
+- `ManagedLanguageModel.stream` applies no cache, no retry, no history, and no usage
+  (`ManagedLanguageModel.scala:135-145`).
+
+**Resolution (flags, typed errors).** `StreamingLanguageModelWrapper` forwards the three flags and
+`defaultOptions`. `LmChunk` has an `error: Option[DspyError]` field, and `LmChunk.failure` builds the terminal
+chunk. The wrapper returns the typed error. Tests: `StreamingWrapperContractSuite`.
+
+**Direction (open).** Reject a stream that ends without a finish marker, and decode a mid-stream error event.
+Record usage and history for streamed calls.
+
+---
+
+## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
+
+**Status:** Open · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+
+**Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
+`execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
+`dspy/lm15.py:47-185`). Responses request and output shapes (`legacy_requests.py:104-174`,
+`dspy/clients/legacy_outputs.py:24-68`). Reasoning-model parameters (`dspy/clients/lm.py:37-44,301-317`).
+`reasoning_content` in the result (`dspy/clients/base_lm.py:352-353`). Bounded connect and read times
+(`dspy/clients/engines/lm15_engine.py:26-59`). `close` and `aclose` (`lm.py:396-442`).
+
+**dspy4s.**
+- `strict` is `false` (`modules/adapters/.../JSONAdapterPrompt.scala:79`).
+- Capability flags are fixed `true` values (`modules/lm/.../providers/OpenAiLanguageModel.scala:48-49`).
+- `LmMode` selects no endpoint and no body (`modules/lm/.../runtime/ProviderLanguageModel.scala:48-53`). Responses
+  `function_call` and `reasoning` items are not parsed.
+- No mapping to `max_completion_tokens` and no temperature rule for OpenAI reasoning models.
+- Nothing reads `supportsReasoning`, and the `message` is dropped from the metadata (`ProviderLanguageModel.scala:110-112`).
+- One 60 s value covers connect and request, and a stream has no idle limit
+  (`modules/lm/.../providers/HttpTransport.scala:28`, `JdkHttpTransport.scala:17,64`).
+- No custom headers and no `User-Agent` (`OpenAiClient.scala:19-21`). The transport has no `close`.
+- Empty content becomes a `ParseError` (`ProviderLanguageModel.scala:86,104-109`). Upstream returns the output and
+  warns about truncation (`execution.py:411-414`).
+
+**Direction.** Do the strict schema first; it is small and sits next to `embedConstraints`. Add a `capabilities`
+value to the OpenAI client for compatible servers. Treat the Responses endpoint as its own item.
+
+---
+
+## G-27 — LM history holds no prompt and no completion; no cost estimate
+
+**Status:** Open · **Verification:** R · **Upgrade items:** L10, I11
+
+**Upstream.** A history entry stores messages, outputs, usage, cost, and the response id
+(`dspy/clients/execution.py:738-754`). `inspect_history` prints messages, responses, and tool calls
+(`dspy/utils/inspect_history.py:40-98`). Cost is advisory: an unknown price is not zero, and a price failure never
+fails a call (`dspy/clients/costs.py:12-110`).
+
+**dspy4s.** An LM entry stores `model`, `cache_hit`, an output count, and `mode`
+(`modules/lm/.../runtime/ManagedLanguageModel.scala:178-190`). Module entries share the list, so `inspectHistory(1)`
+can return a module entry (`modules/core/.../runtime/RuntimeEnvironment.scala:209-211`). The "Recently resolved"
+note for `inspect_history` covers the function, not this content. There is no cost field.
+
+**Direction.** Store the messages and the outputs in the LM entry. Give `inspectHistory` an LM-only view.
+
+---
+
+## G-28 — No tool call ids, no tool message role, no `dspy.History`
+
+**Status:** Open · **Verification:** R · **Upgrade items:** A3, A4
+
+**Upstream.** `ToolCalls` keeps the provider id (`dspy/adapters/types/tool.py:284`, `dspy/adapters/base.py:626-644`).
+`ToolCallResults` exists (`tool.py:440`). Adapters send `assistant.tool_calls` and `role: tool` messages again
+(`base.py:553-585`). `dspy.History` replays earlier turns (`dspy/adapters/types/history.py`, `base.py:513-603`);
+since f207d35cf an earlier user turn keeps the output reminder, and an output-only turn gets no user message.
+
+**dspy4s.** The id is dropped (`modules/lm/.../runtime/ProviderLanguageModel.scala:145`,
+`modules/lm/.../runtime/ToolCallAssembler.scala:46`). `ToolCall` has no id
+(`modules/core/.../contracts/ToolCall.scala:33`). `MessageRole` has three roles
+(`modules/lm/.../contracts/LmRequest.scala:10-13`). There is no `History` type; the `ConversationHistory` example is
+blocked.
+
+**Direction.** Add the id and the tool role first. G-19 (ReActV2) and `History` both need them. Port the current
+`History` behavior directly.
+
+---
+
+## G-29 — Adapter output handling differs from upstream
+
+**Status:** Open · **Verification:** C (optional outputs), R (others) · **Upgrade items:** A1, A2
+
+**Upstream.** A missing optional output takes its default or `None` (`dspy/adapters/utils.py:40-55`). ChatAdapter
+tries JSONAdapter after an `AdapterParseError` only (`dspy/adapters/chat_adapter.py:86-94`). Incomplete demos get a
+prefix and the text "Not supplied for this particular example." (`dspy/adapters/base.py:445-476`). When native
+function calling is off, `tool_calls` stays a text field (`base.py:91-119`).
+
+**dspy4s.**
+- Each adapter rejects a missing output before the typed layer can exempt an `Option` field
+  (`modules/adapters/.../ChatAdapterParser.scala:34`, `JSONAdapterParser.scala:60`, `XMLAdapter.scala:63`). `FieldSpec`
+  has no optional flag.
+- There is no fallback. `PredictEngine` does format, call, and parse one time
+  (`modules/programs/.../runtime/PredictEngine.scala:68-94`).
+- Demos omit the missing fields (`modules/adapters/.../ChatAdapterPrompt.scala:24-34`).
+- `tool_calls` is always removed from the prompt (`ChatAdapterPrompt.scala:17`) and comes from provider calls only.
+  The default is `useNativeFunctionCalling = false`, so the field is always empty by default.
+- A coercion failure is a `ValidationError` with no field name and no raw text
+  (`modules/adapters/.../internal/AdapterTextSupport.scala:92-102`). Upstream raises a parse error with both.
+- Duplicate headers concatenate (`ChatAdapterParser.scala:51-57`); upstream uses the first.
+
+**Direction.** Decide D5 first. Make coercion failures parse errors, then add the fallback with the parse error as
+the key.
+
+---
+
+## G-30 — Adapter prompts are not byte-equal to upstream
+
+**Status:** Open (needs decision D3) · **Verification:** C (ChatAdapter), R (JSON, XML)
+
+**ChatAdapter differences.**
+
+| Difference | dspy4s | Upstream |
+|---|---|---|
+| No `: ` after the type when there is no description | `ChatAdapterPrompt.scala:84-86` | `dspy/adapters/utils.py:276` |
+| Blank lines between the blocks, not one newline | `ChatAdapterPrompt.scala:64-72` | `dspy/adapters/base.py:338-342` |
+| Objective inline, not on a new line with an indent | `ChatAdapterPrompt.scala:72` | `dspy/adapters/chat_adapter.py:142-145` |
+| Default instructions have no backticks | `ChatAdapterPrompt.scala:101-104` | `dspy/signatures/signature.py:35-38` |
+| Reminder has no "Python" | `ChatAdapter.scala:78` | `chat_adapter.py:192` |
+| "true or false", not "True or False" | `ChatAdapter.scala:88` | `utils.py:137` |
+| Constraints inline, not on a new line | `ChatAdapterPrompt.scala:87-91` | `utils.py:277-279` |
+
+**JSONAdapter and XMLAdapter.** They use field names only (`JSONAdapterPrompt.scala:24-35`, `XMLAdapter.scala:31-36`).
+Upstream keeps the description, the structure, and the reminder (`dspy/adapters/json_adapter.py:95-127`,
+`dspy/adapters/xml_adapter.py:38-93`).
+
+**Why it matters.** Optimized instructions and demos move between the two libraries only if the prompt around them
+is the same. The dspy4s tests use `contains`, so they do not detect a difference.
+
+**Direction.** Decide D3. If parity is the goal, add golden prompt tests from upstream's exact format tests
+(52efe7781, 6fb3f96cb).
+
+---
+
+## G-31 — Stream chunks can contain boundary whitespace
+
+**Status:** Open · **Verification:** R · **Upgrade item:** A5
+
+**Upstream.** The listener removes leading whitespace and holds trailing whitespace
+(`dspy/streaming/streaming_listener.py:309-321,376`).
+
+**dspy4s.** `ChatStreamingState` skips the newline after a marker only if it is already in the buffer
+(`modules/adapters/.../ChatStreamingState.scala:66`), then emits the prefix unchanged (`:85-88`). A newline in the
+next delta is emitted. `XmlStreamingState.scala:57` does not trim.
+
+---
+
+## G-32 — Custom adapter types, JSON mode, and nested XML are absent
+
+**Status:** Open · **Verification:** R · **Upgrade item:** A6
+
+- **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, `Code`, and `Reasoning` have no port.
+  `ContentPart` encodes `type` and `text` only (`modules/lm/.../runtime/ProviderLanguageModel.scala:62-71`), and no
+  adapter makes parts. `Reasoning` alone is a small item (`dspy/adapters/types/reasoning.py:46-83`).
+- **JSON mode.** Upstream can send `{"type": "json_object"}` (`dspy/adapters/json_adapter.py:58-63`). dspy4s sends
+  `json_schema` or nothing.
+- **Nested XML.** Upstream parses nested elements for list, dict, and model outputs
+  (`dspy/adapters/xml_adapter.py:95-135,159-218`). dspy4s reads the text of the first match and parses it as JSON
+  (`modules/adapters/.../XMLAdapter.scala:98`).
+- **BAMLAdapter.** Not ported. Low value.
+
+---
+
+## G-33 — Sandbox protocol robustness
+
+**Status:** In progress. The first two items are resolved (2026-10-11, batch 1). · **Verification:** C (first two items), R (others) · **Upgrade items:** I2, I3, I4
+
+- **Unsolicited error.** The runner can send an error with a null id. `readLoop` accepts any error without an id
+  check and returns (`modules/core/.../runtime/DenoPyodideInterpreter.scala:264-275`). The real response stays in the
+  pipe, and each later call fails with "Response id mismatch". Upstream: `dspy/primitives/python_interpreter.py:612-628,828-831`
+  (6334c2ba5).
+- **A tool that throws.** `handleToolCall` has no catch (`DenoPyodideInterpreter.scala:299`). The exception leaves
+  `execute`, and the runner waits for a reply. Upstream replies with a JSON-RPC error (`python_interpreter.py:526-529`).
+- **Request ids and recursion.** Ids are a counter from 1 and there is no guard against a nested `execute`
+  (`DenoPyodideInterpreter.scala:225-226,286-305`). Upstream: `python_interpreter.py:608-610,513-517` (80b118e52).
+- **Mount collisions.** Mounts map by basename with no check (`DenoPyodideInterpreter.scala:190-193,311`). Upstream
+  rejects them (`python_interpreter.py:276-283`, 072c72164).
+- **Wrong component name.** `SubprocessPythonInterpreter.scala:84` uses the literal `"interpreter"`.
+
+**Resolution (first two items).** `DenoPyodideProtocol.outOfBand` classifies each message. The client skips a
+notification and an error without an id, stops on a protocol error code without an id, and stops on an error with
+a different id. `handleToolCall` catches a tool exception and replies with an error. Tests: `SandboxProtocolSuite`
+(a scripted sandbox process) and two live tests in `DenoPyodideInterpreterSuite`.
+
+**Still open in those two items.** The setup read skips a response with a different id; upstream stops there. A
+tool that throws `InterruptedException` still leaves `execute`. Upstream also stops the process after a terminal
+error.
+
+---
+
+## G-34 — The vendored sandbox runner is the 3.2.1 file
+
+**Status:** Open · **Verification:** C · **Upgrade items:** I1, I5
+
+**Upstream.** `dspy/primitives/runner.js` pins Pyodide, freezes `JSON` and `console`, uses a private control
+exception, and revokes read access to the Deno cache (`runner.js:3,6,23,118,145-146`). The launcher passes
+`--no-config --no-lock --node-modules-dir=false`, checks the Deno version, and bounds the probe
+(`dspy/primitives/python_interpreter.py:104-138,298-304`).
+
+**dspy4s.** `modules/core/src/main/resources/dspy4s/core/runtime/runner.js` differs from the 3.2.1 file in three
+comment lines only, and from the current file in 41 lines. `DenoPyodideLaunch.scala:20-29,49-51` has none of the
+launch changes.
+
+**Direction.** Vendor the current file. The client then needs three changes: always pass the environment
+argument, pass `--dspy-deno-dir=`, and skip notifications in `readLoop`.
+
+---
+
+## G-35 — Interpreter lifecycle in the code programs
+
+**Status:** In progress. The failure handling in RLM and CodeAct is resolved (2026-10-11, batch 1). · **Verification:** C (failure handling), R (others) · **Upgrade items:** P1, P2, I7
+
+**Upstream.** An interpreter failure ends the run (`dspy/predict/rlm.py:775-778`, 89696e0cc). Each `forward` gets
+its own interpreter from a factory, and `dspy.settings.interpreter_factory` sets the default
+(`dspy/primitives/code_interpreter.py:178-204`; 623360078, 6fb74fcf4). An interpreter describes its runtime through
+`execution_instructions` (`dspy/primitives/python_interpreter.py:346-350`).
+
+**dspy4s.**
+- RLM changes each interpreter `Left` into an `[Error]` observation and continues
+  (`modules/programs/.../strategies/RLMExecution.scala:106-109`). `CodeAct.scala:99-100` does the same. A missing Deno
+  binary causes the full iteration budget of LM calls. `ProgramOfThought.scala:276-278` is correct.
+- After a process death, the interpreter starts a new process and loses the REPL state silently
+  (`modules/core/.../runtime/DenoPyodideInterpreter.scala:140-152`).
+- `CodeAct` and `ProgramOfThought` hold one interpreter instance in the program value (`CodeAct.scala:57`,
+  `ProgramOfThought.scala:42`). The Deno client has no lock, so a parallel evaluation interleaves JSON-RPC lines.
+- Only RLM has a factory (`RLM.scala:220-224`), and its type names `DenoPyodideInterpreter.OutputField`.
+- `readLine` has no deadline (`DenoPyodideInterpreter.scala:358-365`). `while True: pass` blocks forever.
+- The runtime description in the RLM prompt is fixed text (`RLMReplProtocol.scala:31`).
+
+**Resolution (failure handling).** In RLM and CodeAct an interpreter `Left` is now the result of the program,
+and the LM gets no more calls. A user-code error stays an observation. One effect to know: a timeout of
+`SubprocessPythonInterpreter` is a `Left`, so a slow generated snippet now ends a CodeAct run.
+
+**Direction (open).** Add an interpreter factory to the runtime services and use it in the three programs. Add a
+deadline to the REPL read. Stop the silent restart after a process death.
+
+---
+
+## G-36 — No persistent local Python REPL
+
+**Status:** Open · **Verification:** R · **Upgrade item:** I6
+
+**Upstream.** `LocalInterpreter` runs a persistent CPython worker with tools, `SUBMIT`, variables, a deadline, a
+process-group kill, and leaked-thread detection (`dspy/primitives/local_interpreter.py:47-63,187-209,267-294`).
+
+**dspy4s.** `SubprocessPythonInterpreter` is a stateless `python3 -c` (`modules/core/.../runtime/SubprocessPythonInterpreter.scala:44-50`).
+Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
+
+**Direction.** A second `ReplCodeInterpreter` in `core/runtime`, with the worker script as a resource.
+
+---
+
+## G-37 — ReAct differs from upstream
+
+**Status:** In progress. The truncation rule is resolved (2026-10-11, batch 1); the default limit and the prompt need decisions D3 and D4. · **Verification:** C · **Upgrade item:** P3
+
+- **Truncation with one entry (resolved).** On a context overflow, `truncateOnOverflow` dropped the only entry and
+  tried again with an empty trajectory. Upstream raises `ContextWindowExceededError`
+  (`dspy/predict/react.py:189-194`, 7eb5acce2). The loop now keeps the last entry: the react step ends the loop and
+  the extract steps return the overflow error. Tests: `TruncateOnOverflowSuite`, `ReActSuite`, `CodeActSuite`.
+- **Default limit.** `IterationLimit(5)` (`modules/programs/.../strategies/ReAct.scala:45`) against `max_iters = 20`
+  (`react.py:17`).
+- **Prompt.** The instructions are a paraphrase (`ReAct.scala:159-165` against `react.py:53-58,71`). The tool list has
+  its own format (`ReAct.scala:151-158`). `next_tool_name` is a free string (`ReActProtocol.scala:29-33`); upstream uses
+  a `Literal` of the tool names (`react.py:77`), which `FieldSpec.enumValues` can express.
+
+---
+
+## G-38 — RLM differs from upstream
+
+**Status:** Open · **Verification:** R · **Upgrade items:** P5, P6, P8, I8
+
+- **Namespace checks.** Upstream rejects duplicate tools, names that are not identifiers, inputs that collide with
+  built-ins or tools, and outputs named `trajectory` or `final_reasoning` (`dspy/predict/rlm.py:243-297`, 74194bfab).
+  dspy4s checks four reserved tool names (`modules/programs/.../strategies/RLM.scala:84-89`) and then writes those two
+  keys into `raw` (`RLMExecution.scala:136-137`).
+- **Odd truncation limit.** One character is lost (`RLMReplProtocol.scala:54-56`, `RLMModel.scala:53-54`; 35ef21f16).
+- **Output list.** dspy4s prints `- name (type): desc` (`RLM.scala:164-167`). Upstream prints the type constraints,
+  which include the JSON schema (`rlm.py:392-395`).
+- **`SandboxSerializable`** (`dspy/primitives/sandbox_serializable.py:41-89`) and the async path are absent.
+- **Sandbox `dspy` facade.** Generated code can build `Predict`, `ChainOfThought`, `ReActV2`, or `RLM` and run
+  them on the host under one LM budget (`rlm.py:82-113,577-597`, `dspy/primitives/facade.py:132-261`; ba3f9198e).
+  Large. It is a prerequisite for `dspy.Flex`.
+- Minor: the description text still says `max_iterations` (`RLM.scala:112`); upstream renamed it to `max_iters`.
+
+---
+
+## G-39 — `CodeAct` and `ProgramOfThought` are deprecated upstream
+
+**Status:** Open (needs decision D1) · **Verification:** C · **Upgrade items:** P4, P7
+
+**Upstream.** Both carry a deprecation for removal in 3.5, with RLM as the replacement
+(`dspy/predict/code_act.py:54-58`, `dspy/predict/program_of_thought.py:59-63`; 99bb44bf4).
+
+**dspy4s.** Both are full ports with no deprecation. One parser difference stays: the echo of a final assignment
+needs more than one line (`modules/programs/.../runtime/GeneratedPython.scala:26`), and
+`GeneratedPythonSuite.scala:15` pins that result. Upstream removed the condition (fe75476cd).
+
+---
+
+## G-40 — Callback coverage
+
+**Status:** In progress. The end event on interrupt is resolved (2026-10-11, batch 1). · **Verification:** C (end event), R (new events) · **Upgrade item:** I9
+
+- **End event on interrupt (resolved).** `runWithEnd` now also reports an `InterruptedException` and rethrows
+  it. Before the correction, `runWithEnd` caught `NonFatal` only
+  (`modules/core/.../runtime/CallbackDispatcher.scala:102-112`). `InterruptedException` is not `NonFatal`, and
+  `ParallelExecutor.scala:142` interrupts workers. A start event then has no end event. Upstream reports base
+  exceptions (`dspy/utils/callback.py:362,392`; 970f72900).
+- **New events.** Upstream has interpreter execute, tool, startup, and shutdown events (b11cfe874), optimizer
+  compile events (80553206b), and evaluate events (`callback.py:232-303`). The dspy4s event type has module, LM,
+  adapter, and tool cases (`modules/core/.../contracts/Callbacks.scala:43-140`). `Evaluate` does not call the
+  dispatcher. A new sealed case breaks an exhaustive match in user code.
+
+---
+
+## G-41 — Parallel execution differences
+
+**Status:** Open · **Verification:** R
+
+- **Timeout.** `ParallelExecutor` fails the full batch if no task completes in the limit
+  (`modules/programs/.../runtime/ParallelExecutor.scala:98-100,121-122`). Upstream submits the slow task again and
+  continues (`dspy/utils/parallelizer.py:207-225`). `PORT_BACKLOG.md` defers the straggler retry only.
+- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:25-27`), and
+  `fanout` is sequential (`modules/programs/.../compose/Both.scala:12-15`).
+- **Temperature for `n > 1`.** Upstream sets 0.7 when the temperature is low (`dspy/predict/predict.py:179-185`).
+  `PredictEngine.scala:96-121` has no equivalent.
+
+---
+
+## G-42 — `BootstrapFewShot` differs from upstream in six places
+
+**Status:** Open (needs decision D2) · **Verification:** C · **Upgrade item:** O1
+
+It also feeds MIPROv2, InferRules, KNNFewShot, and the random search.
+
+- **Demos.** dspy4s builds one demo from the program inputs and outputs and gives it to all leaves
+  (`modules/optimize/.../BootstrapFewShot.scala:91-97,126-127`). Upstream builds a demo for each predictor from its
+  trace step (`dspy/teleprompt/bootstrap.py:224-240`). In a program with more than one predictor, the inner
+  predictors get demos with the wrong fields.
+- **Labeled pool.** dspy4s uses only the examples that it tried and that failed (`:68,114,118`). Upstream uses all
+  examples that were not bootstrapped (`bootstrap.py:173`). If the first examples pass, dspy4s adds no labeled demo.
+- **Errors.** A `Left` result is not counted, so `maxErrors` does not trip (`:80,100-102`; `bootstrap.py:213-219`).
+- **Retries.** dspy4s repeats the same call (`:72-78`). Upstream changes the rollout id and the temperature
+  (`bootstrap.py:191`).
+- **Metric.** dspy4s passes no trace (`:84`; `bootstrap.py:206`).
+- **Teacher.** dspy4s does not prime the teacher with labeled demos (`bootstrap.py:103-106`).
+
+Commit 1bc87de15 (labeled demos sampled for each predictor) has no target until the demos are per predictor.
+
+---
+
+## G-43 — Random search and MIPROv2 candidates are less diverse than upstream
+
+**Status:** Open · **Verification:** R
+
+- `BootstrapFewShotWithRandomSearch` gives a subset of 1 to N examples as the trainset
+  (`modules/optimize/.../BootstrapFewShotWithRandomSearch.scala:82-101`). Upstream shuffles the full trainset and
+  changes `max_bootstrapped_demos` (`dspy/teleprompt/random_search.py:106-112`).
+- In MIPROv2 the seed changes only the labeled shuffle (`modules/optimize/.../MIPROv2.scala:132-146`). Upstream
+  shuffles and changes the size (`dspy/teleprompt/utils.py:392-393`).
+
+---
+
+## G-44 — GEPA engine differs from the upstream engine
+
+**Status:** In progress. Dominated candidates are resolved (2026-10-11, batch 1); the trace association needs decision D2. · **Verification:** C (first two items), R (others)
+
+The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
+
+- **Trace association.** `recordFor` finds the trace entry by position (`modules/gepa/.../GepaAdapter.scala:101-106`).
+  Upstream matches the signature, prefers a failed call, and otherwise chooses at random (`gepa_utils.py:375-390`).
+  The position is wrong for ReAct, CodeAct, and RLM, where the first leaf runs in a loop.
+- **Dominated candidates (resolved).** `CandidateSelector.Pareto` and `MergeProposer` sampled from the raw
+  frontier. Upstream removes dominated programs first (`gepa/gepa_utils.py:37-75,90-117`).
+  `GepaState.nonDominatedFrontier` now holds that routine for the two callers. A comparison with the pinned `gepa`
+  0.1.4 on 4,000 random frontiers gave no difference. Tests: `GepaStateSuite`, `MergeProposerSuite`.
+- **Round-robin pointer.** A new candidate starts at 0 (`modules/gepa/.../GepaEngine.scala:176-177`). Upstream
+  inherits the largest parent pointer (`gepa/core/state.py:539-543`).
+- **Empty reflective data.** dspy4s asks the reflection LM with zero examples and evaluates an unchanged candidate
+  (`GepaEngine.scala:187-200`). Upstream skips the proposal (`gepa_utils.py:462-469`).
+- **Failure feedback.** dspy4s always includes failures and calls the user metric with an empty prediction
+  (`GepaAdapter.scala:108-121,129`). Upstream has this off by default.
+- **Resume.** The iteration index and the pointers start again (`GepaEngine.scala:100-101`), and `Gepa.compile` does
+  not pass `runDir` (`modules/gepa/.../Gepa.scala:34-36`).
+- **Budget.** A budget of less than approximately twice the validation set gives zero iterations with no warning
+  (`GepaEngine.scala:106,137`).
+- **Merge depth.** One pass of 10 (`MergeProposer.scala:76,100-119`) against 10 × 10 attempts
+  (`gepa/proposer/merge.py:133-146`).
+
+---
+
+## G-45 — GEPA surface added upstream since 3.2.1
+
+**Status:** Open · **Verification:** R · **Upgrade items:** O3, O4, O5
+
+- **`InstructionProposer`** is now the default (`dspy/teleprompt/gepa/instruction_proposal.py:189,270`; b6c8aaf1e).
+  It is a `Predict` with a JSON adapter, with `skills`, `additional_instructions`, `base_instructions`, `max_chars`
+  with one compression retry, and `truncate_history_outputs`. dspy4s uses a singleton with a raw LM call and a fence
+  parser (`modules/gepa/.../InstructionProposer.scala:16-77`).
+- **Objective-aware frontiers** (`gepa_utils.py:70-79,301-310`; 638e155cf). The G-12 note excludes them because the
+  dspy surface did not use them. That reason no longer holds.
+- **Multiple proposals in one iteration**, evaluated in parallel (`gepa_utils.py:312-332`; aa9d2d053, 822f39319).
+  dspy4s makes one proposal with strict acceptance (`GepaEngine.scala:171-202`). Immutable candidates make the
+  parallel step safe.
+- **Facade.** `auto` budgets, `max_full_evals`, the trainset as the default validation set, and `track_stats` with
+  all candidates and their lineage (`dspy/teleprompt/gepa/gepa.py:26-30,72,513,581,594`). dspy4s returns the best
+  candidate only and requires a validation set.
+
+---
+
+## G-46 — `Evaluate` returns 0.0 for an empty devset
+
+**Status:** Resolved (2026-10-11, batch 1) · **Verification:** C · **Upgrade item:** O2
+
+`Evaluate` returned a result with the score 0.0. Upstream raises a descriptive error
+(`dspy/evaluate/evaluate.py:157-158`, c7ee4462a). An optimizer that received an empty validation set then saw a
+valid score of zero.
+
+**Resolution.** `Evaluate` returns `Left(ValidationError)` and does not call the program. COPRO, MIPROv2,
+InferRules, and the random search return `OptimizerSupport.emptyEvalsetError` before any LM call. Tests:
+`EvaluateSuite`, `OptimizerEmptyEvalsetSuite`.
+
+**Two differences that stay.** The random search rejects `valset = Some(Vector.empty)`; upstream (`valset or
+trainset`) uses the trainset. GEPA with an empty validation set still returns the seed, because it does not call
+`Evaluate` for that set; upstream uses the trainset there (G-45).
+
+---
+
+## G-47 — No MCP tool conversion
+
+**Status:** Open · **Verification:** R · **Upgrade item:** I10
+
+**Upstream.** `dspy/utils/mcp.py:54-86`, with SDK v2 support and opt-in structured results.
+
+**dspy4s.** None; the MCP examples are blocked. `ToolFunction.argSchema` is a flat map
+(`modules/programs/.../contracts/ToolFunction.scala:23`), so a JSON Schema argument model is a prerequisite.
+
+---
+
+## G-48 — Small surface gaps
+
+**Status:** Open · **Verification:** R · **Upgrade item:** A7
+
+- **Test doubles.** Upstream publishes `DummyLM` and `dummy_rm` (`dspy/utils/dummies.py:16,154`). Many dspy4s suites
+  define their own scripted LM.
+- **Retriever persistence.** `Embeddings.save`, `load`, and `from_saved` (`dspy/retrievers/embeddings.py:121-247`).
+- **Version in saved state** (`dspy/primitives/base_module.py:200,278-280`). `ProgramPersistence` writes none.
+- **Custom rationale field** in `ChainOfThought` (`dspy/predict/chain_of_thought.py:39-48`). dspy4s fixes
+  `reasoning: String`.
+- **`append_instructions`** (`dspy/signatures/signature.py:307-333`). dspy4s has `withInstructions` only.
+- Low value: `Unbatchify`, LangChain tool conversion, the asyncify worker limit.
+
+---
+
+## G-49 — Experimental upstream tracks that wait
+
+**Status:** Open (deferred, decision D6) · **Verification:** I · **Upgrade items:** A8, P9, O6
+
+- **Decision types.** `Noul`, `Score`, and `Choice` outputs, a `DecisionAdapter` that asks for evidence and decodes
+  with thresholds, cuts, and weights (`dspy/adapters/decision.py:68-146`, `dspy/adapters/types/decision.py`), and the
+  "System One" client (`dspy/clients/typesafe.py`). Three weeks old at the time of the analysis.
+- **ReAnchor.** A calibration optimizer for those types (`dspy/teleprompt/reanchor/calibrate.py`). Its fold check
+  (`calibrate.py:236-253`) is useful alone: it keeps a candidate only if the gain holds on held-out folds.
+- **`dspy.Flex`.** The module parameter is Python source that runs in the sandbox, and GEPA rewrites the source
+  (`dspy/predict/flex/flex.py`). It needs the sandbox facade of G-38 and a "code" parameter kind.
+- **ReActV2.** See G-19.
+
+---
+
+## G-50 — The runtime context has two sources of truth
+
+**Status:** Open · **Verification:** R
+
+This item is a dspy4s design point, not an upstream difference. `RuntimeEnvironment` has a process-wide default and
+a `ThreadLocal` (`modules/core/.../runtime/RuntimeEnvironment.scala:41,51`). The LM comes from the `using` context
+(`modules/programs/.../runtime/SettingsProgramRuntime.scala:12-13`), but callbacks and workers read the ambient one
+(`CallbackDispatcher.scala:36-37`, `ParallelExecutor.scala:32-38`). The two can differ when a caller passes a context
+that is not installed.
 
 ---
 

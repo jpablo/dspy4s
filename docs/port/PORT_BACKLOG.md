@@ -20,6 +20,10 @@ and behavioral-delta ledger. The backlog below is *phase plan*; the map is
   the tag in a scratch worktree) so the comparison is against 3.1.3, not the
   drifted `main`.
 
+- Latest analyzed upstream: **3.4.0 plus 25 commits** (`f1260ff14`, 2026-10-08). The change list is
+  [`UPGRADE-3.2.1-to-3.4.0.md`](../../UPGRADE-3.2.1-to-3.4.0.md), and the resulting entries are
+  [PORT_GAPS](PORT_GAPS.md) G-23 to G-50. Nothing from that range is ported yet.
+
 When upstream tags a new release, bump this section, refresh the clone
 (`git fetch && git checkout release-X.Y.Z`), and audit the changelog for
 features that affect contracts or behavior dspy4s already ports. Treat any
