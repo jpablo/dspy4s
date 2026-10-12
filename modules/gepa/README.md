@@ -56,10 +56,41 @@ Feedback is requested at two granularities:
 - **OptimizableLeaf level** (`component = Some(name)`, with the one call of that predictor that GEPA selected) —
   feedback aimed at one named predictor. The reflection loop assembles each component's reflective dataset from these.
 
-It `extends Metric` (its `score` is the program-level feedback's score) so a single instance is both the
-scoring metric the adapter feeds to `Evaluate` and the source of reflection feedback. A wrong prediction is a
+It `extends Metric` (its `score` is the program-level feedback's score), so one instance is a plain `Metric`
+for `Evaluate` and the source of the reflection feedback. A wrong prediction is a
 **low score with feedback**, not a `Left` — GEPA learns from those; `Left` is reserved for unrecoverable
 scoring failures.
+
+### Objective scores
+
+A metric can also give scores for named objectives, for example accuracy and cost:
+
+```scala
+ScoreWithFeedback(score = 0.75, feedback = "...", objectiveScores = Map("accuracy" -> 1.0, "cost" -> 0.5))
+```
+
+GEPA reads the objective scores of the program-level feedback only. A larger objective score is better. GEPA
+keeps them for each candidate and each validation example (`GepaState.valObjectiveScores`). The acceptance of a
+candidate and the best candidate of a run use `score` only.
+
+`GepaConfig.frontierType` selects the Pareto fronts that candidate selection and merge use:
+
+| Type | One front for each | Value of a candidate |
+|------|--------------------|----------------------|
+| `Instance` (default) | validation example | its score on the example |
+| `Objective` | objective | the mean of its objective score, over the examples that have one |
+| `Hybrid` | validation example, and objective | the two values above |
+| `Cartesian` | pair of a validation example and an objective | its objective score on the example |
+
+A front is the set of the candidates with the largest value. A candidate that is good on one objective thus
+stays a possible parent, also when another candidate has the larger score on each validation example.
+
+Each type other than `Instance` needs objective scores. If the seed candidate has none, `compile` returns a
+`Left` after the seed evaluation. A later candidate with no objective score (each of its validation runs
+failed) stays in the pool, and it is in no objective front. Upstream stops the run in that case.
+
+`GepaResult.state` gives the data of a run: `objectiveAggregates(i)`, `objectiveBest`, `objectiveFront`, and
+`fronts`.
 
 ## The mechanics
 
@@ -69,10 +100,14 @@ scoring failures.
 the program (rewriting each optimizable leaf's instruction by stable structure ID) and evaluates a batch in one of two
 modes:
 
-- **Scores-only** (acceptance / full-eval fast path) — runs through `Evaluate` for scores.
+- **Scores-only** (acceptance / full-eval fast path) — each example runs in an isolated context, and the metric
+  gets one call with an empty trace. A run that fails has the failure score, and each run that passes keeps its
+  score.
 - **With traces** (the reflective path) — each example runs in an *isolated* context with a fresh trace and
   failure-trace capture on, so its trajectory is exactly its own and a parse failure stays in the trace
   (the raw, unparseable response is captured).
+
+The two modes keep the objective scores that the metric gives for each example.
 
 ### Reflective records
 
@@ -190,17 +225,19 @@ The upstream options `skills` and `truncate_history_outputs` are not ported.
 
 ### Supporting pieces
 
-- **`GepaState`** — the evolving pool: candidates, each candidate's per-validation-instance subscores,
-  lineage (`parents`), and round-robin pointer (`nextComponent`), plus the running metric-call meter. The Pareto
-  frontier is derived from the subscores; `bestIndex` is the candidate with the best mean validation score.
+- **`GepaState`** — the evolving pool: candidates, each candidate's per-validation-instance subscores and
+  objective scores, lineage (`parents`), and round-robin pointer (`nextComponent`), plus the running metric-call
+  meter. The Pareto fronts are derived from the scores (`fronts`, by `frontierType`); `bestIndex` is the candidate
+  with the best mean validation score.
 - **`MinibatchSampler`** — chooses each iteration's reflective minibatch. Default `EpochShuffled` (gepa's
   default) walks a per-epoch shuffle so every train example is used once per epoch before repeats; `RandomDraw`
   is the independent-draw v0 sampler.
 - **`GepaEvalCache`** — memoizes scores-only evaluations by `(candidate, example)`, so a merged candidate's
   subsample eval is reused on its later full-eval, and re-scored pairs are free. Only actual (uncached) evals
   are charged against the budget.
-- **`GepaStatePersistence`** — JSON save/load of the search state (pool, subscores, lineage, pointers, meter) for
-  resuming an interrupted run. The eval cache, RNG position, and merge schedule are not persisted; a resumed
+- **`GepaStatePersistence`** — JSON save/load of the search state (pool, subscores, objective scores, frontier
+  type, lineage, pointers, meter) for resuming an interrupted run. A resumed run with another `frontierType` is an
+  error. The eval cache, RNG position, and merge schedule are not persisted; a resumed
   run keeps every discovered candidate (no budget re-spent) and continues from that pool. A state file that an
   older version wrote has no pointers. It loads with the pointer 0 for each candidate.
 
@@ -212,6 +249,7 @@ The upstream options `skills` and `truncate_history_outputs` are not ported.
 | `reflectionMinibatchSize` | examples per reflective minibatch (default 3) |
 | `candidateSelector` / `componentSelector` | parent selection (Pareto) and component selection (round-robin) |
 | `batchSampler` | `EpochShuffled` (default) or `RandomDraw` |
+| `frontierType` | the Pareto fronts for selection and merge: `Instance` (default), `Objective`, `Hybrid`, or `Cartesian` |
 | `useMerge` / `maxMergeInvocations` | enable crossover (default on) and cap accepted merges |
 | `mergeValOverlapFloor` | the smallest number of validation examples that the two candidates of a merge share (default 5, as upstream) |
 | `skipPerfectScore` / `perfectScore` | skip reflecting on already-perfect minibatches |
@@ -227,7 +265,7 @@ The upstream options `skills` and `truncate_history_outputs` are not ported.
 | `contracts/FeedbackMetric.scala` | `FeedbackMetric`, `ScoreWithFeedback` |
 | `GepaAdapter.scala` | program ↔ engine bridge (apply candidate, evaluate, capture traces) |
 | `GepaEngine.scala` | the search loop + `GepaConfig` / `GepaResult` |
-| `GepaState.scala` | candidate pool, subscores, lineage, Pareto frontier |
+| `GepaState.scala` | candidate pool, subscores, objective scores, lineage, Pareto fronts (`FrontierType`, `FrontierKey`) |
 | `Candidate.scala` | the genome (component → optional instruction) + seed/apply |
 | `InstructionProposer.scala` | the `InstructionProposer` trait and `DefaultInstructionProposer` (reflective mutation) |
 | `MergeProposer.scala` | crossover over common ancestors |
@@ -242,6 +280,6 @@ GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and 
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns an `Either[DspyError, GepaResult[P]]` rather than an
 `OptimizationReport[P]`.
-Deferred relative to upstream: multi-objective frontiers and run-dir resume beyond the single-objective
-instance frontier (PORT_GAPS G-12). Per the [module-purity principle](../../README.md), the program stays an
+Not ported from upstream: more than one proposal in an iteration, and the full resume of a run (PORT_GAPS G-44,
+G-45). Per the [module-purity principle](../../README.md), the program stays an
 immutable pure function — its instructions are the only thing the search rewrites, always into fresh copies.

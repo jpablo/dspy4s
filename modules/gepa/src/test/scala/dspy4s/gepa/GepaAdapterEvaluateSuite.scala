@@ -99,7 +99,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     }
   }
 
-  // PORT_GAPS G-46: `Evaluate` rejects an empty devset. The adapter does not call it for an empty batch.
+  // PORT_GAPS G-46: an empty batch has no output and no score. The adapter runs nothing for it.
   test("evaluate on an empty batch returns an empty batch on the two paths") {
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current

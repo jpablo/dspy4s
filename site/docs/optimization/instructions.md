@@ -37,6 +37,12 @@ Its options add requirements for each new instruction
 (`baseInstructions`), and set a length limit (`maxChars`). To control the
 proposal fully, implement the `InstructionProposer` trait.
 
+A metric can also give scores for named objectives
+(`ScoreWithFeedback.objectiveScores`), for example accuracy and cost.
+`GepaConfig.frontierType` then selects how GEPA keeps candidates that are good
+on one objective: `Objective`, `Hybrid`, or `Cartesian`. The default is
+`Instance`, which uses the score of each validation example only.
+
 ## Choosing one
 
 | Optimizer | Strategy | Use when |

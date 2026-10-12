@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -11,8 +12,9 @@ import dspy4s.programs.optimization.OptimizableId
 import java.nio.file.Path
 import scala.util.Random
 
-/** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, and the evaluation cache.
-  * Objective-aware frontiers and more than one proposal in an iteration are not ported (PORT_GAPS G-45).
+/** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, the evaluation cache, and the
+  * objective-aware Pareto fronts ([[frontierType]]). More than one proposal in an iteration is not ported (PORT_GAPS
+  * G-45).
   */
 final case class GepaConfig(
     /** Budget: total metric (evaluation) calls before stopping. Reflection-LM calls do NOT count, matching gepa. */
@@ -24,6 +26,12 @@ final case class GepaConfig(
       * example is used once per epoch before repeats. `RandomDraw` is GEPA v0's independent random draw.
       */
     batchSampler: BatchSamplerKind = BatchSamplerKind.EpochShuffled,
+    /** The Pareto fronts that candidate selection and merge use (gepa's `frontier_type`). The default is `Instance`, as
+      * upstream: one front for each validation example. Each other type needs objective scores from the metric
+      * ([[dspy4s.gepa.contracts.ScoreWithFeedback.objectiveScores]]): a run whose seed candidate has none returns a
+      * `Left` after the seed evaluation. See [[FrontierType]].
+      */
+    frontierType: FrontierType = FrontierType.Instance,
     /** Whether to interleave merge (crossover) proposals with reflective mutation. Default ON, matching dspy's GEPA
       * wrapper (`use_merge=True`); the standalone gepa engine defaults it off. A no-op for single-component programs
       * (which can't satisfy the merge triplet's "desirable predictor" requirement).
@@ -53,13 +61,17 @@ final case class GepaConfig(
     seed              : Long    = 0L
 )
 
-/** The outcome of a GEPA run: the best candidate (by mean validation score) and the program it yields. */
+/** The outcome of a GEPA run: the best candidate (by mean validation score) and the program it yields. `state` is the
+  * final search state: each candidate, its scores and objective scores for each validation example, its parents, and
+  * the Pareto fronts.
+  */
 final case class GepaResult[P](
     bestCandidate   : Candidate,
     bestProgram     : P,
     bestScore       : Double,
     numCandidates   : GepaCandidateCount,
-    totalMetricCalls: MetricCallCount
+    totalMetricCalls: MetricCallCount,
+    state           : GepaState
 )
 
 /** The GEPA engine: genetic-Pareto reflective prompt evolution. Each iteration selects a parent candidate from the
@@ -70,6 +82,12 @@ final case class GepaResult[P](
   * memoizes scores-only evals so repeated `(candidate, example)` pairs are free. A faithful port of the external `gepa`
   * engine. Atomic seed/iteration steps never cross `maxMetricCalls`; a run stops when the remaining budget cannot cover
   * the next step's worst-case cost. See PORT_GAPS G-12.
+  *
+  * The state keeps the objective scores that the metric gives for each candidate on each validation example
+  * ([[dspy4s.gepa.contracts.ScoreWithFeedback.objectiveScores]]). [[GepaConfig.frontierType]] selects the Pareto fronts
+  * that candidate selection and merge use. The default type has one front for each validation example. Each other type
+  * uses the objective scores ([[FrontierType]]). The acceptance of a candidate and the best candidate of a run use the
+  * score only.
   *
   * The `proposer` writes the new instruction text of an iteration. The engine calls it in a context whose language
   * model is `reflectionLm`, so the engine itself makes no call to that model. See [[InstructionProposer]].
@@ -95,6 +113,12 @@ final class GepaEngine[P](
     *     the same predictor key (found before any run), or a leaf ran but its module recorded no key (found when a
     *     reflective iteration reads the traces).
     *   - The proposer gives a text for a component that the candidate does not hold.
+    *   - [[GepaConfig.frontierType]] is not `Instance`, and the seed candidate has no objective score. The search stops
+    *     after the seed evaluation, before any iteration.
+    *   - The state in `runDir` has a frontier type that is not [[GepaConfig.frontierType]]. The search stops before any
+    *     LM call.
+    *
+    * Each other defect of the state in `runDir` is an `IllegalStateException`.
     */
   def optimize(
       seedCandidate: Candidate,
@@ -134,18 +158,37 @@ final class GepaEngine[P](
         case Right(state) => state
         case Left(error)  => throw IllegalStateException(s"Invalid GEPA checkpoint in '$dir': $error")
     }
-    var state = restored match
+    val initial: Either[DspyError, GepaState] = restored match
+      case Some(saved) if saved.frontierType != config.frontierType =>
+        Left(
+          ConfigurationError(
+            s"The GEPA checkpoint${runDir.fold("")(dir => s" in '$dir'")} has the frontier type " +
+              s"${saved.frontierType}, and the configuration has the frontier type ${config.frontierType}. " +
+              "Use the frontier type of the checkpoint, or a new run directory."
+          )
+        )
       case Some(saved) =>
         validateAndWarm(saved, seedCandidate, valset, cache)
-        saved
+        Right(saved)
       case None =>
         val seedCost = cache.uncachedCount(seedCandidate, valset)
         require(
           seedCost <= config.maxMetricCalls,
           s"maxMetricCalls=${config.maxMetricCalls} cannot cover the seed validation cost of $seedCost"
         )
-        val (seedScores, seedEvals) = fullEval(seedCandidate, valset, cache)
-        GepaState.seed(seedCandidate, seedScores, metricCalls = seedEvals)
+        val seed = fullEval(seedCandidate, valset, cache)
+        Right(
+          GepaState.seed(
+            seedCandidate,
+            seed.scores,
+            metricCalls = seed.evaluated,
+            objectiveScores = seed.objectiveScores,
+            frontierType = config.frontierType
+          )
+        )
+    var state = initial.flatMap(requireObjectiveScores) match
+      case Right(ready) => ready
+      case Left(error)  => return Left(error)
     runDir.foreach(GepaStatePersistence.save(_, state))
     var i           = 0 // iteration index, drives the epoch-shuffled batch sampler
     var canContinue = true
@@ -174,8 +217,14 @@ final class GepaEngine[P](
           mp.lastIterFoundNewProgram = false
           proposalOpt.map { proposal =>
             if proposal.accepted then
-              val (subscores, evals) = fullEval(proposal.candidate, valset, cache)
-              state = state.add(proposal.candidate, subscores, proposal.parents, proposal.metricCalls + evals)
+              val validation = fullEval(proposal.candidate, valset, cache)
+              state = state.add(
+                proposal.candidate,
+                validation.scores,
+                proposal.parents,
+                proposal.metricCalls + validation.evaluated,
+                validation.objectiveScores
+              )
               mp.onMergeAccepted()
             else
               state = state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, proposal.metricCalls))
@@ -206,7 +255,8 @@ final class GepaEngine[P](
         bestProgram = adapter.applyCandidate(state.candidates(best)),
         bestScore = state.aggregateScore(best),
         numCandidates = GepaCandidateCount.assume(state.candidates.size),
-        totalMetricCalls = state.totalMetricCalls
+        totalMetricCalls = state.totalMetricCalls,
+        state = state
       )
     }
 
@@ -291,9 +341,15 @@ final class GepaEngine[P](
     val accepted  = newEval.scores.sum > parentEval.scores.sum
     val nextState =
       if accepted then
-        val (newSubscores, evals) = fullEval(newCandidate, valset, cache)
-        calls += evals
-        moved.add(newCandidate, newSubscores, parents = Vector(parentIdx), metricCalls = calls)
+        val validation = fullEval(newCandidate, valset, cache)
+        calls += validation.evaluated
+        moved.add(
+          newCandidate,
+          validation.scores,
+          parents = Vector(parentIdx),
+          metricCalls = calls,
+          objectiveScores = validation.objectiveScores
+        )
       else
         moved.copy(totalMetricCalls = MetricCallCount.add(moved.totalMetricCalls, calls))
     Right((nextState, accepted))
@@ -327,16 +383,29 @@ final class GepaEngine[P](
     RuntimeEnvironment.propagate(executed.delta.copy(trace = Vector.empty))
     executed.value
 
-  /** Full validation scores for a candidate, via the shared eval cache: returns the per-instance scores and the number
-    * of ACTUAL (uncached) evaluations to charge against the budget.
+  /** Full validation scores for a candidate, via the shared eval cache: returns the per-instance scores, the
+    * per-instance objective scores, and the number of ACTUAL (uncached) evaluations to charge against the budget.
     */
   private def fullEval(candidate: Candidate, valset: Vector[Example], cache: GepaEvalCache[P])(using
       RuntimeContext
-  ): (Vector[Double], Int) =
-    cache.scores(candidate, valset)
+  ): ScoredBatch =
+    cache.scored(candidate, valset)
+
+  /** `Left` when the frontier type of `state` needs objective scores and the seed candidate has none (gepa raises a
+    * `ValueError` for this state). The check applies to a new state and to a state from a checkpoint.
+    */
+  private def requireObjectiveScores(state: GepaState): Either[DspyError, GepaState] =
+    if state.frontierType == FrontierType.Instance || state.objectiveAggregates(0).nonEmpty then Right(state)
+    else
+      Left(
+        ConfigurationError(
+          s"The frontier type ${state.frontierType} needs objective scores from the metric, and the seed candidate " +
+            "has no objective score. Use a metric that gives objective scores, or use the frontier type Instance."
+        )
+      )
 
   /** Validate a checkpoint against the current program/data topology and restore its already-accounted validation
-    * scores into the evaluation cache.
+    * scores and objective scores into the evaluation cache.
     */
   private def validateAndWarm(
       state        : GepaState,
@@ -358,6 +427,8 @@ final class GepaEngine[P](
       throw IllegalStateException(
         s"GEPA checkpoint validation rows do not match the current valset size ${valset.size}: ${wrongRows.mkString(", ")}"
       )
-    state.candidates.zip(state.valSubscores).foreach { case (candidate, scores) =>
-      cache.restore(candidate, valset, scores).fold(error => throw IllegalStateException(error), identity)
+    state.candidates.indices.foreach { index =>
+      cache
+        .restore(state.candidates(index), valset, state.valSubscores(index), state.objectiveScoresOf(index))
+        .fold(error => throw IllegalStateException(error), identity)
     }

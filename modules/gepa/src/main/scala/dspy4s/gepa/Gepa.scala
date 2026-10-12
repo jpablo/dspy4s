@@ -42,6 +42,9 @@ final class Gepa[P](
     *   - A predictor type records no predictor key in its trace entries.
     *
     * `Left` also when `instructionProposer` gives a text for a component that the program does not hold.
+    *
+    * `Left` also when [[GepaConfig.frontierType]] is not `Instance` and the metric gives the seed candidate no
+    * objective score. The run stops after the seed evaluation.
     */
   def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using
       RuntimeContext

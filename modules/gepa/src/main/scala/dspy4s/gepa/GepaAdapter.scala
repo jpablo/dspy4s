@@ -11,7 +11,6 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.programs.contracts.ProgramCall
@@ -74,50 +73,50 @@ final class GepaAdapter[P](
 
   /** Apply `candidate` to the program and evaluate it over `batch`, returning per-example outputs + scores.
     *
-    * When `captureTraces` is set (the reflective path), each example is run in an ISOLATED context — fresh trace and
-    * [[RuntimeContext.captureFailureTraces]] on — so its trajectory is exactly its own and a parse failure stays in the
-    * trace (the raw response is captured, G-12 P-a/P-b). `addFormatFailureAsFeedback` decides if that failure becomes
-    * reflection signal. When `captureTraces` is false (the acceptance/full-eval fast path) it runs through [[Evaluate]]
-    * for scores only.
+    * Each example runs in an ISOLATED context with a fresh trace ([[TracedRun]]), through the [[ParallelExecutor]]. A
+    * run that fails is a result and not an error of the executor. Thus each run that passes keeps its score, for any
+    * number of runs that fail. Upstream gets the same result with an error limit of 100 times the batch size. Only an
+    * exception from a run or from the metric counts for the error limit of the executor.
+    *
+    * The program-level feedback of the metric gives the score and the objective scores of an example. The metric gets
+    * one call for each run that passes. A run that fails, or a metric that gives a `Left`, has `failureScore` and no
+    * objective score. A failure of the whole batch (for example a timeout) gives each example `failureScore`.
+    * [[EvaluationBatch.objectiveScores]] is `None` when no example of the batch has an objective score. The adapter
+    * does not read the objective scores of a component-level feedback.
+    *
+    * With `captureTraces` (the reflective path), [[RuntimeContext.captureFailureTraces]] is on, so a parse failure
+    * stays in the trace with the raw response (G-12 P-a/P-b). `addFormatFailureAsFeedback` decides if that failure
+    * becomes reflection signal. The metric gets the trace of the run, and the batch has one [[Trajectory]] for each
+    * example.
+    *
+    * When `captureTraces` is false (the acceptance/full-eval fast path), the batch has no trajectories, and the metric
+    * gets an empty trace. The output of an example whose metric gives a `Left` is then empty, as it is for a run that
+    * fails. With `captureTraces`, the trajectory of such an example keeps the prediction.
     */
   def evaluate(batch: Vector[Example], candidate: Candidate, captureTraces: Boolean)(using
       RuntimeContext
   ): EvaluationBatch =
     val prog = applyCandidate(candidate)
-    if captureTraces then withTraces(prog, batch) else scoresOnly(prog, batch)
-
-  /** The program with `candidate`'s instructions applied — the engine uses this to materialize the final result. */
-  def applyCandidate(candidate: Candidate): P = Candidate.applyTo(program, candidate)
-
-  private def scoresOnly(prog: P, batch: Vector[Example])(using RuntimeContext): EvaluationBatch =
-    // `Evaluate` rejects an empty devset. An empty batch has no output and no score, so there is nothing to run.
-    if batch.isEmpty then return EvaluationBatch(Vector.empty, Vector.empty, trajectories = None)
-    Evaluate(devset = batch, metric = metric, failureScore = failureScore)()((ex: Example) =>
-      runner.run(prog, ex.inputs)
-    ) match
-      case Right(result) =>
-        EvaluationBatch(result.results.map(_.prediction), result.results.map(_.score), trajectories = None)
-      case Left(_) =>
-        // Whole-batch eval failure (timeout / max-errors): degrade to per-example failure scores.
-        EvaluationBatch(batch.map(_ => RawPrediction.empty), batch.map(_ => failureScore), trajectories = None)
-
-  private def withTraces(prog: P, batch: Vector[Example])(using RuntimeContext): EvaluationBatch =
-    // Reflective runs are independent — runOne isolates its trace context per example — so they go through the
-    // same parallel executor as the scores-only Evaluate path instead of serializing every minibatch run.
-    val trajectories = ParallelExecutor.fromSettings()
+    // The runs are independent, because `runOne` isolates the trace context of each example. They go through the
+    // parallel executor. `runOne` gives a result for a run that fails, so only an exception counts as an error there.
+    val runs = ParallelExecutor.fromSettings()
       .execute(
-        task = (example: Example) => runOne(prog, example)(using RuntimeEnvironment.current),
+        task = (example: Example) => runOne(prog, example, captureTraces)(using RuntimeEnvironment.current),
         data = batch
       ) match
       case Right(outcome) => batch.indices.toVector.map(i => outcome.results(i).getOrElse(failedRun(batch(i))))
-      case Left(_)        =>
-        // Whole-batch failure (timeout / max-errors): degrade to failure trajectories, mirroring scoresOnly.
-        batch.map(failedRun)
+      // A failure of the whole batch (a timeout, or too many exceptions): each example gets the failure score.
+      case Left(_) => batch.map(failedRun)
     EvaluationBatch(
-      outputs = trajectories.map(_.prediction),
-      scores = trajectories.map(_.score),
-      trajectories = Some(trajectories)
+      outputs = runs.map(_.prediction),
+      scores = runs.map(_.score),
+      trajectories = Option.when(captureTraces)(runs),
+      // gepa_utils `_make_evaluation_batch`: `objective_scores if any(objective_scores) else None`.
+      objectiveScores = Option.when(runs.exists(_.objectiveScores.nonEmpty))(runs.map(_.objectiveScores))
     )
+
+  /** The program with the instructions of `candidate`. The engine uses it to make the final result. */
+  def applyCandidate(candidate: Candidate): P = Candidate.applyTo(program, candidate)
 
   /** Build the reflective dataset for each component to update: per trajectory, the input values and the output values
     * of that component plus the optimizable-level feedback (gepa's `make_reflective_dataset`). The
@@ -251,19 +250,26 @@ final class GepaAdapter[P](
         _.messages.map(m => s"${m.role.toString.toLowerCase}: ${m.text.getOrElse("").strip}").mkString("\n")
       )
 
-  /** Run one example in an isolated, failure-capturing context and assemble its [[Trajectory]]. */
-  private def runOne(prog: P, example: Example)(using RuntimeContext): Trajectory =
+  /** Run one example in an isolated context and assemble its [[Trajectory]]. With `captureTraces`, the context captures
+    * the failures, and the trajectory and the metric get the trace of the run. Without it, the two get an empty trace:
+    * the caller reads the output, the score, and the objective scores only.
+    */
+  private def runOne(prog: P, example: Example, captureTraces: Boolean)(using RuntimeContext): Trajectory =
     // The metric runs in the isolated context of the run, so the trace and the history of an LM-judged metric do not
     // reach the trajectory or the caller's context.
-    TracedRun.runWith(prog, ProgramCall(example.inputs), captureFailures = true) { (result, trace) =>
+    TracedRun.runWith(prog, ProgramCall(example.inputs), captureFailures = captureTraces) { (result, runTrace) =>
+      val trace = if captureTraces then runTrace else Vector.empty
       result match
         case Right(prediction) =>
-          val score = metric.feedback(example, prediction, trace, component = None, componentTrace = Vector.empty)
-            .map(_.score)
-            .getOrElse(failureScore)
-          Trajectory(example, prediction, trace, score)
+          metric.feedback(example, prediction, trace, component = None, componentTrace = Vector.empty) match
+            case Right(scored) =>
+              Trajectory(example, prediction, trace, scored.score, objectiveScores = scored.objectiveScores)
+            case Left(_) =>
+              // The scores-only path gives an empty output for each example with no score, as `Evaluate` does
+              // (upstream uses `Evaluate` for this path). The reflective path keeps the prediction.
+              Trajectory(example, if captureTraces then prediction else RawPrediction.empty, trace, failureScore)
         case Left(_) =>
-          // The trace of the run already holds the failure entry (raw response) via captureFailureTraces.
+          // With `captureTraces`, the trace already holds the failure entry (raw response) via captureFailureTraces.
           Trajectory(example, RawPrediction.empty, trace, failureScore, failed = true)
     }
 

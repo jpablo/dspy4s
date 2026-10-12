@@ -13,8 +13,14 @@ import dspy4s.evaluate.contracts.Metric
   * LM, which rewrites that component's instruction to address it. Concrete, actionable feedback — what went wrong, the
   * correct answer, a format error — is what makes the search work; a bare score teaches the reflection LM little. See
   * PORT_GAPS G-12.
+  *
+  * @param objectiveScores
+  *   optional scores of the example for named objectives, for example `"accuracy"` and `"cost"` (dspy's
+  *   `objective_scores`). GEPA reads them from the program-level feedback only. It keeps them for each candidate, and
+  *   it selects candidates with them when [[dspy4s.gepa.GepaConfig.frontierType]] is not `Instance`. The acceptance of
+  *   a candidate and the best candidate of a run use `score` only. A larger objective score is better.
   */
-final case class ScoreWithFeedback(score: Double, feedback: String)
+final case class ScoreWithFeedback(score: Double, feedback: String, objectiveScores: Map[String, Double] = Map.empty)
 
 /** GEPA's feedback metric — the dspy4s analogue of Python's `GEPAFeedbackMetric`.
   *
@@ -29,8 +35,9 @@ final case class ScoreWithFeedback(score: Double, feedback: String)
   *     this feedback only when the run passed, so `prediction` is the prediction of the program.
   *
   * Extends [[Metric]] so ONE instance serves both roles: it is a drop-in `Metric` for the [[dspy4s.evaluate.Evaluate]]
-  * machinery the GEPA adapter reuses for scoring ([[score]] = the program-level feedback's score), AND the source of
-  * reflection feedback ([[feedback]]). LM-judged feedback metrics may call a model via the ambient [[RuntimeContext]].
+  * machinery ([[score]] = the program-level feedback's score), AND the source of reflection feedback ([[feedback]]).
+  * The GEPA adapter calls [[feedback]] only, because it also reads the objective scores. LM-judged feedback metrics may
+  * call a model via the ambient [[RuntimeContext]].
   *
   * Errors: like `Metric`, return `Left` only for an unrecoverable scoring failure. A wrong/empty prediction is a low
   * SCORE with feedback, not a `Left` — GEPA learns from those.
