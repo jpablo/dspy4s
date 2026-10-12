@@ -7,6 +7,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ThreadCount
+import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
@@ -71,10 +72,10 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     val dataset = cfg.devset
     val metric  = cfg.metric
 
+    // An empty devset has no score. A score of 0.0 looks like a valid result to an optimizer, so this is an error
+    // (Python raises `ValueError`).
     if dataset.isEmpty then
-      return Right(
-        EvaluationResult(score = 0.0, results = Vector.empty, metricName = metric.name)
-      )
+      return Left(ValidationError("devset must contain at least one example, got an empty devset."))
 
     // Carry the configured callbackMetadata into the evaluation scope so callbacks firing during the run can read
     // it (Python's `Evaluate(callback_metadata=…)`). Empty metadata leaves the ambient context untouched.

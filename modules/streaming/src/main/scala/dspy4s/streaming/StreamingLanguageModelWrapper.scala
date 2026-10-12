@@ -20,6 +20,7 @@ import dspy4s.lm.runtime.ToolCallAssembler
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
+import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -54,6 +55,12 @@ final class StreamingLanguageModelWrapper private (
 
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
+  // This wrapper is the active LM during `streamify`, so it must not hide what the delegate supports (adapters
+  // consult the flags to decide e.g. whether to emit `response_format` or native tools) or its default options.
+  override def supportsFunctionCalling: Boolean    = delegate.supportsFunctionCalling
+  override def supportsResponseSchema: Boolean     = delegate.supportsResponseSchema
+  override def supportsReasoning: Boolean          = delegate.supportsReasoning
+  override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val ctx                        = activeContext()
@@ -62,20 +69,22 @@ final class StreamingLanguageModelWrapper private (
     val toolDeltas                 = mutable.ArrayBuffer.empty[LmToolCallDelta]
     val chunks                     = delegate.stream(request)
     try
-      // Providers reify transport/HTTP failures into a terminal chunk with `finishReason = "error"` and the
-      // message under `raw` (see OpenAiLanguageModel.stream). Surface that as a Left instead of folding it
-      // into a successful empty response the adapter would then misreport as a parse error.
-      var streamError: Option[String] = None
+      // Providers reify transport/HTTP failures into a terminal chunk with `finishReason = "error"`, the
+      // message under `raw`, and the typed failure in `error` (see OpenAiLanguageModel.stream). Surface that as
+      // a Left instead of folding it into a successful empty response the adapter would then misreport as a
+      // parse error.
+      var streamError: Option[DspyError] = None
       chunks.foreach { chunk =>
-        if chunk.finishReason.contains("error") then streamError = Some(errorMessage(chunk.raw))
-        else
-          emit(ctx, chunk)
-          text.append(chunk.text)
-          chunk.usage.foreach(usage => lastUsage = Some(usage))
-          if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
+        failureOf(chunk) match
+          case Some(failure) => streamError = Some(failure)
+          case None          =>
+            emit(ctx, chunk)
+            text.append(chunk.text)
+            chunk.usage.foreach(usage => lastUsage = Some(usage))
+            if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
       }
       streamError match
-        case Some(message) => Left(RuntimeError("streaming_lm", message))
+        case Some(failure) => Left(failure)
         case None          =>
           flush(ctx)
           val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
@@ -109,6 +118,15 @@ final class StreamingLanguageModelWrapper private (
       predictName: String,
       state      : Option[AdapterStreamingState]
   )
+
+  /** The failure that a chunk reports, if any. The typed `error` of the chunk wins, so the caller gets the same
+    * `DspyError` that the provider produced (a `ContextWindowExceededError` stays one). A chunk that has only
+    * `finishReason = "error"` gives a `RuntimeError("streaming_lm", ...)` with the message from `raw`.
+    */
+  private def failureOf(chunk: LmChunk): Option[DspyError] =
+    chunk.error.orElse(
+      Option.when(chunk.finishReason.contains("error"))(RuntimeError("streaming_lm", errorMessage(chunk.raw)))
+    )
 
   /** Extract the provider's error message from a reified error chunk's `raw` payload (`Map("error" -> message)` by
     * convention).

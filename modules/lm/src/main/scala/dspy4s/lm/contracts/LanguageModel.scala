@@ -2,6 +2,7 @@ package dspy4s.lm.contracts
 
 import dspy4s.core.contracts.{DspyError, Executed, LanguageModelRef, RuntimeContext}
 import dspy4s.core.runtime.ContextPropagation
+import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -22,6 +23,12 @@ trait LanguageModel extends LanguageModelRef:
 
   /** Whether this model exposes reasoning/thinking output (e.g. reasoning-token models). Defaults to `false`. */
   def supportsReasoning: Boolean = false
+
+  /** The provider options that this model merges into each request (e.g. `temperature`). The options of the request win
+    * on a key collision. The cache key covers these options, so a wrapper must forward the value of its delegate.
+    * Defaults to an empty record.
+    */
+  def defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 
   def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse]
 

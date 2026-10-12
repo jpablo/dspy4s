@@ -73,6 +73,11 @@ class MergeProposerSuite extends FunSuite:
     )
   )
 
+  // A seed and two children of it. Each child changes one stage, so the two children are a valid merge pair.
+  private val seedCand = Map(first -> Some("Stage one."), second -> Some("Stage two."))
+  private val hinter   = Map(first -> Some("Use TOKEN1 to produce a good_hint."), second -> Some("Stage two."))
+  private val answerer = Map(first -> Some("Stage one."), second -> Some("Use TOKEN2 with the good_hint to answer."))
+
   // ── Pure crossover helpers ──────────────────────────────────────────────────────────────────────────────────
 
   test("crossover takes each component from whichever descendant improved it (complementary gains stacked)") {
@@ -181,5 +186,62 @@ class MergeProposerSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       assertEquals(merger.propose(state), None)
+    }
+  }
+
+  // ── Dominated candidates (PORT_GAPS G-44; gepa `find_dominator_programs`) ───────────────────────────────────────
+  // The merge pool holds only the candidates that stay after `remove_dominated_programs`.
+
+  test("propose finds no pair when the frontier holds a dominated candidate and one candidate that stays") {
+    val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
+    // Front 0 holds c1 and c2. Front 1 holds c2 only. c2 covers the only front of c1, so c1 leaves the merge pool.
+    // Without that rule, (1, 2, ancestor 0) is a valid triplet.
+    val state = GepaState(
+      candidates = CandidatePool.applyUnsafe(Vector(seedCand, hinter, answerer)),
+      valSubscores = Vector(Vector(0.0, 0.0), Vector(1.0, 0.0), Vector(1.0, 1.0)),
+      parents = Vector(Vector.empty, Vector(0), Vector(0)),
+      totalMetricCalls = MetricCallCount(0)
+    )
+    val merger = new MergeProposer[Pipeline](
+      valset,
+      maxMergeInvocations = MergeInvocationLimit(5),
+      new Random(0),
+      new GepaEvalCache(adapter)
+    )
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(merger.propose(state), None)
+    }
+  }
+
+  test("propose takes the two parents from the candidates that stay, never from a dominated candidate") {
+    val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
+    val valset3 = (1 to 3).toVector.map(i =>
+      Example(
+        values = DynamicValues.record("question" := s"Capital ($i)?", "answer" := "Paris"),
+        inputKeys = Set("question")
+      )
+    )
+    // Front 0 holds c1 and c3. Front 1 holds c2. Front 2 holds c3. c3 covers the only front of c1, so the merge pool is
+    // {c2, c3}. Without that rule, (1, 2, ancestor 0) is also a valid triplet and some seeds select it.
+    val hinter3 = Map(first -> Some("Use TOKEN1 to produce a good_hint. Be brief."), second -> Some("Stage two."))
+    val state   = GepaState(
+      candidates = CandidatePool.applyUnsafe(Vector(seedCand, hinter, answerer, hinter3)),
+      valSubscores = Vector(Vector(0.0, 0.0, 0.0), Vector(1.0, 0.0, 0.0), Vector(0.0, 1.0, 0.0), Vector(1.0, 0.0, 1.0)),
+      parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(0)),
+      totalMetricCalls = MetricCallCount(0)
+    )
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val parents          = (0 until 20).map { seed =>
+        val merger = new MergeProposer[Pipeline](
+          valset3,
+          maxMergeInvocations = MergeInvocationLimit(5),
+          new Random(seed),
+          new GepaEvalCache(adapter)
+        )
+        merger.propose(state).map(_.parents)
+      }.toSet
+      assertEquals(parents, Set(Option(Vector(2, 3))))
     }
   }

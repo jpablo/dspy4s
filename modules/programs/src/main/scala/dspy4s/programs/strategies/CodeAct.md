@@ -137,12 +137,10 @@ flowchart TD
     execute --> outcome{"Execution outcome"}
     outcome -->|"exit 0"| stdout["Append stdout entry"]
     outcome -->|"non-zero exit"| userError["Append stderr entry"]
-    outcome -->|"RuntimeError"| runtimeObservation["Append interpreter-failure entry"]
-    outcome -->|"other DspyError"| abort["Return Left(error)"]
+    outcome -->|"Left(DspyError)"| abort["Return Left(error)"]
 
     stdout --> finish{"finished?"}
     userError --> finish
-    runtimeObservation --> finish
     finish -->|"yes"| done["Stop loop"]
     finish -->|"no"| continue
 ```
@@ -254,7 +252,8 @@ flowchart LR
 ```
 
 If extraction exceeds the model's context window, CodeAct retries up to three total attempts, dropping the oldest
-trajectory entry before each retry. This truncation affects only the extractor's prompt. On success, the final
+trajectory entry before each retry. The last entry is never dropped: an overflow with one entry returns the
+`Left(ContextWindowExceededError)`. This truncation affects only the extractor's prompt. On success, the final
 `prediction.raw.values("trajectory")` still contains the complete, untruncated trajectory produced by the loop.
 
 The final raw completions and LM usage come from the extractor prediction. Generator calls remain observable through
@@ -408,11 +407,10 @@ CodeAct distinguishes recoverable evidence from failures of the prediction machi
 |---|---|
 | Empty or malformed generated code | Append a parse-error observation, ignore `finished`, and continue if budget remains |
 | Python exits non-zero | Append stderr as an execution-error observation; honor `finished` |
-| Interpreter returns `RuntimeError` | Append an interpreter-failure observation; honor `finished` |
-| Interpreter returns another `DspyError` | Return `Left(error)` immediately |
+| Interpreter returns `Left(DspyError)` | Return `Left(error)` immediately; the interpreter itself failed |
 | Generator prediction fails | Return `Left(error)` immediately |
 | `maxIterations` is reached | Extract from the trajectory gathered so far |
-| Extractor context overflow | Drop oldest entries and retry, up to three attempts |
+| Extractor context overflow | Drop oldest entries and retry, up to three attempts; the last entry is never dropped |
 | Persistent extractor overflow | Return the final `Left(ContextWindowExceededError)` |
 | Extractor output fails decoding | Return `Left(DspyError)` |
 

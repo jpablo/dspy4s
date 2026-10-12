@@ -21,10 +21,10 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 final case class ProviderLanguageModel(
-    id            : String,
-    mode          : LmMode,
-    invoke        : DynamicValue => Either[DspyError, DynamicValue],
-    defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
+    id                         : String,
+    mode                       : LmMode,
+    invoke                     : DynamicValue => Either[DspyError, DynamicValue],
+    override val defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends LanguageModel:
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val effectiveMode     = request.mode
@@ -34,6 +34,12 @@ final case class ProviderLanguageModel(
 object ProviderRequestNormalizer:
   private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
 
+  /** The option bag that the provider sends: `defaultOptions` overlaid by the options of the request. [[normalize]] and
+    * the cache key of `ManagedLanguageModel` share this merge, so the key covers the options on the wire.
+    */
+  def effectiveOptions(request: LmRequest, defaultOptions: DynamicValue.Record): DynamicValue.Record =
+    DynamicValues.mergeRecords(defaultOptions, request.options)
+
   /** Build the provider request payload as a `DynamicValue.Record`: the merged option bag (defaults overlaid by the
     * request's options), plus model / mode / request_id and the encoded messages or prompt.
     */
@@ -41,7 +47,7 @@ object ProviderRequestNormalizer:
       request       : LmRequest,
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
   ): DynamicValue.Record =
-    var rec = DynamicValues.mergeRecords(defaultOptions, request.options)
+    var rec = effectiveOptions(request, defaultOptions)
     rec = rec.updated(WireKeys.model, str(request.model))
     rec = rec.updated(WireKeys.mode, str(request.mode.toString.toLowerCase))
     request.requestId.foreach(id => rec = rec.updated(WireKeys.requestId, str(id)))

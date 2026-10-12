@@ -99,6 +99,17 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     }
   }
 
+  // PORT_GAPS G-46: `Evaluate` rejects an empty devset. The adapter does not call it for an empty batch.
+  test("evaluate on an empty batch returns an empty batch on the two paths") {
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val scoresOnly       = adapter.evaluate(Vector.empty, Candidate.seed(program), captureTraces = false)
+      assertEquals(scoresOnly, EvaluationBatch(Vector.empty, Vector.empty, trajectories = None))
+      val withTraces = adapter.evaluate(Vector.empty, Candidate.seed(program), captureTraces = true)
+      assertEquals(withTraces, EvaluationBatch(Vector.empty, Vector.empty, trajectories = Some(Vector.empty)))
+    }
+  }
+
   test("a different candidate instruction is actually applied before evaluation") {
     // Sanity: the candidate's instruction reaches the predictor (we can't see it change the scripted LM's answer,
     // but the prompt the LM sees must carry the candidate instruction).

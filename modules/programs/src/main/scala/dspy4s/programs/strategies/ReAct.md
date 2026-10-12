@@ -227,9 +227,10 @@ prediction machinery.
 | Empty tool name | Append `No tool was selected.` and run the extractor |
 | Model selects `finish` | Append the finish entry and run the extractor |
 | `maxIterations` reached | Run the extractor over the trajectory gathered so far |
-| React-step context overflow | Drop the oldest trajectory entry and retry, up to three attempts |
+| React-step context overflow | Drop the oldest trajectory entry and retry, up to three attempts; the last entry is never dropped |
 | Persistent react-step overflow | End the loop and let the extractor make the best answer it can |
-| Extractor context overflow | Retry with oldest entries omitted, up to three attempts |
+| Extractor context overflow | Retry with oldest entries omitted, up to three attempts; the last entry is never dropped |
+| Persistent extractor overflow | Return the final `Left(ContextWindowExceededError)` |
 | Other react/extractor LM error | Return `Left(error)` |
 | Extractor decoding error | Return `Left(error)` |
 

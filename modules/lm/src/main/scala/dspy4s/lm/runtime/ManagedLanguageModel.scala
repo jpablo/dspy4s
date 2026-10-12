@@ -16,6 +16,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
+import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -122,6 +123,8 @@ final case class ManagedLanguageModel(
   override def supportsFunctionCalling: Boolean = delegate.supportsFunctionCalling
   override def supportsResponseSchema: Boolean  = delegate.supportsResponseSchema
   override def supportsReasoning: Boolean       = delegate.supportsReasoning
+  // The default options pass through too: the cache key below reads them, and an outer wrapper must see them.
+  override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
   /** Streaming passthrough, so wrapping a streaming provider in ManagedLanguageModel does not silently disable token
     * streaming (streamify only wraps `StreamingLanguageModel`s).
@@ -141,11 +144,18 @@ final case class ManagedLanguageModel(
               finishReason = Some("stop"),
               usage = response.usage
             ))
-          case Left(error) =>
-            Iterator.single(LmChunk(finishReason = Some("error"), raw = Some(Map("error" -> error.message))))
+          case Left(error) => Iterator.single(LmChunk.failure(error))
+
+  /** The request that the cache keys on. The provider merges its default options into each request, so the key must
+    * cover the merged options: two models with one id and different defaults get different entries. `rolloutId` and all
+    * other fields stay as they are. The delegate still receives the original request.
+    */
+  private def cacheKey(request: LmRequest): LmRequest =
+    request.copy(options = ProviderRequestNormalizer.effectiveOptions(request, defaultOptions))
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    cache.flatMap(_.get(request)) match
+    lazy val key = cacheKey(request)
+    cache.flatMap(_.get(key)) match
       case Some(cached) =>
         appendHistory(request, cached, cacheHit = true)
         Right(cached.copy(cacheHit = true))
@@ -159,7 +169,7 @@ final case class ManagedLanguageModel(
             Left(error)
           case Right(response) =>
             val uncached = response.copy(cacheHit = false)
-            cache.foreach(_.put(request, uncached))
+            cache.foreach(_.put(key, uncached))
             appendHistory(request, uncached, cacheHit = false)
             trackUsage(request, uncached)
             Right(uncached)

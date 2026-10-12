@@ -92,6 +92,7 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
 
     if ps.read(student).isEmpty then
       Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    else if effVal.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
     else
       // 2) Bootstrap few-shot demos first; the rule-augmented search starts from that program.
       val bootstrapConfig =

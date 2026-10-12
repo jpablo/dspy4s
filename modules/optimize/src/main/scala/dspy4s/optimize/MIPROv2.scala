@@ -106,6 +106,7 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
 
     if leafCount == 0 then
       Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    else if evalset.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
     else
       // ── Phase 1: demo-set candidates (whole-program demo assignments) ──
       val demoCandidates: Vector[Vector[Vector[Example]]] = bootstrapDemoCandidates(student, trainset, teacher)

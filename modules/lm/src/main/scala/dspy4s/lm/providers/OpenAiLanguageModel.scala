@@ -34,10 +34,10 @@ import zio.blocks.schema.DynamicValue
   *   take precedence -- see [[ProviderRequestNormalizer]].
   */
 final case class OpenAiLanguageModel(
-    model         : String,
-    mode          : LmMode              = LmMode.Chat,
-    client        : OpenAiClient,
-    defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
+    model                      : String,
+    mode                       : LmMode              = LmMode.Chat,
+    client                     : OpenAiClient,
+    override val defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends StreamingLanguageModel:
 
   override val id: String = model
@@ -58,20 +58,15 @@ final case class OpenAiLanguageModel(
   /** Open an SSE stream against the same endpoint and yield decoded [[dspy4s.lm.contracts.LmChunk]]s.
     *
     * Errors are reified into the stream rather than thrown: if the client can't open the connection, the result is a
-    * single terminal chunk with `finishReason = "error"` and the message under `raw`, so consumers always see a
-    * finalized stream instead of an `Iterator` that throws on first read.
+    * single terminal chunk with `finishReason = "error"`, the message under `raw`, and the typed failure in `error`
+    * (see [[dspy4s.lm.contracts.LmChunk.failure]]), so consumers always see a finalized stream instead of an `Iterator`
+    * that throws on first read.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     val normalized = ProviderRequestNormalizer.normalize(request, defaultOptions)
     client.stream(normalized) match
       case Right(iterator) => iterator
-      case Left(error)     => Iterator.single(
-          LmChunk(
-            text = "",
-            finishReason = Some("error"),
-            raw = Some(Map("error" -> error.message))
-          )
-        )
+      case Left(error)     => Iterator.single(LmChunk.failure(error))
 
 object OpenAiLanguageModel:
 

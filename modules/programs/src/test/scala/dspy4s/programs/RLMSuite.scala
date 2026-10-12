@@ -303,3 +303,45 @@ class RLMSuite extends FunSuite:
     assert(logged.contains("WARN [dspy4s] RLM: reached max iterations, using extract to get final output"), logged)
     assert(!logged.contains("RLM iteration"), logged)
   }
+
+  // PORT_GAPS G-35 (upstream 89696e0cc): a `Left` from the interpreter means that the interpreter failed. Generated
+  // code cannot repair that, so the run must stop.
+
+  test("an interpreter failure ends the run: no observation and no more LM calls") {
+    val failure = RuntimeError("code_interpreter", "Deno executable not found")
+    val repl    = new ScriptedRepl(Vector(Left(failure)))
+    val lm      = new ScriptedLm(Vector(
+      "first try||```python\nprint(1)\n```",
+      "second try||```python\nprint(2)\n```",
+      "extract"
+    ))
+    val program = rlm(repl)
+
+    withRlm(lm, new ProbeAdapter) {
+      val result = program((context = "c", query = "q"))
+      assertEquals(result.left.toOption, Some(failure))
+      assertEquals(lm.calls.get(), 1, "the LM must not see an interpreter failure as an observation")
+      assertEquals(repl.executed.size, 1)
+      assert(repl.closed, "RLM must close the interpreter that it built")
+    }
+  }
+
+  test("a user-code error is still an observation and the loop continues") {
+    val repl = new ScriptedRepl(Vector(
+      Right(CodeResult("", "NameError: name 'x' is not defined", 1)),
+      Right(CodeResult("", "", 0, finalOutput = Some("""{"answer": "ok"}""")))
+    ))
+    val lm = new ScriptedLm(Vector(
+      "first try||```python\nprint(x)\n```",
+      "second try||```python\nSUBMIT(answer='ok')\n```"
+    ))
+    val probe   = new ProbeAdapter
+    val program = rlm(repl)
+
+    withRlm(lm, probe) {
+      val result = program((context = "c", query = "q"))
+      assertEquals(result.map(_.output.answer), Right("ok"))
+      assertEquals(lm.calls.get(), 2)
+      assert(probe.actionHistories.lastOption.exists(_.contains("NameError")), probe.actionHistories.toString)
+    }
+  }

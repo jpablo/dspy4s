@@ -131,6 +131,28 @@ class OpenAiLanguageModelSuite extends FunSuite:
     assertEquals(result.left.toOption.get.asInstanceOf[RuntimeError].component, "openai_auth")
   }
 
+  test("OpenAiLanguageModel.stream reports an HTTP error as one chunk that carries the typed error") {
+    val transport = new ScriptedTransport(
+      streamingResponses = Vector(
+        Right(HttpStreamResponse(429, Map.empty, new VectorClosableIterator(Vector("""{"error":"rate limit"}"""))))
+      )
+    )
+    val lm = OpenAiLanguageModel(model = "gpt-4o-mini", client = OpenAiClient(apiKey = "x", transport = transport))
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val request          = LmRequest(model = "gpt-4o-mini", messages = Vector(Message(MessageRole.User, Some("x"))))
+    val chunks           = lm.stream(request).toVector
+
+    assertEquals(chunks.size, 1)
+    val chunk = chunks.head
+    // The typed error is new. The finish reason and the `raw` message stay for existing consumers.
+    chunk.error match
+      case Some(RuntimeError(component, _)) => assertEquals(component, "openai_rate_limit")
+      case other                            => fail(s"expected the provider RuntimeError, got $other")
+    assertEquals(chunk.finishReason, Some("error"))
+    assertEquals(chunk.raw, Some(Map("error" -> chunk.error.map(_.message).getOrElse(""))))
+  }
+
   test("defaultOptions override request option keys") {
     val transport = new ScriptedTransport(
       nonStreamingResponses = Vector(Right(HttpResponse(200, Map.empty, okResponse)))

@@ -11,10 +11,29 @@ private[runtime] object DenoPyodideProtocol:
   val MaxSkippedLines = 100
   val ToolErrorCode   = -32008 // upstream's CodeInterpreterError app-error code
 
+  /** The JSON-RPC 2.0 protocol error codes, from parse error (-32700) to internal error (-32603). */
+  val ProtocolErrorCodes: Set[Long] = Set(-32700L, -32600L, -32601L, -32602L, -32603L)
+
   enum ExecuteOutcome:
     case Output(text: String)
     case Submitted(json: String)
     case UserError(message: String)
+
+  /** The class of a sandbox message that is not the response to a request (see [[outOfBand]]). */
+  enum OutOfBand derives CanEqual:
+    /** The message is a request or a response. The caller handles it. */
+    case No
+
+    /** The message has a `method` and no `id`. The caller skips it. */
+    case Notification
+
+    /** The message is an error without an id. The caller skips it and continues to read. */
+    case UnsolicitedError(message: String)
+
+    /** The message is a protocol error without an id. The sandbox did not process a request, so the session cannot
+      * continue.
+      */
+    case ProtocolError(message: String)
 
   private lazy val jsonCodec = Schema.dynamic.jsonCodec
 
@@ -47,6 +66,28 @@ private[runtime] object DenoPyodideProtocol:
       "error"   -> DynamicValues.record("code" := code, "message" := message),
       "id"      -> id
     )))
+
+  /** Classify a message that no request waits for (upstream `_handle_out_of_band_message`). A notification has a
+    * `method` and no `id` member. An error is out of band when its `id` is absent or null: the runner reports an
+    * unhandled promise rejection that way.
+    */
+  def outOfBand(msg: DynamicValue.Record): OutOfBand =
+    val id = field(msg, "id")
+    if field(msg, "method").isDefined && id.isEmpty then OutOfBand.Notification
+    else
+      field(msg, "error") match
+        case Some(error) if id.forall(isNull) =>
+          val record  = Some(error).collect { case r: DynamicValue.Record => r }
+          val message = record.flatMap(field(_, "message")).flatMap(asString).getOrElse(encodeJson(error))
+          if record.flatMap(field(_, "code")).flatMap(asLong).exists(ProtocolErrorCodes.contains) then
+            OutOfBand.ProtocolError(message)
+          else OutOfBand.UnsolicitedError(message)
+        case _ => OutOfBand.No
+
+  private def isNull(dv: DynamicValue): Boolean =
+    dv match
+      case _: DynamicValue.Null.type => true
+      case _                         => false
 
   def field(record: DynamicValue.Record, name: String): Option[DynamicValue] =
     DynamicValues.recordGet(record, name)

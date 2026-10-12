@@ -216,7 +216,8 @@ enum ReplExecution:
 
 That separation is useful. A failed Python action can still produce an observation that helps the next action, so
 `Right(ActionOutcome.Failed(Observed(...)))` continues. A `Left(DspyError)` is reserved for a failure outside this
-recoverable action protocol.
+recoverable action protocol. A `Left` from the REPL is such a failure: the interpreter itself failed, generated code
+cannot repair it, and the run ends with that error.
 
 ```mermaid
 flowchart TD
@@ -227,7 +228,7 @@ flowchart TD
     run --> result{"Interpreter result"}
     result -->|"stdout, exit 0"| observed["Succeeded(Observed(entry))"]
     result -->|"stderr, non-zero"| userError["Failed(Observed([Error] ...))"]
-    result -->|"interpreter failure"| interpreterError["Failed(Observed([Error] ...))"]
+    result -->|"Left(DspyError)"| interpreterError["Return Left(error)"]
     result -->|"finalOutput"| submit{"Complete and Shape[O]-valid?"}
     submit -->|"no"| submitError["Failed(Observed(error entry))"]
     submit -->|"yes"| submitted["Succeeded(Submitted(entry, record))"]
@@ -235,7 +236,6 @@ flowchart TD
     fenceError --> continue["Append entry and continue"]
     observed --> continue
     userError --> continue
-    interpreterError --> continue
     submitError --> continue
     submitted --> done["Decode O and finish"]
 ```
@@ -460,7 +460,7 @@ RLM distinguishes mistakes the agent can learn from from failures that prevent t
 |---|---|
 | Explicit non-Python Markdown fence | Append an `[Error]` observation without invoking the REPL |
 | Python exits non-zero | Append stderr as an `[Error]` observation and continue |
-| REPL returns `Left(DspyError)` | Convert it to an `[Error]` observation and continue |
+| REPL returns `Left(DspyError)` | Return `Left(error)` immediately; RLM still closes the interpreter |
 | `SUBMIT` payload is not a record | Append an `[Error]` observation and continue |
 | `SUBMIT` omits a declared output | Append an `[Error]` observation and continue |
 | `SUBMIT` fails `Shape[O]` decoding | Append a `[Type Error]` observation and continue |

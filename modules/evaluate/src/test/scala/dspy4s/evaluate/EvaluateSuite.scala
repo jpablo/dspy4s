@@ -74,12 +74,20 @@ class EvaluateSuite extends FunSuite:
     assertEquals(DynamicValues.recordGet(seen.get(), "run_id").map(DynamicValues.renderText), Some("abc123"))
   }
 
-  test("Evaluate with empty devset returns score 0") {
+  // PORT_GAPS G-46 (upstream c7ee4462a): a score of 0.0 for no data looks like a valid result to an optimizer.
+  test("Evaluate with an empty devset is a validation error, not a score") {
+    val calls            = new java.util.concurrent.atomic.AtomicInteger(0)
     val evaluator        = Evaluate(devset = Vector.empty, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = evaluator()((_: Example) => Right(RawPrediction.empty))
-    assert(result.isRight)
-    assertEquals(result.toOption.get.score, 0.0)
+    val result           = evaluator() { (_: Example) =>
+      val _ = calls.incrementAndGet()
+      Right(RawPrediction.empty)
+    }
+    result match
+      case Left(error: dspy4s.core.contracts.ValidationError) =>
+        assert(error.message.toLowerCase.contains("empty"), error.message)
+      case other => fail(s"expected a ValidationError, got $other")
+    assertEquals(calls.get(), 0)
   }
 
   test("Evaluate failure_score is used when predict fails") {

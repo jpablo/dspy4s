@@ -94,6 +94,11 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
     * upstream parity: the interpreter re-assigns the variables at the top of each code block, so a model-side mutation
     * of an input variable deliberately does not survive to the next step. The interpreter caches the serialized
     * assignment prelude per map instance, so the repeated injection costs no host-side re-encoding.
+    *
+    * A user-code error (a `CodeResult` with a non-zero exit code) becomes an `[Error]` observation and the loop
+    * continues. A `Left` from the REPL means that the interpreter itself failed (process, timeout, protocol). Generated
+    * code cannot repair that failure, so the `Left` ends the run and the LM gets no more calls. Upstream
+    * `_execute_code` catches only `CodeExecutionError` and `SyntaxError`. `run` still closes the interpreter.
     */
   private def replActionInterpreter(
       interpreter: ReplCodeInterpreter,
@@ -104,9 +109,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
           RuntimeContext
       ): Either[DspyError, ActionOutcome[RLM.ReplExecution]] =
         interpreter.execute(action.code, inputVars) match
-          case Left(error) =>
-            val entry = RLM.ReplEntry(action.reasoning, action.code, s"[Error] ${error.message}")
-            Right(ActionOutcome.Failed(RLM.ReplExecution.Observed(entry)))
+          case Left(error)   => Left(error)
           case Right(result) => result.finalOutput match
               case Some(finalJson) => RLM.parseSubmitted(finalJson, outputFieldNames) match
                   case Left(problem) =>

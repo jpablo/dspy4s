@@ -97,6 +97,7 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
 
     if leafCount == 0 then
       Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    else if evalset.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
     else
       // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
       var current       = student

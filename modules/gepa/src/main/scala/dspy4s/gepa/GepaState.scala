@@ -74,7 +74,32 @@ final case class GepaState(
       j -> candidates.indices.filter(i => valSubscores(i)(j) == best).toSet
     }.toMap
 
+  /** [[paretoFrontier]] without the dominated candidates (gepa's `remove_dominated_programs`, with [[aggregateScore]]
+    * as the score). Candidate selection and merge take their candidates from this frontier.
+    */
+  def nonDominatedFrontier: Map[Int, Set[Int]] = GepaState.removeDominated(paretoFrontier, aggregateScore)
+
 object GepaState:
+
+  /** Remove the dominated candidates from `fronts` (gepa's `remove_dominated_programs`). A candidate is dominated when
+    * each front that holds it also holds a different candidate that stays (gepa's `is_dominated`).
+    *
+    * The routine examines the candidates in ascending `score` order, so a weak candidate leaves before a strong one.
+    * The sort is stable. Candidates with equal scores keep the order of their first appearance in the fronts (fronts by
+    * validation index, candidates by index in a front). Each front keeps at least one candidate.
+    */
+  private[gepa] def removeDominated(fronts: Map[Int, Set[Int]], score: Int => Double): Map[Int, Set[Int]] =
+    val ordered  = fronts.toVector.sortBy(_._1).map(_._2)
+    val frontsOf = ordered.flatMap(front => front.iterator.map(_ -> front)).groupMap(_._1)(_._2)
+    val programs = ordered.flatMap(_.toVector.sorted).distinct.map(p => p -> score(p)).sortBy(_._2).map(_._1)
+    // gepa starts the scan again after each removal. A removal only makes the other candidates harder to dominate, so
+    // a candidate that one scan keeps also stays in each later scan. One pass gives the same result.
+    val dominated = programs.foldLeft(Set.empty[Int]) { (removed, y) =>
+      val isDominated = frontsOf(y).forall(_.exists(p => p != y && !removed.contains(p)))
+      if isDominated then removed + y else removed
+    }
+    fronts.map((instance, front) => instance -> front.diff(dominated))
+
   /** Initialize from the seed candidate's full-validation evaluation. */
   def seed(candidate: Candidate, subscores: Vector[Double], metricCalls: Int): GepaState =
     GepaState(
@@ -91,11 +116,12 @@ trait CandidateSelector:
 object CandidateSelector:
   /** Sample a candidate from the instance Pareto frontier, weighted by how many validation instances it is best on
     * (gepa's default "pareto" strategy — frequency-weighted frontier sampling). Falls back to a uniform draw when there
-    * is no frontier yet (e.g. zero validation instances).
+    * is no frontier yet (e.g. zero validation instances). The sample excludes dominated candidates
+    * ([[GepaState.nonDominatedFrontier]]).
     */
   object Pareto extends CandidateSelector:
     def select(state: GepaState, rng: Random): Int =
-      val weighted: Seq[Int] = state.paretoFrontier.values.toSeq.flatten
+      val weighted: Seq[Int] = state.nonDominatedFrontier.values.toSeq.flatten
       if weighted.isEmpty then rng.nextInt(state.candidates.size) else weighted(rng.nextInt(weighted.size))
 
   /** Always the current best by mean validation score (greedy). */

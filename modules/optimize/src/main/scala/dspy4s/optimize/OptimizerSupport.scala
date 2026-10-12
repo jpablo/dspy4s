@@ -2,8 +2,10 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ValidationError
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.OptimizationReport
@@ -38,10 +40,21 @@ private[optimize] object OptimizerSupport:
     */
   def seedBase(seed: Long): Int = math.floorMod(seed.toInt, 1024)
 
+  /** The error for an optimizer that has no example to score its candidates on. [[Evaluate]] rejects an empty devset,
+    * and an optimizer cannot select a candidate that has no score. Each optimizer that scores candidates returns this
+    * error before it does other work (Python raises `ValueError`).
+    */
+  def emptyEvalsetError(optimizer: String): DspyError =
+    ValidationError(
+      s"$optimizer cannot score candidates on an empty evaluation set. " +
+        "Give a valset (or a trainset, when there is no valset) with at least one example."
+    )
+
   /** Run `program` on `evalset` with `metric` via `runner`, returning the aggregate score (0..100), or `None` when the
     * WHOLE evaluation fails (timeout / maxErrors exceeded). A failed eval is "unknown", not "scored zero" — callers
     * that select a best candidate must not silently collapse `None` into `0.0` (MIPROv2 chooses `0.0` for a
-    * non-selectable trial; COPRO keeps it as `None`).
+    * non-selectable trial; COPRO keeps it as `None`). An empty `evalset` also gives `None`. Each caller rejects an
+    * empty set first with [[emptyEvalsetError]].
     */
   def evalScore[P](program: P, evalset: Vector[Example], metric: Metric, runner: ProgramRunner[P])(using
       RuntimeContext

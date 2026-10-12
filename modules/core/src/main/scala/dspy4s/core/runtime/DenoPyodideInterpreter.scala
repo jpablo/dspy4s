@@ -237,7 +237,9 @@ final class DenoPyodideInterpreter(
     }
 
   /** Read JSON-RPC lines until the response for `expectedId` arrives, servicing `tool_call` requests from the sandbox
-    * along the way and skipping non-JSON noise (Pyodide package-loading messages), up to a cap.
+    * along the way. Non-JSON noise (Pyodide package-loading messages) and out-of-band messages are skipped. Each
+    * skipped line counts against one `MaxSkippedLines` bound per request, so a flood cannot block the read forever. A
+    * tool call does not count.
     */
   private def readLoop(expectedId: Int): Either[DspyError, ExecuteOutcome] =
     var skipped = 0
@@ -245,43 +247,76 @@ final class DenoPyodideInterpreter(
       readLine() match
         case Left(err)   => return Left(err)
         case Right(line) => decodeJson(line) match
-            case None                           => skipped += 1
-            case Some(msg: DynamicValue.Record) => field(msg, "method").flatMap(asString) match
-                case Some("tool_call") => handleToolCall(msg) match
-                    case Left(err) => return Left(err)
-                    case Right(()) => ()
-                case Some(other) =>
-                  return Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Unexpected sandbox request: $other"))
-                case None => field(msg, "result") match
-                    case Some(result: DynamicValue.Record) =>
-                      if field(msg, "id").flatMap(asLong).contains(expectedId.toLong) then
-                        field(result, "final") match
-                          case Some(finalValue) => return Right(ExecuteOutcome.Submitted(encodeJson(finalValue)))
-                          case None             =>
-                            val out = field(result, "output").flatMap(asString).getOrElse("")
-                            return Right(ExecuteOutcome.Output(out))
-                      else return Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Response id mismatch"))
-                    case _ => field(msg, "error") match
-                        case Some(error: DynamicValue.Record) =>
-                          // App-level errors (code -32000..-32099) are USER-CODE errors: the message/args carry
-                          // the Python exception. Unsolicited errors (id null) are treated the same way.
-                          val errType = field(error, "data").collect { case r: DynamicValue.Record => r }
-                            .flatMap(field(_, "type")).flatMap(asString).getOrElse("Error")
-                          val args = field(error, "data").collect { case r: DynamicValue.Record => r }
-                            .flatMap(field(_, "args")).map(DynamicValues.renderText)
-                          val message = field(error, "message").flatMap(asString).filter(_.nonEmpty)
-                          return Right(
-                            ExecuteOutcome.UserError(s"$errType: ${args.orElse(message).getOrElse("Unknown error")}")
-                          )
-                        case _ => return Left(RuntimeError(
-                            CodeInterpreterErrors.Interpreter,
-                            s"Unexpected sandbox message: ${line.take(200)}"
-                          ))
-            case Some(_) => skipped += 1
-    Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Too many non-JSON lines from sandbox (> $MaxSkippedLines)"))
+            case Some(msg: DynamicValue.Record) =>
+              if field(msg, "method").flatMap(asString).contains("tool_call") then
+                handleToolCall(msg) match
+                  case Left(err) => return Left(err)
+                  case Right(()) => ()
+              else
+                skipOutOfBand(msg) match
+                  case Left(err)    => return Left(err)
+                  case Right(true)  => skipped += 1
+                  case Right(false) => return executeOutcome(msg, expectedId, line)
+            case _ => skipped += 1
+    Left(tooManySkippedLines)
+
+  /** Decode the response to the execute request `expectedId`. `msg` is not a tool call and is not out of band. A
+    * response with a different id is a protocol breakdown.
+    */
+  private def executeOutcome(
+      msg       : DynamicValue.Record,
+      expectedId: Int,
+      line      : String
+  ): Either[DspyError, ExecuteOutcome] =
+    val idMatches = field(msg, "id").flatMap(asLong).contains(expectedId.toLong)
+    val mismatch  = Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Response id mismatch"))
+    field(msg, "method").flatMap(asString) match
+      case Some(other) => Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Unexpected sandbox request: $other"))
+      case None        => field(msg, "result") match
+          case Some(result: DynamicValue.Record) =>
+            if !idMatches then mismatch
+            else
+              field(result, "final") match
+                case Some(finalValue) => Right(ExecuteOutcome.Submitted(encodeJson(finalValue)))
+                case None             => Right(ExecuteOutcome.Output(field(result, "output").flatMap(asString).getOrElse("")))
+          case _ => field(msg, "error") match
+              case Some(error: DynamicValue.Record) =>
+                if !idMatches then mismatch
+                else
+                  // App-level errors (code -32000..-32099) are USER-CODE errors: the message/args carry
+                  // the Python exception.
+                  val errType = field(error, "data").collect { case r: DynamicValue.Record => r }
+                    .flatMap(field(_, "type")).flatMap(asString).getOrElse("Error")
+                  val args = field(error, "data").collect { case r: DynamicValue.Record => r }
+                    .flatMap(field(_, "args")).map(DynamicValues.renderText)
+                  val message = field(error, "message").flatMap(asString).filter(_.nonEmpty)
+                  Right(ExecuteOutcome.UserError(s"$errType: ${args.orElse(message).getOrElse("Unknown error")}"))
+              case _ => Left(RuntimeError(
+                  CodeInterpreterErrors.Interpreter,
+                  s"Unexpected sandbox message: ${line.take(200)}"
+                ))
+
+  /** Consume `msg` when no request waits for it. `Right(true)`: the caller skips the message and counts it.
+    * `Right(false)`: the message is a request or a response. `Left`: the sandbox reported a protocol error without an
+    * id, so the response to the pending request does not arrive.
+    */
+  private def skipOutOfBand(msg: DynamicValue.Record): Either[DspyError, Boolean] =
+    outOfBand(msg) match
+      case OutOfBand.No                        => Right(false)
+      case OutOfBand.Notification              => Right(true)
+      case OutOfBand.UnsolicitedError(message) =>
+        RuntimeEnvironment.warn("DenoPyodideInterpreter", s"skipped an out-of-band sandbox error: $message")
+        Right(true)
+      case OutOfBand.ProtocolError(message) =>
+        Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Sandbox protocol error: $message"))
+
+  private def tooManySkippedLines: DspyError =
+    RuntimeError(CodeInterpreterErrors.Interpreter, s"Too many skipped lines from sandbox (> $MaxSkippedLines)")
 
   /** Service one `tool_call` request: invoke the host tool and reply with its result (or an app error). The request
-    * `id` is echoed VERBATIM — the sandbox uses string ids (`"tc_…"`) for tool calls.
+    * `id` is echoed VERBATIM — the sandbox uses string ids (`"tc_…"`) for tool calls. A tool that throws also gets an
+    * error reply (upstream `_handle_tool_call`): the sandbox waits for a reply to each tool call, so an exception that
+    * leaves `execute` here blocks the session.
     */
   private def handleToolCall(msg: DynamicValue.Record): Either[DspyError, Unit] =
     val callId = field(msg, "id").getOrElse(DynamicValue.Null)
@@ -295,13 +330,18 @@ final class DenoPyodideInterpreter(
       case Some(tool) =>
         // Same observability as ReAct's ToolExecutor: callbacks on the active context see every host-tool
         // invocation as a ToolStart/ToolEnd scope. handleToolCall runs on the thread that called `execute`,
-        // so the events land on (and nest under) the caller's scope.
-        CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs)) match
-          case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
-          case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
-            encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
-          case Right(other) =>
-            encodeResult(callId, DynamicValues.record("value" := encodeJson(other), "type" := "json"))
+        // so the events land on (and nest under) the caller's scope. The dispatcher emits the end event before
+        // it rethrows a tool exception, so the catch stays outside the scope.
+        try
+          CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs)) match
+            case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
+            case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
+              encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
+            case Right(other) =>
+              encodeResult(callId, DynamicValues.record("value" := encodeJson(other), "type" := "json"))
+        catch
+          case NonFatal(error) =>
+            encodeError(callId, ToolErrorCode, Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
     writeLine(reply)
 
   private def syncWriteFiles(): Unit =
@@ -315,7 +355,8 @@ final class DenoPyodideInterpreter(
       }
 
   /** Send a setup request (mount/register) and wait for its response, skipping noise. Tool calls cannot occur during
-    * setup, so a plain matching-id read suffices.
+    * setup, so a plain matching-id read suffices. Each skipped line counts against `MaxSkippedLines`, as in
+    * [[readLoop]].
     */
   private def sendRequest(method: String, params: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
     requestId += 1
@@ -337,6 +378,11 @@ final class DenoPyodideInterpreter(
                     msg,
                     "result"
                   ).collect { case r: DynamicValue.Record => r }.getOrElse(DynamicValue.Record.empty))
+            case Some(msg: DynamicValue.Record) =>
+              // A message for a different id is skipped too. Only an out-of-band protocol error stops the read.
+              skipOutOfBand(msg) match
+                case Left(err) => return Left(err)
+                case Right(_)  => skipped += 1
             case _ => skipped += 1
     Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"No response to '$method'"))
 

@@ -236,10 +236,12 @@ class ReActSuite extends FunSuite:
 
   test("react step truncation is durable: later iterations and the result build on the truncated trajectory") {
     val search = new SearchTool
-    // Iteration 1: search (trajectory gains step 1). Iteration 2's react call overflows -> oldest step dropped ->
-    // retry succeeds with finish. The finish entry builds on the TRUNCATED view.
+    // Iterations 1 and 2: search (trajectory gains steps 1 and 2). Iteration 3's react call overflows -> oldest step
+    // dropped -> retry succeeds with finish. The finish entry builds on the TRUNCATED view. Two entries are necessary:
+    // the last entry is never dropped (PORT_GAPS G-37).
     val lm = new EitherLm(Vector(
       Right("look it up||search||query=x"),
+      Right("look again||search||query=y"),
       Left(cwError),
       Right("done||finish||"),
       Right("42")
@@ -250,9 +252,10 @@ class ReActSuite extends FunSuite:
       val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
-      // Step 1 (the search) was truncated away; only the finish step (iteration 2 -> "Step 2") remains.
+      // Step 1 (the first search) was truncated away; step 2 and the finish step (iteration 3 -> "Step 3") remain.
       assert(!traj.contains("Step 1"), traj)
-      assert(traj.contains("Step 2") && traj.contains("tool_name: finish"), traj)
+      assert(traj.contains("Step 2"), traj)
+      assert(traj.contains("Step 3") && traj.contains("tool_name: finish"), traj)
     }
   }
 
@@ -269,5 +272,52 @@ class ReActSuite extends FunSuite:
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "best guess")
       assertEquals(probe.extractorTrajectories.toList, List("(empty)"))
+    }
+  }
+
+  // PORT_GAPS G-37: the last trajectory entry is never dropped. A run on an empty trajectory is not a retry of the
+  // same task.
+
+  test("a react-step overflow with one entry ends the loop and the extractor keeps that entry") {
+    val search = new SearchTool
+    // Iteration 1: search (one entry). Iteration 2's react call overflows. The loop ends with no retry on an empty
+    // trajectory, and the extractor runs over the one entry.
+    val lm = new EitherLm(Vector(
+      Right("look it up||search||query=x"),
+      Left(cwError),
+      Right("Brussels")
+    ))
+    val probe = new ExtractProbeAdapter
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, probe) {
+      val result = react((question = "capital?"))
+      assertEquals(result.map(_.output.answer), Right("Brussels"))
+      assertEquals(lm.calls.get(), 3, "one react step, one overflow, one extract call")
+      assertEquals(probe.extractorTrajectories.size, 1)
+      assert(probe.extractorTrajectories.head.contains("Step 1"), probe.extractorTrajectories.head)
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
+      assert(traj.contains("Step 1") && traj.contains("tool_name: search"), traj)
+    }
+  }
+
+  test("an extract-step overflow with one entry returns the overflow error") {
+    val search = new SearchTool
+    // One react step (finish), then the extractor overflows. The extractor does not run again on an empty trajectory.
+    val lm = new EitherLm(Vector(
+      Right("done||finish||"),
+      Left(cwError),
+      Right("answer with no evidence")
+    ))
+    val probe = new ExtractProbeAdapter
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, probe) {
+      react((question = "q?")) match
+        case Left(_: dspy4s.core.contracts.ContextWindowExceededError) => ()
+        case other                                                     => fail(s"expected the overflow error, got $other")
+      assertEquals(lm.calls.get(), 2, "one react step and one extract call")
+      assertEquals(probe.extractorTrajectories.size, 1)
+      assert(probe.extractorTrajectories.head.contains("tool_name: finish"), probe.extractorTrajectories.head)
     }
   }

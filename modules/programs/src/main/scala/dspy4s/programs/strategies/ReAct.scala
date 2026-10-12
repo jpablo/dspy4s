@@ -231,7 +231,8 @@ final case class ReAct[I, O](
     * Returns the step plus the (possibly truncated) view: truncation is DURABLE — later iterations and the extractor
     * build on the truncated trajectory, as upstream mutates the shared dict. `(None, view)` means the overflow
     * persisted (attempts exhausted, or nothing left to drop) — upstream's `ValueError` path, which the loop converts
-    * into a break rather than a failure.
+    * into a break rather than a failure. The last entry is never dropped, so the react predict never runs again on an
+    * empty view and the extractor keeps that entry as evidence.
     */
   private def reactWithTruncation(
       call     : ProgramCall[I],

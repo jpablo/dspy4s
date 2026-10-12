@@ -51,6 +51,8 @@ final class GepaAdapter[P](
   def applyCandidate(candidate: Candidate): P = Candidate.applyTo(program, candidate)
 
   private def scoresOnly(prog: P, batch: Vector[Example])(using RuntimeContext): EvaluationBatch =
+    // `Evaluate` rejects an empty devset. An empty batch has no output and no score, so there is nothing to run.
+    if batch.isEmpty then return EvaluationBatch(Vector.empty, Vector.empty, trajectories = None)
     Evaluate(devset = batch, metric = metric, failureScore = failureScore)()((ex: Example) =>
       runner.run(prog, ex.inputs)
     ) match

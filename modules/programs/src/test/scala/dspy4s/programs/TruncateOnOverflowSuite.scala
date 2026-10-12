@@ -60,3 +60,28 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
     assert(result.isLeft)
     assertEquals(calls, 1)
   }
+
+  // PORT_GAPS G-37: upstream `truncate_trajectory` raises when the trajectory has one tool call. A run on an empty
+  // trajectory is not a retry of the same task.
+
+  test("overflow with one entry: stops with the overflow error and does not run on an empty view") {
+    val rendered       = scala.collection.mutable.ArrayBuffer.empty[String]
+    val (result, used) = truncateOnOverflow(Vector(1), maxAttempts = 3)(_.mkString(",")) { text =>
+      rendered += text
+      Left(cwe)
+    }
+    assertEquals(result, Left(cwe): Either[DspyError, String])
+    assertEquals(rendered.toVector, Vector("1"))
+    assertEquals(used, Vector(1))
+  }
+
+  test("overflow with two entries: drops one entry, then stops at the last entry") {
+    val rendered       = scala.collection.mutable.ArrayBuffer.empty[String]
+    val (result, used) = truncateOnOverflow(Vector(1, 2), maxAttempts = 5)(_.mkString(",")) { text =>
+      rendered += text
+      Left(cwe)
+    }
+    assertEquals(result, Left(cwe): Either[DspyError, String])
+    assertEquals(rendered.toVector, Vector("1,2", "2"))
+    assertEquals(used, Vector(2))
+  }

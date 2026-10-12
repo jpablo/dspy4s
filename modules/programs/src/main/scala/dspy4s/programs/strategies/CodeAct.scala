@@ -5,7 +5,6 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
@@ -87,8 +86,10 @@ final case class CodeAct[I, O](
   override val moduleName: String         = "code_act"
   private val baseLayout: SignatureLayout = baseSignature.layout
 
-  /** Interpreter for CodeAct's action language. Python exceptions and runtime-interpreter failures become recoverable
-    * observations; other infrastructure errors remain fatal and propagate as `Left`.
+  /** Interpreter for CodeAct's action language. A Python exception (a `CodeResult` with a non-zero exit code) becomes a
+    * recoverable observation. A `Left` from the [[CodeInterpreter]] means that the interpreter itself failed (process,
+    * timeout, protocol). Generated code cannot repair that failure, so the `Left` ends the run and the LM gets no more
+    * calls. Upstream `_execute_code` catches only `CodeExecutionError` and `SyntaxError`.
     */
   override protected val actionInterpreter: ActionInterpreter[String, String] = new ActionInterpreter[String, String]:
     override def execute(code: String)(using RuntimeContext): Either[DspyError, ActionOutcome[String]] =
@@ -96,9 +97,7 @@ final case class CodeAct[I, O](
         case Right(result) if result.exitCode == 0 => Right(ActionOutcome.Succeeded(result.stdout.stripTrailing))
         case Right(result)                         =>
           Right(ActionOutcome.Failed(s"Failed to execute the generated code: ${result.stderr.stripTrailing}"))
-        case Left(err: RuntimeError) =>
-          Right(ActionOutcome.Failed(s"Interpreter failure (${err.component}): ${err.message}"))
-        case Left(other) => Left(other)
+        case Left(error) => Left(error)
 
   /** SignatureLayout for the per-iteration code generator. Mirrors Python: inputs: baseSignature.inputs ∪ {trajectory}
     * outputs: {generated_code, finished}
@@ -287,7 +286,8 @@ object CodeAct:
     CodeActProtocol.renderTool(tool)
 
   /** One step in the CodeAct trajectory. `code` is what we ran; `observation` is either the captured stdout (success)
-    * or an explanation of what failed (parse, execute, or interpreter error).
+    * or an explanation of what failed (parse or execute error). An interpreter failure ends the run and records no
+    * entry.
     */
   final case class TrajectoryEntry(
       iteration  : Int,

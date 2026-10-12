@@ -329,3 +329,78 @@ class CodeActSuite extends FunSuite:
       assert(!extractorCalls(1).contains("Iteration 1") && extractorCalls(1).contains("Iteration 2"), extractorCalls(1))
     }
   }
+
+  // PORT_GAPS G-35 (upstream 89696e0cc): upstream `_execute_code` catches `CodeExecutionError` and `SyntaxError` only.
+  // A failure of the interpreter itself must stop the run.
+
+  test("CodeAct: an interpreter failure ends the run with that error") {
+    val signature   = Signature.fromString("question -> answer")
+    val failure     = dspy4s.core.contracts.RuntimeError("code_interpreter", "Deno executable not found")
+    val interpreter = new RecordingInterpreter(Vector(Left(failure)))
+    val lm          = new ScriptedLm(Vector(
+      "```python\nprint(1)\n```||false",
+      "```python\nprint(2)\n```||false",
+      "extract"
+    ))
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = program((question = "what is 1 + 1?"))
+      assertEquals(result.left.toOption, Some(failure))
+      assertEquals(lm.calls.get(), 1, "the LM must not see an interpreter failure as an observation")
+      assertEquals(interpreter.received.size, 1)
+    }
+  }
+
+  test("CodeAct: a user-code error is still an observation and the loop continues") {
+    val signature   = Signature.fromString("question -> answer")
+    val interpreter = new RecordingInterpreter(Vector(
+      Right(CodeResult(stdout = "", stderr = "NameError: name 'x' is not defined", exitCode = 1)),
+      Right(CodeResult(stdout = "2\n", stderr = "", exitCode = 0))
+    ))
+    val lm = new ScriptedLm(Vector(
+      "```python\nprint(x)\n```||false",
+      "```python\nprint(1 + 1)\n```||true",
+      "2"
+    ))
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = program((question = "what is 1 + 1?"))
+      assertEquals(result.map(_.output.answer), Right("2"))
+      assertEquals(interpreter.received.size, 2)
+      val trajectory = lookupString(result.toOption.get.raw.values, "trajectory")
+      assert(trajectory.contains("NameError"), trajectory)
+    }
+  }
+
+  // PORT_GAPS G-37: the last trajectory entry is never dropped. A run on an empty trajectory is not a retry of the
+  // same task.
+
+  test("CodeAct: an extractor overflow with one entry returns the overflow error") {
+    val signature   = Signature.fromString("q -> answer")
+    val interpreter = new RecordingInterpreter(Vector(Right(CodeResult(stdout = "ok\n", stderr = "", exitCode = 0))))
+
+    // LM: one codeact iteration, then the extractor overflows. A later call would answer with no evidence.
+    final class OverflowLm extends LanguageModel:
+      val calls: AtomicInteger                                                                   = new AtomicInteger(0)
+      override val id: String                                                                    = "overflow-lm"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        calls.getAndIncrement() match
+          case 0 => Right(LmResponse(outputs = Vector(LmOutput(text = "```python\nprint('ok')\n```||true"))))
+          case 1 => Left(dspy4s.core.contracts.ContextWindowExceededError(model = Some("overflow-lm")))
+          case _ => Right(LmResponse(outputs = Vector(LmOutput(text = "answer with no evidence"))))
+
+    val lm      = new OverflowLm
+    val program = CodeAct(baseSignature = signature, interpreter = interpreter, maxIterations = IterationLimit(3))
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      program((q = "x")) match
+        case Left(_: dspy4s.core.contracts.ContextWindowExceededError) => ()
+        case other                                                     => fail(s"expected the overflow error, got $other")
+      assertEquals(lm.calls.get(), 2, "one codeact step and one extract call")
+    }
+  }

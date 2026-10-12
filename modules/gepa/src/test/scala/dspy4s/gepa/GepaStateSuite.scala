@@ -115,3 +115,65 @@ class GepaStateSuite extends FunSuite:
     val cs = Vector(OptimizableId(0), OptimizableId(1), OptimizableId(2))
     assertEquals(ComponentSelector.All.select(cs, 2), (cs, 2))
   }
+
+  // ── Dominated candidates (PORT_GAPS G-44; gepa `remove_dominated_programs`) ───────────────────────────────────────
+  // A candidate is dominated when each front that holds it also holds a different candidate that stays.
+
+  test("Pareto selection excludes a candidate that shares its only front with a stronger candidate") {
+    // Front 0 holds c0 and c1. Front 1 holds c1 only. c1 covers each front that holds c0.
+    val s     = state(Vector(1.0, 0.0), Vector(1.0, 1.0))
+    val rng   = new Random(7)
+    val picks = (0 until 200).map(_ => CandidateSelector.Pareto.select(s, rng)).toSet
+    assertEquals(picks, Set(1))
+  }
+
+  test("Pareto selection excludes two specialists when one candidate covers the two fronts") {
+    // Front 0 holds c0 and c2. Front 1 holds c1 and c2. c2 covers the fronts of c0 and of c1.
+    val s     = state(Vector(1.0, 0.0), Vector(0.0, 1.0), Vector(1.0, 1.0))
+    val rng   = new Random(7)
+    val picks = (0 until 200).map(_ => CandidateSelector.Pareto.select(s, rng)).toSet
+    assertEquals(picks, Set(2))
+  }
+
+  test("Pareto selection keeps two specialists when no candidate covers them") {
+    val s     = state(Vector(1.0, 0.0), Vector(0.0, 1.0), Vector(0.5, 0.5))
+    val rng   = new Random(7)
+    val picks = (0 until 200).map(_ => CandidateSelector.Pareto.select(s, rng)).toSet
+    assertEquals(picks, Set(0, 1))
+  }
+
+  test("Pareto selection keeps exactly one of two identical candidates") {
+    val s     = state(Vector(1.0, 1.0), Vector(1.0, 1.0))
+    val rng   = new Random(7)
+    val picks = (0 until 200).map(_ => CandidateSelector.Pareto.select(s, rng)).toSet
+    assertEquals(picks.size, 1)
+  }
+
+  test("nonDominatedFrontier restricts each front to the candidates that stay") {
+    val s = state(Vector(1.0, 0.0), Vector(0.0, 1.0), Vector(1.0, 1.0))
+    assertEquals(s.paretoFrontier, Map(0 -> Set(0, 2), 1 -> Set(1, 2)))
+    assertEquals(s.nonDominatedFrontier, Map(0 -> Set(2), 1 -> Set(2)))
+  }
+
+  test("removal examines candidates with equal scores in the order of their first appearance in the fronts") {
+    // The three aggregate scores are equal and each front holds two candidates. Each candidate is dominated until one
+    // candidate leaves. Front 0 lists c1 first, so c1 leaves. The pinned gepa package (0.1.4) gives the same result.
+    val s = state(Vector(0.0, 1.0, 1.0), Vector(1.0, 1.0, 0.0), Vector(1.0, 0.0, 1.0))
+    assertEquals(s.paretoFrontier, Map(0 -> Set(1, 2), 1 -> Set(0, 1), 2 -> Set(0, 2)))
+    assertEquals(s.nonDominatedFrontier, Map(0 -> Set(2), 1 -> Set(0), 2 -> Set(0, 2)))
+  }
+
+  test("removal examines a candidate with a lower score first") {
+    // c0 and c1 cover each other on front 0. c0 has the lower aggregate score, so c0 leaves and c1 stays.
+    val fronts = Map(0 -> Set(0, 1))
+    assertEquals(GepaState.removeDominated(fronts, Map(0 -> 0.2, 1 -> 0.8)), Map(0 -> Set(1)))
+    assertEquals(GepaState.removeDominated(fronts, Map(0 -> 0.8, 1 -> 0.2)), Map(0 -> Set(0)))
+  }
+
+  test("Pareto selection falls back to a uniform draw when the state has no frontier") {
+    val s = state(Vector.empty, Vector.empty) // no validation instance
+    assertEquals(s.nonDominatedFrontier, Map.empty[Int, Set[Int]])
+    val rng   = new Random(7)
+    val picks = (0 until 200).map(_ => CandidateSelector.Pareto.select(s, rng)).toSet
+    assertEquals(picks, Set(0, 1))
+  }

@@ -95,6 +95,11 @@ object CallbackDispatcher:
     * callback-dispatch error is attempted before the original exception is rethrown. An observer failure while
     * reporting that body exception is attached as suppressed; an observer failure after an ordinary result propagates
     * directly.
+    *
+    * An `InterruptedException` is reported the same way, although `NonFatal` rejects it: the parallel executor
+    * interrupts its workers, and each start event needs its end event. The other throwables that `NonFatal` rejects
+    * (`VirtualMachineError`, `LinkageError`, `ControlThrowable`) still pass through without an end event. A
+    * `scala.util.boundary.Break` is a `RuntimeException`, so `NonFatal` accepts it and it still gets an end event.
     */
   private def runWithEnd[A](
       thunk: => Either[DspyError, A]
@@ -102,7 +107,7 @@ object CallbackDispatcher:
     val result =
       try thunk
       catch
-        case NonFatal(bodyError) =>
+        case bodyError @ (NonFatal(_) | _: InterruptedException) =>
           val runtimeError: Either[DspyError, A] = Left(
             RuntimeError("callback_dispatch", Option(bodyError.getMessage).getOrElse(bodyError.getClass.getSimpleName))
           )

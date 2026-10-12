@@ -4,6 +4,7 @@ import dspy4s.core.contracts.AdapterEndEvent
 import dspy4s.core.contracts.AdapterStartEvent
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LmEndEvent
 import dspy4s.core.contracts.LmStartEvent
 import dspy4s.core.contracts.ModuleEndEvent
@@ -24,6 +25,8 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
+import scala.util.boundary
+import scala.util.control.ControlThrowable
 
 class CallbackDispatcherSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit =
@@ -254,4 +257,102 @@ class CallbackDispatcherSuite extends FunSuite:
     assertEquals(snapshots(2).size, 2)
     assertEquals(snapshots(3).size, 1)
     assertEquals(RuntimeEnvironment.activeCallStack, Vector.empty)
+  }
+
+  // PORT_GAPS G-40: `InterruptedException` is not `NonFatal`, and the parallel executor interrupts its workers.
+
+  test("withModule emits the end event when the body is interrupted") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        events += event
+
+    // munit `intercept` does not catch an `InterruptedException`, so the test catches it directly.
+    val interrupted =
+      try
+        val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
+          CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "interrupt")) {
+            throw new InterruptedException("worker interrupted")
+          }
+        }
+        false
+      catch case _: InterruptedException => true
+    assert(interrupted, "the InterruptedException must reach the caller")
+
+    assertEquals(events.map(_.getClass.getSimpleName).toVector, Vector("ModuleStartEvent", "ModuleEndEvent"))
+    events.last match
+      case end: ModuleEndEvent => assert(end.output.isLeft, s"the end event must report a failure: ${end.output}")
+      case other               => fail(s"expected a ModuleEndEvent, got $other")
+  }
+
+  test("withTool emits the end event when the body is interrupted") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        events += event
+
+    val interrupted =
+      try
+        val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
+          CallbackDispatcher.withTool(toolName = "search", args = DynamicValues.record("q" := "x")) {
+            throw new InterruptedException("worker interrupted")
+          }
+        }
+        false
+      catch case _: InterruptedException => true
+    assert(interrupted, "the InterruptedException must reach the caller")
+
+    assertEquals(events.map(_.getClass.getSimpleName).toVector, Vector("ToolStartEvent", "ToolEndEvent"))
+  }
+
+  test("an interrupted body rethrows the same exception instance") {
+    val bodyError = new InterruptedException("worker interrupted")
+    val caught    =
+      try
+        val _ = CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "interrupt")) {
+          throw bodyError
+        }
+        None
+      catch case error: InterruptedException => Some(error)
+    assert(caught.exists(_ eq bodyError), s"expected the body exception, got $caught")
+  }
+
+  // The interrupt fix does not change the other throwables that `NonFatal` rejects, and it does not change `Break`.
+
+  test("a ControlThrowable passes through a scope without an end event") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        events += event
+
+    val passed =
+      try
+        val _ = RuntimeEnvironment.withCallbacks(Vector(callback)) {
+          CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "control")) {
+            throw new ControlThrowable {}
+          }
+        }
+        false
+      catch case _: ControlThrowable => true
+    assert(passed, "the ControlThrowable must reach the caller")
+
+    assertEquals(events.map(_.getClass.getSimpleName).toVector, Vector("ModuleStartEvent"))
+  }
+
+  test("a boundary break through a scope keeps its end event") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        events += event
+
+    val result = RuntimeEnvironment.withCallbacks(Vector(callback)) {
+      boundary[Either[DspyError, String]] {
+        CallbackDispatcher.withModule("predict", DynamicValues.record("question" := "break")) {
+          boundary.break(Right("early"))
+        }
+      }
+    }
+
+    assertEquals(result, Right("early"))
+    assertEquals(events.map(_.getClass.getSimpleName).toVector, Vector("ModuleStartEvent", "ModuleEndEvent"))
   }

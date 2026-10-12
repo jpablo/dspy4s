@@ -56,11 +56,12 @@ final class MergeProposer[P](
     mergesDue -= 1
     totalMergesTested += 1
 
-  /** Attempt a merge over the current state's Pareto dominators. Returns the subsample-gated proposal, or `None` when
-    * no mergeable triplet is found (the engine then falls through to reflective mutation).
+  /** Attempt a merge over the current state's Pareto dominators (gepa's `find_dominator_programs`: the candidates that
+    * stay on [[GepaState.nonDominatedFrontier]]). Returns the subsample-gated proposal, or `None` when no mergeable
+    * triplet is found (the engine then falls through to reflective mutation).
     */
   def propose(state: GepaState)(using RuntimeContext): Option[MergeProposal] =
-    val dominators = state.paretoFrontier.values.flatten.toSet.toVector.sorted
+    val dominators = state.nonDominatedFrontier.values.flatten.toSet.toVector.sorted
     if dominators.size < 2 || state.candidates.size < 3 then return None
 
     findTriplet(state, dominators).flatMap { case (id1, id2, ancestor) =>

@@ -152,3 +152,30 @@ class DenoPyodideInterpreterSuite extends FunSuite:
       assert(ends.head.output.exists(v => DynamicValues.renderText(v) == "QUIET"), ends.head.toString)
     finally interp.close()
   }
+
+  test("an unhandled promise rejection in the sandbox does not replace the response, and the sandbox survives") {
+    assumeDeno()
+    // The runner reports the rejection as an error with a null id, before the response to the request (G-33).
+    val code   = "from pyodide.code import run_js\nrun_js(\"Promise.reject(new Error('boom')); 1\")\nprint('first')"
+    val interp = new DenoPyodideInterpreter()
+    try
+      assertEquals(interp.execute(code).map(result => (result.stdout.trim, result.exitCode)), Right(("first", 0)))
+      assertEquals(interp.execute("print('second')").map(_.stdout.trim), Right("second"))
+    finally interp.close()
+  }
+
+  test("a host tool that throws raises in the sandboxed code, and the sandbox survives") {
+    assumeDeno()
+    val explode = SandboxTool(
+      name = "explode",
+      parameters = Vector.empty,
+      invoke = _ => throw new IllegalStateException("tool exploded")
+    )
+    val interp = new DenoPyodideInterpreter(tools = Vector(explode))
+    try
+      val failure = interp.execute("explode()").toOption.get
+      assertEquals(failure.exitCode, 1)
+      assert(failure.stderr.contains("tool exploded"), failure.stderr)
+      assertEquals(interp.execute("print('alive')").map(_.stdout.trim), Right("alive"))
+    finally interp.close()
+  }

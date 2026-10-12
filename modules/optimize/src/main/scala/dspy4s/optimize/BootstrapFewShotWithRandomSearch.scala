@@ -46,6 +46,8 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val ps                               = summon[OptimizableStructure[P]]
     val effectiveValset: Vector[Example] = valset.getOrElse(trainset)
+    // Each candidate gets its score from `Evaluate`, which rejects an empty devset. Stop before the bootstrap work.
+    if effectiveValset.isEmpty then return Left(OptimizerSupport.emptyEvalsetError(name))
 
     val candidates = mutable.ArrayBuffer.empty[(Int, P)]
 
