@@ -9,6 +9,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
+import dspy4s.core.contracts.TypeRef
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.Evaluate
 import dspy4s.gepa.contracts.FeedbackMetric
@@ -22,11 +23,13 @@ import dspy4s.programs.optimization.TracedRun
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.ProgramRunner
 
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+
 import scala.util.Random
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the search
-  * through this object: it applies a [[Candidate]] to the program, evaluates it, and (next) builds the reflective
-  * dataset + proposes new instructions. v0 covers [[evaluate]]. See PORT_GAPS G-12.
+  * through this object: it applies a [[Candidate]] to the program, evaluates it, and builds the reflective dataset. The
+  * [[InstructionProposer]] of the engine writes the new instructions. See PORT_GAPS G-12.
   *
   * @param program
   *   the student program GEPA optimizes (its predictors' instructions are the genome)
@@ -116,9 +119,9 @@ final class GepaAdapter[P](
       trajectories = Some(trajectories)
     )
 
-  /** Build the reflective dataset for each component to update: per trajectory, that component's rendered I/O plus the
-    * optimizable-level feedback (gepa's `make_reflective_dataset`). The reflection LM reads these to rewrite the
-    * component's instruction.
+  /** Build the reflective dataset for each component to update: per trajectory, the input values and the output values
+    * of that component plus the optimizable-level feedback (gepa's `make_reflective_dataset`). The
+    * [[InstructionProposer]] gives these records to the reflection LM to rewrite the instruction of the component.
     *
     * Requires `evalBatch` to carry trajectories (i.e. it came from [[evaluate]] with `captureTraces = true`).
     *
@@ -166,7 +169,7 @@ final class GepaAdapter[P](
       entries: Vector[TraceEntry]
   )(using RuntimeContext): Option[ReflectiveRecord] =
     selectEntry(entries, traj.failed).map { entry =>
-      val inputs = DynamicValues.renderText(entry.inputs)
+      val inputs = reflectiveInputs(entry.inputs, layout)
       entry.failure match
         case Some(message) => failureRecord(inputs, entry, message, layout)
         case None          =>
@@ -180,8 +183,27 @@ final class GepaAdapter[P](
             )
             .map(_.feedback)
             .getOrElse(FeedbackMetric.defaultFeedback(traj.score))
-          ReflectiveRecord(inputs, DynamicValues.renderText(entry.outputs), feedback)
+          ReflectiveRecord(inputs, entry.outputs, feedback)
     }
+
+  /** The inputs of one call in the form of a reflective record (gepa's `make_reflective_dataset`): the conversation
+    * history of the call moves to the key [[ReflectiveRecord.ContextKey]], and that key is first. The value of each
+    * input does not change.
+    *
+    * The conversation history is the first input field of `layout` with the type [[TypeRef.history]], as it is for an
+    * adapter. Inputs with no such field do not change. An input with the name `Context` replaces the history, as
+    * upstream.
+    */
+  private def reflectiveInputs(inputs: DynamicValue.Record, layout: SignatureLayout): DynamicValue.Record =
+    val moved =
+      for
+        field   <- layout.inputFields.find(_.typeRef == TypeRef.history)
+        history <- DynamicValues.recordGet(inputs, field.name)
+      yield DynamicValues.mergeRecords(
+        DynamicValues.record(ReflectiveRecord.ContextKey -> history),
+        DynamicValues.recordFilterKeys(inputs, _ != field.name)
+      )
+    moved.getOrElse(inputs)
 
   /** Select the call of one leaf that the reflection LM sees for one trajectory (gepa's `make_reflective_dataset`).
     * `entries` are the calls of the leaf in that trajectory, in trace order.
@@ -197,19 +219,26 @@ final class GepaAdapter[P](
   /** The record of a call that failed. The user metric gets no call, because the call has no prediction to score. The
     * two texts for a parse failure are those of gepa's `make_reflective_dataset`.
     */
-  private def failureRecord(inputs: String, entry: TraceEntry, message: String, layout: SignatureLayout)(using
-      RuntimeContext
-  ): ReflectiveRecord =
+  private def failureRecord(
+      inputs : DynamicValue.Record,
+      entry  : TraceEntry,
+      message: String,
+      layout : SignatureLayout
+  )(using RuntimeContext): ReflectiveRecord =
     DynamicValues.recordGet(entry.outputs, "raw_response").map(DynamicValues.renderText) match
       case Some(raw) => ReflectiveRecord(
           inputs,
-          "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
-            s"```\n$raw\n```",
+          text(
+            "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
+              s"```\n$raw\n```\n\n"
+          ),
           s"Your output failed to parse. Follow this structure:\n${structureInstruction(layout)}"
         )
       case None =>
         // The call failed and recorded no model response (for example an LM error). Upstream has no such trace entry.
-        ReflectiveRecord(inputs, "(no output)", s"The call failed with this error: $message")
+        ReflectiveRecord(inputs, text("(no output)"), s"The call failed with this error: $message")
+
+  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
 
   /** The output structure that the model must follow, as text: the chat prompt of `layout` with no demos and no inputs.
     * Upstream uses a `ChatAdapter` for this text, whichever adapter the program uses.

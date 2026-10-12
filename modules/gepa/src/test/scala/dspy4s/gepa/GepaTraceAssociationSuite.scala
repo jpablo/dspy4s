@@ -120,16 +120,19 @@ class GepaTraceAssociationSuite extends FunSuite:
   test("the record of the second leaf comes from its own call, not from trace position 1") {
     val finisher = reflect(new RecordingMetric)(OptimizableId(1))
     assertEquals(finisher.size, 1)
-    assert(finisher.head.generatedOutputs.contains("Paris"), finisher.head.generatedOutputs)
-    assert(!finisher.head.generatedOutputs.contains("step note"), finisher.head.generatedOutputs)
-    assert(finisher.head.inputs.contains("step note"), finisher.head.inputs)
+    assert(ReflectionFixtures.text(finisher.head.generatedOutputs).contains("Paris"), finisher.head.generatedOutputs)
+    assert(
+      !ReflectionFixtures.text(finisher.head.generatedOutputs).contains("step note"),
+      finisher.head.generatedOutputs
+    )
+    assert(ReflectionFixtures.text(finisher.head.inputs).contains("step note"), finisher.head.inputs)
   }
 
   test("a leaf that ran two times in one example gives one record, from one of its calls") {
     val stepper = reflect(new RecordingMetric)(OptimizableId(0))
     assertEquals(stepper.size, 1)
-    assert(stepper.head.generatedOutputs.contains("step note"), stepper.head.generatedOutputs)
-    assert(!stepper.head.generatedOutputs.contains("Paris"), stepper.head.generatedOutputs)
+    assert(ReflectionFixtures.text(stepper.head.generatedOutputs).contains("step note"), stepper.head.generatedOutputs)
+    assert(!ReflectionFixtures.text(stepper.head.generatedOutputs).contains("Paris"), stepper.head.generatedOutputs)
   }
 
   test("the metric gets an entry of the same leaf as the component trace") {

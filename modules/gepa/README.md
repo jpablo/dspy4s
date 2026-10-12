@@ -102,13 +102,16 @@ metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
 1. **A reflective mutation.** A `CandidateSelector` (Pareto by default) picks a parent from the pool; a
    minibatch is sampled from the trainset; the adapter evaluates the parent on it *with traces*; a
    `ComponentSelector` (round-robin) picks which component to evolve; the per-component reflective dataset
-   (`ReflectiveRecord`s: inputs / generated outputs / feedback) is built; `InstructionProposer` asks the
-   reflection LM for a rewritten instruction; the new candidate is accepted if it improves on the minibatch and
+   (`ReflectiveRecord`s: inputs / generated outputs / feedback) is built; the instruction proposer asks the
+   reflection LM for a new instruction; the new candidate is accepted if it improves on the minibatch and
    then full-evaluated on the valset and added to the pool.
 
    A component with no reflective record gets no reflection LM call. If no component gets a new instruction, the
    iteration makes no proposal and no acceptance evaluation, as upstream. The metric calls of the minibatch
    evaluation stay counted, so the budget decreases and the loop ends.
+
+   A proposal that fails gets one more call, as upstream. A second failure gives no proposal for the iteration.
+   With more than one selected component, the failure of one component drops the new texts of all of them.
 
    Each candidate has a round-robin pointer: the index of the component that its next mutation changes. The
    pointers are part of `GepaState`. A new candidate (from a mutation or from a merge) takes the largest pointer
@@ -136,6 +139,54 @@ metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
    gives no merge with the default value. Set a lower `mergeValOverlapFloor` for such a set.
 
 The **budget** counts metric (evaluation) calls only — reflection-LM calls are free, matching gepa.
+
+### The instruction proposer
+
+An `InstructionProposer` writes the new instruction text of an iteration. `Gepa` and `GepaEngine` use
+`DefaultInstructionProposer()` when you give no proposer. It is the port of dspy's `InstructionProposer`.
+
+For each selected component, the default proposer runs one predictor call on the reflection LM:
+
+- The inputs are the current instruction and the reflective records. The records go to the model as one JSON
+  text, with the keys `Inputs`, `Generated Outputs`, and `Feedback` (`ReflectiveRecord.toJson`).
+- The output is the field `new_instruction`. The proposer removes the white space at the two ends of the text.
+- An empty text is a failure. The proposer does not read a fence, and it does not truncate a text.
+- The proposer uses its own adapter, a `JSONAdapter` that rejects a response that is not a JSON object. The
+  adapter of the context has no effect on these calls.
+
+The options:
+
+| Option | Effect |
+|--------|--------|
+| `additionalInstructions` | more requirements for each new instruction, for example a voice or a format |
+| `baseInstructions` | replaces the instructions of the proposal call; the fields stay |
+| `maxChars` | the largest number of Unicode code points of a new instruction |
+| `adapter` | the adapter of the calls of the proposer |
+
+With `maxChars`, a draft that is too long gets one call that asks the model to shorten it. A result that is
+empty or still too long is a failure.
+
+```scala
+val gepa = new Gepa[MyProgram](
+  metric = myFeedbackMetric,
+  reflectionLm = strongModel,
+  config = GepaConfig(maxMetricCalls = 200),
+  instructionProposer = DefaultInstructionProposer(
+    additionalInstructions = Some("Write instructions in imperative voice."),
+    maxChars = Some(InstructionCharLimit(1500))
+  )
+)
+```
+
+To write a proposer of your own, implement `InstructionProposer.propose`. The engine calls it one time for an
+iteration, with the parent candidate, the reflective records, and the selected components. The language model
+of the context of that call is the reflection LM, so a predictor in the proposer needs no reference to it. The
+trace entries of the call do not reach your context. The history entries do.
+
+A reflective record holds values, not text. An input of the type `History` is under the key `Context`, and
+that key is first.
+
+The upstream options `skills` and `truncate_history_outputs` are not ported.
 
 ### Supporting pieces
 
@@ -178,7 +229,7 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 | `GepaEngine.scala` | the search loop + `GepaConfig` / `GepaResult` |
 | `GepaState.scala` | candidate pool, subscores, lineage, Pareto frontier |
 | `Candidate.scala` | the genome (component → optional instruction) + seed/apply |
-| `InstructionProposer.scala` | reflective mutation (prompt the reflection LM) |
+| `InstructionProposer.scala` | the `InstructionProposer` trait and `DefaultInstructionProposer` (reflective mutation) |
 | `MergeProposer.scala` | crossover over common ancestors |
 | `MinibatchSampler.scala` | minibatch sampling strategies |
 | `ReflectiveRecord.scala`, `EvaluationBatch.scala` | reflective dataset record + batch/trajectory results |

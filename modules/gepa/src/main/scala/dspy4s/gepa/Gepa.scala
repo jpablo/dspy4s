@@ -20,11 +20,15 @@ import dspy4s.programs.ProgramRunner
   *   the (usually stronger) model that rewrites instructions from reflective feedback
   * @param config
   *   budget + search settings ([[GepaConfig]])
+  * @param instructionProposer
+  *   writes the new instruction text of each iteration. The default is the built-in proposer
+  *   ([[DefaultInstructionProposer]]); give one with options, or an implementation of your own.
   */
 final class Gepa[P](
-    metric      : FeedbackMetric,
-    reflectionLm: LanguageModel,
-    config      : GepaConfig
+    metric             : FeedbackMetric,
+    reflectionLm       : LanguageModel,
+    config             : GepaConfig,
+    instructionProposer: InstructionProposer = InstructionProposer.default
 )(using OptimizableStructure[P], ProgramRunner[P]):
 
   val name: String = "gepa"
@@ -36,9 +40,12 @@ final class Gepa[P](
     *   - Two predictors have the same module name and the same signature structure. The check runs before any LM call.
     *     Give each predictor a name.
     *   - A predictor type records no predictor key in its trace entries.
+    *
+    * `Left` also when `instructionProposer` gives a text for a component that the program does not hold.
     */
   def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using
       RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
     val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback, config.seed)
-    new GepaEngine(adapter, reflectionLm, config).optimize(Candidate.seed(student), trainset, valset)
+    val engine  = new GepaEngine(adapter, reflectionLm, config, instructionProposer)
+    engine.optimize(Candidate.seed(student), trainset, valset)

@@ -3,13 +3,16 @@ package dspy4s.gepa
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ValidationError
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
+import dspy4s.programs.optimization.OptimizableId
 
 import java.nio.file.Path
 import scala.util.Random
 
-/** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, and the evaluation cache;
-  * multi-objective frontiers and run-dir resume are deferred (PORT_GAPS G-12).
+/** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, and the evaluation cache.
+  * Objective-aware frontiers and more than one proposal in an iteration are not ported (PORT_GAPS G-45).
   */
 final case class GepaConfig(
     /** Budget: total metric (evaluation) calls before stopping. Reflection-LM calls do NOT count, matching gepa. */
@@ -67,16 +70,31 @@ final case class GepaResult[P](
   * memoizes scores-only evals so repeated `(candidate, example)` pairs are free. A faithful port of the external `gepa`
   * engine. Atomic seed/iteration steps never cross `maxMetricCalls`; a run stops when the remaining budget cannot cover
   * the next step's worst-case cost. See PORT_GAPS G-12.
+  *
+  * The `proposer` writes the new instruction text of an iteration. The engine calls it in a context whose language
+  * model is `reflectionLm`, so the engine itself makes no call to that model. See [[InstructionProposer]].
+  *
+  * @param adapter
+  *   applies a candidate to the program, evaluates it, and builds the reflective records
+  * @param reflectionLm
+  *   the language model of the context of each proposer call
+  * @param config
+  *   the budget and the search settings
+  * @param proposer
+  *   writes the new instruction text. The default is [[InstructionProposer.default]].
   */
 final class GepaEngine[P](
     adapter     : GepaAdapter[P],
     reflectionLm: LanguageModel,
-    config      : GepaConfig
+    config      : GepaConfig,
+    proposer    : InstructionProposer = InstructionProposer.default
 ):
 
-  /** Run the search. `Left` when the adapter cannot find the trace entries of each leaf (UPGRADE-3.2.1-to-3.4.0,
-    * decision D2): two leaves have the same predictor key (found before any run), or a leaf ran but its module recorded
-    * no key (found when a reflective iteration reads the traces). The `Left` stops the search.
+  /** Run the search. A `Left` stops the search. It has one of these causes:
+    *   - The adapter cannot find the trace entries of each leaf (UPGRADE-3.2.1-to-3.4.0, decision D2): two leaves have
+    *     the same predictor key (found before any run), or a leaf ran but its module recorded no key (found when a
+    *     reflective iteration reads the traces).
+    *   - The proposer gives a text for a component that the candidate does not hold.
     */
   def optimize(
       seedCandidate: Candidate,
@@ -194,10 +212,16 @@ final class GepaEngine[P](
 
   /** One reflective-mutation iteration: returns the new state (with the iteration's metric calls accrued, the
     * round-robin pointer of the parent moved, and the accepted candidate appended on success), and whether a new
-    * candidate was accepted (which schedules a merge). A `Left` is an error from the reflective dataset of the adapter.
+    * candidate was accepted (which schedules a merge). A `Left` is an error from the reflective dataset of the adapter,
+    * or a text of the proposer for a component that the parent does not hold.
     *
-    * The iteration makes no proposal when the selected components have no reflective record, or when the reflection LM
-    * gives no new text. It then costs the minibatch evaluation only.
+    * The proposer gets one call, with the parent, the selected components, and the records of each selected component
+    * that has one record at least. After a `Left`, the proposer gets one more call.
+    *
+    * The iteration makes no proposal in each of these cases, and it then costs the minibatch evaluation only:
+    *   - The selected components have no reflective record. The proposer then gets no call.
+    *   - The proposer gives no text.
+    *   - The proposer gives a `Left` two times.
     *
     * The component selector runs after the perfect-score check, as in gepa. An iteration that this check skips does not
     * move the pointer of the parent. Each other iteration moves it, also when the iteration makes no proposal.
@@ -238,19 +262,24 @@ final class GepaEngine[P](
     val reflective = adapter.makeReflectiveDataset(parent, parentEval, components) match
       case Right(records) => records
       case Left(error)    => return Left(error)
-    // A component with no reflective record gets no reflection LM call and no new text (gepa leaves it out of the
-    // reflective dataset). A reflection call that fails gives no new text for its component.
-    val newTexts = components.flatMap { component =>
-      reflective.get(component).filter(_.nonEmpty).flatMap { records =>
-        InstructionProposer
-          .propose(parent.getOrElse(component, None).getOrElse(""), records, reflectionLm)
-          .toOption
-          .map(component -> _)
-      }
-    }
+    // A component with no reflective record is not in the reflective dataset of the proposer (gepa leaves it out).
+    // With no record at all, the proposer gets no call.
+    val withRecords = reflective.filter((_, records) => records.nonEmpty)
+    val newTexts    =
+      if withRecords.isEmpty then Map.empty[OptimizableId, String]
+      else proposeTexts(parent, withRecords, components).getOrElse(Map.empty)
     // No new text: the candidate would be equal to its parent, so there is no proposal and no acceptance evaluation
     // (gepa: "Reflection returned no text updates; skipping proposal").
     if newTexts.isEmpty then return withoutProposal(moved)
+    // gepa: `assert name in new_candidate`.
+    val unknown = newTexts.keySet.diff(parent.keySet).toVector.sorted
+    if unknown.nonEmpty then
+      return Left(
+        ValidationError(
+          "The instruction proposer gave a text for a component that the candidate does not hold: " +
+            unknown.map(_.render).mkString(", ")
+        )
+      )
     val newCandidate = newTexts.foldLeft(parent) { case (cand, (component, text)) =>
       cand.updated(component, Some(text))
     }
@@ -268,6 +297,35 @@ final class GepaEngine[P](
       else
         moved.copy(totalMetricCalls = MetricCallCount.add(moved.totalMetricCalls, calls))
     Right((nextState, accepted))
+
+  /** The new texts of the proposer for one iteration. `None` when the proposal failed two times: after a `Left`, the
+    * engine calls the proposer one more time (gepa's `_propose_texts_batch_safe`). A `Right` gets no second call, also
+    * when it holds no text.
+    */
+  private def proposeTexts(
+      parent    : Candidate,
+      reflective: Map[OptimizableId, Vector[ReflectiveRecord]],
+      components: Vector[OptimizableId]
+  )(using RuntimeContext): Option[Map[OptimizableId, String]] =
+    def attempt = proposeInReflectionContext(parent, reflective, components)
+    attempt.orElse(attempt).toOption
+
+  /** Call the proposer one time, in a context whose language model is the reflection LM (dspy's
+    * `dspy.context(lm=reflection_lm)`). The context that the proposer gets and [[RuntimeEnvironment.current]] are the
+    * same in the call.
+    *
+    * The call has a trace and a history of its own. The trace entries do not reach the caller. The history entries go
+    * to the context of the caller, also for a call that gives a `Left`.
+    */
+  private def proposeInReflectionContext(
+      parent    : Candidate,
+      reflective: Map[OptimizableId, Vector[ReflectiveRecord]],
+      components: Vector[OptimizableId]
+  )(using ctx: RuntimeContext): Either[DspyError, Map[OptimizableId, String]] =
+    val reflection = ctx.withServices(ctx.services.copy(lm = Some(reflectionLm)))
+    val executed   = RuntimeEnvironment.isolatedAttempt(reflection)(proposer.propose(parent, reflective, components))
+    RuntimeEnvironment.propagate(executed.delta.copy(trace = Vector.empty))
+    executed.value
 
   /** Full validation scores for a candidate, via the shared eval cache: returns the per-instance scores and the number
     * of ACTUAL (uncached) evaluations to charge against the budget.

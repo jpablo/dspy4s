@@ -43,7 +43,7 @@ class GepaEngineSuite extends FunSuite:
     override val id: String                                                                    = "reflect"
     override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      Right(LmResponse(outputs = Vector(LmOutput(text = "```\nAnswer with the CITY name only.\n```"))))
+      Right(LmResponse(outputs = Vector(LmOutput(text = ReflectionFixtures.reply("Answer with the CITY name only.")))))
 
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"

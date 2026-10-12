@@ -75,7 +75,7 @@ class GepaMultiPredictorSuite extends FunSuite:
       val instr  =
         if prompt.contains("Stage one") || prompt.contains("TOKEN1") then "Use TOKEN1 to produce a good_hint."
         else "Use TOKEN2 with the good_hint to answer."
-      Right(LmResponse(outputs = Vector(LmOutput(text = s"```\n$instr\n```"))))
+      Right(LmResponse(outputs = Vector(LmOutput(text = ReflectionFixtures.reply(instr)))))
 
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"
@@ -161,13 +161,14 @@ class GepaMultiPredictorSuite extends FunSuite:
         components += component
         components.size - 1
       }
-      val outputs = if silent(index) then Vector.empty else Vector(LmOutput(text = s"```\n$instr\n```"))
+      val outputs = if silent(index) then Vector.empty else Vector(LmOutput(text = ReflectionFixtures.reply(instr)))
       Right(LmResponse(outputs = outputs))
 
   test("an iteration that adds no candidate moves the round-robin pointer of its parent") {
-    // The first request gets no new text, so iteration 1 makes no proposal. One fix does not change the answer, so
-    // iterations 2 and 3 reject their candidates. The seed is the parent of each iteration.
-    val reflection = new RecordingReflectionLm(silent = Set(0))
+    // The engine calls the proposer two times for an iteration that fails. The two requests of iteration 1 get no new
+    // text, so iteration 1 makes no proposal. One fix does not change the answer, so iterations 2 and 3 reject their
+    // candidates. The seed is the parent of each iteration.
+    val reflection = new RecordingReflectionLm(silent = Set(0, 1))
     // The seed validation costs 4 calls. The budget then holds three iterations of 2, 4, and 4 calls.
     val gepa = new Gepa[Pipeline](
       metric,
@@ -181,6 +182,6 @@ class GepaMultiPredictorSuite extends FunSuite:
         gepa.compile(pipeline, trainset = dataset, valset = dataset).fold(error => fail(error.message), identity)
 
       assertEquals(result.numCandidates.toInt, 1)
-      assertEquals(reflection.components.toVector, Vector("hinter", "answerer", "hinter"))
+      assertEquals(reflection.components.toVector, Vector("hinter", "hinter", "answerer", "hinter"))
     }
   }

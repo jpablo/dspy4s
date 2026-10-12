@@ -170,7 +170,8 @@ object ComponentSelector:
         (Vector(components(i)), (i + 1) % components.size)
 
   /** Update ALL components every iteration. Costs more reflection calls but can fix interdependent components in one
-    * accepted mutation (where round-robin would stall).
+    * accepted mutation (where round-robin would stall). The proposer writes the texts of an iteration in one call, so a
+    * proposal that fails for one component gives no new text for the other components of that iteration.
     */
   object All extends ComponentSelector:
     def select(components: Vector[OptimizableId], pointer: Int): (Vector[OptimizableId], Int) = (components, pointer)

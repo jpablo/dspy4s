@@ -34,6 +34,11 @@ type MergeOverlapFloor = MergeOverlapFloor.T
 
 object MergeOverlapFloor extends RefinedSubtype[Int, Positive0]
 
+/** A strictly positive limit on the number of Unicode code points of a proposed instruction. */
+type InstructionCharLimit = InstructionCharLimit.T
+
+object InstructionCharLimit extends RefinedSubtype[Int, Positive]
+
 /** A candidate pool containing at least the seed candidate. */
 type CandidatePool = CandidatePool.T
 

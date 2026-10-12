@@ -84,7 +84,9 @@ class GepaPointerMergeSuite extends FunSuite:
       val prompt    = request.messages.flatMap(_.text).mkString("\n")
       val component = if prompt.contains("Component A") then "A" else "B"
       val _         = components.synchronized(components += component)
-      Right(LmResponse(outputs = Vector(LmOutput(text = s"```\nComponent $component. FIXED_$component\n```"))))
+      Right(LmResponse(outputs =
+        Vector(LmOutput(text = ReflectionFixtures.reply(s"Component $component. FIXED_$component")))
+      ))
 
   private def okScore(prediction: RawPrediction): Double =
     Vector("a", "b").count(name => prediction.get(name).map(DynamicValues.renderText).contains("ok")) * 0.5

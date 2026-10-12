@@ -101,7 +101,7 @@ class GepaFailureFeedbackSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val _ = prompts.synchronized(prompts += request.messages.flatMap(_.text).mkString("\n"))
       if fail then Left(RuntimeError("reflect_lm", "the reflection model is down"))
-      else Right(LmResponse(outputs = Vector(LmOutput(text = "```\nA new instruction.\n```"))))
+      else Right(LmResponse(outputs = Vector(LmOutput(text = ReflectionFixtures.reply("A new instruction.")))))
 
   /** Records what the adapter gives to the metric for each component. The score is never perfect. */
   private final class RecordingMetric extends FeedbackMetric:
@@ -186,11 +186,14 @@ class GepaFailureFeedbackSuite extends FunSuite:
     assertEquals(records(finisherId).size, 1)
     val record = records(finisherId).head
     // The inputs are those of the predictor call, with the note of the stepper.
-    assert(record.inputs.contains("step note"), record.inputs)
+    assert(ReflectionFixtures.text(record.inputs).contains("step note"), record.inputs)
     assertEquals(
       record.generatedOutputs,
-      "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
-        s"```\n$badReply\n```"
+      // The text ends with the fence and two line ends, as upstream.
+      ReflectionFixtures.string(
+        "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
+          s"```\n$badReply\n```\n\n"
+      )
     )
     assert(record.feedback.startsWith("Your output failed to parse. Follow this structure:\nsystem: "), record.feedback)
     assert(record.feedback.contains("[[ ## answer ## ]]"), record.feedback)
@@ -224,8 +227,14 @@ class GepaFailureFeedbackSuite extends FunSuite:
     val lm      = new FormatLm(failQuestions = Set("second pass"))
     val records = reflect(loop, lm, new RecordingMetric, addFailureAsFeedback = true)
     assertEquals(records(stepperId).size, 1)
-    assert(records(stepperId).head.inputs.contains("second pass"), records(stepperId).head.inputs)
-    assert(records(stepperId).head.generatedOutputs.contains(badReply), records(stepperId).head.generatedOutputs)
+    assert(
+      ReflectionFixtures.text(records(stepperId).head.inputs).contains("second pass"),
+      records(stepperId).head.inputs
+    )
+    assert(
+      ReflectionFixtures.text(records(stepperId).head.generatedOutputs).contains(badReply),
+      records(stepperId).head.generatedOutputs
+    )
     // The finisher did not run.
     assertEquals(records(finisherId), Vector.empty)
   }
@@ -243,7 +252,10 @@ class GepaFailureFeedbackSuite extends FunSuite:
     val records = reflect(retry, lm, metric, addFailureAsFeedback = true)
 
     assertEquals(records(stepperId).size, 1)
-    assert(records(stepperId).head.inputs.contains("first try"), records(stepperId).head.inputs)
+    assert(
+      ReflectionFixtures.text(records(stepperId).head.inputs).contains("first try"),
+      records(stepperId).head.inputs
+    )
     assert(
       records(stepperId).head.feedback.startsWith("Your output failed to parse."),
       records(stepperId).head.feedback
@@ -261,7 +273,10 @@ class GepaFailureFeedbackSuite extends FunSuite:
     val records = reflect(retry, lm, metric)
 
     assertEquals(records(stepperId).size, 1)
-    assert(records(stepperId).head.inputs.contains("third try"), records(stepperId).head.inputs)
+    assert(
+      ReflectionFixtures.text(records(stepperId).head.inputs).contains("third try"),
+      records(stepperId).head.inputs
+    )
     assertEquals(records(stepperId).head.feedback, "feedback for stepper")
     val stepperTraces = metric.componentCalls.toVector.collect { case ("stepper", _, componentTrace) => componentTrace }
     assertEquals(stepperTraces.map(_.map(_.failure)), Vector(Vector(None)))
@@ -274,8 +289,8 @@ class GepaFailureFeedbackSuite extends FunSuite:
 
     assertEquals(records(stepperId).size, 1)
     val record = records(stepperId).head
-    assert(record.inputs.contains("second pass"), record.inputs)
-    assertEquals(record.generatedOutputs, "(no output)")
+    assert(ReflectionFixtures.text(record.inputs).contains("second pass"), record.inputs)
+    assertEquals(record.generatedOutputs, ReflectionFixtures.string("(no output)"))
     assert(record.feedback.startsWith("The call failed with this error: "), record.feedback)
     assert(record.feedback.contains("the model is down"), record.feedback)
     assertEquals(metric.componentCalls.toVector, Vector.empty)
@@ -285,7 +300,7 @@ class GepaFailureFeedbackSuite extends FunSuite:
   private def secondCallSelected(seed: Long): Vector[Boolean] =
     val records = reflect(loop, new FormatLm, new RecordingMetric, seed = seed, dataset = examples(16))
     assertEquals(records(stepperId).size, 16)
-    records(stepperId).map(_.inputs.contains("second pass"))
+    records(stepperId).map(record => ReflectionFixtures.text(record.inputs).contains("second pass"))
 
   test("a leaf that ran two times: the seeded source selects among the two calls") {
     val selection = secondCallSelected(seed = 3L)
@@ -299,7 +314,7 @@ class GepaFailureFeedbackSuite extends FunSuite:
   test("the seeds 0 to 15 do not all make the same first choice") {
     val firstChoice = (0L until 16L).toVector.map { seed =>
       val records = reflect(loop, new FormatLm, new RecordingMetric, seed = seed)
-      records(stepperId).head.inputs.contains("second pass")
+      ReflectionFixtures.text(records(stepperId).head.inputs).contains("second pass")
     }
     assert(firstChoice.contains(true) && firstChoice.contains(false), firstChoice.toString)
   }
@@ -376,8 +391,9 @@ class GepaFailureFeedbackSuite extends FunSuite:
     }.fold(error => fail(error.message), identity)
 
     assertEquals(result.bestCandidate, Candidate.seed(loop))
-    // Each of the 7 iterations asks the reflection LM one time and gets no new text.
-    assertEquals(reflectionLm.prompts.size, 7)
+    // Each of the 7 iterations asks the reflection LM two times and gets no new text: the engine calls the proposer
+    // one more time after a failure (gepa `_propose_texts_batch_safe`).
+    assertEquals(reflectionLm.prompts.size, 14)
     assertEquals(result.totalMetricCalls, 16)
     assertEquals(taskLm.calls.get(), 3 * (2 + 7 * 2))
   }

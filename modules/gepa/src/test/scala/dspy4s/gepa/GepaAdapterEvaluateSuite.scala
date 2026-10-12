@@ -136,8 +136,8 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       val records = dataset(OptimizableId(0))
       assertEquals(records.size, 2)
       // inputs carry the question; generated outputs carry the model's answer; feedback explains the verdict.
-      assert(records.head.inputs.contains("France"), records.head.inputs)
-      assert(records.head.generatedOutputs.contains("Paris"), records.head.generatedOutputs)
+      assert(ReflectionFixtures.text(records.head.inputs).contains("France"), records.head.inputs)
+      assert(ReflectionFixtures.text(records.head.generatedOutputs).contains("Paris"), records.head.generatedOutputs)
       assert(records.head.feedback.contains("expected"), records.head.feedback)
       // The wrong-answer example's feedback reflects the mismatch (gold Paris vs predicted Lyon).
       assert(records(1).feedback.contains("Lyon"), records(1).feedback)

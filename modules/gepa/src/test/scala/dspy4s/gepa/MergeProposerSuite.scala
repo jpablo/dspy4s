@@ -375,7 +375,9 @@ class MergeProposerSuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val prompt    = request.messages.flatMap(_.text).mkString("\n")
       val component = if prompt.contains("Component A") then "A" else "B"
-      Right(LmResponse(outputs = Vector(LmOutput(text = s"```\nComponent $component. FIXED_$component\n```"))))
+      Right(LmResponse(outputs =
+        Vector(LmOutput(text = ReflectionFixtures.reply(s"Component $component. FIXED_$component")))
+      ))
 
   /** A training example has no `stage` field: each stage that answers "ok" gives half of the score. A validation
     * example has a `stage` field: only that stage gives the score. A candidate that fixes one stage is then the best on

@@ -103,15 +103,18 @@ class GepaReActTraceSuite extends FunSuite:
 
       assertEquals(records(extractorId).size, 1)
       assert(
-        records(extractorId).head.generatedOutputs.contains("Brussels"),
+        ReflectionFixtures.text(records(extractorId).head.generatedOutputs).contains("Brussels"),
         records(extractorId).head.generatedOutputs
       )
       assert(
-        !records(extractorId).head.generatedOutputs.contains("next_tool_name"),
+        !ReflectionFixtures.text(records(extractorId).head.generatedOutputs).contains("next_tool_name"),
         records(extractorId).head.generatedOutputs
       )
       assertEquals(records(reactId).size, 1)
-      assert(records(reactId).head.generatedOutputs.contains("next_tool_name"), records(reactId).head.generatedOutputs)
+      assert(
+        ReflectionFixtures.text(records(reactId).head.generatedOutputs).contains("next_tool_name"),
+        records(reactId).head.generatedOutputs
+      )
     }
 
     val byName = metric.componentCalls.toVector.groupMap(_._1)(_._2).view.mapValues(_.flatten).toMap

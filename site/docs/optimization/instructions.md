@@ -30,6 +30,13 @@ Pareto front of candidates, trading off competing objectives. It is a
 self-contained implementation plus a dspy4s adapter, and it follows the same
 `compile(student, trainset)` shape as the optimizers above.
 
+A reflection model writes each new instruction. `Gepa` takes that model, and
+an optional `instructionProposer`. The default is `DefaultInstructionProposer()`.
+Its options add requirements for each new instruction
+(`additionalInstructions`), replace the instructions of the proposal call
+(`baseInstructions`), and set a length limit (`maxChars`). To control the
+proposal fully, implement the `InstructionProposer` trait.
+
 ## Choosing one
 
 | Optimizer | Strategy | Use when |
