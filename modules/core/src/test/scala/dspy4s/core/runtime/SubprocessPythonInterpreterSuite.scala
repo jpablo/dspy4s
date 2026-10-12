@@ -92,3 +92,11 @@ class SubprocessPythonInterpreterSuite extends FunSuite:
   test("isAvailable returns false for a definitely-missing command") {
     assert(!SubprocessPythonInterpreter.isAvailable("definitely-not-a-real-binary-xyz"))
   }
+
+  test("a spawn failure has the interpreter component") {
+    val interpreter = new SubprocessPythonInterpreter(pythonCommand = "/nonexistent/dspy4s/python3")
+    interpreter.execute("print(1)") match
+      case Left(dspy4s.core.contracts.RuntimeError(component, _)) =>
+        assertEquals(component, dspy4s.core.contracts.CodeInterpreterErrors.Interpreter)
+      case other => fail(s"expected a RuntimeError, got $other")
+  }

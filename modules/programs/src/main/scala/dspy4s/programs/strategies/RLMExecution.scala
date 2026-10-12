@@ -1,8 +1,7 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ReplCodeInterpreter, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ReplCodeInterpreter, RuntimeContext, SandboxOutputField}
 import dspy4s.core.data.RawPrediction
-import dspy4s.core.runtime.DenoPyodideInterpreter
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome, Prediction, ProgramCall}
 import dspy4s.programs.runtime.{AgentLoop, SandboxToolBridge}
@@ -32,7 +31,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
     val sandboxTools = RLM.makeLlmTools(rlm.maxLlmCalls, rlm.subLm, ctx) ++
       SandboxToolBridge.fromToolFunctions(rlm.tools)
     val outputFields = baseLayout.outputFields.map { field =>
-      DenoPyodideInterpreter.OutputField(field.name, field.typeRef.pythonTypeName)
+      SandboxOutputField(field.name, field.typeRef.pythonTypeName)
     }
     val interpreter       = rlm.interpreterFactory(sandboxTools, outputFields)
     val actionInterpreter = replActionInterpreter(interpreter, inputVars)

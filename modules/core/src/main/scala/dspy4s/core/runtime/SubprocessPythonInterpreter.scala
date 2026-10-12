@@ -80,7 +80,7 @@ final class SubprocessPythonInterpreter(
           ))
       catch
         case e: IOException => Left(RuntimeError(
-            "interpreter",
+            CodeInterpreterErrors.Interpreter,
             s"Failed to spawn '$pythonCommand': ${e.getMessage}. Is Python installed and on PATH?"
           ))
         case NonFatal(other) => Left(RuntimeError(

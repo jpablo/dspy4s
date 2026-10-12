@@ -3,7 +3,7 @@ package dspy4s.programs.strategies
 import dspy4s.programs.{IterationLimit, LlmCallLimit, OutputCharLimit}
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.ReplCodeInterpreter
+import dspy4s.core.contracts.ReplInterpreterFactory
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.SignatureLayout
@@ -217,7 +217,7 @@ object RLM:
   private[programs] val actionStepShape: Shape[ActionStep] = RLMModel.actionStepShape
 
   /** Builds the per-forward REPL from the sandbox tools and the schema-validated SUBMIT output fields. */
-  type InterpreterFactory = (Vector[SandboxTool], Vector[DenoPyodideInterpreter.OutputField]) => ReplCodeInterpreter
+  type InterpreterFactory = ReplInterpreterFactory
 
   /** Fresh sandboxed [[DenoPyodideInterpreter]] per forward (closed by RLM afterwards) — upstream's default. */
   val defaultInterpreterFactory: InterpreterFactory =

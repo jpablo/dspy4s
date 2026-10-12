@@ -56,6 +56,17 @@ trait ReplCodeInterpreter extends CodeInterpreter:
       variables: Map[String, zio.blocks.schema.DynamicValue]
   ): Either[DspyError, CodeResult]
 
+/** An output field of the `SUBMIT(...)` signature of a sandbox (Python DSPy's `output_fields`): the name, and the
+  * Python type when it is known.
+  */
+final case class SandboxOutputField(name: String, pythonType: Option[String] = None)
+
+/** Builds one [[ReplCodeInterpreter]] for one program call, from the host tools and the output fields of `SUBMIT`. The
+  * caller closes the interpreter. A factory can run on more than one thread at the same time, so it must give a new
+  * interpreter for each call.
+  */
+type ReplInterpreterFactory = (Vector[SandboxTool], Vector[SandboxOutputField]) => ReplCodeInterpreter
+
 /** A host-side function callable BY NAME from inside a sandboxed interpreter (Python DSPy's
   * `PythonInterpreter(tools=...)`): sandboxed code calls `name(kwarg=...)`, the sandbox bridges the call back to the
   * host, [[invoke]] runs, and its result returns into the sandbox. This is the seam RLM's `llm_query` /

@@ -4,6 +4,7 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
@@ -11,6 +12,8 @@ import dspy4s.core.contracts.:=
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import scala.collection.mutable.ArrayBuffer
 import scala.util.control.NonFatal
 
@@ -36,6 +39,17 @@ class DenoPyodideInterpreterSuite extends FunSuite:
       catch case NonFatal(_) => ()
 
   private def assumeDeno(): Unit = assume(denoAvailable, "deno not installed — skipping sandbox tests")
+
+  /** The cache directory of Deno, from `deno info --json`. */
+  private lazy val denoDir: Option[String] =
+    try
+      val process = new ProcessBuilder("deno", "info", "--json").start()
+      val output  = new String(process.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+      if process.waitFor() != 0 then None
+      else
+        DenoPyodideProtocol.decodeJson(output).collect { case record: DynamicValue.Record => record }
+          .flatMap(DenoPyodideProtocol.field(_, "denoDir")).flatMap(DenoPyodideProtocol.asString)
+    catch case NonFatal(_) => None
 
   test("executes code in the sandbox and captures stdout") {
     assumeDeno()
@@ -107,7 +121,7 @@ class DenoPyodideInterpreterSuite extends FunSuite:
     )
     val interp = new DenoPyodideInterpreter(
       tools = Vector(greet),
-      outputFields = Vector(DenoPyodideInterpreter.OutputField("answer"))
+      outputFields = Vector(SandboxOutputField("answer"))
     )
     try
       // Tool call: sandbox -> host -> back into the sandbox, mid-execution.
@@ -177,5 +191,89 @@ class DenoPyodideInterpreterSuite extends FunSuite:
       assertEquals(failure.exitCode, 1)
       assert(failure.stderr.contains("tool exploded"), failure.stderr)
       assertEquals(interp.execute("print('alive')").map(_.stdout.trim), Right("alive"))
+    finally interp.close()
+  }
+
+  // The tests below are for the current upstream runner and the launch rules (PORT_GAPS G-34).
+
+  test("the sandbox runs the fixed Pyodide version") {
+    assumeDeno()
+    assertEquals(plain.execute("import pyodide\nprint(pyodide.__version__)").map(_.stdout.trim), Right("0.29.4"))
+  }
+
+  test("the sandboxed code cannot read the Deno cache directory after the start") {
+    assumeDeno()
+    assume(denoDir.isDefined, "deno info gave no cache directory")
+    // `js.Deno` is the Deno API of the host process. The runner revokes the read permission for the cache after it
+    // loaded Pyodide, so generated code cannot read the packages of other projects.
+    val code = """import js
+        |try:
+        |    js.Deno.statSync(deno_dir)
+        |    print("READ")
+        |except Exception as error:
+        |    print("DENIED")
+        |""".stripMargin
+    val interp = new DenoPyodideInterpreter()
+    try
+      val result = interp.execute(code, Map("deno_dir" -> DynamicValues.fromAny(denoDir.get)))
+      assertEquals(result.map(_.stdout.trim), Right("DENIED"))
+    finally interp.close()
+  }
+
+  test("an exception class of the user code with the name FinalOutput is a user-code error") {
+    assumeDeno()
+    // The runner uses a private control exception for SUBMIT. A class of the user code with the old name must not
+    // look like a SUBMIT call.
+    val code   = "class FinalOutput(Exception):\n    pass\nraise FinalOutput('mine')"
+    val interp = new DenoPyodideInterpreter(outputFields = Vector(SandboxOutputField("answer")))
+    try
+      val result = interp.execute(code).toOption.get
+      assertEquals(result.finalOutput, None)
+      assertEquals(result.exitCode, 1)
+      assert(result.stderr.contains("FinalOutput"), result.stderr)
+      // SUBMIT works after the user code defined that class.
+      val submitted = interp.execute("SUBMIT(answer='done')").toOption.get
+      assert(submitted.finalOutput.exists(_.contains("done")), submitted.toString)
+    finally interp.close()
+  }
+
+  test("a write path cannot overlap the Deno cache directory") {
+    assumeDeno()
+    assume(denoDir.isDefined, "deno info gave no cache directory")
+    val interp = new DenoPyodideInterpreter(enableWritePaths = Vector(denoDir.get))
+    try interp.execute("print(1)") match
+        case Left(error) => assert(error.message.contains("overlap"), error.message)
+        case Right(ok)   => fail(s"expected a failure, got $ok")
+    finally interp.close()
+  }
+
+  test("the mount creates a write path that does not exist, and the sandbox writes to it") {
+    assumeDeno()
+    // The temporary directory of macOS is behind a symbolic link. The permission flags and the mount must name the
+    // same real path, also when the file does not exist at the launch.
+    val file   = Files.createTempDirectory("dspy4s-write").resolve("out.txt")
+    val code   = "with open('/sandbox/out.txt', 'w') as out:\n    out.write('from the sandbox')\nprint('written')"
+    val interp = new DenoPyodideInterpreter(enableWritePaths = Vector(file.toString))
+    try
+      assertEquals(interp.execute(code).map(_.stdout.trim), Right("written"))
+      // The runner copies the file to the host before it reads the next request.
+      assertEquals(interp.execute("print('synced')").map(_.stdout.trim), Right("synced"))
+      assertEquals(new String(Files.readAllBytes(file), StandardCharsets.UTF_8), "from the sandbox")
+    finally interp.close()
+  }
+
+  test("a Deno process that stops ends the session, and no new process starts") {
+    assumeDeno()
+    val interp = new DenoPyodideInterpreter()
+    try
+      assertEquals(interp.execute("kept = 41").map(_.exitCode), Right(0))
+      // `js.Deno` is the Deno API of the host process. `exit` needs no permission.
+      interp.execute("import js\njs.Deno.exit(7)") match
+        case Left(error) => assert(error.message.contains("exited (code 7)"), error.message)
+        case Right(ok)   => fail(s"expected a failure, got $ok")
+      // A new process has no `kept` variable. The interpreter must not hide that loss.
+      interp.execute("print(kept + 1)") match
+        case Left(error) => assert(error.message.contains("session has ended"), error.message)
+        case Right(ok)   => fail(s"expected a failure, got $ok")
     finally interp.close()
   }

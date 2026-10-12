@@ -88,7 +88,7 @@ class SandboxProtocolSuite extends FunSuite:
       |        send({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Invalid JSON input"}, "id": None})
       |        break
       |    elif code == "wrong_id":
-      |        send({"jsonrpc": "2.0", "error": {"code": -32007, "message": "stale"}, "id": request_id + 1000})
+      |        send({"jsonrpc": "2.0", "error": {"code": -32007, "message": "stale"}, "id": "not-the-request-id"})
       |        break
       |    elif code == "user_error":
       |        data = {"type": "NameError", "args": ["name 'x' is not defined"]}
@@ -204,7 +204,9 @@ class SandboxProtocolSuite extends FunSuite:
 
   test("an error with a different id is a protocol breakdown") {
     withSandbox() { interpreter =>
-      assertEquals(interpreterError(interpreter.execute("wrong_id")), "Response id mismatch")
+      val message = interpreterError(interpreter.execute("wrong_id"))
+      assert(message.startsWith("Response id mismatch"), message)
+      assert(message.contains("\"not-the-request-id\""), message)
     }
   }
 
