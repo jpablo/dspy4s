@@ -10,6 +10,7 @@ class GepaLimitsSuite extends FunSuite:
     assert(compileErrors("dspy4s.gepa.MinibatchSize(0)").nonEmpty)
     assert(compileErrors("dspy4s.gepa.MergeInvocationLimit(-1)").nonEmpty)
     assert(compileErrors("dspy4s.gepa.MergeSubsampleSize(0)").nonEmpty)
+    assert(compileErrors("dspy4s.gepa.MergeOverlapFloor(-1)").nonEmpty)
     assert(compileErrors("dspy4s.gepa.GepaCandidateCount(0)").nonEmpty)
   }
 
@@ -20,6 +21,8 @@ class GepaLimitsSuite extends FunSuite:
     assertEquals(MergeInvocationLimit.either(0).map(_.toInt), Right(0))
     assert(MergeInvocationLimit.either(-1).isLeft)
     assert(MergeSubsampleSize.either(0).isLeft)
+    assertEquals(MergeOverlapFloor.either(0).map(_.toInt), Right(0))
+    assert(MergeOverlapFloor.either(-1).isLeft)
     assert(GepaCandidateCount.either(0).isLeft)
     assert(CandidatePool.either(Vector.empty).isLeft)
     val candidate = Map(OptimizableId(0) -> Some("instruction"))

@@ -100,8 +100,8 @@ selection in upstream `make_reflective_dataset`:
 metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
 
 1. **A reflective mutation.** A `CandidateSelector` (Pareto by default) picks a parent from the pool; a
-   `ComponentSelector` (round-robin) picks which component to evolve; a minibatch is sampled from the
-   trainset; the adapter evaluates the parent on it *with traces*; the per-component reflective dataset
+   minibatch is sampled from the trainset; the adapter evaluates the parent on it *with traces*; a
+   `ComponentSelector` (round-robin) picks which component to evolve; the per-component reflective dataset
    (`ReflectiveRecord`s: inputs / generated outputs / feedback) is built; `InstructionProposer` asks the
    reflection LM for a rewritten instruction; the new candidate is accepted if it improves on the minibatch and
    then full-evaluated on the valset and added to the pool.
@@ -110,28 +110,48 @@ metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
    iteration makes no proposal and no acceptance evaluation, as upstream. The metric calls of the minibatch
    evaluation stay counted, so the budget decreases and the loop ends.
 
+   Each candidate has a round-robin pointer: the index of the component that its next mutation changes. The
+   pointers are part of `GepaState`. A new candidate (from a mutation or from a merge) takes the largest pointer
+   of its parents. The pointer of a parent has already moved at that time, so the child continues with the next
+   component.
+
+   The component selector runs after the perfect-score check, as upstream. An iteration that this check skips
+   does not move the pointer of the parent. Each other iteration moves it, also when the iteration makes no
+   proposal.
+
 2. **A merge (crossover).** When enabled and one is scheduled, `MergeProposer` combines two Pareto-frontier
    descendants of a common ancestor: for each component it takes the version from whichever descendant
    *improved* it, stacking the two lineages' complementary gains. Merge only fires for multi-component programs
    with branching lineage (a single-component program can never satisfy the "desirable predictor" gate, so it's
    a safe no-op there).
 
+   The merge search makes 10 attempts at most, and each attempt draws 10 pairs of candidates at most, as
+   upstream. The search continues with the next attempt in these cases:
+
+   - The attempt finds no pair with a valid common ancestor.
+   - The merge of the found pair was already made.
+   - The two candidates share fewer validation examples than `mergeValOverlapFloor` (default 5, as upstream).
+
+   Each candidate has a score for each validation example. Thus a validation set with fewer than 5 examples
+   gives no merge with the default value. Set a lower `mergeValOverlapFloor` for such a set.
+
 The **budget** counts metric (evaluation) calls only — reflection-LM calls are free, matching gepa.
 
 ### Supporting pieces
 
-- **`GepaState`** — the evolving pool: candidates, each candidate's per-validation-instance subscores, and
-  lineage (`parents`), plus the running metric-call meter. The Pareto frontier is derived from the subscores;
-  `bestIndex` is the candidate with the best mean validation score.
+- **`GepaState`** — the evolving pool: candidates, each candidate's per-validation-instance subscores,
+  lineage (`parents`), and round-robin pointer (`nextComponent`), plus the running metric-call meter. The Pareto
+  frontier is derived from the subscores; `bestIndex` is the candidate with the best mean validation score.
 - **`MinibatchSampler`** — chooses each iteration's reflective minibatch. Default `EpochShuffled` (gepa's
   default) walks a per-epoch shuffle so every train example is used once per epoch before repeats; `RandomDraw`
   is the independent-draw v0 sampler.
 - **`GepaEvalCache`** — memoizes scores-only evaluations by `(candidate, example)`, so a merged candidate's
   subsample eval is reused on its later full-eval, and re-scored pairs are free. Only actual (uncached) evals
   are charged against the budget.
-- **`GepaStatePersistence`** — JSON save/load of the search state (pool, subscores, lineage, meter) for
+- **`GepaStatePersistence`** — JSON save/load of the search state (pool, subscores, lineage, pointers, meter) for
   resuming an interrupted run. The eval cache, RNG position, and merge schedule are not persisted; a resumed
-  run keeps every discovered candidate (no budget re-spent) and continues from that pool.
+  run keeps every discovered candidate (no budget re-spent) and continues from that pool. A state file that an
+  older version wrote has no pointers. It loads with the pointer 0 for each candidate.
 
 ## Config highlights (`GepaConfig`)
 
@@ -142,6 +162,7 @@ The **budget** counts metric (evaluation) calls only — reflection-LM calls are
 | `candidateSelector` / `componentSelector` | parent selection (Pareto) and component selection (round-robin) |
 | `batchSampler` | `EpochShuffled` (default) or `RandomDraw` |
 | `useMerge` / `maxMergeInvocations` | enable crossover (default on) and cap accepted merges |
+| `mergeValOverlapFloor` | the smallest number of validation examples that the two candidates of a merge share (default 5, as upstream) |
 | `skipPerfectScore` / `perfectScore` | skip reflecting on already-perfect minibatches |
 | `stopOnPerfectScore` | opt-in early stop when the best candidate is perfect (off, for gepa parity) |
 | `addFormatFailureAsFeedback` | a predictor call that failed gives the reflection LM a record (off, as upstream) |

@@ -12,16 +12,22 @@ import scala.util.control.NonFatal
 /** JSON persistence for [[GepaState]] — the basis for resuming an interrupted run (gepa's `state.save`/`load` into a
   * run dir). The search state contains enough information to warm the evaluation cache on resume: every candidate's
   * validation subscores are aligned with the current validation set. RNG position and merge schedule are not persisted.
+  * The round-robin pointers are persisted.
   */
 object GepaStatePersistence:
 
   /** Flat, JSON-friendly projection of [[GepaState]]'s fields (no methods / `require`), so the codec derives cleanly.
+    *
+    * `nextComponent` is a collection, because the derived codec reads a collection field that is absent as an empty
+    * collection, and does not write an empty collection. A snapshot that an older version wrote has no such field. It
+    * loads with an empty `nextComponent`, which [[GepaState]] reads as the pointer 0 for each candidate.
     */
   private final case class Snapshot(
       candidates      : Vector[Map[String, Option[String]]],
       valSubscores    : Vector[Vector[Double]],
       parents         : Vector[Vector[Int]],
-      totalMetricCalls: Int
+      totalMetricCalls: Int,
+      nextComponent   : Vector[Int]
   ) derives Schema
 
   private val codec = Schema[Snapshot].derive(JsonCodecDeriver)
@@ -31,7 +37,9 @@ object GepaStatePersistence:
   def toJson(state: GepaState): String =
     val candidates = state.candidates.map(_.iterator.map { case (id, instruction) => id.render -> instruction }.toMap)
     new String(
-      codec.encode(Snapshot(candidates, state.valSubscores, state.parents, state.totalMetricCalls)),
+      codec.encode(
+        Snapshot(candidates, state.valSubscores, state.parents, state.totalMetricCalls, state.nextComponent)
+      ),
       StandardCharsets.UTF_8
     )
 
@@ -57,7 +65,7 @@ object GepaStatePersistence:
                      .either(s.totalMetricCalls)
                      .left
                      .map(_ => "invalid GEPA state snapshot: totalMetricCalls must be non-negative")
-          state <- scala.util.Try(GepaState(pool, s.valSubscores, s.parents, calls)).toEither.left
+          state <- scala.util.Try(GepaState(pool, s.valSubscores, s.parents, calls, s.nextComponent)).toEither.left
                      .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
         yield state
       }

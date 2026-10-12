@@ -53,6 +53,14 @@ class GepaStatePersistenceSuite extends FunSuite:
     assert(GepaStatePersistence.fromJson(malformed).isLeft)
   }
 
+  test("fromJson rejects pointers that are negative or not aligned with the candidates") {
+    def snapshot(pointers: String): String =
+      s"""{"candidates":[{"optimizable-0":"x"}],"valSubscores":[[1.0]],"parents":[[]],"totalMetricCalls":1,"nextComponent":$pointers}"""
+    assertEquals(GepaStatePersistence.fromJson(snapshot("[1]")).map(_.pointerOf(0)), Right(1))
+    assert(GepaStatePersistence.fromJson(snapshot("[-1]")).isLeft)
+    assert(GepaStatePersistence.fromJson(snapshot("[0,0]")).isLeft)
+  }
+
   test("load distinguishes an absent checkpoint from a corrupt checkpoint") {
     val dir = Files.createTempDirectory("gepa-state-load")
     try

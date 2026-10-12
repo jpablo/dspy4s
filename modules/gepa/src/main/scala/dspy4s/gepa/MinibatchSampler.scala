@@ -36,9 +36,9 @@ object MinibatchSampler:
     * `minibatchSize` with the least-frequently-used ids so the final window is full; a new shuffle is drawn each time
     * the walk wraps into the next epoch.
     *
-    * Deltas from gepa: the iteration index starts at 0 (gepa's at 1, a harmless one-window offset), and padding ties
-    * break by smallest id (gepa uses `Counter` insertion order) — both change only WHICH example fills a pad slot, not
-    * the coverage guarantee. Deterministic for a given `seed`.
+    * The iteration index starts at 0, as in gepa (its `state.i` is -1 before the first iteration and 0 in it). Delta
+    * from gepa: padding ties break by smallest id (gepa uses `Counter` insertion order). This changes only WHICH
+    * example fills a pad slot, not the coverage guarantee. Deterministic for a given `seed`.
     */
   final class EpochShuffled(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
     private val rng                   = new Random(seed)

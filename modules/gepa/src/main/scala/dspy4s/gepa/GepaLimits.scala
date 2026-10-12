@@ -29,6 +29,11 @@ type MergeSubsampleSize = MergeSubsampleSize.T
 
 object MergeSubsampleSize extends RefinedSubtype[Int, Positive]
 
+/** A non-negative floor on the validation examples that the two candidates of a merge share. */
+type MergeOverlapFloor = MergeOverlapFloor.T
+
+object MergeOverlapFloor extends RefinedSubtype[Int, Positive0]
+
 /** A candidate pool containing at least the seed candidate. */
 type CandidatePool = CandidatePool.T
 

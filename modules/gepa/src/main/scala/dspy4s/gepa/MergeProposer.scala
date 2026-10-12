@@ -31,9 +31,15 @@ final class MergeProposer[P](
     rng                : Random,
     cache              : GepaEvalCache[P],
     maxAttempts        : MergeInvocationLimit = MergeInvocationLimit(10),
-    subsampleSize      : MergeSubsampleSize   = MergeSubsampleSize(5)
+    subsampleSize      : MergeSubsampleSize   = MergeSubsampleSize(5),
+    /** The smallest number of validation examples that the two candidates of a merge must share (gepa's
+      * `val_overlap_floor`). A pair with fewer shared examples gives no merge. The value must not be negative.
+      */
+    valOverlapFloor: Int = MergeProposer.DefaultValOverlapFloor
 ):
   import MergeProposer.*
+
+  require(valOverlapFloor >= 0, s"valOverlapFloor must not be negative: $valOverlapFloor")
 
   var mergesDue: Int            = 0
   var totalMergesTested: Int    = 0
@@ -64,41 +70,65 @@ final class MergeProposer[P](
     val dominators = state.nonDominatedFrontier.values.flatten.toSet.toVector.sorted
     if dominators.size < 2 || state.candidates.size < 3 then return None
 
-    findTriplet(state, dominators).flatMap { case (id1, id2, ancestor) =>
-      val (merged, desc) = crossover(
-        state.candidates(ancestor),
-        id1,
-        state.candidates(id1),
-        id2,
-        state.candidates(id2),
-        state.aggregateScore,
-        rng
-      )
-      if performedDescs.contains((id1, id2, desc)) then None // this exact merge was already produced
-      else
-        performedTriplets += ((id1, id2, ancestor))
-        performedDescs += ((id1, id2, desc))
+    findMerge(state, dominators).flatMap { case ((id1, id2, ancestor), merged) =>
+      performedTriplets += ((id1, id2, ancestor))
 
-        val subIdx = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), subsampleSize, rng)
-        if subIdx.isEmpty then None
-        else
-          val before1            = subIdx.iterator.map(state.valSubscores(id1)).sum
-          val before2            = subIdx.iterator.map(state.valSubscores(id2)).sum
-          val (mergedScores, ev) =
-            cache.scores(merged, subIdx.map(valset)) // cached so the later full-eval reuses these
-          Some(MergeProposal(
-            merged,
-            Vector(id1, id2),
-            accepted = mergedScores.sum >= math.max(before1, before2),
-            metricCalls = ev
-          ))
+      val subIdx = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), subsampleSize, rng)
+      if subIdx.isEmpty then None
+      else
+        val before1            = subIdx.iterator.map(state.valSubscores(id1)).sum
+        val before2            = subIdx.iterator.map(state.valSubscores(id2)).sum
+        val (mergedScores, ev) = cache.scores(merged, subIdx.map(valset)) // cached so the later full-eval reuses these
+        Some(MergeProposal(
+          merged,
+          Vector(id1, id2),
+          accepted = mergedScores.sum >= math.max(before1, before2),
+          metricCalls = ev
+        ))
     }
 
-  /** Up to `maxAttempts` times: sample two distinct dominators (neither an ancestor of the other) and look for a common
-    * ancestor that is (a) not already merged for this pair, (b) outperformed by both descendants, and (c) "desirable"
-    * (some component exactly one descendant changed). Picks among valid ancestors weighted by score.
+  /** The triplet that [[findMerge]] finds, without the merged candidate. A test uses it to examine the search of
+    * [[propose]].
     */
-  private def findTriplet(state: GepaState, dominators: Vector[Int]): Option[(Int, Int, Int)] =
+  private[gepa] def findTriplet(state: GepaState, dominators: Vector[Int]): Option[(Int, Int, Int)] =
+    findMerge(state, dominators).map(_._1)
+
+  /** Up to `maxAttempts` attempts (gepa's `sample_and_attempt_merge_programs_by_common_predictors`). Each attempt looks
+    * for a triplet with [[findCommonAncestorPair]] and makes its crossover. The search continues with the next attempt
+    * in these cases:
+    *   - The attempt finds no triplet.
+    *   - This exact merge was already produced.
+    *   - The two candidates share fewer than `valOverlapFloor` validation examples.
+    *
+    * Returns the triplet and the merged candidate, and records the description of the merge.
+    */
+  private def findMerge(state: GepaState, dominators: Vector[Int]): Option[((Int, Int, Int), Candidate)] =
+    var attempt = 0
+    while attempt < maxAttempts do
+      attempt += 1
+      findCommonAncestorPair(state, dominators) match
+        case Some((id1, id2, ancestor)) =>
+          val (merged, desc) = crossover(
+            state.candidates(ancestor),
+            id1,
+            state.candidates(id1),
+            id2,
+            state.candidates(id2),
+            state.aggregateScore,
+            rng
+          )
+          if !performedDescs.contains((id1, id2, desc)) && sharedExamples(state, id1, id2) >= valOverlapFloor then
+            performedDescs += ((id1, id2, desc))
+            return Some(((id1, id2, ancestor), merged))
+        case None => ()
+    None
+
+  /** Up to `maxAttempts` times (gepa's `find_common_ancestor_pair`): sample two distinct dominators (neither an
+    * ancestor of the other) and look for a common ancestor that is (a) not already merged for this pair, (b)
+    * outperformed by both descendants, and (c) "desirable" (some component exactly one descendant changed). Picks among
+    * valid ancestors weighted by score.
+    */
+  private def findCommonAncestorPair(state: GepaState, dominators: Vector[Int]): Option[(Int, Int, Int)] =
     var attempt = 0
     while attempt < maxAttempts do
       attempt += 1
@@ -120,6 +150,16 @@ final class MergeProposer[P](
     None
 
 object MergeProposer:
+
+  /** gepa's default for `val_overlap_floor`. */
+  val DefaultValOverlapFloor: MergeOverlapFloor = MergeOverlapFloor(5)
+
+  /** The number of validation examples that candidates `id1` and `id2` share (the common ids of gepa's
+    * `has_val_support_overlap`). Each candidate of a [[GepaState]] has a score for each validation example, so the two
+    * candidates share all of them.
+    */
+  private def sharedExamples(state: GepaState, id1: Int, id2: Int): Int =
+    math.min(state.valSubscores(id1).size, state.valSubscores(id2).size)
 
   /** A triplet is mergeable iff some component is unchanged in exactly one descendant (so the OTHER descendant's change
     * is the one to carry forward). Corresponds to gepa's `does_triplet_have_desirable_predictors`.

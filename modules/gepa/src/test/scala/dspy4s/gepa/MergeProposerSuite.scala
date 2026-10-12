@@ -21,6 +21,7 @@ import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
+import java.nio.file.Files
 import scala.util.Random
 
 class MergeProposerSuite extends FunSuite:
@@ -144,11 +145,13 @@ class MergeProposerSuite extends FunSuite:
       parents = Vector(Vector.empty, Vector(0), Vector(0)),
       totalMetricCalls = MetricCallCount(0)
     )
+    // The validation set has 2 examples, so the test sets the overlap floor below gepa's default of 5.
     val merger = new MergeProposer[Pipeline](
       valset,
       maxMergeInvocations = MergeInvocationLimit(5),
       new Random(0),
-      new GepaEvalCache(adapter)
+      new GepaEvalCache(adapter),
+      valOverlapFloor = valset.size
     )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
@@ -202,11 +205,13 @@ class MergeProposerSuite extends FunSuite:
       parents = Vector(Vector.empty, Vector(0), Vector(0)),
       totalMetricCalls = MetricCallCount(0)
     )
+    // The overlap floor permits a merge on the 2 validation examples, so the floor is not the reason for the result.
     val merger = new MergeProposer[Pipeline](
       valset,
       maxMergeInvocations = MergeInvocationLimit(5),
       new Random(0),
-      new GepaEvalCache(adapter)
+      new GepaEvalCache(adapter),
+      valOverlapFloor = valset.size
     )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -234,14 +239,228 @@ class MergeProposerSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val parents          = (0 until 20).map { seed =>
+        // The validation set has 3 examples, so the test sets the overlap floor below gepa's default of 5.
         val merger = new MergeProposer[Pipeline](
           valset3,
           maxMergeInvocations = MergeInvocationLimit(5),
           new Random(seed),
-          new GepaEvalCache(adapter)
+          new GepaEvalCache(adapter),
+          valOverlapFloor = valset3.size
         )
         merger.propose(state).map(_.parents)
       }.toSet
       assertEquals(parents, Set(Option(Vector(2, 3))))
     }
+  }
+
+  // ── The repeated merge description (PORT_GAPS G-44; gepa `merge.py`) ────────────────────────────────────────────
+  // gepa continues with the next attempt when the merge of the found triplet was already made.
+
+  /** Two pairs can merge: (2, 3) and (5, 6). The pair (2, 3) has two common ancestors, 0 and 1, and the two ancestors
+    * give the same merged candidate. The pair (5, 6) has one valid ancestor, 4. The seed scores more than 5 and 6, so
+    * no pair with one candidate of each family passes the ancestor rule.
+    */
+  private lazy val twoPairState: GepaState =
+    val examples                                          = 8
+    def row(best: Set[Int], rest: Double): Vector[Double] =
+      Vector.tabulate(examples)(i => if best(i) then 1.0 else rest)
+    def cand(a: String, b: String): Candidate = Map(first -> Some(a), second -> Some(b))
+    GepaState(
+      candidates = CandidatePool.applyUnsafe(Vector(
+        cand("A0", "B0"), // 0: the seed
+        cand("A1", "B0"), // 1: a child of 0
+        cand("A1", "B2"), // 2: a child of 1
+        cand("A3", "B0"), // 3: a child of 1, with a better score than 2
+        cand("A0", "B4"), // 4: a child of 0
+        cand("A5", "B4"), // 5: a child of 4
+        cand("A0", "B6")  // 6: a child of 4
+      )),
+      valSubscores = Vector(
+        Vector.fill(examples)(0.5),
+        Vector.fill(examples)(0.4),
+        row(Set(0), 0.5),
+        row(Set(1, 2), 0.5),
+        Vector.fill(examples)(0.0),
+        row(Set(3), 0.0),
+        row(Set(4), 0.0)
+      ),
+      parents = Vector(Vector.empty, Vector(0), Vector(1), Vector(1), Vector(0), Vector(4), Vector(4)),
+      totalMetricCalls = MetricCallCount(0)
+    )
+
+  private lazy val valset8: Vector[Example] = (1 to 8).toVector.map(i =>
+    Example(
+      values = DynamicValues.record("question" := s"Capital ($i)?", "answer" := "Paris"),
+      inputKeys = Set("question")
+    )
+  )
+
+  test("the frontier of the two-pair state has the two pairs and no ancestor") {
+    assertEquals(twoPairState.nonDominatedFrontier.values.flatten.toSet, Set(2, 3, 5, 6))
+  }
+
+  test("propose continues with a different pair when the merge of the found triplet was already made") {
+    val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      // After the merge of (2, 3) over one ancestor, the other ancestor gives the same merge again. A search that stops
+      // at that triplet finds no second merge for approximately one seed of three.
+      val found = (0 until 100).count { seed =>
+        val merger = new MergeProposer[Pipeline](
+          valset8,
+          maxMergeInvocations = MergeInvocationLimit(5),
+          new Random(seed),
+          new GepaEvalCache(adapter)
+        )
+        val parents = Vector(merger.propose(twoPairState), merger.propose(twoPairState)).map(_.map(_.parents))
+        parents.toSet == Set(Option(Vector(2, 3)), Option(Vector(5, 6)))
+      }
+      assert(found >= 95, s"the search found the two merges for $found of 100 seeds")
+    }
+  }
+
+  test("propose finds no merge when each triplet that stays gives a merge that was already made") {
+    val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
+    // The first four candidates of the two-pair state: (2, 3) is the only pair, with the ancestors 0 and 1.
+    val state = GepaState(
+      candidates = CandidatePool.applyUnsafe(twoPairState.candidates.take(4)),
+      valSubscores = twoPairState.valSubscores.take(4),
+      parents = twoPairState.parents.take(4),
+      totalMetricCalls = MetricCallCount(0)
+    )
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val merger           = new MergeProposer[Pipeline](
+        valset8,
+        maxMergeInvocations = MergeInvocationLimit(5),
+        new Random(0),
+        new GepaEvalCache(adapter)
+      )
+      assertEquals(merger.propose(state).map(_.parents), Some(Vector(2, 3)))
+      assertEquals(merger.propose(state), None)
+    }
+  }
+
+  // ── The overlap floor (PORT_GAPS G-44; gepa `val_overlap_floor`) ────────────────────────────────────────────────
+
+  test("MergeProposer rejects a negative overlap floor") {
+    val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
+    intercept[IllegalArgumentException] {
+      new MergeProposer[Pipeline](
+        valset,
+        maxMergeInvocations = MergeInvocationLimit(5),
+        new Random(0),
+        new GepaEvalCache(adapter),
+        valOverlapFloor = -1
+      )
+    }
+  }
+
+  // ── The merge in the engine ─────────────────────────────────────────────────────────────────────────────────
+
+  /** Stage `a` answers "ok" only when its instruction has FIXED_A. Stage `b` answers "ok" only with FIXED_B. */
+  private final class StageLm extends LanguageModel:
+    override val id: String                                                                    = "stage"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val prompt          = request.messages.flatMap(_.text).mkString("\n")
+      val (field, marker) = if prompt.contains("## a ##") then ("a", "FIXED_A") else ("b", "FIXED_B")
+      val value           = if prompt.contains(marker) then "ok" else "bad"
+      Right(LmResponse(outputs = Vector(LmOutput(text = s"[[ ## $field ## ]]\n$value\n\n[[ ## completed ## ]]"))))
+
+  /** Gives the component of the request its fix. */
+  private final class StageReflectionLm extends LanguageModel:
+    override val id: String                                                                    = "reflect"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val prompt    = request.messages.flatMap(_.text).mkString("\n")
+      val component = if prompt.contains("Component A") then "A" else "B"
+      Right(LmResponse(outputs = Vector(LmOutput(text = s"```\nComponent $component. FIXED_$component\n```"))))
+
+  /** A training example has no `stage` field: each stage that answers "ok" gives half of the score. A validation
+    * example has a `stage` field: only that stage gives the score. A candidate that fixes one stage is then the best on
+    * the validation examples of that stage only, so the two candidates with one fix each stay on the frontier.
+    */
+  private def stageMetric: FeedbackMetric =
+    new FeedbackMetric:
+      override def name: String = "stage_score"
+      override def feedback(
+          example       : Example,
+          prediction    : RawPrediction,
+          trace         : Vector[TraceEntry],
+          component     : Option[String],
+          componentTrace: Vector[TraceEntry]
+      )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
+        def ok(stage: String): Boolean = prediction.get(stage).map(DynamicValues.renderText).contains("ok")
+        val score                      = example.get("stage").map(DynamicValues.renderText) match
+          case Some(stage) => if ok(stage) then 1.0 else 0.0
+          case None        => Vector("a", "b").count(ok) * 0.5
+        Right(ScoreWithFeedback(score, "Each stage must answer ok."))
+
+  /** Always selects the seed. A reflective mutation then changes one component of the seed only, so only a merge gives
+    * a candidate with the two fixes.
+    */
+  private object SeedOnly extends CandidateSelector:
+    def select(state: GepaState, rng: Random): Int = 0
+
+  private lazy val twoStage: TwoStage =
+    TwoStage(first = predict("question -> a", "Component A."), second = predict("question -> b", "Component B."))
+
+  private lazy val stageTrainset: Vector[Example] = (1 to 4).toVector.map(i =>
+    Example(values = DynamicValues.record("question" := s"Question $i?"), inputKeys = Set("question"))
+  )
+
+  private lazy val stageValset: Vector[Example] = Vector("a", "a", "b", "b").zipWithIndex.map((stage, i) =>
+    Example(
+      values = DynamicValues.record("question" := s"Validation $i?", "stage" := stage),
+      inputKeys = Set("question")
+    )
+  )
+
+  /** The budget holds the seed validation (4 calls), two reflective mutations (8 calls each), and one merge (4 calls).
+    */
+  private def stageConfig: GepaConfig =
+    GepaConfig(
+      maxMetricCalls = MetricCallCount(24),
+      reflectionMinibatchSize = MinibatchSize(2),
+      candidateSelector = SeedOnly,
+      seed = 1L
+    )
+
+  /** The state that a run of the engine saves last. */
+  private def finalState(config: GepaConfig): GepaState =
+    val dir = Files.createTempDirectory("gepa-merge-engine")
+    try
+      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new StageLm), adapter = Some(ChatAdapter()))) {
+        given RuntimeContext = RuntimeEnvironment.current
+        val engine           = new GepaEngine(new GepaAdapter[TwoStage](twoStage, stageMetric), new StageReflectionLm, config)
+        val _                = engine
+          .optimize(Candidate.seed(twoStage), stageTrainset, stageValset, runDir = Some(dir))
+          .fold(error => fail(error.message), identity)
+      }
+      GepaStatePersistence.load(dir).fold(error => fail(error), _.getOrElse(fail("the run saved no state")))
+    finally
+      val _ = Files.deleteIfExists(dir.resolve(GepaStatePersistence.fileName))
+      val _ = Files.deleteIfExists(dir)
+
+  test("the engine merges on a small validation set when the configuration sets a lower overlap floor") {
+    // The validation set has 4 examples, so the default floor of 5 permits no merge.
+    val state = finalState(stageConfig.copy(mergeValOverlapFloor = MergeOverlapFloor(4)))
+
+    // The two mutations change one component of the seed each. The merge then takes the two fixes.
+    assertEquals(state.parents, Vector(Vector.empty, Vector(0), Vector(0), Vector(1, 2)))
+    assertEquals(
+      state.candidates(3),
+      Map(first -> Some("Component A. FIXED_A"), second -> Some("Component B. FIXED_B"))
+    )
+    assertEquals(state.aggregateScore(3), 1.0)
+    // The pointer of the seed moved two times. Each child took the pointer that the seed had at that time, and the
+    // merged candidate took the largest pointer of its two parents.
+    assertEquals(Vector.tabulate(4)(state.pointerOf), Vector(0, 1, 0, 1))
+  }
+
+  test("the engine makes no merge on a validation set that is smaller than the default overlap floor") {
+    val state = finalState(stageConfig)
+    assertEquals(state.parents, Vector(Vector.empty, Vector(0), Vector(0)))
+    assertEquals(state.aggregateScore(state.bestIndex), 0.5)
   }

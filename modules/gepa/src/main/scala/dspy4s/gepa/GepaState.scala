@@ -4,9 +4,9 @@ import dspy4s.programs.optimization.OptimizableId
 
 import scala.util.Random
 
-/** The evolving GEPA search state: the candidate pool, each candidate's full-validation per-instance scores, and
-  * lineage, plus the running metric-call count (the budget meter). The instance-type Pareto frontier is derived from
-  * `valSubscores`. v0 is single-objective with the instance frontier and no merge. See PORT_GAPS G-12.
+/** The evolving GEPA search state: the candidate pool, each candidate's full-validation per-instance scores, lineage,
+  * and round-robin pointer, plus the running metric-call count (the budget meter). The instance-type Pareto frontier is
+  * derived from `valSubscores`. v0 is single-objective with the instance frontier. See PORT_GAPS G-12.
   *
   * `candidates`, `valSubscores`, and `parents` are aligned by candidate index; `valSubscores(i)` is candidate `i`'s
   * score on each validation example (aligned by validation index).
@@ -15,12 +15,22 @@ final case class GepaState(
     candidates      : CandidatePool,
     valSubscores    : Vector[Vector[Double]],
     parents         : Vector[Vector[Int]],
-    totalMetricCalls: MetricCallCount
+    totalMetricCalls: MetricCallCount,
+    /** The round-robin pointer of each candidate: the index of the component that the next reflective mutation of that
+      * candidate changes (gepa's `named_predictor_id_to_update_next_for_program_candidate`). Empty means 0 for each
+      * candidate, which is the value of a state that an older version saved. Read a pointer with [[pointerOf]].
+      */
+    nextComponent: Vector[Int] = Vector.empty
 ):
   require(
     valSubscores.length == candidates.length && parents.length == candidates.length,
     "GepaState candidates, valSubscores, and parents must be aligned by index"
   )
+  require(
+    nextComponent.isEmpty || nextComponent.length == candidates.length,
+    "GepaState nextComponent must be empty or aligned with candidates"
+  )
+  require(nextComponent.forall(_ >= 0), "GepaState nextComponent pointers must not be negative")
   require(
     valSubscores.map(_.length).distinct.sizeIs <= 1,
     "GepaState valSubscores rows must all have the same length (one score per validation example) — " +
@@ -52,15 +62,28 @@ final case class GepaState(
       }
     walk(i, Set.empty)
 
+  /** The round-robin pointer of candidate `i`. */
+  def pointerOf(i: Int): Int = nextComponent.lift(i).getOrElse(0)
+
+  /** This state with `pointer` as the round-robin pointer of candidate `i`. */
+  def withPointer(i: Int, pointer: Int): GepaState = copy(nextComponent = allPointers.updated(i, pointer))
+
+  private def allPointers: Vector[Int] = candidates.indices.toVector.map(pointerOf)
+
   /** Append a newly-accepted candidate with its full-validation subscores, parent lineage (one parent for a reflective
     * mutation, two for a merge — empty only for the seed), and the metric calls its discovery consumed.
+    *
+    * The new candidate takes the largest round-robin pointer of its parents (gepa `core/state.py`,
+    * `update_state_with_new_program`). The pointer of a parent has already moved when its child is added, so the child
+    * continues with the next component.
     */
   def add(candidate: Candidate, subscores: Vector[Double], parents: Vector[Int], metricCalls: Int): GepaState =
     copy(
       candidates = CandidatePool.assume(candidates :+ candidate),
       valSubscores = valSubscores :+ subscores,
       parents = this.parents :+ parents,
-      totalMetricCalls = MetricCallCount.add(totalMetricCalls, metricCalls)
+      totalMetricCalls = MetricCallCount.add(totalMetricCalls, metricCalls),
+      nextComponent = allPointers :+ parents.map(pointerOf).maxOption.getOrElse(0)
     )
 
   /** Instance-type Pareto frontier: for each validation-example index, the set of candidate indices achieving the max

@@ -49,6 +49,13 @@ class GepaStateSuite extends FunSuite:
     }
   }
 
+  test("GepaState rejects a round-robin pointer that is negative, and pointers that are not aligned") {
+    val s = state(Vector(1.0), Vector(0.0))
+    val _ = intercept[IllegalArgumentException](s.copy(nextComponent = Vector(0, -1)))
+    val _ = intercept[IllegalArgumentException](s.withPointer(1, -1))
+    intercept[IllegalArgumentException](s.copy(nextComponent = Vector(0)))
+  }
+
   test("Pareto selection only ever returns a frontier candidate (never the dominated one)") {
     val s     = state(Vector(0.0, 0.0), Vector(1.0, 1.0)) // c1 dominates
     val rng   = new Random(0)
