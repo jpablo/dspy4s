@@ -55,10 +55,35 @@ The full suite passes: 1,119 tests, 0 failures, 5 live tests skipped.
 - **Rule for leaf types.** The module of a leaf type must use `ModuleLifecycle.predictor` or
   `ModuleLifecycle.dynamicPredictor`. An optimizer returns an error for a leaf type that records no key.
 
+### Batch 3 (2026-10-11): typed LM errors, and decisions D1 and D4
+
+The full suite passes: 1,151 tests, 0 failures, 6 live tests skipped. The count was 1,176 before the removal of the
+two programs.
+
+- **G-23** an LM failure has a class (`LmError` and 12 classes with the upstream codes) and details: model, provider,
+  provider code, status, request id, and retry hint. One mapper serves the chat call, the streamed call, and the
+  embedder (L1).
+- **G-23** a retry policy retries the transient classes only, and waits for the `Retry-After` hint. This was the last
+  defect of the first table that needed no decision.
+- **G-37** the default of `ReAct.maxIterations` is 20 (decision D4).
+- **G-39** `CodeAct` and `ProgramOfThought` are removed (decision D1), with `GeneratedPython`, their guides, their
+  type class instances, and their tests: approximately 900 main lines, 1,000 test lines, and 1,200 document lines.
+  Four tests of shared machinery moved to `RLM` and `ReAct`. P4 and P7 are closed.
+- **Open after the removal.** `RLM` has no `Streamable` instance, so `Streamify` cannot run it. These public items
+  have no user in main sources now: `SubprocessPythonInterpreter`, the plain `CodeInterpreter` trait, and the
+  rejection branch of `InterpretedTrajectoryAgent` (`ActionPreparation.Rejected`).
+- **Change in behavior.** A retry policy without an explicit predicate does not retry a `RuntimeError`. A custom
+  `LanguageModel` must return a transient `LmError` to get a retry.
+- **Live test guard.** The test of `OpenAiLiveSuite` for a wrong API key had no opt-in guard, so each test run sent
+  a request to the OpenAI API. It now has the guard of the other live tests, and a plain `sbt test` makes no
+  network request from this suite.
+- **Format.** Four files of batch 2 had format defects, and they are corrected. `sbt fmtCheck` stops at two old
+  failures and hides new ones. Use the scalafmt command-line tool with `--list` as the check.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
-- A `SubprocessPythonInterpreter` timeout now ends a CodeAct run.
+- A `SubprocessPythonInterpreter` timeout ended a CodeAct run. This point is closed: batch 3 removed `CodeAct`.
 - The sandbox setup read still skips a response with a different id. Upstream stops.
 - A custom `LanguageModel` wrapper must forward `defaultOptions` and the capability flags by hand.
 
@@ -73,12 +98,16 @@ Open points from batch 1, for the owner:
 - Upstream marks four new features as experimental: decision types, ReAnchor, `dspy.Flex`, and ReActV2. Wait for
   them to become stable.
 - Upstream deprecated `CodeAct` and `ProgramOfThought`. It removes them in 3.5 and names `RLM` as the replacement.
+  dspy4s removed them in batch 3 (decision D1).
 
 ## Phase 0: decisions to make before the work
 
-- [ ] **D1. `CodeAct` and `ProgramOfThought`.** Upstream deprecated them (99bb44bf4). Decide: add `@deprecated`, or
-      keep them and record the decision in `PORT_DIFFERENCES.md`. The decision sets the priority of G-39 and of
-      the shared-interpreter part of G-35.
+- [x] **D1. `CodeAct` and `ProgramOfThought`.** Upstream deprecated them (99bb44bf4) and removes them in 3.5.
+      **Decided 2026-10-11: remove them now.** The owner chose deprecation and asked to consider an early removal,
+      so that no more work goes into the two programs. The removal costs less than a deprecation: `RLM` does not
+      use the two classes, the version is `0.1.0-SNAPSHOT`, and a `@deprecated` annotation needs a `-Wconf` rule or
+      `@nowarn` at each use under `-Werror`. `PORT_DIFFERENCES.md` section 15 records the difference. The decision
+      closes G-39, P4, and P7, and the part of G-35 about one shared interpreter instance.
 - [x] **D2. Trace entry to optimizable leaf.** `BootstrapFewShot` (G-42) and the GEPA adapter (G-44) must find the
       trace entries of one predictor. Upstream uses object identity and signature equality. dspy4s needs one rule
       for the two optimizers.
@@ -94,7 +123,8 @@ Open points from batch 1, for the owner:
       now: each leaf type must then carry a label. The metadata key stays valid if that id comes later.
 - [ ] **D3. Prompt parity policy.** The adapter prompts are not byte-equal to upstream (G-30, G-37). Decide: match
       upstream exactly, or record each difference as intended.
-- [ ] **D4. ReAct default iteration limit.** dspy4s uses 5 and upstream uses 20 (G-37).
+- [x] **D4. ReAct default iteration limit.** dspy4s used 5 and upstream uses 20 (G-37).
+      **Decided 2026-10-11: 20, as upstream.** The default of `ReAct.maxIterations` is `IterationLimit(20)`.
 - [ ] **D5. Optional output fields.** `FieldSpec` has no optional flag, so the adapters cannot apply the upstream
       rule (G-29).
 - [ ] **D6. Experimental tracks.** Confirm that decision types, ReAnchor, `dspy.Flex`, and ReActV2 wait (G-49,
@@ -102,7 +132,7 @@ Open points from batch 1, for the owner:
 
 ## Phase 1: lm / clients
 
-- [ ] **L1. Typed LM errors and retry classes** (e608bc024, 2cda3872d). Errors carry `status`, `provider_code`,
+- [x] **L1. Typed LM errors and retry classes** (e608bc024, 2cda3872d). Errors carry `status`, `provider_code`,
       `request_id`, and `retry_after`. Retries use transient classes only. → G-23 (C)
 - [ ] **L2. Stream guard** (2cda3872d, 7fd361214, 661467b77). A stream without an end event is an error, and the
       typed error survives. → G-25 (C)
@@ -130,12 +160,14 @@ Open points from batch 1, for the owner:
 ## Phase 3: programs
 
 - [x] **P1. Interpreter failure is terminal** (89696e0cc). → G-35 (C)
-- [ ] **P2. One interpreter for each invocation, from a factory** (623360078, 6fb74fcf4, 430af8d87). → G-35 (R)
+- [ ] **P2. One interpreter for each invocation, from a factory** (623360078, 6fb74fcf4, 430af8d87). `RLM` has a
+      factory. The default factory in the runtime services is open. → G-35 (R)
 - [x] **P3. ReAct truncation with one tool call** (7eb5acce2). → G-37 (C)
-- [ ] **P4. Echo for a single-line assignment in `_parse_code`** (fe75476cd). → G-39 (C)
+- [-] **P4. Echo for a single-line assignment in `_parse_code`** (fe75476cd). The parser belonged to
+      `ProgramOfThought`, which is removed (D1). → G-39 (C)
 - [ ] **P5. RLM namespace checks** (74194bfab). → G-38 (R)
 - [ ] **P6. RLM truncation with an odd limit** (35ef21f16). → G-38 (R)
-- [ ] **P7. Deprecation of `CodeAct` and `ProgramOfThought`** (99bb44bf4). → D1, G-39 (C)
+- [x] **P7. Deprecation of `CodeAct` and `ProgramOfThought`** (99bb44bf4). dspy4s removed them (D1). → G-39 (C)
 - [ ] **P8. Sandbox `dspy` facade and sub-agents in RLM** (ba3f9198e). Large. → G-38 (I)
 - [ ] **P9. `dspy.Flex`** (e4e97aae2, f70d08a5b, 573cfe707). Experimental. → G-49 (I)
 - [ ] **P10. ReActV2 changes** (b3897e271, ca54a855a, 05728f6ad): reserved outputs, an error when the forced
@@ -212,7 +244,7 @@ the behavior.
   uses them (O4).
 - `PORT_GAPS.md` lists `inspect_history` as resolved. The history payload holds no prompt and no completion (G-27).
 - `PORT_MAP.md` says that `llm_query_batched` is sequential. The code is parallel.
-- `PORT_MAP.md` records the caller-owned interpreter of `CodeAct` as intended. Upstream changed to one interpreter
-  for each invocation (P2).
+- `PORT_MAP.md` recorded the caller-owned interpreter of `CodeAct` as intended. Upstream changed to one interpreter
+  for each invocation (P2). Batch 3 removed `CodeAct`, and `PORT_MAP.md` now says so.
 - `PORT_GAPS.md` G-22 names LiteLLM as the Anthropic reference. Upstream now has a native Anthropic adapter in
   `dspy/_vendor/lm15/providers/anthropic.py`.

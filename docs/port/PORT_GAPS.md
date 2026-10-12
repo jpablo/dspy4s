@@ -1017,7 +1017,7 @@ No test reproduced any of these items. Write a failing test before each fix.
 
 ## G-23 — All provider failures are one `RuntimeError`, so retry cannot classify them
 
-**Status:** Open · **Verification:** C · **Upgrade item:** L1
+**Status:** Resolved (2026-10-11, batch 3) · **Verification:** C · **Upgrade item:** L1
 
 **Upstream.** Errors carry `status`, `provider_code`, `request_id`, and `retry_after`
 (`dspy/utils/exceptions.py:9-45,190-278`), mapped by one table (`dspy/clients/errors.py:34-104`). Retries use
@@ -1034,9 +1034,57 @@ transient classes only and obey the `Retry-After` hint (`dspy/clients/execution.
 - Timeouts and other HTTP 4xx share the component `"openai_http"` (`modules/lm/.../providers/JdkHttpTransport.scala:78-84`).
 - The `Retry-After` header is dropped (`OpenAiClient.scala:36`).
 
-**Direction.** Add a sealed LM error branch to `DspyError` with status, provider code, request id, and retry hint.
-Make the default retry predicate accept transient classes only. The adapter fallback (G-29) needs the same
-taxonomy.
+**Resolution.** The list above describes the code before the correction.
+
+- **Error family.** `LmError` is a sealed branch of `DspyError` (`modules/core/.../contracts/Errors.scala`). Each
+  error has `details: LmErrorDetails` (model, provider, provider code, status, request id, retry hint) and the
+  upstream `code`. The classes are `LmTransportError`, `LmNotConfiguredError`, `LmUnexpectedError`, and below
+  `LmProviderError`: `LmAuthError`, `LmBillingError`, `LmRateLimitError`, `LmInvalidRequestError`,
+  `ContextWindowExceededError`, `LmUnsupportedModelError`, `LmTimeoutError`, `LmServerError`, and
+  `LmProviderResponseError`.
+- **One mapper.** `OpenAiErrors.fromResponse` (`modules/lm/.../providers/OpenAiErrors.scala`) serves the chat call,
+  the streamed call, and the embedder. The class comes from the code and the type of the error envelope first, and
+  from the HTTP status second (upstream `normalize_error` and `map_http_error`). `insufficient_quota` on HTTP 429 is
+  a billing error, so no retry follows.
+- **Retry hint.** The mapper reads `Retry-After` (seconds or an HTTP date), then `retry-after-ms` and
+  `x-ms-retry-after-ms`. It reads the request id from six header names.
+- **Transport.** `JdkHttpTransport` gives `LmTimeoutError` for a timeout, `LmTransportError` for an IO failure, and
+  `LmUnexpectedError` for each other failure. The client adds the model and the provider.
+- **Retry.** The default predicate of `RetryPolicies.maxRetries` and `RetryPolicies.exponentialBackoff` is
+  `LmError.isRetryable`: a rate limit, a timeout, a server failure, and a transport failure. The delay is the retry
+  hint when the error carries one (upstream `_delay`).
+- **Missing key.** `fromEnv` gives `LmNotConfiguredError`.
+
+Tests: `ErrorsSuite`, `OpenAiErrorMappingSuite`, `OpenAiErrorEdgeCasesSuite`, `JdkHttpTransportErrorSuite`,
+`RetryClassificationSuite`.
+
+Changes in behavior to know:
+
+- A provider failure is no longer `RuntimeError("openai_...", …)`. Code that matched on the component must match
+  on the class.
+- `ContextWindowExceededError` is now `(message, details)`. The model is in `details.model`.
+- A retry policy without an explicit predicate no longer retries a `RuntimeError`, an authentication failure, or a
+  context-window failure. A custom `LanguageModel` must return an `LmError` of a transient class to get a retry, or
+  the caller must pass `retryOn`.
+- `DynamicJson.decode` returns a `ParseError` for JSON that is nested too deep for the stack. Before, it threw
+  `StackOverflowError`.
+
+Deliberate differences from upstream:
+
+- `ContextWindowExceededError` and `LmUnsupportedModelError` are siblings of `LmInvalidRequestError`, not
+  subclasses, because a case class cannot extend a case class.
+- `LmProviderResponseError` takes the place of a direct `LMProviderError` instance.
+- Four upstream classes have no source in dspy4s and are absent: `LMLockTimeoutError`, `LMCollectionLimitError`,
+  `LMUnsupportedFeatureError`, and `LMStreamAssemblyError`. The last one comes with the stream guard (G-25).
+- Three rules of the upstream OpenAI mapper are not ported: the text rule for a missing model on HTTP 404, the
+  billing codes of Z.AI and Moonshot, and the `(code)` suffix of the message.
+
+Open:
+
+- No policy limits the retry hint. A large `Retry-After` makes the caller wait for that time, as upstream.
+- A streamed call that fails after the first chunk still gives `RuntimeError("streaming_lm", …)` (G-25).
+- The adapter fallback (G-29) can now use the taxonomy.
+- `JdkHttpTransport` joins duplicate headers with a comma, so a duplicate `Retry-After` gives no hint.
 
 ---
 
@@ -1293,7 +1341,7 @@ argument, pass `--dspy-deno-dir=`, and skip notifications in `readLoop`.
 
 ## G-35 — Interpreter lifecycle in the code programs
 
-**Status:** In progress. The failure handling in RLM and CodeAct is resolved (2026-10-11, batch 1). · **Verification:** C (failure handling), R (others) · **Upgrade items:** P1, P2, I7
+**Status:** In progress. The failure handling is resolved (2026-10-11, batch 1). The shared interpreter instance ended with the removal of `CodeAct` and `ProgramOfThought` (batch 3, G-39). · **Verification:** C (failure handling), R (others) · **Upgrade items:** P1, P2, I7
 
 **Upstream.** An interpreter failure ends the run (`dspy/predict/rlm.py:775-778`, 89696e0cc). Each `forward` gets
 its own interpreter from a factory, and `dspy.settings.interpreter_factory` sets the default
@@ -1316,8 +1364,12 @@ its own interpreter from a factory, and `dspy.settings.interpreter_factory` sets
 and the LM gets no more calls. A user-code error stays an observation. One effect to know: a timeout of
 `SubprocessPythonInterpreter` is a `Left`, so a slow generated snippet now ends a CodeAct run.
 
-**Direction (open).** Add an interpreter factory to the runtime services and use it in the three programs. Add a
-deadline to the REPL read. Stop the silent restart after a process death.
+**After the removal (batch 3).** `CodeAct` and `ProgramOfThought` are removed (G-39), so the points about them no
+longer apply. `RLM` is the one code program, and it gets one interpreter for each call from its factory.
+
+**Direction (open).** Add a default interpreter factory to the runtime services, and make the factory type of `RLM`
+independent of `DenoPyodideInterpreter`. Add a deadline to the REPL read. Stop the silent restart after a process
+death.
 
 ---
 
@@ -1337,14 +1389,15 @@ Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
 
 ## G-37 — ReAct differs from upstream
 
-**Status:** In progress. The truncation rule is resolved (2026-10-11, batch 1); the default limit and the prompt need decisions D3 and D4. · **Verification:** C · **Upgrade item:** P3
+**Status:** In progress. The truncation rule is resolved (2026-10-11, batch 1). The default limit is resolved (2026-10-11, decision D4). The prompt needs decision D3. · **Verification:** C · **Upgrade item:** P3
 
 - **Truncation with one entry (resolved).** On a context overflow, `truncateOnOverflow` dropped the only entry and
   tried again with an empty trajectory. Upstream raises `ContextWindowExceededError`
   (`dspy/predict/react.py:189-194`, 7eb5acce2). The loop now keeps the last entry: the react step ends the loop and
-  the extract steps return the overflow error. Tests: `TruncateOnOverflowSuite`, `ReActSuite`, `CodeActSuite`.
-- **Default limit.** `IterationLimit(5)` (`modules/programs/.../strategies/ReAct.scala:45`) against `max_iters = 20`
-  (`react.py:17`).
+  the extract steps return the overflow error. Tests: `TruncateOnOverflowSuite`, `ReActSuite`.
+- **Default limit (resolved).** The default was `IterationLimit(5)` against `max_iters = 20` (`react.py:17`). It is
+  now `IterationLimit(20)` (`modules/programs/.../strategies/ReAct.scala:45`). Test: `ReActSuite`. A program that
+  relied on the old default now makes up to 20 react steps.
 - **Prompt.** The instructions are a paraphrase (`ReAct.scala:159-165` against `react.py:53-58,71`). The tool list has
   its own format (`ReAct.scala:151-158`). `next_tool_name` is a free string (`ReActProtocol.scala:29-33`); upstream uses
   a `Literal` of the tool names (`react.py:77`), which `FieldSpec.enumValues` can express.
@@ -1372,7 +1425,7 @@ Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
 
 ## G-39 — `CodeAct` and `ProgramOfThought` are deprecated upstream
 
-**Status:** Open (needs decision D1) · **Verification:** C · **Upgrade items:** P4, P7
+**Status:** Resolved (2026-10-11, batch 3, decision D1: removed) · **Verification:** C · **Upgrade items:** P4, P7
 
 **Upstream.** Both carry a deprecation for removal in 3.5, with RLM as the replacement
 (`dspy/predict/code_act.py:54-58`, `dspy/predict/program_of_thought.py:59-63`; 99bb44bf4).
@@ -1380,6 +1433,25 @@ Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
 **dspy4s.** Both are full ports with no deprecation. One parser difference stays: the echo of a final assignment
 needs more than one line (`modules/programs/.../runtime/GeneratedPython.scala:26`), and
 `GeneratedPythonSuite.scala:15` pins that result. Upstream removed the condition (fe75476cd).
+
+**Resolution.** dspy4s removed the two programs, before the upstream removal in 3.5. The text above describes the
+code before the removal. Removed: `CodeAct`, `CodeActProtocol`, `ProgramOfThought`, `ProgramOfThoughtProtocol`,
+`GeneratedPython`, the two guides, the instances of `ProgramRunner`, `OptimizableStructure`, and `Streamable`, and
+the six test suites. The parser difference ended with `GeneratedPython`. `PORT_DIFFERENCES.md` section 15 records
+the difference from upstream 3.4.
+
+Four tests covered shared machinery through the two programs. They moved: the sandbox tool bridge to `RLMSuite`,
+the replacement of the second predictor to a `ReAct` test in `ProgramOptimizableStructureSuite`, and two
+`Streamable` tests to the new `StreamableSuite`.
+
+Open after the removal:
+
+- `RLM` has no `Streamable` instance. The two removed programs had one, so `Streamify` cannot run the replacement.
+- These public items have no user in main sources: `SubprocessPythonInterpreter`, the plain `CodeInterpreter`
+  trait (`RLM` needs `ReplCodeInterpreter`), `ActionOutcome.isError`, and the rejection branch of
+  `InterpretedTrajectoryAgent` (`ActionPreparation.Rejected`). `TrajectoryAgent` and `InterpretedTrajectoryAgent`
+  have one implementation, `ReAct`.
+- Entries of this ledger that are older than this one name the two programs as they were at that time.
 
 ---
 
@@ -1445,7 +1517,7 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 - The signature check between student and teacher compares the structure, which holds no instructions.
 - The random choices are repeatable for a seed, but they are not equal to those of Python.
 - The report key `num_labeled_demos` is now `num_labeled_demos_per_predictor`.
-- No end-to-end bootstrap test exists yet for ReAct, CodeAct, or RLM.
+- No end-to-end bootstrap test exists yet for ReAct or RLM.
 
 ---
 

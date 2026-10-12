@@ -252,6 +252,7 @@ Tracks:
   injection, host tools (`SandboxTool`), `SUBMIT` → `CodeResult.finalOutput`. PoT now honors
   SUBMIT; `CodeAct.sandboxTools` enables tools-inside-code. **Shipped (part 2):** the `RLM`
   driver module (`programs/RLM.scala`), live-validated through the real Deno sandbox. G-20 resolved.
+  `ProgramOfThought` and `CodeAct` were removed later (2026-10-11, G-39); `RLM` is the one code program.
 - ~~Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)~~ **Shipped** (G-10):
   `Embedder` + `OpenAiEmbedder` (lm), `KNN` + `EmbeddingsRetriever`
   (programs.retrievers), `KNNFewShot` (optimize). Legacy `dspy.Retrieve`/vendor RMs
