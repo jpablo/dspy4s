@@ -150,6 +150,28 @@ The full suite passes: 1,408 tests, 0 failures, 6 live tests skipped.
 - **Not in this batch.** The objective frontiers (O4), more than one proposal (O5), resume, the stop reason of a
   run, and the facade.
 
+### Batch 7 (2026-10-12): the GEPA objective frontiers
+
+The full suite passes: 1,457 tests, 0 failures, 6 live tests skipped.
+
+- **G-45** a metric can give objective scores (`ScoreWithFeedback.objectiveScores`), and GEPA keeps them for each
+  candidate and each validation example (O4). `GepaConfig.frontierType` selects the Pareto fronts for candidate
+  selection and merge: `Instance` (default, as upstream), `Objective`, `Hybrid`, or `Cartesian`.
+- **G-44** an evaluation with no traces keeps the score of each run that passes. Before, more than 10 failed runs in
+  one batch gave the failure score to each example of the batch. A test failed first.
+- **API changes.** `ScoreWithFeedback`, `Trajectory`, and `EvaluationBatch` have an `objectiveScores` field with a
+  default. `GepaState` has `valObjectiveScores` and `frontierType`. `GepaConfig` has `frontierType`. `GepaResult`
+  has `state`, the final search state. `FrontierType`, `FrontierKey`, and `ScoredBatch` are new.
+- **Changes in behavior.** The default frontier type gives the same candidate selection as before. The scores-only
+  evaluation no longer runs through `Evaluate`: each example runs in an isolated context, and the error limit of
+  the context does not apply.
+- **Deliberate differences from upstream.** The objectives of a front are in the order of their names. A later
+  candidate with no objective score stays in the pool; upstream stops the run.
+- **Open point, for the owner.** A run or a metric that throws an exception still counts for the error limit of the
+  executor (10 by default), on the two evaluation paths. Ten exceptions in one batch thus give each example the
+  failure score. A failure that is a `Left` does not count.
+- **Not in this batch.** More than one proposal (O5), resume, the stop reason of a run, and the facade.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -265,7 +287,7 @@ Open points from batch 1, for the owner:
 - [x] **O2. Empty devset is an error** (c7ee4462a). → G-46 (C)
 - [x] **O3. GEPA `InstructionProposer` as the default proposer** (b6c8aaf1e). No `skills` and no
   `truncate_history_outputs`. → G-45 (C)
-- [ ] **O4. GEPA objective-aware frontiers** (638e155cf). → G-45 (R)
+- [x] **O4. GEPA objective-aware frontiers** (638e155cf). → G-45 (C)
 - [ ] **O5. GEPA multiple proposals with parallel evaluation** (aa9d2d053, 822f39319). → G-45 (R)
 - [ ] **O6. ReAnchor calibration optimizer** (e8ec009c6). Experimental. → G-49 (I)
 

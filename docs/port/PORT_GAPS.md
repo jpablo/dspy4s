@@ -610,7 +610,7 @@ full-eval and the merge subsample). **Run-dir resume done** (`GepaStatePersisten
 state after each iteration; `optimize(..., runDir)` loads-or-seeds, so a resumed run keeps every discovered
 candidate and re-spends no budget). **Multi-objective frontiers: deliberately NOT ported** — dspy's GEPA metric is
 a scalar `ScoreWithFeedback` (`score: float`) and its adapter never passes objective vectors, so multi-objective is
-a gepa-library-only path unused by the dspy surface dspy4s mirrors. (Update 2026-10-11: upstream now passes objective scores from the metric; see G-45.) With that, GEPA is algorithmically complete for
+a gepa-library-only path unused by the dspy surface dspy4s mirrors. (Update 2026-10-11: upstream now passes objective scores from the metric; see G-45. Update 2026-10-12: the objective frontiers are ported.) With that, GEPA is algorithmically complete for
 dspy parity; the remaining gap items are G-10/G-11 (unrelated tracks).
 
 **Summary.** `dspy.GEPA` (Genetic-Pareto reflective prompt evolution) is unported. The standout architectural
@@ -1662,7 +1662,7 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6). Open: resume, budget. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
+**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7). Open: resume, budget. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1687,6 +1687,12 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
   reflection LM call, and an iteration with no new text makes no acceptance evaluation. The minibatch calls stay
   counted, so the loop still ends at the budget.
+- **Error limit of an evaluation (resolved).** The scores-only path ran through `Evaluate` with the error limit of
+  the context (10 by default). When more than 10 runs of one batch failed, each example of the batch got the
+  failure score, also the runs that passed. Upstream gives `Evaluate` a limit of 100 times the batch size
+  (`gepa_utils.py:285-294`), so the limit never applies. The scores-only path now runs each example in an isolated
+  context and keeps each result. Test: `GepaObjectiveEngineSuite`. A run or a metric that throws an exception
+  still counts for the error limit of the executor, on the two paths; a failure that is a `Left` does not.
 - **Second proposal call (resolved).** A reflection call that failed dropped its component only, with no second
   call. Upstream calls the proposer for the task one more time, and a second failure gives no proposal for the task
   (`gepa/proposer/reflective_mutation/reflective_mutation.py:203-225`). The engine now does the same. With more than
@@ -1722,8 +1728,9 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
 
 ## G-45 — GEPA surface added upstream since 3.2.1
 
-**Status:** Partly resolved (the instruction proposer, 2026-10-12, batch 6) · **Verification:** C (a second read of
-the two sides, 2026-10-11) · **Upgrade items:** O3, O4, O5
+**Status:** Partly resolved (the instruction proposer, 2026-10-12, batch 6; the objective frontiers, 2026-10-12,
+batch 7). Open: more than one proposal, the facade. · **Verification:** C (a second read of the two sides,
+2026-10-11) · **Upgrade items:** O3, O4, O5
 
 The second read corrected the first report in two points: objective frontiers and more than one proposal are options
 upstream, and their defaults agree with dspy4s. Only the instruction proposer changes default behavior.
@@ -1762,8 +1769,25 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
 - **Objective-aware frontiers are an option** (`gepa_utils.py:70-79,301-310`; 638e155cf; engine `frontier_type` with
   the default `"instance"`). The metric can return `objective_scores`, and the engine can select candidates by
   `objective`, `hybrid`, or `cartesian` fronts (`gepa/core/state.py:157-236,474-601`). Acceptance and the best
-  candidate use the scalar score only. dspy4s has the instance front only; `ScoreWithFeedback` has no objective
-  field. The G-12 reason for the exclusion ("the dspy surface does not use them") no longer holds.
+  candidate use the scalar score only. dspy4s before batch 7 had the instance front only, and `ScoreWithFeedback`
+  had no objective field. The G-12 reason for the exclusion ("the dspy surface does not use them") no longer holds.
+  - **Resolved (batch 7).** `ScoreWithFeedback.objectiveScores` is new. The adapter keeps the objective scores of the
+    program-level feedback on its two paths, the evaluation cache keeps them, and the state keeps them for each
+    candidate and each validation example (`GepaState.valObjectiveScores`). `GepaConfig.frontierType` selects
+    `Instance` (default), `Objective`, `Hybrid`, or `Cartesian`; `GepaState.fronts` derives the fronts, and candidate
+    selection and merge use them. A saved state keeps the objective scores and the type, and a resume with another
+    type is an error. `GepaResult.state` gives the data of a run. Tests: `GepaObjectiveFrontierSuite`,
+    `GepaObjectiveEngineSuite`.
+  - **Differences that stay.**
+    - The order of the fronts. gepa keeps the keys in the order of their first appearance. dspy4s orders the
+      objectives by name, because a map of objective scores has no order. The order has an effect only on the
+      candidate that a seeded random draw selects.
+    - A candidate with no objective score. gepa raises when the frontier type is not `instance`, and that stops
+      the run. This occurs when each validation run of an accepted candidate fails. dspy4s keeps the candidate in
+      the pool, and it is in no objective front and in no cartesian front. Only a seed candidate with no objective
+      score is an error.
+    - dspy4s keeps the objective scores of each validation example. gepa keeps the aggregates, and the raw scores
+      only for the cartesian type.
 - **More than one proposal in one iteration is an option** (aa9d2d053, 822f39319; engine `sampling_strategy` with the
   default `SingleMutationSampling`, and `AllImprovements` selection). Upstream evaluates the parents, the children,
   and the selected candidates in batches on threads (`gepa_utils.py:312-332`). dspy4s makes one proposal with strict
@@ -1773,8 +1797,8 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
   (`dspy/teleprompt/gepa/gepa.py:26-30,448-453,513-594,690-692`). dspy4s requires `maxMetricCalls` and a validation
   set, and returns the best candidate only.
 
-**Direction.** The proposer is done. Next the frontiers, then the proposals, because the proposals need the final
-shape of an evaluation batch. The facade and resume (G-44) come after the state shape is final, so that the snapshot
+**Direction.** The proposer and the frontiers are done. Next the proposals, which use the final shape of an
+evaluation batch. The facade and resume (G-44) come after the state shape is final, so that the snapshot
 format changes one time.
 
 **Decisions of the owner (2026-10-12).**
