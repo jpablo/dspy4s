@@ -1729,7 +1729,7 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
 ## G-45 — GEPA surface added upstream since 3.2.1
 
 **Status:** Partly resolved (the instruction proposer, 2026-10-12, batch 6; the objective frontiers, 2026-10-12,
-batch 7). Open: more than one proposal, the facade. · **Verification:** C (a second read of the two sides,
+batch 7; more than one proposal, 2026-10-12, batch 8). Open: the facade. · **Verification:** C (a second read of the two sides,
 2026-10-11) · **Upgrade items:** O3, O4, O5
 
 The second read corrected the first report in two points: objective frontiers and more than one proposal are options
@@ -1790,15 +1790,31 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
       only for the cartesian type.
 - **More than one proposal in one iteration is an option** (aa9d2d053, 822f39319; engine `sampling_strategy` with the
   default `SingleMutationSampling`, and `AllImprovements` selection). Upstream evaluates the parents, the children,
-  and the selected candidates in batches on threads (`gepa_utils.py:312-332`). dspy4s makes one proposal with strict
-  acceptance, which is the upstream default.
+  and the selected candidates in batches on threads (`gepa_utils.py:312-332`). dspy4s before batch 8 made one
+  proposal with strict acceptance, which is the upstream default.
+  - **Resolved (batch 8).** `GepaConfig` has `proposalSampling` (`Single`, `SameParent(n)`, `Independent(n)`,
+    `PxN(p, n)`), `proposalSelection` (`AllImprovements`, `BestImprovement`, `TopK(k)`), and `acceptance`
+    (`StrictImprovement`, `ImprovementOrEqual`), with the upstream defaults. The iteration has the upstream stages:
+    the tasks, one batch for the parents with shared equal evaluations, the reflection in task order, one batch for
+    the children, the selection, the removal of equal children, one batch for the validations, and the adds in
+    order. Each task moves the round-robin pointer of its parent, and each added candidate schedules one merge.
+    `GepaAdapter.batchEvaluate` divides the threads between the candidates as upstream does. A later call of the
+    minibatch sampler in one iteration takes the next window. Tests: `GepaProposalsSuite`.
+  - **Differences that stay.**
+    - The budget is a hard limit (decision of the owner). An iteration starts only when its largest possible cost
+      fits: `2 × tasks × minibatch + limit × |distinct valset|`. Upstream checks the budget only at the start of an
+      iteration, so it can go above the budget.
+    - dspy4s captures no traces for the children and for the validations. Upstream does; this changes no score.
+    - The selection and the acceptance are fixed sets of strategies. Upstream takes any object with the method of
+      the strategy.
+    - Equal minibatches are equal by the content and the order of their examples. Upstream compares the ids of the
+      examples. The result differs only when the trainset holds equal examples at different indices.
 - **Facade.** `auto` budgets (`light` 6, `medium` 12, `heavy` 18 candidates through `auto_budget`), `max_full_evals`,
   the trainset as the default validation set, and `track_stats` with all candidates and their lineage
   (`dspy/teleprompt/gepa/gepa.py:26-30,448-453,513-594,690-692`). dspy4s requires `maxMetricCalls` and a validation
   set, and returns the best candidate only.
 
-**Direction.** The proposer and the frontiers are done. Next the proposals, which use the final shape of an
-evaluation batch. The facade and resume (G-44) come after the state shape is final, so that the snapshot
+**Direction.** The proposer, the frontiers, and the proposals are done. The facade and resume (G-44) come after the state shape is final, so that the snapshot
 format changes one time.
 
 **Decisions of the owner (2026-10-12).**

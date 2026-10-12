@@ -172,6 +172,30 @@ The full suite passes: 1,457 tests, 0 failures, 6 live tests skipped.
   failure score. A failure that is a `Left` does not count.
 - **Not in this batch.** More than one proposal (O5), resume, the stop reason of a run, and the facade.
 
+### Batch 8 (2026-10-12): more than one GEPA proposal in an iteration
+
+The full suite passes: 1,484 tests, 0 failures, 6 live tests skipped.
+
+- **G-45** an iteration can have more than one proposal task (O5): `GepaConfig.proposalSampling` (`Single`,
+  `SameParent(n)`, `Independent(n)`, `PxN(p, n)`), `proposalSelection` (`AllImprovements`, `BestImprovement`,
+  `TopK(k)`), and `acceptance` (`StrictImprovement`, `ImprovementOrEqual`). The defaults are those of upstream: one
+  task, strict acceptance, all improvements.
+- The engine evaluates the parents, the children, and the selected candidates of one iteration in batches.
+  `GepaAdapter.batchEvaluate` runs the candidates in parallel and divides the threads of the context between them.
+- **API changes.** `GepaConfig` has three new fields with defaults. `MinibatchSampler.sample` has a third parameter
+  with a default. `ProposalSampling`, `ProposalSelection`, `ProposalAcceptance`, `Proposal`, and `ProposalCount` are
+  new.
+- **Changes in behavior.** None with the default configuration: one task gives the same random draws and the same
+  metric call counts as before.
+- **Deliberate differences from upstream.** The budget stays a hard limit: an iteration starts only when its largest
+  possible cost fits. No traces are captured for the children and for the validations.
+- **Open points, for the owner.**
+  - The engine evaluates in the context that is installed on the thread (`RuntimeEnvironment.current`), and the
+    proposer call uses the `using RuntimeContext` value. A caller that passes a context that is not installed gets
+    evaluations with no language model. This behavior is old.
+  - The limit of 120 seconds for one example of an evaluation still applies in each candidate of a batch.
+- **Not in this batch.** Resume, the stop reason of a run, and the facade.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -288,7 +312,7 @@ Open points from batch 1, for the owner:
 - [x] **O3. GEPA `InstructionProposer` as the default proposer** (b6c8aaf1e). No `skills` and no
   `truncate_history_outputs`. → G-45 (C)
 - [x] **O4. GEPA objective-aware frontiers** (638e155cf). → G-45 (C)
-- [ ] **O5. GEPA multiple proposals with parallel evaluation** (aa9d2d053, 822f39319). → G-45 (R)
+- [x] **O5. GEPA multiple proposals with parallel evaluation** (aa9d2d053, 822f39319). → G-45 (C)
 - [ ] **O6. ReAnchor calibration optimizer** (e8ec009c6). Experimental. → G-49 (I)
 
 ## Checked and already correct in dspy4s
