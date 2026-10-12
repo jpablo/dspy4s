@@ -117,6 +117,39 @@ The full suite passes: 1,357 tests, 0 failures, 6 live tests skipped.
 - **Not in this batch.** The instruction proposer (O3), the objective frontiers (O4), more than one proposal (O5),
   resume, the stop reason of a run, and the facade.
 
+### Batch 6 (2026-10-12): the GEPA instruction proposer
+
+The full suite passes: 1,408 tests, 0 failures, 6 live tests skipped.
+
+- **G-45** `InstructionProposer` is a trait, and `DefaultInstructionProposer` is the default proposer of `Gepa` and
+  `GepaEngine` (O3). It runs a predictor over the upstream signature, with its own JSON adapter, and reads the new
+  instruction from the field `new_instruction`. The options are `additionalInstructions`, `baseInstructions`,
+  `maxChars`, and `adapter`.
+- **G-44** the engine calls the proposer one more time after a failure. A second failure gives no proposal.
+- **Decisions of the owner.** The proposer writes the JSON text of the records itself. The first version has no
+  `skills` and no `truncate_history_outputs`. The budget stays a hard limit.
+- **API changes.** `ReflectiveRecord` holds values (`inputs` is a record, `generatedOutputs` is a value).
+  `InstructionProposer` is a trait, and the function `InstructionProposer.propose(currentInstruction, records, lm)`
+  is gone. `Gepa` and `GepaEngine` have one more parameter with a default. `InstructionCharLimit` is new.
+- **Changes in behavior.**
+  - The reflection LM gets another prompt, and its response must be a JSON object. The results of a GEPA run thus
+    change.
+  - A response with no instruction gives no child. Before, the engine evaluated a child with an empty instruction.
+  - A reflection call that fails gets one more call.
+  - With more than one selected component, the failure of one component drops the texts of all of them.
+  - The text of a parse failure in a reflective record ends with two line ends, as upstream.
+  - A reflection call is a predictor call. A callback handler of the context thus gets its module events and its LM
+    events, with the names `gepa_propose_instruction` and `gepa_compress_instruction`.
+- **Open points, for the owner.**
+  - A response `{"new_instruction": null}` gives the instruction `null`, because the JSON adapter gives the JSON text
+    of a value that is not a string. Upstream fails there. The correction is in the adapter, and it changes each
+    program (decision D5).
+  - The JSON adapter shows no field description (G-37), so the descriptions of the proposal signature do not reach
+    the reflection LM with the default adapter. They do with `adapter = ChatAdapter()`.
+  - An exception from a proposer of the caller goes to the caller. Only a `Left` gets the second call.
+- **Not in this batch.** The objective frontiers (O4), more than one proposal (O5), resume, the stop reason of a
+  run, and the facade.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -230,7 +263,8 @@ Open points from batch 1, for the owner:
 
 - [x] **O1. Labeled demos sampled for each predictor** (1bc87de15). It needs per-predictor demos first. → G-42 (C)
 - [x] **O2. Empty devset is an error** (c7ee4462a). → G-46 (C)
-- [ ] **O3. GEPA `InstructionProposer` as the default proposer** (b6c8aaf1e). → G-45 (R)
+- [x] **O3. GEPA `InstructionProposer` as the default proposer** (b6c8aaf1e). No `skills` and no
+  `truncate_history_outputs`. → G-45 (C)
 - [ ] **O4. GEPA objective-aware frontiers** (638e155cf). → G-45 (R)
 - [ ] **O5. GEPA multiple proposals with parallel evaluation** (aa9d2d053, 822f39319). → G-45 (R)
 - [ ] **O6. ReAnchor calibration optimizer** (e8ec009c6). Experimental. → G-49 (I)

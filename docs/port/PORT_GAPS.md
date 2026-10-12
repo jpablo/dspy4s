@@ -1662,7 +1662,7 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5). Open: resume, budget. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
+**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6). Open: resume, budget. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1687,6 +1687,11 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
   reflection LM call, and an iteration with no new text makes no acceptance evaluation. The minibatch calls stay
   counted, so the loop still ends at the budget.
+- **Second proposal call (resolved).** A reflection call that failed dropped its component only, with no second
+  call. Upstream calls the proposer for the task one more time, and a second failure gives no proposal for the task
+  (`gepa/proposer/reflective_mutation/reflective_mutation.py:203-225`). The engine now does the same. With more than
+  one selected component, the failure of one component drops the texts of all of them. Tests:
+  `GepaProposerEngineSuite`, `GepaFailureFeedbackSuite`.
 - **Failure feedback (resolved).** dspy4s always included failures and called the user metric with an empty
   prediction. The new option `GepaConfig.addFormatFailureAsFeedback` is `false` by default, as upstream. With the
   option on, a failed call gives the upstream texts and the user metric gets no call. Tests:
@@ -1717,7 +1722,8 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
 
 ## G-45 — GEPA surface added upstream since 3.2.1
 
-**Status:** Open · **Verification:** C (a second read of the two sides, 2026-10-11) · **Upgrade items:** O3, O4, O5
+**Status:** Partly resolved (the instruction proposer, 2026-10-12, batch 6) · **Verification:** C (a second read of
+the two sides, 2026-10-11) · **Upgrade items:** O3, O4, O5
 
 The second read corrected the first report in two points: objective frontiers and more than one proposal are options
 upstream, and their defaults agree with dspy4s. Only the instruction proposer changes default behavior.
@@ -1732,9 +1738,27 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
     no proposal (`gepa/proposer/reflective_mutation/reflective_mutation.py:203-225`).
   - With `max_chars`, a draft that is too long gets one `CompressInstruction` call. A result that is still too long
     is an error; nothing is cut. The count is in code points.
-  - dspy4s: `InstructionProposer` is an object with one raw LM call, a paraphrase of the old engine template, text
-    records, and a fence parser (`modules/gepa/.../InstructionProposer.scala`). An empty response gives a child with
-    an empty instruction, and a failed call is not repeated.
+  - dspy4s before batch 6: `InstructionProposer` was an object with one raw LM call, a paraphrase of the old engine
+    template, text records, and a fence parser. An empty response gave a child with an empty instruction, and a
+    failed call was not repeated.
+  - **Resolved (batch 6).** `InstructionProposer` is a trait (gepa's `ProposalFn`), and `DefaultInstructionProposer`
+    is the default of `Gepa` and `GepaEngine`. It runs a `DynamicPredict` over the upstream signature and texts, with
+    its own `JSONAdapter` that has no fallback to plain text. `ReflectiveRecord` holds values, and a `History` input
+    moves to the key `Context`. The engine calls the proposer in a context whose language model is the reflection LM,
+    and one more time after a failure. The options are `additionalInstructions`, `baseInstructions`, `maxChars`, and
+    `adapter`. Tests: `InstructionProposerSuite`, `GepaProposerEngineSuite`.
+  - **Differences that stay.**
+    - The proposer writes the JSON text of the records itself (`ReflectiveRecord.toJson`, in the form of Python
+      `json.dumps`), because the dspy4s `JSONAdapter` does not write a sequence as JSON. The other parts of the
+      prompt are those of the dspy4s adapter, not the upstream bytes (G-37): the JSON adapter shows no field
+      description.
+    - `skills` and `truncate_history_outputs` are not ported. The skills loader needs a YAML parser. The ReAct
+      trajectory of dspy4s is a string that is already rendered, so only a real `History` input can be compacted.
+    - Upstream logs each failed proposal. dspy4s has no logger in this module, so a run in which each reflection
+      call fails returns the seed with no signal. The stop reason of a run (G-44) is the place for that report.
+    - A response `{"new_instruction": null}` gives the instruction `null`: `JSONAdapterParser` gives the JSON text
+      of a value that is not a string. Upstream fails there. The correction is in the adapter (decision D5).
+    - Only a `Left` of a proposer gets the second call. An exception goes to the caller; upstream catches it.
 - **Objective-aware frontiers are an option** (`gepa_utils.py:70-79,301-310`; 638e155cf; engine `frontier_type` with
   the default `"instance"`). The metric can return `objective_scores`, and the engine can select candidates by
   `objective`, `hybrid`, or `cartesian` fronts (`gepa/core/state.py:157-236,474-601`). Acceptance and the best
@@ -1749,17 +1773,16 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
   (`dspy/teleprompt/gepa/gepa.py:26-30,448-453,513-594,690-692`). dspy4s requires `maxMetricCalls` and a validation
   set, and returns the best candidate only.
 
-**Direction.** The proposer first (the only change of a default). Then the frontiers, then the proposals, because
-the proposals need the final shape of an evaluation batch. The facade and resume (G-44) come after the state shape
-is final, so that the snapshot format changes one time.
+**Direction.** The proposer is done. Next the frontiers, then the proposals, because the proposals need the final
+shape of an evaluation batch. The facade and resume (G-44) come after the state shape is final, so that the snapshot
+format changes one time.
 
-**Decisions that the work needs.**
+**Decisions of the owner (2026-10-12).**
 
-- The dspy4s `JSONAdapter` does not make the upstream prompt (no field descriptions, and a sequence is not written
-  as JSON). The proposer can write the JSON text of the records itself, so that the content agrees.
-- The scope of `skills` (the loader has path rules and YAML frontmatter) and of `truncate_history_outputs` (the
-  ReAct trajectory of dspy4s is a string that is already rendered).
-- What an iteration with n proposals does when its worst-case cost does not fit in the budget.
+- The proposer writes the JSON text of the records itself.
+- The first version has no `skills` and no `truncate_history_outputs`.
+- The budget stays a hard limit. An iteration that does not fit does not start, and the result must report why a
+  run stopped (G-44). This rule also applies to an iteration with n proposals (O5).
 
 ---
 
