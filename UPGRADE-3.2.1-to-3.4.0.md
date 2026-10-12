@@ -41,6 +41,20 @@ Each correction started from a failing test. The full suite passes: 1,030 tests,
 - **G-44** GEPA selection and merge exclude dominated candidates.
 - **G-46** an empty devset is a validation error (O2).
 
+### Batch 2 (2026-10-11): decision D2 and what it unlocks
+
+The full suite passes: 1,119 tests, 0 failures, 5 live tests skipped.
+
+- **Foundation.** `PredictorKey` in each predictor trace entry, `PredictorTraces` (distinct keys, entries by leaf,
+  missing key), and `TracedRun` (the trace of one run; the metric runs in the isolated context).
+- **G-42** `BootstrapFewShot` follows upstream: demos for each predictor, the labeled pool, error counts, the trace
+  for the metric, retry rounds, and teacher priming (O1).
+- **G-44** the GEPA adapter finds the call of a leaf by its key, with the upstream selection, the failure option, and
+  no proposal for empty reflective data.
+- **API change.** `Gepa.compile` and `GepaEngine.optimize` return `Either[DspyError, GepaResult[P]]`.
+- **Rule for leaf types.** The module of a leaf type must use `ModuleLifecycle.predictor` or
+  `ModuleLifecycle.dynamicPredictor`. An optimizer returns an error for a leaf type that records no key.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -65,9 +79,19 @@ Open points from batch 1, for the owner:
 - [ ] **D1. `CodeAct` and `ProgramOfThought`.** Upstream deprecated them (99bb44bf4). Decide: add `@deprecated`, or
       keep them and record the decision in `PORT_DIFFERENCES.md`. The decision sets the priority of G-39 and of
       the shared-interpreter part of G-35.
-- [ ] **D2. Trace entry to optimizable leaf.** `BootstrapFewShot` (G-42) and the GEPA adapter (G-44) must find the
+- [x] **D2. Trace entry to optimizable leaf.** `BootstrapFewShot` (G-42) and the GEPA adapter (G-44) must find the
       trace entries of one predictor. Upstream uses object identity and signature equality. dspy4s needs one rule
       for the two optimizers.
+      **Decided 2026-10-11: the metadata key.** A predictor writes its key into each trace entry: the module name
+      and the signature structure, which is the data of `OptimizableMetadata`. The `frame` law keeps that data
+      stable across candidates. The outermost predictor on a call path owns the key, so the `Predict` inside
+      `ChainOfThought` writes none. Three rules follow:
+      - Two leaves with the same key are an error. The message tells the user to give each predictor a name.
+      - A leaf type that sets no key is an error, not a leaf to skip. The optimizer detects it when the module ran
+        but no entry has its key.
+      - Each optimizer keeps its upstream policy for a leaf that ran more than one time in a run.
+      An injected leaf id (the exact identity that upstream Bootstrap gets from object identity) was rejected for
+      now: each leaf type must then carry a label. The metadata key stays valid if that id comes later.
 - [ ] **D3. Prompt parity policy.** The adapter prompts are not byte-equal to upstream (G-30, G-37). Decide: match
       upstream exactly, or record each difference as intended.
 - [ ] **D4. ReAct default iteration limit.** dspy4s uses 5 and upstream uses 20 (G-37).
@@ -135,7 +159,7 @@ Open points from batch 1, for the owner:
 
 ## Phase 5: optimize / gepa / evaluate
 
-- [ ] **O1. Labeled demos sampled for each predictor** (1bc87de15). It needs per-predictor demos first. → G-42 (C)
+- [x] **O1. Labeled demos sampled for each predictor** (1bc87de15). It needs per-predictor demos first. → G-42 (C)
 - [x] **O2. Empty devset is an error** (c7ee4462a). → G-46 (C)
 - [ ] **O3. GEPA `InstructionProposer` as the default proposer** (b6c8aaf1e). → G-45 (R)
 - [ ] **O4. GEPA objective-aware frontiers** (638e155cf). → G-45 (R)

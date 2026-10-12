@@ -1415,7 +1415,7 @@ needs more than one line (`modules/programs/.../runtime/GeneratedPython.scala:26
 
 ## G-42 — `BootstrapFewShot` differs from upstream in six places
 
-**Status:** Open (needs decision D2) · **Verification:** C · **Upgrade item:** O1
+**Status:** Resolved (2026-10-11, batch 2, after decision D2) · **Verification:** C · **Upgrade item:** O1
 
 It also feeds MIPROv2, InferRules, KNNFewShot, and the random search.
 
@@ -1433,6 +1433,20 @@ It also feeds MIPROv2, InferRules, KNNFewShot, and the random search.
 
 Commit 1bc87de15 (labeled demos sampled for each predictor) has no target until the demos are per predictor.
 
+**Resolution.** `BootstrapFewShot` now follows the upstream steps. It finds the calls of each leaf by the predictor
+key of the trace entries (decision D2; `PredictorTraces`, `TracedRun`). All six items above are corrected, and the
+labeled demos are sampled for each predictor. The metric runs in the isolated context of the run. MIPROv2,
+InferRules, KNNFewShot, and the random search return a configuration error from the bootstrap; before, two of them
+discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfigurationErrorSuite`, `BootstrapFewShotSuite`.
+
+**Deliberate differences that stay** (also in the scaladoc of `BootstrapFewShot`):
+- dspy4s has no `_compiled` flag. A teacher is "not compiled" when none of its leaves has a demo; only such a
+  teacher gets labeled demos first. A student that is its own teacher and has demos keeps them.
+- The signature check between student and teacher compares the structure, which holds no instructions.
+- The random choices are repeatable for a seed, but they are not equal to those of Python.
+- The report key `num_labeled_demos` is now `num_labeled_demos_per_predictor`.
+- No end-to-end bootstrap test exists yet for ReAct, CodeAct, or RLM.
+
 ---
 
 ## G-43 — Random search and MIPROv2 candidates are less diverse than upstream
@@ -1449,23 +1463,31 @@ Commit 1bc87de15 (labeled demos sampled for each predictor) has no target until 
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** In progress. Dominated candidates are resolved (2026-10-11, batch 1); the trace association needs decision D2. · **Verification:** C (first two items), R (others)
+**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2). Open: round-robin pointer, resume, budget warning, merge depth. · **Verification:** C (first two items), R (others)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
-- **Trace association.** `recordFor` finds the trace entry by position (`modules/gepa/.../GepaAdapter.scala:101-106`).
-  Upstream matches the signature, prefers a failed call, and otherwise chooses at random (`gepa_utils.py:375-390`).
-  The position is wrong for ReAct, CodeAct, and RLM, where the first leaf runs in a loop.
+- **Trace association (resolved).** `recordFor` found the trace entry by position. Upstream matches the signature,
+  prefers a failed call, and otherwise chooses at random (`gepa_utils.py:375-390`). The position was wrong for
+  ReAct, CodeAct, and RLM, where the first leaf runs in a loop. The adapter now takes the entries with the predictor
+  key of the leaf (decision D2) and applies the upstream selection with a seeded random source. Tests:
+  `GepaTraceAssociationSuite`, `GepaReActTraceSuite`, `GepaPredictorKeySuite`.
 - **Dominated candidates (resolved).** `CandidateSelector.Pareto` and `MergeProposer` sampled from the raw
   frontier. Upstream removes dominated programs first (`gepa/gepa_utils.py:37-75,90-117`).
   `GepaState.nonDominatedFrontier` now holds that routine for the two callers. A comparison with the pinned `gepa`
   0.1.4 on 4,000 random frontiers gave no difference. Tests: `GepaStateSuite`, `MergeProposerSuite`.
 - **Round-robin pointer.** A new candidate starts at 0 (`modules/gepa/.../GepaEngine.scala:176-177`). Upstream
   inherits the largest parent pointer (`gepa/core/state.py:539-543`).
-- **Empty reflective data.** dspy4s asks the reflection LM with zero examples and evaluates an unchanged candidate
-  (`GepaEngine.scala:187-200`). Upstream skips the proposal (`gepa_utils.py:462-469`).
-- **Failure feedback.** dspy4s always includes failures and calls the user metric with an empty prediction
-  (`GepaAdapter.scala:108-121,129`). Upstream has this off by default.
+- **Empty reflective data (resolved).** dspy4s asked the reflection LM with zero examples and evaluated an unchanged
+  candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
+  reflection LM call, and an iteration with no new text makes no acceptance evaluation. The minibatch calls stay
+  counted, so the loop still ends at the budget.
+- **Failure feedback (resolved).** dspy4s always included failures and called the user metric with an empty
+  prediction. The new option `GepaConfig.addFormatFailureAsFeedback` is `false` by default, as upstream. With the
+  option on, a failed call gives the upstream texts and the user metric gets no call. Tests:
+  `GepaFailureFeedbackSuite`.
+- **API change.** `Gepa.compile` and `GepaEngine.optimize` now return `Either[DspyError, GepaResult[P]]`, because two
+  leaves with the same key and a leaf type with no key are errors (decision D2).
 - **Resume.** The iteration index and the pointers start again (`GepaEngine.scala:100-101`), and `Gepa.compile` does
   not pass `runDir` (`modules/gepa/.../Gepa.scala:34-36`).
 - **Budget.** A budget of less than approximately twice the validation set gives zero iterations with no warning
