@@ -8,6 +8,7 @@ import munit.FunSuite
 
 import java.net.InetAddress
 import java.net.ServerSocket
+import scala.concurrent.duration.DurationInt
 
 /** The JDK transport gives a failure without a response its LM error class. The tests use the loopback interface only.
   */
@@ -35,7 +36,7 @@ class JdkHttpTransportErrorSuite extends FunSuite:
       case Right(_)    => fail("expected a failure")
 
   test("a refused connection is LmTransportError, for a plain call and for a stream") {
-    val transport = HttpTransport.jdk(timeoutMillis = 2000L)
+    val transport = HttpTransport.jdk(HttpTimeouts(connect = 2.seconds, read = 2.seconds))
     val port      = closedPort()
 
     val plain = failure(transport.sendJson(url(port), Map.empty, "{}"))
@@ -47,7 +48,7 @@ class JdkHttpTransportErrorSuite extends FunSuite:
   }
 
   test("no response in the time limit is LmTimeoutError, for a plain call and for a stream") {
-    val transport = HttpTransport.jdk(timeoutMillis = 300L)
+    val transport = HttpTransport.jdk(HttpTimeouts(connect = 2.seconds, read = 300.millis))
     withSilentServer { port =>
       val plain = failure(transport.sendJson(url(port), Map.empty, "{}"))
       assert(plain.isInstanceOf[LmTimeoutError], plain.toString)

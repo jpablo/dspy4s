@@ -32,7 +32,8 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
-import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
+import dspy4s.lm.providers.{HttpTimeouts, JdkHttpTransport, OpenAiLanguageModel}
+import scala.concurrent.duration.DurationInt
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.signatures.Signature
@@ -64,7 +65,7 @@ object LanguageModels:
   // | # Local (Ollama / vLLM / SGLang) and other OpenAI-compatible providers: point base_url elsewhere.
   // | lm = dspy.LM("openai/meta-llama/Meta-Llama-3-8B-Instruct", api_base="http://localhost:7501/v1", api_key="")
   def openAiCompatible(model: String, apiKey: String, baseUrl: String): LanguageModel =
-    OpenAiLanguageModel(model, apiKey, baseUrl, new JdkHttpTransport(timeoutMillis = 60000))
+    OpenAiLanguageModel(model, apiKey, baseUrl, new JdkHttpTransport(HttpTimeouts(read = 60.seconds)))
 
   // Local servers that don't check credentials get a dedicated no-key constructor (a placeholder bearer token is
   // still sent — the wire format requires the header). Common base URLs: Ollama http://localhost:11434/v1, vLLM

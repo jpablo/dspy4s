@@ -57,7 +57,10 @@ final case class OpenAiClient(
     *     in the table gives an [[dspy4s.core.contracts.LmProviderResponseError]]. The message is the `message` of the
     *     error, else the code. The details have the model, the provider, and the code.
     *
-    * The connection closes when the stream ends.
+    * The connection closes when the stream ends. When the transport ended the lines early
+    * ([[HttpStreamResponse.failure]]), the last chunk is an [[LmChunk.failure]] with that error, in place of the
+    * `LmStreamAssemblyError` of a stream with no end event. The error gets the model and the provider. This is also
+    * true after an end event that is not `[DONE]` (upstream raises the transport error while it reads the lines).
     */
   def stream(payload: DynamicValue): Either[DspyError, ClosableIterator[LmChunk]] =
     val url           = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
@@ -80,11 +83,17 @@ final case class OpenAiClient(
           finally draining.close()
           Left(OpenAiErrors.fromResponse(response.status, response.headers, buffered.toString, model))
         else
-          Right(parseSse(response.dataLines, model))
+          Right(parseSse(response.dataLines, response.failure, model))
       }
 
-  /** The chunks of the `data:` lines, with the stream rules of [[stream]]. */
-  private def parseSse(lines: ClosableIterator[String], model: Option[String]): ClosableIterator[LmChunk] =
+  /** The chunks of the `data:` lines, with the stream rules of [[stream]]. `failure` is the reason why the transport
+    * ended the lines early ([[HttpStreamResponse.failure]]).
+    */
+  private def parseSse(
+      lines  : ClosableIterator[String],
+      failure: () => Option[DspyError],
+      model  : Option[String]
+  ): ClosableIterator[LmChunk] =
     new ClosableIterator[LmChunk]:
       private var finished                = false // No more lines are read, and the connection is closed.
       private var ended                   = false // An end event came.
@@ -97,14 +106,20 @@ final case class OpenAiClient(
         finished = true
         lines.close()
 
-      /** The end of the lines, or the `[DONE]` line. A complete stream with no chunk that has a finish reason gets a
-        * last chunk with the finish reason `stop`, because the completeness rule of [[LmChunk]] reads the finish reason
-        * (upstream: the end event has the default finish reason).
+      /** The end of the lines, or the `[DONE]` line. When the transport ended the lines early, the last chunk has the
+        * failure of the transport. A complete stream with no chunk that has a finish reason gets a last chunk with the
+        * finish reason `stop`, because the completeness rule of [[LmChunk]] reads the finish reason (upstream: the end
+        * event has the default finish reason).
         */
       private def end(done: Boolean): Unit =
-        if stopped then finish(null)
-        else if ended || done then finish(LmChunk(finishReason = Some("stop")))
-        else finish(LmChunk.failure(OpenAiErrors.streamAssembly("The OpenAI stream ended with no end event", model)))
+        val dropped = if done then None else failure()
+        dropped match
+          case Some(error) => finish(LmChunk.failure(OpenAiErrors.withRequestDetails(error, model)))
+          case None        =>
+            if stopped then finish(null)
+            else if ended || done then finish(LmChunk(finishReason = Some("stop")))
+            else
+              finish(LmChunk.failure(OpenAiErrors.streamAssembly("The OpenAI stream ended with no end event", model)))
 
       private def read(data: String): Unit =
         OpenAiStreamChunk.decode(data) match

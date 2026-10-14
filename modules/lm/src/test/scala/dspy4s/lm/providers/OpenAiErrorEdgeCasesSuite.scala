@@ -127,7 +127,7 @@ class OpenAiErrorEdgeCasesSuite extends FunSuite:
   }
 
   test("the JDK transport gives LmUnexpectedError for a URL that it cannot read") {
-    HttpTransport.jdk(timeoutMillis = 1000L).sendJson("not a url", Map.empty, "{}") match
+    HttpTransport.jdk(HttpTimeouts(connect = 1.second, read = 1.second)).sendJson("not a url", Map.empty, "{}") match
       case Left(error: LmUnexpectedError) => assert(error.message.nonEmpty)
       case other                          => fail(s"expected LmUnexpectedError, got $other")
   }
