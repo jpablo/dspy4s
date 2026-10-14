@@ -266,6 +266,47 @@ The full suite passes: 1,537 tests, 0 failures, 6 live tests skipped.
   - An incomplete demo does not show its null inputs, and a null output shows the "Not supplied" text. Upstream
     shows `None`.
 
+### Batch 11 (2026-10-14): the stream guard and one call path for streamed calls
+
+The full suite passes: 1,561 tests, 0 failures, 6 live tests skipped.
+
+- **G-25** the stream guard (L2) and one call path for streamed calls (L3). This closes G-25.
+- **Decisions of the owner.** The six decisions of 2026-10-14, all as upstream:
+  - A stream is complete when a chunk has a finish reason, a chunk has usage, or `[DONE]` arrives. A stream
+    that stops before that is an `LmStreamAssemblyError`, with no retry and no cache entry.
+  - A `data:` line that is not valid JSON is an `LmStreamAssemblyError`. A JSON value that is not an object is
+    skipped.
+  - A mid-stream error event gives the typed error of its code, with the upstream table.
+  - A cache hit on a streamed call gives the cached response, and the listeners get no token.
+  - A retry is possible only before the first chunk with text or a tool call.
+  - Each streamed call has one history entry, and the usage of its chunks is recorded, also after a failure.
+- **API changes.** `LmStreamAssemblyError` is new (code `stream_assembly`). `LmChunk` has `cachedResponse`, and
+  `LmChunk.cached` builds the chunk of a cache hit.
+- **Changes in behavior.**
+  - A streamed call through `ManagedLanguageModel` uses the cache, the retry policy, the history, and the usage
+    tracker. Before, it used none of them.
+  - Under `streamify`, a call that the cache answers gives no token.
+  - A stream that stops before its end is an error. Before, the partial text was a success.
+  - A `data:` line that is not JSON is an error. Before, the client dropped it.
+  - A mid-stream error event is a typed error. Before, it was an empty chunk.
+  - An OpenAI stream that ends with `[DONE]` or a usage chunk, but has no chunk with a finish reason, gets a last
+    chunk with the finish reason `stop`. Upstream gives the end event the same default.
+  - A retry also stops after a chunk with a finish reason, as upstream `_retryable` (`state.completed`).
+  - When the last attempt fails before its first chunk with text or a tool call, the caller gets only the failure
+    chunk.
+  - The stream wrapper gives no token for a cached chunk. `LmChunk.reportedFailure` replaces the private failure
+    helpers of the wrapper.
+- **Open points, for the owner.**
+  - A caller that closes a managed stream before its end gets no history entry, no usage record, and no cache entry.
+  - The upstream rule that no event can come after the end event is not enforced.
+  - The usage of an attempt that failed and got a retry is not recorded.
+  - When a `ManagedLanguageModel` wraps another one, the outer model reads a cached chunk of the inner model as a
+    new response: it stores it, and its history entry has `cache_hit = false`.
+  - An OpenAI chunk that the codec cannot read, with no `error` object, is skipped. Upstream reads its fields
+    leniently.
+  - `StreamingLanguageModelWrapper.stream` does not give a `ClosableIterator`. This is older than the batch.
+  - An exception from the stream of the delegate gives no history entry. `call` has the same behavior.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -321,9 +362,9 @@ Open points from batch 1, for the owner:
 
 - [x] **L1. Typed LM errors and retry classes** (e608bc024, 2cda3872d). Errors carry `status`, `provider_code`,
       `request_id`, and `retry_after`. Retries use transient classes only. → G-23 (C)
-- [ ] **L2. Stream guard** (2cda3872d, 7fd361214, 661467b77). A stream without an end event is an error, and the
+- [x] **L2. Stream guard** (2cda3872d, 7fd361214, 661467b77). A stream without an end event is an error, and the
       typed error survives. → G-25 (C)
-- [ ] **L3. One call path for streamed calls**: cache, retry before the first token, usage, and history. → G-25 (C)
+- [x] **L3. One call path for streamed calls**: cache, retry before the first token, usage, and history. → G-25 (C)
 - [ ] **L4. Strict response schema** (40a6e1689): `strict: true` with a schema shaped for strict mode. → G-26 (C)
 - [ ] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
 - [ ] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)

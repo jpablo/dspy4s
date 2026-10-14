@@ -1115,7 +1115,7 @@ because its key changed.
 
 ## G-25 — Streamed LM calls skip the managed path
 
-**Status:** In progress. The capability flags and the typed errors are resolved (2026-10-11, batch 1). · **Verification:** C (flags, typed error), R (others) · **Upgrade items:** L2, L3
+**Status:** Resolved (2026-10-14, batch 11). The capability flags and the typed errors were resolved on 2026-10-11 (batch 1). · **Verification:** C (flags, typed error), R (others) · **Upgrade items:** L2, L3
 
 **Upstream.** One call path applies cache, retry before the first token, usage, and history to streams
 (`dspy/clients/execution.py:574-646`). A stream without an end event is an error, and the typed error survives
@@ -1138,8 +1138,24 @@ because its key changed.
 `defaultOptions`. `LmChunk` has an `error: Option[DspyError]` field, and `LmChunk.failure` builds the terminal
 chunk. The wrapper returns the typed error. Tests: `StreamingWrapperContractSuite`.
 
-**Direction (open).** Reject a stream that ends without a finish marker, and decode a mid-stream error event.
-Record usage and history for streamed calls.
+**Resolution (batch 11, with the decisions of the owner of 2026-10-14).**
+
+- The OpenAI client ends a stream at `[DONE]`. A chunk with a finish reason and a chunk with usage are end
+  events. When the lines stop with no end event, the last chunk is an `LmStreamAssemblyError` (code
+  `stream_assembly`, not transient). A `data:` line that is not JSON gives the same error. A JSON value that is not
+  an object is skipped, and so is an object that the chunk codec cannot read.
+- A mid-stream `{"error": ...}` event gives the typed error of its code (`code`, else `type`), with the upstream
+  `_stream_error_code_map`. The details have the model, the provider, and the code.
+- `ManagedLanguageModel.stream` applies the rules of `call`. A cache hit gives one `LmChunk.cached` chunk, and the
+  stream wrapper gives no token of it to a listener. The cache stores a complete stream only. A stream with no
+  chunk that has a finish reason ends with an `LmStreamAssemblyError`. A failure before the first chunk with text
+  or a tool call gets the retry policy, and the caller gets no chunk of the failed attempt. Each streamed call has
+  one history entry, and the usage of its chunks is recorded, also after a failure.
+- Tests: `OpenAiStreamGuardSuite`, `ManagedStreamSuite`, `StreamingCacheSuite`.
+
+**Open points (batch 11).** A managed stream that the caller closes early gets no history, usage, or cache entry.
+No check rejects an event after the end event. The usage of a retried attempt is not recorded. An outer
+`ManagedLanguageModel` reads a cached chunk of an inner one as a new response. The UPGRADE file lists the details.
 
 ---
 
