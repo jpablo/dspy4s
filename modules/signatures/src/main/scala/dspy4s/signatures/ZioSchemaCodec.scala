@@ -10,9 +10,10 @@ import dspy4s.core.contracts.{
   TypeRef,
   ValidationError
 }
-import zio.blocks.chunk.Chunk
+import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
 import zio.blocks.schema.binding.{Binding, BindingType}
+import zio.blocks.schema.json.{JsonCodec, JsonFormat, JsonReader, JsonSchema, JsonWriter}
 import zio.blocks.schema.{
   DynamicOptic,
   DynamicValue,
@@ -25,7 +26,7 @@ import zio.blocks.schema.{
   Schema,
   Term
 }
-import zio.blocks.typeid.TypeId
+import zio.blocks.typeid.{Owner, TypeId}
 
 /** Bridge between zio-blocks `Schema[A]` and dspy4s's `Shape[A]`.
   *
@@ -35,7 +36,8 @@ import zio.blocks.typeid.TypeId
   *   - [[fieldSpecsFromReflect]] -- derive `FieldSpec` list from a `Reflect.Record`.
   *   - [[normalize]] -- DynamicValue → DynamicValue coercion guided by a target `Reflect`. Public for the rare caller
   *     that needs to pre-coerce a record before decoding.
-  *   - [[jsonSchemaForModel]] -- the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`.
+  *   - [[jsonSchemaForModel]] -- the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, and with
+  *     `$defs` for a recursive type.
   *
   * No `Map[String, Any]` round-trip: the spine is `DynamicValue.Record` end-to-end.
   */
@@ -266,9 +268,151 @@ private[signatures] object ZioSchemaCodec:
   /** The JSON schema of `schema` as a model sees it. The schema does not ask for the `id` of a [[ToolCall]] (upstream
     * removes `id` from the JSON schema of `ToolCalls.ToolCall`): the id comes from the provider, and a model that
     * writes a tool call as text does not supply it.
+    *
+    * A recursive type has its schema in `$defs`, and each reference to it is a `$ref` (upstream pydantic does the
+    * same). zio-blocks writes no `$ref`. It puts the schema of each field in the schema of its record, so for a
+    * recursive type its `toJsonSchema` (a `lazy val`) reads itself and waits forever. Thus this function cuts each
+    * cycle before zio-blocks makes the schema. When the root type is recursive, the root is a `$ref` to its definition.
     */
   def jsonSchemaForModel[A](schema: Schema[A]): String =
-    Schema(schema.reflect.transform(DynamicOptic.root, HideToolCallId).force).toJsonSchema.toJson.toString
+    val shown     = schema.reflect.transform(DynamicOptic.root, HideToolCallId).force
+    val recursive = recursiveTypes(shown)
+    if recursive.isEmpty then Schema(shown).toJsonSchema.toJson.toString
+    else withDefinitions(shown, recursive).toJson.toString
+
+  /** The JSON schema of `root`, with a definition in `$defs` for each type in `recursive`. In each schema, each
+    * reference to a type in `recursive` is a placeholder whose JSON schema is a `$ref` ([[RefSchemaCodec]]).
+    */
+  private def withDefinitions(root: Reflect.Bound[?], recursive: Vector[Reflect.Bound[?]]): JsonSchema =
+    val names = definitionNames(recursive)
+    val cut   = CutCycles(names)
+
+    def jsonSchemaOf[B](reflect: Reflect.Bound[B]): JsonSchema =
+      val builder = Schema(reflect.transform(DynamicOptic.root, cut).force).deriving(JsonFormat.deriver)
+      names.valuesIterator
+        .foldLeft(builder)((acc, name) => acc.instance(refTypeId[Any](name), RefSchemaCodec(name)))
+        .derive
+        .toJsonSchema
+
+    val definitions = ChunkMap.from(recursive.map(reflect => names(reflect.typeId) -> jsonSchemaOf(reflect)))
+    names.get(root.typeId).fold(jsonSchemaOf(root))(name => JsonSchema.refString(refOf(name))) match
+      case obj: JsonSchema.Object => obj.copy($defs = Some(definitions))
+      case other                  => JsonSchema.Object(allOf = Some(NonEmptyChunk.single(other)), $defs = Some(definitions))
+
+  /** The types that occur again in themselves, in the order that the walk from `root` finds them. A type here is a
+    * record, a variant, or a wrapper. A sequence, a map, and an `Option` are not types here: the walk goes into them.
+    * Thus for `next: Option[Node]` the recursive type is `Node`, not `Option[Node]`.
+    *
+    * The type id identifies a type, as in zio-blocks. zio-blocks gives one type id to each instance of a generic type
+    * (for example `Tree[Int]` and `Tree[String]`), so these instances share one definition. zio-blocks cannot encode a
+    * value of such a type either.
+    */
+  private def recursiveTypes(root: Reflect.Bound[?]): Vector[Reflect.Bound[?]] =
+    def visit(
+        reflect: Reflect.Bound[?],
+        path   : Set[TypeId[?]],
+        found  : Vector[Reflect.Bound[?]]
+    ): Vector[Reflect.Bound[?]] =
+      def node(children: Iterable[Reflect.Bound[?]]): Vector[Reflect.Bound[?]] =
+        if !path.contains(reflect.typeId) then
+          children.foldLeft(found)((acc, child) => visit(child, path + reflect.typeId, acc))
+        else if found.iterator.map(_.typeId).contains(reflect.typeId) then found
+        else found :+ reflect
+      reflect match
+        case deferred: Reflect.Deferred[Binding, ?] => visit(deferred.value, path, found)
+        case seq: Reflect.Sequence[Binding, ?, ?]   => visit(seq.element, path, found)
+        case map: Reflect.Map[Binding, ?, ?, ?]     => visit(map.value, path, visit(map.key, path, found))
+        // The `Some` and `None` records of an `Option` are not types here: the walk goes to the value in `Some`.
+        case variant: Reflect.Variant[Binding, ?] if variant.typeId.isOption || variant.typeId.isMaybe =>
+          variant.cases.foldLeft(found)((acc, term) =>
+            term.value match
+              case rec: Reflect.Record[Binding, ?] =>
+                rec.fields.foldLeft(acc)((a, field) => visit(field.value, path, a))
+              case other => visit(other, path, acc)
+          )
+        case rec: Reflect.Record[Binding, ?]         => node(rec.fields.map(_.value))
+        case variant: Reflect.Variant[Binding, ?]    => node(variant.cases.map(_.value))
+        case wrapper: Reflect.Wrapper[Binding, ?, ?] => node(Vector(wrapper.wrapped))
+        case _                                       => found
+    visit(root, Set.empty, Vector.empty)
+
+  /** A name in `$defs` for each type in `types`: the simple name of the type, with a number when two types have the
+    * same simple name.
+    */
+  private def definitionNames(types: Vector[Reflect.Bound[?]]): Map[TypeId[?], String] =
+    types.foldLeft(Map.empty[TypeId[?], String]) { (names, reflect) =>
+      val base  = reflect.typeId.name.map(c => if c.isLetterOrDigit || c == '_' then c else '_')
+      val taken = names.valuesIterator.toSet
+      val name  = if !taken.contains(base) then base else Iterator.from(2).map(n => s"$base$n").filterNot(taken).next()
+      names.updated(reflect.typeId, name)
+    }
+
+  private def refOf(name: String): String = s"#/$$defs/$name"
+
+  /** The type id of a placeholder for the type with the definition `name`. */
+  private def refTypeId[A](name: String): TypeId[A] = TypeId.nominal[A](refOf(name), Owner.Root)
+
+  /** Gives each type in `names` the type id of its placeholder ([[refTypeId]]), except at the root. Thus the reflect of
+    * a recursive type is the root with its fields, and each reference to a type in `names` is a placeholder.
+    */
+  private final class CutCycles(names: Map[TypeId[?], String])
+      extends ReflectTransformer.OnlyMetadata[Binding, Binding]:
+    override def transformMetadata[K, A](f: Binding[K, A]): Lazy[Binding[K, A]] = Lazy(f)
+
+    private def shownTypeId[A](path: DynamicOptic, typeId: TypeId[A]): TypeId[A] =
+      names.get(typeId) match
+        case Some(name) if path.nodes.nonEmpty => refTypeId[A](name)
+        case _                                 => typeId
+
+    override def transformRecord[A](
+        path              : DynamicOptic,
+        fields            : IndexedSeq[Term[Binding, A, ?]],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Record, A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Record[Binding, A]] =
+      val shown = shownTypeId(path, typeId)
+      super.transformRecord(path, fields, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+    override def transformVariant[A](
+        path              : DynamicOptic,
+        cases             : IndexedSeq[Term[Binding, A, ? <: A]],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Variant, A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Variant[Binding, A]] =
+      val shown = shownTypeId(path, typeId)
+      super.transformVariant(path, cases, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+    override def transformWrapper[A, B](
+        path              : DynamicOptic,
+        wrapped           : Reflect[Binding, B],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Wrapper[A, B], A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Wrapper[Binding, A, B]] =
+      val shown = shownTypeId(path, typeId)
+      super.transformWrapper(path, wrapped, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+  /** The JSON codec of a placeholder: its JSON schema is a `$ref` to the definition `name`. The codec is only for the
+    * JSON schema, so its encoder and its decoder fail.
+    */
+  private final class RefSchemaCodec(name: String) extends JsonCodec[Any]:
+    override def decodeValue(in: JsonReader): Any = error(s"The placeholder of '${refOf(name)}' has no decoder")
+
+    override def encodeValue(x: Any, out: JsonWriter): Unit =
+      error(s"The placeholder of '${refOf(name)}' has no encoder")
+
+    override def toJsonSchema: JsonSchema = JsonSchema.refString(refOf(name))
 
   private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef =
     prim match

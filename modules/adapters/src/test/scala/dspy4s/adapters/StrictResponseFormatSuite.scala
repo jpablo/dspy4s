@@ -87,6 +87,11 @@ class StrictResponseFormatSuite extends FunSuite:
   private val mapSchema: String =
     """{"properties":{"scores":{"additionalProperties":{"type":"integer"},"type":["object","null"],"title":"Map[String,Int]"},"kind":{"enum":["Bad","Good"],"title":"TmpKind"}},"type":"object","required":["kind"],"title":"TmpMapProbe"}"""
 
+  // A recursive type is in `$defs`, and the root is a `$ref` to it (zio-blocks writes no `$ref`, so
+  // `jsonSchemaForModel` cuts the cycle).
+  private val recursiveSchema: String =
+    """{"$ref":"#/$defs/ZsNode","$defs":{"ZsNode":{"properties":{"label":{"type":"string"},"children":{"items":{"$ref":"#/$defs/ZsNode"},"type":["array","null"],"title":"List[ZsNode]"}},"type":"object","required":["label"],"title":"ZsNode"}}}"""
+
   // ── Strict mode ─────────────────────────────────────────────────────────────────────────────────────────────
 
   test("a typed schema goes out strict, with the upstream name, each property required, and each object closed") {
@@ -109,6 +114,19 @@ class StrictResponseFormatSuite extends FunSuite:
     val step = stage("properties")("steps")("items")
     assertEquals(step("required"), json("""["action", "comment"]"""))
     assertEquals(step("additionalProperties"), ujson.Bool(false))
+  }
+
+  test("a recursive typed schema goes out strict: the $ref at the root resolves, and the inner $ref stays") {
+    val format = responseFormat(layoutOf("question -> label, children: list"), Some(recursiveSchema))
+    assertEquals(format("json_schema")("strict"), ujson.Bool(true))
+    val schema = schemaOf(format)
+    assert(!schema.obj.contains("$ref"), schema.toString)
+    assertEquals(schema("required"), json("""["label", "children"]"""))
+    assertEquals(schema("additionalProperties"), ujson.Bool(false))
+    assertEquals(schema("properties")("children")("items"), json("""{"$ref": "#/$defs/ZsNode"}"""))
+    val definition = schema("$defs")("ZsNode")
+    assertEquals(definition("required"), json("""["label", "children"]"""))
+    assertEquals(definition("additionalProperties"), ujson.Bool(false))
   }
 
   // ── A schema from the field types ───────────────────────────────────────────────────────────────────────────
