@@ -66,6 +66,10 @@ changing the domain types.
   repeated samples don't collide. (See the [provider-bag vs request-control](../../README.md) decision.)
 - **Caching is rollout-aware and layered.** The cache key (`RequestHash`, SHA-256) includes the rolloutId;
   `CompositeLmCache` promotes disk hits into memory.
+- **The disk record is versioned JSON.** `DiskLmCache` writes `<key>.json` with `_dspy4s_format`
+  (`dspy4s-lm-result-v1`), the outputs, the usage, and the model name, as upstream `CallResult.dump`. A legacy
+  `<key>.bin` entry (Java serialization) is read through a strict `ObjectInputFilter` and moved to the JSON record; a
+  class outside the old record is rejected before Java serialization reads it.
 - **Streaming closes cleanly.** `stream` returns a lazy `Iterator[LmChunk]`; a setup error is reified as a
   terminal error chunk rather than thrown, so consumers always see a closed stream. Tool-call deltas are
   reassembled by `ToolCallAssembler`, with a JSON-parse fallback that wraps an unparseable fragment.
