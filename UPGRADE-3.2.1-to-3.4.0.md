@@ -418,6 +418,32 @@ The full suite passes: 1,613 tests, 0 failures, 6 live tests skipped.
   - `kwargs` keeps all the request options. Upstream removes the keys that start with `api_`. No port code puts such
     keys in the options.
 
+### Batch 16 (2026-10-14): callback events for evaluation, compile, and the interpreter
+
+The full suite passes: 1,622 tests, 0 failures, 6 live tests skipped.
+
+- **I9** (G-40, new events). `Evaluate` runs, optimizer `compile` calls, and code-interpreter operations are callback
+  scopes, as upstream `on_evaluate_*`, `on_compile_*` (80553206b), and `on_interpreter_*` (b11cfe874).
+- **Decided by Claude, review.**
+  - New sealed cases of `CallbackEvent`: `EvaluateStartEvent`/`EvaluateEndEvent`, `CompileStartEvent`/
+    `CompileEndEvent`, and `InterpreterStartEvent`/`InterpreterEndEvent` with an `InterpreterOperation` (`Execute`,
+    `ToolCall`, `Startup`, `Shutdown`). A typed field gives the operation, not a key in the inputs. An exhaustive match
+    on `CallbackEvent` in user code needs the new cases.
+  - The inputs are sizes, not objects: `devset_size` and `num_threads` for an evaluation, `trainset_size` (and
+    `valset_size`) for a compile, `programs_size` for `Ensemble`.
+  - Only the outermost `compile` of one optimizer instance on a thread opens a scope, as upstream. A `compile` of
+    another instance nests: the random search shows `LabeledFewShot` and `BootstrapFewShot` scopes inside its own, as
+    upstream. `InferRules` calls the inner `BootstrapFewShot` run with no scope, as upstream `super().compile`.
+  - `optimizerName` is the simple class name (`Gepa`, where upstream says `GEPA`).
+  - The Deno interpreter has no public `start`, so a `Startup` scope occurs only inside the first `Execute`. The
+    subprocess interpreter has `Execute` and `Shutdown` scopes only.
+- **API changes.** The new events and `InterpreterOperation`. `CallbackDispatcher.withEvaluate`, `withCompile`, and
+  `withInterpreter`. `Teleprompter.withCompileCallbacks`.
+- **Changes in behavior.**
+  - A callback handler gets the new events. An evaluation inside a compile nests under the compile scope: `Evaluate`
+    keeps the open call scopes of the thread.
+  - `SandboxProtocolSuite` filters the tool events, because the interpreter now emits its own events too.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -523,7 +549,7 @@ Open points from batch 1, for the owner:
 - [ ] **I6. Persistent local Python REPL** (d58c3007e, 453823209). → G-36 (R)
 - [ ] **I7. `execution_instructions`** (0b93fb148, 750017192). → G-35 (R)
 - [ ] **I8. `SandboxSerializable`** (ed4d479a1). → G-38 (R)
-- [ ] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
+- [x] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
       for base exceptions (970f72900). → G-40 (C for the end event, R for the others)
 - [ ] **I10. MCP**: SDK v2 (32bcd36ce) and structured results (ca0a088bd). → G-47 (R)
 - [x] **I11. `inspect_history` renders tool calls** (571171227). → G-27 (R)

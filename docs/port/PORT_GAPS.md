@@ -1659,7 +1659,7 @@ Open after the removal:
 
 ## G-40 — Callback coverage
 
-**Status:** In progress. The end event on interrupt is resolved (2026-10-11, batch 1). · **Verification:** C (end event), R (new events) · **Upgrade item:** I9
+**Status:** Resolved (2026-10-14, batch 16). The end event on interrupt was resolved on 2026-10-11 (batch 1). · **Verification:** C (end event), R (new events) · **Upgrade item:** I9
 
 - **End event on interrupt (resolved).** `runWithEnd` now also reports an `InterruptedException` and rethrows
   it. Before the correction, `runWithEnd` caught `NonFatal` only
@@ -1667,9 +1667,10 @@ Open after the removal:
   `ParallelExecutor.scala:142` interrupts workers. A start event then has no end event. Upstream reports base
   exceptions (`dspy/utils/callback.py:362,392`; 970f72900).
 - **New events.** Upstream has interpreter execute, tool, startup, and shutdown events (b11cfe874), optimizer
-  compile events (80553206b), and evaluate events (`callback.py:232-303`). The dspy4s event type has module, LM,
-  adapter, and tool cases (`modules/core/.../contracts/Callbacks.scala:43-140`). `Evaluate` does not call the
-  dispatcher. A new sealed case breaks an exhaustive match in user code.
+  compile events (80553206b), and evaluate events (`callback.py:232-303`). Resolved in batch 16: the evaluate,
+  compile, and interpreter events, with `CallbackDispatcher.withEvaluate`, `withCompile`, and `withInterpreter`.
+  Tests: `LifecycleCallbackSuite`, `DenoInterpreterCallbackSuite`, `EvaluateCallbackSuite`, `CompileCallbackSuite`.
+  The new sealed cases need a case in an exhaustive match of user code.
 
 ---
 
