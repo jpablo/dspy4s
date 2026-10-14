@@ -1265,7 +1265,8 @@ Open:
 
 ## G-29 — Adapter output handling differs from upstream
 
-**Status:** Open · **Verification:** C (optional outputs), R (others) · **Upgrade items:** A1, A2
+**Status:** Resolved (2026-10-13, batch 10) · **Verification:** C (optional outputs), R (others) · **Upgrade items:**
+A1, A2
 
 **Upstream.** A missing optional output takes its default or `None` (`dspy/adapters/utils.py:40-55`). ChatAdapter
 tries JSONAdapter after an `AdapterParseError` only (`dspy/adapters/chat_adapter.py:86-94`). Incomplete demos get a
@@ -1287,6 +1288,31 @@ function calling is off, `tool_calls` stays a text field (`base.py:91-119`).
 
 **Direction.** Decide D5 first. Make coercion failures parse errors, then add the fallback with the parse error as
 the key.
+
+**Resolution (batch 10, with the decisions of the owner of 2026-10-13).**
+
+- `FieldSpec.optional` marks an optional field (decision D5). An `Option[T]` field of a typed signature sets it, and
+  the string syntax `Optional[T]` and `T | None` sets it. A missing output takes the `defaultValue` of the field, else
+  a null when the field is optional, else it is a parse error, in the Chat, JSON, and XML adapters. An explicit JSON
+  null for an optional field is a null.
+- `ChatAdapter` falls back to a `JSONAdapter` after a parse error of the parse step (`useJsonAdapterFallback`, on by
+  default). An LM error or a configuration error gives no second call, and a call that streamed visible output gets
+  no second call. The predictor runs the second call (`Adapter.fallback`).
+- A value that does not fit the type of its field is a `ParseError` with the field name and the raw response.
+- In the chat format, the first header of a field wins.
+- An incomplete demo comes first, with the upstream prefix, and a missing output shows "Not supplied for this
+  particular example." A demo with no input or no output is dropped. A field default no longer fills a demo; it
+  still fills a missing input of the live call.
+- With native function calling off, or with an LM that does not support it, `tool_calls` is a text output field in
+  the Chat and JSON adapters.
+- Tests: `AdapterOutputRulesSuite`, `AdapterFallbackSuite`, `StreamingFallbackSuite`, `OptionalFieldSuite`,
+  `OptionalFieldSpecSuite`.
+
+**Open points (batch 10).** The XML adapter keeps `tool_calls` as text. A typed `Option[Int]` field has the prompt
+type `str`. The string syntax does not parse a type with a comma, such as `Union[int, None]`. A JSON fallback call
+streams through the chat stream state. The extraction step of `TwoStepAdapter` and `Adapter.execute` get no
+fallback. The JSON string `"3"` for an `int` field is a parse error. An incomplete demo hides its null inputs, and a
+null output shows the "Not supplied" text, where upstream shows `None`. The UPGRADE file lists the details.
 
 ---
 

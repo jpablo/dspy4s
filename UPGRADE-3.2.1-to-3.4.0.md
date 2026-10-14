@@ -224,6 +224,48 @@ The full suite passes: 1,506 tests, 0 failures, 6 live tests skipped.
   rejected. When a later candidate is equal to that merged candidate, a resumed run evaluates those examples again,
   so its metric call count can differ from a run with no stop. The draws stay the same. This case is rare.
 
+### Batch 10 (2026-10-13): the output rules of the adapters
+
+The full suite passes: 1,537 tests, 0 failures, 6 live tests skipped.
+
+- **G-29** optional and default outputs (A1, decision D5), the fallback from `ChatAdapter` to `JSONAdapter` after a
+  parse error (A2), parse errors for values of the wrong type, the first header of a field, the upstream rule for
+  incomplete demos, and `tool_calls` as a text field when native function calling is off. This closes the last
+  defect of the first table.
+- **Decisions of the owner.** The six decisions of 2026-10-13, as listed in G-29.
+- **API changes.** `FieldSpec` has `optional`. `Adapter` has `fallback`. `ChatAdapter` has `useJsonAdapterFallback`
+  (default `true`). `AdapterDemos` is new.
+- **Changes in behavior.**
+  - A chat response that does not parse gives one more LM call, in the JSON format.
+  - A value of the wrong type is a `ParseError` with the field name. Before, it was a `ValidationError`.
+  - An `Option` output that the response does not have is `None`. Before, the call failed.
+  - A duplicate header keeps its first value. Before, the values were joined.
+  - The prompts of programs with incomplete demos change, and a field default no longer fills a demo.
+  - With native function calling off, the prompt asks for `tool_calls`, and the parser reads it from the text.
+    Before, the field was always empty. The JSON adapter also accepts a JSON string that has such a list.
+  - With native function calling active and no provider calls, the JSON adapter gives an empty `tool_calls`. Before,
+    it was a parse error.
+  - On a tool turn, a missing text field takes its `defaultValue`, else a null. Before, it was always a null.
+  - A demo with no value for the history field of a signature is an incomplete demo, as upstream. The demo rule uses
+    all fields of the signature.
+  - In a GEPA run, a predictor call that fails to parse gets one more call with the JSON format. The failure record
+    has the raw response of that call, and the metric call count of such a run grows. `GepaFailureFeedbackSuite`
+    has the new counts.
+  - The saved state of a signature has the key `optional`. A state with no such key loads as not optional.
+  - `Refine` gives the fallback of the base adapter the same advice, as upstream `WrapperAdapter`.
+- **Open points, for the owner.**
+  - The XML adapter keeps `tool_calls` as text, and its prompt asks for no format. Upstream parses a list.
+  - A typed `Option[Int]` field has the prompt type `str`, because `Option` is a variant. `Optional[int]` in a string
+    signature gives `int`.
+  - The string syntax splits fields on `,`. Thus `Union[int, None]` and `Optional[dict[str, int]]` do not parse.
+  - `Streamify` builds its stream state from the configured adapter, so a JSON fallback call streams through the
+    chat stream state.
+  - The extraction step of `TwoStepAdapter` gets no JSON fallback. Upstream gets one through `ChatAdapter.__call__`.
+  - `Adapter.execute` does not use the fallback. No main code calls it.
+  - The JSON string `"3"` for an `int` field is a parse error. Upstream `parse_value` accepts it.
+  - An incomplete demo does not show its null inputs, and a null output shows the "Not supplied" text. Upstream
+    shows `None`.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -269,8 +311,9 @@ Open points from batch 1, for the owner:
       upstream exactly, or record each difference as intended.
 - [x] **D4. ReAct default iteration limit.** dspy4s used 5 and upstream uses 20 (G-37).
       **Decided 2026-10-11: 20, as upstream.** The default of `ReAct.maxIterations` is `IterationLimit(20)`.
-- [ ] **D5. Optional output fields.** `FieldSpec` has no optional flag, so the adapters cannot apply the upstream
-      rule (G-29).
+- [x] **D5. Optional output fields.** `FieldSpec` has no optional flag, so the adapters cannot apply the upstream
+      rule (G-29). **Decided 2026-10-13:** `FieldSpec.optional`, set by `Option[T]` and by `Optional[T]`; a missing
+      output takes its default, else a null when optional, else a parse error.
 - [ ] **D6. Experimental tracks.** Confirm that decision types, ReAnchor, `dspy.Flex`, and ReActV2 wait (G-49,
       G-19).
 
@@ -291,8 +334,8 @@ Open points from batch 1, for the owner:
 
 ## Phase 2: adapters / signatures / streaming
 
-- [ ] **A1. Optional and default output fields** (ba8a64958): a missing optional output takes its default. → G-29 (C)
-- [ ] **A2. Fallback from ChatAdapter to JSONAdapter after a parse error only** (2cda3872d), and never after
+- [x] **A1. Optional and default output fields** (ba8a64958): a missing optional output takes its default. → G-29 (C)
+- [x] **A2. Fallback from ChatAdapter to JSONAdapter after a parse error only** (2cda3872d), and never after
       visible stream output. → G-29 (R)
 - [x] **A3. Tool call ids, `ToolCallResults`, and native tool history** (2ec31b3aa, a0fcc1e37). → G-28 (R)
 - [x] **A4. `dspy.History` with output-format reminders in replay** (f207d35cf). → G-28 (R)
