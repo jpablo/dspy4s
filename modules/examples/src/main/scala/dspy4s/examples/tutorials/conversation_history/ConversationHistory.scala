@@ -7,7 +7,8 @@
   * caller adds each turn to a `History` value and gives that value to the next call.
   *
   * dspy4s programs are immutable values, so `predict.demos.append(...)` becomes `predict.copy(demos = ...)`.
-  * `dspy.inspect_history()` has no translation here: the dspy4s LM history holds no prompt (PORT_GAPS G-27).
+  * `dspy.inspect_history()` has no translation here. `askThenInspect` in learn/programming/Adapters shows the dspy4s
+  * form: `RuntimeEnvironment.inspectHistory(n)` shows the calls of a `ManagedLanguageModel`.
   */
 package dspy4s.examples.tutorials.conversation_history
 

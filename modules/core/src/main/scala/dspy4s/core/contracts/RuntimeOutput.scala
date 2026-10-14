@@ -49,8 +49,9 @@ object PredictorKey:
     PredictorKey(moduleName, layout.withInstructions(None))
 
 /** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and -- for LM
-  * entries -- usage accounting. `component` is the module name or LM id; `payload` is the caller-defined snapshot. The
-  * history ring is capped by [[RuntimeContext.maxHistorySize]] in `RuntimeEnvironment.appendHistory`.
+  * entries -- usage accounting. `component` is the module name, or `lm:<id>` for an LM call; `payload` is the
+  * caller-defined snapshot. The history ring is capped by [[RuntimeContext.maxHistorySize]] in
+  * `RuntimeEnvironment.appendHistory`.
   */
 final case class HistoryEntry(component: String, payload: DynamicValue.Record, timestamp: Instant = Instant.now())
 

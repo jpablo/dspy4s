@@ -79,7 +79,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 
 | Example | Run (`…tutorials.<pkg>.<main>`) | Coverage / notes |
 |---|---|---|
-| **conversation_history** | `conversation_history.conversationHistoryMain` 🔑 | 2/2. A `History` input field; an adapter replays its messages as earlier turns. `predict.demos.append` → `copy(demos = …)`. `inspect_history` out of scope (the LM history holds no prompt, G-27). |
+| **conversation_history** | `conversation_history.conversationHistoryMain` 🔑 | 2/2. A `History` input field; an adapter replays its messages as earlier turns. `predict.demos.append` → `copy(demos = …)`. `inspect_history` maps to `RuntimeEnvironment.inspectHistory` (see `learn/programming/Adapters`). |
 | **email_extraction** | `email_extraction.emailExtractionMain` 🔑 | Enums/case classes/`Option`/`List` via `derives Schema`; four composed `ChainOfThought`s. MLflow autolog out of scope. |
 | **output_refinement** | `output_refinement.bestOfNAndRefineMain` 🔑 | 6/6. `BestOfN[I,O]` / `Refine[I,O]` with reward functions over `Prediction[O]`. |
 | **streaming** | `streaming.streamingMain` 🔑 | 1–9. Synchronous `streamify` → `ClosableIterator[StreamEvent]`; per-field & per-predict listeners; status provider. |

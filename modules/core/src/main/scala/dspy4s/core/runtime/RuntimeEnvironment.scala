@@ -214,14 +214,15 @@ object RuntimeEnvironment:
     delta.trace.foreach(appendTrace)
     delta.history.foreach(appendHistory)
 
-  /** Render the last `n` LM-call history entries on the active context as a human-readable string, in the spirit of
-    * upstream `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread
-    * accumulation on [[dspy4s.core.contracts.RuntimeContext.history]] (filled by [[appendHistory]]), so this reads
-    * `current.history`. `n <= 0` yields an empty render; `n` larger than the available history is clamped. The payload
-    * shape is caller-defined, so [[dspy4s.core.contracts.HistoryRenderer]] renders each field generically.
+  /** Render the last `n` LM-call history entries on the active context as a human-readable string, as upstream
+    * `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread accumulation on
+    * [[dspy4s.core.contracts.RuntimeContext.history]] (filled by [[appendHistory]]), so this reads `current.history`.
+    * Only the LM entries count: the entries whose component starts with `lm:`. The other entries of the history are not
+    * shown. `n <= 0` yields an empty render; `n` larger than the available history is clamped.
+    * [[dspy4s.core.contracts.HistoryRenderer]] gives the layout.
     */
   def inspectHistory(n: Int = 10): String =
-    val entries = if n <= 0 then Vector.empty else current.history.takeRight(n)
+    val entries = if n <= 0 then Vector.empty else current.history.filter(_.component.startsWith("lm:")).takeRight(n)
     HistoryRenderer.render(entries)
 
   /** Convenience: [[inspectHistory]] printed to stdout, matching upstream `dspy.inspect_history`'s print-only behavior.

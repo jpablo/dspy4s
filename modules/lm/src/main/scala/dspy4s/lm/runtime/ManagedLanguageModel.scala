@@ -2,13 +2,11 @@ package dspy4s.lm.runtime
 
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.LmError
 import dspy4s.core.contracts.LmErrorDetails
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
@@ -248,32 +246,18 @@ final case class ManagedLanguageModel(
         case failed @ Left(_) => failed
     loop(0)
 
+  /** Append the history entry of a success or a cache hit. [[LmHistoryRecord.success]] gives the payload. */
   private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean)(using RuntimeContext): Unit =
     if historyEnabled then
       RuntimeEnvironment.appendHistory(
-        HistoryEntry(
-          component = s"lm:$id",
-          payload = DynamicValues.record(
-            "model"     := request.model,
-            "cache_hit" := cacheHit,
-            "outputs"   := response.outputs.size,
-            "mode"      := request.mode.toString
-          )
-        )
+        HistoryEntry(component = s"lm:$id", payload = LmHistoryRecord.success(request, response, cacheHit))
       )
 
+  /** Append the history entry of a failure. [[LmHistoryRecord.failure]] gives the payload. */
   private def appendFailureHistory(request: LmRequest, error: DspyError)(using RuntimeContext): Unit =
     if historyEnabled then
       RuntimeEnvironment.appendHistory(
-        HistoryEntry(
-          component = s"lm:$id",
-          payload = DynamicValues.record(
-            "model"         := request.model,
-            "cache_hit"     := false,
-            "error_code"    := error.code,
-            "error_message" := error.message
-          )
-        )
+        HistoryEntry(component = s"lm:$id", payload = LmHistoryRecord.failure(request, error))
       )
 
   private def historyEnabled(using RuntimeContext): Boolean =
