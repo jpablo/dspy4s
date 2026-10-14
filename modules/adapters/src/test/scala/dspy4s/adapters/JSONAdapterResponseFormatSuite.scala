@@ -75,10 +75,10 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     assert(embeddedSchema.isDefined, s"expected embedded schema object, got: ${js.get}")
     assertEquals(stringField(embeddedSchema.get, "type"), Some("object"))
     assert(field(embeddedSchema.get, "properties").isDefined, s"expected properties in embedded schema")
-    // strict must be false
+    // Strict mode, as upstream (L4).
     assertEquals(
       field(js.get, "strict").collect { case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => b },
-      Some(false)
+      Some(true)
     )
   }
 
@@ -121,18 +121,14 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     assertEquals(stringField(scoreProp.get, "type"), Some("integer"))
   }
 
-  test("response_format embeds the sanitized signature name") {
+  test("response_format has the upstream schema name") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
     val formatted        = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
     val opts             = formatted.toOption.get.requestOptions
     val name             = DynamicValues.recordGet(opts, "response_format")
       .flatMap(field(_, "json_schema"))
       .flatMap(stringField(_, "name"))
-    assert(name.isDefined, "expected a name field")
-    assert(
-      name.exists(_.matches("^[a-zA-Z0-9_-]+$")),
-      s"expected sanitized name matching ^[a-zA-Z0-9_-]+$$, got: $name"
-    )
+    assertEquals(name, Some("DSPyProgramOutputs"))
   }
 
   test("no response_format when the LM does not support response schema") {
@@ -141,10 +137,13 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
   }
 
-  test("no response_format when no JSON schema is present (even if supported)") {
+  test("with no typed schema, response_format has a schema built from the field types") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
     val formatted        = JSONAdapter().format(invocationWithSchema(None))
-    assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
+    val rf               = DynamicValues.recordGet(formatted.toOption.get.requestOptions, "response_format")
+    assertEquals(rf.flatMap(stringField(_, "type")), Some("json_schema"))
+    val properties = rf.flatMap(field(_, "json_schema")).flatMap(field(_, "schema")).flatMap(field(_, "properties"))
+    assert(properties.flatMap(field(_, "answer")).isDefined, s"expected an `answer` property, got: $rf")
   }
 
   test("no response_format when there is no ambient LM") {
@@ -153,11 +152,16 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
   }
 
-  test("malformed schema string yields no response_format but format still succeeds with prose") {
+  test("malformed schema string yields JSON mode but format still succeeds with prose") {
     given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
     val formatted        = JSONAdapter().format(invocationWithSchema(Some("{not valid json")))
     assert(formatted.isRight, s"format must not fail over a malformed schema, got: $formatted")
-    assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
+    // Upstream: when no structured schema results, the request uses JSON mode.
+    assertEquals(
+      DynamicValues.recordGet(formatted.toOption.get.requestOptions, "response_format")
+        .flatMap(stringField(_, "type")),
+      Some("json_object")
+    )
     // prose fallback: the malformed schema string is still inlined into the system message
     assert(
       formatted.toOption.get.messages.head.text.exists(_.contains("{not valid json")),

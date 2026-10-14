@@ -7,7 +7,7 @@ import dspy4s.adapters.contracts.{
   NativeFunctionCalling,
   ToolChoice
 }
-import dspy4s.adapters.internal.{AdapterTextSupport, ConversationHistory, JsonDynamic, TurnText}
+import dspy4s.adapters.internal.{AdapterTextSupport, ConversationHistory, JsonDynamic, StrictJsonSchema, TurnText}
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, updated}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
@@ -53,7 +53,7 @@ private[adapters] object JSONAdapterPrompt:
       FormattedPrompt(
         messages = messages,
         requestOptions = FormattedPrompt.mergeOptions(
-          responseFormatOptions(invocation),
+          responseFormatOptions(invocation, useNativeFunctionCalling),
           NativeFunctionCalling.toolOptions(
             invocation.layout,
             invocation.tools,
@@ -91,37 +91,75 @@ private[adapters] object JSONAdapterPrompt:
       .map(field => s" The value of `${field.name}` must be ${NativeFunctionCalling.TextFormat}.")
       .mkString
 
-  /** Emit an OpenAI-compatible response schema when the resolved model supports it. */
-  private def responseFormatOptions(invocation: AdapterInvocation)(using ctx: RuntimeContext): DynamicValue.Record =
+  /** The `response_format` of the request (upstream `JSONAdapter._prepare_response_format`). Empty when the model of
+    * the context does not support a response schema.
+    *
+    * The schema is the typed output schema of the invocation, else the schema that
+    * [[dspy4s.adapters.internal.StrictJsonSchema.fromFields]] builds from the output fields. With native function
+    * calling active ([[NativeFunctionCalling.isActive]]), the schema has no tool calls field. The constraints of the
+    * fields are added, then [[dspy4s.adapters.internal.StrictJsonSchema.shape]] puts the schema in strict shape. The
+    * result is `{"type": "json_schema", "json_schema": {"name": "DSPyProgramOutputs", "schema": ..., "strict": true}}`.
+    *
+    * JSON mode, `{"type": "json_object"}`, replaces the schema when an output is a tool calls field and native function
+    * calling is not active, or when no strict schema results: the typed schema does not parse, a field type has no
+    * schema, or the schema has an open map.
+    */
+  private def responseFormatOptions(invocation: AdapterInvocation, useNativeFunctionCalling: Boolean)(using
+      ctx: RuntimeContext
+  ): DynamicValue.Record =
     val capable = ctx.lm match
       case Some(lm: LanguageModel) => lm.supportsResponseSchema
       case _                       => false
     if !capable then
       DynamicValue.Record.empty
     else
-      invocation.outputJsonSchema match
-        case Some(schemaString) => JsonDynamic.parse(schemaString) match
-            case Right(schema: DynamicValue.Record) =>
-              val jsonSchema = DynamicValue.Record(
+      val format = responseFormat(invocation, NativeFunctionCalling.isActive(useNativeFunctionCalling))
+      DynamicValue.Record(Chunk.single("response_format" -> format))
+
+  /** The strict `json_schema` format of `invocation`, else JSON mode. See [[responseFormatOptions]]. */
+  private def responseFormat(invocation: AdapterInvocation, nativeActive: Boolean): DynamicValue.Record =
+    val outputFields = invocation.layout.outputFields
+    if !nativeActive && outputFields.exists(NativeFunctionCalling.isToolCallsField) then
+      JsonMode
+    else
+      // In this branch, a tool calls field is an output only when native function calling is active. The schema does
+      // not show that field.
+      val fields         = outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
+      val toolCallsNames = outputFields.filter(NativeFunctionCalling.isToolCallsField).map(_.name).toSet
+      val schema         = invocation.outputJsonSchema match
+        case Some(schemaString) => JsonDynamic.parse(schemaString).toOption.collect {
+            case typed: DynamicValue.Record => withoutProperties(typed, toolCallsNames)
+          }
+        case None => StrictJsonSchema.fromFields(fields)
+      val optionalFields = fields.filter(_.optional).map(_.name).toSet
+      schema
+        .map(embedConstraints(_, fields))
+        .flatMap(StrictJsonSchema.shape(_, optionalFields).toOption) match
+        case Some(strict) => DynamicValue.Record(
+            Chunk(
+              "type"        -> DynamicValue.Primitive(PrimitiveValue.String("json_schema")),
+              "json_schema" -> DynamicValue.Record(
                 Chunk(
-                  "name"   -> DynamicValue.Primitive(PrimitiveValue.String(sanitizeSchemaName(invocation.layout.name))),
-                  "schema" -> embedConstraints(schema, invocation.layout.outputFields),
-                  "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false))
+                  "name"   -> DynamicValue.Primitive(PrimitiveValue.String(StrictJsonSchema.Name)),
+                  "schema" -> strict,
+                  "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
                 )
               )
-              DynamicValue.Record(
-                Chunk.single(
-                  "response_format" ->
-                    DynamicValue.Record(
-                      Chunk(
-                        "type"        -> DynamicValue.Primitive(PrimitiveValue.String("json_schema")),
-                        "json_schema" -> jsonSchema
-                      )
-                    )
-                )
-              )
-            case _ => DynamicValue.Record.empty
-        case None => DynamicValue.Record.empty
+            )
+          )
+        case None => JsonMode
+
+  /** The JSON mode format: the response is a JSON object, with no schema. */
+  private val JsonMode: DynamicValue.Record =
+    DynamicValue.Record(Chunk.single("type" -> DynamicValue.Primitive(PrimitiveValue.String("json_object"))))
+
+  /** `schema` with no property in `names`. [[StrictJsonSchema.shape]] writes `required` again from the properties. */
+  private def withoutProperties(schema: DynamicValue.Record, names: Set[String]): DynamicValue.Record =
+    DynamicValues.recordGet(schema, "properties") match
+      case Some(properties: DynamicValue.Record) if names.nonEmpty =>
+        val kept = properties.fields.toVector.filterNot((name, _) => names.contains(name))
+        schema.updated("properties", DynamicValue.Record(Chunk.from(kept)))
+      case _ => schema
 
   /** Add each output field's constraints to the corresponding JSON Schema property. */
   private def embedConstraints(
@@ -147,10 +185,3 @@ private[adapters] object JSONAdapterPrompt:
             }
           schema.updated("properties", DynamicValue.Record(Chunk.from(updatedProperties)))
         case _ => schema
-
-  private def sanitizeSchemaName(name: String): String =
-    val cleaned = name.replaceAll("[^a-zA-Z0-9_-]", "_")
-    if cleaned.isEmpty then
-      "response_schema"
-    else
-      cleaned

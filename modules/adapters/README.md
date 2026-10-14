@@ -30,7 +30,7 @@ earlier turns, between the demos and the current request.
 |------|------|
 | `Adapter` | The trait: `format` (build the prompt), `parse` (extract outputs), `streamingState` (optional per-field streaming), `execute` (full round-trip). |
 | `ChatAdapter` | Marker-framed (`[[ ## name ## ]]`) formatting and parsing; mirrors Python dspy. Configurable native function-calling, parallel tool calls, tool choice. |
-| `JSONAdapter` | JSON instructions; inlines a JSON schema when one is available, merges `response_format` into request options; falls back to text for single-output signatures. |
+| `JSONAdapter` | JSON instructions; inlines a JSON schema when one is available, merges a strict `response_format` (or JSON mode) into request options; falls back to text for single-output signatures. |
 | `XMLAdapter` | `<outputs><field>…</field></outputs>` framing with the same single-output fallback. |
 | `TwoStepAdapter` | A natural-language first call to the main LM, then a ChatAdapter second call to an `extractionModel` that structures the free-form reply. |
 | `AdapterInvocation` | Everything an adapter needs: layout, demos, inputs, the `LmRequest`, optional output JSON schema, and tool specs. |
@@ -90,11 +90,14 @@ earlier turns, between the demos and the current request.
       field `tool_call_results`.
     - A demo that has a history value shows it as a field. The history of a demo is not replayed.
       `TwoStepAdapter` does not replay a history. It shows the value as a field.
-- **Two JSON modes, one lenient.** Without schema support, JSONAdapter gives prose key-guidance; with it, it
-  injects `response_format: {type: "json_schema", …, strict: false}`. The schema is embedded leniently because
-  dspy4s schemas may not satisfy OpenAI strict mode. (See the [two-codec note](../../README.md): the
-  DynamicValue codec is strict round-trip; the zio-blocks `Schema` JSON codec is the lenient one for loose provider
-  payloads.)
+- **Strict structured outputs.** When the model supports a response schema, JSONAdapter sends
+  `response_format: {type: "json_schema", json_schema: {name: "DSPyProgramOutputs", schema, strict: true}}`, as
+  upstream `JSONAdapter._prepare_response_format`. The schema is the typed output schema, else a schema built from
+  the field types (`StrictJsonSchema.fromFields`). `StrictJsonSchema.shape` puts it in strict shape: each property
+  required, each object closed, an optional field nullable, a lone `allOf` merged, a `$ref` with other keys resolved,
+  and a `oneOf` sent as `anyOf`. JSON mode (`{"type": "json_object"}`) replaces the schema for a text `tool_calls`
+  field, an open map, or a type with no schema. Without schema support, JSONAdapter sends no `response_format` and
+  gives prose key-guidance only.
 - **Marker discipline for streaming.** Markers must be line-aligned; the streaming state holds back the longest
   possible partial marker so a token boundary never truncates one. On finish, held content flushes with
   `isLast = true`.
