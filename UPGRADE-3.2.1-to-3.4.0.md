@@ -370,6 +370,28 @@ The full suite passes: 1,595 tests, 0 failures, 6 live tests skipped.
     and the stream sends the text before a later marker as a chunk of the field.
   - A repeated chat header streams each section, but the parser keeps the first.
 
+### Batch 14 (2026-10-14): the JSON disk cache record
+
+The full suite passes: 1,603 tests, 0 failures, 6 live tests skipped.
+
+- **L9** (G-24). `DiskLmCache` writes a versioned JSON record in place of Java serialization, as upstream
+  `CallResult.dump` and `CACHE_FORMAT`.
+- **Decided by Claude, review.**
+  - The record: `<key>.json` with `_dspy4s_format` = `dspy4s-lm-result-v1`, `outputs` (`text`, `tool_calls` of
+    `{name, args, id?}`, `metadata`), `usage` (`total_tokens`, `prompt_tokens`, `completion_tokens`, `extras`) or
+    `null`, and `model_name` or `null`. The port has its own format name, because its record is not upstream's.
+  - A legacy `.bin` entry stays readable, as upstream keeps legacy records readable, but only through a strict
+    `ObjectInputFilter`. A valid legacy entry is a hit and moves to the JSON record. A rejected one is a miss and is
+    removed. The alternative was to drop all legacy entries.
+- **Changes in behavior.**
+  - The cache directory gets `.json` files. Old `.bin` files move to `.json` when `get` reads them.
+  - A `.bin` file with a class outside the old record no longer runs the code of that class.
+- **Open points, for the owner.**
+  - Each `put` still lists and sorts the directory for the eviction.
+  - A deeply nested `args` value can overflow the stack in the JSON encoder, as before.
+  - Upstream also stores the provider responses, the cost, and the raw response. The port stores only the fields of
+    `LmResponse`.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -433,7 +455,7 @@ Open points from batch 1, for the owner:
 - [ ] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
 - [ ] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
 - [ ] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
-- [ ] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
+- [x] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
 - [ ] **L10. Advisory cost estimate** and nested cost roll-up (bb8ba59c0). → G-27 (R)
 
 ## Phase 2: adapters / signatures / streaming

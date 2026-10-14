@@ -1090,7 +1090,7 @@ Open:
 
 ## G-24 — LM cache: the key ignores model default options; the disk format is Java serialization
 
-**Status:** In progress. The cache key is resolved (2026-10-11, batch 1); the disk format is open. · **Verification:** C (key), R (disk) · **Upgrade item:** L9
+**Status:** Resolved (2026-10-14, batch 14). The cache key was resolved on 2026-10-11 (batch 1). · **Verification:** C (key), R (disk) · **Upgrade item:** L9
 
 **Upstream.** The key uses the merged request options (`dspy/clients/execution.py:58-70,145,166`). The disk
 record is versioned plain data (`dspy/clients/call_result.py:11,126-138`).
@@ -1109,7 +1109,12 @@ record is versioned plain data (`dspy/clients/call_result.py:11,126-138`).
 two cannot differ. Tests: `LmCacheKeySuite`. A disk cache entry of a model that has defaults misses one time,
 because its key changed.
 
-**Direction (disk).** Replace Java serialization with a versioned JSON record.
+**Resolution (disk, batch 14).** `DiskLmCache` writes `<key>.json`, a JSON object with `_dspy4s_format`
+(`dspy4s-lm-result-v1`), `outputs`, `usage`, and `model_name`. A file that is not JSON or has another format is a
+miss and is removed. A legacy `<key>.bin` entry is read with an `ObjectInputFilter` that accepts only the classes of
+the old record (one-dimension arrays of its element classes, `String`, `Long`, `Number`, `HashMap`, and a depth of 8
+at most), then moved to the JSON record. Tests: `DiskCacheRecordSuite`. Open: the directory listing on each `put`
+stays; a deeply nested `args` value can still overflow the stack in the encoder, as before.
 
 ---
 
