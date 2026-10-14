@@ -117,6 +117,14 @@ private[adapters] object AdapterTextSupport:
       }
     }.mkString("\n")
 
+  /** The value of the output field `field` from its raw text (upstream `parse_value` with a string). A `tool_calls`
+    * field takes the JSON list of calls in the text ([[textToolCalls]]). Each other field goes to [[coerceOutputText]].
+    * The Chat, JSON, and XML adapters use this function, so a text value has the same rules in each format.
+    */
+  def outputTextValue(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
+    if NativeFunctionCalling.isToolCallsField(field) then textToolCalls(raw)
+    else coerceOutputText(field, raw)
+
   /** Coerce the raw text of the output field `field` (upstream `parse_value`). The text `null` or `None` of an optional
     * field is a null, when the type of the field is not a string. Each other text goes to [[coerceText]].
     */

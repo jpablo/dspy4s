@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import scala.util.matching.Regex
+
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
   * This is the *adapter / prompt* type, not the Scala type -- `Shape[A]` carries the static Scala-side encoding. A
@@ -45,8 +47,9 @@ object TypeRef:
 
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
-    * case-insensitive. Unknown tokens become opaque `TypeRef(other)`. An empty / missing token defaults to
-    * [[TypeRef.string]] (DSPy convention -- fields without a type annotation are strings).
+    * case-insensitive. A `dict[...]` token is [[TypeRef.json]], as `dict` is. Unknown tokens become opaque
+    * `TypeRef(other)`. An empty / missing token defaults to [[TypeRef.string]] (DSPy convention -- fields without a
+    * type annotation are strings).
     */
   def fromToken(token: String): TypeRef =
     token.trim.toLowerCase match
@@ -57,4 +60,8 @@ object TypeRef:
       case "json" | "dict" | "map"       => json
       case "tool_calls" | "toolcalls"    => toolCalls
       case "history"                     => history
+      case DictToken()                   => json
       case other                         => TypeRef(other)
+
+  /** A `dict` token with type arguments, for example `dict[str, int]` (after the token becomes lower case). */
+  private val DictToken: Regex = """dict\[.*\]""".r

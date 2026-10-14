@@ -66,10 +66,13 @@ final case class XMLAdapter(
           AdapterTextSupport.singleOutputTextFallback(name, layout, output)
         else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
 
+  /** The values of the output fields of `document`. A text `tool_calls` field takes the JSON list of calls in its text,
+    * as in the chat and JSON formats (upstream `parse_value` with `ToolCalls`).
+    */
   private def parseFields(layout: SignatureLayout, document: Elem, output: LmOutput): Either[DspyError, ParsedOutput] =
     AdapterTextSupport.decodeOutputFields(layout, output.text) { field =>
       extractFieldText(document, field.name) match
-        case Some(raw) => AdapterTextSupport.coerceOutputText(field, raw).map(Some(_))
+        case Some(raw) => AdapterTextSupport.outputTextValue(field, raw).map(Some(_))
         case None      => Right(None)
     }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
 

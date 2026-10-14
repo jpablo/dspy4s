@@ -39,16 +39,12 @@ private[adapters] object ChatAdapterParser:
           Right(Some(NativeFunctionCalling.encodeToolCalls(output.toolCalls)))
         else
           resolved.get(field.name) match
-            case Some(value) => decodeText(field, value).map(Some(_))
+            case Some(value) => AdapterTextSupport.outputTextValue(field, value).map(Some(_))
             // A tool turn has no final answer yet: a missing field takes its default, else a null.
             case None if output.toolCalls.nonEmpty => Right(Some(field.defaultValue.getOrElse(DynamicValue.Null)))
             case None                              => Right(None)
       }
       .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
-
-  private def decodeText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
-    if NativeFunctionCalling.isToolCallsField(field) then AdapterTextSupport.textToolCalls(raw)
-    else AdapterTextSupport.coerceOutputText(field, raw)
 
   /** The text of each output field. The first header of a field wins (upstream `ChatAdapter.parse`): the lines of a
     * later header of the same field are dropped. Each text is stripped at both ends, as upstream

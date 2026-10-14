@@ -74,13 +74,16 @@ private[adapters] object JSONAdapterParser:
       .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
 
   /** The value of the output field `field` (upstream `parse_value`). A JSON null of an optional field is a null. A tool
-    * calls field takes a JSON list of calls, or the JSON text of such a list.
+    * calls field takes a JSON list of calls, or the JSON text of such a list. A JSON string for a field whose type is
+    * not a string goes through the text coercion of the chat format (`AdapterTextSupport.coerceOutputText`), as
+    * upstream `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a
+    * `list` field is a list.
     */
   private def decode(field: FieldSpec, value: Value): Either[DspyError, DynamicValue] =
     value match
-      case _: ujson.Null.type if field.optional                             => Right(DynamicValue.Null)
-      case ujson.Str(text) if NativeFunctionCalling.isToolCallsField(field) => AdapterTextSupport.textToolCalls(text)
-      case other if NativeFunctionCalling.isToolCallsField(field)           =>
+      case _: ujson.Null.type if field.optional                   => Right(DynamicValue.Null)
+      case ujson.Str(text)                                        => AdapterTextSupport.outputTextValue(field, text)
+      case other if NativeFunctionCalling.isToolCallsField(field) =>
         AdapterTextSupport.toolCallsValue(JsonDynamic.fromUjson(other))
       case other => coerce(field.typeRef, other)
 
