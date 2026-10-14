@@ -1348,10 +1348,10 @@ the key.
 - Tests: `AdapterOutputRulesSuite`, `AdapterFallbackSuite`, `StreamingFallbackSuite`, `OptionalFieldSuite`,
   `OptionalFieldSpecSuite`.
 
-**Open points (batch 10).** The XML adapter keeps `tool_calls` as text. A typed `Option[Int]` field has the prompt
-type `str`. The string syntax does not parse a type with a comma, such as `Union[int, None]`. A JSON fallback call
+**Open points (batch 10).** The XML `tool_calls` field, a type with a comma such as `Union[int, None]`, and the JSON
+string `"3"` for an `int` field are resolved in batch 18. A typed `Option[Int]` field has the prompt type `str`. A JSON fallback call
 streams through the chat stream state. The extraction step of `TwoStepAdapter` and `Adapter.execute` get no
-fallback. The JSON string `"3"` for an `int` field is a parse error. An incomplete demo hides its null inputs, and a
+fallback. An incomplete demo hides its null inputs, and a
 null output shows the "Not supplied" text, where upstream shows `None`. The UPGRADE file lists the details.
 
 ---

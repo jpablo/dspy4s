@@ -467,6 +467,29 @@ The full suite passes: 1,630 tests, 0 failures, 6 live tests skipped.
   - `sendJson` has no limit on the body after the headers: the JDK client stops its timer when the headers arrive.
   - A consumer that never reads a stream to its end and never closes it keeps the reader thread and the connection.
 
+### Batch 18 (2026-10-14): value and syntax fixes from the open points of batch 10
+
+The full suite passes: 1,639 tests, 0 failures, 6 live tests skipped.
+
+Three open points of batch 10, closed with the upstream behavior (decided by Claude, review):
+
+- A JSON string for a field that is not a string is read from its text, as upstream `parse_value` reads a string
+  with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a `list` field is a list. A string that does
+  not fit is still a parse error with the field name. `AdapterTextSupport.outputTextValue` is the one rule for a text
+  value in the chat, JSON, and XML formats.
+- The XML adapter reads a text `tool_calls` field as the JSON list of calls, as the chat and JSON formats do.
+- The string signature syntax splits fields at commas outside brackets, reads `Union[T, None]` and `Union[None, T]`
+  as an optional `T`, and reads a `dict[...]` type as `json`. Thus `scores: dict[str, int]` and
+  `note: Optional[dict[str, int]]` parse.
+- **Changes in behavior.**
+  - A JSON string for a `json` field that is not JSON is a parse error. Before, it was a string value.
+  - An optional `tool_calls` field with the text `null` is now a parse error in the XML format too. Before, XML gave a
+    null. Upstream gives `None` in each format; this is an open point.
+- **Open points, for the owner.**
+  - The text of an `int` field is not trimmed, and `"3.0"` is not an `int`. Upstream accepts both.
+  - An opaque type such as `list[str]` keeps a JSON string as a string. Upstream reads a list.
+  - A union of more than one type and `None` gives an opaque type, for example `int | str`.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
