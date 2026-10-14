@@ -1201,7 +1201,8 @@ endpoint as its own item.
 
 ## G-27 — LM history holds no prompt and no completion; no cost estimate
 
-**Status:** Open · **Verification:** R · **Upgrade items:** L10, I11
+**Status:** In progress. The history content and `inspectHistory` are resolved (2026-10-14, batch 15); the cost
+estimate is open. · **Verification:** R · **Upgrade items:** L10, I11
 
 **Upstream.** A history entry stores messages, outputs, usage, cost, and the response id
 (`dspy/clients/execution.py:738-754`). `inspect_history` prints messages, responses, and tool calls
@@ -1213,7 +1214,14 @@ fails a call (`dspy/clients/costs.py:12-110`).
 can return a module entry (`modules/core/.../runtime/RuntimeEnvironment.scala:209-211`). The "Recently resolved"
 note for `inspect_history` covers the function, not this content. There is no cost field.
 
-**Direction.** Store the messages and the outputs in the LM entry. Give `inspectHistory` an LM-only view.
+**Resolution (history content, batch 15).** `LmHistoryRecord` writes the LM entry with the upstream keys: `model`,
+`model_type`, `cache_hit`, `messages`, `kwargs`, `outputs`, `usage`, `response_model`, and `uuid` (a failure has
+`error_code` and `error_message` in place of the outputs). `ManagedLanguageModel` uses it for a call, a cache hit, and
+a streamed call. `RuntimeEnvironment.inspectHistory` shows only the `lm:` entries, in the layout of upstream
+`pretty_print_history`, with the tool calls. Tests: `LmHistoryEntrySuite`, `InspectHistorySuite`.
+
+**Direction (cost, open).** Upstream reads the prices from a model catalog. The port has no catalog, so a cost
+estimate needs a decision of the owner: a catalog, prices that the user declares, or no cost.
 
 ---
 

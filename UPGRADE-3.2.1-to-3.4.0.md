@@ -338,8 +338,8 @@ marked **decided by Claude, review**. Each such choice takes the upstream behavi
     Upstream checks only `type == "object"`.
   - A `$ref` in a cycle gives JSON mode. Upstream recurses with no end.
 - **Open points, for the owner.**
-  - `ZioSchemaCodec.jsonSchemaForModel` did not finish in 10 minutes for a recursive case class
-    (`children: List[Node]`). The L4 subagent saw this in a probe. This batch does not cause it.
+  - `ZioSchemaCodec.jsonSchemaForModel` does not return for a recursive case class (`children: List[Node]`). A
+    second probe confirmed it (no result in 7 minutes). This batch does not cause it. A separate task is flagged.
   - Upstream logs a warning when it goes back to JSON mode. The port does not log.
 
 ### Batch 13 (2026-10-14): stream whitespace, `appendInstructions`, and the RLM checks
@@ -391,6 +391,32 @@ The full suite passes: 1,603 tests, 0 failures, 6 live tests skipped.
   - A deeply nested `args` value can overflow the stack in the JSON encoder, as before.
   - Upstream also stores the provider responses, the cost, and the raw response. The port stores only the fields of
     `LmResponse`.
+
+### Batch 15 (2026-10-14): the content of the LM history and `inspectHistory`
+
+The full suite passes: 1,613 tests, 0 failures, 6 live tests skipped.
+
+- **I11** (G-27, history content). An LM history entry holds the messages, the options, the outputs, the usage, the
+  model of the response, and a UUID, as upstream `finalize`. `inspectHistory` shows only the LM entries, in the
+  layout of upstream `pretty_print_history`, with the tool calls of the messages and of the response.
+- **Decided by Claude, review.**
+  - The keys and their order follow upstream: `model`, `model_type`, `cache_hit`, `messages`, `kwargs`, `outputs`,
+    `usage`, `response_model`, `uuid`. A tool call is `{name, args, id?}`, the shape of the port, not the OpenAI wire
+    shape. A message part is `{kind, payload}`.
+  - A failed call keeps its entry, with `error_code` and `error_message`. Upstream records no failed call. The render
+    shows it as `Error (<code>): <message>`.
+  - The render has no colors. A part shows `<kind: n characters>`. The arguments of a tool call are compact JSON.
+- **API changes.** `LmHistoryRecord` is new in `dspy4s.lm.runtime`. `HistoryRenderer.render` has the new layout.
+- **Changes in behavior.**
+  - `inspectHistory(n)` counts only the LM entries. Before, a module entry could fill the view.
+  - An LM entry holds the full messages and outputs. A long run keeps more data in memory; the cap of 10,000 entries
+    stays.
+  - The old keys `outputs` (a count) and `mode` are gone.
+- **Open points, for the owner.**
+  - L10, the cost estimate: upstream reads prices from a model catalog. The port needs a decision: a catalog, prices
+    that the user declares, or no cost.
+  - `kwargs` keeps all the request options. Upstream removes the keys that start with `api_`. No port code puts such
+    keys in the options.
 
 Open points from batch 1, for the owner:
 
@@ -500,7 +526,7 @@ Open points from batch 1, for the owner:
 - [ ] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
       for base exceptions (970f72900). → G-40 (C for the end event, R for the others)
 - [ ] **I10. MCP**: SDK v2 (32bcd36ce) and structured results (ca0a088bd). → G-47 (R)
-- [ ] **I11. `inspect_history` renders tool calls** (571171227). → G-27 (R)
+- [x] **I11. `inspect_history` renders tool calls** (571171227). → G-27 (R)
 
 ## Phase 5: optimize / gepa / evaluate
 
