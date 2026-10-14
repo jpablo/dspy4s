@@ -62,6 +62,9 @@ final case class OpenAiClient(
           DynamicJson.decode(response.body)
       }
 
+  /** Close the transport (see [[HttpTransport.close]]). The client stays usable. */
+  def close(): Unit = transport.close()
+
   /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]]. The stream always goes
     * to [[chatEndpoint]] with the chat body: the port has no parser for the events of a Responses stream.
     *

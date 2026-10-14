@@ -32,6 +32,7 @@ import dspy4s.streaming.contracts.StreamEvent
 import munit.FunSuite
 import zio.blocks.schema.Schema
 
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 private final case class ContractInput(question: String) derives Schema
@@ -119,6 +120,23 @@ class StreamingWrapperContractSuite extends FunSuite:
     assert(wrapper.supportsFunctionCalling, "supportsFunctionCalling")
     assert(wrapper.supportsResponseSchema, "supportsResponseSchema")
     assert(wrapper.supportsReasoning, "supportsReasoning")
+  }
+
+  test("the stream wrapper does not close its delegate, because it does not own the model of the configuration") {
+    val closes = AtomicInteger(0)
+    val lm     = new StreamingLanguageModel:
+      override val id: String                                                                    = "owned-elsewhere"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        Right(LmResponse(outputs = Vector(LmOutput(text = "ok"))))
+      override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+        Iterator.single(LmChunk(text = "ok", finishReason = Some("stop")))
+      override def close(): Unit =
+        val _ = closes.incrementAndGet()
+
+    StreamingLanguageModelWrapper(lm, StreamingQueue[StreamEvent]()).close()
+
+    assertEquals(closes.get(), 0)
   }
 
   test("under streamify, the JSON adapter still sends response_format to a model that supports it") {

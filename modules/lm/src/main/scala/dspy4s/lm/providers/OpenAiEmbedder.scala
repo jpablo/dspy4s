@@ -26,6 +26,9 @@ final case class OpenAiEmbedder(
 
   override def id: String = model
 
+  /** Close the transport. The embedder stays usable: a later call opens new connections. */
+  def close(): Unit = transport.close()
+
   override def embed(texts: Vector[String])(using RuntimeContext): Either[DspyError, Vector[Vector[Float]]] =
     if texts.isEmpty then Right(Vector.empty)
     else

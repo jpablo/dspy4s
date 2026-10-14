@@ -21,9 +21,10 @@ import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
-/** An [[HttpTransport]] on the JDK HTTP client. The connect limit of `timeouts` bounds the connection. The read limit
-  * bounds the wait for the status and the headers, and, for a stream, the wait for each next line (see [[HttpTimeouts]]
-  * and [[HttpStreamResponse.failure]]).
+/** An [[HttpTransport]] on the JDK HTTP client. The client starts at the first request. [[close]] closes it (JDK
+  * `HttpClient.close`, which waits for the requests that run), and the next request starts a new client. The connect
+  * limit of `timeouts` bounds the connection. The read limit bounds the wait for the status and the headers, and, for a
+  * stream, the wait for each next line (see [[HttpTimeouts]] and [[HttpStreamResponse.failure]]).
   *
   * The read limit of [[sendJson]] bounds only the wait for the status and the headers (the JDK request timeout). The
   * JDK client then reads the body with no limit.
@@ -33,9 +34,36 @@ final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
 
   private val timeoutMillis: Long = timeouts.read.toMillis
 
-  private val client: HttpClient = HttpClient.newBuilder()
-    .connectTimeout(Duration.ofMillis(timeouts.connect.toMillis))
-    .build()
+  /** The JDK client: `None` before the first request and after [[close]]. The lock of this transport guards it. */
+  private var current: Option[HttpClient] = None
+
+  /** The JDK client. The first call after the start or after [[close]] starts a new client. */
+  private def client: HttpClient =
+    this.synchronized {
+      current.getOrElse {
+        val started = HttpClient.newBuilder()
+          .connectTimeout(Duration.ofMillis(timeouts.connect.toMillis))
+          .build()
+        current = Some(started)
+        started
+      }
+    }
+
+  /** `true` when this transport has a JDK client now: after a request and before [[close]]. For tests. */
+  private[providers] def isOpen: Boolean = this.synchronized(current.isDefined)
+
+  /** Remove the client from this transport, then close it (upstream `LM.close`). The JDK close waits for the requests
+    * that run, and for each stream until it ends. A request that starts during this call can get the old client, and
+    * then fails with an [[dspy4s.core.contracts.LmTransportError]]. A stream that is open can end with a failure of the
+    * transport. A request after this call starts a new client. When the transport has no client, `close` does nothing.
+    */
+  override def close(): Unit =
+    val removed = this.synchronized {
+      val previous = current
+      current = None
+      previous
+    }
+    removed.foreach(_.close())
 
   override def sendJson(
       url    : String,

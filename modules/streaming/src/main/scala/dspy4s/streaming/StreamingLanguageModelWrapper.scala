@@ -63,6 +63,11 @@ final class StreamingLanguageModelWrapper private (
   override def supportsReasoning: Boolean          = delegate.supportsReasoning
   override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
+  /** Does nothing. The delegate is the model of the configuration, and this wrapper does not own it: the wrapper is the
+    * active model for one `streamify` call only. Thus the wrapper does not close the delegate.
+    */
+  override def close(): Unit = ()
+
   /** Stream the call, give the tokens to the listeners, and assemble the response. A [[LmChunk.cached]] chunk gives its
     * response as is, and no token goes to a listener (upstream: a cache hit sends no stream chunk).
     */

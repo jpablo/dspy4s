@@ -91,6 +91,9 @@ final case class OpenAiLanguageModel(
       case _                     => request
     ProviderRequestNormalizer.normalize(routed, defaultOptions)
 
+  /** Close the client (see [[dspy4s.lm.contracts.LanguageModel.close]]). */
+  override def close(): Unit = client.close()
+
 object OpenAiLanguageModel:
 
   /** Construct a provider against the default OpenAI base URL (`https://api.openai.com/v1`) and JDK transport, given an

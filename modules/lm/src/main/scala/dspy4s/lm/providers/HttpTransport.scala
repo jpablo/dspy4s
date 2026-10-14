@@ -53,6 +53,11 @@ trait HttpTransport:
       body   : String
   ): Either[DspyError, HttpStreamResponse]
 
+  /** Release the connections of this transport. The transport stays usable: a later request opens new connections. The
+    * default does nothing.
+    */
+  def close(): Unit = ()
+
 object HttpTransport:
   /** A transport on the JDK HTTP client with the time limits `timeouts`. */
   def jdk(timeouts: HttpTimeouts = HttpTimeouts()): HttpTransport = new JdkHttpTransport(timeouts)

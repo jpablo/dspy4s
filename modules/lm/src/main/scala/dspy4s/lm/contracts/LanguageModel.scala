@@ -32,6 +32,12 @@ trait LanguageModel extends LanguageModelRef:
 
   def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse]
 
+  /** Release the resources that this model owns, for example the HTTP client of a provider (upstream `LM.close`). The
+    * model stays usable: a later call opens new resources. A copy of a model shares its resources, so a `close` of one
+    * copy releases them for each copy. A wrapper closes its delegate. The default does nothing.
+    */
+  def close(): Unit = ()
+
   def acall(request: LmRequest)(using RuntimeContext, ExecutionContext): Future[Either[DspyError, LmResponse]] =
     acallExecuted(request).map(_.value)(using ExecutionContext.parasitic)
 

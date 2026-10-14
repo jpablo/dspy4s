@@ -165,6 +165,9 @@ final case class ManagedLanguageModel(
   // The default options pass through too: the cache key below reads them, and an outer wrapper must see them.
   override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
+  /** Close the delegate. The cache stays. */
+  override def close(): Unit = delegate.close()
+
   /** A streamed call with the rules of [[call]] (upstream `execute`: one call path for streamed calls).
     *
     *   - Cache: a hit gives one [[LmChunk.cached]] chunk, and the delegate gets no request. The cache stores the
