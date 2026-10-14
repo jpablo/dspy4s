@@ -1166,7 +1166,7 @@ No check rejects an event after the end event. The usage of a retried attempt is
 
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
-**Status:** In progress. The strict schema is resolved (2026-10-14, batch 12). · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+**Status:** In progress. The strict schema (2026-10-14, batch 12) and the timeouts (batch 17) are resolved. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1193,6 +1193,11 @@ No check rejects an event after the end event. The usage of a retried attempt is
 signature gets a schema from its field types (`StrictJsonSchema.fromFields`). JSON mode replaces the schema for an
 open map, a text `tool_calls` field, or a schema that cannot be built. A `oneOf` goes out as `anyOf`. Tests:
 `StrictResponseFormatSuite`, `JSONAdapterResponseFormatSuite`.
+
+**Resolution (timeouts, batch 17).** `HttpTimeouts(connect = 10 s, read = 600 s)`, the lm15 defaults. The read limit
+bounds the wait for the headers and for each line of a stream. A stream that stops ends with an `LmTimeoutError`, and a
+connection that fails during a stream ends it with an `LmTransportError` (`HttpStreamResponse.failure`). Tests:
+`HttpTimeoutsSuite`. Open: the body of a plain call has no limit after the headers.
 
 **Direction (open).** Add a `capabilities` value to the OpenAI client for compatible servers. Treat the Responses
 endpoint as its own item.

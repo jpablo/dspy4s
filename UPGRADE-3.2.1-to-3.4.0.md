@@ -444,6 +444,29 @@ The full suite passes: 1,622 tests, 0 failures, 6 live tests skipped.
     keeps the open call scopes of the thread.
   - `SandboxProtocolSuite` filters the tool events, because the interpreter now emits its own events too.
 
+### Batch 17 (2026-10-14): the time limits of the transport
+
+The full suite passes: 1,630 tests, 0 failures, 6 live tests skipped.
+
+- **L6** (G-26, timeouts). `HttpTimeouts` gives a connect limit and a read limit, with the upstream lm15 defaults
+  (10 s and 600 s). The read limit bounds the wait for the headers and, for a stream, the wait for each next line.
+- **Decided by Claude, review.**
+  - The defaults change from one 60 s value to the upstream 10 s connect and 600 s read limits.
+  - A stream with no new line in the read limit ends with an `LmTimeoutError`. A connection that fails during a
+    stream ends it with an `LmTransportError`. `HttpStreamResponse.failure` carries the reason, and the OpenAI client
+    reports it in place of the stream assembly error. An interrupt of the consumer, or a reader failure that is not an
+    IO error, gives an `LmUnexpectedError` (not transient, so no retry).
+  - The limit bounds the wait for each line. Upstream bounds the wait for each byte.
+- **API changes.** `HttpTimeouts` is new. `HttpTransport.jdk(timeouts)` and `JdkHttpTransport(timeouts)` replace the
+  `timeoutMillis` parameter. `HttpStreamResponse` has `failure`.
+- **Changes in behavior.**
+  - A plain call can wait 600 s for the headers. Before, it waited 60 s.
+  - A broken stream gives a typed error. Before, the line iterator threw an `UncheckedIOException`.
+  - Each open stream has one reader thread.
+- **Open points, for the owner.**
+  - `sendJson` has no limit on the body after the headers: the JDK client stops its timer when the headers arrive.
+  - A consumer that never reads a stream to its end and never closes it keeps the reader thread and the connection.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -504,7 +527,7 @@ Open points from batch 1, for the owner:
 - [x] **L3. One call path for streamed calls**: cache, retry before the first token, usage, and history. → G-25 (C)
 - [x] **L4. Strict response schema** (40a6e1689): `strict: true` with a schema shaped for strict mode. → G-26 (C)
 - [ ] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
-- [ ] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
+- [x] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
 - [ ] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
 - [ ] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
 - [x] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
