@@ -16,6 +16,7 @@ import dspy4s.lm.contracts.Message
 import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.providers.DynamicJson
 import dspy4s.lm.providers.OpenAiUsage
+import dspy4s.lm.providers.ResponsesWire
 import dspy4s.lm.providers.WireKeys
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -122,11 +123,16 @@ object ProviderRequestNormalizer:
 object ProviderResponseParser:
   import DynamicJson.{field, asRecord, asString}
 
+  /** The `LmResponse` of the provider body `raw` in `mode`. The chat mode gives one output for each choice. The text
+    * mode reads `text`, else the choices. The Responses mode gives one output for the whole response
+    * (`ResponsesWire.outputs`, upstream `responses_outputs`); a body with no `output` array is a `ParseError`. A
+    * response with no output (no text and no tool call) is a `ParseError`.
+    */
   def parse(raw: DynamicValue, mode: LmMode): Either[DspyError, LmResponse] =
     val outputs = mode match
       case LmMode.Chat      => parseChatOutputs(raw)
       case LmMode.Text      => parseTextOutputs(raw)
-      case LmMode.Responses => parseResponsesOutputs(raw).orElse(parseChatOutputs(raw))
+      case LmMode.Responses => ResponsesWire.outputs(raw)
 
     outputs.flatMap { entries =>
       if entries.isEmpty then Left(ParseError("lm", "Provider response does not contain any outputs"))
@@ -166,19 +172,6 @@ object ProviderResponseParser:
       case Some(text) => Right(Vector(LmOutput(text = text)))
       case None       => parseChatOutputs(raw)
 
-  private def parseResponsesOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    seqField(raw, WireKeys.output).map { output =>
-      output.flatMap { item =>
-        val text      = extractText(item).map(_.trim).filter(_.nonEmpty)
-        val toolCalls = asRecord(item).map(parseToolCalls).getOrElse(Vector.empty)
-        // Same EITHER-text-OR-tool-calls rule as the chat path: a function-call output item carries no text.
-        Option.when(text.nonEmpty || toolCalls.nonEmpty) {
-          val metadata = asRecord(item).getOrElse(DynamicValue.Record.empty)
-          LmOutput(text = text.getOrElse(""), toolCalls = toolCalls, metadata = metadata)
-        }
-      }
-    }
-
   private def parseUsage(raw: DynamicValue): Option[LmUsage] =
     field(raw, WireKeys.usage).flatMap(asRecord).map(usage => OpenAiUsage.fromDynamic(usage).toLmUsage)
 
@@ -188,7 +181,11 @@ object ProviderResponseParser:
           asRecord(call).flatMap { rec =>
             val functionRec = field(rec, WireKeys.function).flatMap(asRecord).getOrElse(rec)
             field(functionRec, WireKeys.name).flatMap(asString).map { name =>
-              ToolCall(name = name, args = parseArgs(field(functionRec, WireKeys.arguments)), id = toolCallId(rec))
+              ToolCall(
+                name = name,
+                args = ToolCallAssembler.decodeArguments(field(functionRec, WireKeys.arguments)),
+                id = toolCallId(rec)
+              )
             }
           }
         }
@@ -201,18 +198,6 @@ object ProviderResponseParser:
   private def toolCallId(call: DynamicValue.Record): Option[String] =
     def text(key: String): Option[String] = field(call, key).flatMap(asString).filter(_.nonEmpty)
     text(WireKeys.callId).orElse(text(WireKeys.id))
-
-  private def parseArgs(raw: Option[DynamicValue]): DynamicValue.Record =
-    raw.flatMap(asRecord) match
-      case Some(rec) => rec
-      case None      => raw.flatMap(asString) match
-          // OpenAI sends `function.arguments` as a JSON STRING; decode it into a Record (the ToolCall contract:
-          // args are decoded at the parse boundary). Shares ToolCallAssembler.parseArguments with the streaming
-          // path so both decode identically; non-JSON strings fall back to `{input: raw}` there.
-          case Some(value) if value.trim.nonEmpty => ToolCallAssembler.parseArguments(value)
-          case _                                  => raw match
-              case Some(other) => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
-              case None        => DynamicValue.Record.empty
 
   private def extractText(node: DynamicValue): Option[String] =
     field(node, WireKeys.content) match

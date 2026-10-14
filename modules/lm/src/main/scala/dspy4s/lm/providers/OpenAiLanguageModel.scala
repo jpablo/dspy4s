@@ -25,8 +25,9 @@ import zio.blocks.schema.DynamicValue
   * @param model
   *   the provider model id (e.g. `"gpt-4o-mini"`); also surfaced as [[id]] for history/tracing.
   * @param mode
-  *   the request/response shape. `call` parses responses against THIS field (not `request.mode`), so a provider
-  *   configured for `Chat` always parses as chat. Defaults to [[dspy4s.lm.contracts.LmMode.Chat]].
+  *   the request/response shape. THIS field (not `request.mode`) selects the endpoint, the body, and the parse, so a
+  *   provider configured for `Chat` always parses as chat, and one configured for `Responses` always calls the
+  *   Responses API. Defaults to [[dspy4s.lm.contracts.LmMode.Chat]].
   * @param client
   *   the HTTP client carrying the API key, base URL, transport, and endpoint path.
   * @param defaultOptions
@@ -48,14 +49,21 @@ final case class OpenAiLanguageModel(
   override val supportsFunctionCalling: Boolean = true
   override val supportsResponseSchema: Boolean  = true
 
-  /** Normalize, POST to the chat-completions endpoint, and parse the JSON response into an `LmResponse`. HTTP and
-    * decode failures arrive as a `Left[DspyError]` from the [[OpenAiClient]] (never an exception).
+  /** Normalize, POST to the endpoint of [[mode]], and parse the JSON response into an `LmResponse`. HTTP and decode
+    * failures arrive as a `Left[DspyError]` from the [[OpenAiClient]] (never an exception).
+    *
+    * The mode of the provider ([[mode]]) selects the endpoint, the body, and the parse, not the mode of the request:
+    * with [[dspy4s.lm.contracts.LmMode.Responses]], the request goes to the Responses API, and the response gives one
+    * output (`ResponsesWire.outputs`, upstream `responses_outputs`).
     */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    val normalized = ProviderRequestNormalizer.normalize(request, defaultOptions)
-    client.invoke(normalized).flatMap(ProviderResponseParser.parse(_, mode))
+    client.invoke(payload(request)).flatMap(ProviderResponseParser.parse(_, mode))
 
   /** Open an SSE stream against the same endpoint and yield decoded [[dspy4s.lm.contracts.LmChunk]]s.
+    *
+    * In the Responses mode, the port has no parser for the Responses stream events: the stream is one final chunk from
+    * [[call]] (the text and the tool calls of the first output, the finish reason `stop`, and the usage), or one
+    * failure chunk.
     *
     * Errors are reified into the stream rather than thrown: if the client can't open the connection, the result is a
     * single terminal chunk with `finishReason = "error"`, the message under `raw`, and the typed failure in `error`
@@ -63,10 +71,25 @@ final case class OpenAiLanguageModel(
     * that throws on first read.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
-    val normalized = ProviderRequestNormalizer.normalize(request, defaultOptions)
-    client.stream(normalized) match
-      case Right(iterator) => iterator
-      case Left(error)     => Iterator.single(LmChunk.failure(error))
+    mode match
+      case LmMode.Responses => call(request) match
+          case Right(response) => Iterator.single(LmChunk.fromResponse(response).copy(usage = response.usage))
+          case Left(error)     => Iterator.single(LmChunk.failure(error))
+      case LmMode.Chat | LmMode.Text => client.stream(payload(request)) match
+          case Right(iterator) => iterator
+          case Left(error)     => Iterator.single(LmChunk.failure(error))
+
+  /** The provider payload of `request`. Its internal `mode` key selects the endpoint in [[OpenAiClient.invoke]], so the
+    * mode of the provider decides it: with [[dspy4s.lm.contracts.LmMode.Responses]], the request gets the Responses
+    * mode (the normalizer then writes the messages). In each other mode, a request in the Responses mode gets the chat
+    * mode, and each other request stays as it is.
+    */
+  private def payload(request: LmRequest): DynamicValue.Record =
+    val routed = (mode, request.mode) match
+      case (LmMode.Responses, _) => request.copy(mode = LmMode.Responses)
+      case (_, LmMode.Responses) => request.copy(mode = LmMode.Chat)
+      case _                     => request
+    ProviderRequestNormalizer.normalize(routed, defaultOptions)
 
 object OpenAiLanguageModel:
 

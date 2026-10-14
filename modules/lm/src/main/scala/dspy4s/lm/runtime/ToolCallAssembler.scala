@@ -5,6 +5,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.providers.DynamicJson
+import dspy4s.lm.providers.WireKeys
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
@@ -64,9 +65,23 @@ object ToolCallAssembler:
     */
   private def idOf(delta: LmToolCallDelta): Option[String] = delta.id.filter(_.nonEmpty)
 
+  /** The arguments of a provider tool call (the `arguments` value of a chat tool call or of a Responses `function_call`
+    * item) as a record. An object stays as it is. A text that is not blank goes through [[parseArguments]], as on the
+    * stream path. Each other value gives `{value: <value>}`. No value gives an empty record.
+    */
+  private[lm] def decodeArguments(raw: Option[DynamicValue]): DynamicValue.Record =
+    raw match
+      case Some(rec: DynamicValue.Record) => rec
+      case Some(other)                    => DynamicJson.asString(other).filter(_.trim.nonEmpty) match
+          // OpenAI sends `arguments` as a JSON STRING; decode it into a Record (the ToolCall contract: args are decoded
+          // at the parse boundary). Text that is not JSON falls back to `{input: raw}` in parseArguments.
+          case Some(text) => parseArguments(text)
+          case None       => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
+      case None => DynamicValue.Record.empty
+
   /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `{input: raw}` when it is not valid JSON,
-    * `{value: json}` when it parses to a non-object. Shared with the non-streaming `ProviderResponseParser.parseArgs`
-    * so both paths decode identically.
+    * `{value: json}` when it parses to a non-object. [[decodeArguments]] uses it for a response, so the stream path and
+    * the response path decode identically.
     */
   private[runtime] def parseArguments(raw: String): DynamicValue.Record =
     val trimmed = raw.trim

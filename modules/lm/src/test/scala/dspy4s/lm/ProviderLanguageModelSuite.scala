@@ -177,7 +177,10 @@ class ProviderLanguageModelSuite extends FunSuite:
       "output" -> Vector(
         Map(
           "type"    -> "message",
-          "content" -> Vector(Map("type" -> "output_text", "text" -> "First line"), Map("text" -> "Second line"))
+          "content" -> Vector(
+            Map("type" -> "output_text", "text" -> "First line"),
+            Map("type" -> "output_text", "text" -> "Second line")
+          )
         )
       ),
       "usage" -> Map("input_tokens" -> 3, "output_tokens" -> 4, "total_tokens" -> 7)
@@ -200,7 +203,8 @@ class ProviderLanguageModelSuite extends FunSuite:
 
     assert(result.isRight)
     val response = result.toOption.get
-    assertEquals(response.outputs.head.text, "First line\nSecond line")
+    // Upstream `responses_outputs` reads only the typed text parts, and joins them with no separator.
+    assertEquals(response.outputs.head.text, "First lineSecond line")
     assertEquals(response.usage.get.promptTokens, 3L)
     assertEquals(response.usage.get.completionTokens, 4L)
   }

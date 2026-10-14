@@ -6,13 +6,16 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmChunk
+import dspy4s.lm.contracts.LmMode
 import zio.blocks.schema.DynamicValue
 
 final case class OpenAiClient(
     apiKey      : String,
     baseUrl     : String        = OpenAiClient.defaultBaseUrl,
     transport   : HttpTransport = HttpTransport.jdk(),
-    chatEndpoint: String        = "/chat/completions"
+    chatEndpoint: String        = "/chat/completions",
+    /** The path of the Responses API. A payload whose internal `mode` key is `responses` goes here (see [[invoke]]). */
+    responsesEndpoint: String = "/responses"
 ):
   private val defaultHeaders: Map[String, String] = Map(
     "Authorization" -> s"Bearer $apiKey"
@@ -20,20 +23,37 @@ final case class OpenAiClient(
 
   private val providerInternalKeys: Set[String] = Set(WireKeys.mode)
 
-  /** Drop dspy4s-internal keys; `DynamicJson.encode` handles null-stripping. */
-  private def outgoingJson(payload: DynamicValue): String =
-    val filtered = payload match
+  /** The value of the internal `mode` key that selects the Responses API (the normalizer writes the mode in lower
+    * case).
+    */
+  private val responsesMode: String = LmMode.Responses.toString.toLowerCase
+
+  /** The payload with no dspy4s-internal key. */
+  private def withoutInternalKeys(payload: DynamicValue): DynamicValue =
+    payload match
       case rec: DynamicValue.Record => DynamicValues.recordFilterKeys(rec, k => !providerInternalKeys.contains(k))
       case other                    => other
-    DynamicJson.encode(filtered)
 
-  /** POST the payload and decode the JSON body. A response with a status outside 200 to 299 becomes the LM error that
-    * `OpenAiErrors.fromResponse` gives. A failure of the transport keeps its class and gets the model and the provider.
+  /** Drop dspy4s-internal keys; `DynamicJson.encode` handles null-stripping. */
+  private def outgoingJson(payload: DynamicValue): String =
+    DynamicJson.encode(withoutInternalKeys(payload))
+
+  /** POST the payload and decode the JSON body.
+    *
+    * When the internal `mode` key of the payload is `responses`, the request goes to [[responsesEndpoint]], and the
+    * body is the Responses body of the payload (`ResponsesWire.request`, upstream `chat_to_responses`). Else the
+    * request goes to [[chatEndpoint]] with the chat body. The internal keys never reach the wire. A response with a
+    * status outside 200 to 299 becomes the LM error that `OpenAiErrors.fromResponse` gives. A failure of the transport
+    * keeps its class and gets the model and the provider.
     */
   def invoke(payload: DynamicValue): Either[DspyError, DynamicValue] =
-    val url   = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
+    val responses        = DynamicJson.field(payload, WireKeys.mode).flatMap(DynamicJson.asString).contains(responsesMode)
+    val (endpoint, body) = withoutInternalKeys(payload) match
+      case chat: DynamicValue.Record if responses => (responsesEndpoint, ResponsesWire.request(chat))
+      case other                                  => (chatEndpoint, other)
+    val url   = s"${baseUrl.stripSuffix("/")}$endpoint"
     val model = modelOf(payload)
-    transport.sendJson(url, defaultHeaders, outgoingJson(payload))
+    transport.sendJson(url, defaultHeaders, DynamicJson.encode(body))
       .left.map(OpenAiErrors.withRequestDetails(_, model))
       .flatMap { response =>
         if response.status < 200 || response.status >= 300 then
@@ -42,7 +62,8 @@ final case class OpenAiClient(
           DynamicJson.decode(response.body)
       }
 
-  /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]].
+  /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]]. The stream always goes
+    * to [[chatEndpoint]] with the chat body: the port has no parser for the events of a Responses stream.
     *
     * The stream rules of upstream `parse_stream_events` and `checked_stream`:
     *   - A chunk with a `finish_reason`, a chunk with `usage`, or the line `[DONE]` is an end event. `[DONE]` ends the

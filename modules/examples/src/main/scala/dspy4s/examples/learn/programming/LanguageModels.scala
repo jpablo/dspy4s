@@ -5,9 +5,9 @@
   * setup, direct calls, use-with-modules, multiple LMs, generation config, usage/errors). dspy4s ships a single
   * OpenAI-compatible provider ([[OpenAiLanguageModel]]), so the LiteLLM provider matrix collapses: OpenAI and any
   * OpenAI-compatible endpoint (Azure / Ollama / vLLM / SGLang / OpenRouter) are supported via the `baseUrl` overload;
-  * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. Also out of scope: the Responses API
-  * (`model_type= "responses"` — dspy4s only has `LmMode.Chat`), and custom-LM save/load (`dump_state`/`load_state`/
-  * `copy`, since dspy4s has no program persistence).
+  * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. The Responses API
+  * (`model_type="responses"`) is `OpenAiLanguageModel(mode = LmMode.Responses)`. Out of scope: custom-LM save/load
+  * (`dump_state`/`load_state`/`copy`, since dspy4s has no program persistence).
   *
   * Key shape differences:
   *   - `dspy.configure(lm=…)` → `RuntimeEnvironment.configure(RuntimeContext(lm = Some(lm), adapter = Some(…)))`; `with
@@ -188,9 +188,10 @@ object LanguageModels:
   // --8<-- [end:lm-errors]
 
   // ── Responses API (lines 271–298) / Advanced custom LMs (lines 301–345) ──
-  // Out of scope: dspy4s has only `LmMode.Chat` (no `model_type="responses"`). You can write a custom provider
-  // by implementing the `LanguageModel` trait, but there is no `dump_state`/`load_state`/`copy` persistence —
-  // dspy4s programs aren't serialized.
+  // The Responses API is `OpenAiLanguageModel(mode = LmMode.Responses)`: the request goes to `/responses`, and the
+  // reply gives one output with its tool calls and its reasoning. A streamed call in that mode gives one final chunk.
+  // You can write a custom provider by implementing the `LanguageModel` trait, but there is no
+  // `dump_state`/`load_state`/`copy` persistence — dspy4s programs aren't serialized.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.languageModelsMain"
 @main def languageModelsMain(): Unit =
