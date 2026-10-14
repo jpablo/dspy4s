@@ -58,6 +58,15 @@ final case class SignatureLayout private (
   def withInstructions(text: String): SignatureLayout =
     if text.isEmpty then this else withInstructions(Some(text))
 
+  /** The same fields, with `text` after the instructions, and a blank line between them (dspy's
+    * `Signature.append_instructions`). When the layout has no instructions, `text` comes after the default instructions
+    * of the layout (dspy's `_default_instructions`), as [[dspy4s.core.signatures.SignatureDsl.defaultInstructions]]
+    * writes them.
+    */
+  def appendInstructions(text: String): SignatureLayout =
+    val base = instructions.getOrElse(dspy4s.core.signatures.SignatureDsl.defaultInstructions(this))
+    withInstructions(Some(s"$base\n\n$text"))
+
   // ── Field-mutation helpers ──────────────────────────────────────────
   // Narrowed to `private[dspy4s]`: composite programs
   // (MultiChainComparison, ChainOfThought)

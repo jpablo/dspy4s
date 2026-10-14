@@ -32,6 +32,10 @@ final case class Signature[I, O](
   def withInstructions(text: Option[String]): Signature[I, O] =
     copy(layout = layout.withInstructions(text))
 
+  /** Add `text` after the instructions, with a blank line between them. See [[SignatureLayout.appendInstructions]]. */
+  def appendInstructions(text: String): Signature[I, O] =
+    copy(layout = layout.appendInstructions(text))
+
   /** Mark the named OUTPUT field as the native tool-calls sink: sets its wire [[TypeRef]] to [[TypeRef.toolCalls]]. An
     * adapter with native function-calling enabled then fills that field from the provider's `tool_calls` rather than
     * asking the model to produce it as text. Decoding the field as a `Vector[ToolCall]` happens via `O`'s derived

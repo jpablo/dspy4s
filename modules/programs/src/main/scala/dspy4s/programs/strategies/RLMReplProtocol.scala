@@ -51,9 +51,10 @@ private[programs] object RLMReplProtocol:
     val rawLen = output.length
     val body   =
       if rawLen > maxOutputChars then
-        val half    = maxOutputChars / 2
-        val omitted = rawLen - maxOutputChars
-        output.take(half) + s"\n\n... (${groupDigits(omitted)} characters omitted) ...\n\n" + output.takeRight(half)
+        val headChars = maxOutputChars / 2
+        val omitted   = rawLen - maxOutputChars
+        output.take(headChars) + s"\n\n... (${groupDigits(omitted)} characters omitted) ...\n\n" +
+          output.takeRight(maxOutputChars - headChars)
       else output
     s"Output (${groupDigits(rawLen)} chars):\n$body"
 

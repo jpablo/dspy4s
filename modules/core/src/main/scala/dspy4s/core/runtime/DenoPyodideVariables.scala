@@ -7,43 +7,6 @@ import zio.blocks.schema.DynamicValue
 private[runtime] object DenoPyodideVariables:
   import DenoPyodideProtocol.encodeJson
 
-  private val PythonKeywords: Set[String] = Set(
-    "False",
-    "None",
-    "True",
-    "and",
-    "as",
-    "assert",
-    "async",
-    "await",
-    "break",
-    "class",
-    "continue",
-    "def",
-    "del",
-    "elif",
-    "else",
-    "except",
-    "finally",
-    "for",
-    "from",
-    "global",
-    "if",
-    "import",
-    "in",
-    "is",
-    "lambda",
-    "nonlocal",
-    "not",
-    "or",
-    "pass",
-    "raise",
-    "return",
-    "try",
-    "while",
-    "with",
-    "yield"
-  )
   private val IdentifierPattern = "^[A-Za-z_][A-Za-z0-9_]*$".r
 
   /** Build the `name = json.loads("<json>")` assignment prelude for `variables` (plus `import json`); the empty string
@@ -58,7 +21,8 @@ private[runtime] object DenoPyodideVariables:
   def prelude(variables: Map[String, DynamicValue]): Either[DspyError, String] =
     if variables.isEmpty then Right("")
     else
-      val invalid = variables.keys.find(k => !IdentifierPattern.matches(k) || PythonKeywords.contains(k) || k == "json")
+      val invalid =
+        variables.keys.find(k => !IdentifierPattern.matches(k) || PythonNames.Keywords.contains(k) || k == "json")
       invalid match
         case Some(k) => Left(RuntimeError(CodeInterpreterErrors.Interpreter, s"Invalid variable name: '$k'"))
         case None    =>

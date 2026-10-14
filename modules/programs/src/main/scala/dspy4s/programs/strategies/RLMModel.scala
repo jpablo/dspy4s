@@ -50,8 +50,8 @@ object RLMModel:
       val rendered = RLMReplProtocol.renderValue(value)
       val preview  =
         if rendered.length > previewChars then
-          val half = previewChars / 2
-          rendered.take(half) + "..." + rendered.takeRight(half)
+          val headChars = previewChars / 2
+          rendered.take(headChars) + "..." + rendered.takeRight(previewChars - headChars)
         else rendered
       ReplVariable(
         name = name,

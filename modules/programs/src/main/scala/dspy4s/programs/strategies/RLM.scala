@@ -9,6 +9,7 @@ import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.runtime.DenoPyodideInterpreter
+import dspy4s.core.runtime.PythonNames
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
@@ -50,9 +51,18 @@ import zio.blocks.schema.DynamicValue
   *   log each iteration's reasoning/code and step output to stderr as it happens (upstream's `verbose` flag;
   *   `logger.info` there, `Console.err` here per the PredictEngine diagnostics precedent). The surviving record when a
   *   run fails mid-loop.
+  * ==Name checks==
+  * The constructor rejects a namespace that upstream `_normalize_tools` and `_validate_namespace` reject, with an
+  * `IllegalArgumentException`:
+  *   - two tools with the same name;
+  *   - a tool name that is not a Python identifier, or that is a Python keyword;
+  *   - a tool name or an input field name that is reserved: `llm_query`, `llm_query_batched`, `SUBMIT`, `print`,
+  *     `dspy`, or a name that starts with `_dspy` or `__dspy` (upstream `is_reserved_sandbox_name`);
+  *   - an input field with the name of a tool;
+  *   - an output field named `trajectory` or `final_reasoning` (the result keeps these two names on `.raw`).
+  *
   * @param tools
-  *   extra [[ToolFunction]]s callable from generated code (documented in the prompt); names must not collide with the
-  *   built-ins (`llm_query`, `llm_query_batched`, `SUBMIT`, `print`)
+  *   extra [[ToolFunction]]s callable from generated code (documented in the prompt); see the name checks
   * @param subLm
   *   LM for `llm_query` — defaults to the ambient context's LM (pass a cheaper model here)
   * @param interpreterFactory
@@ -82,12 +92,7 @@ final case class RLM[I, O](
 ) extends Module[I, O]:
 
   override val moduleName: String = "rlm"
-  tools.foreach { tool =>
-    require(
-      !RLM.ReservedToolNames.contains(tool.name),
-      s"Tool name '${tool.name}' conflicts with a built-in sandbox function"
-    )
-  }
+  RLM.checkNames(tools.map(_.name), baseSignature.layout)
 
   private val baseLayout: SignatureLayout      = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
@@ -110,7 +115,7 @@ final case class RLM[I, O](
       FieldSpec(
         "iteration",
         typeRef = TypeRef.string,
-        description = Some("Current iteration number (1-indexed) out of max_iterations")
+        description = Some("Current iteration number (1-indexed) out of max_iters")
       )
     ))
     .withOutputFields(Vector(RLM.reasoningField, RLM.codeField))
@@ -231,8 +236,46 @@ object RLM:
   def resolveInterpreterFactory(own: Option[InterpreterFactory])(using ctx: RuntimeContext): InterpreterFactory =
     own.orElse(ctx.interpreterFactory).getOrElse(defaultInterpreterFactory)
 
-  /** Names of built-in sandbox functions user tools must not shadow (upstream `_RESERVED_TOOL_NAMES`). */
+  /** Names of the built-in sandbox functions. A tool or an input field must not use them (upstream
+    * `_RESERVED_SANDBOX_NAMES`).
+    */
   val ReservedToolNames: Set[String] = Set("llm_query", "llm_query_batched", "SUBMIT", "print")
+
+  /** Names that the result keeps on `.raw`. An output field must not use them (upstream `_RESERVED_RESULT_NAMES`). */
+  val ReservedResultNames: Set[String] = Set("trajectory", "final_reasoning")
+
+  /** True when the sandbox owns `name`: a built-in function, the `dspy` facade, or a name that starts with `_dspy` or
+    * `__dspy` (upstream `is_reserved_sandbox_name`).
+    */
+  def isReservedSandboxName(name: String): Boolean =
+    ReservedToolNames.contains(name) || name == "dspy" || name.startsWith("_dspy") || name.startsWith("__dspy")
+
+  /** The name checks of the constructor (upstream `_normalize_tools` and `_validate_namespace`). See the "Name checks"
+    * section of [[RLM]]. Throws an `IllegalArgumentException` for the first problem.
+    */
+  private def checkNames(toolNames: Vector[String], layout: SignatureLayout): Unit =
+    val duplicates = toolNames.diff(toolNames.distinct)
+    require(duplicates.isEmpty, s"Duplicate tool name '${duplicates.head}'")
+    toolNames.foreach { name =>
+      require(
+        PythonNames.isIdentifier(name) && !PythonNames.Keywords.contains(name),
+        s"Invalid tool name '$name': must be a valid Python identifier and not a keyword"
+      )
+      require(!isReservedSandboxName(name), s"Tool name '$name' conflicts with a built-in sandbox function")
+    }
+    val inputNames     = layout.inputFields.map(_.name)
+    val reservedInputs = inputNames.filter(isReservedSandboxName).sorted
+    require(
+      reservedInputs.isEmpty,
+      s"Input fields conflict with built-in sandbox functions: ${reservedInputs.mkString(", ")}"
+    )
+    val toolInputs = inputNames.filter(toolNames.contains).sorted
+    require(toolInputs.isEmpty, s"Input fields conflict with user tools: ${toolInputs.mkString(", ")}")
+    val reservedOutputs = layout.outputFields.map(_.name).filter(ReservedResultNames.contains).sorted
+    require(
+      reservedOutputs.isEmpty,
+      s"Output fields conflict with RLM result metadata: ${reservedOutputs.mkString(", ")}"
+    )
 
   /** Upstream's `ACTION_INSTRUCTIONS_TEMPLATE`, ported verbatim with the same placeholders. */
   private[programs] def actionInstructionsTemplate(

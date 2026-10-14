@@ -20,6 +20,10 @@ import scala.collection.mutable
   *   - On `finish()`, anything held back is flushed to the current field and the last chunk is marked `isLast = true`.
   *   - When the model never emits any marker and the signature has a single output field, all received text is
   *     attributed to that field (matches the parser's single-output fallback).
+  *   - Boundary whitespace (upstream `_default_handle_stream_chunk`): the parser strips each field value, so the chunks
+  *     of a field do too. The leading whitespace of a field is dropped. A run of whitespace is held until more text of
+  *     the same field arrives, and is dropped at the end of the field. Thus the text of the chunks of a field, joined,
+  *     is the value that [[ChatAdapter]] parses for that field, for each split of the response into deltas.
   */
 final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
 
@@ -36,6 +40,7 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     (outputFields.map(f => s"[[ ## ${f.name} ## ]]".length) :+ ChatAdapter.CompletedMarker.length).max
 
   private val buffer                                                        = new StringBuilder
+  private val whitespace                                                    = new ChatStreamingState.BoundaryWhitespace
   private var currentField: Option[String]                                  = None
   private var sawAnyMarker: Boolean                                         = false
   override protected def receiveOpen(textDelta: String): Vector[FieldChunk] =
@@ -53,17 +58,10 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     while !done do
       findMarker(buffer.toString) match
         case Some(MarkerHit(field, markerStart, markerEnd)) =>
-          // Emit any content preceding the marker to the current field
-          // (closing it).
-          val precedingContent = stripFramingNewlines(buffer.substring(0, markerStart))
-          effectiveActiveField match
-            case Some(name) if precedingContent.nonEmpty => out += FieldChunk(name, precedingContent, isLast = true)
-            case _                                       => ()
+          // The content before the marker is the end of the current field.
+          effectiveActiveField.foreach(name => closeField(name, buffer.substring(0, markerStart), out))
           buffer.delete(0, markerEnd)
           sawAnyMarker = true
-          // Skip the trailing newline that follows the marker, if present,
-          // so emitted content doesn't begin with an empty leading line.
-          while buffer.nonEmpty && buffer.charAt(0) == '\n' do buffer.deleteCharAt(0)
           currentField = Some(field).filter(outputNames.contains)
           // Loop — there may be another marker already in the buffer.
         case None =>
@@ -77,17 +75,24 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
             case Some(name) =>
               val text = buffer.toString
               if forceFlush then
-                val flushed = stripFramingNewlines(text)
-                if flushed.nonEmpty then
-                  out += FieldChunk(name, flushed, isLast = false)
+                closeField(name, text, out)
                 buffer.clear()
               else
                 val emittable = safeEmittablePrefixLength(text, forceFlush = false)
                 if emittable > 0 then
-                  out += FieldChunk(name, text.substring(0, emittable), isLast = false)
+                  val emitted = whitespace.accept(text.substring(0, emittable))
+                  if emitted.nonEmpty then out += FieldChunk(name, emitted, isLast = false)
                   buffer.delete(0, emittable)
           done = true
     out.toVector
+
+  /** End the field `name` with its last `content`. A field with text gets a last chunk with `isLast = true`, which can
+    * be empty: the held whitespace at the end of a field is dropped. A field with no text gets no chunk.
+    */
+  private def closeField(name: String, content: String, out: mutable.ArrayBuffer[FieldChunk]): Unit =
+    val emitted = whitespace.accept(content)
+    if whitespace.started then out += FieldChunk(name, emitted, isLast = true)
+    whitespace.reset()
 
   /** What's the active output field, taking the single-output fallback into account when the model has not yet emitted
     * any marker. Once any marker has been seen we trust the marker stream exclusively — no fallback.
@@ -136,22 +141,40 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     // consumed. If we're at start-of-text, return 0.
     if k < 0 then 0 else k + 1
 
-  /** Trim leading/trailing newlines left over from marker framing.
-    *
-    * Markers reliably emit a `\n` *after* themselves and the LM typically adds `\n\n` *before* the next marker, so the
-    * framing artifacts can be multiple newlines on either side. Inner blank lines are preserved because we only strip
-    * from the boundaries.
-    */
-  private def stripFramingNewlines(s: String): String =
-    var start = 0
-    while start < s.length && s.charAt(start) == '\n' do start += 1
-    var endExclusive = s.length
-    while endExclusive > start && s.charAt(endExclusive - 1) == '\n' do endExclusive -= 1
-    s.substring(start, endExclusive)
-
   private final case class MarkerHit(field: String, markerStart: Int, markerEnd: Int)
 
 object ChatStreamingState:
+
+  /** The boundary whitespace rule for the chunks of one field (upstream `_default_handle_stream_chunk`). The rule drops
+    * the leading whitespace of the field. It holds a run of whitespace until more text of the field arrives. Whitespace
+    * is a character for which `Character.isWhitespace` is true, as `String.strip` in the parser.
+    */
+  private final class BoundaryWhitespace:
+    private val held: StringBuilder = new StringBuilder
+    private var hasText: Boolean    = false
+
+    /** True when the field has a character that is not whitespace. */
+    def started: Boolean = hasText
+
+    /** The text to emit for the next `content` of the field. */
+    def accept(content: String): String =
+      val text = if hasText then content else content.stripLeading
+      val body = text.stripTrailing
+      if body.isEmpty then
+        held.append(text)
+        ""
+      else
+        hasText = true
+        val emitted = held.toString + body
+        held.clear()
+        held.append(text.substring(body.length))
+        emitted
+
+    /** Drop the held whitespace, and start again for the next field. */
+    def reset(): Unit =
+      held.clear()
+      hasText = false
+
   /** True iff `text`'s tail or interior could still grow into a `[[ ## field_name ## ]]` (or `[[ ## completed ## ]]`)
     * marker. Used by the per-token holdback heuristic — when this returns `false`, every pending token in the wrapper's
     * queue is safe to flush.

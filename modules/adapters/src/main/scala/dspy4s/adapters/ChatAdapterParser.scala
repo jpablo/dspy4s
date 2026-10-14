@@ -51,7 +51,8 @@ private[adapters] object ChatAdapterParser:
     else AdapterTextSupport.coerceOutputText(field, raw)
 
   /** The text of each output field. The first header of a field wins (upstream `ChatAdapter.parse`): the lines of a
-    * later header of the same field are dropped.
+    * later header of the same field are dropped. Each text is stripped at both ends, as upstream
+    * (`"\n".join(v).strip()`).
     */
   private def extractSections(text: String, outputNames: Set[String]): Map[String, String] =
     val out                          = scala.collection.mutable.LinkedHashMap.empty[String, StringBuilder]
@@ -81,6 +82,6 @@ private[adapters] object ChatAdapterParser:
     out
       .iterator
       .map { (name, value) =>
-        name -> value.toString.stripTrailing
+        name -> value.toString.strip
       }
       .toMap

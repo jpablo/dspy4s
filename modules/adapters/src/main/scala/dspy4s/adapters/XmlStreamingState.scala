@@ -21,6 +21,10 @@ import scala.util.control.NonFatal
   *
   * Designed for incremental input: receive boundaries that split a tag
   * name, an entity, or content are all resumed cleanly on the next call.
+  *
+  * Boundary whitespace (upstream `_default_handle_stream_chunk`): the chunks of a field have no leading and no trailing
+  * whitespace of the field value. Thus the text of the chunks of a field, joined, is the value that [[XMLAdapter]]
+  * parses for that field, for each split of the response into deltas.
   */
 final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
@@ -54,7 +58,8 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
 
   private def emitFinal(out: mutable.ArrayBuffer[FieldChunk]): Unit =
     currentField.foreach { name =>
-      out += FieldChunk(name, contentBuffer.toString, isLast = true)
+      // The parser trims the field value (`XMLAdapter.extractFieldText`), so the chunk does too.
+      out += FieldChunk(name, contentBuffer.toString.trim, isLast = true)
     }
     contentBuffer.clear()
     currentField = None
