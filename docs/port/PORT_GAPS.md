@@ -1166,8 +1166,8 @@ No check rejects an event after the end event. The usage of a retried attempt is
 
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
-**Status:** In progress. The strict schema (2026-10-14, batch 12), the timeouts (batch 17), and the Responses shapes
-(batch 20) are resolved. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+**Status:** In progress. The strict schema (2026-10-14, batch 12), the timeouts (batch 17), the Responses shapes
+(batch 20), and `close` (batch 22) are resolved; the capabilities (L5) and the reasoning-model parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1206,7 +1206,8 @@ body of upstream `chat_to_responses` and reads one output with `responses_output
 Responses stream events (a stream is one final chunk from a plain call).
 
 **Direction (open).** Add a `capabilities` value to the OpenAI client for compatible servers (L5, needs a decision of
-the owner). Reasoning-model parameters, custom headers, and `close` (L8) remain.
+the owner). Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
+(`CloseLifecycleSuite`).
 
 ---
 

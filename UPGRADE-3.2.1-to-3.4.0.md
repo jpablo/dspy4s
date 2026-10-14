@@ -550,6 +550,27 @@ The full suite passes: 1,666 tests, 0 failures, 6 live tests skipped.
   - The stderr of the worker is discarded, so a worker that cannot start (for example on Python before 3.10) gives
     only "Python worker exited unexpectedly".
 
+### Batch 22 (2026-10-14): `close` on the models and the transport
+
+The full suite passes: 1,671 tests, 0 failures, 6 live tests skipped.
+
+- **L8** (G-26, connection lifecycle). `LanguageModel.close` releases the resources of a model, as upstream
+  `LM.close`, and the model stays usable: the JDK transport starts its client at the first request, `close` closes it,
+  and the next request starts a new one. `OpenAiClient`, `OpenAiLanguageModel`, and `OpenAiEmbedder` close their
+  transport; `ManagedLanguageModel` closes its delegate. The stream wrapper of `streamify` does not close the
+  configured model, because it does not own it.
+- **Decided by Claude, review.**
+  - A copy of a model shares its client, so a `close` of one copy releases it for each copy, as upstream ("copies
+    share owned pools").
+  - The port closes a transport that the caller gave to `OpenAiClient`. Upstream does not close a custom engine.
+  - `close` uses the JDK `HttpClient.close`, which waits for the requests that run.
+- **API changes.** `LanguageModel.close` and `HttpTransport.close` (both no-ops by default), `OpenAiClient.close`,
+  `OpenAiEmbedder.close`.
+- **Open points, for the owner.**
+  - `close` blocks while a stream is open and nobody reads it, for example when the thread that calls `close` holds an
+    open stream. Closing the open streams of the transport first would avoid this, but it differs from upstream.
+  - A request that starts just before `close` can fail with `LmTransportError`, as upstream.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -612,7 +633,7 @@ Open points from batch 1, for the owner:
 - [ ] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
 - [x] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
 - [x] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
-- [ ] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
+- [x] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
 - [x] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
 - [ ] **L10. Advisory cost estimate** and nested cost roll-up (bb8ba59c0). → G-27 (R)
 
