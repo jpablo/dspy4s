@@ -1,9 +1,12 @@
 package dspy4s.optimize
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.programs.Aggregation
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
@@ -43,9 +46,16 @@ final case class Ensemble(
 
   val name: String = "ensemble"
 
-  /** Build the ensembled program over the given members. */
+  /** Build the ensembled program over the given members. The call is a compile scope (upstream
+    * `_with_compile_callbacks`) with the input `programs_size`, because an ensemble has no trainset. The output of the
+    * scope is the ensembled program.
+    */
   def compile(programs: Vector[DynamicModule]): DynamicModule =
-    Ensemble.EnsembledProgram(programs, reduceFn, size, seed)
+    val ensembled: DynamicModule = Ensemble.EnsembledProgram(programs, reduceFn, size, seed)
+    val inputs                   = DynamicValues.record("programs_size" := programs.size)
+    CallbackDispatcher
+      .withCompile(this, getClass.getSimpleName, inputs)(Right(ensembled): Either[DspyError, DynamicModule])
+      .getOrElse(ensembled)
 
 object Ensemble:
 

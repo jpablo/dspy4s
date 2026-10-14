@@ -43,6 +43,15 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
       trainset: Vector[Example],
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+
+  /** The work of [[compile]], inside its compile scope. */
+  private def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val ps                               = summon[OptimizableStructure[P]]
     val effectiveValset: Vector[Example] = valset.getOrElse(trainset)

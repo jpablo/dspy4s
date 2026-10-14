@@ -1,6 +1,8 @@
 package dspy4s.evaluate
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.data.RawPrediction
@@ -8,6 +10,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.EvaluationResult
 import dspy4s.evaluate.contracts.Evaluator
@@ -37,6 +40,12 @@ final case class EvaluateConfig(
     callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
 )
 
+/** Runs a program on each example of a dev set and scores it with a metric (upstream `dspy.Evaluate`).
+  *
+  * Each run is an evaluate scope (upstream `on_evaluate_start` and `on_evaluate_end`) with the `evaluatorName`
+  * `Evaluate`. The inputs are `devset_size` and `num_threads` (the thread count of the run), and the output is the
+  * [[EvaluationResult]] or the failure. The scope runs in the context of the run, so it sees the `callbackMetadata`.
+  */
 final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
   def apply(
@@ -65,7 +74,30 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     )
     applyInternal(program, mergedConfig)
 
+  /** One run of the evaluation, in an evaluate scope. */
   private def applyInternal(
+      fn : Example => Either[DspyError, RawPrediction],
+      cfg: EvaluateConfig
+  )(using RuntimeContext): Either[DspyError, EvaluationResult] =
+    // Carry the configured callbackMetadata into the evaluation scope so callbacks firing during the run can read
+    // it (Python's `Evaluate(callback_metadata=…)`). Empty metadata leaves the ambient context untouched.
+    // The run keeps the dynamic scope of this thread (the open call scopes), so the evaluate scope nests under the
+    // scope that calls it, for example a compile scope, also when the given context is older than that scope.
+    val baseCtx      = summon[RuntimeContext]
+    val withMetadata =
+      if cfg.callbackMetadata.fields.isEmpty then baseCtx
+      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
+    val evalCtx                     = withMetadata.withScope(RuntimeEnvironment.current.scope)
+    val inputs: DynamicValue.Record = DynamicValues.record(
+      "devset_size" := cfg.devset.size,
+      "num_threads" := (resolvedNumThreads(cfg)(using evalCtx): Int)
+    )
+    // The scope opens in the context of the run, so the parallel workers capture its call id as their parent.
+    RuntimeEnvironment.withContext(evalCtx) {
+      CallbackDispatcher.withEvaluate("Evaluate", inputs)(runEvaluation(fn, cfg)(using evalCtx))
+    }
+
+  private def runEvaluation(
       fn : Example => Either[DspyError, RawPrediction],
       cfg: EvaluateConfig
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
@@ -77,15 +109,8 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
     if dataset.isEmpty then
       return Left(ValidationError("devset must contain at least one example, got an empty devset."))
 
-    // Carry the configured callbackMetadata into the evaluation scope so callbacks firing during the run can read
-    // it (Python's `Evaluate(callback_metadata=…)`). Empty metadata leaves the ambient context untouched.
-    val baseCtx = summon[RuntimeContext]
-    val evalCtx =
-      if cfg.callbackMetadata.fields.isEmpty then baseCtx
-      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
-
-    val execResultE = RuntimeEnvironment.withContext(evalCtx) {
-      val executor = buildExecutor(cfg)(using evalCtx)
+    val execResultE =
+      val executor = buildExecutor(cfg)
       executor.executeEither[Example, (RawPrediction, Double)](
         task = (ex: Example) =>
           // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
@@ -98,7 +123,6 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
         ,
         data = dataset
       )
-    }
 
     execResultE.flatMap { execResult =>
       val evaluations = dataset.indices.map { idx =>
@@ -169,12 +193,15 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
       case Left(true)  => Some(None)
       case Right(n)    => Some(Some(n))
 
+  /** The thread count of a run: the configured count, else the count of the context, else 8. */
+  private def resolvedNumThreads(cfg: EvaluateConfig)(using ctx: RuntimeContext): ThreadCount =
+    cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8)))
+
   private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
-    val ctx                = summon[RuntimeContext]
-    val resolvedNumThreads = cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8)))
-    val resolvedMaxErrors  = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10)))
+    val ctx               = summon[RuntimeContext]
+    val resolvedMaxErrors = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10)))
     ParallelExecutor(
-      numThreads = resolvedNumThreads,
+      numThreads = resolvedNumThreads(cfg),
       maxErrors = resolvedMaxErrors,
       timeout = cfg.timeout
     )

@@ -83,6 +83,15 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+
+  /** The work of [[compile]], inside its compile scope. */
+  private def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     // 1) Split if no valset (upstream's 50/50 holdout).
     val (effTrain, effVal) = valset match
       case Some(v) => (trainset, v)
@@ -100,8 +109,10 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
         else config.bootstrap.copy(metric = Some(config.metric))
       // Two leaves with the same predictor key are a configuration error (decision D2). The bootstrap makes no such
       // check for an empty trainset, so make the check here. Each `Left` of the bootstrap stops the compile.
+      // Upstream `InferRules` is a subclass of `BootstrapFewShot` and calls `super().compile`, which opens no compile
+      // scope inside the `InferRules` scope. Thus the bootstrap runs with no compile scope of its own.
       val bootstrapped = OptimizerSupport.requireDistinctKeys(student, teacher).flatMap { _ =>
-        new BootstrapFewShot[P](bootstrapConfig).compile(student, effTrain, teacher)
+        new BootstrapFewShot[P](bootstrapConfig).compileInScope(student, effTrain, teacher)
       }
       bootstrapped.map { bootstrapReport =>
         val base = bootstrapReport.bestProgram

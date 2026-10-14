@@ -5,6 +5,7 @@ import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
@@ -62,6 +63,12 @@ import scala.util.control.NonFatal
   *   - Upstream makes the checks of the mounts and of the write paths in its constructor. A Scala constructor cannot
   *     return an `Either`, so [[execute]] gives the `Left` before the process starts.
   *
+  * ==Callback events==
+  * The interpreter opens an interpreter scope (upstream `on_interpreter_<operation>_start`) for each of these
+  * operations: an `Execute` scope for each [[execute]] call, a `Startup` scope inside the first `Execute` when the
+  * process starts, a `ToolCall` scope for each host tool call from the sandbox, and a `Shutdown` scope for each
+  * [[close]] call. A `ToolCall` scope holds the `ToolStartEvent` / `ToolEndEvent` pair of the tool.
+  *
   * '''First run downloads Pyodide''' from npm into Deno's cache (network needed once); subsequent runs are offline.
   * Prerequisite: a `deno` executable on PATH, version 2.x (or pass `denoCommand`, which gets no version check).
   *
@@ -101,6 +108,8 @@ final class DenoPyodideInterpreter(
   import DenoPyodideLaunch.sandboxPath
   import DenoPyodideProtocol.*
 
+  // The `interpreterName` of the callback events.
+  private val interpreterName: String = getClass.getSimpleName
   // `close` can run on a different thread while a call is in progress, so the session state is one atomic value.
   private val session = new AtomicReference[Session](Session.NotStarted)
   // The thread of the call in progress holds this lock. The state below belongs to that thread.
@@ -126,23 +135,27 @@ final class DenoPyodideInterpreter(
     * continues. A call from a different thread while a call is in progress gets a `Left` too.
     */
   override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
-    if executeLock.isHeldByCurrentThread then
-      failure("DenoPyodideInterpreter cannot execute recursively from one of its tools.")
-    else if !executeLock.tryLock() then
-      failure(
-        "DenoPyodideInterpreter is not thread-safe: a call is in progress on a different thread. Create a separate interpreter for each thread."
-      )
-    else
-      try
-        for
-          _       <- checkSessionActive()
-          prelude <- injectionPrelude(variables)
-          _       <- ensureProcess()
-          _       <- mountFiles()
-          _       <- registerTools()
-          result  <- executeRequest(if prelude.isEmpty then code else s"$prelude\n$code")
-        yield result
-      finally executeLock.unlock()
+    val inputs =
+      DynamicValues.record("code" := code, "variables" -> DynamicValues.recordFromEntries(variables.toVector))
+    CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Execute, inputs) {
+      if executeLock.isHeldByCurrentThread then
+        failure("DenoPyodideInterpreter cannot execute recursively from one of its tools.")
+      else if !executeLock.tryLock() then
+        failure(
+          "DenoPyodideInterpreter is not thread-safe: a call is in progress on a different thread. Create a separate interpreter for each thread."
+        )
+      else
+        try
+          for
+            _       <- checkSessionActive()
+            prelude <- injectionPrelude(variables)
+            _       <- ensureProcess()
+            _       <- mountFiles()
+            _       <- registerTools()
+            result  <- executeRequest(if prelude.isEmpty then code else s"$prelude\n$code")
+          yield result
+        finally executeLock.unlock()
+    }
 
   private def injectionPrelude(variables: Map[String, DynamicValue]): Either[DspyError, String] =
     cachedPrelude match
@@ -153,9 +166,15 @@ final class DenoPyodideInterpreter(
         }
 
   /** Ends the session and stops the sandbox process. The session does not start again. A different thread can call
-    * `close` while a call is in progress. That call then gives a `Left`.
+    * `close` while a call is in progress. That call then gives a `Left`. Each call opens a `Shutdown` scope, also when
+    * the session has ended (upstream `shutdown`).
     */
-  override def close(): Unit = endSession(shutdown = true)
+  override def close(): Unit =
+    val _ =
+      CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Shutdown, DynamicValue.Record.empty) {
+        endSession(shutdown = true)
+        Right(())
+      }
 
   // ── Session lifecycle ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -207,7 +226,11 @@ final class DenoPyodideInterpreter(
 
   private def ensureProcess(): Either[DspyError, Unit] =
     session.get() match
-      case Session.NotStarted       => startProcess()
+      case Session.NotStarted =>
+        // Upstream `start`: the start of the process is a `Startup` scope inside the `Execute` scope.
+        CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Startup, DynamicValue.Record.empty)(
+          startProcess()
+        )
       case running: Session.Running =>
         if running.process.isAlive then Right(())
         else terminal(ioFailure(running, "Sandbox process is not running"))
@@ -413,6 +436,9 @@ final class DenoPyodideInterpreter(
     * `id` is echoed VERBATIM — the sandbox uses string ids (`"tc_…"`) for tool calls. A tool that throws also gets an
     * error reply (upstream `_handle_tool_call`): the sandbox waits for a reply to each tool call, so an exception that
     * leaves `execute` here blocks the session.
+    *
+    * Each tool call is a `ToolCall` interpreter scope (upstream `invoke_tool`), also for an unknown tool. The inputs
+    * are `tool` and `args`, and the output is the tool result.
     */
   private def handleToolCall(msg: DynamicValue.Record): Either[DspyError, Unit] =
     val callId = field(msg, "id").getOrElse(DynamicValue.Null)
@@ -421,23 +447,26 @@ final class DenoPyodideInterpreter(
     val kwargs =
       field(params, "kwargs").collect { case r: DynamicValue.Record => r }.getOrElse(DynamicValue.Record.empty)
 
-    val reply = tools.find(_.name == name) match
-      case None       => encodeError(callId, ToolErrorCode, s"Unknown tool: $name")
-      case Some(tool) =>
-        // Same observability as ReAct's ToolExecutor: callbacks on the active context see every host-tool
-        // invocation as a ToolStart/ToolEnd scope. handleToolCall runs on the thread that called `execute`,
-        // so the events land on (and nest under) the caller's scope. The dispatcher emits the end event before
-        // it rethrows a tool exception, so the catch stays outside the scope.
-        try
-          CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs)) match
-            case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
-            case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
-              encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
-            case Right(other) =>
-              encodeResult(callId, DynamicValues.record("value" := encodeJson(other), "type" := "json"))
-        catch
-          case NonFatal(error) =>
-            encodeError(callId, ToolErrorCode, Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+    // Same observability as ReAct's ToolExecutor: callbacks on the active context see every host-tool invocation as
+    // a ToolStart/ToolEnd scope, inside the `ToolCall` interpreter scope. handleToolCall runs on the thread that
+    // called `execute`, so the events land on (and nest under) the `Execute` scope. The dispatcher emits the end
+    // events before it rethrows a tool exception, so the catch stays outside the scopes.
+    val toolInputs = DynamicValues.record("tool" := name, "args" -> kwargs)
+    val reply      =
+      try
+        CallbackDispatcher.withInterpreter[DynamicValue](interpreterName, InterpreterOperation.ToolCall, toolInputs) {
+          tools.find(_.name == name) match
+            case None       => failure(s"Unknown tool: $name")
+            case Some(tool) => CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs))
+        } match
+          case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
+          case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
+            encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
+          case Right(other) =>
+            encodeResult(callId, DynamicValues.record("value" := encodeJson(other), "type" := "json"))
+      catch
+        case NonFatal(error) =>
+          encodeError(callId, ToolErrorCode, Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
     writeLine(reply)
 
   /** Tell the runner to copy each write path from the sandbox to the host. A write that fails ends the session. */

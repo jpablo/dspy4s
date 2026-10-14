@@ -4,7 +4,11 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.:=
+import zio.blocks.schema.DynamicValue
 
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -27,6 +31,10 @@ import scala.util.control.NonFatal
   * next. [[DenoPyodideInterpreter]] provides a stateful alternative without a long-lived unrestricted `python3 -i`
   * subprocess.
   *
+  * '''Callback events.''' Each `execute` call is an `Execute` interpreter scope (its `variables` input is empty), and
+  * each `close` call is a `Shutdown` interpreter scope. There is no long-lived process, so there are no `Startup`
+  * scopes, and there are no host tools, so there are no `ToolCall` scopes.
+  *
   * @param pythonCommand
   *   the executable to invoke (default `"python3"`; override for `python`, `python3.11`, virtualenv paths, etc.)
   * @param timeoutMillis
@@ -38,9 +46,23 @@ final class SubprocessPythonInterpreter(
     timeoutMillis: Long   = 30_000L
 ) extends CodeInterpreter:
 
+  // The `interpreterName` of the callback events.
+  private val interpreterName: String = getClass.getSimpleName
+
   @volatile private var closed = false
 
   override def execute(code: String): Either[DspyError, CodeResult] =
+    val inputs = DynamicValues.record("code" := code, "variables" -> DynamicValue.Record.empty)
+    CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Execute, inputs)(run(code))
+
+  override def close(): Unit =
+    val _ =
+      CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Shutdown, DynamicValue.Record.empty) {
+        closed = true
+        Right(())
+      }
+
+  private def run(code: String): Either[DspyError, CodeResult] =
     if closed then Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Interpreter is closed"))
     else
       try
@@ -87,9 +109,6 @@ final class SubprocessPythonInterpreter(
             CodeInterpreterErrors.Interpreter,
             Option(other.getMessage).getOrElse(other.getClass.getSimpleName)
           ))
-
-  override def close(): Unit =
-    closed = true
 
   /** Spawn a daemon pump thread that copies bytes from `in` into `out` until EOF. Returns immediately; caller
     * `.join()`s when ready.

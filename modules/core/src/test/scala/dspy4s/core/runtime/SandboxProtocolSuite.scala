@@ -238,7 +238,12 @@ class SandboxProtocolSuite extends FunSuite:
       val result = RuntimeEnvironment.withCallbacks(Vector(recorder))(interpreter.execute("call_tool"))
       assert(result.isRight, result.toString)
     }
-    events.toVector match
+    // The interpreter scopes (Execute, Startup, ToolCall) also emit events. This test looks at the tool scope only.
+    val toolEvents = events.toVector.filter {
+      case _: ToolStartEvent | _: ToolEndEvent => true
+      case _                                   => false
+    }
+    toolEvents match
       case Vector(start: ToolStartEvent, end: ToolEndEvent) =>
         assertEquals(start.toolName, "explode")
         assertEquals(start.callId, end.callId)

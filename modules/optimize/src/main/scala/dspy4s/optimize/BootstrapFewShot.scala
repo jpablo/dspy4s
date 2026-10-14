@@ -97,6 +97,16 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
       trainset: Vector[Example],
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher))
+
+  /** The work of [[compile]], inside its compile scope. [[InferRules]] calls it directly: upstream `InferRules` is a
+    * subclass of `BootstrapFewShot`, and its call of `super().compile` opens no second compile scope.
+    */
+  private[optimize] def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      teacher : Option[P]
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     if trainset.isEmpty then
       Right(

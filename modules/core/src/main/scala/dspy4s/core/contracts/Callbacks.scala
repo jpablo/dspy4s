@@ -5,9 +5,10 @@ import zio.blocks.schema.DynamicValue
 import java.time.Instant
 import java.util.UUID
 
-/** Observable lifecycle event emitted around one of the four kinds of work dspy4s wraps in an instrumented scope: a
-  * module call, an LM call, an adapter format/parse, or a tool invocation. Every successfully started scope attempts
-  * exactly one matching `*EndEvent` (even on body failure or exception), correlated by [[callId]].
+/** Observable lifecycle event emitted around one of the kinds of work dspy4s wraps in an instrumented scope: a module
+  * call, an LM call, an adapter format/parse, a tool invocation, an evaluation, an optimizer compile, or a
+  * code-interpreter operation. Every successfully started scope attempts exactly one matching `*EndEvent` (even on body
+  * failure or exception), correlated by [[callId]].
   *
   * '''Correlation model.''' Every scope is given a fresh [[callId]] when it opens and inherits the enclosing scope's id
   * as its [[parentCallId]]. So a top-level `Predict` call produces a tree:
@@ -137,6 +138,94 @@ final case class ToolEndEvent(
     callId      : String         = UUID.randomUUID().toString,
     parentCallId: Option[String] = None,
     timestamp   : Instant        = Instant.now()
+) extends CallbackEvent
+
+/** Opens an evaluation scope around one run of `Evaluate` (upstream `on_evaluate_start`). `inputs` has `devset_size`
+  * and `num_threads`. Paired with [[EvaluateEndEvent]].
+  */
+final case class EvaluateStartEvent(
+    evaluatorName: String,
+    inputs       : DynamicValue.Record,
+    callId       : String         = UUID.randomUUID().toString,
+    parentCallId : Option[String] = None,
+    timestamp    : Instant        = Instant.now()
+) extends CallbackEvent
+
+/** Closes an evaluation scope opened by an [[EvaluateStartEvent]] with the same `callId`. `output` is the result of the
+  * evaluation, or the failure.
+  */
+final case class EvaluateEndEvent(
+    evaluatorName: String,
+    output       : Either[DspyError, Any],
+    callId       : String         = UUID.randomUUID().toString,
+    parentCallId : Option[String] = None,
+    timestamp    : Instant        = Instant.now()
+) extends CallbackEvent
+
+/** Opens an optimizer scope around one `compile` call (upstream `on_compile_start`). `optimizerName` is the simple
+  * class name of the optimizer, for example `BootstrapFewShot`. `inputs` has `trainset_size`, and `valset_size` when
+  * the call has a validation set. Paired with [[CompileEndEvent]].
+  *
+  * Only the outermost `compile` of one optimizer instance on one thread opens a scope: a `compile` of the same instance
+  * inside that scope does not (upstream `_with_compile_callbacks`). A `compile` of another optimizer instance inside
+  * the scope opens a nested scope, for example the `BootstrapFewShot` runs of `BootstrapFewShotWithRandomSearch`.
+  */
+final case class CompileStartEvent(
+    optimizerName: String,
+    inputs       : DynamicValue.Record,
+    callId       : String         = UUID.randomUUID().toString,
+    parentCallId : Option[String] = None,
+    timestamp    : Instant        = Instant.now()
+) extends CallbackEvent
+
+/** Closes an optimizer scope opened by a [[CompileStartEvent]] with the same `callId`. `output` is the result of the
+  * compile, or the failure.
+  */
+final case class CompileEndEvent(
+    optimizerName: String,
+    output       : Either[DspyError, Any],
+    callId       : String         = UUID.randomUUID().toString,
+    parentCallId : Option[String] = None,
+    timestamp    : Instant        = Instant.now()
+) extends CallbackEvent
+
+/** The work of a code interpreter that an interpreter scope covers (upstream `_INTERPRETER_OPERATIONS`). */
+enum InterpreterOperation derives CanEqual:
+  /** One `execute` call. `inputs` has `code` and `variables`. */
+  case Execute
+
+  /** One call of a host tool from the sandbox, inside an `Execute` scope. `inputs` has `tool` and `args`. */
+  case ToolCall
+
+  /** The start of the interpreter process. It occurs inside the first `Execute` scope. `inputs` is empty. */
+  case Startup
+
+  /** One `close` call. Each call opens a scope, also when the interpreter is already closed. `inputs` is empty. */
+  case Shutdown
+
+/** Opens a code-interpreter scope (upstream `on_interpreter_<operation>_start`). `interpreterName` is the simple class
+  * name of the interpreter, for example `DenoPyodideInterpreter`. Paired with [[InterpreterEndEvent]].
+  */
+final case class InterpreterStartEvent(
+    interpreterName: String,
+    operation      : InterpreterOperation,
+    inputs         : DynamicValue.Record,
+    callId         : String         = UUID.randomUUID().toString,
+    parentCallId   : Option[String] = None,
+    timestamp      : Instant        = Instant.now()
+) extends CallbackEvent
+
+/** Closes a code-interpreter scope opened by an [[InterpreterStartEvent]] with the same `callId`. `output` is the
+  * result of the operation (the `CodeResult` of an `Execute`, the tool result of a `ToolCall`, `()` for a `Startup` or
+  * a `Shutdown`), or the failure.
+  */
+final case class InterpreterEndEvent(
+    interpreterName: String,
+    operation      : InterpreterOperation,
+    output         : Either[DspyError, Any],
+    callId         : String         = UUID.randomUUID().toString,
+    parentCallId   : Option[String] = None,
+    timestamp      : Instant        = Instant.now()
 ) extends CallbackEvent
 
 /** Consumer side of the [[CallbackEvent]] stream. Implementations receive every event from every scope opened in the

@@ -5,6 +5,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LanguageModel
+import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.ProgramRunner
 
@@ -23,6 +24,9 @@ import dspy4s.programs.ProgramRunner
   * @param instructionProposer
   *   writes the new instruction text of each iteration. The default is the built-in proposer
   *   ([[DefaultInstructionProposer]]); give one with options, or an implementation of your own.
+  *
+  * Each `compile` call is a compile scope (upstream `_with_compile_callbacks`) with the inputs `trainset_size`, and
+  * `valset_size` for the call with a validation set.
   */
 final class Gepa[P](
     metric             : FeedbackMetric,
@@ -52,7 +56,7 @@ final class Gepa[P](
     * objective score. The run stops after the seed evaluation.
     */
   def compile(student: P, trainset: Vector[Example])(using RuntimeContext): Either[DspyError, GepaResult[P]] =
-    run(student, trainset, trainset, valsetSize = None)
+    Teleprompter.withCompileCallbacks(this, trainset)(run(student, trainset, trainset, valsetSize = None))
 
   /** As the other `compile`, with `valset` for the Pareto scores. An empty `valset` selects the trainset, as upstream
     * (`valset or trainset`).
@@ -63,7 +67,9 @@ final class Gepa[P](
   def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using
       RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
-    run(student, trainset, if valset.isEmpty then trainset else valset, valsetSize = Some(valset.size))
+    Teleprompter.withCompileCallbacks(this, trainset, Some(valset)) {
+      run(student, trainset, if valset.isEmpty then trainset else valset, valsetSize = Some(valset.size))
+    }
 
   /** Run the engine on `valset` with the budget that [[GepaBudget.resolve]] gives for `valsetSize`, the size of the
     * validation set that the caller gave. The engine gets the resolved number of metric calls, so it does not resolve
