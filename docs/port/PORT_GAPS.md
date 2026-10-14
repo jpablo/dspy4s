@@ -1662,7 +1662,7 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** In progress. Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7). Open: resume, budget. · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
+**Status:** Resolved (2026-10-13, batch 9). Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7); resume and the stop reason (2026-10-13, batch 9). · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1704,15 +1704,23 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   `GepaFailureFeedbackSuite`.
 - **API change.** `Gepa.compile` and `GepaEngine.optimize` now return `Either[DspyError, GepaResult[P]]`, because two
   leaves with the same key and a leaf type with no key are errors (decision D2).
-- **Resume.** The iteration index and the random sources start again, and `Gepa.compile` does not pass `runDir`
-  (`modules/gepa/.../GepaEngine.scala`, `Gepa.scala`). The pointers continue since batch 5, because they are in the
-  saved state.
-  A checkpoint that is not valid throws. Upstream continues the iteration index and the pointers, and restores the
-  random state of the adapter; it also loses the merge schedule and the engine random source.
-- **Budget.** dspy4s runs an iteration only when its worst-case cost fits: `2 × minibatch + |distinct valset|`
-  (`GepaEngine.scala:128,159`). A budget below `2 × |distinct valset| + 2 × minibatch` gives zero iterations, and the
-  result does not say why. Upstream checks the budget only at the start of an iteration, so a run can go above it
-  (`gepa/core/engine.py:731`). The hard limit of dspy4s is deliberate; the missing stop reason is the gap.
+- **Resume (resolved, batch 9).** The iteration index and the random sources started again, `Gepa.compile` did not
+  pass a run directory, and a checkpoint that was not valid threw an exception. Upstream continues the iteration
+  index and the pointers, and restores the random state of the adapter; it loses the merge schedule and the engine
+  random source. Now `GepaConfig.runDir` is the run directory of the engine and of the facade. The state holds the
+  iteration index and the merge schedule. The random source of each iteration, each epoch shuffle, and each
+  reflective dataset comes from the seed and fixed coordinates, so a resumed run makes the same draws as a run with
+  no stop. This is a deliberate difference: it is stronger than upstream, and it changed the seeded results of the
+  runs of earlier versions. Each checkpoint error and each configuration error is a `Left`, and the file stays
+  unchanged. A checkpoint that cannot be written is a `Left` too. Test: `GepaRunSuite`. One gap stays: the
+  checkpoint does not keep the cached scores of a merge subsample that the run rejected, so in a rare case a resumed
+  run makes more metric calls than a run with no stop.
+- **Budget (resolved, batch 9).** dspy4s runs an iteration only when its worst-case cost fits. Upstream checks the
+  budget only at the start of an iteration, so a run can go above it (`gepa/core/engine.py:731`). The hard limit is
+  a decision of the owner and stays. The gap was the missing signal: a run with zero iterations did not say why.
+  `GepaResult` now has `stopReason` (`BudgetExhausted`, `IterationDoesNotFit(required, remaining)`, or
+  `PerfectScore`), `iterations`, and `maxMetricCalls`, and `GepaState.failedProposals` counts the proposal tasks
+  whose proposer failed two times. Test: `GepaRunSuite`.
 - **Merge depth (resolved).** dspy4s made one loop of 10 pair draws against 10 attempts of 10 pair draws
   (`gepa/proposer/merge.py:87,126-141`). A merge description that was already made ended the search; upstream
   continues with the next attempt (`merge.py:195-197`). Upstream also makes no merge when the two candidates share
@@ -1728,8 +1736,8 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
 
 ## G-45 — GEPA surface added upstream since 3.2.1
 
-**Status:** Partly resolved (the instruction proposer, 2026-10-12, batch 6; the objective frontiers, 2026-10-12,
-batch 7; more than one proposal, 2026-10-12, batch 8). Open: the facade. · **Verification:** C (a second read of the two sides,
+**Status:** Resolved (the instruction proposer, 2026-10-12, batch 6; the objective frontiers, 2026-10-12, batch 7;
+more than one proposal, 2026-10-12, batch 8; the facade, 2026-10-13, batch 9). · **Verification:** C (a second read of the two sides,
 2026-10-11) · **Upgrade items:** O3, O4, O5
 
 The second read corrected the first report in two points: objective frontiers and more than one proposal are options
@@ -1811,11 +1819,18 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
       examples. The result differs only when the trainset holds equal examples at different indices.
 - **Facade.** `auto` budgets (`light` 6, `medium` 12, `heavy` 18 candidates through `auto_budget`), `max_full_evals`,
   the trainset as the default validation set, and `track_stats` with all candidates and their lineage
-  (`dspy/teleprompt/gepa/gepa.py:26-30,448-453,513-594,690-692`). dspy4s requires `maxMetricCalls` and a validation
-  set, and returns the best candidate only.
+  (`dspy/teleprompt/gepa/gepa.py:26-30,448-453,513-594,690-692`). dspy4s before batch 9 required `maxMetricCalls`
+  and a validation set, and returned the best candidate only.
+  - **Resolved (batch 9).** `GepaConfig.budget` is `GepaBudget.MetricCalls(n)`, `FullEvals(n)`, or `Auto(Light |
+    Medium | Heavy)`, with the upstream formula (`GepaBudget.auto`) and the upstream rules for the validation set
+    that the caller gave. `Gepa.compile(student, trainset)` uses the trainset as the validation set, and an empty
+    validation set does the same. An empty trainset is a `Left` before any LM call. `GepaResult.state` holds each
+    candidate, its lineage, its scores, and its discovery count (`GepaState.discoveryCalls`, gepa's
+    `num_metric_calls_by_discovery`). Tests: `GepaBudgetSuite`, `GepaRunSuite`.
+  - **Not ported.** `track_best_outputs` (the best outputs of each validation example), and the callbacks of the
+    engine. `track_stats` is not necessary: the result always holds the state.
 
-**Direction.** The proposer, the frontiers, and the proposals are done. The facade and resume (G-44) come after the state shape is final, so that the snapshot
-format changes one time.
+**Direction.** The proposer, the frontiers, the proposals, and the facade are done.
 
 **Decisions of the owner (2026-10-12).**
 
@@ -1839,8 +1854,8 @@ InferRules, and the random search return `OptimizerSupport.emptyEvalsetError` be
 `EvaluateSuite`, `OptimizerEmptyEvalsetSuite`.
 
 **Two differences that stay.** The random search rejects `valset = Some(Vector.empty)`; upstream (`valset or
-trainset`) uses the trainset. GEPA with an empty validation set still returns the seed, because it does not call
-`Evaluate` for that set; upstream uses the trainset there (G-45).
+trainset`) uses the trainset. GEPA with an empty validation set uses the trainset since batch 9, as upstream
+(G-45).
 
 ---
 

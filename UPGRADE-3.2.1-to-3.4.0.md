@@ -196,6 +196,34 @@ The full suite passes: 1,484 tests, 0 failures, 6 live tests skipped.
   - The limit of 120 seconds for one example of an evaluation still applies in each candidate of a batch.
 - **Not in this batch.** Resume, the stop reason of a run, and the facade.
 
+### Batch 9 (2026-10-13): GEPA resume, stop reason, and facade
+
+The full suite passes: 1,506 tests, 0 failures, 6 live tests skipped.
+
+- **G-44** a resumed run continues the iteration index, the pointers, and the merge schedule, and its random draws
+  come from the seed and the iteration index. A resumed run thus makes the same draws as a run with no stop.
+  `GepaConfig.runDir` is the run directory, also for `Gepa.compile`.
+- **G-44** `GepaResult` has `stopReason`, `iterations`, and `maxMetricCalls`. `GepaState.failedProposals` counts the
+  proposal tasks whose proposer failed two times.
+- **G-45** `GepaConfig.budget` is `MetricCalls(n)`, `FullEvals(n)`, or `Auto(level)` with the upstream formula.
+  `Gepa.compile(student, trainset)` uses the trainset as the validation set.
+- **Decisions of the owner.** The six decisions of 2026-10-13: `runDir` in `GepaConfig`; random sources from the seed
+  and the iteration; the merge schedule in the checkpoint; each checkpoint error as a `Left`; the stop reason in the
+  result; and the facade with an optional validation set and a budget of three forms.
+- **API changes.** `GepaConfig.maxMetricCalls` is now `GepaConfig.budget`: write
+  `budget = GepaBudget.MetricCalls(MetricCallCount(n))`. `GepaEngine.optimize` has no `runDir` parameter.
+  `GepaResult` has three new fields. `GepaState` has `iteration`, `merge`, `discoveryCalls`, and `failedProposals`.
+  `GepaBudget`, `AutoBudget`, `GepaStopReason`, `MergeSchedule`, and `FullEvalCount` are new.
+- **Changes in behavior.**
+  - The seeded results of a run change, because the random sources come from the seed and the iteration index.
+  - A checkpoint error, a budget below the seed cost, and an empty trainset give a `Left`. Before, they threw.
+  - An empty validation set for `Gepa.compile` selects the trainset. Before, the run returned the seed.
+  - In a run of the engine, the random sources come from `GepaConfig.seed`. The `seed` parameter of `GepaAdapter`
+    now has an effect only on a direct call of `makeReflectiveDataset`. `Gepa.compile` gives the two the same value.
+- **Open point, for the owner.** The checkpoint does not keep the cached scores of a merge subsample that the run
+  rejected. When a later candidate is equal to that merged candidate, a resumed run evaluates those examples again,
+  so its metric call count can differ from a run with no stop. The draws stay the same. This case is rare.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
