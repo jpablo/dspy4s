@@ -307,6 +307,41 @@ The full suite passes: 1,561 tests, 0 failures, 6 live tests skipped.
   - `StreamingLanguageModelWrapper.stream` does not give a `ClosableIterator`. This is older than the batch.
   - An exception from the stream of the delegate gives no history entry. `call` has the same behavior.
 
+### Batch 12 (2026-10-14): the strict response schema
+
+The full suite passes: 1,579 tests, 0 failures, 6 live tests skipped.
+
+From this batch on, the owner is offline, and Claude continues the work. A choice that the owner did not make is
+marked **decided by Claude, review**. Each such choice takes the upstream behavior where upstream has one.
+
+- **L4** (G-26, strict flag). The JSON adapter sends a strict structured output, as upstream
+  `JSONAdapter._prepare_response_format`.
+- **Decisions of the owner.** The six decisions of 2026-10-14:
+  - `strict: true`, with the upstream shaping (`_strict_json_schema`). The constraints of the port stay.
+  - An optional field permits `null` in the strict schema.
+  - JSON mode (`{"type": "json_object"}`) for an open map, a text `tool_calls` field, or a schema that cannot be
+    built. No `response_format` when the model does not support a response schema.
+  - A string signature gets a schema built from its field types.
+  - With native function calling active, the schema has no `tool_calls` field.
+  - The schema name is `DSPyProgramOutputs`.
+- **Decided by Claude, review.** A `oneOf` goes out as an `anyOf`. zio-blocks writes `oneOf` for a sealed trait whose
+  cases have fields, and OpenAI strict mode does not take `oneOf`. Upstream does not handle `oneOf`. Without this
+  rule, such a typed output gets a request error now that `strict` is `true`.
+- **API changes.** `StrictJsonSchema` (internal) is new. `JSONAdapterPrompt.sanitizeSchemaName` is gone.
+- **Changes in behavior.**
+  - The request has `strict: true` and the name `DSPyProgramOutputs`. Before, `strict` was `false`, and the name was
+    the signature name.
+  - A string signature (`DynamicPredict`) now sends a `response_format`. Before, it sent none.
+  - An open map, a text `tool_calls` field, a type with no schema, or a typed schema that does not parse gives JSON
+    mode. Before, the first three sent a lenient schema or none, and the last sent none.
+  - An object whose `type` is a list with `object` (zio-blocks writes `["object", "null"]`) gets the strict shape.
+    Upstream checks only `type == "object"`.
+  - A `$ref` in a cycle gives JSON mode. Upstream recurses with no end.
+- **Open points, for the owner.**
+  - `ZioSchemaCodec.jsonSchemaForModel` did not finish in 10 minutes for a recursive case class
+    (`children: List[Node]`). The L4 subagent saw this in a probe. This batch does not cause it.
+  - Upstream logs a warning when it goes back to JSON mode. The port does not log.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -365,7 +400,7 @@ Open points from batch 1, for the owner:
 - [x] **L2. Stream guard** (2cda3872d, 7fd361214, 661467b77). A stream without an end event is an error, and the
       typed error survives. → G-25 (C)
 - [x] **L3. One call path for streamed calls**: cache, retry before the first token, usage, and history. → G-25 (C)
-- [ ] **L4. Strict response schema** (40a6e1689): `strict: true` with a schema shaped for strict mode. → G-26 (C)
+- [x] **L4. Strict response schema** (40a6e1689): `strict: true` with a schema shaped for strict mode. → G-26 (C)
 - [ ] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
 - [ ] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
 - [ ] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)

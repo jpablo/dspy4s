@@ -1161,7 +1161,7 @@ No check rejects an event after the end event. The usage of a retried attempt is
 
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
-**Status:** Open · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+**Status:** In progress. The strict schema is resolved (2026-10-14, batch 12). · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1183,8 +1183,14 @@ No check rejects an event after the end event. The usage of a retried attempt is
 - Empty content becomes a `ParseError` (`ProviderLanguageModel.scala:86,104-109`). Upstream returns the output and
   warns about truncation (`execution.py:411-414`).
 
-**Direction.** Do the strict schema first; it is small and sits next to `embedConstraints`. Add a `capabilities`
-value to the OpenAI client for compatible servers. Treat the Responses endpoint as its own item.
+**Resolution (strict schema, batch 12).** The JSON adapter sends `strict: true` with the name
+`DSPyProgramOutputs` and a schema in strict shape (`StrictJsonSchema.shape`, upstream `_strict_json_schema`). A string
+signature gets a schema from its field types (`StrictJsonSchema.fromFields`). JSON mode replaces the schema for an
+open map, a text `tool_calls` field, or a schema that cannot be built. A `oneOf` goes out as `anyOf`. Tests:
+`StrictResponseFormatSuite`, `JSONAdapterResponseFormatSuite`.
+
+**Direction (open).** Add a `capabilities` value to the OpenAI client for compatible servers. Treat the Responses
+endpoint as its own item.
 
 ---
 
