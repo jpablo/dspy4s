@@ -157,14 +157,15 @@ private[signatures] object ZioSchemaCodec:
     val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
     noSign.filter(_ != ',')
 
-  /** Walk a `Reflect.Record` and produce its role-free field metadata. */
+  /** Walk a `Reflect.Record` and produce its role-free field metadata. An `Option` field is an optional field. */
   def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] =
     reflect match
       case rec: Reflect.Record[?, ?] => rec.fields.toVector.map(term =>
           FieldSpec(
             name = term.name,
             typeRef = typeRefFor(term.value),
-            enumValues = enumValuesOf(term.value)
+            enumValues = enumValuesOf(term.value),
+            optional = optionSomeValueReflect(term.value).isDefined
           )
         )
       case _ => Vector.empty
@@ -216,6 +217,10 @@ private[signatures] object ZioSchemaCodec:
     * types one field at a time rather than deriving a whole record).
     */
   def typeRefForSchema[A](using schema: Schema[A]): TypeRef = typeRefFor(schema.reflect)
+
+  /** `true` when `A` is an `Option` type. A field of such a type is an optional field, as in [[fieldSpecsFromReflect]].
+    */
+  def isOptionSchema[A](using schema: Schema[A]): Boolean = optionSomeValueReflect(schema.reflect).isDefined
 
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
     reflect match
@@ -288,10 +293,7 @@ private[signatures] object ZioSchemaCodec:
     val specs       = fieldSpecsFromReflect(rootReflect)
     // Option-fields are not required on the wire: an LM that omits the key entirely means None, the
     // same as an explicit null/"none". Collected once so decode can exempt them from the missing-field check.
-    val optionalFieldNames: Set[String] = rootReflect match
-      case rec: Reflect.Record[?, ?] =>
-        rec.fields.iterator.filter(term => optionSomeValueReflect(term.value).isDefined).map(_.name).toSet
-      case _ => Set.empty
+    val optionalFieldNames: Set[String] = specs.filter(_.optional).map(_.name).toSet
 
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs

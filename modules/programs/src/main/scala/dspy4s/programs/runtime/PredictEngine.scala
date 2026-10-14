@@ -10,6 +10,7 @@ import dspy4s.core.data.Completions
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -17,6 +18,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.core.runtime.StreamProgress
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -68,30 +70,58 @@ private[dspy4s] final case class PredictEngine(
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
       for
-        model     <- lm.fold(runtime.resolveModel)(Right(_))
-        adapter   <- runtime.resolveAdapter
-        invocation = buildInvocation(call, model)
-        prompt    <- CallbackDispatcher.withAdapter(
-                    adapterName = adapter.name,
-                    inputs = DynamicValues.record("phase" := "format", "signature" := layout.name)
-                  ) {
-                    adapter.format(invocation)
-                  }
-        response <- CallbackDispatcher.withLm(
-                      modelId = model.id,
-                      request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
-                    ) {
-                      // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing
-                      // request options, so explicit per-call/module config wins on key collision.
-                      val mergedOptions =
-                        FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
-                      model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
-                    }
-        parsed     <- parseOutputs(adapter, response.outputs)
-        prediction <-
-          buildPrediction(parsed, response, response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty))
+        model      <- lm.fold(runtime.resolveModel)(Right(_))
+        adapter    <- runtime.resolveAdapter
+        answer     <- answerWithFallback(adapter, model, buildInvocation(call, model))
+        prediction <- buildPrediction(
+                        answer.parsed,
+                        answer.response,
+                        answer.response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty)
+                      )
       yield prediction
     }
+
+  /** Format, call the model, and parse with `adapter`. After a [[ParseError]] of the parse step, do the three steps one
+    * more time with [[Adapter.fallback]] (upstream `ChatAdapter.__call__`). A call that streamed output to a listener
+    * gets no second call. An error of the format step or of the model gives no second call.
+    */
+  private def answerWithFallback(adapter: Adapter, model: LanguageModel, invocation: AdapterInvocation)(using
+      RuntimeContext
+  ): Either[DspyError, PredictEngine.Answer] =
+    StreamProgress.withScope { progress =>
+      callModel(adapter, model, invocation).flatMap { attempt =>
+        attempt.parsed match
+          case Left(error: ParseError) if !progress.emitted =>
+            adapter.fallback match
+              case Some(next) => callModel(next, model, invocation).flatMap(_.answer)
+              case None       => Left(error)
+          case _ => attempt.answer
+      }
+    }
+
+  /** Format with `adapter`, call the model, and parse. The result keeps the result of the parse step apart, so the
+    * caller can tell a parse error from an error of the other steps.
+    */
+  private def callModel(adapter: Adapter, model: LanguageModel, invocation: AdapterInvocation)(using
+      RuntimeContext
+  ): Either[DspyError, PredictEngine.Attempt] =
+    for
+      prompt <- CallbackDispatcher.withAdapter(
+                  adapterName = adapter.name,
+                  inputs = DynamicValues.record("phase" := "format", "signature" := layout.name)
+                ) {
+                  adapter.format(invocation)
+                }
+      response <- CallbackDispatcher.withLm(
+                    modelId = model.id,
+                    request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
+                  ) {
+                    // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing
+                    // request options, so explicit per-call/module config wins on key collision.
+                    val mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
+                    model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
+                  }
+    yield PredictEngine.Attempt(response, parseOutputs(adapter, response.outputs))
 
   private def buildInvocation(call: ProgramCall[DynamicValue.Record], model: LanguageModel): AdapterInvocation =
     warnOnExtraInputs(call)
@@ -167,6 +197,14 @@ private[dspy4s] final case class PredictEngine(
     yield prediction
 
 private[dspy4s] object PredictEngine:
+
+  /** The response of the model and its parsed outputs. */
+  private final case class Answer(response: LmResponse, parsed: Vector[ParsedOutput])
+
+  /** The response of the model and the result of the parse step. */
+  private final case class Attempt(response: LmResponse, parsed: Either[DspyError, Vector[ParsedOutput]]):
+    def answer: Either[DspyError, Answer] = parsed.map(Answer(response, _))
+
   /** Name of the synthetic prediction value the engine appends when the LM returned native tool calls (upstream parity:
     * a `tool_calls` value exists only on tool turns). Consumers that iterate a prediction's values positionally — e.g.
     * [[dspy4s.programs.Aggregation.majority]]'s "last output field" default — must still skip this key when present.

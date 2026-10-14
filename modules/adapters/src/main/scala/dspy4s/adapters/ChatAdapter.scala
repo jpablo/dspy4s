@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.core.contracts.DspyError
@@ -29,6 +30,9 @@ final case class ChatAdapter(
       * request option bag and the tool-calls field is filled from the provider's structured `tool_calls` instead of
       * being requested as text. Off by default (mirrors dspy's `use_native_function_calling`).
       *
+      * When the flag is off, or the LM does not support function calling, the tool-calls field is a text output field.
+      * See [[NativeFunctionCalling.isToolCallsField]].
+      *
       * The flag also sets how the adapter replays a turn of a conversation history that has tool calls. When on AND the
       * resolved LM advertises `supportsFunctionCalling`, the turn is an assistant message with tool calls and one tool
       * message for each result. In each other case the turn stays text.
@@ -42,8 +46,23 @@ final case class ChatAdapter(
       * [[ToolChoice.Required]] / [[ToolChoice.Off]], or [[ToolChoice.Function]] to force a specific tool). `None`
       * leaves it unset (provider default).
       */
-    toolChoice: Option[ToolChoice] = None
+    toolChoice: Option[ToolChoice] = None,
+    /** Try a [[JSONAdapter]] after a parse error (dspy's `use_json_adapter_fallback`). On by default, as upstream. The
+      * fallback adapter has the native function-calling options of this adapter. See [[Adapter.fallback]].
+      */
+    useJsonAdapterFallback: Boolean = true
 ) extends Adapter:
+
+  /** A [[JSONAdapter]] with the native function-calling options of this adapter, when [[useJsonAdapterFallback]] is on.
+    */
+  override def fallback: Option[Adapter] =
+    Option.when(useJsonAdapterFallback)(
+      JSONAdapter(
+        useNativeFunctionCalling = useNativeFunctionCalling,
+        parallelToolCalls = parallelToolCalls,
+        toolChoice = toolChoice
+      )
+    )
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     ChatAdapterPrompt.format(invocation, useNativeFunctionCalling, parallelToolCalls, toolChoice)
@@ -54,7 +73,7 @@ final case class ChatAdapter(
     )
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    ChatAdapterParser.parse(name, layout, output)
+    ChatAdapterParser.parse(name, layout, output, NativeFunctionCalling.isActive(useNativeFunctionCalling))
 
 object ChatAdapter:
   /** Pattern matching `[[ ## field_name ## ]]`. Capture group 1 is the field name. The pattern is intentionally
@@ -77,19 +96,21 @@ object ChatAdapter:
     */
   def reminderHint(t: TypeRef): Option[String] =
     t match
-      case TypeRef.string => None
-      case TypeRef.list   => Some("must be a valid JSON array")
-      case _              => Some(s"must be formatted as a valid ${displayTypeName(t)}")
+      case TypeRef.string    => None
+      case TypeRef.list      => Some("must be a valid JSON array")
+      case TypeRef.toolCalls => Some(s"must be ${NativeFunctionCalling.TextFormat}")
+      case _                 => Some(s"must be formatted as a valid ${displayTypeName(t)}")
 
   /** Hint phrasing for the structure-example `# note: ...` comments. More specific than the reminder hint: enumerates
     * booleans and gives a brief "single X value" form for scalars.
     */
   def structureHint(t: TypeRef): Option[String] =
     t match
-      case TypeRef.string => None
-      case TypeRef.int    => Some("must be a single int value")
-      case TypeRef.double => Some("must be a single float value")
-      case TypeRef.bool   => Some("must be true or false")
-      case TypeRef.json   => Some("must be a valid JSON object")
-      case TypeRef.list   => Some("must be a valid JSON array")
-      case other          => Some(s"must be a valid ${displayTypeName(other)}")
+      case TypeRef.string    => None
+      case TypeRef.int       => Some("must be a single int value")
+      case TypeRef.double    => Some("must be a single float value")
+      case TypeRef.bool      => Some("must be true or false")
+      case TypeRef.json      => Some("must be a valid JSON object")
+      case TypeRef.list      => Some("must be a valid JSON array")
+      case TypeRef.toolCalls => Some(s"must be ${NativeFunctionCalling.TextFormat}")
+      case other             => Some(s"must be a valid ${displayTypeName(other)}")

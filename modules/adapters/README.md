@@ -50,9 +50,27 @@ earlier turns, between the demos and the current request.
   marker is seen, raw tokens route to the single field.
 - **Native tool-calling is adapter-level and gated.** It activates only when native function-calling is on, tools
   are supplied, the signature has a `tool_calls` field, and the LM advertises support. The `tool_calls` field is
-  excluded from the rendered text prompt and filled post-parse from the structured response; missing text fields
-  on a tool turn default to `Null` rather than erroring (matching dspy's lenient `setdefault`). ReAct keeps its
-  text protocol unchanged.
+  then excluded from the rendered text prompt and filled post-parse from the structured response; a missing text
+  field on a tool turn takes its `defaultValue`, else a null, rather than an error (as dspy's lenient
+  `_call_postprocess`). When native function-calling is off, or the LM does not support it, `tool_calls` is an
+  ordinary output field in the Chat and JSON adapters: the prompt asks for a JSON list of `{"name", "args"}` objects,
+  and the parser reads it from the text, as upstream. The XML adapter keeps the field as text (an open point). ReAct
+  keeps its text protocol unchanged.
+- **Missing outputs.** An output that the response does not have takes the `defaultValue` of its field, else a null
+  when the field is `optional` (an `Option[T]` field, or `Optional[T]` in a string signature), else it is a
+  `ParseError`. An explicit JSON null for an optional field is a null. The rule is the same in the Chat, JSON, and
+  XML adapters (dspy's `apply_output_field_defaults`).
+- **Parse errors.** A value that does not fit the type of its field is a `ParseError` with the field name and the
+  raw response. In the chat format, the first header of a field wins.
+- **JSON fallback.** After a `ParseError` of a `ChatAdapter` response, the predictor formats, calls, and parses one
+  more time with a `JSONAdapter` that has the native function-calling options of the chat adapter
+  (`Adapter.fallback`, `ChatAdapter.useJsonAdapterFallback`, on by default). An LM error or a configuration error
+  gives no second call, and a call that streamed visible output gets no second call.
+- **Incomplete demos.** A demo with a value that is not null for each field is complete. A demo with the key of
+  one input field and one output field at least, but not complete, is incomplete. A key with a null value counts, as
+  upstream. An incomplete demo comes first, its user turn starts with "This is an example of the task, though some
+  input or output fields are not supplied.", and a missing output shows "Not supplied for this particular example."
+  Each other demo is dropped. A field default does not fill a demo (`AdapterDemos`).
 - **Conversation history replay.** `internal/ConversationHistory` builds the message sequence for the Chat, JSON,
   and XML adapters: system, demos, history turns, current request. Each adapter supplies only its text for a user
   turn and for an assistant turn (`TurnText`).

@@ -1,18 +1,31 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{AdapterErrors, NativeFunctionCalling, ParsedOutput}
+import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
 import dspy4s.adapters.internal.AdapterTextSupport
-import dspy4s.core.contracts.{DspyError, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldSpec, SignatureLayout}
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.DynamicValue
 
 /** Decodes ChatAdapter's marker-framed completion and provider-native tool calls. */
 private[adapters] object ChatAdapterParser:
-  def parse(adapterName: String, layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
-    val textFields  = layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
+
+  /** @param nativeCalls
+    *   `true` when native function calling is active for the call. The provider tool calls then fill the tool calls
+    *   field. They also fill it when the response has provider tool calls (upstream `_call_postprocess`). Else the
+    *   field is a text field.
+    */
+  def parse(
+      adapterName: String,
+      layout     : SignatureLayout,
+      output     : LmOutput,
+      nativeCalls: Boolean
+  ): Either[DspyError, ParsedOutput] =
+    val providerCalls                           = nativeCalls || output.toolCalls.nonEmpty
+    def fromProvider(field: FieldSpec): Boolean = providerCalls && NativeFunctionCalling.isToolCallsField(field)
+
+    val textFields  = layout.outputFields.filterNot(fromProvider)
     val outputNames = textFields.map(_.name).toSet
-    val sections    = extractSections(output.text, outputNames)
-    val values      = sections.view.filterKeys(outputNames.contains).toMap
+    val values      = extractSections(output.text, outputNames)
 
     val resolved =
       if values.isEmpty && textFields.size == 1 && output.text.trim.nonEmpty then
@@ -21,20 +34,25 @@ private[adapters] object ChatAdapterParser:
         values
 
     AdapterTextSupport
-      .decodeOutputFields(layout) { field =>
-        if NativeFunctionCalling.isToolCallsField(field) then
-          Right(NativeFunctionCalling.encodeToolCalls(output.toolCalls))
+      .decodeOutputFields(layout, output.text) { field =>
+        if fromProvider(field) then
+          Right(Some(NativeFunctionCalling.encodeToolCalls(output.toolCalls)))
         else
           resolved.get(field.name) match
-            case Some(value) => coerce(field.typeRef, value)
-            case None        =>
-              if output.toolCalls.nonEmpty then
-                Right(DynamicValue.Null)
-              else
-                Left(AdapterErrors.missingField(field.name, Some(output.text)))
+            case Some(value) => decodeText(field, value).map(Some(_))
+            // A tool turn has no final answer yet: a missing field takes its default, else a null.
+            case None if output.toolCalls.nonEmpty => Right(Some(field.defaultValue.getOrElse(DynamicValue.Null)))
+            case None                              => Right(None)
       }
       .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
 
+  private def decodeText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
+    if NativeFunctionCalling.isToolCallsField(field) then AdapterTextSupport.textToolCalls(raw)
+    else AdapterTextSupport.coerceOutputText(field, raw)
+
+  /** The text of each output field. The first header of a field wins (upstream `ChatAdapter.parse`): the lines of a
+    * later header of the same field are dropped.
+    */
   private def extractSections(text: String, outputNames: Set[String]): Map[String, String] =
     val out                          = scala.collection.mutable.LinkedHashMap.empty[String, StringBuilder]
     var currentField: Option[String] = None
@@ -48,12 +66,8 @@ private[adapters] object ChatAdapterParser:
             val trailing  = stripped.substring(marker.end).trim
             if fieldName == ChatAdapter.CompletedFieldName then
               currentField = None
-            else if outputNames.contains(fieldName) then
-              val builder = out.getOrElseUpdate(fieldName, new StringBuilder)
-              if trailing.nonEmpty then
-                if builder.nonEmpty then
-                  builder.append('\n')
-                builder.append(trailing)
+            else if outputNames.contains(fieldName) && !out.contains(fieldName) then
+              out.update(fieldName, new StringBuilder(trailing))
               currentField = Some(fieldName)
             else
               currentField = None
@@ -70,9 +84,3 @@ private[adapters] object ChatAdapterParser:
         name -> value.toString.stripTrailing
       }
       .toMap
-
-  private def coerce(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
-    AdapterTextSupport.coerceText(
-      typeRef,
-      raw
-    )

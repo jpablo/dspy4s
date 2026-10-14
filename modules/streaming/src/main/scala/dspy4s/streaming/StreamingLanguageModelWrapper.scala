@@ -9,6 +9,7 @@ import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.ActivePredictContext
+import dspy4s.core.runtime.StreamProgress
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -150,7 +151,7 @@ final class StreamingLanguageModelWrapper private (
       case Some(s) => if chunk.text.nonEmpty then
           s.receive(chunk.text).foreach(emitFieldChunk(ctx, _, isFinalChunk = chunk.isFinal))
       case None => if chunk.text.nonEmpty && listenerAccepts(ctx.predictName, "") then
-          val _ = queue.offer(
+          offerToken(
             TokenEvent(
               predictName = ctx.predictName,
               fieldName = "",
@@ -167,7 +168,7 @@ final class StreamingLanguageModelWrapper private (
   private def emitFieldChunk(ctx: CallContext, fc: FieldChunk, isFinalChunk: Boolean): Unit =
     val isLast = fc.isLast || isFinalChunk
     if listenerAccepts(ctx.predictName, fc.fieldName) then
-      val _ = queue.offer(
+      offerToken(
         TokenEvent(
           predictName = ctx.predictName,
           fieldName = fc.fieldName,
@@ -176,6 +177,13 @@ final class StreamingLanguageModelWrapper private (
         )
       )
       if isLast then markListenersFired(ctx.predictName, fc.fieldName)
+
+  /** Give a token to the listeners, and record the visible output, so the predictor tries no fallback adapter for this
+    * call (see [[StreamProgress]]).
+    */
+  private def offerToken(event: TokenEvent): Unit =
+    val _ = queue.offer(event)
+    StreamProgress.markEmitted()
 
   private def listenerAccepts(predictName: String, fieldName: String): Boolean =
     if listeners.isEmpty then true

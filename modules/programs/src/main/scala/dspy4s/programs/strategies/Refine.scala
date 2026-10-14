@@ -179,6 +179,11 @@ object Refine:
   ) extends Adapter:
     override def name: String = s"${baseAdapter.name}+hint"
 
+    /** The fallback of the base adapter, with the same advice (upstream `WrapperAdapter` calls the base adapter, which
+      * does its own fallback).
+      */
+    override def fallback: Option[Adapter] = baseAdapter.fallback.map(next => copy(baseAdapter = next))
+
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       adviceByLayout.get(invocation.layout).map(_.trim).filter(a => a.nonEmpty && a != "N/A") match
         case None         => baseAdapter.format(invocation) // no advice routed to this predictor

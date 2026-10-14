@@ -188,12 +188,16 @@ class GepaFailureFeedbackSuite extends FunSuite:
     val record = records(finisherId).head
     // The inputs are those of the predictor call, with the note of the stepper.
     assert(ReflectionFixtures.text(record.inputs).contains("step note"), record.inputs)
+    // The chat adapter falls back to a JSON adapter after the parse error (PORT_GAPS G-29, item A2). The request of the
+    // JSON call has no answer marker, so the model gives the reply of the stepper, and that parse fails too. The record
+    // has the raw response of this last call, as upstream (the parse error of the fallback adapter).
+    val lastReply = "[[ ## note ## ]]\nstep note\n\n[[ ## tag ## ]]\ngeo\n\n[[ ## completed ## ]]"
     assertEquals(
       record.generatedOutputs,
       // The text ends with the fence and two line ends, as upstream.
       ReflectionFixtures.string(
         "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
-          s"```\n$badReply\n```\n\n"
+          s"```\n$lastReply\n```\n\n"
       )
     )
     assert(record.feedback.startsWith("Your output failed to parse. Follow this structure:\nsystem: "), record.feedback)
@@ -380,8 +384,10 @@ class GepaFailureFeedbackSuite extends FunSuite:
     assertEquals(reflectionLm.prompts.toVector, Vector.empty)
     // An iteration with no proposal costs its minibatch evaluation only (2 calls), so 7 iterations run: 2 + 7 * 2.
     assertEquals(result.totalMetricCalls, 16)
-    // No acceptance evaluation ran: the task LM served the seed validation and the 7 minibatch evaluations only.
-    assertEquals(taskLm.calls.get(), 3 * (2 + 7 * 2))
+    // No acceptance evaluation ran: the task LM served the seed validation and the 7 minibatch evaluations only. Each
+    // program run calls the task LM 4 times: the finisher call that fails to parse gets one more call with the JSON
+    // fallback of the chat adapter (PORT_GAPS G-29, item A2).
+    assertEquals(taskLm.calls.get(), 4 * (2 + 7 * 2))
   }
 
   test("when each reflection call fails, the iteration makes no acceptance evaluation") {

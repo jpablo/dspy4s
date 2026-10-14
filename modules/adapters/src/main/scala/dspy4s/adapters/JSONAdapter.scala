@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.core.contracts.DspyError
@@ -31,4 +32,10 @@ final case class JSONAdapter(
     )
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    JSONAdapterParser.parse(name, allowTextFallbackForSingleOutput, layout, output)
+    JSONAdapterParser.parse(
+      name,
+      allowTextFallbackForSingleOutput,
+      layout,
+      output,
+      NativeFunctionCalling.isActive(useNativeFunctionCalling)
+    )

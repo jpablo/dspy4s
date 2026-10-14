@@ -8,7 +8,7 @@ import dspy4s.adapters.contracts.{
   ToolChoice
 }
 import dspy4s.adapters.internal.{AdapterTextSupport, ConversationHistory, JsonDynamic, TurnText}
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, SignatureLayout, updated}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, updated}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -23,14 +23,16 @@ private[adapters] object JSONAdapterPrompt:
       toolChoice              : Option[ToolChoice]
   )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val layout           = invocation.layout
-    val textOutputFields = layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
+    val renderLayout     = NativeFunctionCalling.promptLayout(layout, useNativeFunctionCalling)
+    val textOutputFields = renderLayout.outputFields
     val fieldList        = textOutputFields.map(_.name).mkString(", ")
     val jsonInstruction  = invocation.outputJsonSchema match
       case Some(schema) =>
         s"""Return a valid JSON object that conforms to the following JSON Schema. Do not include markdown fences.
            |
            |$schema""".stripMargin
-      case None => s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences."
+      case None => s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences." +
+          toolCallsNote(textOutputFields)
     val baseSystemText = layout.instructions match
       case Some(instructions) => s"$instructions\n\n$jsonInstruction"
       case None               => jsonInstruction
@@ -41,7 +43,7 @@ private[adapters] object JSONAdapterPrompt:
 
     val messages = ConversationHistory.messages(
       invocation,
-      renderLayout = layout.withOutputFields(textOutputFields),
+      renderLayout = renderLayout,
       systemText,
       useNativeFunctionCalling,
       Turns
@@ -82,6 +84,13 @@ private[adapters] object JSONAdapterPrompt:
 
     override val assistantWritesJson: Boolean = true
 
+  /** The form of each text tool calls field, for the keys instruction. Empty when the layout has no such field. */
+  private def toolCallsNote(outputFields: Vector[FieldSpec]): String =
+    outputFields
+      .filter(NativeFunctionCalling.isToolCallsField)
+      .map(field => s" The value of `${field.name}` must be ${NativeFunctionCalling.TextFormat}.")
+      .mkString
+
   /** Emit an OpenAI-compatible response schema when the resolved model supports it. */
   private def responseFormatOptions(invocation: AdapterInvocation)(using ctx: RuntimeContext): DynamicValue.Record =
     val capable = ctx.lm match
@@ -117,7 +126,7 @@ private[adapters] object JSONAdapterPrompt:
   /** Add each output field's constraints to the corresponding JSON Schema property. */
   private def embedConstraints(
       schema      : DynamicValue.Record,
-      outputFields: Vector[dspy4s.core.contracts.FieldSpec]
+      outputFields: Vector[FieldSpec]
   ): DynamicValue.Record =
     val constrained = outputFields.filter(_.constraints.nonEmpty)
     if constrained.isEmpty then

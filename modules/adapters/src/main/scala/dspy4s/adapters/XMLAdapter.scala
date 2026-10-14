@@ -2,7 +2,6 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterConstraints
-import dspy4s.adapters.contracts.AdapterErrors
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
@@ -68,11 +67,10 @@ final case class XMLAdapter(
         else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
 
   private def parseFields(layout: SignatureLayout, document: Elem, output: LmOutput): Either[DspyError, ParsedOutput] =
-    AdapterTextSupport.decodeOutputFields(layout) { field =>
-      for
-        raw     <- extractFieldText(document, field.name).toRight(AdapterErrors.missingField(field.name, Some(output.text)))
-        coerced <- AdapterTextSupport.coerceText(field.typeRef, raw)
-      yield coerced
+    AdapterTextSupport.decodeOutputFields(layout, output.text) { field =>
+      extractFieldText(document, field.name) match
+        case Some(raw) => AdapterTextSupport.coerceOutputText(field, raw).map(Some(_))
+        case None      => Right(None)
     }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
 
   /** The text of a turn: `prefix value` lines for a user turn, and one `<outputs>` document for an assistant turn. A

@@ -1,8 +1,8 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{AdapterErrors, NativeFunctionCalling, ParsedOutput}
+import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
 import dspy4s.adapters.internal.{AdapterTextSupport, JsonDynamic}
-import dspy4s.core.contracts.{DspyError, ParseError, SignatureLayout, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, FieldSpec, ParseError, SignatureLayout, TypeRef, ValidationError}
 import dspy4s.lm.contracts.LmOutput
 import ujson.Value
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -14,23 +14,31 @@ import scala.util.matching.Regex
 private[adapters] object JSONAdapterParser:
   private val FencedJson: Regex = "(?s)```json\\s*(\\{.*?\\})\\s*```".r
 
+  /** @param nativeCalls
+    *   `true` when native function calling is active for the call. The provider tool calls then fill the tool calls
+    *   field, and an empty sequence when there are none. Else the field is an ordinary JSON key.
+    */
   def parse(
       adapterName                     : String,
       allowTextFallbackForSingleOutput: Boolean,
       layout                          : SignatureLayout,
-      output                          : LmOutput
+      output                          : LmOutput,
+      nativeCalls                     : Boolean
   ): Either[DspyError, ParsedOutput] =
     if layout.outputFields.exists(NativeFunctionCalling.isToolCallsField) && output.toolCalls.nonEmpty then
       Right(parseNativeToolTurn(adapterName, layout, output))
     else
       extractJson(output.text).flatMap(parseJsonObject) match
-        case Right(root) => parseFields(adapterName, layout, root, output)
+        case Right(root) => parseFields(adapterName, layout, root, output, nativeCalls)
         case Left(_)     =>
           if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
             AdapterTextSupport.singleOutputTextFallback(adapterName, layout, output)
           else
             Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
 
+  /** A tool turn has no final answer yet: a field that is missing or does not fit its type takes its default, else a
+    * null.
+    */
   private def parseNativeToolTurn(adapterName: String, layout: SignatureLayout, output: LmOutput): ParsedOutput =
     val jsonRoot: Option[Value] = extractJson(output.text).flatMap(parseJsonObject).toOption
     val entries                 = layout
@@ -41,9 +49,9 @@ private[adapters] object JSONAdapterParser:
         else
           jsonRoot
             .flatMap(_.objOpt.flatMap(_.get(field.name)))
-            .flatMap(raw => coerce(field.typeRef, raw).toOption)
+            .flatMap(raw => decode(field, raw).toOption)
             .map(coerced => field.name -> coerced)
-            .getOrElse(field.name -> DynamicValue.Null)
+            .getOrElse(field.name -> field.defaultValue.getOrElse(DynamicValue.Null))
       }
     AdapterTextSupport.parsedOutput(adapterName, output, entries)
 
@@ -51,15 +59,30 @@ private[adapters] object JSONAdapterParser:
       adapterName: String,
       layout     : SignatureLayout,
       root       : Value,
-      output     : LmOutput
+      output     : LmOutput,
+      nativeCalls: Boolean
   ): Either[DspyError, ParsedOutput] =
     AdapterTextSupport
-      .decodeOutputFields(layout) { field =>
-        root.obj.get(field.name) match
-          case Some(raw) => coerce(field.typeRef, raw)
-          case None      => Left(AdapterErrors.missingField(field.name, Some(output.text)))
+      .decodeOutputFields(layout, output.text) { field =>
+        if nativeCalls && NativeFunctionCalling.isToolCallsField(field) then
+          Right(Some(NativeFunctionCalling.encodeToolCalls(output.toolCalls)))
+        else
+          root.obj.get(field.name) match
+            case Some(raw) => decode(field, raw).map(Some(_))
+            case None      => Right(None)
       }
       .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
+
+  /** The value of the output field `field` (upstream `parse_value`). A JSON null of an optional field is a null. A tool
+    * calls field takes a JSON list of calls, or the JSON text of such a list.
+    */
+  private def decode(field: FieldSpec, value: Value): Either[DspyError, DynamicValue] =
+    value match
+      case _: ujson.Null.type if field.optional                             => Right(DynamicValue.Null)
+      case ujson.Str(text) if NativeFunctionCalling.isToolCallsField(field) => AdapterTextSupport.textToolCalls(text)
+      case other if NativeFunctionCalling.isToolCallsField(field)           =>
+        AdapterTextSupport.toolCallsValue(JsonDynamic.fromUjson(other))
+      case other => coerce(field.typeRef, other)
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim

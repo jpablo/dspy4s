@@ -26,17 +26,33 @@ enum ToolChoice derives CanEqual:
   */
 object NativeFunctionCalling:
 
-  /** True for the output field that receives native provider tool calls (`typeRef == TypeRef.toolCalls`). Such a field
-    * is filled from the structured response, never rendered/parsed as text.
+  /** True for the output field that receives the tool calls (`typeRef == TypeRef.toolCalls`). When native function
+    * calling is active ([[isActive]]), the structured response fills such a field, and the prompt does not ask for it.
+    * Else the field is a text output field: the prompt asks for a JSON list of `{"name", "args"}` objects, and the
+    * parser reads that list from the text.
     */
   def isToolCallsField(field: FieldSpec): Boolean =
     field.typeRef == TypeRef.toolCalls
+
+  /** The form of a text tool calls value, as a prompt names it. */
+  val TextFormat: String = """a JSON list of objects like {"name": "...", "args": {...}}"""
 
   /** Whether the ambient LM advertises function-calling support (narrows the opaque `RuntimeContext.lm` ref). */
   def lmSupportsFunctionCalling(using ctx: RuntimeContext): Boolean =
     ctx.lm match
       case Some(lm: LanguageModel) => lm.supportsFunctionCalling
       case _                       => false
+
+  /** Whether native function calling is active for a call: the adapter has `useNative` and the LM of the context
+    * supports function calling (upstream `_call_preprocess`).
+    */
+  def isActive(useNative: Boolean)(using RuntimeContext): Boolean =
+    useNative && lmSupportsFunctionCalling
+
+  /** The fields of `layout` that the prompt shows: with native function calling active, no tool calls field. */
+  def promptLayout(layout: SignatureLayout, useNative: Boolean)(using RuntimeContext): SignatureLayout =
+    if isActive(useNative) then layout.withOutputFields(layout.outputFields.filterNot(isToolCallsField))
+    else layout
 
   /** The provider `tools` (and optional `parallel_tool_calls`) request options to contribute, or an empty record when
     * native calling is not active. Active iff `useNative` is on AND `tools` were supplied AND the layout declares a

@@ -14,7 +14,7 @@ private[adapters] object ChatAdapterPrompt:
       toolChoice              : Option[ToolChoice]
   )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val layout       = invocation.layout
-    val renderLayout = layout.withOutputFields(layout.outputFields.filterNot(NativeFunctionCalling.isToolCallsField))
+    val renderLayout = NativeFunctionCalling.promptLayout(layout, useNativeFunctionCalling)
 
     Right(
       FormattedPrompt(
@@ -146,7 +146,6 @@ private[adapters] object ChatAdapterPrompt:
       .flatMap { field =>
         val resolved = DynamicValues
           .recordGet(values, field.name)
-          .orElse(field.defaultValue)
           .map(DynamicValues.renderText)
         resolved.map(rendered => s"[[ ## ${field.name} ## ]]\n$rendered")
       }

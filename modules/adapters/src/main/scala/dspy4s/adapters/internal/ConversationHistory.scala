@@ -56,8 +56,10 @@ private[adapters] object ConversationHistory:
   /** The messages of one request, in this order: system, demos, history turns, current request.
     *
     *   - A demo shows each field of `renderLayout`. A demo that has a value for the history field shows that value as a
-    *     field. The history of a demo is not replayed.
-    *   - The current request, and each replayed turn, use `renderLayout` without the history field.
+    *     field. The history of a demo is not replayed. [[DemoMessages]] gives the order of the demos and the text of an
+    *     incomplete demo.
+    *   - The current request, and each replayed turn, use `renderLayout` without the history field. Only the current
+    *     request takes the default value of an input field that it does not have.
     *
     * @param renderLayout
     *   the layout that the adapter shows in a demo and in a request. It has the history field.
@@ -78,19 +80,15 @@ private[adapters] object ConversationHistory:
     val requestLayout = historyName.fold(renderLayout) { name =>
       renderLayout.withInputFields(renderLayout.inputFields.filterNot(_.name == name))
     }
-    val demos = invocation.demos.flatMap { demo =>
-      Vector(
-        Message(role = MessageRole.User, text = Some(turns.user(renderLayout, demo.values, mainRequest = false))),
-        Message(role = MessageRole.Assistant, text = Some(turns.assistant(renderLayout, demo.values)))
-      )
-    }
-    val history     = historyName.flatMap(History.fromInput(invocation.inputs.values, _)).getOrElse(History.empty)
-    val nativeCalls = useNativeFunctionCalling && NativeFunctionCalling.lmSupportsFunctionCalling
-    val earlier     = history.messages.flatMap(replay(invocation.layout, requestLayout, _, nativeCalls, turns))
-    val current     = Message(
-      role = MessageRole.User,
-      text = Some(turns.user(requestLayout, invocation.inputs.values, mainRequest = true))
+    val demos = DemoMessages.messages(renderLayout, invocation.demos)(
+      turns.user(renderLayout, _, mainRequest = false),
+      turns.assistant(renderLayout, _)
     )
+    val history     = historyName.flatMap(History.fromInput(invocation.inputs.values, _)).getOrElse(History.empty)
+    val nativeCalls = NativeFunctionCalling.isActive(useNativeFunctionCalling)
+    val earlier     = history.messages.flatMap(replay(invocation.layout, requestLayout, _, nativeCalls, turns))
+    val inputs      = AdapterTextSupport.withInputDefaults(requestLayout.inputFields, invocation.inputs.values)
+    val current     = Message(role = MessageRole.User, text = Some(turns.user(requestLayout, inputs, mainRequest = true)))
     (Message(role = MessageRole.System, text = Some(systemText)) +: demos) ++ earlier :+ current
 
   /** The turns of one history message. A key of the message that is not a field of the signature is ignored.

@@ -63,7 +63,8 @@ final class SignatureBuilder private[signatures] (
   private def fieldSpec[T](name: String)(using Schema[T]): FieldSpec =
     FieldSpec(
       name = name,
-      typeRef = ZioSchemaCodec.typeRefForSchema[T]
+      typeRef = ZioSchemaCodec.typeRefForSchema[T],
+      optional = ZioSchemaCodec.isOptionSchema[T]
     )
 
   private def copy(

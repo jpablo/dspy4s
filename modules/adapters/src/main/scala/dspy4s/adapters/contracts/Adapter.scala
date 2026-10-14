@@ -6,6 +6,15 @@ import dspy4s.lm.contracts.{LanguageModel, LmOutput}
 trait Adapter extends AdapterRef:
   def name: String
 
+  /** The adapter that a predictor tries after a parse error of this adapter (dspy's `use_json_adapter_fallback`). The
+    * predictor then formats, calls the model, and parses one more time with that adapter.
+    *
+    * Only a [[dspy4s.core.contracts.ParseError]] of the parse step gives the second call. An error of the model, of the
+    * configuration, or of the format step does not. A call that already streamed visible output to a listener gets no
+    * second call. `None` (the default) gives no second call.
+    */
+  def fallback: Option[Adapter] = None
+
   def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt]
 
   def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]

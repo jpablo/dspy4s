@@ -24,7 +24,8 @@ private[dspy4s] object SignatureLayoutStateCodec:
         "prefix"       -> opt(field.prefix),
         "defaultValue" -> field.defaultValue.getOrElse(DynamicValue.Null),
         "enumValues"   -> DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))),
-        "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue)))
+        "constraints"  -> DynamicValue.Sequence(Chunk.from(field.constraints.map(c => c.dumpState: DynamicValue))),
+        "optional"     -> DynamicValue.Primitive(PrimitiveValue.Boolean(field.optional))
       )))
 
     DynamicValue.Record(Chunk.from(Seq(
@@ -72,6 +73,10 @@ private[dspy4s] object SignatureLayoutStateCodec:
                   case value: DynamicValue.Record => value
                 }.flatMap(Constraint.fromState).toVector
               case _ => Vector.empty[Constraint]
+            // A state from before the `optional` key has no such key: the field is not optional.
+            val optional = DynamicValues.recordGet(record, "optional") match
+              case Some(DynamicValue.Primitive(PrimitiveValue.Boolean(value))) => value
+              case _                                                           => false
             FieldSpec(
               name = name,
               typeRef = typeRef,
@@ -79,7 +84,8 @@ private[dspy4s] object SignatureLayoutStateCodec:
               prefix = getString(record, "prefix"),
               defaultValue = defaultValue,
               enumValues = enumValues,
-              constraints = constraints
+              constraints = constraints,
+              optional = optional
             )
           }
         case _ => Left(ValidationError("Invalid field entry in signature state"))

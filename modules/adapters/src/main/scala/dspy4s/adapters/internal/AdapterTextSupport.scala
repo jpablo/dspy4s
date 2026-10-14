@@ -1,14 +1,18 @@
 package dspy4s.adapters.internal
 
+import dspy4s.adapters.contracts.AdapterErrors
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
@@ -22,7 +26,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 private[adapters] object AdapterTextSupport:
 
   /** Standard system → demonstration pairs → live input message sequence. `TwoStepAdapter` uses it. The Chat, JSON, and
-    * XML adapters use [[ConversationHistory.messages]], which also replays a conversation history.
+    * XML adapters use [[ConversationHistory.messages]], which also replays a conversation history. Both use
+    * [[DemoMessages]] for the demos.
     */
   def fewShotMessages(
       invocation: AdapterInvocation,
@@ -30,34 +35,61 @@ private[adapters] object AdapterTextSupport:
   )(
       renderDemoOutput: DynamicValue.Record => String
   ): Vector[Message] =
-    val demos = invocation.demos.flatMap { demo =>
-      Vector(
-        Message(
-          role = MessageRole.User,
-          text = Some(renderFields(invocation.layout.inputFields, demo.values))
-        ),
-        Message(role = MessageRole.Assistant, text = Some(renderDemoOutput(demo.values)))
-      )
-    }
+    val inputFields = invocation.layout.inputFields
+    val demos       = DemoMessages.messages(invocation.layout, invocation.demos)(
+      values => renderFields(inputFields, values),
+      renderDemoOutput
+    )
     (Vector(Message(role = MessageRole.System, text = Some(systemText))) ++ demos) :+
       Message(
         role = MessageRole.User,
-        text = Some(renderFields(invocation.layout.inputFields, invocation.inputs.values))
+        text = Some(renderFields(inputFields, withInputDefaults(inputFields, invocation.inputs.values)))
       )
 
-  /** Decode every output field in layout order, attaching the field name exactly once at this shared boundary. */
+  /** `values` with the [[FieldSpec.defaultValue]] of each field of `inputFields` that `values` does not have. Only the
+    * inputs of a live call take the defaults. A demo and a turn of a history do not.
+    */
+  def withInputDefaults(inputFields: Vector[FieldSpec], values: DynamicValue.Record): DynamicValue.Record =
+    inputFields.foldLeft(values) { (filled, field) =>
+      (DynamicValues.recordGet(filled, field.name), field.defaultValue) match
+        case (None, Some(default)) => filled.updated(field.name, default)
+        case _                     => filled
+    }
+
+  /** Decode every output field in layout order, attaching the field name exactly once at this shared boundary.
+    *
+    * `decode` gives `None` when the response does not have the field. The field then takes the value of
+    * [[missingOutput]]. An error of `decode` becomes a [[ParseError]] that names the field and has the raw response
+    * `raw`.
+    */
   def decodeOutputFields(
-      layout: SignatureLayout
+      layout: SignatureLayout,
+      raw   : String
   )(
-      decode: FieldSpec => Either[DspyError, DynamicValue]
+      decode: FieldSpec => Either[DspyError, Option[DynamicValue]]
   ): Either[DspyError, Vector[(String, DynamicValue)]] =
     layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) {
       (acc, field) =>
         for
           soFar <- acc
-          value <- decode(field)
+          found <- decode(field).left.map(fieldError(field, raw, _))
+          value <- found.fold(missingOutput(field, raw))(Right(_))
         yield soFar :+ (field.name -> value)
     }
+
+  /** The value of an output field that the response does not have (upstream `apply_output_field_defaults`): the
+    * [[FieldSpec.defaultValue]] of the field, else a null when the field is optional. Else it is a parse error that has
+    * the raw response `raw`.
+    */
+  def missingOutput(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
+    field.defaultValue match
+      case Some(default)          => Right(default)
+      case None if field.optional => Right(DynamicValue.Null)
+      case None                   => Left(AdapterErrors.missingField(field.name, Some(raw)))
+
+  /** The parse error of a value of the output field `field` that does not fit the type of the field. */
+  private def fieldError(field: FieldSpec, raw: String, error: DspyError): DspyError =
+    ParseError("adapter", s"Failed to parse field ${field.name}: ${error.message}", raw = Some(raw))
 
   /** Build the common adapter parse result while preserving the model's exact raw text. */
   def parsedOutput(
@@ -72,19 +104,51 @@ private[adapters] object AdapterTextSupport:
       metadata = Map("adapter" -> adapterName) ++ metadata
     )
 
-  /** Render fields as `prefix value` lines (prefix falls back to `name:`, value falls back to the field's
-    * `defaultValue`). Used for demo / input user messages by the JSON, XML, and TwoStep adapters.
+  /** Render fields as `prefix value` lines (prefix falls back to `name:`). A field that `values` does not have is not
+    * rendered. Used for demo / input user messages by the JSON, XML, and TwoStep adapters.
     */
   def renderFields(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
     fields.flatMap { field =>
       val rendered = DynamicValues.recordGet(values, field.name)
-        .orElse(field.defaultValue)
         .map(DynamicValues.renderText)
       rendered.map { value =>
         val prefix = field.prefix.getOrElse(s"${field.name}:")
         s"$prefix $value"
       }
     }.mkString("\n")
+
+  /** Coerce the raw text of the output field `field` (upstream `parse_value`). The text `null` or `None` of an optional
+    * field is a null, when the type of the field is not a string. Each other text goes to [[coerceText]].
+    */
+  def coerceOutputText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
+    if field.optional && field.typeRef != TypeRef.string && NullTexts.contains(raw.trim) then Right(DynamicValue.Null)
+    else coerceText(field.typeRef, raw)
+
+  /** The texts that are a null for an optional field: JSON `null` and Python `None`. */
+  private val NullTexts: Set[String] = Set("null", "None")
+
+  /** The value of a `tool_calls` output field that the model wrote as text (native function calling is not active). The
+    * text is a JSON list of `{"name", "args"}` objects, or a JSON object with that list under the key `tool_calls`.
+    * Each other text is an error.
+    */
+  def textToolCalls(raw: String): Either[DspyError, DynamicValue] =
+    JsonDynamic.parse(raw).flatMap(toolCallsValue)
+
+  /** The value of a `tool_calls` output field from a JSON value: a list of `{"name", "args"}` objects, or an object
+    * with that list under the key `tool_calls`. The value has the form of [[NativeFunctionCalling.encodeToolCalls]].
+    */
+  def toolCallsValue(value: DynamicValue): Either[DspyError, DynamicValue] =
+    val calls = value match
+      case record: DynamicValue.Record => DynamicValues.recordGet(record, ToolCallsKey).flatMap(ToolCall.fromDynamic)
+      case other                       => ToolCall.fromDynamic(other)
+    calls
+      .map(NativeFunctionCalling.encodeToolCalls)
+      .toRight(ValidationError(
+        s"Expected a JSON list of tool calls, each with a name and args, found: ${DynamicValues.renderText(value)}"
+      ))
+
+  /** The key of the list in the object form of a text `tool_calls` value (upstream `ToolCalls`). */
+  private val ToolCallsKey: String = "tool_calls"
 
   /** Coerce a raw string field value into the `DynamicValue` its declared `TypeRef` demands. Shared by the Chat and XML
     * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it.

@@ -62,6 +62,17 @@ a Scala value, so `_.output.sentiment` has type `Emotion` with no cast:
 --8<-- "signatures/CaseClassExample.scala:derived-sig"
 ```
 
+### Optional outputs
+
+An output field of type `Option[T]` is optional. When the response of the model
+does not have the field, the value is `None`, and the call does not fail. In an
+inline signature, write the type as `Optional[T]` or `T | None`, for example
+`"question -> answer, note: Optional[str]"`.
+
+A required field that the response does not have is a parse error. With the
+default `ChatAdapter`, a parse error gives one more call in the JSON format
+(`useJsonAdapterFallback`).
+
 ## Building a signature programmatically
 
 When a case class per signature is overkill (exploration, shapes assembled from

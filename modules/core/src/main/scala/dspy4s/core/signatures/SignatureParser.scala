@@ -6,6 +6,8 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 
+import scala.util.matching.Regex
+
 final class SignatureParser:
   def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
     val trimmed = signatureDsl.trim
@@ -39,7 +41,23 @@ final class SignatureParser:
     if !FieldSpec.validateName(fieldName) then
       Left(ValidationError(s"Invalid field name '$fieldName' in signature token '$token'"))
     else
-      val typeRef =
-        if parts.length == 1 || parts(1).isEmpty then TypeRef.string
-        else TypeRef.fromToken(parts(1))
-      Right(FieldSpec(name = fieldName, typeRef = typeRef))
+      val (typeRef, optional) =
+        if parts.length == 1 || parts(1).isEmpty then (TypeRef.string, false)
+        else typeOf(parts(1))
+      Right(FieldSpec(name = fieldName, typeRef = typeRef, optional = optional))
+
+  /** The type of a type token, and `true` when the token permits no value (upstream `annotation_allows_none`).
+    * `Optional[T]`, `T | None`, and `None | T` give the type `T` and `true`.
+    */
+  private def typeOf(token: String): (TypeRef, Boolean) =
+    token match
+      case SignatureParser.OptionalToken(inner) => (TypeRef.fromToken(inner), true)
+      case _                                    =>
+        val members = token.split('|').map(_.trim).toVector
+        val others  = members.filterNot(_ == SignatureParser.NoneToken)
+        if others.nonEmpty && others.size < members.size then (TypeRef.fromToken(others.mkString(" | ")), true)
+        else (TypeRef.fromToken(token), false)
+
+object SignatureParser:
+  private val OptionalToken: Regex = """Optional\[(.+)\]""".r
+  private val NoneToken: String    = "None"
