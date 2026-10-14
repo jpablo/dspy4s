@@ -1581,7 +1581,7 @@ for this interpreter.
 
 ## G-36 — No persistent local Python REPL
 
-**Status:** Open · **Verification:** R · **Upgrade item:** I6
+**Status:** Resolved (2026-10-14, batch 21) · **Verification:** R · **Upgrade item:** I6
 
 **Upstream.** `LocalInterpreter` runs a persistent CPython worker with tools, `SUBMIT`, variables, a deadline, a
 process-group kill, and leaked-thread detection (`dspy/primitives/local_interpreter.py:47-63,187-209,267-294`).
@@ -1589,7 +1589,9 @@ process-group kill, and leaked-thread detection (`dspy/primitives/local_interpre
 **dspy4s.** `SubprocessPythonInterpreter` is a stateless `python3 -c` (`modules/core/.../runtime/SubprocessPythonInterpreter.scala:44-50`).
 Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
 
-**Direction.** A second `ReplCodeInterpreter` in `core/runtime`, with the worker script as a resource.
+**Resolution (batch 21).** `LocalPythonInterpreter` is a second `ReplCodeInterpreter` in `core/runtime`, with the
+vendored upstream worker script as a resource and the JSON-line protocol of upstream. `LocalPythonInterpreter.factory`
+gives RLM an interpreter with no Deno. Tests: `LocalPythonInterpreterSuite` (skips when `python3` 3.10+ is absent).
 
 ---
 

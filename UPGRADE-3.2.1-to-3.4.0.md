@@ -528,6 +528,28 @@ The full suite passes: 1,655 tests, 0 failures, 6 live tests skipped.
   - A tool message with a list content joins only its text blocks; a `file` block stays as it is.
   - `ProviderLanguageModel` (the generic runtime provider) parses with the mode of the request.
 
+### Batch 21 (2026-10-14): the persistent local Python interpreter
+
+The full suite passes: 1,666 tests, 0 failures, 6 live tests skipped.
+
+- **I6** (G-36). `LocalPythonInterpreter` runs Python in a persistent local subprocess, as upstream
+  `LocalInterpreter`: state across calls, variables, host tools, `SUBMIT`, a time limit, and the callback scopes of
+  batch 16. The worker is the upstream `local_interpreter_worker.py`, vendored as a resource. RLM can use it through
+  `LocalPythonInterpreter.factory()` (`RuntimeContext.interpreterFactory`), so RLM no longer needs Deno.
+- **Decided by Claude, review.**
+  - It is not a security sandbox, as upstream says: the worker has the files, the network, and the credentials of the
+    user.
+  - The JVM cannot start a process in its own process group, so a time limit kills the worker and its descendants.
+  - The checks of the tool names and the output fields run at each `execute` and give a `Left`; upstream checks them
+    in the constructor.
+  - An error result keeps the captured output in `stdout`; upstream discards it.
+- **API changes.** `LocalPythonInterpreter` and `LocalPythonInterpreter.factory` are new in `dspy4s.core.runtime`.
+- **Open points, for the owner.**
+  - `execution_instructions` (I7, the text that tells the model how the interpreter runs) waits for D3.
+  - A process that the worker started, and whose parent exited before the kill, keeps running.
+  - The stderr of the worker is discarded, so a worker that cannot start (for example on Python before 3.10) gives
+    only "Python worker exited unexpectedly".
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -630,7 +652,7 @@ Open points from batch 1, for the owner:
 - [x] **I3. Request ids and recursion guard** (80b118e52). → G-33 (R)
 - [x] **I4. Mount collisions** (072c72164). → G-33 (R)
 - [x] **I5. Launch flags, Deno version check, probe timeout** (07a0f7aa6). → G-34 (R)
-- [ ] **I6. Persistent local Python REPL** (d58c3007e, 453823209). → G-36 (R)
+- [x] **I6. Persistent local Python REPL** (d58c3007e, 453823209). → G-36 (R)
 - [ ] **I7. `execution_instructions`** (0b93fb148, 750017192). → G-35 (R)
 - [ ] **I8. `SandboxSerializable`** (ed4d479a1). → G-38 (R)
 - [x] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
